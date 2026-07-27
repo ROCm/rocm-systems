@@ -2993,14 +2993,11 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
         arch);
     uint16_t owner_vgpr = 0;
     if (result.resolved_moi_persistent_owner_sgpr) {
-      const auto resource_plan =
-          std::ranges::find_if(result.resource_plans, [&](const auto &plan) {
-            return plan.site_kind == ConSanResourceSiteKind::Atomic &&
-                   plan.text_offset == patch.anchor_offset &&
-                   plan.scratch_vgpr == patch.scratch_vgpr;
-          });
-      if (resource_plan == result.resource_plans.end() ||
-          resource_plan->scratch_vgpr_count < 4u) {
+      const auto resource_plan = std::ranges::find_if(result.resource_plans, [&](const auto &plan) {
+        return plan.site_kind == ConSanResourceSiteKind::Atomic &&
+               plan.text_offset == patch.anchor_offset && plan.scratch_vgpr == patch.scratch_vgpr;
+      });
+      if (resource_plan == result.resource_plans.end() || resource_plan->scratch_vgpr_count < 4u) {
         errors.emplace_back(
             "ConSan final validation could not resolve release-transaction scalar owner state");
         continue;
@@ -3009,8 +3006,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       // four-register tail reserved by the selected resource plan. Derive the
       // owner from that plan rather than duplicating an architecture-specific
       // scratch-window size in validation.
-      owner_vgpr =
-          static_cast<uint16_t>(scratch + resource_plan->scratch_vgpr_count - 4u);
+      owner_vgpr = static_cast<uint16_t>(scratch + resource_plan->scratch_vgpr_count - 4u);
     } else if (result.resolved_moi_owner_vgpr) {
       owner_vgpr = *result.resolved_moi_owner_vgpr;
     } else {
@@ -3085,10 +3081,12 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       const std::vector<size_t> store_positions = positions(*store);
       return store_positions.size() == 1u && !cas_positions.empty() &&
              cas_positions.front() < store_positions.front() &&
-             std::ranges::any_of(owner_positions, [&](size_t owner_position) {
-               return store_positions.front() < owner_position &&
-                      owner_position < cas_positions.back();
-             });
+             std::ranges::any_of(
+                 owner_positions,
+                 [&](size_t owner_position) {
+                   return store_positions.front() < owner_position &&
+                          owner_position < cas_positions.back();
+                 });
     };
     bool snapshot_stores_valid =
         require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
@@ -3297,6 +3295,18 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
             requirement.required_vgpr_count = std::max<uint16_t>(
                 requirement.required_vgpr_count, static_cast<uint16_t>(*workgroup_key_vgpr + 1u));
           }
+          const ConSanMoiPersistentWorkgroupRegisters &workgroup_vgprs =
+              patch.persistent_record_replay_workgroup_vgprs.complete()
+                  ? patch.persistent_record_replay_workgroup_vgprs
+                  : result.resolved_moi_record_replay_workgroup_vgprs;
+          if (workgroup_vgprs.complete()) {
+            requirement.require_full_workgroup_id = true;
+            for (const std::optional<uint16_t> reg :
+                 {workgroup_vgprs.x, workgroup_vgprs.y, workgroup_vgprs.z}) {
+              requirement.required_vgpr_count = std::max<uint16_t>(
+                  requirement.required_vgpr_count, static_cast<uint16_t>(*reg + 1u));
+            }
+          }
           if (result.resolved_moi_persistent_workgroup_key_sgpr)
             requirement.require_full_workgroup_id = true;
           if (result.resolved_moi_persistent_owner_sgpr) {
@@ -3313,6 +3323,16 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
             requirement.required_sgpr_count = std::max<uint16_t>(
                 requirement.required_sgpr_count,
                 static_cast<uint16_t>(*result.resolved_moi_persistent_workgroup_key_sgpr + 1u));
+          }
+          if (result.resolved_moi_record_replay_workgroup_sgprs.complete()) {
+            requirement.require_full_workgroup_id = true;
+            for (const std::optional<uint16_t> reg :
+                 {result.resolved_moi_record_replay_workgroup_sgprs.x,
+                  result.resolved_moi_record_replay_workgroup_sgprs.y,
+                  result.resolved_moi_record_replay_workgroup_sgprs.z}) {
+              requirement.required_sgpr_count = std::max<uint16_t>(
+                  requirement.required_sgpr_count, static_cast<uint16_t>(*reg + 1u));
+            }
           }
         }
         if (patch.dispatch_id_capture_sgpr) {
@@ -3396,18 +3416,15 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
         requirement.require_full_workgroup_id &&
         (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250);
     const auto normalize_workgroup_id_payload = [&](uint32_t &rsrc2) {
-      AMDHSA_BITS_SET(
-          rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
-          AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
-                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X));
-      AMDHSA_BITS_SET(
-          rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
-          AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
-                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y));
-      AMDHSA_BITS_SET(
-          rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
-          AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
-                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z));
+      AMDHSA_BITS_SET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                      AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
+                                      kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X));
+      AMDHSA_BITS_SET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                      AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
+                                      kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y));
+      AMDHSA_BITS_SET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                      AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
+                                      kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z));
     };
     if (requires_full_workgroup_id) {
       const bool full_workgroup_id =

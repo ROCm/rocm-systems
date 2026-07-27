@@ -3575,16 +3575,21 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             plan.original_private_segment_size);
       }
       if (patch_result.resolved_moi_owner_vgpr || patch_result.resolved_moi_epoch_vgpr ||
+          patch_result.resolved_moi_workgroup_key_vgpr ||
+          !patch_result.resolved_moi_record_replay_workgroup_vgprs.empty() ||
           patch_result.resolved_moi_exec_save_sgpr || patch_result.resolved_moi_owner_sgpr ||
           patch_result.resolved_moi_persistent_owner_sgpr ||
           patch_result.resolved_moi_persistent_epoch_sgpr ||
           patch_result.resolved_moi_persistent_workgroup_key_sgpr ||
+          !patch_result.resolved_moi_record_replay_workgroup_sgprs.empty() ||
           patch_result.moi_private_epoch_automatic) {
         log_message(
             kLogInfo,
             "ConSan MOI persistent reader=%llu owner_vgpr=%s epoch_vgpr=%s "
+            "workgroup_key_vgpr=%s rr_workgroup_vgprs=%s/%s/%s "
             "exec_save_sgpr=%s owner_sgpr=%s scalar_owner_sgpr=%s "
-            "scalar_epoch_sgpr=%s scalar_workgroup_key_sgpr=%s automatic_vgprs=%s "
+            "scalar_epoch_sgpr=%s scalar_workgroup_key_sgpr=%s "
+            "rr_workgroup_sgprs=%s/%s/%s automatic_vgprs=%s "
             "automatic_private_epoch=%s automatic_exec_save=%s "
             "automatic_owner_sgpr=%s",
             static_cast<unsigned long long>(code_object_reader.handle),
@@ -3593,6 +3598,18 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 : "-",
             patch_result.resolved_moi_epoch_vgpr
                 ? std::to_string(*patch_result.resolved_moi_epoch_vgpr).c_str()
+                : "-",
+            patch_result.resolved_moi_workgroup_key_vgpr
+                ? std::to_string(*patch_result.resolved_moi_workgroup_key_vgpr).c_str()
+                : "-",
+            patch_result.resolved_moi_record_replay_workgroup_vgprs.x
+                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_vgprs.x).c_str()
+                : "-",
+            patch_result.resolved_moi_record_replay_workgroup_vgprs.y
+                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_vgprs.y).c_str()
+                : "-",
+            patch_result.resolved_moi_record_replay_workgroup_vgprs.z
+                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_vgprs.z).c_str()
                 : "-",
             patch_result.resolved_moi_exec_save_sgpr
                 ? std::to_string(*patch_result.resolved_moi_exec_save_sgpr).c_str()
@@ -3608,6 +3625,15 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 : "-",
             patch_result.resolved_moi_persistent_workgroup_key_sgpr
                 ? std::to_string(*patch_result.resolved_moi_persistent_workgroup_key_sgpr).c_str()
+                : "-",
+            patch_result.resolved_moi_record_replay_workgroup_sgprs.x
+                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_sgprs.x).c_str()
+                : "-",
+            patch_result.resolved_moi_record_replay_workgroup_sgprs.y
+                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_sgprs.y).c_str()
+                : "-",
+            patch_result.resolved_moi_record_replay_workgroup_sgprs.z
+                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_sgprs.z).c_str()
                 : "-",
             patch_result.moi_persistent_vgprs_automatic ? "true" : "false",
             patch_result.moi_private_epoch_automatic ? "true" : "false",

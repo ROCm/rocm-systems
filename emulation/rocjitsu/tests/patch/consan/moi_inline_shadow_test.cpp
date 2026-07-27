@@ -405,10 +405,27 @@ TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
   ASSERT_NE(prologue, result.patches.end());
   EXPECT_TRUE(prologue->workgroup_shadow_lazy_initialization);
   EXPECT_EQ(prologue->workgroup_shadow_validity_size, 0u);
-  // Generation-tagged CDNA4 shadows need no eager LDS clear, so both entry
-  // variants now fit directly in their aligned entry windows.
-  EXPECT_FALSE(prologue->dispatch_id_primary_prologue_offset);
-  EXPECT_FALSE(prologue->dispatch_id_secondary_prologue_offset);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  const auto select_invalid = instrumentation::build_s_andn2_b64(
+      kRdna4ExecLo, static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 20u),
+      static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 8u), ROCJITSU_CODE_ARCH_CDNA4);
+  const auto zero_invalid = instrumentation::build_v_mov_b32_literal(
+      *result.resolved_moi_workgroup_key_vgpr, 0u, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(select_invalid && zero_invalid);
+  EXPECT_NE(std::ranges::find(prologue_words, *select_invalid), prologue_words.end());
+  EXPECT_TRUE(contains_subsequence(prologue_words, *zero_invalid));
+  // Capturing and normalizing the entry workgroup key grows the paired
+  // kernarg-preload bodies beyond their 256-byte hardware entry windows.
+  // Both hardware entries therefore remain short relays to equivalent
+  // expanded bodies.
+  ASSERT_TRUE(prologue->dispatch_id_primary_prologue_offset);
+  ASSERT_TRUE(prologue->dispatch_id_secondary_prologue_offset);
+  EXPECT_LT(*prologue->dispatch_id_primary_prologue_offset,
+            *prologue->dispatch_id_secondary_prologue_offset);
 }
 
 TEST(ConSanMoi, Cdna4InlineShadowAvoidsOriginalPhysicalVccPair) {

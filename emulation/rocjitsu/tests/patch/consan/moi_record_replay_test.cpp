@@ -453,6 +453,14 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete())
+      << "RDNA4 automatic banked replay must capture its exact tuple in VGPRs";
+  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_sgprs.empty());
+  EXPECT_FALSE(result.resolved_moi_workgroup_key_vgpr);
+  EXPECT_FALSE(result.resolved_moi_persistent_workgroup_key_sgpr);
+  EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+                              &ConSanPatchInfo::kind),
+            result.patches.end());
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
@@ -549,8 +557,20 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   const auto load_site_token = instrumentation::build_flat_load_b32(
       scratch, static_cast<uint16_t>(scratch + 2u), ROCJITSU_CODE_ARCH_RDNA4,
       offsetof(ConSanMoiAccessRecord, site_token));
-  const auto current_workgroup_x =
+  const auto transient_workgroup_x =
       build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 4u), ttmp_scalar_operand(kTtmpRdna4GridX),
+                          ROCJITSU_CODE_ARCH_RDNA4);
+  const auto load_persistent_workgroup_x =
+      build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
+                          vector_source_vgpr(*result.resolved_moi_record_replay_workgroup_vgprs.x),
+                          ROCJITSU_CODE_ARCH_RDNA4);
+  const auto load_persistent_workgroup_y =
+      build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
+                          vector_source_vgpr(*result.resolved_moi_record_replay_workgroup_vgprs.y),
+                          ROCJITSU_CODE_ARCH_RDNA4);
+  const auto load_persistent_workgroup_z =
+      build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
+                          vector_source_vgpr(*result.resolved_moi_record_replay_workgroup_vgprs.z),
                           ROCJITSU_CODE_ARCH_RDNA4);
   const auto compare_workgroup_x = instrumentation::build_v_cmp_ne_u32_vcc(
       vector_source_vgpr(static_cast<uint16_t>(scratch + 4u)), static_cast<uint16_t>(scratch + 2u),
@@ -621,7 +641,10 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   EXPECT_TRUE(contains_subsequence(access_words, *load_workgroup_y));
   EXPECT_TRUE(contains_subsequence(access_words, *load_workgroup_z));
   EXPECT_TRUE(contains_subsequence(access_words, *load_site_token));
-  EXPECT_NE(std::ranges::find(access_words, current_workgroup_x), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, load_persistent_workgroup_x), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, load_persistent_workgroup_y), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, load_persistent_workgroup_z), access_words.end());
+  EXPECT_EQ(std::ranges::find(access_words, transient_workgroup_x), access_words.end());
   EXPECT_NE(std::ranges::find(access_words, *compare_workgroup_x), access_words.end());
   EXPECT_TRUE(contains_subsequence(access_words, *dispatch_saturation_flag));
   EXPECT_TRUE(contains_subsequence(access_words, *owner_saturation_flag));
@@ -630,6 +653,103 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
             kConSanMoiRecordReplayMaximumDispatchTokenCount);
   EXPECT_EQ(report_plan.layout.record_replay_logical_access_range_count, 2u);
   EXPECT_EQ(report_plan.layout.access_record_capacity, 1024u);
+}
+
+TEST(ConSanMoi, AutoRecordReplayAddsExactTupleToExplicitOwnerEpoch) {
+  const std::array<uint32_t, 4> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32
+      0xBFC60000u, // s_wait_dscnt
+      0xBFB00000u, // s_endpgm
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "record_replay_explicit_owner_epoch", kRdna4Wave64AllVgprsGranulated,
+      /*wave32=*/false, /*uses_dynamic_stack=*/false,
+      /*workgroup_id_dimension_mask=*/7u);
+  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
+      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1});
+  ASSERT_TRUE(report_plan.complete());
+  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
+  ASSERT_TRUE(layout_override);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = report_plan.required_bytes;
+  options.moi_report_layout = *layout_override;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(result.resolved_moi_owner_vgpr, 40u);
+  EXPECT_EQ(result.resolved_moi_epoch_vgpr, 41u);
+  ASSERT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
+  EXPECT_GT(*result.resolved_moi_record_replay_workgroup_vgprs.x, 41u);
+  EXPECT_GT(*result.resolved_moi_record_replay_workgroup_vgprs.y, 41u);
+  EXPECT_GT(*result.resolved_moi_record_replay_workgroup_vgprs.z, 41u);
+  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_sgprs.empty());
+  EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+                              &ConSanPatchInfo::kind),
+            result.patches.end());
+}
+
+TEST(ConSanMoi, AutoRecordReplayBarrierAdvancesEpochWithoutReloadingWorkgroupIdentity) {
+  const std::array<uint32_t, 5> text_words = {
+      0xD8340000u, 0x00000000u, // ds_store_b32
+      0xBE804EC1u,              // s_barrier_signal -1
+      0xBF94FFFFu,              // s_barrier_wait -1
+      0xBFB00000u,              // s_endpgm
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "record_replay_exact_barrier_tuple", kRdna4Wave64AllVgprsGranulated,
+      /*wave32=*/false, /*uses_dynamic_stack=*/false,
+      /*workgroup_id_dimension_mask=*/7u);
+  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
+      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1, .barrier_event_count = 1});
+  ASSERT_TRUE(report_plan.complete());
+  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
+  ASSERT_TRUE(layout_override);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = report_plan.required_bytes;
+  options.moi_report_layout = *layout_override;
+  options.moi_track_barriers = true;
+  options.max_patches = 4u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
+                               &ConSanPatchInfo::kind),
+            0u);
+  const auto barrier = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
+  ASSERT_NE(barrier, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> barrier_words =
+      text_words_at_offset(patched, barrier->trampoline_offset, barrier->trampoline_size);
+  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
+  const auto epoch_increment = instrumentation::build_v_add_u32(
+      *result.resolved_moi_epoch_vgpr, scalar_positive_inline_u32(1u),
+      *result.resolved_moi_epoch_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(epoch_increment);
+  EXPECT_TRUE(contains_subsequence(barrier_words, *epoch_increment));
+
+  // The access records carry the entry-captured tuple. A persistent-epoch
+  // barrier only advances that workgroup's epoch and must not reload launch
+  // TTMPs at this arbitrary post-entry site.
+  for (uint16_t destination = 0; destination < 16u; ++destination) {
+    const uint32_t transient_x = build_v_mov_b32_e32(
+        destination, ttmp_scalar_operand(kTtmpRdna4GridX), ROCJITSU_CODE_ARCH_RDNA4);
+    EXPECT_EQ(std::ranges::find(barrier_words, transient_x), barrier_words.end());
+  }
 }
 
 TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
@@ -2545,6 +2665,9 @@ TEST(ConSanMoi, Cdna4StaticRecordReplayRestoresOverlappingStoreOperandsBeforeGue
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_NE(result.resolved_moi_record_replay_workgroup_vgprs.complete(),
+            result.resolved_moi_record_replay_workgroup_sgprs.complete())
+      << "CDNA4 automatic banked replay must resolve one exact persistent workgroup tuple";
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
@@ -5230,7 +5353,7 @@ TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesScalarEpochCoalescing) {
   EXPECT_TRUE(contains_subsequence(barrier_words, expected_epoch_update));
 }
 
-TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesOwnerScopeScalarHole) {
+TEST(ConSanMoi, Cdna4AutomaticBankedReplaySkipsOccupiedExactTupleScalarHole) {
   const auto guest = build_cdna4_ds_store_b32(
       /*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(guest);
@@ -5238,27 +5361,33 @@ TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesOwnerScopeScalarHole) {
   std::copy(guest->begin(), guest->end(), text_words.begin());
   size_t cursor = guest->size();
   text_words[cursor++] =
-      build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(7), ROCJITSU_CODE_ARCH_CDNA4);
-  // Reference every scalar below s72 and s87 after the access. The only
-  // untouched pair below the high guest references is s72:s73; s88:s89 and
-  // s92:s96 are reserved explicitly for dispatch and transient state.
+      build_v_mov_b32_e32(/*vdst=*/0, vector_source_vgpr(15), ROCJITSU_CODE_ARCH_CDNA4);
+  // Reference every scalar below s72 and s74 after the access. A five-register
+  // automatic owner/epoch/x/y/z tuple beginning at s72 would therefore
+  // overlap its third register even though s72:s73 themselves are untouched.
+  // The next complete owner-scope hole is s75:s79; s88:s89 and s92:s96 are
+  // reserved explicitly for dispatch and transient state.
   for (uint16_t sgpr = 0u; sgpr < 72u; ++sgpr)
     text_words[cursor++] = build_s_mov_b32(/*sdst=*/87u, sgpr, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/74u, ROCJITSU_CODE_ARCH_CDNA4);
   text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/87u, ROCJITSU_CODE_ARCH_CDNA4);
   text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/90u, ROCJITSU_CODE_ARCH_CDNA4);
   text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/91u, ROCJITSU_CODE_ARCH_CDNA4);
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
-  // A separate linked kernel does use s72:s73. It is not an owner of the LDS
+  // A separate linked kernel does use s75:s79. It is not an owner of the LDS
   // site and therefore must not poison the complete owner-scope proof.
-  const std::array<uint32_t, 3> unrelated_words = {
-      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/72u, ROCJITSU_CODE_ARCH_CDNA4),
-      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/73u, ROCJITSU_CODE_ARCH_CDNA4),
+  const std::array<uint32_t, 6> unrelated_words = {
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/75u, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/76u, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/77u, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/78u, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/79u, ROCJITSU_CODE_ARCH_CDNA4),
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
   std::vector<uint8_t> bytes = make_cdna4_code_object_with_local_function(
       text_words, unrelated_words, {}, /*vgpr_granulated=*/3u, /*function_is_kernel=*/true);
   mutate_kernel_descriptor(bytes, "lds_probe", [](KD &descriptor) {
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
     // 104 decoded SGPRs place physical VCC at s98:s99. Dispatch and transient
     // state already fit below it; the selected hole must not grow the
     // allocation or move VCC.
@@ -5269,11 +5398,16 @@ TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesOwnerScopeScalarHole) {
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
-  options.moi_init_owner_epoch = true;
   options.moi_exec_save_sgpr = 92u;
   options.moi_dispatch_id_sgpr = 88u;
+  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
+      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1});
+  ASSERT_TRUE(report_plan.complete());
+  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
+  ASSERT_TRUE(layout_override);
   options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+  options.moi_report_buffer_size = report_plan.required_bytes;
+  options.moi_report_layout = *layout_override;
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
@@ -5283,8 +5417,13 @@ TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesOwnerScopeScalarHole) {
   EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
   ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
-  EXPECT_EQ(*result.resolved_moi_persistent_owner_sgpr, 72u);
-  EXPECT_EQ(*result.resolved_moi_persistent_epoch_sgpr, 73u);
+  ASSERT_TRUE(result.resolved_moi_record_replay_workgroup_sgprs.complete());
+  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.empty());
+  EXPECT_EQ(*result.resolved_moi_persistent_owner_sgpr, 75u);
+  EXPECT_EQ(*result.resolved_moi_persistent_epoch_sgpr, 76u);
+  EXPECT_EQ(*result.resolved_moi_record_replay_workgroup_sgprs.x, 77u);
+  EXPECT_EQ(*result.resolved_moi_record_replay_workgroup_sgprs.y, 78u);
+  EXPECT_EQ(*result.resolved_moi_record_replay_workgroup_sgprs.z, 79u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1u);

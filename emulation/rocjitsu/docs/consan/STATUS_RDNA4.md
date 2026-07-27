@@ -63,7 +63,7 @@ ConSan model false positive.
 | **P1 PyTorch collision-heavy scatter-reduce** | 🟩 Exact BF16/FP32 oracle; clean-complete 27/27 LDS accesses; exact global-atomic scope weakening is a precommitted qualified miss; overhead 1.010x | 🟩 Exact oracle; clean-complete 27/27 accesses; exact scope weakening is a precommitted qualified miss; overhead 1.006x (0.996x BF16) | 🟩 Exact oracle; clean-complete 27/27 accesses; exact scope weakening is a precommitted qualified miss; overhead 0.993x | 🟩 Exact oracle; clean-complete 27/27 accesses; exact scope weakening is a precommitted qualified miss; overhead 1.031x |
 | **P2 PyTorch/Inductor compiled softmax** | 🟩 Exact oracle; clean 4/4; exact third barrier drop is a precommitted qualified miss; overhead 0.960x | 🟩 Exact oracle; clean 4/4 + 3/3; exact drop emits an attributed replay diagnostic; overhead 1.065x | 🟩 Exact oracle; clean 4/4 + 6/6 barrier members; exact drop emits a causal diagnostic; overhead 1.204x | 🟩 Exact oracle; clean 4/4 + 3/3; exact drop emits attributed diagnostics; overhead 0.937x |
 | **P2 PyTorch split online softmax** | 🟩 Exact CPU-derived BF16 oracle; clean 8/8 across two stages; exact drop is a precommitted qualified miss; overhead 0.977x | 🟩 Exact oracle; clean 8/8 + 6/6; exact drop is a qualified replay miss; overhead 0.982x | 🟩 Exact oracle; clean 8/8 + 12/12 barrier members; exact drop emits a causal diagnostic; overhead 1.257x | 🟩 Exact oracle; clean 8/8 + 6/6; independently confirmed exact drop emits diagnostics; overhead 4.012x |
-| **P2 PyTorch Qwen-vocabulary top-k** | 🟥 Exact oracle and typed verdict in 54.00 seconds, but only 2,039/63,474 supported accesses patch on the retained historical object | 🟧 Current nightly exact oracle and complete 418,292/418,292 accesses + 50,458/50,458 barriers in about 73 seconds; zero or up to four bounded exact conflicts have been observed and remain unclassified under `bd-1w9.6.5`, so this is a coverage/output row rather than a clean gate; paired-overhead requalification uses the same bounded contract and remains pending, while fault qualification is deferred | 🟧 Exact oracle and clean execution on the retained historical object; 57,153/63,474 accesses + 12,978/14,200 barrier members in 102.05 seconds; overhead and fault pending | 🟥 Current nightly objects fail strict placement before any probe; the default numeric run is uninstrumented and `applicable=false` |
+| **P2 PyTorch Qwen-vocabulary top-k** | 🟥 Exact oracle and typed verdict in 54.00 seconds, but only 2,039/63,474 supported accesses patch on the retained historical object | 🟩 Current nightly exact oracle and complete 418,292/418,292 accesses + 50,458/50,458 barriers; four physical runs completed in 71.53–76.36 seconds with zero diagnostics, including a final current-source strict run with exact entry-captured x/y/z identity; the former coverage-output exception is retired | 🟧 Exact oracle and clean execution on the retained historical object; 57,153/63,474 accesses + 12,978/14,200 barrier members in 102.05 seconds; overhead and fault pending | 🟥 Current nightly objects fail strict placement before any probe; the default numeric run is uninstrumented and `applicable=false` |
 | **P2 PyTorch causal SDPA** | 🟩 Independent CPU oracle; clean 158/158; exact barrier drop emits an attributed diagnostic and breaks the oracle; overhead 1.946x | 🟨 Independent CPU oracle; clean-complete 158/158 accesses + 22/22 barriers + 2/2 atomics + 2/2 fences; overhead 7.894x; reviewed drops cause unattributed traps | 🟥 The attention kernel lacks safe transient scalar probe/router state; only the separate 27/27-access fill object patches | 🟥 The attention kernel lacks a common dead scalar pair for its indirect router; 131 accesses + 22 barriers + 2 atomics remain unpatched |
 | **P2 llama.cpp quantized matvec** | 🟩 Independent CPU oracle; clean-complete 462/462 accesses; reviewed exact drop is a qualified miss; overhead 19.225x | 🟩 Independent CPU oracle; clean-complete 462/462 accesses + 44/44 barriers + 63/63 atomics + 72/72 fences; reviewed drop breaks the oracle; overhead 14.493x | 🟩 Independent CPU oracle; clean-complete 462/462 accesses + 88/88 barrier members; reviewed drop breaks the oracle; overhead 17.548x | 🟧 Exact oracle and zero diagnostics; 81/462 accesses + 44/44 barriers, but 49,152 unsupported dynamic events reject strict execution |
 | **P2 Sharktank TP2 family** | 🟩 Exact oracle; clean 2,976/2,976; exact drop is a precommitted qualified miss; overhead 1.28x | 🟨 Exact oracle; five clean-complete trials at 2,976/2,976 + 228/228 with no diagnostics; exact drop detected in 3/5 contained trials; overhead 1.806x prefill / 1.319x combined / 1.270x decode | 🟩 Exact oracle; clean 2,976/2,976 + 420/420; exact drop is a precommitted qualified miss; overhead 1.24x | 🟩 Exact oracle; clean 2,976/2,976 + 228/228; exact drop detected 16/16; overhead 2.17x |
@@ -112,52 +112,27 @@ below.
   placement for SuperCollider, not another clean retry.
 - **Record/Replay:** the current nightly reaches complete 418,292/418,292
   access and 50,458/50,458 barrier coverage with an exact sorted value/index
-  oracle.  Identically covered runs have emitted either zero diagnostics or up
-  to four exact adjacent LDS write/write reports within one of four
-  disassembly-qualified, barrier-separated LDS store groups. The bounded
-  Record/Replay
-  `coverage_output_contract` is pinned to the retained object's
-  `fnv1a64:3833562345afa454` fingerprint, emits this profile under the distinct
-  `coverage-output` phase, and rejects incomplete, different-object, or
-  otherwise out-of-contract reports. The producer repeats the object
-  fingerprint on its pre-replay summary, replay summary, and details; the gate
-  cross-checks all three identities and retains the bounded
-  `provenance_repaired` count.
-  A current-format physical capture at this checkpoint completed in 65.04
-  seconds with zero diagnostics and retains the producer-shaped report and
-  replay lines used by the parser regression fixture. Artifact:
-  `consan-validation-gfx1201-topk-rr-current-format-c117-reviewfix-20260727`.
-  A single bounded retained-object retry at the next hook found three reports
-  and correctly rejected the then-too-narrow site window. Disassembly of its
-  original object maps `0xfe96c`/`0xfe974` to `ds_store_b32` and `0xfe9c4` to
-  `ds_store_b64` in the same rocPRIM radix-sort kernel, ruling out native B96
-  admission for every currently observed report. The producer-shaped
-  three-detail log is retained as a second parser fixture. Artifact:
-  `consan-validation-gfx1201-topk-rr-current-reviewfix2-20260727`.
-  A subsequent 70.13-second run found two exact reports at
-  `0xfea68`/`0xfea70`; disassembly maps both to the homologous `ds_store_b32`
-  block in the other control-flow path. The contract now enumerates all four
-  exact store groups instead of accepting a contiguous instruction window, and
-  its producer-shaped two-detail log is retained as a third parser fixture.
+  oracle. The former adjacent rocPRIM write/write reports were a ConSan false
+  positive: automatic banked replay read launch TTMP workgroup coordinates
+  after arbitrary guest code, collapsing distinct physical workgroups onto one
+  recorded LDS identity. Access probes now consume the exact entry-captured
+  32-bit `(workgroup_x, workgroup_y, workgroup_z)` tuple from persistent state;
+  Record/Replay no longer inherits Inline Shadow's compact-key grid bounds.
+  Three retirement runs of the pinned `fnv1a64:3833562345afa454` object
+  completed in 75.40, 75.26, and 71.53 seconds with the exact oracle, full
+  access/barrier coverage, zero diagnostics, and no incomplete state. Artifacts:
+  `consan-validation-gfx1201-topk-workgroup-key-final-run1-20260727` and
+  `consan-validation-gfx1201-topk-workgroup-key-final-run2-20260727`, followed
+  by the strict-clean
+  `consan-validation-gfx1201-topk-workgroup-key-final-strict-20260727`.
+  After review strengthened the persistent representation from a packed key to
+  the exact x/y/z tuple, a current-source strict requalification repeated the
+  same complete clean result in 76.36 seconds with hook SHA-256
+  `43a13035f925ddb4486bfdeb55e2ce2b39d2bac08f38a5d188aeb7d1019d1446`.
   Artifact:
-  `consan-validation-gfx1201-topk-rr-current-lifecycle-final-20260727`.
-  The final dump-enabled requalification passed that exact-group contract in
-  71.94 seconds with the exact oracle, complete 418,292/418,292 access and
-  50,458/50,458 barrier coverage, and two admitted reports
-  (`0xfe964`→`0xfe974` and `0xfe9d4`→`0xfe9cc`). Artifact:
-  `consan-validation-gfx1201-topk-rr-exact-groups-final-20260727`.
-  It remains the larger loading, planning, dynamic-coverage, and output oracle,
-  not clean evidence. Paired-overhead execution uses the same structural
-  contract and still needs requalification. Record/Replay fault qualification
-  is withheld because an unclassified baseline report cannot yet be
-  distinguished from a fault-induced one. This does not suppress fault
-  qualification for SuperCollider, Sampled, or Inline Shadow; those profiles
-  retain the `barrier-drop` family. `explain --json` records the
-  profile-specific withholding, its reason, and `bd-1w9.6.5` in
-  `usability_audit.fault_qualification_exceptions`.
-  `bd-1w9.6.5` tracks classification as a real rocPRIM race, B96
-  admission/lowering issue, or ConSan model false positive and retirement
-  after the corresponding fix plus repeated zero-diagnostic runs.
+  `consan-validation-gfx1201-topk-exact-tuple-strict-20260727`.
+  The workload is again a strict clean gate with no diagnostic exception or
+  Record/Replay fault-qualification withholding.
 - **Sampled:** the 23 MiB object is complete, while the 40 MiB object reaches
   36,331/42,652 accesses and 8,778/10,000 barrier members.  Close its remaining
   placement/lowering gaps before collecting overhead and reviewed-fault

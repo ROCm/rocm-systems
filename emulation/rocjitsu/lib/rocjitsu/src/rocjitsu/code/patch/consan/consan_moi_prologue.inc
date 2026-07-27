@@ -607,6 +607,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     ConSanMoiOwnerSource owner_source, std::optional<uint16_t> owner_sgpr, bool one_based_owner_ids,
     std::optional<uint16_t> persistent_owner_sgpr, std::optional<uint16_t> persistent_epoch_sgpr,
     std::optional<uint16_t> persistent_workgroup_key_sgpr,
+    ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_sgprs,
+    ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs,
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan,
     std::optional<uint16_t> persistent_dispatch_sgpr,
     std::optional<uint16_t> runtime_sample_counter_sgpr, std::optional<uint16_t> return_pc_sgpr,
@@ -685,6 +687,75 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                               words, *workgroup_shadow, owner_vgpr, epoch_vgpr, has_quad_zero_tuple,
                               return_pc_sgpr, arch, errors)) {
     return std::nullopt;
+  }
+  if ((!record_replay_workgroup_sgprs.empty() && !record_replay_workgroup_sgprs.complete()) ||
+      (!record_replay_workgroup_vgprs.empty() && !record_replay_workgroup_vgprs.complete()) ||
+      (record_replay_workgroup_sgprs.complete() && record_replay_workgroup_vgprs.complete())) {
+    errors.emplace_back(
+        "ConSan MOI exact workgroup-tuple prologue requires one complete register tuple");
+    return std::nullopt;
+  }
+  if (record_replay_workgroup_sgprs.complete() || record_replay_workgroup_vgprs.complete()) {
+    if (!workgroup_sources) {
+      errors.emplace_back("ConSan MOI exact workgroup-tuple prologue requires launch sources");
+      return std::nullopt;
+    }
+    const std::array<const ConSanMoiWorkgroupSource *, 3> sources = {
+        &workgroup_sources->x, &workgroup_sources->y, &workgroup_sources->z};
+    const std::array<std::optional<uint16_t>, 3> scalar_destinations = {
+        record_replay_workgroup_sgprs.x, record_replay_workgroup_sgprs.y,
+        record_replay_workgroup_sgprs.z};
+    const std::array<std::optional<uint16_t>, 3> vector_destinations = {
+        record_replay_workgroup_vgprs.x, record_replay_workgroup_vgprs.y,
+        record_replay_workgroup_vgprs.z};
+    for (size_t index = 0; index < sources.size(); ++index) {
+      const ConSanMoiWorkgroupSource &source = *sources[index];
+      if (!source.is_well_formed()) {
+        errors.emplace_back(
+            "ConSan MOI exact workgroup-tuple prologue found an invalid launch source");
+        return std::nullopt;
+      }
+      if (scalar_destinations[index]) {
+        if (source.vector_src) {
+          errors.emplace_back(
+              "ConSan MOI exact scalar workgroup tuple requires scalar launch sources");
+          return std::nullopt;
+        }
+        const uint16_t destination = *scalar_destinations[index];
+        const uint16_t source_operand = source.scalar_src.value_or(scalar_positive_inline_u32(0u));
+        if (!append_moi_entry_salu_write(words, build_s_mov_b32(destination, source_operand, arch),
+                                         arch) ||
+            (source.mask_low_16 &&
+             (!append_moi_entry_salu_write(
+                  words,
+                  build_s_lshl_b32(destination, destination, scalar_positive_inline_u32(16), arch),
+                  arch) ||
+              !append_moi_entry_salu_write(
+                  words,
+                  build_s_lshr_b32(destination, destination, scalar_positive_inline_u32(16), arch),
+                  arch))) ||
+            (source.shift_right_16 &&
+             !append_moi_entry_salu_write(
+                 words,
+                 build_s_lshr_b32(destination, destination, scalar_positive_inline_u32(16), arch),
+                 arch))) {
+          errors.emplace_back(
+              "ConSan MOI exact scalar workgroup-tuple prologue could not copy a launch source");
+          return std::nullopt;
+        }
+      } else if (vector_destinations[index]) {
+        const uint16_t destination = *vector_destinations[index];
+        if (source.has_value()) {
+          if (!append_workgroup_source_value(words, source, destination, arch)) {
+            errors.emplace_back(
+                "ConSan MOI exact vector workgroup-tuple prologue could not copy a launch source");
+            return std::nullopt;
+          }
+        } else {
+          words.push_back(build_v_mov_b32_e32(destination, scalar_positive_inline_u32(0u), arch));
+        }
+      }
+    }
   }
   if (persistent_workgroup_key_sgpr) {
     if (!workgroup_sources || !return_pc_sgpr) {
@@ -992,8 +1063,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   return kernel_contains_patch_anchor(kernel, patch);
 }
 
-[[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch,
-                                                        ConSanResult &result) {
+[[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch, ConSanResult &result) {
   result.moi_full_workgroup_id_descriptor_offsets.clear();
   if (result.elf_bytes.empty() ||
       (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
@@ -1005,9 +1075,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   for (const ConSanPatchInfo &patch : result.patches) {
     for (uint64_t descriptor_offset : patch.owner_descriptor_file_offsets) {
       owner_descriptor_offsets.insert(descriptor_offset);
-      const auto owner =
-          std::ranges::find(result.kernels, descriptor_offset,
-                            &ConSanKernelInfo::descriptor_file_offset);
+      const auto owner = std::ranges::find(result.kernels, descriptor_offset,
+                                           &ConSanKernelInfo::descriptor_file_offset);
       if (owner == result.kernels.end()) {
         result.errors.emplace_back(
             "ConSan MOI could not resolve an owner before enabling workgroup IDs");
@@ -1044,12 +1113,12 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     }
     KD descriptor{};
     std::memcpy(&descriptor, current_image.data() + descriptor_offset, sizeof(descriptor));
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
-                    kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1u);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
-                    kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1u);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
-                    kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    1u);
     if (!patcher.patch_kernel_descriptor(
             descriptor_offset,
             std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&descriptor),
@@ -1073,8 +1142,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
 [[nodiscard]] bool
 grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKernelInfo &kernel,
                                      uint32_t required_vgpr_count, uint32_t required_sgpr_count,
-                                     rj_code_arch_t arch,
-                                     std::vector<std::string> &errors) {
+                                     rj_code_arch_t arch, std::vector<std::string> &errors) {
   const std::span<const uint8_t> current_image = patcher.image_bytes();
   if (kernel.descriptor_file_offset > current_image.size() ||
       sizeof(KD) > current_image.size() - kernel.descriptor_file_offset) {
@@ -1730,7 +1798,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       continue;
     }
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
-    if (kernel_options.moi_workgroup_key_vgpr || kernel_options.moi_persistent_workgroup_key_sgpr) {
+    if (kernel_options.moi_workgroup_key_vgpr || kernel_options.moi_persistent_workgroup_key_sgpr ||
+        !kernel_options.moi_record_replay_workgroup_vgprs.empty() ||
+        !kernel_options.moi_record_replay_workgroup_sgprs.empty()) {
       std::vector<std::string> source_errors;
       workgroup_sources = moi_descriptor_workgroup_sources(
           active_bytes, active.descriptor_file_offset, arch, source_errors);
@@ -1754,6 +1824,12 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     if (kernel_options.moi_workgroup_key_vgpr)
       required_vgpr_count =
           std::max<uint32_t>(required_vgpr_count, *kernel_options.moi_workgroup_key_vgpr + 1u);
+    for (const std::optional<uint16_t> reg : {kernel_options.moi_record_replay_workgroup_vgprs.x,
+                                              kernel_options.moi_record_replay_workgroup_vgprs.y,
+                                              kernel_options.moi_record_replay_workgroup_vgprs.z}) {
+      if (reg)
+        required_vgpr_count = std::max<uint32_t>(required_vgpr_count, *reg + 1u);
+    }
     uint32_t required_sgpr_count = owner_required_sgpr_count;
     if (kernel_options.moi_dispatch_id_sgpr) {
       required_sgpr_count = std::max<uint32_t>(
@@ -1770,14 +1846,20 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       required_sgpr_count = std::max<uint32_t>(
           required_sgpr_count,
           static_cast<uint32_t>(*options.moi_persistent_workgroup_key_sgpr) + 1u);
+    for (const std::optional<uint16_t> reg : {kernel_options.moi_record_replay_workgroup_sgprs.x,
+                                              kernel_options.moi_record_replay_workgroup_sgprs.y,
+                                              kernel_options.moi_record_replay_workgroup_sgprs.z}) {
+      if (reg)
+        required_sgpr_count = std::max<uint32_t>(required_sgpr_count, *reg + 1u);
+    }
     if (item.dispatch_plan && kernel_options.moi_dispatch_id_sgpr &&
         !apply_moi_dispatch_id_descriptor(patcher, item.kernel.descriptor_file_offset,
                                           *item.dispatch_plan, *kernel_options.moi_dispatch_id_sgpr,
                                           arch, result.errors)) {
       return;
     }
-    if (!grow_moi_kernel_descriptor_registers(
-            patcher, item.kernel, required_vgpr_count, required_sgpr_count, arch, result.errors)) {
+    if (!grow_moi_kernel_descriptor_registers(patcher, item.kernel, required_vgpr_count,
+                                              required_sgpr_count, arch, result.errors)) {
       return;
     }
   }
@@ -1847,8 +1929,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       } else {
         std::vector<std::string> relocation_errors;
         auto decoded = decode_relocatable_entry_instruction(
-            old_text, kernel.entry_text_offset, arch, relocation_errors,
-            relocation_decoder.get());
+            old_text, kernel.entry_text_offset, arch, relocation_errors, relocation_decoder.get());
         if (!decoded) {
           if (requires_in_place_entry) {
             result.errors.insert(result.errors.end(), relocation_errors.begin(),
@@ -1918,7 +1999,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         kernel_options.moi_owner_source, kernel_options.moi_owner_sgpr,
         kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
         kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
-        kernel_options.moi_persistent_workgroup_key_sgpr, item.dispatch_plan,
+        kernel_options.moi_persistent_workgroup_key_sgpr,
+        kernel_options.moi_record_replay_workgroup_sgprs,
+        kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan,
         kernel_options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(kernel_options),
         kernel_options.moi_exec_save_sgpr, prologue_workgroup_shadow,
         options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250,
@@ -1980,7 +2063,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
           kernel_options.moi_workgroup_key_vgpr, *owner_shift, kernel_options.moi_owner_source,
           kernel_options.moi_owner_sgpr, kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
           kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
-          kernel_options.moi_persistent_workgroup_key_sgpr, item.dispatch_plan,
+          kernel_options.moi_persistent_workgroup_key_sgpr,
+          kernel_options.moi_record_replay_workgroup_sgprs,
+          kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan,
           kernel_options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(kernel_options),
           kernel_options.moi_exec_save_sgpr, prologue_workgroup_shadow,
           options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250,
@@ -2008,7 +2093,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
             kernel_options.moi_owner_source, kernel_options.moi_owner_sgpr,
             kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
             kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
-            kernel_options.moi_persistent_workgroup_key_sgpr, item.dispatch_plan,
+            kernel_options.moi_persistent_workgroup_key_sgpr,
+            kernel_options.moi_record_replay_workgroup_sgprs,
+            kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan,
             kernel_options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(kernel_options),
             kernel_options.moi_exec_save_sgpr, prologue_workgroup_shadow,
             options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250,
@@ -2024,7 +2111,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
             kernel_options.moi_owner_sgpr,
             kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
             kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
-            kernel_options.moi_persistent_workgroup_key_sgpr, item.dispatch_plan,
+            kernel_options.moi_persistent_workgroup_key_sgpr,
+            kernel_options.moi_record_replay_workgroup_sgprs,
+            kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan,
             kernel_options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(kernel_options),
             kernel_options.moi_exec_save_sgpr, prologue_workgroup_shadow,
             options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250,
@@ -2056,17 +2145,19 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     info.kind = ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
     info.anchor_offset = kernel.entry_text_offset;
     info.trampoline_offset = prologue_text_offset;
-    info.original_size = instrument_entry_in_place
-                             ? (chains_existing_entry_trampoline
-                                    ? composed_entry_patch->original_size
-                                    : displaced_entry_words.size() * sizeof(uint32_t))
-                             : 0u;
+    info.original_size =
+        instrument_entry_in_place
+            ? (chains_existing_entry_trampoline ? composed_entry_patch->original_size
+                                                : displaced_entry_words.size() * sizeof(uint32_t))
+            : 0u;
     info.trampoline_size = static_cast<uint32_t>(new_text.size() - prologue_text_offset);
     info.dispatch_id_primary_prologue_offset = dispatch_id_primary_prologue_offset;
     info.dispatch_id_secondary_prologue_offset = dispatch_id_secondary_prologue_offset;
     info.persistent_owner_vgpr = kernel_options.moi_owner_vgpr;
     info.persistent_epoch_vgpr = kernel_options.moi_epoch_vgpr;
     info.persistent_workgroup_key_vgpr = kernel_options.moi_workgroup_key_vgpr;
+    info.persistent_record_replay_workgroup_vgprs =
+        kernel_options.moi_record_replay_workgroup_vgprs;
     if (item.workgroup_shadow) {
       info.workgroup_shadow_base = item.workgroup_shadow->base;
       info.workgroup_shadow_size = item.workgroup_shadow->size;

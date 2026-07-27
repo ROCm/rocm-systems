@@ -100,17 +100,25 @@ resolve_record_replay_report_layout(const ConSanOptions &options, bool include_b
                                                    include_atomics, include_fences);
 }
 
+/// Automatic Record/Replay access banks promise exact dispatch/site/workgroup/
+/// wave identity. Placement, scratch sizing, and emission must use this single
+/// predicate so a probe can never require persistent identity that placement
+/// did not reserve.
+[[nodiscard]] bool record_replay_uses_automatic_banked_capture(const ConSanOptions &options,
+                                                               uint32_t dispatch_token_capacity) {
+  return options.moi_engine == ConSanMoiEngine::RecordReplay &&
+         !options.moi_dynamic_access_records && dispatch_token_capacity != 0u;
+}
+
+[[nodiscard]] bool record_replay_uses_automatic_banked_capture(const ConSanOptions &options) {
+  return options.moi_report_layout &&
+         record_replay_uses_automatic_banked_capture(
+             options, options.moi_report_layout->record_replay_dispatch_token_capacity);
+}
+
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
 }
-
-struct ConSanMoiWorkgroupSource {
-  std::optional<uint16_t> scalar_src;
-  bool shift_right_16 = false;
-  bool mask_low_16 = false;
-
-  auto operator<=>(const ConSanMoiWorkgroupSource &) const = default;
-};
 
 struct ConSanMoiWorkgroupSources {
   ConSanMoiWorkgroupSource x;
@@ -565,17 +573,17 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
 [[nodiscard]] bool moi_candidate_semantics_equal(const ConSanMoiCandidate &lhs,
                                                  const ConSanMoiCandidate &rhs) {
   return std::tie(lhs.in_kernel, lhs.container_entry_text_offset, lhs.gfx1250_vgpr_msb_mode,
-                  lhs.source, lhs.kind, lhs.flat_address_space_hint, lhs.text_offset, lhs.file_offset,
-                  lhs.size, lhs.width_bits, lhs.dst_vgpr, lhs.addr_vgpr, lhs.data_vgpr,
-                  lhs.second_data_vgpr, lhs.uses_gfx1250_cluster_workgroup_id, lhs.raw_op,
-                  lhs.raw_saddr, lhs.raw_vaddr, lhs.raw_vsrc, lhs.raw_vdst, lhs.raw_ioffset,
-                  lhs.raw_segment, lhs.raw_scope, lhs.raw_th, lhs.mnemonic) ==
+                  lhs.source, lhs.kind, lhs.flat_address_space_hint, lhs.text_offset,
+                  lhs.file_offset, lhs.size, lhs.width_bits, lhs.dst_vgpr, lhs.addr_vgpr,
+                  lhs.data_vgpr, lhs.second_data_vgpr, lhs.uses_gfx1250_cluster_workgroup_id,
+                  lhs.raw_op, lhs.raw_saddr, lhs.raw_vaddr, lhs.raw_vsrc, lhs.raw_vdst,
+                  lhs.raw_ioffset, lhs.raw_segment, lhs.raw_scope, lhs.raw_th, lhs.mnemonic) ==
          std::tie(rhs.in_kernel, rhs.container_entry_text_offset, rhs.gfx1250_vgpr_msb_mode,
-                  rhs.source, rhs.kind, rhs.flat_address_space_hint, rhs.text_offset, rhs.file_offset,
-                  rhs.size, rhs.width_bits, rhs.dst_vgpr, rhs.addr_vgpr, rhs.data_vgpr,
-                  rhs.second_data_vgpr, rhs.uses_gfx1250_cluster_workgroup_id, rhs.raw_op,
-                  rhs.raw_saddr, rhs.raw_vaddr, rhs.raw_vsrc, rhs.raw_vdst, rhs.raw_ioffset,
-                  rhs.raw_segment, rhs.raw_scope, rhs.raw_th, rhs.mnemonic);
+                  rhs.source, rhs.kind, rhs.flat_address_space_hint, rhs.text_offset,
+                  rhs.file_offset, rhs.size, rhs.width_bits, rhs.dst_vgpr, rhs.addr_vgpr,
+                  rhs.data_vgpr, rhs.second_data_vgpr, rhs.uses_gfx1250_cluster_workgroup_id,
+                  rhs.raw_op, rhs.raw_saddr, rhs.raw_vaddr, rhs.raw_vsrc, rhs.raw_vdst,
+                  rhs.raw_ioffset, rhs.raw_segment, rhs.raw_scope, rhs.raw_th, rhs.mnemonic);
 }
 
 [[nodiscard]] bool canonicalize_moi_candidates_by_physical_site(ConSanResult &result) {
@@ -585,8 +593,8 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
   canonical_candidates.reserve(result.moi_candidates.size());
 
   for (ConSanMoiCandidate &candidate : result.moi_candidates) {
-    const auto [entry, inserted] = canonical_index_by_file_offset.emplace(
-        candidate.file_offset, canonical_candidates.size());
+    const auto [entry, inserted] =
+        canonical_index_by_file_offset.emplace(candidate.file_offset, canonical_candidates.size());
     if (inserted) {
       canonical_candidates.push_back(std::move(candidate));
       continue;
@@ -665,8 +673,7 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
   // both admitted mnemonic lists, and
   // CdnaNativeB96AccessesRemainUnsupportedAtTransformBoundary pins that
   // transform boundary.
-  if (is_rdna4_family_arch(arch) &&
-      equals_any(mnemonic, {"ds_load_b96", "ds_store_b96"}))
+  if (is_rdna4_family_arch(arch) && equals_any(mnemonic, {"ds_load_b96", "ds_store_b96"}))
     return true;
   return is_unconditionally_single_range_native_lds_mnemonic(mnemonic) ||
          ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
@@ -848,9 +855,10 @@ find_first_light_access_record_candidates(const ConSanResult &result,
 [[nodiscard]] bool append_workgroup_source_value(std::vector<uint32_t> &words,
                                                  const ConSanMoiWorkgroupSource &source,
                                                  uint16_t value_vgpr, rj_code_arch_t arch) {
-  if (!source.scalar_src)
+  const auto operand = source.operand();
+  if (!operand)
     return false;
-  words.push_back(build_v_mov_b32_e32(value_vgpr, *source.scalar_src, arch));
+  words.push_back(build_v_mov_b32_e32(value_vgpr, *operand, arch));
   if (source.mask_low_16) {
     const auto shift_left = instrumentation::build_v_lshlrev_b32(
         value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
@@ -915,7 +923,9 @@ public:
   [[nodiscard]] bool
   store_workgroup(uint32_t offset, const ConSanMoiWorkgroupSource &source,
                   MissingWorkgroupSource missing = MissingWorkgroupSource::Skip) {
-    if (!source.scalar_src)
+    if (!source.is_well_formed())
+      return false;
+    if (!source.has_value())
       return missing == MissingWorkgroupSource::Skip ? true : store_literal(offset, 0u);
     return append_workgroup_source_value(words_, source, temporary_vgpr_, arch_) &&
            store_vgpr(offset, temporary_vgpr_);
@@ -939,17 +949,13 @@ struct ConSanMoiReportDispatchIdWordSource {
 // literal after owner-local resolution has established that no SGPR pair is
 // available. Keep every caller explicit so a new path cannot silently choose
 // the wrong side of that contract.
-enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t {
-  Rdna4FamilyOnly,
-  AnyArchitecture
-};
+enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { Rdna4FamilyOnly, AnyArchitecture };
 
 [[nodiscard]] ConSanMoiReportDispatchIdWordSource
 moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word) {
   if (options.moi_dispatch_id_sgpr) {
     return ConSanMoiReportDispatchIdWordSource{
-        .sgpr =
-            static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + (high_word ? 1u : 0u))};
+        .sgpr = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + (high_word ? 1u : 0u))};
   }
   return ConSanMoiReportDispatchIdWordSource{
       .sgpr = std::nullopt,
@@ -957,9 +963,10 @@ moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word)
                            : static_cast<uint32_t>(options.moi_report_dispatch_id)};
 }
 
-[[nodiscard]] bool moi_report_dispatch_id_source_permitted(
-    const ConSanMoiReportDispatchIdWordSource &source,
-    ConSanMoiLiteralDispatchIdPolicy policy, rj_code_arch_t arch) {
+[[nodiscard]] bool
+moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSource &source,
+                                        ConSanMoiLiteralDispatchIdPolicy policy,
+                                        rj_code_arch_t arch) {
   return source.sgpr || policy == ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture ||
          is_rdna4_family_arch(arch);
 }
@@ -1012,9 +1019,8 @@ moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word)
     // VGPR whose next use either overwrites or explicitly reloads it.
     assert(clobberable_literal_temporary_vgpr != value_vgpr);
     if (clobberable_literal_temporary_vgpr == value_vgpr ||
-        !append_moi_report_dispatch_id_word(words, options,
-                                            clobberable_literal_temporary_vgpr, high_word, arch,
-                                            policy)) {
+        !append_moi_report_dispatch_id_word(words, options, clobberable_literal_temporary_vgpr,
+                                            high_word, arch, policy)) {
       return false;
     }
     expected = vector_source_vgpr(clobberable_literal_temporary_vgpr);
@@ -1026,11 +1032,9 @@ moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word)
   return true;
 }
 
-[[nodiscard]] bool append_store_moi_report_dispatch_id_pair(ConSanMoiRecordEmitter &record,
-                                                            const ConSanOptions &options,
-                                                            uint32_t low_offset,
-                                                            rj_code_arch_t arch,
-                                                            ConSanMoiLiteralDispatchIdPolicy policy) {
+[[nodiscard]] bool append_store_moi_report_dispatch_id_pair(
+    ConSanMoiRecordEmitter &record, const ConSanOptions &options, uint32_t low_offset,
+    rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy) {
   for (const bool high_word : {false, true}) {
     const ConSanMoiReportDispatchIdWordSource source =
         moi_report_dispatch_id_word_source(options, high_word);
@@ -1326,23 +1330,20 @@ static_assert(static_cast<size_t>(kDynamicDiagnosticRecordLayout.stride) ==
 
 [[nodiscard]] bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t low_field_address,
-    const ConSanOptions &options, uint16_t slot_vgpr, uint16_t scratch_vgpr,
-    rj_code_arch_t arch, ConSanMoiLiteralDispatchIdPolicy policy) {
+    const ConSanOptions &options, uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch,
+    ConSanMoiLiteralDispatchIdPolicy policy) {
   for (const bool high_word : {false, true}) {
     const ConSanMoiReportDispatchIdWordSource source =
         moi_report_dispatch_id_word_source(options, high_word);
     if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
       return false;
-    const uint64_t field_address =
-        low_field_address + (high_word ? sizeof(uint32_t) : 0u);
+    const uint64_t field_address = low_field_address + (high_word ? sizeof(uint32_t) : 0u);
     const bool stored =
         source.sgpr
-            ? append_dynamic_record_store_u32_scalar_src(words, layout, field_address,
-                                                         *source.sgpr, slot_vgpr, scratch_vgpr,
-                                                         arch)
-            : append_dynamic_record_store_u32_literal(words, layout, field_address,
-                                                      source.literal, slot_vgpr, scratch_vgpr,
-                                                      arch);
+            ? append_dynamic_record_store_u32_scalar_src(words, layout, field_address, *source.sgpr,
+                                                         slot_vgpr, scratch_vgpr, arch)
+            : append_dynamic_record_store_u32_literal(words, layout, field_address, source.literal,
+                                                      slot_vgpr, scratch_vgpr, arch);
     if (!stored)
       return false;
   }
@@ -1353,10 +1354,15 @@ static_assert(static_cast<size_t>(kDynamicDiagnosticRecordLayout.stride) ==
     std::vector<uint32_t> &words, const DynamicRecordLayout &layout, uint64_t field_address,
     const ConSanMoiWorkgroupSource &source, uint16_t slot_vgpr, uint16_t scratch_vgpr,
     rj_code_arch_t arch) {
-  if (!source.scalar_src)
+  if (!source.is_well_formed())
+    return false;
+  if (!source.has_value())
     return true;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + layout.value_vgpr_offset);
-  words.push_back(build_v_mov_b32_e32(value_vgpr, *source.scalar_src, arch));
+  const auto operand = source.operand();
+  if (!operand)
+    return false;
+  words.push_back(build_v_mov_b32_e32(value_vgpr, *operand, arch));
   if (source.mask_low_16) {
     const auto shift_left = instrumentation::build_v_lshlrev_b32(
         value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);

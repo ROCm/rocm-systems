@@ -195,6 +195,19 @@ struct ConSanMoiReportLayoutOverride {
   uint64_t required_bytes = 0;
 };
 
+/// Exact persistent Record/Replay workgroup tuple. Record/Replay publishes
+/// full coordinates, unlike Inline Shadow's separately packed cell key.
+struct ConSanMoiPersistentWorkgroupRegisters {
+  std::optional<uint16_t> x;
+  std::optional<uint16_t> y;
+  std::optional<uint16_t> z;
+
+  [[nodiscard]] bool empty() const { return !x && !y && !z; }
+  [[nodiscard]] bool complete() const { return x && y && z; }
+
+  auto operator<=>(const ConSanMoiPersistentWorkgroupRegisters &) const = default;
+};
+
 /// Persistent vector state selected for one connected set of owning kernels.
 /// A shared helper connects all of its owners because its instruction stream
 /// must use one tuple, while unrelated kernels may use different safe tails.
@@ -203,6 +216,7 @@ struct ConSanMoiPersistentVgprAssignment {
   uint16_t owner_vgpr = 0;
   uint16_t epoch_vgpr = 0;
   std::optional<uint16_t> workgroup_key_vgpr;
+  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs;
 
   auto operator<=>(const ConSanMoiPersistentVgprAssignment &) const = default;
 };
@@ -420,9 +434,14 @@ struct ConSanOptions {
   std::optional<uint16_t> moi_persistent_owner_sgpr;
   std::optional<uint16_t> moi_persistent_epoch_sgpr;
   std::optional<uint16_t> moi_persistent_workgroup_key_sgpr;
-  /// InlineShadow-only persistent exact workgroup identity. Launch SGPRs are
-  /// copied into this VGPR at entry because they become ordinary guest state
-  /// after the ABI prologue.
+  /// Exact persistent workgroup coordinates used by automatic banked
+  /// Record/Replay. All three registers are assigned together; absent launch
+  /// dimensions are initialized to zero at kernel entry.
+  ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_sgprs;
+  ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
+  /// Persistent packed workgroup identity used only by Inline Shadow. Launch
+  /// SGPRs or RDNA TTMPs are copied into this VGPR at entry because they are
+  /// not stable after arbitrary guest code.
   std::optional<uint16_t> moi_workgroup_key_vgpr;
   std::optional<uint64_t> report_buffer_address;
   std::optional<uint64_t> moi_report_buffer_address;

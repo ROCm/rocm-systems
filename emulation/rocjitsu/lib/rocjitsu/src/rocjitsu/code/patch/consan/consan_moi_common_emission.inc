@@ -142,17 +142,9 @@ struct MoiRecordOwnerDerivation {
   return derivation;
 }
 
-[[nodiscard]] bool same_workgroup_source(const ConSanMoiWorkgroupSource &lhs,
-                                         const ConSanMoiWorkgroupSource &rhs) {
-  return lhs.scalar_src == rhs.scalar_src && lhs.shift_right_16 == rhs.shift_right_16 &&
-         lhs.mask_low_16 == rhs.mask_low_16;
-}
-
 [[nodiscard]] bool same_workgroup_sources(const ConSanMoiWorkgroupSources &lhs,
                                           const ConSanMoiWorkgroupSources &rhs) {
-  return same_workgroup_source(lhs.x, rhs.x) && same_workgroup_source(lhs.y, rhs.y) &&
-         same_workgroup_source(lhs.z, rhs.z) &&
-         same_workgroup_source(lhs.cluster_workgroup_id, rhs.cluster_workgroup_id);
+  return lhs == rhs;
 }
 
 [[nodiscard]] std::optional<uint64_t>
@@ -739,19 +731,16 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, rj_code_arch_t arch, uint32_t record_index, uint32_t record_count,
     uint32_t logical_range_index, const ConSanMoiReportBufferLayout &layout,
-    const VgprSpillSequence *spill,
-    std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
-    std::optional<uint16_t> private_owner_shift, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset = nullptr) {
+    const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
+    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI first-light probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
-  const bool automatic_banked_capture =
-      !options.moi_dynamic_access_records &&
-      layout.record_replay_dispatch_token_capacity != 0u;
-  const uint16_t base_scratch_count =
-      automatic_banked_capture ? 10u : 6u;
+  const bool automatic_banked_capture = record_replay_uses_automatic_banked_capture(
+      options, layout.record_replay_dispatch_token_capacity);
+  const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;
   const bool materialize_flat_offset =
       candidate_requires_gfx1250_flat_offset_materialization(candidate);
   const bool save_clobbered_address = moi_load_clobbers_address(candidate);
@@ -796,7 +785,16 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr,
                                             scratch_count, "MOI epoch", errors) ||
       reject_optional_scratch_range_overlap(options.moi_workgroup_key_vgpr, *options.scratch_vgpr,
-                                            scratch_count, "MOI workgroup key", errors))
+                                            scratch_count, "MOI workgroup key", errors) ||
+      reject_optional_scratch_range_overlap(options.moi_record_replay_workgroup_vgprs.x,
+                                            *options.scratch_vgpr, scratch_count,
+                                            "MOI Record/Replay workgroup x", errors) ||
+      reject_optional_scratch_range_overlap(options.moi_record_replay_workgroup_vgprs.y,
+                                            *options.scratch_vgpr, scratch_count,
+                                            "MOI Record/Replay workgroup y", errors) ||
+      reject_optional_scratch_range_overlap(options.moi_record_replay_workgroup_vgprs.z,
+                                            *options.scratch_vgpr, scratch_count,
+                                            "MOI Record/Replay workgroup z", errors))
     return std::nullopt;
   auto byte_count = byte_count_for_candidate(candidate);
   if (!byte_count) {
@@ -919,10 +917,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
 
   const uint64_t base = *options.moi_report_buffer_address;
   const uint32_t access_record_capacity = layout.access_record_capacity;
-  const uint32_t access_dispatch_bank_count =
-      layout.record_replay_access_dispatch_bank_count;
-  const uint32_t access_owner_bank_count =
-      layout.record_replay_access_owner_bank_count;
+  const uint32_t access_dispatch_bank_count = layout.record_replay_access_dispatch_bank_count;
+  const uint32_t access_owner_bank_count = layout.record_replay_access_owner_bank_count;
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
   auto append_effective_range_offset = [&](const ConSanMoiAccessRange &range,
                                            uint16_t value_vgpr) -> std::optional<uint16_t> {
@@ -1018,9 +1014,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
           !append_dynamic_record_store_moi_report_dispatch_id_pair(
               words, kDynamicAccessRecordLayout,
-              dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation), options,
-              slot_vgpr, *options.scratch_vgpr, arch,
-              ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation), options, slot_vgpr,
+              *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
           !append_dynamic_access_event_index_store(
               words, base + offsetof(ConSanMoiReportHeader, event_counter),
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, event_index), slot_vgpr,
@@ -1126,8 +1121,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const uint16_t dispatch_bank_vgpr = static_cast<uint16_t>(record_address_vgpr + 6u);
   const uint16_t owner_bank_vgpr = static_cast<uint16_t>(record_address_vgpr + 7u);
   const uint16_t bank_probe_count_vgpr = static_cast<uint16_t>(record_address_vgpr + 8u);
-  const uint16_t identity_claim_hash_vgpr =
-      static_cast<uint16_t>(record_address_vgpr + 9u);
+  const uint16_t identity_claim_hash_vgpr = static_cast<uint16_t>(record_address_vgpr + 9u);
   const std::optional<uint16_t> spilled_lds_byte_offset_vgpr =
       !materialize_flat_offset && !save_clobbered_address && spill != nullptr &&
               options.moi_spill_overlaps_guest_operands &&
@@ -1148,8 +1142,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       access_bank_count > std::numeric_limits<uint32_t>::max() ||
       (automatic_banked_capture &&
        (layout.record_replay_logical_access_range_count == 0u ||
-        static_cast<uint64_t>(layout.record_replay_logical_access_range_count) *
-                access_bank_count >
+        static_cast<uint64_t>(layout.record_replay_logical_access_range_count) * access_bank_count >
             access_record_capacity ||
         (access_record_capacity & (access_record_capacity - 1u)) != 0u ||
         layout.record_replay_dispatch_token_capacity >
@@ -1198,34 +1191,31 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     return true;
   };
-  const auto append_access_claim_token =
-      [&](uint16_t low_vgpr, uint16_t high_vgpr, uint16_t temporary_vgpr,
-          uint32_t site_token) {
-        if (!append_claim_token(low_vgpr, high_vgpr, temporary_vgpr))
-          return false;
-        const auto combine_identity = instrumentation::build_v_xor_b32(
-            low_vgpr, vector_source_vgpr(low_vgpr),
-            identity_claim_hash_vgpr, arch);
-        const auto materialize_site = instrumentation::build_v_mov_b32_literal(
-            temporary_vgpr, site_token, arch);
-        const auto combine_site = instrumentation::build_v_xor_b32(
-            high_vgpr, vector_source_vgpr(high_vgpr), temporary_vgpr, arch);
-        if (!combine_identity || !materialize_site || !combine_site)
-          return false;
-        words.push_back(*combine_identity);
-        words.insert(words.end(), materialize_site->begin(),
-                     materialize_site->end());
-        words.push_back(*combine_site);
-        return true;
-      };
+  const auto append_access_claim_token = [&](uint16_t low_vgpr, uint16_t high_vgpr,
+                                             uint16_t temporary_vgpr, uint32_t site_token) {
+    if (!append_claim_token(low_vgpr, high_vgpr, temporary_vgpr))
+      return false;
+    const auto combine_identity = instrumentation::build_v_xor_b32(
+        low_vgpr, vector_source_vgpr(low_vgpr), identity_claim_hash_vgpr, arch);
+    const auto materialize_site =
+        instrumentation::build_v_mov_b32_literal(temporary_vgpr, site_token, arch);
+    const auto combine_site = instrumentation::build_v_xor_b32(
+        high_vgpr, vector_source_vgpr(high_vgpr), temporary_vgpr, arch);
+    if (!combine_identity || !materialize_site || !combine_site)
+      return false;
+    words.push_back(*combine_identity);
+    words.insert(words.end(), materialize_site->begin(), materialize_site->end());
+    words.push_back(*combine_site);
+    return true;
+  };
   const auto materialize_banked_record_address = [&](uint64_t first_address) {
     if (!record.materialize_address(first_address))
       return false;
     if (access_bank_count == 1u)
       return true;
     const auto scale_bank = instrumentation::build_v_mul_lo_u32_literal(
-        record_value_vgpr, record_value_high_vgpr, sizeof(ConSanMoiAccessRecord),
-        owner_bank_vgpr, arch);
+        record_value_vgpr, record_value_high_vgpr, sizeof(ConSanMoiAccessRecord), owner_bank_vgpr,
+        arch);
     const auto add_bank =
         instrumentation::build_v_add_u64_vgpr_offset(record_address_vgpr, record_value_vgpr, arch);
     InstructionSequence append(words);
@@ -1306,6 +1296,16 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   words.push_back(*narrow_first);
 
   if (automatic_banked_capture) {
+    // The bounded bank hashes the complete persistent tuple. Descriptor SGPRs
+    // and launch TTMPs are entry inputs, not probe-lifetime state, so falling
+    // back to either here would recreate cross-workgroup LDS aliasing.
+    if (!workgroup_sources.x.has_value() || !workgroup_sources.y.has_value() ||
+        !workgroup_sources.z.has_value()) {
+      errors.emplace_back(
+          "ConSan MOI automatic first-light probe requires a persistent exact workgroup tuple");
+      return std::nullopt;
+    }
+
     const auto dispatch_probe_label = sequence.make_label();
     const auto dispatch_occupied_label = sequence.make_label();
     const auto dispatch_retry_label = sequence.make_label();
@@ -1318,35 +1318,28 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     // access from repeating the bounded probe walk for the rest of the
     // dispatch lifetime.
     if (!record.materialize_address(base) ||
-        !record.load(offsetof(ConSanMoiReportHeader, flags),
-                     record_value_vgpr)) {
-      errors.emplace_back(
-          "ConSan MOI first-light probe could not read report saturation");
+        !record.load(offsetof(ConSanMoiReportHeader, flags), record_value_vgpr)) {
+      errors.emplace_back("ConSan MOI first-light probe could not read report saturation");
       return std::nullopt;
     }
-    const auto saturation_read_wait =
-        instrumentation::build_s_wait_flat_load0(arch);
+    const auto saturation_read_wait = instrumentation::build_s_wait_flat_load0(arch);
     const auto select_saturation = instrumentation::build_v_and_b32_literal(
-        record_compare_vgpr, kConSanMoiReportFlagRecordReplayBankSaturated,
-        record_value_vgpr, arch);
+        record_compare_vgpr, kConSanMoiReportFlagRecordReplayBankSaturated, record_value_vgpr,
+        arch);
     const auto already_saturated = instrumentation::build_v_cmp_ne_u32_vcc(
         scalar_positive_inline_u32(0), record_compare_vgpr, arch);
     if (!saturation_read_wait || !select_saturation || !already_saturated) {
-      errors.emplace_back(
-          "ConSan MOI first-light probe could not test report saturation");
+      errors.emplace_back("ConSan MOI first-light probe could not test report saturation");
       return std::nullopt;
     }
     words.push_back(*saturation_read_wait);
-    words.insert(words.end(), select_saturation->begin(),
-                 select_saturation->end());
+    words.insert(words.end(), select_saturation->begin(), select_saturation->end());
     words.push_back(*already_saturated);
-    if (!sequence.emit_branch(restore_exec_label,
-                              InstructionSequence::BranchKind::VccNonzero)) {
+    if (!sequence.emit_branch(restore_exec_label, InstructionSequence::BranchKind::VccNonzero)) {
       return std::nullopt;
     }
 
-    if (!append_claim_token(record_value_vgpr, record_value_high_vgpr,
-                            record_compare_vgpr)) {
+    if (!append_claim_token(record_value_vgpr, record_value_high_vgpr, record_compare_vgpr)) {
       errors.emplace_back("ConSan MOI first-light probe could not form its dispatch claim");
       return std::nullopt;
     }
@@ -1355,13 +1348,11 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto token_high_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
         scalar_positive_inline_u32(0), record_value_high_vgpr, arch);
     const auto hash_dispatch = instrumentation::build_v_xor_b32(
-        dispatch_bank_vgpr, vector_source_vgpr(record_value_vgpr),
-        record_value_high_vgpr, arch);
+        dispatch_bank_vgpr, vector_source_vgpr(record_value_vgpr), record_value_high_vgpr, arch);
     const auto bound_dispatch = instrumentation::build_v_and_b32_literal(
-        dispatch_bank_vgpr, layout.record_replay_dispatch_token_capacity - 1u,
-        dispatch_bank_vgpr, arch);
-    if (!token_low_nonzero || !token_high_nonzero || !hash_dispatch ||
-        !bound_dispatch) {
+        dispatch_bank_vgpr, layout.record_replay_dispatch_token_capacity - 1u, dispatch_bank_vgpr,
+        arch);
+    if (!token_low_nonzero || !token_high_nonzero || !hash_dispatch || !bound_dispatch) {
       errors.emplace_back("ConSan MOI first-light probe could not hash its dispatch claim");
       return std::nullopt;
     }
@@ -1380,49 +1371,41 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     words.push_back(*hash_dispatch);
     words.insert(words.end(), bound_dispatch->begin(), bound_dispatch->end());
-    words.push_back(build_v_mov_b32_e32(bank_probe_count_vgpr,
-                                        scalar_positive_inline_u32(0), arch));
+    words.push_back(
+        build_v_mov_b32_e32(bank_probe_count_vgpr, scalar_positive_inline_u32(0), arch));
 
     if (!sequence.bind(dispatch_probe_label) ||
-        !record.materialize_address(base +
-                                    layout.record_replay_dispatch_tokens_offset)) {
+        !record.materialize_address(base + layout.record_replay_dispatch_tokens_offset)) {
       errors.emplace_back("ConSan MOI first-light probe could not address its dispatch table");
       return std::nullopt;
     }
     const auto scale_dispatch_slot = instrumentation::build_v_mul_lo_u32_literal(
-        record_compare_vgpr, record_compare_high_vgpr, sizeof(uint64_t),
-        dispatch_bank_vgpr, arch);
+        record_compare_vgpr, record_compare_high_vgpr, sizeof(uint64_t), dispatch_bank_vgpr, arch);
     const auto add_dispatch_slot = instrumentation::build_v_add_u64_vgpr_offset(
         record_address_vgpr, record_compare_vgpr, arch);
     if (!scale_dispatch_slot || !add_dispatch_slot) {
       errors.emplace_back("ConSan MOI first-light probe could not select a dispatch slot");
       return std::nullopt;
     }
-    words.insert(words.end(), scale_dispatch_slot->begin(),
-                 scale_dispatch_slot->end());
-    words.insert(words.end(), add_dispatch_slot->begin(),
-                 add_dispatch_slot->end());
-    words.push_back(build_v_mov_b32_e32(record_compare_vgpr,
-                                        scalar_positive_inline_u32(0), arch));
-    words.push_back(build_v_mov_b32_e32(record_compare_high_vgpr,
-                                        scalar_positive_inline_u32(0), arch));
+    words.insert(words.end(), scale_dispatch_slot->begin(), scale_dispatch_slot->end());
+    words.insert(words.end(), add_dispatch_slot->begin(), add_dispatch_slot->end());
+    words.push_back(build_v_mov_b32_e32(record_compare_vgpr, scalar_positive_inline_u32(0), arch));
+    words.push_back(
+        build_v_mov_b32_e32(record_compare_high_vgpr, scalar_positive_inline_u32(0), arch));
     const auto claim_dispatch = instrumentation::build_flat_atomic_cmpswap_b64(
         record_address_vgpr, record_value_vgpr, record_value_vgpr,
         /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-    const auto claim_dispatch_wait =
-        instrumentation::build_s_wait_flat_load0(arch);
+    const auto claim_dispatch_wait = instrumentation::build_s_wait_flat_load0(arch);
     if (!claim_dispatch || !claim_dispatch_wait) {
       errors.emplace_back("ConSan MOI first-light probe could not claim a dispatch slot");
       return std::nullopt;
     }
     words.insert(words.end(), claim_dispatch->begin(), claim_dispatch->end());
     words.push_back(*claim_dispatch_wait);
-    const auto prior_dispatch_low_nonzero =
-        instrumentation::build_v_cmp_ne_u32_vcc(
-            scalar_positive_inline_u32(0), record_value_vgpr, arch);
-    const auto prior_dispatch_high_nonzero =
-        instrumentation::build_v_cmp_ne_u32_vcc(
-            scalar_positive_inline_u32(0), record_value_high_vgpr, arch);
+    const auto prior_dispatch_low_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
+        scalar_positive_inline_u32(0), record_value_vgpr, arch);
+    const auto prior_dispatch_high_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
+        scalar_positive_inline_u32(0), record_value_high_vgpr, arch);
     if (!prior_dispatch_low_nonzero || !prior_dispatch_high_nonzero) {
       errors.emplace_back("ConSan MOI first-light probe could not inspect a dispatch slot");
       return std::nullopt;
@@ -1436,9 +1419,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     if (!sequence.emit_branch(dispatch_occupied_label,
                               InstructionSequence::BranchKind::VccNonzero) ||
         !append_atomic_fetch_add_one_u32(
-            words,
-            base + offsetof(ConSanMoiReportHeader,
-                            record_replay_dispatch_token_count),
+            words, base + offsetof(ConSanMoiReportHeader, record_replay_dispatch_token_count),
             record_compare_vgpr, record_address_vgpr, arch) ||
         !sequence.emit_branch(dispatch_bank_ready_label,
                               InstructionSequence::BranchKind::Unconditional) ||
@@ -1447,20 +1428,16 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       return std::nullopt;
     }
 
-    const auto prior_dispatch_low_xor_literal =
-        instrumentation::build_v_mov_b32_literal(
-            record_compare_vgpr,
-            static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask),
-            arch);
+    const auto prior_dispatch_low_xor_literal = instrumentation::build_v_mov_b32_literal(
+        record_compare_vgpr, static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask), arch);
     const auto decode_prior_dispatch_low = instrumentation::build_v_xor_b32(
-        record_value_vgpr, vector_source_vgpr(record_compare_vgpr),
-        record_value_vgpr, arch);
+        record_value_vgpr, vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch);
     if (!prior_dispatch_low_xor_literal || !decode_prior_dispatch_low ||
         !sequence.emit(*prior_dispatch_low_xor_literal) ||
         !sequence.emit(*decode_prior_dispatch_low) ||
-        !append_moi_report_dispatch_id_word(
-            words, options, record_compare_vgpr, /*high_word=*/false, arch,
-            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+        !append_moi_report_dispatch_id_word(words, options, record_compare_vgpr,
+                                            /*high_word=*/false, arch,
+                                            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
       errors.emplace_back("ConSan MOI first-light probe could not compare a dispatch slot");
       return std::nullopt;
     }
@@ -1470,98 +1447,76 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       return std::nullopt;
     }
     words.push_back(*dispatch_low_mismatch);
-    if (!sequence.emit_branch(dispatch_retry_label,
-                              InstructionSequence::BranchKind::VccNonzero)) {
+    if (!sequence.emit_branch(dispatch_retry_label, InstructionSequence::BranchKind::VccNonzero)) {
       return std::nullopt;
     }
 
-    const auto prior_dispatch_high_xor_literal =
-        instrumentation::build_v_mov_b32_literal(
-            record_compare_vgpr,
-            static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask >>
-                                  32u),
-            arch);
+    const auto prior_dispatch_high_xor_literal = instrumentation::build_v_mov_b32_literal(
+        record_compare_vgpr, static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask >> 32u),
+        arch);
     const auto decode_prior_dispatch_high = instrumentation::build_v_xor_b32(
-        record_value_high_vgpr, vector_source_vgpr(record_compare_vgpr),
-        record_value_high_vgpr, arch);
+        record_value_high_vgpr, vector_source_vgpr(record_compare_vgpr), record_value_high_vgpr,
+        arch);
     if (!prior_dispatch_high_xor_literal || !decode_prior_dispatch_high ||
         !sequence.emit(*prior_dispatch_high_xor_literal) ||
         !sequence.emit(*decode_prior_dispatch_high) ||
-        !append_moi_report_dispatch_id_word(
-            words, options, record_compare_vgpr, /*high_word=*/true, arch,
-            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+        !append_moi_report_dispatch_id_word(words, options, record_compare_vgpr, /*high_word=*/true,
+                                            arch,
+                                            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
       errors.emplace_back("ConSan MOI first-light probe could not compare a dispatch slot");
       return std::nullopt;
     }
-    const auto dispatch_high_mismatch =
-        instrumentation::build_v_cmp_ne_u32_vcc(
-            vector_source_vgpr(record_compare_vgpr),
-            record_value_high_vgpr, arch);
+    const auto dispatch_high_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
+        vector_source_vgpr(record_compare_vgpr), record_value_high_vgpr, arch);
     if (!dispatch_high_mismatch) {
       return std::nullopt;
     }
     words.push_back(*dispatch_high_mismatch);
-    if (!sequence.emit_branch(dispatch_retry_label,
-                              InstructionSequence::BranchKind::VccNonzero) ||
+    if (!sequence.emit_branch(dispatch_retry_label, InstructionSequence::BranchKind::VccNonzero) ||
         !sequence.emit_branch(dispatch_bank_ready_label,
                               InstructionSequence::BranchKind::Unconditional) ||
         !sequence.bind(dispatch_retry_label)) {
       return std::nullopt;
     }
 
-    const auto increment_dispatch_probe =
-        instrumentation::build_v_add_u32_literal(
-            bank_probe_count_vgpr, record_compare_vgpr, 1u,
-            bank_probe_count_vgpr, arch);
-    const auto materialize_dispatch_capacity =
-        instrumentation::build_v_mov_b32_literal(
-            record_compare_vgpr,
-            std::min(layout.record_replay_dispatch_token_capacity,
-                     kConSanMoiRecordReplayProbeLimit),
-            arch);
-    const auto dispatch_probe_in_range =
-        instrumentation::build_v_cmp_gt_u32_vcc(
-            vector_source_vgpr(record_compare_vgpr),
-            bank_probe_count_vgpr, arch);
+    const auto increment_dispatch_probe = instrumentation::build_v_add_u32_literal(
+        bank_probe_count_vgpr, record_compare_vgpr, 1u, bank_probe_count_vgpr, arch);
+    const auto materialize_dispatch_capacity = instrumentation::build_v_mov_b32_literal(
+        record_compare_vgpr,
+        std::min(layout.record_replay_dispatch_token_capacity, kConSanMoiRecordReplayProbeLimit),
+        arch);
+    const auto dispatch_probe_in_range = instrumentation::build_v_cmp_gt_u32_vcc(
+        vector_source_vgpr(record_compare_vgpr), bank_probe_count_vgpr, arch);
     // Mirror consan_moi_record_replay_advance_probe(): the incremented probe
     // count produces a triangular walk through the power-of-two directory.
     const auto increment_dispatch_bank = instrumentation::build_v_add_u32(
-        dispatch_bank_vgpr, vector_source_vgpr(dispatch_bank_vgpr),
-        bank_probe_count_vgpr, arch);
+        dispatch_bank_vgpr, vector_source_vgpr(dispatch_bank_vgpr), bank_probe_count_vgpr, arch);
     const auto wrap_dispatch_bank = instrumentation::build_v_and_b32_literal(
-        dispatch_bank_vgpr, layout.record_replay_dispatch_token_capacity - 1u,
-        dispatch_bank_vgpr, arch);
-    if (!increment_dispatch_probe || !materialize_dispatch_capacity ||
-        !dispatch_probe_in_range ||
+        dispatch_bank_vgpr, layout.record_replay_dispatch_token_capacity - 1u, dispatch_bank_vgpr,
+        arch);
+    if (!increment_dispatch_probe || !materialize_dispatch_capacity || !dispatch_probe_in_range ||
         !increment_dispatch_bank || !wrap_dispatch_bank) {
       errors.emplace_back("ConSan MOI first-light probe could not advance its dispatch probe");
       return std::nullopt;
     }
-    words.insert(words.end(), increment_dispatch_probe->begin(),
-                 increment_dispatch_probe->end());
+    words.insert(words.end(), increment_dispatch_probe->begin(), increment_dispatch_probe->end());
     words.insert(words.end(), materialize_dispatch_capacity->begin(),
                  materialize_dispatch_capacity->end());
     words.push_back(*dispatch_probe_in_range);
-    if (!sequence.emit_branch(dispatch_saturated_label,
-                              InstructionSequence::BranchKind::VccZero)) {
+    if (!sequence.emit_branch(dispatch_saturated_label, InstructionSequence::BranchKind::VccZero)) {
       return std::nullopt;
     }
-    words.insert(words.end(), increment_dispatch_bank->begin(),
-                 increment_dispatch_bank->end());
-    words.insert(words.end(), wrap_dispatch_bank->begin(),
-                 wrap_dispatch_bank->end());
-    if (!append_claim_token(record_value_vgpr, record_value_high_vgpr,
-                            record_compare_vgpr) ||
+    words.insert(words.end(), increment_dispatch_bank->begin(), increment_dispatch_bank->end());
+    words.insert(words.end(), wrap_dispatch_bank->begin(), wrap_dispatch_bank->end());
+    if (!append_claim_token(record_value_vgpr, record_value_high_vgpr, record_compare_vgpr) ||
         !sequence.emit_branch(dispatch_probe_label,
                               InstructionSequence::BranchKind::Unconditional) ||
         !sequence.bind(dispatch_saturated_label) ||
-        !append_atomic_or_u32_literal(
-            words, base + offsetof(ConSanMoiReportHeader, flags),
-            kConSanMoiReportFlagRecordReplayBankSaturated |
-                kConSanMoiReportFlagRecordReplayDispatchBankSaturated,
-            record_address_vgpr, arch) ||
-        !sequence.emit_branch(restore_exec_label,
-                              InstructionSequence::BranchKind::Unconditional) ||
+        !append_atomic_or_u32_literal(words, base + offsetof(ConSanMoiReportHeader, flags),
+                                      kConSanMoiReportFlagRecordReplayBankSaturated |
+                                          kConSanMoiReportFlagRecordReplayDispatchBankSaturated,
+                                      record_address_vgpr, arch) ||
+        !sequence.emit_branch(restore_exec_label, InstructionSequence::BranchKind::Unconditional) ||
         !sequence.bind(dispatch_bank_ready_label)) {
       errors.emplace_back("ConSan MOI first-light dispatch-directory path is invalid");
       return std::nullopt;
@@ -1575,63 +1530,55 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         workgroup_sources.x, workgroup_sources.y, workgroup_sources.z};
     for (const ConSanMoiWorkgroupSource &source : sources) {
       const auto mix = instrumentation::build_v_mul_lo_u32_literal(
-          owner_bank_vgpr, record_value_high_vgpr,
-          kConSanMoiRecordReplayIdentityHashMultiplier,
+          owner_bank_vgpr, record_value_high_vgpr, kConSanMoiRecordReplayIdentityHashMultiplier,
           owner_bank_vgpr, arch);
       if (!mix)
         return false;
       words.insert(words.end(), mix->begin(), mix->end());
-      if (source.scalar_src) {
-        if (!append_workgroup_source_value(words, source, record_value_vgpr,
-                                           arch)) {
+      if (source.has_value()) {
+        if (!append_workgroup_source_value(words, source, record_value_vgpr, arch)) {
           return false;
         }
       } else {
-        words.push_back(build_v_mov_b32_e32(
-            record_value_vgpr, scalar_positive_inline_u32(0), arch));
+        words.push_back(
+            build_v_mov_b32_e32(record_value_vgpr, scalar_positive_inline_u32(0), arch));
       }
       const auto combine = instrumentation::build_v_xor_b32(
-          owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr),
-          record_value_vgpr, arch);
+          owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr), record_value_vgpr, arch);
       if (!combine)
         return false;
       words.push_back(*combine);
     }
     const auto mix_dispatch = instrumentation::build_v_mul_lo_u32_literal(
-        owner_bank_vgpr, record_value_high_vgpr,
-        kConSanMoiRecordReplayIdentityHashMultiplier,
+        owner_bank_vgpr, record_value_high_vgpr, kConSanMoiRecordReplayIdentityHashMultiplier,
         owner_bank_vgpr, arch);
     const auto combine_dispatch = instrumentation::build_v_xor_b32(
-        owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr),
-        dispatch_bank_vgpr, arch);
+        owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr), dispatch_bank_vgpr, arch);
     const auto mix_site = instrumentation::build_v_mul_lo_u32_literal(
-        owner_bank_vgpr, record_value_high_vgpr,
-        kConSanMoiRecordReplayIdentityHashMultiplier,
+        owner_bank_vgpr, record_value_high_vgpr, kConSanMoiRecordReplayIdentityHashMultiplier,
         owner_bank_vgpr, arch);
-    const auto materialize_site = instrumentation::build_v_mov_b32_literal(
-        record_value_vgpr, site_token, arch);
+    const auto materialize_site =
+        instrumentation::build_v_mov_b32_literal(record_value_vgpr, site_token, arch);
     const auto combine_site = instrumentation::build_v_xor_b32(
-        owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr),
-        record_value_vgpr, arch);
+        owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr), record_value_vgpr, arch);
     const auto bound = instrumentation::build_v_and_b32_literal(
-        owner_bank_vgpr, access_record_capacity - 1u, owner_bank_vgpr,
-        arch);
-    if (!mix_dispatch || !combine_dispatch || !mix_site || !materialize_site ||
-        !combine_site || !bound)
+        owner_bank_vgpr, access_record_capacity - 1u, owner_bank_vgpr, arch);
+    if (!mix_dispatch || !combine_dispatch || !mix_site || !materialize_site || !combine_site ||
+        !bound)
       return false;
     words.insert(words.end(), mix_dispatch->begin(), mix_dispatch->end());
     words.push_back(*combine_dispatch);
     // Preserve the unbounded owner/workgroup/dispatch hash for the access
     // publication token. The bounded table slot is mixed with the static site
     // below and may then advance independently while probing.
-    words.push_back(build_v_mov_b32_e32(
-        identity_claim_hash_vgpr, vector_source_vgpr(owner_bank_vgpr), arch));
+    words.push_back(
+        build_v_mov_b32_e32(identity_claim_hash_vgpr, vector_source_vgpr(owner_bank_vgpr), arch));
     words.insert(words.end(), mix_site->begin(), mix_site->end());
     words.insert(words.end(), materialize_site->begin(), materialize_site->end());
     words.push_back(*combine_site);
     words.insert(words.end(), bound->begin(), bound->end());
-    words.push_back(build_v_mov_b32_e32(
-        bank_probe_count_vgpr, scalar_positive_inline_u32(0), arch));
+    words.push_back(
+        build_v_mov_b32_e32(bank_probe_count_vgpr, scalar_positive_inline_u32(0), arch));
     return true;
   };
 
@@ -1651,19 +1598,15 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto publication_incomplete_label = sequence.make_label();
     const ConSanMoiAccessRange &range = (*access_ranges)[range_index];
     const uint32_t site_token =
-        automatic_banked_capture
-            ? logical_range_index + static_cast<uint32_t>(range_index)
-            : 0u;
+        automatic_banked_capture ? logical_range_index + static_cast<uint32_t>(range_index) : 0u;
     const uint64_t access_record_base =
-        automatic_banked_capture
-            ? base + layout.access_records_offset
-            : base + layout.access_records_offset +
-                  (static_cast<uint64_t>(record_index) + range_index) *
-                      sizeof(ConSanMoiAccessRecord);
+        automatic_banked_capture ? base + layout.access_records_offset
+                                 : base + layout.access_records_offset +
+                                       (static_cast<uint64_t>(record_index) + range_index) *
+                                           sizeof(ConSanMoiAccessRecord);
 
     if (automatic_banked_capture) {
-      if (!append_owner_bank_start(site_token) ||
-          !sequence.bind(owner_probe_label)) {
+      if (!append_owner_bank_start(site_token) || !sequence.bind(owner_probe_label)) {
         errors.emplace_back(
             "ConSan MOI first-light probe could not initialize its access-identity probe");
         return std::nullopt;
@@ -1678,11 +1621,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     if (!materialize_banked_record_address(access_record_base +
                                            offsetof(ConSanMoiAccessRecord, claim_token)) ||
         !(automatic_banked_capture
-              ? append_access_claim_token(record_value_vgpr,
-                                          record_value_high_vgpr,
+              ? append_access_claim_token(record_value_vgpr, record_value_high_vgpr,
                                           record_compare_vgpr, site_token)
-              : append_claim_token(record_value_vgpr,
-                                   record_value_high_vgpr,
+              : append_claim_token(record_value_vgpr, record_value_high_vgpr,
                                    record_compare_vgpr))) {
       errors.emplace_back("ConSan MOI first-light probe could not materialize its bank claim");
       return std::nullopt;
@@ -1733,9 +1674,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       return std::nullopt;
     const uint32_t visible_record_count =
         automatic_banked_capture ? access_record_capacity : record_count;
-    if (!append_store_u32_literal(
-            words, base + offsetof(ConSanMoiReportHeader, access_record_count),
-            visible_record_count, *options.scratch_vgpr, arch) ||
+    if (!append_store_u32_literal(words,
+                                  base + offsetof(ConSanMoiReportHeader, access_record_count),
+                                  visible_record_count, *options.scratch_vgpr, arch) ||
         !append_atomic_fetch_add_one_u32(words,
                                          base + offsetof(ConSanMoiReportHeader, event_counter),
                                          record_compare_vgpr, record_address_vgpr, arch) ||
@@ -1773,8 +1714,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
          !record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), *options.moi_epoch_vgpr)) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, instruction_offset),
                               static_cast<uint32_t>(candidate.text_offset)) ||
-        !record.store_literal(offsetof(ConSanMoiAccessRecord, site_token),
-                              site_token)) {
+        !record.store_literal(offsetof(ConSanMoiAccessRecord, site_token), site_token)) {
       errors.emplace_back("ConSan MOI first-light probe could not encode record stores");
       return std::nullopt;
     }
@@ -1880,16 +1820,13 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       // Preserve the returned token in the now-dead address pair, recompute
       // this execution identity's fingerprint, and bypass unrelated
       // in-flight claims without waiting for their publishers.
-      words.push_back(build_v_mov_b32_e32(
-          record_address_vgpr, vector_source_vgpr(record_value_vgpr), arch));
-      words.push_back(build_v_mov_b32_e32(
-          static_cast<uint16_t>(record_address_vgpr + 1u),
-          vector_source_vgpr(record_value_high_vgpr), arch));
-      if (!append_access_claim_token(record_compare_vgpr,
-                                     record_compare_high_vgpr,
+      words.push_back(
+          build_v_mov_b32_e32(record_address_vgpr, vector_source_vgpr(record_value_vgpr), arch));
+      words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(record_address_vgpr + 1u),
+                                          vector_source_vgpr(record_value_high_vgpr), arch));
+      if (!append_access_claim_token(record_compare_vgpr, record_compare_high_vgpr,
                                      record_value_vgpr, site_token)) {
-        errors.emplace_back(
-            "ConSan MOI first-light probe could not rebuild its identity claim");
+        errors.emplace_back("ConSan MOI first-light probe could not rebuild its identity claim");
         return std::nullopt;
       }
       const auto low_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
@@ -1898,44 +1835,35 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
           vector_source_vgpr(record_compare_high_vgpr),
           static_cast<uint16_t>(record_address_vgpr + 1u), arch);
       if (!low_mismatch || !high_mismatch) {
-        errors.emplace_back(
-            "ConSan MOI first-light probe could not compare its identity claim");
+        errors.emplace_back("ConSan MOI first-light probe could not compare its identity claim");
         return std::nullopt;
       }
       words.push_back(*low_mismatch);
-      if (!sequence.emit_branch(owner_retry_label,
-                                InstructionSequence::BranchKind::VccNonzero)) {
+      if (!sequence.emit_branch(owner_retry_label, InstructionSequence::BranchKind::VccNonzero)) {
         return std::nullopt;
       }
       words.push_back(*high_mismatch);
-      if (!sequence.emit_branch(owner_retry_label,
-                                InstructionSequence::BranchKind::VccNonzero) ||
-          !materialize_banked_record_address(
-              access_record_base +
-              offsetof(ConSanMoiAccessRecord, access_kind))) {
+      if (!sequence.emit_branch(owner_retry_label, InstructionSequence::BranchKind::VccNonzero) ||
+          !materialize_banked_record_address(access_record_base +
+                                             offsetof(ConSanMoiAccessRecord, access_kind))) {
         return std::nullopt;
       }
     } else {
       // Direct capture retains the historical reversible dispatch token.
-      const auto low_xor_literal =
-          instrumentation::build_v_mov_b32_literal(
-              record_compare_vgpr,
-              static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask),
-              arch);
+      const auto low_xor_literal = instrumentation::build_v_mov_b32_literal(
+          record_compare_vgpr, static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask),
+          arch);
       const auto low_xor = instrumentation::build_v_xor_b32(
-          record_value_vgpr, vector_source_vgpr(record_compare_vgpr),
-          record_value_vgpr, arch);
+          record_value_vgpr, vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch);
       if (!low_xor_literal || !low_xor) {
-        errors.emplace_back(
-            "ConSan MOI first-light probe could not compare its dispatch claim");
+        errors.emplace_back("ConSan MOI first-light probe could not compare its dispatch claim");
         return std::nullopt;
       }
-      words.insert(words.end(), low_xor_literal->begin(),
-                   low_xor_literal->end());
+      words.insert(words.end(), low_xor_literal->begin(), low_xor_literal->end());
       words.push_back(*low_xor);
-      if (!append_moi_report_dispatch_id_word(
-              words, options, record_compare_vgpr, /*high_word=*/false, arch,
-              ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+      if (!append_moi_report_dispatch_id_word(words, options, record_compare_vgpr,
+                                              /*high_word=*/false, arch,
+                                              ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
         return std::nullopt;
       }
       const auto low_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
@@ -1943,52 +1871,40 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       if (!low_mismatch)
         return std::nullopt;
       words.push_back(*low_mismatch);
-      if (!sequence.emit_branch(saturation_label,
-                                InstructionSequence::BranchKind::VccNonzero)) {
+      if (!sequence.emit_branch(saturation_label, InstructionSequence::BranchKind::VccNonzero)) {
         return std::nullopt;
       }
 
-      const auto high_xor_literal =
-          instrumentation::build_v_mov_b32_literal(
-              record_compare_vgpr,
-              static_cast<uint32_t>(
-                  kConSanMoiRecordReplayClaimTokenXorMask >> 32u),
-              arch);
+      const auto high_xor_literal = instrumentation::build_v_mov_b32_literal(
+          record_compare_vgpr,
+          static_cast<uint32_t>(kConSanMoiRecordReplayClaimTokenXorMask >> 32u), arch);
       const auto high_xor = instrumentation::build_v_xor_b32(
-          record_value_high_vgpr, vector_source_vgpr(record_compare_vgpr),
-          record_value_high_vgpr, arch);
+          record_value_high_vgpr, vector_source_vgpr(record_compare_vgpr), record_value_high_vgpr,
+          arch);
       if (!high_xor_literal || !high_xor) {
-        errors.emplace_back(
-            "ConSan MOI first-light probe could not compare its dispatch claim");
+        errors.emplace_back("ConSan MOI first-light probe could not compare its dispatch claim");
         return std::nullopt;
       }
-      words.insert(words.end(), high_xor_literal->begin(),
-                   high_xor_literal->end());
+      words.insert(words.end(), high_xor_literal->begin(), high_xor_literal->end());
       words.push_back(*high_xor);
-      if (!append_moi_report_dispatch_id_word(
-              words, options, record_compare_vgpr, /*high_word=*/true, arch,
-              ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
+      if (!append_moi_report_dispatch_id_word(words, options, record_compare_vgpr,
+                                              /*high_word=*/true, arch,
+                                              ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
         return std::nullopt;
       }
       const auto high_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
-          vector_source_vgpr(record_compare_vgpr),
-          record_value_high_vgpr, arch);
-      const auto access_kind_address =
-          instrumentation::build_v_add_u64_signed_i24(
-              record_address_vgpr,
-              offsetof(ConSanMoiAccessRecord, access_kind), arch);
+          vector_source_vgpr(record_compare_vgpr), record_value_high_vgpr, arch);
+      const auto access_kind_address = instrumentation::build_v_add_u64_signed_i24(
+          record_address_vgpr, offsetof(ConSanMoiAccessRecord, access_kind), arch);
       if (!high_mismatch || !access_kind_address) {
-        errors.emplace_back(
-            "ConSan MOI first-light probe could not compare its dispatch claim");
+        errors.emplace_back("ConSan MOI first-light probe could not compare its dispatch claim");
         return std::nullopt;
       }
       words.push_back(*high_mismatch);
-      if (!sequence.emit_branch(saturation_label,
-                                InstructionSequence::BranchKind::VccNonzero)) {
+      if (!sequence.emit_branch(saturation_label, InstructionSequence::BranchKind::VccNonzero)) {
         return std::nullopt;
       }
-      words.insert(words.end(), access_kind_address->begin(),
-                   access_kind_address->end());
+      words.insert(words.end(), access_kind_address->begin(), access_kind_address->end());
     }
 
     // Use a no-op atomic compare-and-swap as an acquire-style read of the
@@ -2024,10 +1940,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     words.insert(words.end(), read_commit->begin(), read_commit->end());
     words.push_back(*read_commit_wait);
     words.push_back(*publication_incomplete);
-    if (!sequence.emit_branch(
-            automatic_banked_capture ? owner_retry_label
-                                     : publication_incomplete_label,
-            InstructionSequence::BranchKind::VccNonzero)) {
+    if (!sequence.emit_branch(automatic_banked_capture ? owner_retry_label
+                                                       : publication_incomplete_label,
+                              InstructionSequence::BranchKind::VccNonzero)) {
       return std::nullopt;
     }
     words.push_back(*publication_kind_mismatch);
@@ -2035,16 +1950,14 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         record_address_vgpr, -static_cast<int32_t>(offsetof(ConSanMoiAccessRecord, access_kind)),
         arch);
     if (!record_base_address ||
-        !sequence.emit_branch(
-            automatic_banked_capture ? owner_retry_label : saturation_label,
-            InstructionSequence::BranchKind::VccNonzero)) {
+        !sequence.emit_branch(automatic_banked_capture ? owner_retry_label : saturation_label,
+                              InstructionSequence::BranchKind::VccNonzero)) {
       return std::nullopt;
     }
     words.insert(words.end(), record_base_address->begin(), record_base_address->end());
 
     if (automatic_banked_capture) {
-      const auto reject_dispatch_mismatch = [&](uint32_t offset,
-                                                bool high_word) {
+      const auto reject_dispatch_mismatch = [&](uint32_t offset, bool high_word) {
         if (!record.load(offset, record_value_vgpr) ||
             !append_moi_report_dispatch_id_word(
                 words, options, record_compare_vgpr, high_word, arch,
@@ -2056,39 +1969,32 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         if (!mismatch)
           return false;
         words.push_back(*mismatch);
-        return sequence.emit_branch(owner_retry_label,
-                                    InstructionSequence::BranchKind::VccNonzero);
+        return sequence.emit_branch(owner_retry_label, InstructionSequence::BranchKind::VccNonzero);
       };
-      if (!reject_dispatch_mismatch(
-              offsetof(ConSanMoiAccessRecord, generation),
-              /*high_word=*/false) ||
-          !reject_dispatch_mismatch(
-              offsetof(ConSanMoiAccessRecord, generation) + sizeof(uint32_t),
-              /*high_word=*/true)) {
-        errors.emplace_back(
-            "ConSan MOI first-light probe could not qualify its retained dispatch");
+      if (!reject_dispatch_mismatch(offsetof(ConSanMoiAccessRecord, generation),
+                                    /*high_word=*/false) ||
+          !reject_dispatch_mismatch(offsetof(ConSanMoiAccessRecord, generation) + sizeof(uint32_t),
+                                    /*high_word=*/true)) {
+        errors.emplace_back("ConSan MOI first-light probe could not qualify its retained dispatch");
         return std::nullopt;
       }
     }
 
-    if (!record.load(offsetof(ConSanMoiAccessRecord, site_token),
-                     record_value_vgpr)) {
+    if (!record.load(offsetof(ConSanMoiAccessRecord, site_token), record_value_vgpr)) {
       return std::nullopt;
     }
-    const auto expected_site = instrumentation::build_v_mov_b32_literal(
-        record_compare_vgpr, site_token, arch);
+    const auto expected_site =
+        instrumentation::build_v_mov_b32_literal(record_compare_vgpr, site_token, arch);
     const auto site_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
         vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch);
     if (!expected_site || !site_mismatch) {
-      errors.emplace_back(
-          "ConSan MOI first-light probe could not qualify its retained site");
+      errors.emplace_back("ConSan MOI first-light probe could not qualify its retained site");
       return std::nullopt;
     }
     words.insert(words.end(), expected_site->begin(), expected_site->end());
     words.push_back(*site_mismatch);
-    if (!sequence.emit_branch(
-            automatic_banked_capture ? owner_retry_label : saturation_label,
-            InstructionSequence::BranchKind::VccNonzero)) {
+    if (!sequence.emit_branch(automatic_banked_capture ? owner_retry_label : saturation_label,
+                              InstructionSequence::BranchKind::VccNonzero)) {
       return std::nullopt;
     }
 
@@ -2096,7 +2002,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                                                const ConSanMoiWorkgroupSource &source) {
       if (!record.load(offset, record_value_vgpr))
         return false;
-      if (source.scalar_src) {
+      if (source.has_value()) {
         if (!append_workgroup_source_value(words, source, record_compare_vgpr, arch))
           return false;
       } else {
@@ -2108,9 +2014,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       if (!mismatch)
         return false;
       words.push_back(*mismatch);
-      return sequence.emit_branch(
-          automatic_banked_capture ? owner_retry_label : saturation_label,
-          InstructionSequence::BranchKind::VccNonzero);
+      return sequence.emit_branch(automatic_banked_capture ? owner_retry_label : saturation_label,
+                                  InstructionSequence::BranchKind::VccNonzero);
     };
     if (!reject_workgroup_mismatch(offsetof(ConSanMoiAccessRecord, workgroup_x),
                                    workgroup_sources.x) ||
@@ -2118,8 +2023,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                                    workgroup_sources.y) ||
         !reject_workgroup_mismatch(offsetof(ConSanMoiAccessRecord, workgroup_z),
                                    workgroup_sources.z)) {
-      errors.emplace_back(
-          "ConSan MOI first-light probe could not qualify its retained workgroup");
+      errors.emplace_back("ConSan MOI first-light probe could not qualify its retained workgroup");
       return std::nullopt;
     }
 
@@ -2127,32 +2031,26 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     // dispatch/workgroup. The automatic table has spare slots and retains
     // wave identity explicitly so replay can cover every execution owner.
     if (automatic_banked_capture) {
-      if (!record.load(offsetof(ConSanMoiAccessRecord, wave_id),
-                       record_value_vgpr) ||
+      if (!record.load(offsetof(ConSanMoiAccessRecord, wave_id), record_value_vgpr) ||
           !append_owner_id(record_compare_vgpr)) {
-        errors.emplace_back(
-            "ConSan MOI first-light probe could not qualify its retained owner");
+        errors.emplace_back("ConSan MOI first-light probe could not qualify its retained owner");
         return std::nullopt;
       }
       const auto owner_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
           vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch);
       if (!owner_mismatch) {
-        errors.emplace_back(
-            "ConSan MOI first-light probe could not compare its retained owner");
+        errors.emplace_back("ConSan MOI first-light probe could not compare its retained owner");
         return std::nullopt;
       }
       words.push_back(*owner_mismatch);
-      if (!sequence.emit_branch(owner_retry_label,
-                                InstructionSequence::BranchKind::VccNonzero)) {
-        errors.emplace_back(
-            "ConSan MOI first-light probe could not qualify its retained owner");
+      if (!sequence.emit_branch(owner_retry_label, InstructionSequence::BranchKind::VccNonzero)) {
+        errors.emplace_back("ConSan MOI first-light probe could not qualify its retained owner");
         return std::nullopt;
       }
     }
     if (!sequence.emit_branch(publication_done_label,
                               InstructionSequence::BranchKind::Unconditional)) {
-      errors.emplace_back(
-          "ConSan MOI first-light probe could not qualify its retained identity");
+      errors.emplace_back("ConSan MOI first-light probe could not qualify its retained identity");
       return std::nullopt;
     }
 
@@ -2160,58 +2058,42 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       if (!sequence.bind(owner_retry_label)) {
         return std::nullopt;
       }
-      const auto increment_owner_probe =
-          instrumentation::build_v_add_u32_literal(
-              bank_probe_count_vgpr, record_compare_vgpr, 1u,
-              bank_probe_count_vgpr, arch);
-      const auto materialize_identity_capacity =
-          instrumentation::build_v_mov_b32_literal(
-              record_compare_vgpr,
-              std::min(access_record_capacity,
-                       kConSanMoiRecordReplayProbeLimit),
-              arch);
-      const auto owner_probe_in_range =
-          instrumentation::build_v_cmp_gt_u32_vcc(
-              vector_source_vgpr(record_compare_vgpr),
-              bank_probe_count_vgpr, arch);
+      const auto increment_owner_probe = instrumentation::build_v_add_u32_literal(
+          bank_probe_count_vgpr, record_compare_vgpr, 1u, bank_probe_count_vgpr, arch);
+      const auto materialize_identity_capacity = instrumentation::build_v_mov_b32_literal(
+          record_compare_vgpr, std::min(access_record_capacity, kConSanMoiRecordReplayProbeLimit),
+          arch);
+      const auto owner_probe_in_range = instrumentation::build_v_cmp_gt_u32_vcc(
+          vector_source_vgpr(record_compare_vgpr), bank_probe_count_vgpr, arch);
       // Mirror consan_moi_record_replay_advance_probe(): triangular probing is
       // a permutation of every power-of-two table and avoids the primary
       // clustering of a linear walk at higher load.
       const auto increment_owner_bank = instrumentation::build_v_add_u32(
-          owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr),
-          bank_probe_count_vgpr, arch);
+          owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr), bank_probe_count_vgpr, arch);
       const auto wrap_owner_bank = instrumentation::build_v_and_b32_literal(
-          owner_bank_vgpr, access_record_capacity - 1u,
-          owner_bank_vgpr,
-          arch);
-      if (!increment_owner_probe || !materialize_identity_capacity ||
-          !owner_probe_in_range ||
+          owner_bank_vgpr, access_record_capacity - 1u, owner_bank_vgpr, arch);
+      if (!increment_owner_probe || !materialize_identity_capacity || !owner_probe_in_range ||
           !increment_owner_bank || !wrap_owner_bank) {
         errors.emplace_back(
             "ConSan MOI first-light probe could not advance its access-identity probe");
         return std::nullopt;
       }
-      words.insert(words.end(), increment_owner_probe->begin(),
-                   increment_owner_probe->end());
+      words.insert(words.end(), increment_owner_probe->begin(), increment_owner_probe->end());
       words.insert(words.end(), materialize_identity_capacity->begin(),
                    materialize_identity_capacity->end());
       words.push_back(*owner_probe_in_range);
-      if (!sequence.emit_branch(owner_saturation_label,
-                                InstructionSequence::BranchKind::VccZero)) {
+      if (!sequence.emit_branch(owner_saturation_label, InstructionSequence::BranchKind::VccZero)) {
         return std::nullopt;
       }
-      words.insert(words.end(), increment_owner_bank->begin(),
-                   increment_owner_bank->end());
-      words.insert(words.end(), wrap_owner_bank->begin(),
-                   wrap_owner_bank->end());
+      words.insert(words.end(), increment_owner_bank->begin(), increment_owner_bank->end());
+      words.insert(words.end(), wrap_owner_bank->begin(), wrap_owner_bank->end());
       if (!sequence.emit_branch(owner_probe_label,
                                 InstructionSequence::BranchKind::Unconditional) ||
           !sequence.bind(owner_saturation_label) ||
-          !append_atomic_or_u32_literal(
-              words, base + offsetof(ConSanMoiReportHeader, flags),
-              kConSanMoiReportFlagRecordReplayBankSaturated |
-                  kConSanMoiReportFlagRecordReplayOwnerBankSaturated,
-              record_address_vgpr, arch) ||
+          !append_atomic_or_u32_literal(words, base + offsetof(ConSanMoiReportHeader, flags),
+                                        kConSanMoiReportFlagRecordReplayBankSaturated |
+                                            kConSanMoiReportFlagRecordReplayOwnerBankSaturated,
+                                        record_address_vgpr, arch) ||
           !sequence.emit_branch(publication_done_label,
                                 InstructionSequence::BranchKind::Unconditional)) {
         errors.emplace_back("ConSan MOI first-light access-identity path is invalid");
@@ -2219,15 +2101,13 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       }
     } else {
       if (!sequence.bind(publication_incomplete_label) ||
-          !append_atomic_or_u32_literal(
-              words, base + offsetof(ConSanMoiReportHeader, flags),
-              kConSanMoiReportFlagRecordReplayBankSaturated |
-                  kConSanMoiReportFlagRecordReplayPublicationIncomplete,
-              record_address_vgpr, arch) ||
+          !append_atomic_or_u32_literal(words, base + offsetof(ConSanMoiReportHeader, flags),
+                                        kConSanMoiReportFlagRecordReplayBankSaturated |
+                                            kConSanMoiReportFlagRecordReplayPublicationIncomplete,
+                                        record_address_vgpr, arch) ||
           !sequence.emit_branch(publication_done_label,
                                 InstructionSequence::BranchKind::Unconditional)) {
-        errors.emplace_back(
-            "ConSan MOI first-light direct publication path is invalid");
+        errors.emplace_back("ConSan MOI first-light direct publication path is invalid");
         return std::nullopt;
       }
     }

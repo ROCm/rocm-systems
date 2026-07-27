@@ -927,9 +927,24 @@ MOI separates:
 - workgroup identity: `(workgroup_x, workgroup_y, workgroup_z)`;
 - owner identity: the logical peer inside a workgroup used by conflict checks.
 
-Current workgroup identity is stronger than current owner identity. Access and
-barrier probes can read RDNA4 launch TTMP payload fields and record 3D
-workgroup coordinates, so host replay avoids cross-workgroup comparisons.
+Current workgroup identity is stronger than current owner identity. Automatic
+banked Record/Replay captures the exact 32-bit
+`(workgroup_x, workgroup_y, workgroup_z)` tuple at kernel entry and publishes
+those three components directly. It therefore has no Inline Shadow packing
+limit. Inline Shadow separately captures the compact key required by its
+shadow-cell representation. Caller-owned single-bank Record/Replay layouts
+retain their documented coalescing behavior until their caller-owned
+persistent identity is migrated to the exact tuple.
+
+This is an entry-state lifetime invariant, not an engine-specific
+optimization: a probe that can execute after arbitrary guest code may consume
+an ABI entry value only from state ConSan captured persistently at entry.
+Descriptor-selected entry SGPRs, RDNA launch TTMP payload fields, and the
+entry workitem-ID VGPR are ordinary guest-reusable state after the prologue.
+Record/Replay workgroup identity, Inline Shadow workgroup identity, and the
+ordinary MOI owner source all follow this rule. SuperCollider is deliberately
+different: it duplicates one instruction at a site and compares the immediate
+result there; it carries no dispatch-wide identity from one probe to another.
 
 The ordinary owner source for every MOI engine is
 `RJ_CONSAN_MOI_OWNER_SOURCE=workitem_id`. ConSan captures it at kernel entry,

@@ -19,9 +19,11 @@ from unittest import mock
 import consan_validation as validation
 import consan_llama_validation as llama_validation
 from consan_coverage_gate import _COVERAGE_COUNT_FIELDS
-from consan_validation_test_support import temporary_root
-
-TOPK_CODE_OBJECT_FINGERPRINT = "fnv1a64:3833562345afa454"
+from consan_validation_test_support import (
+    RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
+    RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
+    temporary_root,
+)
 
 
 def moi_auto_report(
@@ -30,7 +32,7 @@ def moi_auto_report(
     *,
     diagnostics: int = 0,
     visible_records: int = 1,
-    code_object_fingerprint: str = TOPK_CODE_OBJECT_FINGERPRINT,
+    code_object_fingerprint: str = RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
 ) -> str:
     return (
         f"ConSan MOI auto report reader={reader} generation={generation} "
@@ -80,7 +82,7 @@ def moi_auto_replay(
     diagnostic_capacity: int = 4,
     provenance_repaired: int = 0,
     provenance_unresolved: int = 0,
-    code_object_fingerprint: str = TOPK_CODE_OBJECT_FINGERPRINT,
+    code_object_fingerprint: str = RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
 ) -> str:
     if conflict is None:
         conflict = diagnostics != 0
@@ -103,7 +105,7 @@ def moi_auto_replay_diagnostic(
     generation: int,
     index: int,
     *,
-    code_object_fingerprint: str = TOPK_CODE_OBJECT_FINGERPRINT,
+    code_object_fingerprint: str = RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
 ) -> str:
     return (
         f"ConSan MOI auto replay diagnostic reader={reader} "
@@ -226,10 +228,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_diagnostic_inventory_accepts_declared_conflicts(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
                 (
@@ -260,10 +259,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_diagnostic_inventory_rejects_unbounded_output(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         fixture = (
             Path(__file__).with_name("fixtures")
             / "gfx1201_topk_record_replay_current_diagnostics.log"
@@ -432,7 +428,7 @@ class ConSanValidationTest(unittest.TestCase):
             ),
             "code-object fingerprint drift": (
                 fixture.replace(
-                    TOPK_CODE_OBJECT_FINGERPRINT,
+                    RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
                     "fnv1a64:0000000000000000",
                 ),
                 "diagnostic code-object fingerprint does not match contract",
@@ -442,7 +438,7 @@ class ConSanValidationTest(unittest.TestCase):
                     (
                         pre_report,
                         "ConSan MOI auto replay reader=1679495808 generation=3 "
-                        f"code_object={TOPK_CODE_OBJECT_FINGERPRINT} skipped "
+                        f"code_object={RETIRED_TOPK_CODE_OBJECT_FINGERPRINT} skipped "
                         "required_shadow_entries=1048577 limit=1048576",
                     )
                 ),
@@ -461,10 +457,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_diagnostic_inventory_is_accounted_per_reader(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
                 (
@@ -496,10 +489,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_contract_fingerprint_applies_only_to_diagnostics(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         clean_fingerprint = "fnv1a64:0000000000000001"
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
@@ -521,16 +511,13 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertTrue(summary["accepted"], summary["reasons"])
         self.assertEqual(
             summary["observed_code_object_fingerprints"],
-            [clean_fingerprint, TOPK_CODE_OBJECT_FINGERPRINT],
+            [clean_fingerprint, RETIRED_TOPK_CODE_OBJECT_FINGERPRINT],
         )
 
     def test_coverage_output_requires_contracted_object_even_without_diagnostics(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         other_fingerprint = "fnv1a64:0000000000000001"
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
@@ -549,17 +536,14 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertFalse(summary["accepted"])
         self.assertIn(
             "contract code-object fingerprint missing from replay summaries: "
-            f"expected={TOPK_CODE_OBJECT_FINGERPRINT}",
+            f"expected={RETIRED_TOPK_CODE_OBJECT_FINGERPRINT}",
             summary["reasons"],
         )
 
     def test_coverage_output_requires_replay_for_each_nonempty_report(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
                 (
@@ -582,10 +566,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_allows_zero_event_report_without_replay(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
                 (
@@ -599,10 +580,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertTrue(summary["accepted"], summary["reasons"])
 
     def test_coverage_output_identity_includes_report_generation(self) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
                 (
@@ -621,10 +599,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
 
     def test_coverage_output_detail_uses_report_not_record_generation(self) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
                 (
@@ -642,10 +617,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_rejects_replay_without_matching_report(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
                 (
@@ -666,10 +638,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
 
     def test_coverage_output_diagnostic_inventory_enforces_maximum(self) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         reader_counts = ((7, 1, 3), (8, 2, 2))
         lines = []
         for reader, generation, count in reader_counts:
@@ -703,10 +672,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_rejects_hostile_report_count_without_expanding_it(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
                 (
@@ -725,16 +691,13 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_current_summary_requires_diagnostic_capacity(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         summary = validation._coverage_output_diagnostic_summary(
             "\n".join(
                 (
                     moi_auto_report(7, 1),
                     "ConSan MOI auto replay reader=7 generation=1 "
-                    f"code_object={TOPK_CODE_OBJECT_FINGERPRINT} "
+                    f"code_object={RETIRED_TOPK_CODE_OBJECT_FINGERPRINT} "
                     "diagnostics=0 conflict=false metadata_full=false "
                     "diagnostic_capacity_exhausted=false provenance_repaired=0 "
                     "provenance_unresolved=0",
@@ -754,10 +717,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_summary_integrates_only_declared_diagnostic_contract(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         log = complete_coverage_log(
             moi_auto_replay(7, 1, 1),
             moi_auto_replay_diagnostic(7, 1, 1, 0).replace("kind=1", "kind=3", 1),
@@ -815,21 +775,8 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             workloads["pytorch-rdna4-llm-topk"]["run_timeout_seconds"], 120
         )
-        self.assertEqual(
-            workloads["pytorch-rdna4-llm-topk"]["coverage_output_contract"],
-            {
-                "profile": "record-replay",
-                "diagnostics": ("exact-lds-write-write",),
-                "max_diagnostics": 4,
-                "instruction_groups": validation.TOPK_RECORD_REPLAY_INSTRUCTION_GROUPS,
-                "code_object_fingerprint": TOPK_CODE_OBJECT_FINGERPRINT,
-                "tracking_issue": "bd-1w9.6.5",
-                "withhold_fault_qualification": True,
-                "fault_qualification_withheld_reason": (
-                    "baseline diagnostics remain unclassified and cannot be "
-                    "distinguished from a fault-induced report"
-                ),
-            },
+        self.assertIsNone(
+            workloads["pytorch-rdna4-llm-topk"]["coverage_output_contract"]
         )
         self.assertEqual(workloads["pytorch-rdna4-sdpa"]["run_timeout_seconds"], 30)
         self.assertEqual(workloads["pytorch-rdna4-sdpa"]["targets"], ("gfx1201",))
@@ -850,7 +797,7 @@ class ConSanValidationTest(unittest.TestCase):
                 diagnostics=("exact-lds-write-write",),
                 max_diagnostics=1,
                 instruction_groups=((1, 2),),
-                code_object_fingerprint=TOPK_CODE_OBJECT_FINGERPRINT,
+                code_object_fingerprint=RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
                 tracking_issue="bd-test",
                 withhold_fault_qualification=True,
                 fault_qualification_withheld_reason="test-only exception",
@@ -864,10 +811,7 @@ class ConSanValidationTest(unittest.TestCase):
             validation._validate_coverage_output_contract(workload)
 
     def test_coverage_output_contract_validates_every_bound(self) -> None:
-        base = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(base)
+        base = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         cases = {
             "diagnostics": (
                 replace(base, diagnostics=("test-only-conflict",)),
@@ -919,12 +863,12 @@ class ConSanValidationTest(unittest.TestCase):
                     validation._validate_coverage_output_contract(workload)
 
     def test_coverage_output_contract_keeps_unrelated_profile_faults(self) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         validation._validate_coverage_output_contract(
-            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"]
+            replace(
+                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+                coverage_output_contract=contract,
+            )
         )
         workload = replace(
             validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
@@ -939,10 +883,7 @@ class ConSanValidationTest(unittest.TestCase):
             validation._validate_coverage_output_contract(workload)
 
     def test_coverage_output_contract_can_retain_fault_qualification(self) -> None:
-        base = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(base)
+        base = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         contract = replace(
             base,
             withhold_fault_qualification=False,
@@ -985,13 +926,13 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(record_replay["disposition"], "applicable")
         self.assertEqual(record_replay["detector"], "REVIEW_REQUIRED")
 
-    def test_only_topk_record_replay_has_a_coverage_output_contract(self) -> None:
+    def test_no_workload_declares_a_coverage_output_contract(self) -> None:
         contracts = [
             (workload.id, workload.coverage_output_contract.profile)
             for workload in validation.WORKLOADS
             if workload.coverage_output_contract is not None
         ]
-        self.assertEqual(contracts, [("pytorch-rdna4-llm-topk", "record-replay")])
+        self.assertEqual(contracts, [])
 
     def test_workload_manifest_validates_every_declared_workload(self) -> None:
         invalid = replace(
@@ -1001,7 +942,7 @@ class ConSanValidationTest(unittest.TestCase):
                 diagnostics=("exact-lds-write-write",),
                 max_diagnostics=1,
                 instruction_groups=((1, 2),),
-                code_object_fingerprint=TOPK_CODE_OBJECT_FINGERPRINT,
+                code_object_fingerprint=RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
                 tracking_issue="bd-test",
                 withhold_fault_qualification=True,
                 fault_qualification_withheld_reason="test-only exception",
@@ -1816,7 +1757,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--repetitions") + 1], "1")
 
-    def test_coverage_output_environment_relaxes_clean_and_overhead(
+    def test_topk_record_replay_is_a_strict_clean_and_overhead_gate(
         self,
     ) -> None:
         hook = Path("/workspace/hook.so")
@@ -1826,7 +1767,7 @@ class ConSanValidationTest(unittest.TestCase):
             hook,
             "gfx1201",
         )
-        coverage_output = validation._run_environment(
+        topk_clean = validation._run_environment(
             "record-replay",
             validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
             hook,
@@ -1835,8 +1776,8 @@ class ConSanValidationTest(unittest.TestCase):
         )
 
         self.assertEqual(clean_gate["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
-        self.assertNotIn("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", coverage_output)
-        self.assertEqual(coverage_output["RJ_CONSAN_POLICY"], "strict")
+        self.assertEqual(topk_clean["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
+        self.assertEqual(topk_clean["RJ_CONSAN_POLICY"], "strict")
         overhead = validation._run_environment(
             "record-replay",
             validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
@@ -1844,7 +1785,7 @@ class ConSanValidationTest(unittest.TestCase):
             "gfx1201",
             "overhead",
         )
-        self.assertNotIn("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", overhead)
+        self.assertEqual(overhead["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
         for profile in ("sampled", "inline-shadow"):
             with self.subTest(profile=profile):
                 other_engine = validation._run_environment(
@@ -1871,9 +1812,11 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_overhead_uses_the_same_diagnostic_contract(
         self,
     ) -> None:
-        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"]
-        contract = workload.coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
+        workload = replace(
+            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            coverage_output_contract=contract,
+        )
         with temporary_root() as root:
             artifact_root = root / "artifacts"
             hook = root / "hook.so"
@@ -1924,11 +1867,15 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(environment["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
 
     def test_coverage_output_contract_separates_result_phase(self) -> None:
+        coverage_output_workload = replace(
+            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            coverage_output_contract=RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
+        )
         self.assertEqual(
             validation._result_phase(
                 "clean",
                 "record-replay",
-                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+                coverage_output_workload,
             ),
             "coverage-output",
         )
@@ -1936,7 +1883,7 @@ class ConSanValidationTest(unittest.TestCase):
             validation._result_phase(
                 "clean",
                 "sampled",
-                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+                coverage_output_workload,
             ),
             "clean",
         )
@@ -1952,13 +1899,24 @@ class ConSanValidationTest(unittest.TestCase):
             validation._result_phase(
                 "overhead",
                 "record-replay",
-                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+                coverage_output_workload,
             ),
             "overhead",
         )
+        self.assertEqual(
+            validation._result_phase(
+                "clean",
+                "record-replay",
+                validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            ),
+            "clean",
+        )
 
     def test_coverage_output_result_references_workload_provenance(self) -> None:
-        workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"]
+        workload = replace(
+            validation.WORKLOAD_BY_ID["pytorch-rdna4-llm-topk"],
+            coverage_output_contract=RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
+        )
         log = complete_coverage_log(moi_auto_replay(7, 1, 0))
         with temporary_root() as root:
             artifact_root = root / "artifacts"
@@ -2049,7 +2007,7 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first, workload_root / "provenance.json")
 
-    def test_coverage_output_explain_reports_actual_clean_contract(self) -> None:
+    def test_topk_explain_reports_strict_clean_contract(self) -> None:
         audit = validation._explain_contract(
             Path("/workspace"),
             "gfx1201",
@@ -2068,19 +2026,18 @@ class ConSanValidationTest(unittest.TestCase):
             setting["name"]: setting["value"] for setting in record_replay["settings"]
         }
 
-        self.assertNotIn("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS", settings)
-        self.assertEqual(record_replay["clean_result_phase"], "coverage-output")
+        self.assertEqual(settings["RJ_CONSAN_MOI_FORBID_DIAGNOSTICS"], "1")
+        self.assertEqual(record_replay["clean_result_phase"], "clean")
         self.assertEqual(
             record_replay["clean_artifact_root"],
-            "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/coverage-output/record-replay",
+            "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/clean/record-replay",
         )
         self.assertEqual(
             workload["commands"]["clean"]["profile_artifact_roots"]["record-replay"],
-            "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/coverage-output/record-replay",
+            "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/clean/record-replay",
         )
-        self.assertIsNone(workload["commands"]["clean"]["payload_argv"])
         self.assertEqual(
-            workload["commands"]["clean"]["payload_argv_by_profile"]["record-replay"],
+            workload["commands"]["clean"]["payload_argv"],
             validation._workload_command(
                 Path("/workspace"),
                 "gfx1201",
@@ -2088,61 +2045,24 @@ class ConSanValidationTest(unittest.TestCase):
                 "clean",
                 Path(
                     "$ARTIFACT_ROOT/pytorch-rdna4-llm-topk/"
-                    "coverage-output/record-replay/benchmark-0.json"
+                    "clean/record-replay/benchmark-0.json"
                 ),
             ),
         )
         self.assertEqual(
             audit["usability_audit"]["coverage_output_contracts"],
-            [
-                {
-                    "workload": "pytorch-rdna4-llm-topk",
-                    "contract": {
-                        "profile": "record-replay",
-                        "diagnostics": ("exact-lds-write-write",),
-                        "max_diagnostics": 4,
-                        "instruction_groups": (
-                            validation.TOPK_RECORD_REPLAY_INSTRUCTION_GROUPS
-                        ),
-                        "code_object_fingerprint": TOPK_CODE_OBJECT_FINGERPRINT,
-                        "tracking_issue": "bd-1w9.6.5",
-                        "withhold_fault_qualification": True,
-                        "fault_qualification_withheld_reason": (
-                            "baseline diagnostics remain unclassified and cannot "
-                            "be distinguished from a fault-induced report"
-                        ),
-                    },
-                }
-            ],
+            [],
         )
         self.assertEqual(
             audit["usability_audit"]["fault_qualification_exceptions"],
-            [
-                {
-                    "workload": "pytorch-rdna4-llm-topk",
-                    "profile": "record-replay",
-                    "reason": (
-                        "baseline diagnostics remain unclassified and cannot be "
-                        "distinguished from a fault-induced report"
-                    ),
-                    "tracking_issue": "bd-1w9.6.5",
-                }
-            ],
+            [],
         )
         self.assertEqual(len(workload["faults"]), 1)
         expectations = {
             item["profile"]: item
             for item in workload["faults"][0]["profile_expectations"]
         }
-        self.assertEqual(
-            expectations["record-replay"]["disposition"],
-            "not-applicable",
-        )
-        self.assertEqual(
-            expectations["record-replay"]["tracking_issue"],
-            "bd-1w9.6.5",
-        )
-        for profile in ("supercollider", "sampled", "inline-shadow"):
+        for profile in validation.PROFILE_IDS:
             with self.subTest(profile=profile):
                 self.assertEqual(
                     expectations[profile]["disposition"],
@@ -2153,7 +2073,7 @@ class ConSanValidationTest(unittest.TestCase):
                     "REVIEW_REQUIRED",
                 )
 
-    def test_coverage_output_explain_text_renders_profile_specific_commands(
+    def test_topk_explain_text_renders_profile_specific_commands(
         self,
     ) -> None:
         audit = validation._explain_contract(
@@ -2168,23 +2088,16 @@ class ConSanValidationTest(unittest.TestCase):
         with redirect_stdout(output):
             validation._print_explain(audit)
         rendered = output.getvalue()
-        self.assertIn("clean/record-replay (1 process(es)):", rendered)
+        self.assertIn("clean (1 process(es)):", rendered)
         self.assertIn(
-            shlex.join(
-                audit["workloads"][0]["commands"]["clean"]["payload_argv_by_profile"][
-                    "record-replay"
-                ]
-            ),
+            shlex.join(audit["workloads"][0]["commands"]["clean"]["payload_argv"]),
             rendered,
         )
 
     def test_coverage_output_contract_accepts_current_physical_runtime_fixture(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         fixture = (
             Path(__file__).with_name("fixtures")
             / "gfx1201_topk_record_replay_current_runtime.log"
@@ -2217,10 +2130,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_contract_accepts_current_physical_diagnostic_fixture(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         fixture = (
             Path(__file__).with_name("fixtures")
             / "gfx1201_topk_record_replay_current_diagnostics.log"
@@ -2245,7 +2155,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertEqual(
             summary["observed_code_object_fingerprints"],
-            [TOPK_CODE_OBJECT_FINGERPRINT],
+            [RETIRED_TOPK_CODE_OBJECT_FINGERPRINT],
         )
         self.assertEqual(
             summary["readers"]["reader=1679495808,generation=3"]["provenance_repaired"],
@@ -2255,10 +2165,7 @@ class ConSanValidationTest(unittest.TestCase):
     def test_coverage_output_contract_accepts_alternate_store_group_fixture(
         self,
     ) -> None:
-        contract = validation.WORKLOAD_BY_ID[
-            "pytorch-rdna4-llm-topk"
-        ].coverage_output_contract
-        self.assertIsNotNone(contract)
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
         fixture = (
             Path(__file__).with_name("fixtures")
             / "gfx1201_topk_record_replay_alternate_group_diagnostics.log"

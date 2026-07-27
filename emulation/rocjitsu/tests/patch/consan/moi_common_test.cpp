@@ -8,6 +8,29 @@
 namespace rocjitsu {
 namespace {
 
+TEST(ConSanMoi, WorkgroupSourceRequiresExactlyOneOperandKind) {
+  const ConSanMoiWorkgroupSource absent;
+  EXPECT_FALSE(absent.has_value());
+  EXPECT_TRUE(absent.is_well_formed());
+  EXPECT_FALSE(absent.operand());
+
+  const ConSanMoiWorkgroupSource scalar = ConSanMoiWorkgroupSource::scalar(17u);
+  EXPECT_TRUE(scalar.has_value());
+  EXPECT_TRUE(scalar.is_well_formed());
+  EXPECT_EQ(scalar.operand(), 17u);
+
+  const ConSanMoiWorkgroupSource vector = ConSanMoiWorkgroupSource::vector(23u);
+  EXPECT_TRUE(vector.has_value());
+  EXPECT_TRUE(vector.is_well_formed());
+  EXPECT_EQ(vector.operand(), vector_source_vgpr(23u));
+
+  ConSanMoiWorkgroupSource ambiguous = scalar;
+  ambiguous.vector_src = 23u;
+  EXPECT_FALSE(ambiguous.has_value());
+  EXPECT_FALSE(ambiguous.is_well_formed());
+  EXPECT_FALSE(ambiguous.operand());
+}
+
 TEST(ConSanMoi, ScalarPersistentTemporaryValidationIsNoopWhenDisabled) {
   ConSanOptions disabled;
   std::vector<std::string> errors;
@@ -1262,8 +1285,11 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
                                    ROCJITSU_CODE_ARCH_RDNA4));
     }
   };
-  verify_entry(prologue->trampoline_offset);
-  verify_entry(prologue->trampoline_offset + 256u);
+  EXPECT_EQ(prologue->dispatch_id_primary_prologue_offset.has_value(),
+            prologue->dispatch_id_secondary_prologue_offset.has_value());
+  verify_entry(prologue->dispatch_id_primary_prologue_offset.value_or(prologue->trampoline_offset));
+  verify_entry(
+      prologue->dispatch_id_secondary_prologue_offset.value_or(prologue->trampoline_offset + 256u));
 }
 
 TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {

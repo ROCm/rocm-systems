@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -21,6 +22,42 @@
 namespace rocjitsu {
 
 struct ConSanOptions;
+
+/// One scalar or vector source for a workgroup-coordinate component.
+///
+/// The neither-set state represents an absent dimension. The both-set state is
+/// malformed and never has an operand. Keeping this release-active invariant
+/// beside the representation prevents individual emitters from interpreting
+/// ambiguous sources differently.
+struct ConSanMoiWorkgroupSource {
+  std::optional<uint16_t> scalar_src;
+  std::optional<uint16_t> vector_src;
+  bool shift_right_16 = false;
+  bool mask_low_16 = false;
+
+  [[nodiscard]] bool has_value() const { return scalar_src.has_value() != vector_src.has_value(); }
+  [[nodiscard]] bool is_well_formed() const { return !(scalar_src && vector_src); }
+  [[nodiscard]] std::optional<uint16_t> operand() const;
+
+  [[nodiscard]] static ConSanMoiWorkgroupSource scalar(uint16_t source, bool shift_right_16 = false,
+                                                       bool mask_low_16 = false) {
+    ConSanMoiWorkgroupSource result;
+    result.scalar_src = source;
+    result.shift_right_16 = shift_right_16;
+    result.mask_low_16 = mask_low_16;
+    return result;
+  }
+  [[nodiscard]] static ConSanMoiWorkgroupSource vector(uint16_t source, bool shift_right_16 = false,
+                                                       bool mask_low_16 = false) {
+    ConSanMoiWorkgroupSource result;
+    result.vector_src = source;
+    result.shift_right_16 = shift_right_16;
+    result.mask_low_16 = mask_low_16;
+    return result;
+  }
+
+  auto operator<=>(const ConSanMoiWorkgroupSource &) const = default;
+};
 
 namespace consan_detail {
 

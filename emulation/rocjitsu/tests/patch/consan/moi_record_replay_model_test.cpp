@@ -1324,6 +1324,62 @@ TEST(ConSanMoi, RecordReplayAccessRecordsEmitsConflictDiagnostic) {
   EXPECT_EQ(diagnostic.second_access_kind, static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read));
 }
 
+TEST(ConSanMoi, RecordReplayCollapsedWorkgroupIdentityCreatesCrossLdsConflict) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/3,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 2;
+  std::array<ConSanMoiAccessRecord, 2> records{};
+  for (uint32_t index = 0; index < records.size(); ++index) {
+    records[index].wave_id = index + 1u;
+    records[index].lane_mask = uint64_t{1} << index;
+    records[index].instruction_offset = 0x10u + index * 8u;
+    records[index].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    records[index].lds_byte_offset = 8u;
+    records[index].lds_byte_count = 4u;
+    records[index].epoch = 3u;
+  }
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 3> shadow{};
+
+  const ConSanMoiRecordReplayResult replay =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+
+  EXPECT_TRUE(replay.conflict);
+  EXPECT_EQ(replay.emitted_diagnostic_count, 1u);
+  EXPECT_EQ(header.diagnostic_count, 1u);
+  EXPECT_EQ(diagnostics[0].kind, static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict));
+}
+
+TEST(ConSanMoi, RecordReplayExactWorkgroupTupleSeparatesLdsInstances) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/3,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 2;
+  std::array<ConSanMoiAccessRecord, 2> records{};
+  for (uint32_t index = 0; index < records.size(); ++index) {
+    records[index].workgroup_x = index;
+    records[index].wave_id = index + 1u;
+    records[index].lane_mask = uint64_t{1} << index;
+    records[index].instruction_offset = 0x10u + index * 8u;
+    records[index].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    records[index].lds_byte_offset = 8u;
+    records[index].lds_byte_count = 4u;
+    records[index].epoch = 3u;
+  }
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 3> shadow{};
+
+  const ConSanMoiRecordReplayResult replay =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+
+  EXPECT_FALSE(replay.conflict);
+  EXPECT_EQ(replay.emitted_diagnostic_count, 0u);
+  EXPECT_EQ(header.diagnostic_count, 0u);
+}
+
 TEST(ConSanMoi, RecordReplayAccessRecordsRetainsEveryBoundedDiagnostic) {
   ConSanMoiReportHeader header = make_consan_moi_report_header(
       /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/4,

@@ -54,6 +54,12 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
+std::optional<uint16_t> ConSanMoiWorkgroupSource::operand() const {
+  if (!has_value())
+    return std::nullopt;
+  return scalar_src ? *scalar_src : vector_source_vgpr(*vector_src);
+}
+
 std::optional<consan_detail::ScalarOwnerContextResolution>
 consan_detail::resolve_scalar_owner_contexts(bool planning_state_valid,
                                              std::span<const ScalarOwnerContextSummary> contexts,
@@ -248,10 +254,12 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.resolved_moi_owner_vgpr.reset();
   result.resolved_moi_epoch_vgpr.reset();
   result.resolved_moi_workgroup_key_vgpr.reset();
+  result.resolved_moi_record_replay_workgroup_vgprs = {};
   result.resolved_moi_persistent_vgpr_assignments.clear();
   result.resolved_moi_persistent_owner_sgpr.reset();
   result.resolved_moi_persistent_epoch_sgpr.reset();
   result.resolved_moi_persistent_workgroup_key_sgpr.reset();
+  result.resolved_moi_record_replay_workgroup_sgprs = {};
   result.resolved_moi_prologue_scratch_vgpr_assignments.clear();
   result.resolved_moi_exec_save_sgpr.reset();
   result.resolved_moi_transient_sgpr_assignments.clear();
@@ -528,6 +536,10 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     result.resolved_moi_epoch_vgpr = effective_options.moi_epoch_vgpr;
   if (!result.resolved_moi_workgroup_key_vgpr)
     result.resolved_moi_workgroup_key_vgpr = effective_options.moi_workgroup_key_vgpr;
+  if (result.resolved_moi_record_replay_workgroup_vgprs.empty()) {
+    result.resolved_moi_record_replay_workgroup_vgprs =
+        effective_options.moi_record_replay_workgroup_vgprs;
+  }
   if (!result.resolved_moi_persistent_owner_sgpr)
     result.resolved_moi_persistent_owner_sgpr = effective_options.moi_persistent_owner_sgpr;
   if (!result.resolved_moi_persistent_epoch_sgpr)
@@ -535,6 +547,10 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (!result.resolved_moi_persistent_workgroup_key_sgpr) {
     result.resolved_moi_persistent_workgroup_key_sgpr =
         effective_options.moi_persistent_workgroup_key_sgpr;
+  }
+  if (result.resolved_moi_record_replay_workgroup_sgprs.empty()) {
+    result.resolved_moi_record_replay_workgroup_sgprs =
+        effective_options.moi_record_replay_workgroup_sgprs;
   }
   if (!result.resolved_moi_exec_save_sgpr)
     result.resolved_moi_exec_save_sgpr = effective_options.moi_exec_save_sgpr;

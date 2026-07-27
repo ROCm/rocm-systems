@@ -469,6 +469,7 @@ struct ConSanPatchInfo {
   std::optional<uint16_t> persistent_owner_vgpr;
   std::optional<uint16_t> persistent_epoch_vgpr;
   std::optional<uint16_t> persistent_workgroup_key_vgpr;
+  ConSanMoiPersistentWorkgroupRegisters persistent_record_replay_workgroup_vgprs;
   /// Minimum ordinary SGPR allocation required by this patch, independent of
   /// whether its placement uses an indirect control-flow relay.
   uint16_t required_sgpr_count = 0;

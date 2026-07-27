@@ -353,54 +353,35 @@ settings supplied by the validation harness. `explain --json` records those
 values under `implicit_runtime_defaults`, while `workload_specific_tuning`
 remains empty.
 
-The Qwen-vocabulary top-k row has one Record/Replay
-`coverage_output_contract`. It remains a strict large-object loading, planning,
-dynamic-coverage, and exact-output oracle, while retaining a narrowly bounded
-diagnostic exception for the current rocPRIM object: at most four exact
-same-range LDS write/write reports between distinct owners. Both instructions
-must belong to the same one of four disassembly-qualified, barrier-separated
-store groups:
-`{0xfe964,0xfe96c,0xfe974,0xfe97c}`,
-`{0xfe9c4,0xfe9cc,0xfe9d4,0xfe9dc}`,
-`{0xfea68,0xfea70,0xfea78,0xfea80}`, or
-`{0xfeb40,0xfeb48,0xfeb50,0xfeb58}`. This exact grouping rejects nearby
-instructions and pairs that span groups. The contract is also pinned to
-code-object fingerprint `fnv1a64:3833562345afa454`; any regenerated object,
-even one retaining the same raw instruction offsets, requires a new retained
-disassembly and explicit contract requalification. The producer emits that
-fingerprint on the pre-replay report, replay summary, and every replay detail,
-and the runner requires all three views to agree.
+The Qwen-vocabulary top-k Record/Replay row is a strict clean gate. Its former
+diagnostic exception was retired after `bd-1w9.6.5` classified the rocPRIM
+same-range write/write reports as a ConSan identity-model false positive.
+Automatic banked replay had read RDNA launch TTMPs at arbitrary access probes;
+separate physical workgroups could therefore be recorded under the same
+workgroup tuple and their distinct LDS instances compared. Automatic banked
+Record/Replay now captures the exact 32-bit
+`(workgroup_x, workgroup_y, workgroup_z)` tuple at kernel entry and publishes
+those stable components from persistent state. This path no longer inherits
+Inline Shadow's compact-key dimensional bounds.
 
-The runtime declares its four-entry replay-diagnostic capacity in the summary,
-and the runner rejects any other producer capacity. The workload policy
-independently caps accepted diagnostics at four and may never exceed that
-producer capacity. The runner also rejects missing replay summaries,
-per-reader summary/detail mismatches, pre-replay diagnostics or sampled
-conflicts, undeclared or malformed signatures, sites outside those groups,
-diagnostic-capacity exhaustion, metadata overflow, and unresolved provenance.
-The replay summary's `provenance_repaired` count is retained and may not exceed
-its diagnostic count. Zero reports are accepted only when an explicit replay
-summary states that the inventory is complete. Report and replay rows are
-joined by the report buffer's `(reader, report_generation)` identity; the
-diagnostic record's own generation is retained separately as provenance. Every
-report buffer with visible access, barrier, atomic, or fence events must have a
-replay summary; an allocated zero-event buffer intentionally has nothing to
-replay.
-
-These reports are not classified as benign. `bd-1w9.6.5` tracks whether they
-are a rocPRIM race or a ConSan false positive and owns removal of the exception.
-Retirement requires the corresponding implementation or model fix followed by
-repeated zero-diagnostic runs; expanding the count or qualified instruction
-groups is not a substitute. Sampled and Inline Shadow remain fail-closed clean
-gates.
-The ordinary `torch.mode` row has no coverage-output contract and supplies the
-large-object Record/Replay clean gate. The same bounded contract applies to
-the top-k Record/Replay paired-overhead execution. Fault qualification for
-top-k Record/Replay is deliberately absent: while the reports remain
-unclassified, the runner cannot distinguish one of them from a fault-induced
-diagnostic. That withholding is profile-specific; SuperCollider, Sampled, and
-Inline Shadow retain the workload's `barrier-drop` fault family and remain
-`REVIEW_REQUIRED` until separately qualified.
+Three retirement runs on physical gfx1201 of the same
+`fnv1a64:3833562345afa454` object passed the exact sorted value/index oracle,
+patched 418,292/418,292 accesses and 50,458/50,458 barriers, and completed
+replay with zero diagnostics or incomplete state. Artifacts:
+`consan-validation-gfx1201-topk-workgroup-key-final-run1-20260727` and
+`consan-validation-gfx1201-topk-workgroup-key-final-run2-20260727`, followed
+by the strict-clean
+`consan-validation-gfx1201-topk-workgroup-key-final-strict-20260727`.
+After review strengthened the representation from a packed key to the exact
+x/y/z tuple, the current-source hook repeated the strict result in 76.36
+seconds. Its log exposes the selected persistent tuple as
+`rr_workgroup_vgprs=x/y/z`; artifact
+`consan-validation-gfx1201-topk-exact-tuple-strict-20260727`, hook SHA-256
+`43a13035f925ddb4486bfdeb55e2ce2b39d2bac08f38a5d188aeb7d1019d1446`.
+The row no longer has a `coverage_output_contract`, and Record/Replay fault
+qualification is no longer withheld. The generic coverage-output parser and
+its producer-shaped regression fixtures remain available for future explicitly
+declared contracts.
 
 The ordinary process deadline is 30 seconds. The Qwen-vocabulary top-k row
 declares 120 seconds because its complete Record/Replay transform patches

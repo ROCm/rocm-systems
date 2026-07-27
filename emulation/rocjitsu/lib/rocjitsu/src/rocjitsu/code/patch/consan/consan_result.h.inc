@@ -82,10 +82,12 @@ struct ConSanResult {
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
   std::optional<uint16_t> resolved_moi_workgroup_key_vgpr;
+  ConSanMoiPersistentWorkgroupRegisters resolved_moi_record_replay_workgroup_vgprs;
   std::vector<ConSanMoiPersistentVgprAssignment> resolved_moi_persistent_vgpr_assignments;
   std::optional<uint16_t> resolved_moi_persistent_owner_sgpr;
   std::optional<uint16_t> resolved_moi_persistent_epoch_sgpr;
   std::optional<uint16_t> resolved_moi_persistent_workgroup_key_sgpr;
+  ConSanMoiPersistentWorkgroupRegisters resolved_moi_record_replay_workgroup_sgprs;
   std::vector<ConSanMoiPrologueScratchVgprAssignment>
       resolved_moi_prologue_scratch_vgpr_assignments;
   std::optional<uint16_t> resolved_moi_exec_save_sgpr;

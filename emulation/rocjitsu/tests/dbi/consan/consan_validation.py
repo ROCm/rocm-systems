@@ -136,6 +136,10 @@ class Profile:
 
 @dataclass(frozen=True)
 class CoverageOutputContract:
+    # No current workload declares this exception. Keep the typed contract and
+    # validation/reporting path available for a future workload only when it
+    # explicitly names a bounded, tracked diagnostic contract. Retired
+    # producer-shaped examples live in consan_validation_test_support.py.
     profile: str
     diagnostics: tuple[str, ...]
     max_diagnostics: int
@@ -230,20 +234,6 @@ COVERAGE_OUTPUT_DIAGNOSTICS = ("exact-lds-write-write",)
 # The hook currently retains at most four replay diagnostics per report buffer.
 # This is a producer-format invariant, separate from any workload policy bound.
 MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY = 4
-# Keep the unclassified top-k exception independently bounded. A runtime
-# capacity change must not silently widen the policy owned by bd-1w9.6.5.
-TOPK_RECORD_REPLAY_MAX_DIAGNOSTICS = 4
-# These are the four barrier-separated LDS store groups in the qualified
-# rocPRIM radix-sort kernel. A diagnostic must remain within one group; nearby
-# instructions and pairs spanning groups are not admitted.
-TOPK_RECORD_REPLAY_INSTRUCTION_GROUPS = (
-    (0xFE964, 0xFE96C, 0xFE974, 0xFE97C),
-    (0xFE9C4, 0xFE9CC, 0xFE9D4, 0xFE9DC),
-    (0xFEA68, 0xFEA70, 0xFEA78, 0xFEA80),
-    (0xFEB40, 0xFEB48, 0xFEB50, 0xFEB58),
-)
-
-
 WORKLOADS = (
     Workload(
         id="tensile-sk-mxf8gemm-explicit",
@@ -673,24 +663,9 @@ WORKLOADS = (
         tracks_barriers=True,
         tracks_atomics=False,
         overhead_processes=1,
-        # Only Record/Replay fault qualification is withheld by the bounded
-        # output contract. The other profiles retain barrier-drop coverage.
         fault_families=("barrier-drop",),
         targets=("gfx1201",),
         run_timeout_seconds=120,
-        coverage_output_contract=CoverageOutputContract(
-            profile="record-replay",
-            diagnostics=("exact-lds-write-write",),
-            max_diagnostics=TOPK_RECORD_REPLAY_MAX_DIAGNOSTICS,
-            instruction_groups=TOPK_RECORD_REPLAY_INSTRUCTION_GROUPS,
-            code_object_fingerprint="fnv1a64:3833562345afa454",
-            tracking_issue="bd-1w9.6.5",
-            withhold_fault_qualification=True,
-            fault_qualification_withheld_reason=(
-                "baseline diagnostics remain unclassified and cannot be "
-                "distinguished from a fault-induced report"
-            ),
-        ),
     ),
     Workload(
         id="pytorch-rdna4-sdpa",

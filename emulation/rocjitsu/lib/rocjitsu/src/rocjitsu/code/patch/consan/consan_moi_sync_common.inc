@@ -45,8 +45,7 @@ struct AtomicRecordCandidate {
     AtomicRecordCandidate &retained = canonical[entry->second];
     if (!atomic_record_candidate_semantics_equal(retained, candidate)) {
       result.errors.emplace_back(
-          "ConSan MOI atomic site at file offset " +
-          std::to_string(candidate.site.file_offset) +
+          "ConSan MOI atomic site at file offset " + std::to_string(candidate.site.file_offset) +
           " was decoded inconsistently through aliases '" + retained.container_name + "' and '" +
           candidate.container_name + "'");
       return false;
@@ -240,8 +239,9 @@ void append_fence_record_candidates(const ConSanResult &result,
     if (!fence.eligible)
       continue;
     const ConSanSyncEvent *event = sync_index.event(fence.communication_event_identity);
-    if (event == nullptr || (event->kind != ConSanSyncEventKind::Atomic &&
-                             event->kind != ConSanSyncEventKind::OrdinaryMemory) ||
+    if (event == nullptr ||
+        (event->kind != ConSanSyncEventKind::Atomic &&
+         event->kind != ConSanSyncEventKind::OrdinaryMemory) ||
         event->container_name != fence.container_name || event->in_kernel != fence.in_kernel ||
         event->execution_owners.empty())
       continue;
@@ -249,8 +249,7 @@ void append_fence_record_candidates(const ConSanResult &result,
                                  std::optional<uint64_t> descriptor_file_offset) {
       if (descriptor_file_offset &&
           (event->execution_owners.size() != 1u ||
-           event->execution_owners.front().descriptor_file_offset !=
-               *descriptor_file_offset)) {
+           event->execution_owners.front().descriptor_file_offset != *descriptor_file_offset)) {
         descriptor_file_offset.reset();
       }
       if (event->kind == ConSanSyncEventKind::Atomic) {
@@ -356,9 +355,8 @@ void append_fence_record_candidates(const ConSanResult &result,
 }
 
 [[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
-atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index,
-                           std::string_view container_name, bool in_kernel,
-                           const ConSanAtomicSite &site) {
+atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_view container_name,
+                           bool in_kernel, const ConSanAtomicSite &site) {
   const ConSanSyncEvent *event =
       sync_index.event(ConSanSyncEventKind::Atomic, container_name, in_kernel, site.text_offset);
   if (event == nullptr)
@@ -395,8 +393,8 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSa
     const ConSanAtomicSite normalized = normalize_atomic_record_site(site, allow_gfx1250_lds);
     if (is_first_light_atomic_record_candidate(normalized, allow_gfx1250_lds) && event_kind) {
       std::optional<uint64_t> descriptor_file_offset = kernel.descriptor_file_offset;
-      const ConSanSyncEvent *event = sync_index.event(
-          ConSanSyncEventKind::Atomic, kernel.name, true, site.text_offset);
+      const ConSanSyncEvent *event =
+          sync_index.event(ConSanSyncEventKind::Atomic, kernel.name, true, site.text_offset);
       if (event == nullptr || event->execution_owners.size() != 1u ||
           event->execution_owners.front().descriptor_file_offset != kernel.descriptor_file_offset)
         descriptor_file_offset.reset();
@@ -427,13 +425,13 @@ void append_inline_atomic_candidates(const ConSanKernelInfo &kernel,
     const auto event_kind = atomic_event_kind_for_site(sync_index, kernel.name, true, site);
     if (event_kind) {
       std::optional<uint64_t> descriptor_file_offset = kernel.descriptor_file_offset;
-      const ConSanSyncEvent *event = sync_index.event(
-          ConSanSyncEventKind::Atomic, kernel.name, true, site.text_offset);
+      const ConSanSyncEvent *event =
+          sync_index.event(ConSanSyncEventKind::Atomic, kernel.name, true, site.text_offset);
       if (event == nullptr || event->execution_owners.size() != 1u ||
           event->execution_owners.front().descriptor_file_offset != kernel.descriptor_file_offset)
         descriptor_file_offset.reset();
-      candidates.push_back({"kernel:" + kernel.name, site, descriptor_file_offset,
-                            *event_kind, kernel.uses_gfx1250_cluster_workgroup_id});
+      candidates.push_back({"kernel:" + kernel.name, site, descriptor_file_offset, *event_kind,
+                            kernel.uses_gfx1250_cluster_workgroup_id});
     }
   }
 }
@@ -586,12 +584,15 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                                        uint16_t destination_vgpr,
                                                        const ConSanMoiWorkgroupSource &source,
                                                        rj_code_arch_t arch) {
-  if (!source.scalar_src) {
+  if (!source.is_well_formed())
+    return false;
+  const auto operand = source.operand();
+  if (!operand) {
     const auto zero = instrumentation::build_v_mov_b32_literal(destination_vgpr, 0u, arch);
     InstructionSequence sequence(words);
     return sequence.emit(zero);
   }
-  words.push_back(build_v_mov_b32_e32(destination_vgpr, *source.scalar_src, arch));
+  words.push_back(build_v_mov_b32_e32(destination_vgpr, *operand, arch));
   if (source.mask_low_16) {
     const auto left = instrumentation::build_v_lshlrev_b32(
         destination_vgpr, scalar_positive_inline_u32(16), destination_vgpr, arch);
@@ -696,8 +697,18 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       static_cast<uint16_t>(exec_base + 6u), kRdna4VccLo, arch);
   const auto add_one =
       instrumentation::build_v_add_u32(key_vgpr, scalar_positive_inline_u32(1), key_vgpr, arch);
+  const uint16_t valid_exec = static_cast<uint16_t>(exec_base + 8u);
+  const auto save_valid = instrumentation::build_s_mov_b64(valid_exec, kRdna4ExecLo, arch);
+  const auto select_invalid = instrumentation::build_s_andn2_b64(
+      kRdna4ExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), valid_exec, arch);
+  const auto zero_invalid = instrumentation::build_v_mov_b32_literal(key_vgpr, 0u, arch);
+  const auto restore_valid = instrumentation::build_s_mov_b64(kRdna4ExecLo, valid_exec, arch);
   InstructionSequence sequence(words);
-  return sequence.emit_all(max_key, not_reserved, narrow_reserved, add_one);
+  // Keep zero as the persistent invalid sentinel for lanes excluded by a
+  // coordinate-width or reserved-key predicate. The caller still receives
+  // EXEC narrowed to valid lanes, exactly as before.
+  return sequence.emit_all(max_key, not_reserved, narrow_reserved, add_one, save_valid,
+                           select_invalid, zero_invalid, restore_valid);
 }
 
 [[nodiscard]] bool append_inline_acquired_token_slot_address(
@@ -1041,10 +1052,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       return false;
     // Slot derivation is complete. `hash` is dead here and its next use
     // overwrites it with the source-version parity bit.
-    if (!append_compare_moi_report_dispatch_id_word(words, options, value, hash,
-                                                    /*high_word=*/false, arch,
-                                                    ConSanMoiLiteralDispatchIdPolicy::
-                                                        Rdna4FamilyOnly))
+    if (!append_compare_moi_report_dispatch_id_word(
+            words, options, value, hash,
+            /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly))
       return false;
     if (!narrow_vcc() ||
         !append_load_u32_vgpr_at_offset(
@@ -1052,10 +1062,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
             offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) + sizeof(uint32_t), value,
             arch))
       return false;
-    if (!append_compare_moi_report_dispatch_id_word(words, options, value, hash,
-                                                    /*high_word=*/true, arch,
-                                                    ConSanMoiLiteralDispatchIdPolicy::
-                                                        Rdna4FamilyOnly))
+    if (!append_compare_moi_report_dispatch_id_word(
+            words, options, value, hash,
+            /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly))
       return false;
     if (!narrow_vcc() ||
         !append_load_u32_vgpr_at_offset(
@@ -1297,16 +1306,14 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
             value, arch))
       return false;
-    if (!append_moi_report_dispatch_id_word(
-            words, options, value, /*high_word=*/false, arch,
-            ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly))
+    if (!append_moi_report_dispatch_id_word(words, options, value, /*high_word=*/false, arch,
+                                            ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly))
       return false;
     if (!append_store_u32_vgpr_at_offset(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id), value, arch))
       return false;
-    if (!append_moi_report_dispatch_id_word(
-            words, options, value, /*high_word=*/true, arch,
-            ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly))
+    if (!append_moi_report_dispatch_id_word(words, options, value, /*high_word=*/true, arch,
+                                            ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly))
       return false;
     if (!append_store_u32_vgpr_at_offset(
             words, base,
@@ -1473,10 +1480,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return false;
   // Release-slot addressing is complete. `temporary_vgpr` is dead here and
   // the later snapshot construction overwrites it before any read.
-  if (!append_compare_moi_report_dispatch_id_word(words, options, value_vgpr, temporary_vgpr,
-                                                  /*high_word=*/false, arch,
-                                                  ConSanMoiLiteralDispatchIdPolicy::
-                                                      Rdna4FamilyOnly))
+  if (!append_compare_moi_report_dispatch_id_word(
+          words, options, value_vgpr, temporary_vgpr,
+          /*high_word=*/false, arch, ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly))
     return false;
   words.push_back(*narrow_if_valid);
   if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
@@ -1484,10 +1490,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                           sizeof(uint32_t),
                                       value_vgpr, arch))
     return false;
-  if (!append_compare_moi_report_dispatch_id_word(words, options, value_vgpr, temporary_vgpr,
-                                                  /*high_word=*/true, arch,
-                                                  ConSanMoiLiteralDispatchIdPolicy::
-                                                      Rdna4FamilyOnly))
+  if (!append_compare_moi_report_dispatch_id_word(
+          words, options, value_vgpr, temporary_vgpr,
+          /*high_word=*/true, arch, ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly))
     return false;
   words.push_back(*narrow_if_valid);
   // CDNA3/4 FLAT memory instructions require an even-aligned address pair.
@@ -1568,10 +1573,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
             ? instrumentation::build_s_mov_b64(kRdna4ExecLo, kScalarInlineNegativeOneOperand, arch)
             : std::nullopt;
     const auto restore_matching_exec =
-        widen_consumer_segment
-            ? instrumentation::build_s_mov_b64(kRdna4ExecLo,
-                                               static_cast<uint16_t>(exec_base + 16u), arch)
-            : std::nullopt;
+        widen_consumer_segment ? instrumentation::build_s_mov_b64(
+                                     kRdna4ExecLo, static_cast<uint16_t>(exec_base + 16u), arch)
+                               : std::nullopt;
     const auto advance_epoch = instrumentation::build_v_add_u32(
         *options.moi_epoch_vgpr, scalar_positive_inline_u32(1), *options.moi_epoch_vgpr, arch);
     const auto saturate_epoch = instrumentation::build_v_min_u32_literal(
@@ -1602,8 +1606,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       errors.emplace_back("ConSan MOI inline acquire consumer segment guard exceeds branch range");
       return false;
     }
-    const auto skip_empty_acquire = instrumentation::build_s_cbranch_execz(
-        static_cast<int16_t>(advance_words.size()), arch);
+    const auto skip_empty_acquire =
+        instrumentation::build_s_cbranch_execz(static_cast<int16_t>(advance_words.size()), arch);
     if (!skip_empty_acquire) {
       errors.emplace_back("ConSan MOI inline acquire could not guard its consumer segment");
       return false;
@@ -1919,10 +1923,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     // The stable-version check is complete. `version_before` is dead here and
     // the next scan iteration reloads it before use.
     if (!append_load_u32_vgpr_at_offset(words, snapshot_address, offset, temporary, arch) ||
-        !append_compare_moi_report_dispatch_id_word(words, options, temporary, version_before,
-                                                    high_word, arch,
-                                                    ConSanMoiLiteralDispatchIdPolicy::
-                                                        Rdna4FamilyOnly)) {
+        !append_compare_moi_report_dispatch_id_word(
+            words, options, temporary, version_before, high_word, arch,
+            ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly)) {
       return false;
     }
     return narrow_vcc();
@@ -2199,10 +2202,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     // `cas_new` has no live value before the claim. `claim_new` below
     // overwrites it before the first use of the compare-swap operand.
     if (!append_load_u32_vgpr_at_offset(words, slot_address, offset, temporary, arch) ||
-        !append_compare_moi_report_dispatch_id_word(words, options, temporary, cas_new, high_word,
-                                                    arch,
-                                                    ConSanMoiLiteralDispatchIdPolicy::
-                                                        Rdna4FamilyOnly)) {
+        !append_compare_moi_report_dispatch_id_word(
+            words, options, temporary, cas_new, high_word, arch,
+            ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly)) {
       return false;
     }
     return narrow_vcc();
@@ -2484,9 +2486,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                            sizeof(uint32_t),
                                        static_cast<uint16_t>(stable_guest_address + 1u), arch))
     return false;
-  if (!append_moi_report_dispatch_id_word(
-          words, options, temporary, /*high_word=*/false, arch,
-          ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly)) {
+  if (!append_moi_report_dispatch_id_word(words, options, temporary, /*high_word=*/false, arch,
+                                          ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID low");
     return false;
   }
@@ -2494,9 +2495,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id),
                                        temporary, arch))
     return false;
-  if (!append_moi_report_dispatch_id_word(
-          words, options, temporary, /*high_word=*/true, arch,
-          ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly)) {
+  if (!append_moi_report_dispatch_id_word(words, options, temporary, /*high_word=*/true, arch,
+                                          ConSanMoiLiteralDispatchIdPolicy::Rdna4FamilyOnly)) {
     errors.emplace_back("ConSan MOI inline release could not materialize dispatch ID high");
     return false;
   }
