@@ -8,6 +8,7 @@ add_library(
     test_shmem_gotcha.cpp
     test_ucx_gotcha.cpp
     test_pthread_mutex_gotcha.cpp
+    test_sampling_gotcha.cpp
     test_category_region.cpp
 )
 
