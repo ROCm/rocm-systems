@@ -2,20 +2,32 @@
 // SPDX-License-Identifier: MIT
 
 /// @file instruction_builder.h
-/// @brief ISA-parameterized instruction encoding helpers for code patching.
-/// @brief Builder functions for constructing common AMDGPU instructions.
+/// @brief Arch-parameterized encoders for the AMDGPU scalar instructions the DBT
+///        and DBI patchers emit.
 ///
-/// @details Provides helpers for encoding frequently-used instructions
-/// (s_branch, s_nop) in the DBT and DBI layers. The SOPP encoding
-/// format is identical across all AMDGPU ISA generations:
+/// @details These helpers turn a target ISA (rj_code_arch_t) plus operands into
+/// the raw instruction word(s) that code patching splices into a kernel. The scope
+/// is the scalar (SOP*) instruction families used by the trampoline envelope and
+/// inline patches, plus the scalar-operand and inline-constant codes they
+/// reference. Vector, scratch, lane, and waitcnt encoders live in spill_builders.h.
+///
+/// There are two layers. The pack_* helpers are pure field packers for one fixed
+/// encoding format (SOPP, SOP1, SOP2, SOPC, or SOPK) and do not depend on the
+/// generation. The build_* helpers are arch-parameterized front ends: they pick
+/// the per-generation opcode and prefix, then delegate to the packers or to the
+/// generated per-arch builders.
+///
+/// The encoding format of a family is stable across generations, but the opcodes
+/// are not. For example, s_branch is opcode 2 on GFX9 (CDNA1-4) and 32 on GFX12
+/// (RDNA4). Every build_* therefore takes rj_code_arch_t and throws
+/// util::UnimplementedInst for an arch it does not model. Scalar-operand codes
+/// (VCC, EXEC, M0) and inline constants come from the generated operand tables
+/// (operand_types.h); see scalar_operand_m0 and the kScalarOperand* constants.
+///
+/// The SOPP format, for reference:
 ///   bits[31:23] = SOPP encoding selector
 ///   bits[22:16] = op (7-bit opcode)
 ///   bits[15:0]  = simm16 (16-bit signed/unsigned immediate)
-///
-/// IMPORTANT: While the SOPP *format* is consistent across ISAs, the
-/// *opcodes* for specific instructions differ between generations.
-/// s_branch is opcode 2 on GFX9 (CDNA1-4) but opcode 32 on GFX12 (RDNA4).
-/// These builders are parameterized by target ISA via rj_code_arch_t.
 
 #pragma once
 
@@ -77,7 +89,10 @@ inline constexpr uint32_t kSopcEncodingPrefix = 0x17E;
 // SOPK has the same representation split: its machine field stores the low
 // fixed selector, while generated encoding IDs describe primary decode.
 inline constexpr uint32_t kSopkEncodingPrefix = 0xB;
-inline constexpr uint16_t kScalarPositiveInlineBase = 128;
+// Base scalar-source code for non-negative inline integers: code 128 encodes 0,
+// 129 encodes 1, etc. (see scalar_positive_inline_u32). Generation-stable; sourced
+// from the operand table and checked in the same test as the other inline codes.
+inline constexpr uint16_t kScalarPositiveInlineBase = cdna4::OPR_SRC_POS_INT_MIN;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 // Scalar-operand codes for special registers, used as the ssrc/sdst of a plain
 // s_mov to save/restore them across a probe call. VCC_LO and EXEC_LO are stable
@@ -89,7 +104,9 @@ inline constexpr uint16_t kScalarOperandVccLo = cdna4::OPR_SDST_VCC_LO;
 inline constexpr uint16_t kScalarOperandExecLo = cdna4::OPR_SDST_EXEC_LO;
 // Inline-constant scalar source for -1 (all bits set); as a b64 source it sign-
 // extends to 0xFFFF'FFFF'FFFF'FFFF, i.e. `s_mov_b64 exec, -1` = all lanes active.
-inline constexpr uint16_t kScalarInlineNegOne = 193;
+// OPR_SRC_NEG_INT_MIN is the smallest-magnitude negative inline integer (-1) and,
+// like the VCC/EXEC codes, is generation-stable (checked in the same test).
+inline constexpr uint16_t kScalarInlineNegOne = cdna4::OPR_SRC_NEG_INT_MIN;
 /// @brief Pack a SOPP instruction word from its constituent fields.
 ///
 /// @param op      7-bit SOPP opcode.
