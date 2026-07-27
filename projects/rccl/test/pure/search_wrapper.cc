@@ -1,10 +1,7 @@
-// Compiles the real search.cc with all real RCCL headers.
-// Stubs/ directory intercepts <hip/hip_runtime.h>, <cuda.h>, <hsa/hsa.h>.
-#include "rccl_host_preamble.h"
-
+// Compiles the real search.cc (hipified) with hipcc --offload-host-only.
+// No stubs needed — hipcc handles HIP/CUDA headers natively.
 #include "search.cc"
 
-// Expose static functions for testing.
 int test_gpuPciBw(struct ncclTopoNode* gpu) {
   return gpuPciBw(gpu);
 }
