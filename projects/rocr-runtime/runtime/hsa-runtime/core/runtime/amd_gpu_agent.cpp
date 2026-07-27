@@ -229,8 +229,19 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 #endif
 
 #if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
-  // XXX we might want LOW
-  ::rocm_timesync::timesync_init(::rocm_timesync::ts_precision_t::TIMESYNC_PRECISION_HIGH);
+  {
+      // XXX we might want LOW
+      // XXX make configurable through env I guess
+      int status = ::rocm_timesync::timesync_init(::rocm_timesync::ts_config_t{
+          .precision = ::rocm_timesync::ts_precision_t::TIMESYNC_PRECISION_HIGH,
+          .db_config = ::rocm_timesync::ts_db_influx_t{
+              .host = "influxdb-local",
+              .port = 8086,
+              .database = "rocm_timesync"
+          },
+      });
+      assert(status == 0 && "timesync_init failed");
+  }
 #endif
 
   auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];

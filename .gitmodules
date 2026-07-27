@@ -82,6 +82,6 @@
 [submodule "projects/rocprofiler-systems/examples/openmp/external/ompvv"]
 	path = projects/rocprofiler-systems/examples/openmp/external/ompvv
 	url = https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV.git
-[submodule "projects/rocm-timesync/external/influxdb-cxx"]
-	path = projects/rocm-timesync/external/influxdb-cxx
-	url = https://github.com/offa/influxdb-cxx.git
+[submodule "projects/external/json"]
+	path = projects/external/json
+	url = https://github.com/nlohmann/json.git
