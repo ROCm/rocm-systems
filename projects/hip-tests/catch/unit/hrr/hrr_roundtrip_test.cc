@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -183,12 +184,32 @@ static bool json_array_exists(const std::string& json, const std::string& key) {
 }
 
 // ---------------------------------------------------------------------------
+// hrr_parse_d2h_summary: extract the pass/fail counts from the playback
+// "D2H checks" summary line, which hrr_playback.cpp prints as:
+//
+//   "[HRR]   D2H checks     : N pass (E exact, T within tol), M fail, K skipped"
+//
+// The parenthetical breakdown is always part of the line, so the format string
+// has to consume it: a format that stops at "pass," matches only the pass count
+// and leaves the fail count at its initial value, which silently turns every
+// caller's fail assertion into a no-op.
+//
+// Returns false when the line is absent or does not match, so a future change
+// to the producer surfaces as a test failure instead of a phantom zero.
+// ---------------------------------------------------------------------------
+static bool hrr_parse_d2h_summary(const std::string& out, int& d2h_pass, int& d2h_fail) {
+  const size_t pos = out.find("D2H checks");
+  if (pos == std::string::npos) return false;
+  const size_t colon = out.find(':', pos);
+  if (colon == std::string::npos) return false;
+  return std::sscanf(out.c_str() + colon + 1, " %d pass (%*d exact, %*d within tol), %d fail",
+                     &d2h_pass, &d2h_fail) == 2;
+}
+
+// ---------------------------------------------------------------------------
 // hrr_run_playback — spawn hrr-playback, capture stdout, assert:
 //   1. Exit code == 0.
 //   2. The "D2H checks" summary line is present and shows >= 1 pass, 0 fail.
-//
-// The D2H line format (from hrr_playback.cpp):
-//   "[HRR]   D2H checks     : N pass, M fail, K skipped"
 //
 // If require_d2h == true (default) we REQUIRE pass >= 1.
 // Workloads with no D2H memcpy (e.g. DeviceInfo, Occupancy) pass require_d2h=false.
@@ -230,17 +251,10 @@ static void hrr_run_playback(const fs::path& cap_path,
   }
 
   // Parse the D2H summary line.
-  size_t pos = out.find("D2H checks");
-  if (pos == std::string::npos) {
-    // hrr-playback didn't print a summary — treat as failure.
-    FAIL("hrr-playback output missing 'D2H checks' summary line");
-  }
-  size_t colon = out.find(':', pos);
-  if (colon == std::string::npos) FAIL("D2H checks line missing ':'");
-  std::string rest = out.substr(colon + 1);
   int d2h_pass = 0, d2h_fail = 0;
-  // Format: " N pass, M fail, K skipped"
-  sscanf(rest.c_str(), " %d pass, %d fail", &d2h_pass, &d2h_fail);
+  if (!hrr_parse_d2h_summary(out, d2h_pass, d2h_fail)) {
+    FAIL("hrr-playback output missing or malformed 'D2H checks' summary line");
+  }
   INFO("D2H pass=" << d2h_pass << " fail=" << d2h_fail);
   if (require_d2h) {
     CHECK(d2h_pass >= 1);
@@ -698,12 +712,8 @@ HIP_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
   INFO("Playback exit code: " << ret);
   REQUIRE(ret == 0);  // zero-init reproduces the captured all-zero output
 
-  size_t pos = out.find("D2H checks");
-  REQUIRE(pos != std::string::npos);
-  size_t colon = out.find(':', pos);
-  REQUIRE(colon != std::string::npos);
   int d2h_pass = 0, d2h_fail = 0;
-  sscanf(out.c_str() + colon + 1, " %d pass, %d fail", &d2h_pass, &d2h_fail);
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
   INFO("D2H pass=" << d2h_pass << " fail=" << d2h_fail);
   CHECK(d2h_pass >= 1);
   CHECK(d2h_fail == 0);
