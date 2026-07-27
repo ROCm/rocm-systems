@@ -1892,9 +1892,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
         // context-sensitive return edge. Drop every stash in a caller-saved
         // VGPR; a conforming callee must preserve a callee-saved VGPR, so a
         // stash there survives (see is_callee_saved_vgpr).
-        std::erase_if(state.slots, [](const auto &item) {
-          return !is_callee_saved_vgpr(item.first.vgpr);
-        });
+        std::erase_if(state.slots,
+                      [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
       }
 
       if (mnemonic == "v_writelane_b32") {
@@ -1961,9 +1960,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
         // publishing the block exit so a callee-clobbered value cannot reach
         // the continuation. A callee-saved VGPR is preserved by a conforming
         // callee, so a stash there survives (see is_callee_saved_vgpr).
-        std::erase_if(state.slots, [](const auto &item) {
-          return !is_callee_saved_vgpr(item.first.vgpr);
-        });
+        std::erase_if(state.slots,
+                      [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
       }
 
       RegisterSet vgpr_defs;

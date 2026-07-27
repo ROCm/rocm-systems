@@ -1311,6 +1311,96 @@ TEST(CfgAnalysis, Gfx1250DirectCallKillsCarriedLaneStash) {
   EXPECT_EQ(total_fixups, 0u);
 }
 
+TEST(CfgAnalysis, Gfx1250CalleeSavedLaneStashSurvivesDirectCall) {
+  // Same shape as Gfx1250DirectCallKillsCarriedLaneStash, but the stash lives
+  // in v44 (CALLEE-saved under CSR_AMDGPU_VGPRs). The synthetic callee writes
+  // only caller-saved v48, so the continuation must recover the call target
+  // from the surviving v44 stash.
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr auto clobber = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 128, .vdst = 48});
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u, 56u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(56) -> stashed target 0x3c.
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 v44, s1, 1.
+      rocjitsu::build_s_call_b64(kReturnSreg, 7, ROCJITSU_CODE_ARCH_GFX1250),
+      // 0x20: direct call -> callee at 0x40.
+      0xD7600000u,
+      0x0201012Cu, // 0x24: continuation reads the surviving low half.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x2c: reads the high half.
+      0xBE9E4900u,                                // 0x34: recovered s_swap_pc_i64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x38: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: stashed target.
+      clobber[0],                                 // 0x40: callee clobbers caller-saved v48.
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      // 0x44: callee return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  const IndirectCallFixup *continuation_fixup = nullptr;
+  for (const auto &block : blocks) {
+    for (const auto &fixup : block->static_indirect_call_fixups()) {
+      if (fixup.source_call_offset == 52) // 0x34: the continuation swappc.
+        continuation_fixup = &fixup;
+    }
+  }
+  ASSERT_NE(continuation_fixup, nullptr);
+  EXPECT_EQ(continuation_fixup->source_target_offset, 60u); // 0x3c: the stashed target.
+}
+
+TEST(CfgAnalysis, Gfx1250BankedLaneStashDoesNotSurviveDirectCall) {
+  // Select bank 1 for both DST and SRC0, so the v44 operands below consistently
+  // address physical v300. Although low selector v44 is callee-saved, the ABI
+  // table does not prove physical VGPRs above v255 are preserved. The call must
+  // therefore discard the stash rather than mask v300 down to v44.
+  //
+  // s_set_vgpr_msb immediate byte is {DST[7:6], SRC2[5:4], SRC1[3:2], SRC0[1:0]};
+  // 0x41 selects bank 1 for DST and SRC0.
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr auto set_dst_src0_bank_one =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x41});
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u, 60u,
+      0u,                       // 0x04: s_add_nc_u64 ..., lit64(60) -> stale target 0x40.
+      set_dst_src0_bank_one[0], // 0x10: v44 DST/SRC0 operands resolve to physical v300.
+      0xD761002Cu,
+      0x02010000u, // 0x14: v_writelane_b32 physical v300, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x1c: v_writelane_b32 physical v300, s1, 1.
+      rocjitsu::build_s_call_b64(kReturnSreg, 7, ROCJITSU_CODE_ARCH_GFX1250),
+      // 0x24: direct call -> callee at 0x44.
+      0xD7600000u,
+      0x0201012Cu, // 0x28: continuation reads physical v300 lane 0.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x30: reads physical v300 lane 1.
+      0xBE9E4900u,                                // 0x38: must remain dynamic.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x3c: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x40: stale target.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x44: conforming callee body.
+      rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
+      // 0x48: callee return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  size_t total_fixups = 0;
+  for (const auto &block : blocks)
+    total_fixups += block->static_indirect_call_fixups().size();
+  EXPECT_EQ(total_fixups, 0u);
+}
+
 TEST(CfgAnalysis, Gfx1250IndirectCallKillsCarriedLaneStash) {
   constexpr uint16_t kCallPcSreg = 8;
   constexpr uint16_t kReturnSreg = 30;
@@ -1394,7 +1484,7 @@ TEST(CfgAnalysis, Gfx1250CalleeSavedLaneStashSurvivesIndirectCall) {
       gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = kCallPcSreg, .sdst = kReturnSreg});
   constexpr auto stale_call =
       gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = 0, .sdst = kStaleReturnSreg});
-  constexpr auto clobber = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 128, .vdst = 44});
+  constexpr auto clobber = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 128, .vdst = 48});
 
   std::vector<uint32_t> words = {
       stale_getpc[0], // 0x00: s_get_pc_i64 s[0:1].
@@ -1417,7 +1507,7 @@ TEST(CfgAnalysis, Gfx1250CalleeSavedLaneStashSurvivesIndirectCall) {
       stale_call[0],                              // 0x44: continuation indirect call.
       build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x48: continuation.
       build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x4c: stashed target.
-      clobber[0],                                 // 0x50: callee body (v44 preserved by ABI).
+      clobber[0],                                 // 0x50: callee clobbers caller-saved v48.
       rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
       // 0x54: callee return.
   };
