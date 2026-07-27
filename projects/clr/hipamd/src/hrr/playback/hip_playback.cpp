@@ -1160,6 +1160,7 @@ static bool hrr_replay_zero_init() {
 // this: it waits for both operations to finish but does not order them. The
 // ordering edge has to be established here, at the allocation.
 static void hrr_zero_init_alloc(PlaybackContext& ctx, void* live, size_t sz) {
+    if (!live || sz == 0) return;  // nothing written, so nothing to order
     if (!hrr_zero_init_needs_drain(hrr_replay_zero_init(), ctx.in_graph_capture))
         return;
     if (hipMemsetAsync(live, 0, sz, nullptr) != hipSuccess) return;

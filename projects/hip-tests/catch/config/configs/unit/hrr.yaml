@@ -69,12 +69,6 @@ hrr:
   Unit_HRR_CaptureReplayRoundtrip:
     <<: *level_2
     tags: [capture, playback, roundtrip]
-    # ROCM-27985: intermittent replay D2H failure on gfx1250/MI450. The replay
-    # zero-init ordering fix in this change removes a defect with exactly this
-    # signature, but that has not yet been confirmed against the MI450 stack
-    # that reproduces the original failure. Stays quarantined on gfx1250 only
-    # (other archs still run it) until it is; tracked in ROCM-27985.
-    disabled: [gfx1250]
   Unit_HRR_GraphRoundtrip:
     <<: *level_2
     tags: [capture, graph, playback, roundtrip]
