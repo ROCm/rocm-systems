@@ -206,10 +206,9 @@ rocprofiler_add_integration_execute_test(
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-att-hsa-multiqueue-plus-pmc
-    TEST_PATHS validate.py
+    TEST_PATHS validate_counter_collection.py
     COPY conftest.py
     CONFIG pytest.ini
-    DISCOVERY_ARGS -k test_counter_collection_with_att
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
