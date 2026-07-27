@@ -128,6 +128,24 @@ build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arc
   }
 }
 
+/// @brief Encode a wait for outstanding stores, used to order a scratch store
+///        before a same-address reload.
+///
+/// CDNA uses the unified vmcnt (s_waitcnt covers stores). RDNA4/GFX12 split the
+/// counters, so stores need s_wait_storecnt — s_wait_loadcnt does NOT order them.
+[[nodiscard]] inline uint32_t build_wait_stores_complete(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0);
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0);
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return build_sopp_encoding(arch, rdna4::kSWaitStorecntSopp, 0);
+  default:
+    throw util::UnimplementedInst("store-completion wait for target architecture");
+  }
+}
+
 /// @brief Encode a wait for outstanding loads: s_waitcnt 0 (CDNA), s_wait_loadcnt 0 (RDNA).
 [[nodiscard]] inline uint32_t build_wait_loads_complete(rj_code_arch_t arch) {
   switch (arch) {
