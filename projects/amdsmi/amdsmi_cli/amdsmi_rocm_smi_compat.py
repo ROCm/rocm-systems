@@ -722,7 +722,13 @@ def get_power_cap(processor):
 
         power_cap_info = amdsmi.amdsmi_get_power_cap_info(processor)
         if "power_cap" in power_cap_info:
-            return power_cap_info["power_cap"] / 1000000.0
+            # power_cap is the currently-enforced cap (sysfs power1_cap). MI300-series
+            # APUs leave it at 0 because no standalone GPU cap is exposed; fall back to
+            # the factory default so the column shows the rated ceiling, not 0.
+            cap = power_cap_info["power_cap"]
+            if cap == 0:
+                cap = power_cap_info.get("default_power_cap") or 0
+            return cap / 1000000.0 if cap else None
         return None
     except:
         return None
