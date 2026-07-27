@@ -221,12 +221,17 @@ jobs:
           retention-days: 7
 
       - name: Run Hardware-Free Python Unit Tests
+        # Record the result but do not abort the job here: a unit failure must
+        # not skip the downstream hardware test steps. The gate below enforces
+        # it after all test logs are collected.
         run: |
-          set -euo pipefail
+          set -uo pipefail
           RESULTS_DIR=/tmp/test-results-${{ matrix.os }}
           mkdir -p "$RESULTS_DIR"
           cd /opt/rocm/share/amd_smi/tests/python_unittest
-          runuser -u nobody -- ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
+          rc=0
+          runuser -u nobody -- ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1 || rc=$?
+          echo "$rc" > "$RESULTS_DIR/unit_test_rc.txt"
 
       - name: AMDSMI Command Tests
         run: |
@@ -309,6 +314,15 @@ jobs:
       - name: Unit Test Results
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
+
+      - name: Enforce Hardware-Free Unit Test Result
+        if: always()
+        run: |
+          rc=$(cat /tmp/test-results-${{ matrix.os }}/unit_test_rc.txt 2>/dev/null || echo 1)
+          if [ "$rc" -ne 0 ]; then
+            echo "Hardware-free unit tests failed (exit $rc). See 'Unit Test Results'."
+            exit "$rc"
+          fi
 
       - name: Perf Test Results
         if: always()
