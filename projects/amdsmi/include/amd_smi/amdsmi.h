@@ -3474,6 +3474,28 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
                                            unsigned int* uuid_length, char* uuid);
 
 /**
+ *  @brief Returns the CUID of the device
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
+ *  @platform{guest_windows}
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[in,out] cuid_length Length of the cuid string. As input, must be
+ *                 equal or greater than AMDSMI_GPU_CUID_SIZE and be allocated by
+ *                 user. As output it is the length of the cuid string.
+ *
+ *  @param[out] cuid Pointer to string to store the CUID. Must be
+ *              allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_handle,
+                                           unsigned int* cuid_length, char* cuid);
+
+/**
  *  @brief          Returns the Enumeration information for the device
  *
  *  @ingroup tagProcDiscovery

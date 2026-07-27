@@ -2774,6 +2774,22 @@ def amdsmi_get_gpu_device_uuid(processor_handle: processor_handle_t) -> str:
     return uuid.value.decode("utf-8")
 
 
+def amdsmi_get_gpu_device_cuid(processor_handle: processor_handle_t) -> str:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    cuid = ctypes.create_string_buffer(AMDSMI_GPU_UUID_SIZE)
+
+    cuid_length = ctypes.c_uint32()
+    cuid_length.value = AMDSMI_GPU_UUID_SIZE
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_device_cuid(processor_handle, ctypes.byref(cuid_length), cuid)
+    )
+
+    return cuid.value.decode("utf-8")
+
+
 def amdsmi_get_gpu_enumeration_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
     """
     Retrieves GPU enumeration information including DRM card ID, DRM render ID, HIP ID, and HIP UUID.

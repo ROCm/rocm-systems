@@ -76,9 +76,15 @@ class ListDevicesCommands:
             bdf = "N/A"
 
         try:
-            uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
+            uuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(args.gpu)
         except amdsmi_exception.AmdSmiLibraryException:
             uuid = "N/A"
+
+        if uuid == "N/A":
+            try:
+                uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
+            except amdsmi_exception.AmdSmiLibraryException:
+                uuid = "N/A"
 
         try:
             kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)

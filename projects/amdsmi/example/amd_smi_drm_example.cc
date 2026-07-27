@@ -1236,6 +1236,14 @@ int main() {
         printf("\tamdsmi_get_gpu_driver_info(): not available on this device.\n");
       }
 
+      // Get device cuid
+      unsigned int cuid_length = AMDSMI_GPU_UUID_SIZE;
+      char cuid[AMDSMI_GPU_UUID_SIZE];
+      ret = amdsmi_get_gpu_device_cuid(processor_handles[device_index], &cuid_length, cuid);
+      CHK_AMDSMI_RET(ret)
+      printf("    Output of amdsmi_get_gpu_device_cuid:\n");
+      printf("\tDevice cuid: %s\n\n", cuid);
+
       // Get device uuid
       unsigned int uuid_length = AMDSMI_GPU_UUID_SIZE;
       char uuid[AMDSMI_GPU_UUID_SIZE];
