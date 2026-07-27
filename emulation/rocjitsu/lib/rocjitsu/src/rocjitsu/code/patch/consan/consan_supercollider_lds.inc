@@ -3988,8 +3988,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       std::memcpy(new_text.data() + relay_offset, &relay_word, sizeof(relay_word));
     }
-    if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-      result.errors.emplace_back("ConSan LDS check/trap proof could not append trampoline text");
+    if (!replace_consan_text(patcher, new_text, options, "LDS check/trap proof", result)) {
       result.patches.clear();
       return;
     }

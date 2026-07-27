@@ -58,6 +58,10 @@ namespace rocjitsu::consan_hook {
     *out = default_value;
     return true;
   }
+  if (!std::isdigit(static_cast<unsigned char>(*value))) {
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected uint32\n", name, value);
+    return false;
+  }
 
   errno = 0;
   char *end = nullptr;
@@ -146,16 +150,21 @@ namespace rocjitsu::consan_hook {
   return true;
 }
 
-[[nodiscard]] bool parse_u64_env(const char *name, uint64_t default_value, uint64_t *out) {
+[[nodiscard]] bool parse_u64_env(const char *name, uint64_t default_value, uint64_t *out,
+                                 int base = 0) {
   const char *value = std::getenv(name);
   if (value == nullptr || *value == '\0') {
     *out = default_value;
     return true;
   }
+  if (!std::isdigit(static_cast<unsigned char>(*value))) {
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected uint64\n", name, value);
+    return false;
+  }
 
   errno = 0;
   char *end = nullptr;
-  const unsigned long long parsed = std::strtoull(value, &end, 0);
+  const unsigned long long parsed = std::strtoull(value, &end, base);
   if (end == value || *end != '\0' || errno == ERANGE ||
       parsed > std::numeric_limits<uint64_t>::max()) {
     std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid %s='%s'; expected uint64\n", name, value);
@@ -924,6 +933,29 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   if (!parse_u32_env("RJ_CONSAN_DELAY", 0, &config.delay_nops))
     return std::nullopt;
+  const bool absolute_growth_limit = env_has_value("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES");
+  const bool relative_growth_limit = env_has_value("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT");
+  if (absolute_growth_limit && relative_growth_limit) {
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES and "
+                         "RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT cannot both be set\n");
+    return std::nullopt;
+  }
+  if (absolute_growth_limit) {
+    config.patched_image_growth_limit.kind =
+        rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes;
+    if (!parse_u64_env("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES",
+                       rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes,
+                       &config.patched_image_growth_limit.absolute_bytes, 10)) {
+      return std::nullopt;
+    }
+  } else if (relative_growth_limit) {
+    config.patched_image_growth_limit.kind =
+        rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent;
+    if (!parse_u32_env("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", 0,
+                       &config.patched_image_growth_limit.input_percent)) {
+      return std::nullopt;
+    }
+  }
   config.max_patches_explicit = env_has_value("RJ_CONSAN_MAX_PATCHES");
   if (!parse_u32_env("RJ_CONSAN_MAX_PATCHES", kConSanAllSupportedPatchBudget, &config.max_patches))
     return std::nullopt;

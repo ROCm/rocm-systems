@@ -64,6 +64,51 @@ TEST(ConSan, ParsesMoiEngineNamesAndAliases) {
   EXPECT_FALSE(parse_consan_moi_engine("moi"));
 }
 
+TEST(ConSan, PatchedImageGrowthPolicyPreservesAbsoluteDefault) {
+  ConSanPatchedImageGrowthLimit policy;
+  EXPECT_EQ(policy.kind, ConSanPatchedImageGrowthLimitKind::AbsoluteBytes);
+  EXPECT_EQ(policy.absolute_bytes, kConSanDefaultMaxPatchedImageGrowthBytes);
+  EXPECT_EQ(consan_patched_image_growth_limit_bytes(policy, 17u),
+            kConSanDefaultMaxPatchedImageGrowthBytes);
+}
+
+TEST(ConSan, RelativePatchedImageGrowthPolicyRoundsDownWithoutOverflow) {
+  ConSanPatchedImageGrowthLimit policy;
+  policy.kind = ConSanPatchedImageGrowthLimitKind::InputPercent;
+  policy.input_percent = 25u;
+  EXPECT_EQ(consan_patched_image_growth_limit_bytes(policy, 1003u), 250u);
+
+  policy.input_percent = 200u;
+  EXPECT_EQ(consan_patched_image_growth_limit_bytes(policy, std::numeric_limits<size_t>::max()),
+            std::numeric_limits<size_t>::max());
+}
+
+TEST(ConSan, PatchedImageGrowthPolicyRejectsInvalidKind) {
+  ConSanPatchedImageGrowthLimit policy;
+  policy.kind = static_cast<ConSanPatchedImageGrowthLimitKind>(255u);
+  EXPECT_FALSE(consan_patched_image_growth_limit_bytes(policy, 1003u));
+}
+
+TEST(ConSan, PatchedImageGrowthBudgetIsSharedAcrossStages) {
+  ConSanPatchedImageGrowthLimit policy{
+      .kind = ConSanPatchedImageGrowthLimitKind::InputPercent,
+      .input_percent = 25u,
+  };
+  const auto budget = consan_patched_image_growth_budget(policy, 1000u, 1100u);
+  ASSERT_TRUE(budget);
+  EXPECT_EQ(budget->input_image_bytes, 1000u);
+  EXPECT_EQ(budget->current_image_bytes, 1100u);
+  EXPECT_EQ(budget->total_limit_bytes, 250u);
+  EXPECT_EQ(budget->existing_growth_bytes, 100u);
+  EXPECT_EQ(budget->remaining_growth_bytes, 150u);
+  EXPECT_FALSE(budget->already_exceeded);
+
+  const auto exceeded = consan_patched_image_growth_budget(policy, 1000u, 1300u);
+  ASSERT_TRUE(exceeded);
+  EXPECT_EQ(exceeded->remaining_growth_bytes, 0u);
+  EXPECT_TRUE(exceeded->already_exceeded);
+}
+
 TEST(ConSan, SharedDiagnosticVocabularyUsesStableNames) {
   EXPECT_STREQ(
       consan_register_allocation_source_name(ConSanRegisterAllocationSource::DescriptorGrowth),

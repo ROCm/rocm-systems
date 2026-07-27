@@ -1519,6 +1519,82 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   EXPECT_EQ(rodata_word, 0xA5A55A5Au);
 }
 
+TEST(CodeObjectPatcher, ReplaceTextReportsAndResetsResourcePolicyState) {
+  const auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+  ASSERT_EQ(code_object.text_sections().size(), 1u);
+  const size_t original_text_size = code_object.text_sections().front()->size();
+
+  {
+    CodeObjectPatcher patcher(code_object);
+    std::vector<uint8_t> replacement(original_text_size + sizeof(uint32_t));
+    TextReplacementInfo info{
+        .required_file_growth = 123u,
+        .file_growth_limit_exceeded = false,
+    };
+    EXPECT_FALSE(patcher.replace_text(replacement, 0u, &info));
+    ASSERT_TRUE(info.required_file_growth);
+    EXPECT_EQ(*info.required_file_growth, sizeof(uint32_t));
+    EXPECT_TRUE(info.file_growth_limit_exceeded);
+    EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), image));
+  }
+
+  {
+    CodeObjectPatcher patcher(code_object);
+    std::vector<uint8_t> malformed(original_text_size + 1u);
+    TextReplacementInfo info{
+        .required_file_growth = 123u,
+        .file_growth_limit_exceeded = true,
+    };
+    EXPECT_FALSE(patcher.replace_text(malformed, kTestFileGrowthBudget, &info));
+    EXPECT_FALSE(info.required_file_growth);
+    EXPECT_FALSE(info.file_growth_limit_exceeded);
+    EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), image));
+  }
+
+  {
+    auto late_malformed_image = make_minimal_amdgpu_elf_with_load_segments();
+    Elf64_Ehdr header{};
+    std::memcpy(&header, late_malformed_image.data(), sizeof(header));
+    Elf64_Phdr later_load{};
+    const size_t later_load_offset = header.e_phoff + sizeof(Elf64_Phdr);
+    std::memcpy(&later_load, late_malformed_image.data() + later_load_offset, sizeof(later_load));
+    later_load.p_paddr = std::numeric_limits<uint64_t>::max();
+    std::memcpy(late_malformed_image.data() + later_load_offset, &later_load, sizeof(later_load));
+    AmdGpuCodeObject late_malformed(late_malformed_image.data(), late_malformed_image.size());
+    ASSERT_TRUE(late_malformed.is_valid());
+    ASSERT_EQ(late_malformed.text_sections().size(), 1u);
+    std::vector<uint8_t> replacement(late_malformed.text_sections().front()->size() +
+                                     sizeof(uint32_t));
+    CodeObjectPatcher patcher(late_malformed);
+    TextReplacementInfo info{
+        .required_file_growth = 123u,
+        .file_growth_limit_exceeded = true,
+    };
+    EXPECT_FALSE(patcher.replace_text(replacement, kTestFileGrowthBudget, &info));
+    ASSERT_TRUE(info.required_file_growth);
+    EXPECT_GT(*info.required_file_growth, 0u);
+    EXPECT_FALSE(info.file_growth_limit_exceeded);
+    EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), late_malformed_image));
+  }
+
+  {
+    CodeObjectPatcher patcher(code_object);
+    const auto *text = code_object.text_sections().front();
+    std::vector<uint8_t> replacement(text->size());
+    std::memcpy(replacement.data(), text->data(), text->size());
+    TextReplacementInfo info{
+        .required_file_growth = 123u,
+        .file_growth_limit_exceeded = true,
+    };
+    ASSERT_TRUE(patcher.replace_text(replacement, 0u, &info));
+    ASSERT_TRUE(info.required_file_growth);
+    EXPECT_EQ(*info.required_file_growth, 0u);
+    EXPECT_FALSE(info.file_growth_limit_exceeded);
+  }
+}
+
 TEST(CodeObjectPatcher, RejectsMalformedElfTablesWithoutMutation) {
   enum class Malformation {
     InconsistentProgramHeaderOffset,

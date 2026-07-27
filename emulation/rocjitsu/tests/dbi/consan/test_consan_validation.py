@@ -1602,6 +1602,15 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(v1_tool["category"], "runtime-plumbing")
         self.assertFalse(v1_tool["usability_exception"])
 
+    def test_growth_policy_overrides_are_audited_as_workload_tuning(self) -> None:
+        for name, value in (
+            ("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4096"),
+            ("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", "37"),
+        ):
+            [setting] = validation._audited_settings({name: value})
+            self.assertEqual(setting["category"], "workload-tuning")
+            self.assertTrue(setting["usability_exception"])
+
     def test_supercollider_does_not_receive_moi_tracking_controls(self) -> None:
         workload = validation.WORKLOAD_BY_ID["streamk-arrival"]
         environment = validation._clean_environment(

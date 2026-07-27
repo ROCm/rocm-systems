@@ -9,6 +9,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -431,6 +432,7 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
     options.flavor = ConSanFlavor::Moi;
     if (inventory.moi_inventory_options)
       options = *inventory.moi_inventory_options;
+    options.patched_image_growth_input_bytes = code_object_bytes.size();
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
     if (!inventory.visited_code_object || inventory.input_size != code_object_bytes.size())
@@ -505,16 +507,20 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
 ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
                               const ConSanOptions &options) {
   try {
-    ConSanResult result = try_patch_consan_impl(code_object_bytes, options);
-    try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
+    ConSanOptions effective_options = options;
+    effective_options.patched_image_growth_input_bytes = code_object_bytes.size();
+    ConSanResult result = try_patch_consan_impl(code_object_bytes, effective_options);
+    try_apply_unmatched_barrier_wait_abort(code_object_bytes, effective_options, result);
     result = finalize_consan_result(std::move(result), code_object_bytes);
     const bool composite_discovery =
-        options.fault_dry_run && options.flavor == ConSanFlavor::SuperCollider &&
-        options.sc_perturb_kind != ConSanPerturbationKind::None &&
-        (options.probe_lds_check_trap || options.probe_flat_check_trap) && result.errors.empty() &&
-        result.fault_plans.size() == 1u && result.perturbation_plans.size() == 1u;
+        effective_options.fault_dry_run &&
+        effective_options.flavor == ConSanFlavor::SuperCollider &&
+        effective_options.sc_perturb_kind != ConSanPerturbationKind::None &&
+        (effective_options.probe_lds_check_trap || effective_options.probe_flat_check_trap) &&
+        result.errors.empty() && result.fault_plans.size() == 1u &&
+        result.perturbation_plans.size() == 1u;
     if (composite_discovery) {
-      ConSanOptions live_options = options;
+      ConSanOptions live_options = effective_options;
       live_options.fault_dry_run = false;
       ConSanResult validated = finalize_consan_result(
           try_patch_consan_impl(code_object_bytes, live_options), code_object_bytes);

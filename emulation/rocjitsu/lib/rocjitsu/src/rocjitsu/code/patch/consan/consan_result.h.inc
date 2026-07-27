@@ -62,6 +62,19 @@ struct ConSanScLdsCoverageSite {
   bool supported = false;
 };
 
+/// Machine-readable resource-policy rejection retained alongside the human
+/// diagnostic. Required bytes are total growth from the original input;
+/// transaction bytes are the exact alignment-inclusive cost of this stage.
+struct ConSanPatchedImageGrowthRejection {
+  std::string operation;
+  ConSanPatchedImageGrowthLimit policy;
+  size_t input_image_bytes = 0;
+  size_t existing_growth_bytes = 0;
+  size_t transaction_growth_bytes = 0;
+  size_t required_total_growth_bytes = 0;
+  size_t limit_bytes = 0;
+};
+
 struct ConSanResult {
   bool visited_code_object = false;
   bool modified = false;
@@ -130,6 +143,7 @@ struct ConSanResult {
   std::vector<ConSanKernelInfo> kernels;
   std::vector<ConSanFunctionInfo> functions;
   std::vector<ConSanFaultSite> fault_sites;
+  std::vector<ConSanPatchedImageGrowthRejection> patched_image_growth_rejections;
   std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
   std::vector<ConSanFaultMutationPlan> fault_plans;
   std::vector<ConSanSyncEvent> sync_events;

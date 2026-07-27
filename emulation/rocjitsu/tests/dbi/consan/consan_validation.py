@@ -1778,6 +1778,8 @@ def _setting_metadata(name: str) -> dict:
     elif name in {
         "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
         "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
+        "RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES",
+        "RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT",
     }:
         category = "workload-tuning"
     elif name == "RJ_CONSAN_LOG" or "_REQUIRE_" in name or "_FORBID_" in name:

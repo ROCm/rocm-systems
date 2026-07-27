@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 
+#include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
@@ -10,6 +11,33 @@
 
 namespace rocjitsu {
 namespace {
+
+struct GrowthPolicyFixture {
+  std::vector<uint8_t> bytes;
+  ConSanOptions options;
+  ConSanResult baseline;
+};
+
+[[nodiscard]] GrowthPolicyFixture make_growth_policy_fixture() {
+  const std::array<uint32_t, 1> kernel_words = {
+      0xBFB00000u, // s_endpgm
+  };
+  const std::array<uint32_t, 9> function_words = {
+      0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
+      0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
+      0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
+      0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
+      0xBFB00000u,                           // s_endpgm
+  };
+  GrowthPolicyFixture fixture;
+  fixture.bytes = make_rdna4_code_object_with_local_function(kernel_words, function_words);
+  fixture.options.flavor = ConSanFlavor::SuperCollider;
+  fixture.options.probe_flat_check_trap = true;
+  fixture.options.delay_nops = 1;
+  fixture.options.scratch_vgpr = 5;
+  fixture.baseline = try_patch_consan(fixture.bytes, fixture.options);
+  return fixture;
+}
 
 TEST(ConSan, FlatTrapProofRewritesLikelyGroupLocalFunctionSite) {
   const std::array<uint32_t, 1> kernel_words = {
@@ -76,6 +104,116 @@ TEST(ConSan, FlatCheckTrapProofUsesReachableAppendedCave) {
   EXPECT_GT(result.patches.front().trampoline_size, 0u);
   EXPECT_GT(result.elf_bytes.size(), bytes.size());
   EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSan, RelativeGrowthLimitRejectsAndAdmitsAtExactPercentageBoundary) {
+  GrowthPolicyFixture fixture = make_growth_policy_fixture();
+  ASSERT_TRUE(consan_patch_succeeded(fixture.baseline))
+      << testing::PrintToString(fixture.baseline.errors);
+  ASSERT_EQ(fixture.bytes.size(), 944u);
+  ASSERT_EQ(fixture.baseline.elf_bytes.size() - fixture.bytes.size(), 64u);
+
+  fixture.options.patched_image_growth_limit.kind = ConSanPatchedImageGrowthLimitKind::InputPercent;
+  fixture.options.patched_image_growth_limit.input_percent = 6;
+  const ConSanResult rejected = try_patch_consan(fixture.bytes, fixture.options);
+  const std::string expected =
+      "ConSan flat check/trap proof rejected patched-image file growth: required total 64 bytes, "
+      "limit 56 bytes (policy input-percent=6, original-input-image-bytes=944)";
+  EXPECT_FALSE(rejected.modified);
+  EXPECT_NE(std::ranges::find(rejected.errors, expected), rejected.errors.end())
+      << testing::PrintToString(rejected.errors);
+  ASSERT_EQ(rejected.patched_image_growth_rejections.size(), 1u);
+  const auto &resource = rejected.patched_image_growth_rejections.front();
+  EXPECT_EQ(resource.operation, "flat check/trap proof");
+  EXPECT_EQ(resource.policy, fixture.options.patched_image_growth_limit);
+  EXPECT_EQ(resource.input_image_bytes, fixture.bytes.size());
+  EXPECT_EQ(resource.existing_growth_bytes, 0u);
+  EXPECT_EQ(resource.transaction_growth_bytes, 64u);
+  EXPECT_EQ(resource.required_total_growth_bytes, 64u);
+  EXPECT_EQ(resource.limit_bytes, 56u);
+
+  fixture.options.patched_image_growth_limit.input_percent = 7;
+  const ConSanResult admitted = try_patch_consan(fixture.bytes, fixture.options);
+  ASSERT_TRUE(consan_patch_succeeded(admitted)) << testing::PrintToString(admitted.errors);
+  EXPECT_EQ(admitted.elf_bytes, fixture.baseline.elf_bytes);
+  EXPECT_TRUE(admitted.patched_image_growth_rejections.empty());
+}
+
+TEST(ConSan, AbsoluteGrowthLimitReportsStructuredExactRejection) {
+  GrowthPolicyFixture fixture = make_growth_policy_fixture();
+  ASSERT_TRUE(consan_patch_succeeded(fixture.baseline))
+      << testing::PrintToString(fixture.baseline.errors);
+  const size_t required_growth = fixture.baseline.elf_bytes.size() - fixture.bytes.size();
+  ASSERT_EQ(required_growth, 64u);
+  fixture.options.patched_image_growth_limit.absolute_bytes = required_growth - 1u;
+
+  const ConSanResult rejected = try_patch_consan(fixture.bytes, fixture.options);
+  const std::string expected =
+      "ConSan flat check/trap proof rejected patched-image file growth: required total 64 bytes, "
+      "limit 63 bytes (policy absolute-bytes=63)";
+  EXPECT_NE(std::ranges::find(rejected.errors, expected), rejected.errors.end())
+      << testing::PrintToString(rejected.errors);
+  ASSERT_EQ(rejected.patched_image_growth_rejections.size(), 1u);
+  EXPECT_EQ(rejected.patched_image_growth_rejections.front().required_total_growth_bytes, 64u);
+  EXPECT_EQ(rejected.patched_image_growth_rejections.front().limit_bytes, 63u);
+}
+
+TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
+  GrowthPolicyFixture fixture = make_growth_policy_fixture();
+  ASSERT_TRUE(consan_patch_succeeded(fixture.baseline))
+      << testing::PrintToString(fixture.baseline.errors);
+  ASSERT_EQ(fixture.baseline.elf_bytes.size() - fixture.bytes.size(), 64u);
+  AmdGpuCodeObject grown(fixture.baseline.elf_bytes.data(), fixture.baseline.elf_bytes.size());
+  ASSERT_TRUE(grown.is_valid());
+  ASSERT_EQ(grown.text_sections().size(), 1u);
+  CodeObjectPatcher patcher(grown);
+  std::vector<uint8_t> second_stage_text(grown.text_sections().front()->size() + sizeof(uint32_t));
+  std::memcpy(second_stage_text.data(), grown.text_sections().front()->data(),
+              grown.text_sections().front()->size());
+
+  ConSanOptions options;
+  options.patched_image_growth_limit.kind = ConSanPatchedImageGrowthLimitKind::InputPercent;
+  options.patched_image_growth_limit.input_percent = 13u;
+  options.patched_image_growth_input_bytes = fixture.bytes.size();
+  ConSanResult result;
+  EXPECT_FALSE(replace_consan_text(patcher, second_stage_text, options, "second stage", result));
+  ASSERT_EQ(result.patched_image_growth_rejections.size(), 1u);
+  const auto &rejection = result.patched_image_growth_rejections.front();
+  EXPECT_EQ(rejection.input_image_bytes, fixture.bytes.size());
+  EXPECT_EQ(rejection.existing_growth_bytes, 64u);
+  EXPECT_EQ(rejection.transaction_growth_bytes, 64u);
+  EXPECT_EQ(rejection.required_total_growth_bytes, 128u);
+  EXPECT_EQ(rejection.limit_bytes, 122u);
+}
+
+TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
+  GrowthPolicyFixture fixture = make_growth_policy_fixture();
+  fixture.options.patched_image_growth_limit.kind =
+      static_cast<ConSanPatchedImageGrowthLimitKind>(255u);
+  const ConSanResult invalid = try_patch_consan(fixture.bytes, fixture.options);
+  EXPECT_NE(std::ranges::find(invalid.errors,
+                              "ConSan flat check/trap proof has an invalid patched-image growth "
+                              "policy (invalid-kind=255)"),
+            invalid.errors.end());
+  EXPECT_TRUE(invalid.patched_image_growth_rejections.empty());
+
+  AmdGpuCodeObject code_object(fixture.bytes.data(), fixture.bytes.size());
+  ASSERT_TRUE(code_object.is_valid());
+  ASSERT_EQ(code_object.text_sections().size(), 1u);
+  CodeObjectPatcher patcher(code_object);
+  std::vector<uint8_t> malformed_text(code_object.text_sections().front()->size() + 1u);
+  ConSanOptions default_options;
+  default_options.patched_image_growth_input_bytes = fixture.bytes.size();
+  ConSanResult malformed;
+  EXPECT_FALSE(replace_consan_text(patcher, malformed_text, default_options,
+                                   "test malformed replacement", malformed));
+  const std::string expected_malformed =
+      "ConSan test malformed replacement could not replace executable text (patched-image "
+      "remaining file growth limit 201326592 bytes, total limit 201326592 bytes (policy "
+      "absolute-bytes=201326592))";
+  EXPECT_NE(std::ranges::find(malformed.errors, expected_malformed), malformed.errors.end())
+      << testing::PrintToString(malformed.errors);
+  EXPECT_TRUE(malformed.patched_image_growth_rejections.empty());
 }
 
 TEST(ConSan, FlatCheckTrapProofUsesIndirectIslandForFarAppendedCave) {

@@ -1264,14 +1264,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       append_words_bytes(new_text, host_words);
     }
 
-    if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-      const uint64_t growth =
-          new_text.size() > old_text.size() ? new_text.size() - old_text.size() : 0u;
-      result.errors.emplace_back("ConSan MOI first-light probe could not grow .text from " +
-                                 std::to_string(old_text.size()) + " to " +
-                                 std::to_string(new_text.size()) + " bytes (growth " +
-                                 std::to_string(growth) + ", limit " +
-                                 std::to_string(kConSanMaxPatchedFileGrowth) + ")");
+    if (!replace_consan_text(patcher, new_text, options, "MOI first-light probe", result)) {
       return;
     }
     result.elf_bytes = patcher.emit();

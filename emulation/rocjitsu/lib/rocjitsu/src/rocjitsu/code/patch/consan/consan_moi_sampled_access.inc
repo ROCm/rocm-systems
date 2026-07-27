@@ -1336,8 +1336,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       append_words_bytes(new_text, host_words);
     }
 
-    if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-      result.errors.emplace_back("ConSan MOI sampled probe could not grow .text");
+    if (!replace_consan_text(patcher, new_text, options, "MOI sampled probe", result)) {
       return;
     }
     result.elf_bytes = patcher.emit();

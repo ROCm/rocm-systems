@@ -227,6 +227,8 @@ std::vector<bool> g_transform_override_track_atomics;
 std::vector<bool> g_transform_override_fault_drop_barriers;
 std::vector<bool> g_transform_override_fault_mutations;
 std::vector<bool> g_transform_override_fault_dry_runs;
+std::vector<rocjitsu::ConSanPatchedImageGrowthLimit>
+    g_transform_override_patched_image_growth_limits;
 bool g_transform_override_uses_production = false;
 bool g_transform_override_models_fault_application = false;
 size_t g_transform_override_actual_fault_applications = 1;
@@ -624,6 +626,7 @@ rocjitsu::ConSanResult transform_override(std::span<const uint8_t> bytes,
     g_transform_override_fault_drop_barriers.push_back(options.fault_drop_barrier);
     g_transform_override_fault_mutations.push_back(fault_mutation_enabled);
     g_transform_override_fault_dry_runs.push_back(options.fault_dry_run);
+    g_transform_override_patched_image_growth_limits.push_back(options.patched_image_growth_limit);
     g_transform_override_runtime_sample_strides.push_back(options.moi_runtime_sample_stride);
     g_transform_override_sc_report_addresses.push_back(options.report_buffer_address);
     g_transform_override_report_sizes.push_back(options.moi_report_buffer_size);
@@ -1158,6 +1161,7 @@ void reset_code_object_observations() {
   g_transform_override_fault_drop_barriers.clear();
   g_transform_override_fault_mutations.clear();
   g_transform_override_fault_dry_runs.clear();
+  g_transform_override_patched_image_growth_limits.clear();
   g_transform_override_uses_production = false;
   g_transform_override_models_fault_application = false;
   g_transform_override_actual_fault_applications = 1;
@@ -1208,6 +1212,8 @@ void configure_consan_profile(const ConSanHookProfile &profile, bool fail_closed
   unsetenv("RJ_CONSAN_MOI_TRACK_ATOMICS");
   unsetenv("RJ_CONSAN_SC_REPORT_MODE");
   unsetenv("RJ_CONSAN_REPORT_BUFFER");
+  unsetenv("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES");
+  unsetenv("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT");
   if (profile.expected_flavor == rocjitsu::ConSanFlavor::Moi) {
     setenv("RJ_CONSAN_MOI_REPORT_BUFFER", "4096", 1);
     setenv("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", "65536", 1);
@@ -1228,6 +1234,8 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
   ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
   ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "0");
+  ScopedEnvVar absolute_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", nullptr);
+  ScopedEnvVar relative_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", nullptr);
 
   reset_code_object_observations();
   rocjitsu::ConSanResult unchanged;
@@ -1250,6 +1258,102 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   EXPECT_EQ(g_transform_override_flavors.front(), rocjitsu::ConSanFlavor::Moi);
   ASSERT_EQ(g_transform_override_engines.size(), 1u);
   EXPECT_EQ(g_transform_override_engines.front(), rocjitsu::ConSanMoiEngine::RecordReplay);
+}
+
+TEST(HsaHooksUnitTest, ConSanThreadsAbsoluteAndRelativePatchedImageGrowthLimits) {
+  struct GrowthCase {
+    const char *absolute;
+    const char *relative;
+    rocjitsu::ConSanPatchedImageGrowthLimit expected;
+  };
+  constexpr std::array cases = {
+      GrowthCase{"4096",
+                 nullptr,
+                 {.kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+                  .absolute_bytes = 4096u,
+                  .input_percent = 0u}},
+      GrowthCase{"0100",
+                 nullptr,
+                 {.kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+                  .absolute_bytes = 100u,
+                  .input_percent = 0u}},
+      GrowthCase{nullptr,
+                 "37",
+                 {.kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent,
+                  .absolute_bytes = rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes,
+                  .input_percent = 37u}},
+      GrowthCase{nullptr,
+                 "0100",
+                 {.kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent,
+                  .absolute_bytes = rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes,
+                  .input_percent = 100u}},
+  };
+
+  for (const GrowthCase &test : cases) {
+    SCOPED_TRACE(test.absolute != nullptr ? "absolute" : "relative");
+    SCOPED_TRACE(test.absolute != nullptr ? test.absolute : test.relative);
+    configure_consan_profile(kConSanHookProfiles[1], false);
+    ScopedEnvVar absolute("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", test.absolute);
+    ScopedEnvVar relative("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", test.relative);
+    reset_code_object_observations();
+    g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+
+    ASSERT_EQ(g_transform_override_patched_image_growth_limits.size(), 1u);
+    const auto &observed = g_transform_override_patched_image_growth_limits.front();
+    EXPECT_EQ(observed, test.expected);
+  }
+}
+
+TEST(HsaHooksUnitTest, ConSanRejectsAmbiguousPatchedImageGrowthLimits) {
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar absolute("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4096");
+  ScopedEnvVar relative("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", "37");
+
+  reset_code_object_observations();
+  FakeApiTable api;
+  const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
+  InstalledDbiHook hook(api);
+  EXPECT_FALSE(hook.installed());
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
+}
+
+TEST(HsaHooksUnitTest, ConSanRejectsMalformedPatchedImageGrowthLimits) {
+  constexpr std::array cases = {
+      std::pair{"-1", static_cast<const char *>(nullptr)},
+      std::pair{" -1", static_cast<const char *>(nullptr)},
+      std::pair{"\t-1", static_cast<const char *>(nullptr)},
+      std::pair{"+5", static_cast<const char *>(nullptr)},
+      std::pair{static_cast<const char *>(nullptr), "-1"},
+      std::pair{static_cast<const char *>(nullptr), " -1"},
+      std::pair{static_cast<const char *>(nullptr), "\t-1"},
+      std::pair{static_cast<const char *>(nullptr), "+5"},
+  };
+  for (const auto &[absolute_value, relative_value] : cases) {
+    SCOPED_TRACE(absolute_value != nullptr ? "absolute" : "relative");
+    SCOPED_TRACE(absolute_value != nullptr ? absolute_value : relative_value);
+    configure_consan_profile(kConSanHookProfiles[1], false);
+    ScopedEnvVar absolute("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", absolute_value);
+    ScopedEnvVar relative("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", relative_value);
+
+    reset_code_object_observations();
+    FakeApiTable api;
+    const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
+    InstalledDbiHook hook(api);
+    EXPECT_FALSE(hook.installed());
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
+  }
 }
 
 TEST(HsaHooksUnitTest, RecordReplayBankSaturationIsTypedByEngine) {
@@ -1417,12 +1521,16 @@ void expect_transform_profile(const ConSanHookProfile &profile) {
   ASSERT_EQ(g_transform_override_track_barriers.size(), 1u);
   ASSERT_EQ(g_transform_override_track_atomics.size(), 1u);
   ASSERT_EQ(g_transform_override_runtime_sample_strides.size(), 1u);
+  ASSERT_EQ(g_transform_override_patched_image_growth_limits.size(), 1u);
   const bool expected_sync_defaults = profile.expected_flavor == rocjitsu::ConSanFlavor::Moi;
   EXPECT_EQ(g_transform_override_track_barriers.front(), expected_sync_defaults);
   EXPECT_EQ(g_transform_override_track_atomics.front(), expected_sync_defaults);
   const uint32_t expected_runtime_sample_stride =
       profile.expected_engine == rocjitsu::ConSanMoiEngine::Sampled ? 16384u : 1u;
   EXPECT_EQ(g_transform_override_runtime_sample_strides.front(), expected_runtime_sample_stride);
+  const auto &growth = g_transform_override_patched_image_growth_limits.front();
+  EXPECT_EQ(growth.kind, rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes);
+  EXPECT_EQ(growth.absolute_bytes, rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes);
 }
 
 void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,

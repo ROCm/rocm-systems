@@ -23,6 +23,16 @@ struct AppendedSidecarDescriptor {
   uint64_t vaddr = 0;
 };
 
+/// Resource-policy details for one transactional .text replacement attempt.
+///
+/// `required_file_growth` is populated after ELF alignment requirements have
+/// been resolved, even when the caller's limit rejects the transaction. It is
+/// therefore the exact inserted byte count, including alignment padding.
+struct TextReplacementInfo {
+  std::optional<size_t> required_file_growth;
+  bool file_growth_limit_exceeded = false;
+};
+
 class CodeObjectPatcher {
 public:
   explicit CodeObjectPatcher(const AmdGpuCodeObject &obj);
@@ -45,10 +55,13 @@ public:
   /// the ELF image to grow. This includes both the new text and any padding
   /// required to preserve section and segment alignment. Keeping the budget at
   /// the call site lets each transformation choose its own resource policy.
+  /// @param info Optional exact resource-policy details. This is reset before
+  /// the attempt and identifies a file-growth-limit rejection separately from
+  /// malformed input or allocation failure.
   /// @returns false, without changing this patcher, when the replacement is
   /// malformed, exceeds @p max_file_growth, or cannot be allocated.
-  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
-                                  size_t max_file_growth) noexcept;
+  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text, size_t max_file_growth,
+                                  TextReplacementInfo *info = nullptr) noexcept;
 
   /// @brief True if any relocation's place (r_offset) falls inside .text.
   ///
@@ -128,7 +141,8 @@ public:
   std::vector<uint8_t> emit() &&;
 
 private:
-  [[nodiscard]] bool replace_text_impl(std::span<const uint8_t> new_text, size_t max_file_growth);
+  [[nodiscard]] bool replace_text_impl(std::span<const uint8_t> new_text, size_t max_file_growth,
+                                       TextReplacementInfo *info);
 
   std::vector<uint8_t> image_;
   uint64_t text_offset_;

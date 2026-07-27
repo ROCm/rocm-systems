@@ -2721,7 +2721,7 @@ void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
 }
 
 void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                    ConSanResult &result) {
+                                    const ConSanOptions &options, ConSanResult &result) {
   if (result.perturbation_plans.empty())
     return;
   if (code_object.text_sections().size() != 1u) {
@@ -2909,8 +2909,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
                   trampoline_size);
     }
   }
-  if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-    result.errors.emplace_back("ConSan SC perturbation could not replace executable text");
+  if (!replace_consan_text(patcher, new_text, options, "SC perturbation", result)) {
     return;
   }
   result.elf_bytes = patcher.emit();

@@ -1578,6 +1578,7 @@ public:
         "moi_require_replay_conflict=%s moi_forbid_overflow=%s "
         "fault_barrier_index=%u "
         "delay_mode=%s delay_var_ssrc=%u "
+        "patched_image_growth_limit_kind=%s patched_image_growth_limit_value=%llu "
         "max_patches=%u max_patches_source=%s tmp_vgpr=%s moi_exec_save_sgpr=%s "
         "moi_owner_source=%s flat_provenance=%s moi_owner_sgpr=%s moi_owner_vgpr=%s "
         "moi_epoch_vgpr=%s "
@@ -1602,8 +1603,11 @@ public:
         config.moi_forbid_diagnostics ? "true" : "false",
         config.moi_require_replay_conflict ? "true" : "false",
         config.moi_forbid_overflow ? "true" : "false", config.fault_barrier_index,
-        delay_mode_name(config.delay_mode), config.delay_var_ssrc, config.max_patches,
-        config.max_patches_explicit ? "expert-limit" : "all-supported-default",
+        delay_mode_name(config.delay_mode), config.delay_var_ssrc,
+        patched_image_growth_limit_kind_name(config.patched_image_growth_limit.kind),
+        static_cast<unsigned long long>(
+            patched_image_growth_limit_value(config.patched_image_growth_limit)),
+        config.max_patches, config.max_patches_explicit ? "expert-limit" : "all-supported-default",
         config.scratch_vgpr ? std::to_string(*config.scratch_vgpr).c_str() : "auto",
         config.moi_exec_save_sgpr ? std::to_string(*config.moi_exec_save_sgpr).c_str() : "unset",
         owner_source_name(config.moi_owner_source),
@@ -2742,6 +2746,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.moi_max_workgroup_lds_bytes =
         runtime_group_segment_size_bytes(layer().core_table(), agent);
     patch_options.delay_nops = config->delay_nops;
+    patch_options.patched_image_growth_limit = config->patched_image_growth_limit;
     patch_options.max_patches = config->max_patches;
     patch_options.max_patches_is_expert_limit = config->max_patches_explicit;
     patch_options.moi_sample_stride = config->moi_sample_stride;
@@ -3092,6 +3097,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "moi_dynamic_access_records=%s "
         "fault_barrier_index=%u "
         "delay_mode=%s delay_var_ssrc=%u "
+        "patched_image_growth_limit_kind=%s patched_image_growth_limit_value=%llu "
         "max_patches=%u max_patches_source=%s tmp_vgpr=%s moi_exec_save_sgpr=%s "
         "moi_owner_source=%s moi_owner_sgpr=%s moi_owner_vgpr=%s moi_epoch_vgpr=%s "
         "report_buffer=%s report_marker=%u "
@@ -3111,7 +3117,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         config->moi_init_owner_epoch ? "true" : "false",
         config->moi_track_barriers ? "true" : "false", config->moi_track_atomics ? "true" : "false",
         config->moi_dynamic_access_records ? "true" : "false", config->fault_barrier_index,
-        delay_mode_name(config->delay_mode), config->delay_var_ssrc, config->max_patches,
+        delay_mode_name(config->delay_mode), config->delay_var_ssrc,
+        patched_image_growth_limit_kind_name(patch_options.patched_image_growth_limit.kind),
+        static_cast<unsigned long long>(
+            patched_image_growth_limit_value(patch_options.patched_image_growth_limit)),
+        config->max_patches,
         config->max_patches_explicit ? "expert-limit" : "all-supported-default",
         config->scratch_vgpr ? std::to_string(*config->scratch_vgpr).c_str() : "auto",
         config->moi_exec_save_sgpr ? std::to_string(*config->moi_exec_save_sgpr).c_str() : "unset",

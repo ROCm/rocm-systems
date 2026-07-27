@@ -595,8 +595,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     patches.push_back(std::move(info));
     ++record_index;
   }
-  if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-    result.errors.emplace_back("ConSan MOI fence record patch could not grow .text");
+  if (!replace_consan_text(patcher, new_text, options, "MOI fence record patch", result)) {
     return;
   }
   result.elf_bytes = patcher.emit();

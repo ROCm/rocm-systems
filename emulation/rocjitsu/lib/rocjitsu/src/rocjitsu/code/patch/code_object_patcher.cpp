@@ -33,6 +33,9 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace {
 
+static_assert(sizeof(size_t) >= sizeof(uint64_t),
+              "CodeObjectPatcher requires a 64-bit host address space");
+
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 
@@ -823,10 +826,12 @@ bool CodeObjectPatcher::has_relocation_to_text_symbol() const {
   return false;
 }
 
-bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
-                                     size_t max_file_growth) noexcept {
+bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text, size_t max_file_growth,
+                                     TextReplacementInfo *info) noexcept {
+  if (info != nullptr)
+    *info = {};
   try {
-    return replace_text_impl(new_text, max_file_growth);
+    return replace_text_impl(new_text, max_file_growth, info);
   } catch (const std::bad_alloc &) {
     return false;
   } catch (const std::length_error &) {
@@ -834,8 +839,8 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
   }
 }
 
-bool CodeObjectPatcher::replace_text_impl(std::span<const uint8_t> new_text,
-                                          size_t max_file_growth) {
+bool CodeObjectPatcher::replace_text_impl(std::span<const uint8_t> new_text, size_t max_file_growth,
+                                          TextReplacementInfo *info) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -876,6 +881,8 @@ bool CodeObjectPatcher::replace_text_impl(std::span<const uint8_t> new_text,
     return false;
   const uint64_t old_text_end_vaddr = text_header.sh_addr + text_size_;
   const uint64_t growth = new_text.size() - text_size_;
+  if (info != nullptr)
+    info->required_file_growth = 0;
 
   if (growth != 0) {
     std::vector<bool> shift_section_vaddr(shdrs.size(), false);
@@ -910,7 +917,14 @@ bool CodeObjectPatcher::replace_text_impl(std::span<const uint8_t> new_text,
     const auto padded_file_delta = checked_align_up(growth, *file_delta_alignment);
     if (!padded_file_delta || *padded_file_delta < growth)
       return false;
-    if (*padded_file_delta > max_file_growth || *padded_file_delta % sizeof(uint32_t) != 0 ||
+    if (info != nullptr)
+      info->required_file_growth = static_cast<size_t>(*padded_file_delta);
+    if (*padded_file_delta > max_file_growth) {
+      if (info != nullptr)
+        info->file_growth_limit_exceeded = true;
+      return false;
+    }
+    if (*padded_file_delta % sizeof(uint32_t) != 0 ||
         *padded_file_delta > image.max_size() - image.size())
       return false;
 

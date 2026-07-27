@@ -1,12 +1,88 @@
 namespace rocjitsu {
 
-/// Maximum additional ELF storage one ConSan transformation may materialize,
-/// including alignment padding. CodeObjectPatcher deliberately leaves this
-/// resource policy to each caller.
-// Dense production code objects can require one out-of-line body per admitted
-// access. Keep the transaction bounded independently of the input object while
-// leaving room for complete instrumentation of large generated libraries.
-inline constexpr size_t kConSanMaxPatchedFileGrowth = size_t{192} * 1024 * 1024;
+/// Default maximum additional ELF storage one ConSan transformation may
+/// materialize, including alignment padding. Dense production code objects can
+/// require one out-of-line body per admitted access, so retain the established
+/// 192 MiB default until workload data supports changing it.
+inline constexpr uint64_t kConSanDefaultMaxPatchedImageGrowthBytes = uint64_t{192} * 1024 * 1024;
+
+enum class ConSanPatchedImageGrowthLimitKind : uint8_t {
+  AbsoluteBytes,
+  InputPercent,
+};
+
+/// Resource policy for one complete ConSan code-object transformation.
+///
+/// Both forms bound total additional ELF bytes across one complete code-object
+/// transformation. The relative form resolves against the original input image
+/// rather than an intermediate image produced by an earlier ConSan stage. It is
+/// an alternative to the absolute form rather than a second silently combined
+/// cap.
+struct ConSanPatchedImageGrowthLimit {
+  ConSanPatchedImageGrowthLimitKind kind = ConSanPatchedImageGrowthLimitKind::AbsoluteBytes;
+  uint64_t absolute_bytes = kConSanDefaultMaxPatchedImageGrowthBytes;
+  uint32_t input_percent = 0;
+
+  auto operator<=>(const ConSanPatchedImageGrowthLimit &) const = default;
+};
+
+/// Resolve a configured policy without overflowing size_t. An invalid enum
+/// value is rejected instead of silently selecting a fallback.
+[[nodiscard]] inline std::optional<size_t>
+consan_patched_image_growth_limit_bytes(const ConSanPatchedImageGrowthLimit &policy,
+                                        size_t input_image_bytes) {
+  static_assert(sizeof(size_t) >= sizeof(uint64_t),
+                "ConSan patched-image accounting requires a 64-bit size_t");
+  switch (policy.kind) {
+  case ConSanPatchedImageGrowthLimitKind::AbsoluteBytes:
+    return static_cast<size_t>(policy.absolute_bytes);
+  case ConSanPatchedImageGrowthLimitKind::InputPercent: {
+    const size_t whole = input_image_bytes / 100u;
+    const size_t remainder = input_image_bytes % 100u;
+    if (whole != 0u && policy.input_percent > std::numeric_limits<size_t>::max() / whole) {
+      return std::numeric_limits<size_t>::max();
+    }
+    const size_t whole_bytes = whole * policy.input_percent;
+    const size_t remainder_bytes =
+        static_cast<size_t>((static_cast<uint64_t>(remainder) * policy.input_percent) / 100u);
+    if (remainder_bytes > std::numeric_limits<size_t>::max() - whole_bytes)
+      return std::numeric_limits<size_t>::max();
+    return whole_bytes + remainder_bytes;
+  }
+  }
+  return std::nullopt;
+}
+
+struct ConSanPatchedImageGrowthBudget {
+  size_t input_image_bytes = 0;
+  size_t current_image_bytes = 0;
+  size_t total_limit_bytes = 0;
+  size_t existing_growth_bytes = 0;
+  size_t remaining_growth_bytes = 0;
+  bool already_exceeded = false;
+};
+
+/// Resolve the remaining budget for a transformation stage against the
+/// original code-object image. This prevents successive stages from each
+/// receiving a fresh full allowance.
+[[nodiscard]] inline std::optional<ConSanPatchedImageGrowthBudget>
+consan_patched_image_growth_budget(const ConSanPatchedImageGrowthLimit &policy,
+                                   size_t input_image_bytes, size_t current_image_bytes) {
+  const auto total_limit = consan_patched_image_growth_limit_bytes(policy, input_image_bytes);
+  if (!total_limit)
+    return std::nullopt;
+  const size_t existing_growth =
+      current_image_bytes > input_image_bytes ? current_image_bytes - input_image_bytes : 0u;
+  return ConSanPatchedImageGrowthBudget{
+      .input_image_bytes = input_image_bytes,
+      .current_image_bytes = current_image_bytes,
+      .total_limit_bytes = *total_limit,
+      .existing_growth_bytes = existing_growth,
+      .remaining_growth_bytes =
+          existing_growth > *total_limit ? 0u : *total_limit - existing_growth,
+      .already_exceeded = existing_growth > *total_limit,
+  };
+}
 
 enum class ConSanFlavor : uint8_t {
   None,
@@ -472,6 +548,10 @@ struct ConSanOptions {
   /// Auto report buffers use the stable code-object reader identity.
   uint64_t moi_report_dispatch_id = 0;
   uint32_t delay_nops = 0;
+  ConSanPatchedImageGrowthLimit patched_image_growth_limit;
+  /// Internal immutable baseline set by the public transform entry point and
+  /// retained by every staged composition pass.
+  std::optional<size_t> patched_image_growth_input_bytes;
   uint32_t max_patches = 1;
   // Programmatic callers set max_patches as an explicit cap by default.  The
   // runtime hook clears this for its all-supported policy so independent

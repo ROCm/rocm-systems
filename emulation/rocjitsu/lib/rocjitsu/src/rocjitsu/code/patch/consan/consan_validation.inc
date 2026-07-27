@@ -101,8 +101,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
       patch.owner_descriptor_file_offsets.push_back(*wait.owner_descriptor_file_offset);
     patches.push_back(std::move(patch));
   }
-  if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-    result.errors.emplace_back("ConSan unmatched barrier abort could not rewrite executable text");
+  if (!replace_consan_text(patcher, new_text, options, "unmatched barrier abort", result)) {
     return;
   }
   result.elf_bytes = patcher.emit();

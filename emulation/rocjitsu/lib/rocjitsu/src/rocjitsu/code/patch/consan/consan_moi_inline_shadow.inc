@@ -1522,11 +1522,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       append_words_bytes(new_text, host_words);
     }
 
-    if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-      result.errors.emplace_back("ConSan MOI inline-shadow probe could not grow .text from " +
-                                 std::to_string(old_text.size()) + " to " +
-                                 std::to_string(new_text.size()) + " bytes (maximum file growth " +
-                                 std::to_string(kConSanMaxPatchedFileGrowth) + ")");
+    if (!replace_consan_text(patcher, new_text, options, "MOI inline-shadow probe", result)) {
       return;
     }
     result.elf_bytes = patcher.emit();

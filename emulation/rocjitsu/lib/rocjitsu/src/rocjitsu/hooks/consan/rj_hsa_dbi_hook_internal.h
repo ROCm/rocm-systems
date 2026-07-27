@@ -140,6 +140,7 @@ struct HookConfig {
   uint64_t moi_auto_report_buffer_size = 0;
   bool moi_auto_report_buffer_size_explicit = false;
   uint32_t delay_nops = 0;
+  rocjitsu::ConSanPatchedImageGrowthLimit patched_image_growth_limit;
   uint32_t max_patches = kConSanAllSupportedPatchBudget;
   bool max_patches_explicit = false;
   uint32_t moi_sample_stride = 1;
@@ -631,6 +632,24 @@ moi_resource_source_name(rocjitsu::ConSanRegisterAllocationSource source) {
 
 [[nodiscard]] inline const char *delay_mode_name(rocjitsu::ConSanDelayMode mode) {
   return rocjitsu::consan_delay_mode_name(mode);
+}
+
+[[nodiscard]] inline const char *
+patched_image_growth_limit_kind_name(rocjitsu::ConSanPatchedImageGrowthLimitKind kind) {
+  switch (kind) {
+  case rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes:
+    return "absolute-bytes";
+  case rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent:
+    return "input-percent";
+  }
+  return "unknown";
+}
+
+[[nodiscard]] inline uint64_t
+patched_image_growth_limit_value(const rocjitsu::ConSanPatchedImageGrowthLimit &limit) {
+  return limit.kind == rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent
+             ? limit.input_percent
+             : limit.absolute_bytes;
 }
 
 [[nodiscard]] inline const char *owner_source_name(rocjitsu::ConSanMoiOwnerSource source) {

@@ -2077,8 +2077,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     }
   }
 
-  if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-    result.errors.emplace_back("ConSan MOI inline-shadow barrier epoch patch could not grow .text");
+  if (!replace_consan_text(patcher, new_text, options, "MOI inline-shadow barrier epoch patch",
+                           result)) {
     return;
   }
 
@@ -2482,8 +2482,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     result.warnings.emplace_back("ConSan MOI barrier record patch found no patchable barriers");
     return;
   }
-  if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-    result.errors.emplace_back("ConSan MOI barrier record patch could not grow .text");
+  if (!replace_consan_text(patcher, new_text, options, "MOI barrier record patch", result)) {
     return;
   }
 

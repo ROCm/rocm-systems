@@ -1415,8 +1415,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         patches.push_back(std::move(info));
       }
     }
-    if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-      result.errors.emplace_back("ConSan MOI sampled barrier sync could not grow .text");
+    if (!replace_consan_text(patcher, new_text, options, "MOI sampled barrier sync", result)) {
       return;
     }
     result.elf_bytes = patcher.emit();
@@ -1535,8 +1534,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     }
     patches.push_back(std::move(info));
   }
-  if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-    result.errors.emplace_back("ConSan MOI sampled barrier sync could not grow .text");
+  if (!replace_consan_text(patcher, new_text, options, "MOI sampled barrier sync", result)) {
     return;
   }
   result.elf_bytes = patcher.emit();
@@ -2155,8 +2153,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     patches.push_back(std::move(info));
   }
-  if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-    result.errors.emplace_back("ConSan MOI sampled atomic sync could not grow .text");
+  if (!replace_consan_text(patcher, new_text, options, "MOI sampled atomic sync", result)) {
     return;
   }
   result.elf_bytes = patcher.emit();

@@ -1436,8 +1436,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                     planned.words.size() * sizeof(uint32_t));
       }
     }
-    if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-      result.errors.emplace_back("ConSan flat check/trap proof could not append trampoline text");
+    if (!replace_consan_text(patcher, new_text, options, "flat check/trap proof", result)) {
       return;
     }
     result.elf_bytes = patcher.emit();

@@ -400,8 +400,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     ++record_index;
   }
 
-  if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-    result.errors.emplace_back("ConSan MOI atomic record patch could not grow .text");
+  if (!replace_consan_text(patcher, new_text, options, "MOI atomic record patch", result)) {
     return;
   }
   result.elf_bytes = patcher.emit();

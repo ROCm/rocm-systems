@@ -813,7 +813,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     try_apply_proof_nop_patch(code_object, arch, options.probe_trampoline_nop, result);
 
   if (has_perturbation && result.errors.empty()) {
-    try_apply_perturbation_patches(code_object, arch, result);
+    try_apply_perturbation_patches(code_object, arch, options, result);
     if (result.applied_perturbations != result.perturbation_plans.size()) {
       result.modified = false;
       result.elf_bytes.clear();

@@ -376,8 +376,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     result.warnings.emplace_back("ConSan MOI inline atomic patch found no patchable atomics");
     return;
   }
-  if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-    result.errors.emplace_back("ConSan MOI inline atomic patch could not grow .text");
+  if (!replace_consan_text(patcher, new_text, options, "MOI inline atomic patch", result)) {
     return;
   }
   result.elf_bytes = patcher.emit();

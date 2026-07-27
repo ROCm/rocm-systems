@@ -1436,8 +1436,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
       std::memcpy(new_text.data() + placement->body_offset, cave_words.data(),
                   cave_words.size() * sizeof(uint32_t));
     }
-    if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-      result.errors.emplace_back("ConSan markerless barrier move could not append trampoline text");
+    if (!replace_consan_text(patcher, new_text, options, "markerless barrier move", result)) {
       return;
     }
     result.elf_bytes = patcher.emit();

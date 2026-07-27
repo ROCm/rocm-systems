@@ -153,11 +153,17 @@ continues to return the HSA error to callers that correctly handle it.
 | `RJ_CONSAN_FAIL_CLOSED=0|1` | `0` | Reject unsupported/invalid transformation outcomes instead of loading the original. |
 | `RJ_CONSAN_REQUIRE_PATCH=0|1` | `0` | Reject an applicable code object when no real access/barrier/atomic/fence instrumentation patch is emitted. Prologues and metadata-only changes do not satisfy it. |
 | `RJ_CONSAN_FLAT_PROVENANCE=likely|strict` | `likely` | Admit proven `Group` plus heuristic `MaybeGroup` flat LDS sites, or only proven `Group` sites. |
+| `RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES=N` | `201326592` (192 MiB) | Bound total additional ELF bytes, including alignment padding, across one code-object transformation. `N` is unsigned decimal; zero permits only no-growth rewrites. |
+| `RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT=N` | unset (absolute policy applies) | Use an alternative bound relative to the original code object: total additional ELF bytes may not exceed `floor(original input bytes * N / 100)`. `N` is unsigned decimal in `0..4294967295`; values above 100 intentionally allow growth larger than the original image. |
 | `RJ_CONSAN_DUMP_DIR=PATH` | unset | Write original and transformed `.hsaco` objects for inspection. |
 
 For one transition, the old `RJ_CONSAN_FLAVOR`, `RJ_CONSAN_MOI_ENGINE`, and
 `RJ_CONSAN_MOI_BACKEND` variables remain accepted with deprecation warnings.
 Do not combine old selection variables with `RJ_CONSAN_MODE`.
+The absolute and percentage growth variables are mutually exclusive. A
+growth-policy rejection reports the exact alignment-inclusive bytes required,
+the effective total limit, and the selected policy. Successive ConSan stages
+share that one original-image budget rather than receiving independent limits.
 
 ## SuperCollider controls
 
