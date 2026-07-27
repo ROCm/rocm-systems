@@ -7,7 +7,12 @@ include( CMakeFindDependencyMacro )
 # the build. If libnuma was represented by an imported target when hsakmt was
 # built, recreate that target before loading hsakmt's exported target.
 if(@HSAKMT_FIND_NUMA_DEPENDENCY@)
+  # A ROCm distribution that bundles libnuma installs its package config under
+  # lib/rocm_sysdeps, which is not on a consumer's default search path. Scope
+  # the hint to this lookup so it does not leak into the consuming project.
+  list(APPEND CMAKE_PREFIX_PATH "${PACKAGE_PREFIX_DIR}/lib/rocm_sysdeps")
   find_dependency(NUMA)
+  list(REMOVE_AT CMAKE_PREFIX_PATH -1)
 endif()
 
 # If the option is ON link other dependent libraries dynamically
