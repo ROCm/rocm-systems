@@ -39,6 +39,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_npm.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi/rocm_smi_vram.h"
 
 using amd::smi::AMDGpuMetricTypeId_t;
 using amd::smi::getRSMIStatusString;
@@ -4185,12 +4186,7 @@ rsmi_status_t rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t* sensor
 }
 
 namespace amd::smi {
-// Prefer the KFD topology (mem_banks) total over sysfs mem_info_vram_total in
-// three cases: sysfs is unusable (0 or failure, e.g. MI300A where the node is
-// absent); a multi-partition mode (CPX/DPX/TPX/QPX), where sysfs splits the
-// whole device evenly and ignores reserved memory; and APUs (e.g. gfx1151),
-// where sysfs shows only the small BIOS carveout instead of the unified pool.
-//
+// See rocm_smi_vram.h for the three cases this covers. Implementation note:
 // APUs are detected by size (kfd_total > sysfs_total), not a flag, because the
 // driver exposes no APU marker (processor_type is AMD_GPU for APU and discrete
 // alike). On discrete and SPX GPUs sysfs is not smaller than the KFD FB_PUBLIC
@@ -4261,11 +4257,14 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
     }
     if (kfd_total > 0 &&
         amd::smi::vram_total_prefer_kfd(sysfs_read_ok, *total, compute_partition_str, kfd_total)) {
+      uint64_t sysfs_total = *total;
       *total = kfd_total;
-      ss << __PRETTY_FUNCTION__ << " | inside success fallback... "
+      ss << __PRETTY_FUNCTION__ << " | preferring KFD VRAM total"
          << " | Device #: " << std::to_string(dv_ind)
          << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
-         << " | Data: total = " << std::to_string(*total)
+         << " | partition = " << (compute_partition_str.empty() ? "<none>" : compute_partition_str)
+         << " | sysfs total = " << std::to_string(sysfs_total)
+         << " | kfd total = " << std::to_string(kfd_total)
          << " | ret = " << getRSMIStatusString(RSMI_STATUS_SUCCESS);
       LOG_DEBUG(ss);
       return RSMI_STATUS_SUCCESS;
