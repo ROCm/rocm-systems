@@ -53,9 +53,7 @@ class IGPUBackend {
   virtual amdsmi_status_t GetVoltMetric(amdsmi_voltage_type_t, amdsmi_voltage_metric_t, int64_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetPowerInfo(amdsmi_power_info_t*) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
+  virtual amdsmi_status_t GetPowerInfo(amdsmi_power_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
   virtual amdsmi_status_t GetGpuActivity(amdsmi_engine_usage_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
