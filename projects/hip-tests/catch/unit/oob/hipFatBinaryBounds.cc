@@ -290,7 +290,7 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Negative_TruncatedImages) {
  * against the bounds checks regressing into false positives.
  */
 HIP_TEST_CASE(Unit_hipModuleLoadData_Positive_ValidFileBackedImage) {
-  FileBackedMapping mapping("copyKernelCompressed.code");
+  FileBackedMapping mapping("oob_copyKernelCompressed.code");
 
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoadData(&module, mapping.data()));
