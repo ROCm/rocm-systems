@@ -793,12 +793,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDeregisterMemory(void *MemoryAddress) {
       delete gpu_mem;
       return HSAKMT_STATUS_SUCCESS;
     }
-    if (it->second.userptr) {
-      allocation_map_->erase((void*)it->second.gpu_addr);
-      allocation_map_->erase(it);
-      delete gpu_mem;
-      return HSAKMT_STATUS_SUCCESS;
-    }
   }
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -877,15 +871,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
       }
     }
 
-    // userptr mem
-    it = FindAllocation(MemoryAddress, aligned_size);
-    if (it != nullptr) {
-      if (it->userptr && it->size >= MemorySizeInBytes) {
-        *AlternateVAGPU =
-            (uintptr_t)it->gpu_addr +
-            ((uintptr_t)MemoryAddress - (uintptr_t)it->cpu_addr);
-        return HSAKMT_STATUS_SUCCESS;
-      }
+    // Reuse only an exact user-pointer mapping.
+    auto map_it = allocation_map_->find(MemoryAddress);
+    if (map_it != allocation_map_->end() && map_it->second.userptr &&
+        map_it->second.size_requested == MemorySizeInBytes) {
+      wsl::thunk::GpuMemory::Convert(map_it->second.handle)->IncMappingCount();
+      *AlternateVAGPU =
+          (uintptr_t)map_it->second.gpu_addr +
+          ((uintptr_t)MemoryAddress - (uintptr_t)map_it->second.cpu_addr);
+      return HSAKMT_STATUS_SUCCESS;
     }
   }
 
@@ -967,6 +961,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
         return HSAKMT_STATUS_ERROR;
       gpu_mem->Evict();
 
+      return HSAKMT_STATUS_SUCCESS;
+    }
+
+    if (it->second.userptr) {
+      if (gpu_mem->DecMappingCount() == 0) {
+        allocation_map_->erase((void*)it->second.gpu_addr);
+        allocation_map_->erase(it);
+        delete gpu_mem;
+      }
       return HSAKMT_STATUS_SUCCESS;
     }
   }
@@ -1292,7 +1295,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
   return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHandle, HSAint32* fd) 
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHandle, HSAint32* fd)
 {
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
