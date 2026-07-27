@@ -71,6 +71,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/encodings.h"
@@ -8168,7 +8169,7 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtF32Fp8E5m3ForA0) {
   EXPECT_EQ(bfe_count, 1) << "E5M3 unpack must isolate the byte with exactly one v_bfe_u32";
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250CopiesWmmaWithoutAnA0SpecificWorkaround) {
+TEST(BinaryTranslatorE2E, Gfx1250CopiesWmmaOutsideB0ToA0Profile) {
   constexpr auto source_wmma = gfx1250::build_vop3p(
       gfx1250::kVWmmaF3216x16x32Bf16Vop3p, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -8193,7 +8194,7 @@ TEST(BinaryTranslatorE2E, Gfx1250CopiesWmmaWithoutAnA0SpecificWorkaround) {
   EXPECT_EQ(target_words[2], kGfx1250SEndpgm);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250EqualRevisionsDoNotApplyA0Errata) {
+TEST(BinaryTranslatorE2E, Gfx1250EqualRevisionsUseIdentityProfile) {
   constexpr auto source_ds2 = gfx1250::build_vds(
       gfx1250::kDsLoad2addrB32Vds, {.offset0 = 1, .offset1 = 3, .addr = 7, .vdst = 9});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -8470,6 +8471,28 @@ TEST(BinaryTranslatorE2E, Gfx1250Ds2AdjustsDestinationBankForSecondLoad) {
     generated_modes.push_back(static_cast<uint16_t>(decoded[index]->raw_encoding()[0] & 0xffffu));
   }
   EXPECT_EQ(generated_modes, (std::vector<uint16_t>{0x0040, 0x4000}));
+}
+
+TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
+  std::vector<uint32_t> liveness_free_rules;
+  for (const rocjitsu::TranslationRule &rule : rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0()) {
+    if (!rule.requires_liveness) {
+      liveness_free_rules.push_back((static_cast<uint32_t>(rule.src_encoding_id) << 16) |
+                                    rule.src_opcode);
+    }
+  }
+
+  const std::vector<uint32_t> expected = {
+      (static_cast<uint32_t>(gfx1250::encoding::kSopp) << 16) | gfx1250::kSClauseSopp,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
+          gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) | gfx1250::kVWmmaI3216x16x64Iu8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
+          gfx1250::kVSwmmacI3216x16x128Iu8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF3232x16x128F4Vop3p,
+  };
+  EXPECT_EQ(liveness_free_rules, expected);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250LowersF32K128Fp8Bf8WmmaToNeutralRegularScale) {
@@ -8991,11 +9014,9 @@ void init_c_code_object(rj_code_object_t &handle, const std::vector<uint8_t> &im
 } // namespace
 
 TEST(RjCodeTranslateCApi, RejectsSameArchGfx1250) {
-  // The C ABI carries no silicon revision, and gfx1250 A0/B0 share an ELF machine
-  // ID, so a same-architecture gfx1250 translation is direction-ambiguous. The C
-  // entry point must fail closed rather than pass the object through unchanged
-  // (which would silently skip any required workarounds). Revision-aware B0->A0 is
-  // reached through the C++ BinaryTranslator instead (see the tests below).
+  // The C ABI carries no silicon revision, and gfx1250 A0 and B0 share an ELF
+  // machine ID, so a same-architecture translation is direction-ambiguous.
+  // Revision-aware B0-to-A0 translation uses the C++ BinaryTranslator instead.
   constexpr auto mov = gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image =
@@ -9013,9 +9034,8 @@ TEST(RjCodeTranslateCApi, RejectsSameArchGfx1250) {
 }
 
 TEST(BinaryTranslatorEnforcesGfx1250Revisions, SameArchUnspecifiedRevisionFailsClosed) {
-  // Direct BinaryTranslator use with same-arch gfx1250 and no revisions must fail
-  // closed, so a caller cannot get a silent identity copy that skips the
-  // workarounds. This is the guard the C entry point relies on.
+  // Direct BinaryTranslator use with same-arch gfx1250 and no revisions fails
+  // closed because no translation profile was selected.
   constexpr auto cluster =
       gfx1250::build_vglobal(gfx1250::kClusterLoadB64Vglobal, {.saddr = 4, .vdst = 8, .vaddr = 12});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -9031,10 +9051,8 @@ TEST(BinaryTranslatorEnforcesGfx1250Revisions, SameArchUnspecifiedRevisionFailsC
 }
 
 TEST(BinaryTranslatorEnforcesGfx1250Revisions, TranslatesGfx1250B0ToA0WithRevisions) {
-  // With both revisions provided, a B0->A0 translation runs and selects the
-  // workaround path: the cluster load stays a cluster load framed by an M0=0
-  // sequence (see the operand-level test), and translation succeeds. This is the
-  // revision-aware path the DBT hook and CLI drive through BinaryTranslator.
+  // With both revisions provided, B0-to-A0 translation selects its profile. The
+  // cluster load remains a cluster load framed by an M0=0 sequence.
   constexpr auto cluster =
       gfx1250::build_vglobal(gfx1250::kClusterLoadB64Vglobal, {.saddr = 4, .vdst = 8, .vaddr = 12});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;

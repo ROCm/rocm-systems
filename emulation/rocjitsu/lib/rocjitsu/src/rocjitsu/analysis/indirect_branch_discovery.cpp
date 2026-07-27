@@ -687,6 +687,12 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   return (inst.flags() & INDIRECT_CALL) != 0 && inst.branch_offset_bytes().has_value();
 }
 
+[[nodiscard]] bool is_recoverable_indirect_consumer(const Instruction &inst) {
+  // Every fixup producer in this pass targets one of these consumer kinds.
+  // Extend this predicate when adding recovery for another terminator.
+  return is_indirect_branch(inst) || ((inst.flags() & INDIRECT_CALL) != 0 && !is_direct_call(inst));
+}
+
 [[nodiscard]] bool has_no_direct_successor(const Instruction &inst) {
   // Indirect branches have no known target until this analysis recovers one.
   // Indirect calls still expose their ordinary fallthrough/return continuation
@@ -1783,6 +1789,27 @@ struct VectorLaneFlowState {
   return ref;
 }
 
+// Whether a physical VGPR is callee-saved under the AMDGPU device calling
+// convention (CSR_AMDGPU_VGPRs). The callee-saved VGPRs are interleaved with
+// scratch registers in stripes of eight at a stride of sixteen starting at
+// v40: v40-47, v56-63, v72-79, ... A conforming callee must preserve these
+// across a call, so a PC stashed in one survives an intervening call even
+// though the analysis does not descend into the callee body.
+//
+// TODO: Replace this calling-convention assumption with analysis that proves
+// every reachable callee preserves the stashed physical VGPR before allowing
+// the stash to survive a call. A compiler-generated callee violating the ABI is
+// highly unlikely, but hand-written or otherwise non-conforming code may still
+// do so. See the LLVM AMDGPU User Guide and AMDGPUCallingConv.td.
+//
+// @p phys_vgpr is the resolved physical index, which for gfx1250 VGPR_MSB
+// banking may exceed 255 (bank*256 + selector). The ABI table only defines the
+// convention for v0-255, so a banked register above that range is NOT proven
+// callee-saved and must fail closed rather than be masked down to its selector.
+[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
+  return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
+}
+
 void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
                                      std::vector<IndirectCallFixup> &recovered,
                                      std::span<const uint64_t> extra_leaders) {
@@ -1802,9 +1829,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   // conflicting definition, unknown bank, or overlapping VGPR write therefore
   // still fails closed.
   //
-  // The gfx1250 A0 trap-recovery workaround requires S_SET_VGPR_MSB SIMM16[15:8]
-  // to carry the previous bank state. The architectural bank update remains
-  // SIMM16[7:0], so analysis intentionally ignores the workaround metadata byte.
+  // The gfx1250 A0 profile uses S_SET_VGPR_MSB SIMM16[15:8] for the previous
+  // bank state. The bank update remains SIMM16[7:0], so analysis ignores the
+  // profile metadata byte.
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
@@ -1863,10 +1890,12 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
 
       if (facts.call_sdst) {
         // A direct call can clobber any caller-saved VGPR before its
-        // fallthrough continuation executes. The temporary CFG has no
-        // context-sensitive return edge, so no pre-call lane stash is proven
-        // to survive into either successor.
-        state.slots.clear();
+        // fallthrough continuation executes, and the temporary CFG has no
+        // context-sensitive return edge. Drop every stash in a caller-saved
+        // VGPR; a conforming callee must preserve a callee-saved VGPR, so a
+        // stash there survives (see is_callee_saved_vgpr).
+        std::erase_if(state.slots,
+                      [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
       }
 
       if (mnemonic == "v_writelane_b32") {
@@ -1929,9 +1958,12 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
       if (facts.swappc_sdst) {
         // A returning indirect call may execute arbitrary callee code before
         // the fallthrough continuation. Resolve this call from the pre-call
-        // state above, then discard every lane stash before publishing the
-        // block exit so a callee-clobbered value cannot reach the continuation.
-        state.slots.clear();
+        // state above, then drop every stash in a caller-saved VGPR before
+        // publishing the block exit so a callee-clobbered value cannot reach
+        // the continuation. A callee-saved VGPR is preserved by a conforming
+        // callee, so a stash there survives (see is_callee_saved_vgpr).
+        std::erase_if(state.slots,
+                      [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
       }
 
       RegisterSet vgpr_defs;
@@ -2165,16 +2197,11 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
   return static_cast<uint16_t>((word >> 16) & 0x7fu);
 }
 
-} // namespace
-
-std::vector<IndirectCallFixup>
-discover_indirect_branch_edges(std::span<const Instruction *const> insts,
-                               std::span<const uint8_t> text, rj_code_arch_t arch,
-                               std::span<const uint64_t> extra_leaders) {
+[[nodiscard]] std::vector<IndirectCallFixup>
+discover_indirect_branch_edges_unfiltered(std::span<const Instruction *const> insts,
+                                          std::span<const uint8_t> text, rj_code_arch_t arch,
+                                          std::span<const uint64_t> extra_leaders) {
   std::vector<IndirectCallFixup> recovered;
-  if (insts.empty())
-    return recovered;
-
   AnalysisContext ctx = build_context(insts, text, arch);
   recover_vector_lane_stashed_pcs(ctx, recovered, extra_leaders);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
@@ -2207,6 +2234,34 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
 
   std::ranges::sort(recovered, {}, &IndirectCallFixup::source_call_offset);
   return recovered;
+}
+
+} // namespace
+
+std::vector<IndirectCallFixup>
+discover_indirect_branch_edges(std::span<const Instruction *const> insts,
+                               std::span<const uint8_t> text, rj_code_arch_t arch,
+                               std::span<const uint64_t> extra_leaders) {
+  if (insts.empty())
+    return {};
+
+  // Every recoverable edge ends at an indirect branch/call consumer. Most
+  // generated kernels have none, so avoid building the auxiliary CFG and
+  // running its dataflow passes when no fixup can possibly be produced.
+  const bool has_indirect_consumer = std::ranges::any_of(
+      insts, [](const Instruction *inst) { return is_recoverable_indirect_consumer(*inst); });
+  if (!has_indirect_consumer) {
+#ifndef NDEBUG
+    // Keep the cheap predicate coupled to every fixup producer. A future
+    // recovery path for another consumer kind must extend the predicate above.
+    const auto unfiltered =
+        discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders);
+    assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
+#endif
+    return {};
+  }
+
+  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders);
 }
 
 } // namespace rocjitsu

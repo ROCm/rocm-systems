@@ -15,7 +15,7 @@
 // Increment the step version when new runtime API functions are added.
 // If the corresponding table version increases, reset the step version
 // to zero.
-#define HIPFILE_RUNTIME_API_TABLE_STEP_VERSION 1
+#define HIPFILE_RUNTIME_API_TABLE_STEP_VERSION 0
 
 // hipFile API interface
 typedef const char *(*PfnHipFileGetOpErrorString)(hipFileOpError_t status);
@@ -60,9 +60,6 @@ typedef hipFileError_t (*PfnHipFileSetParameterSizeT)(hipFileSizeTConfigParamete
 typedef hipFileError_t (*PfnHipFileSetParameterBool)(hipFileBoolConfigParameter_t param, bool value);
 typedef hipFileError_t (*PfnHipFileSetParameterString)(hipFileStringConfigParameter_t param,
                                                        const char                    *desc_str);
-typedef hipFileError_t (*PfnHipFileGetStatsL1)(hipFileStatsLevel1_t *stats);
-typedef hipFileError_t (*PfnHipFileGetStatsL2)(hipFileStatsLevel2_t *stats);
-typedef hipFileError_t (*PfnHipFileGetStatsL3)(hipFileStatsLevel3_t *stats);
 
 // hipFile API dispatch table
 struct hipFileDispatchTable {
@@ -102,12 +99,6 @@ struct hipFileDispatchTable {
     // PLEASE DO NOT EDIT ABOVE!
 
     // HIPFILE_RUNTIME_API_TABLE_STEP_VERSION == 1
-    PfnHipFileGetStatsL1 pfn_hipfile_get_stats_l1;
-    PfnHipFileGetStatsL2 pfn_hipfile_get_stats_l2;
-    PfnHipFileGetStatsL3 pfn_hipfile_get_stats_l3;
-    // PLEASE DO NOT EDIT ABOVE!
-
-    // HIPFILE_RUNTIME_API_TABLE_STEP_VERSION == 2
 
     // *******************************************************************************************
     //                                            READ BELOW

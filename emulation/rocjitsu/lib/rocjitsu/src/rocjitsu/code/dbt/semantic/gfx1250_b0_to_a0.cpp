@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file semantic/gfx1250_b0_to_a0.cpp
-/// @brief Handwritten semantic expansions for gfx1250 B0-to-A0 errata.
+/// @brief Handwritten semantic expansions for gfx1250 B0-to-A0 translation.
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
@@ -200,10 +200,10 @@ struct Gfx1250Ds2Shape {
 
 /// @brief Expand a gfx1250 B0 two-address DS operation for A0.
 ///
-/// @details A0 requires DS2 offsets to satisfy alignment restrictions which B0
-/// relaxed. Two ordinary DS operations accept byte offsets and avoid that
-/// erratum. A local DSCNT drain preserves the completion semantics of the one
-/// original DS instruction without having to rewrite downstream wait counts.
+/// @details A0 and B0 use different DS2 offset alignment rules. The B0-to-A0
+/// profile translates the operation into two ordinary DS operations with byte
+/// offsets. A local DSCNT drain preserves the completion semantics of the
+/// original instruction without rewriting downstream wait counts.
 ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
                                 std::span<const uint8_t>, const LivenessAnalysis &liveness,
                                 TranslationContext &, const LaneLayout *, const LaneLayout *) {
@@ -390,16 +390,15 @@ void set_word_field(uint32_t &word, uint32_t value, uint32_t shift, uint32_t wid
   word = (word & ~mask) | ((value << shift) & mask);
 }
 
-/// @brief Apply the A0 regular-scale fixes, including the B0-only M=32 split.
+/// @brief Apply the B0-to-A0 regular-scale translation, including the M=32 split.
 ///
-/// @details VOP3PX2 bits [58:50] are an unused `scale_src2` encoding which SQ
-/// nevertheless decodes as a source register. Encoding VGPR0 (0x100) prevents
-/// the zero-filled B0 encoding from creating a false SGPR dependency. This is
-/// an encoding erratum only for the common M=16 form.
+/// @details The translation profile encodes VGPR0 (0x100) in the VOP3PX2
+/// `scale_src2` field for the M=16 form.
 ///
-/// gfx1250 B0 additionally introduces the M=32 FP4 form. A0 has only the M=16
-/// F8F6F4 operation, so split M into two independent halves. The scale layout
-/// assigns M=0..15 and M=16..31 to lanes 0..15 and 16..31 of the same
+/// gfx1250 B0 additionally introduces the M=32 FP4 form. A0 has the M=16
+/// F8F6F4 operation, so the profile translates M=32 into two independent
+/// halves. The scale layout assigns M=0..15 and M=16..31 to lanes 0..15 and
+/// 16..31 of the same
 /// A-scale VGPR; SCL_OPSEL selects the corresponding lane half. Matrix B and
 /// its scale are shared. D, A, and a VGPR C are sliced by eight dwords. Both
 /// replacement matrix-format fields are forced to FP4, and reuse promises are
@@ -520,13 +519,10 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
   return ExpandResult::success(std::move(words));
 }
 
-/// @brief Split the standalone B0 32x16 FP4 WMMA for A0.
-/// @details Fails closed. The split would emit bare low-precision WMMA halves,
-/// which are exactly the forms the legalizer rejects on input (their standalone
-/// two-dword base encoding is not safe to emit for A0). The safe replacement is
-/// the regular-Scale-prefixed encoding with neutral inline scales, but that
-/// lowering is not yet implemented, so the whole instruction fails closed rather
-/// than emitting a form that would itself need re-legalization.
+/// @brief Translate the standalone B0 32x16 FP4 WMMA for A0.
+/// @details The profile represents this operation as regular-Scale-prefixed
+/// halves with neutral inline scales. That lowering is not yet implemented, so
+/// this rule fails closed.
 ExpandResult expand_gfx1250_wmma_32x16_f4(const Instruction &inst, uint32_t, uint64_t,
                                           std::span<const uint8_t>, const LivenessAnalysis &,
                                           TranslationContext &, const LaneLayout *,
@@ -1203,15 +1199,14 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   return ExpandResult::success(std::move(words));
 }
 
-/// @brief Wrap a standalone low-precision WMMA in an A0-safe neutral scale prefix.
+/// @brief Wrap a standalone low-precision WMMA in the neutral scale prefix.
 ///
-/// @details gfx1250 A0 cannot safely expose the bare F8F6F4 matrix instruction to
-/// trap/CWSR recovery. The documented workaround is the regular-Scale four-DWORD
-/// form with inline-zero scale operands, which the ISA defines as scale 1.0 and
-/// which requires no temporary GPR. Keep the original two-DWORD matrix body
-/// byte-for-byte so its formats, accumulator, modifiers, and register operands
-/// retain their source semantics. The prefix's otherwise-unused SRC2 must encode
-/// VGPR0 to avoid the documented false scalar dependency.
+/// @details The B0-to-A0 profile represents the bare F8F6F4 matrix instruction
+/// as a regular-Scale four-DWORD form with inline-zero scale operands, which
+/// encode scale 1.0 and require no temporary GPR. Keep the original two-DWORD
+/// matrix body byte-for-byte so its formats, accumulator, modifiers, and
+/// register operands retain their source semantics. The prefix's
+/// otherwise-unused SRC2 encodes VGPR0.
 ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, uint64_t,
                                              std::span<const uint8_t>, const LivenessAnalysis &,
                                              TranslationContext &, const LaneLayout *,
@@ -1316,17 +1311,17 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
 // high opcode bits, hence the four consecutive kVdsOpHi* groups below.
 inline constexpr std::array<TranslationRule, 38> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kSopp, gfx1250::kSClauseSopp, RuleAction::Expand, 0, 0, nullptr,
-     expand_gfx1250_s_clause, nullptr, nullptr},
+     expand_gfx1250_s_clause, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3p, gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_bare_f8f6f4_wmma, nullptr, nullptr},
+     nullptr, expand_gfx1250_bare_f8f6f4_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3p, kWmmaScaleSrc2PrefixOp, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_wmma_scale_src2, nullptr, nullptr},
     {gfx1250::encoding::kVop3p, kWmmaScale16PrefixOp, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_wmma_scale16, nullptr, nullptr},
     {gfx1250::encoding::kVop3p, gfx1250::kVWmmaI3216x16x64Iu8Vop3p, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr},
+     nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3p, gfx1250::kVSwmmacI3216x16x128Iu8Vop3p, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr},
+     nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
@@ -1344,7 +1339,7 @@ inline constexpr std::array<TranslationRule, 38> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3232x16x128F4Vop3p, RuleAction::Expand, 0, 0,
-     nullptr, expand_gfx1250_wmma_32x16_f4, nullptr, nullptr},
+     nullptr, expand_gfx1250_wmma_32x16_f4, nullptr, nullptr, false},
     {gfx1250::encoding::kVimage, gfx1250::kTensorLoadToLdsVimage, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_tensor_load_to_lds, nullptr, nullptr},
     {gfx1250::encoding::kVop3OpHi3, gfx1250::kVCvtF32Fp8Vop3, RuleAction::Expand, 0, 0, nullptr,
