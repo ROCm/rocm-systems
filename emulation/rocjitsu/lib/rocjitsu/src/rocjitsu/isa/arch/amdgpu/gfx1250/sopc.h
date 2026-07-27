@@ -21,7 +21,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLgI32Sopc : public Sopc {
@@ -31,7 +30,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpGtI32Sopc : public Sopc {
@@ -41,7 +39,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpGeI32Sopc : public Sopc {
@@ -51,7 +48,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLtI32Sopc : public Sopc {
@@ -61,7 +57,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLeI32Sopc : public Sopc {
@@ -71,7 +66,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpEqU32Sopc : public Sopc {
@@ -81,7 +75,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLgU32Sopc : public Sopc {
@@ -91,7 +84,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpGtU32Sopc : public Sopc {
@@ -101,7 +93,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpGeU32Sopc : public Sopc {
@@ -111,7 +102,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLtU32Sopc : public Sopc {
@@ -121,7 +111,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLeU32Sopc : public Sopc {
@@ -131,7 +120,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SBitcmp0B32Sopc : public Sopc {
@@ -141,7 +129,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SBitcmp1B32Sopc : public Sopc {
@@ -151,7 +138,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SBitcmp0B64Sopc : public Sopc {
@@ -161,7 +147,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SBitcmp1B64Sopc : public Sopc {
@@ -171,7 +156,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpEqU64Sopc : public Sopc {
@@ -181,7 +165,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLgU64Sopc : public Sopc {
@@ -191,7 +174,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLtF32Sopc : public Sopc {
@@ -201,7 +183,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLtF16Sopc : public Sopc {
@@ -211,7 +192,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpEqF32Sopc : public Sopc {
@@ -221,7 +201,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpEqF16Sopc : public Sopc {
@@ -231,7 +210,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLeF32Sopc : public Sopc {
@@ -241,7 +219,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLeF16Sopc : public Sopc {
@@ -251,7 +228,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpGtF32Sopc : public Sopc {
@@ -261,7 +237,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpGtF16Sopc : public Sopc {
@@ -271,7 +246,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLgF32Sopc : public Sopc {
@@ -281,7 +255,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpLgF16Sopc : public Sopc {
@@ -291,7 +264,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpGeF32Sopc : public Sopc {
@@ -301,7 +273,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpGeF16Sopc : public Sopc {
@@ -311,7 +282,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpOF32Sopc : public Sopc {
@@ -321,7 +291,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpOF16Sopc : public Sopc {
@@ -331,7 +300,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpUF32Sopc : public Sopc {
@@ -341,7 +309,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpUF16Sopc : public Sopc {
@@ -351,7 +318,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNgeF32Sopc : public Sopc {
@@ -361,7 +327,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNgeF16Sopc : public Sopc {
@@ -371,7 +336,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNlgF32Sopc : public Sopc {
@@ -381,7 +345,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNlgF16Sopc : public Sopc {
@@ -391,7 +354,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNgtF32Sopc : public Sopc {
@@ -401,7 +363,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNgtF16Sopc : public Sopc {
@@ -411,7 +372,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNleF32Sopc : public Sopc {
@@ -421,7 +381,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNleF16Sopc : public Sopc {
@@ -431,7 +390,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNeqF32Sopc : public Sopc {
@@ -441,7 +399,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNeqF16Sopc : public Sopc {
@@ -451,7 +408,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNltF32Sopc : public Sopc {
@@ -461,7 +417,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 class SCmpNltF16Sopc : public Sopc {
@@ -471,7 +426,6 @@ public:
   Operand ssrc0;
   Operand ssrc1;
   Operand scc;
-  static const bool execute_registered_;
 };
 
 } // namespace gfx1250

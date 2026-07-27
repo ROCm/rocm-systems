@@ -873,15 +873,31 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
         symlink_path.symlink_to(rocm_binary)
         print(f"Linked {symlink_path} -> {rocm_binary}")
 
-    # Verify installation: CLI version + Python import/init/shutdown under
-    # the SYSTEM python. The system package installs amdsmi/ to the path
-    # /usr/bin/python3 searches (see py-interface/CMakeLists.txt). The
-    # test must use /usr/bin/python3 explicitly -- some build containers
-    # (notably ubuntu-24.04-bld) put a venv ahead of /usr/bin on PATH,
-    # and that venv has its own sys.path that does NOT include the
-    # system dist-packages. Falls back to plain `python3` if /usr/bin/python3
-    # is absent.
-    system_python = "/usr/bin/python3" if Path("/usr/bin/python3").exists() else "python3"
+    # Verify installation: CLI version + Python import/init/shutdown under the
+    # interpreter the module was actually installed for. The system package
+    # installs amdsmi/ into a specific interpreter's site-packages, and the
+    # amd-smi CLI shebang is pinned to that same interpreter (see
+    # py-interface/CMakeLists.txt + amdsmi_cli/CMakeLists.txt). We must verify
+    # against THAT interpreter, not a bare /usr/bin/python3: this harness itself
+    # repoints /usr/bin/python3 via `alternatives` when it has to bootstrap a
+    # newer python on an old base image (e.g. el8's 3.6), so /usr/bin/python3 at
+    # verify time may be a different minor than the one the module landed under.
+    # Derive the interpreter from the installed CLI's shebang so the check
+    # mirrors what a real user's `amd-smi` invocation resolves to. Fall back to
+    # /usr/bin/python3 (then plain python3) if the shebang can't be read.
+    verify_python = "/usr/bin/python3" if Path("/usr/bin/python3").exists() else "python3"
+    try:
+        cli_target = rocm_binary.resolve() if rocm_binary.exists() else None
+        if cli_target and cli_target.exists():
+            first_line = cli_target.read_text(errors="replace").splitlines()[:1]
+            if first_line and first_line[0].startswith("#!"):
+                interp = first_line[0][2:].strip().split()[0]
+                if interp and Path(interp).exists():
+                    verify_python = interp
+    except (OSError, IndexError):
+        pass
+    print(f"Verifying import under interpreter: {verify_python}")
+    system_python = verify_python
     import_smoke = (
         "import amdsmi; "
         "print('amdsmi from:', amdsmi.__file__); "
@@ -950,23 +966,35 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         log_dir=cfg.log_dir,
     )
 
-    # Check install location -- the wheel must land under site-packages
-    # or dist-packages; the system DEB/RPM also installs to dist-packages,
-    # so a coexisting system module is fine (whichever sys.path entry wins
-    # is whichever is searched first by the active python).
+    # Prove the pip install takes priority over any coexisting system copy for
+    # plain Python scripting: a user who `pip install`s amdsmi wants that
+    # version. `pip show` reports where pip put the wheel; assert `import
+    # amdsmi` resolves there. Clear PYTHONPATH first: the CI container and a
+    # ROCm install both point PYTHONPATH at /opt/rocm/share/amd_smi, which
+    # unconditionally precedes site-packages, so leaving it set would test the
+    # environment's path config rather than the package. A bare interpreter
+    # (no PYTHONPATH) is the real scripting scenario where pip must win.
+    priority_check = (
+        "import os, subprocess, amdsmi\n"
+        "out = subprocess.check_output(['python3', '-m', 'pip', 'show', 'amdsmi'], text=True)\n"
+        "loc = next((l.split(':', 1)[1].strip() for l in out.splitlines() "
+        "if l.startswith('Location:')), '')\n"
+        "loc = os.path.realpath(loc)\n"
+        "p = os.path.realpath(amdsmi.__file__)\n"
+        "print('pip install location: ' + loc)\n"
+        "print('amdsmi imported from : ' + p)\n"
+        "assert loc and p.startswith(loc), "
+        "'a system copy shadowed the pip install: import resolved to ' + p\n"
+        "assert '/opt/rocm/' not in p, "
+        "'the /opt/rocm system copy shadowed the pip install: ' + p\n"
+        "print('PASS: pip install takes priority for scripting')\n"
+    )
+    priority_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     run_command(
-        [
-            "python3",
-            "-c",
-            (
-                "import amdsmi; p = amdsmi.__file__; "
-                "print('amdsmi imported from: ' + p); "
-                "ok = 'site-packages' in p or 'dist-packages' in p or '/opt/rocm/' in p; "
-                "assert ok, 'Unexpected install location: ' + p; "
-                "print('PASS: Wheel correctly installed')"
-            ),
-        ],
-        name="wheel-location-check",
+        ["python3", "-c", priority_check],
+        name="wheel-priority-check",
+        cwd=Path("/tmp"),
+        env=priority_env,
         retries=1,
         log_dir=cfg.log_dir,
     )

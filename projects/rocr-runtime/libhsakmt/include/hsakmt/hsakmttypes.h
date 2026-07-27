@@ -770,6 +770,7 @@ typedef struct
 	HSAuint64 ControlStackUsedInBytes; // Must be 4-Byte aligned
 	HsaUserContextSaveAreaHeader *SaveAreaHeader;
 	HSAuint64 Reserved2;		// runtime/system CU assignment
+	HSAuint64 SaveAreaAllocSize;	// Size of the full save area, per XCC
 } HsaQueueInfo;
 
 typedef struct _HsaQueueResource
