@@ -109,6 +109,18 @@ jobs:
           TORCH_NCCL_BLOCKING_WAIT: 1
           TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
         run: |
+          # LD_LIBRARY_PATH must be set BEFORE the Python process starts.
+          # The dynamic linker caches LD_LIBRARY_PATH at process startup;
+          # os.environ changes after that don't affect dlopen(). The test
+          # script's setup_ld_library_path() sets os.environ too late for
+          # import torch → rocm_sdk.preload_libraries → ctypes.CDLL to
+          # resolve transitive deps like libamd_smi.so.26.
+          SITE_PKGS=$(python -c "import site; print(site.getsitepackages()[0])")
+          for d in "$SITE_PKGS"/_rocm_sdk_*/lib; do
+            [ -d "$d" ] && export LD_LIBRARY_PATH="${d}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          done
+          echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+
           NOTIFY_ARGS=""
           if [ -n "${{ inputs.notify_email }}" ]; then
             NOTIFY_ARGS="--notify-email ${{ inputs.notify_email }}"
