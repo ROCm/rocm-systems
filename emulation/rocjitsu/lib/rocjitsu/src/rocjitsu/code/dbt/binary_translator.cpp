@@ -132,6 +132,19 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
   dst.insert(dst.end(), src.begin(), src.end());
 }
 
+[[nodiscard]] DiagnosticKind text_replacement_diagnostic_kind(TextReplacementOutcome outcome) {
+  switch (outcome) {
+  case TextReplacementOutcome::Success:
+    return DiagnosticKind::MalformedCodeObject;
+  case TextReplacementOutcome::MalformedInput:
+    return DiagnosticKind::MalformedCodeObject;
+  case TextReplacementOutcome::AllocationFailure:
+  case TextReplacementOutcome::FileGrowthLimitExceeded:
+    return DiagnosticKind::ResourceLimit;
+  }
+  return DiagnosticKind::MalformedCodeObject;
+}
+
 /// @brief Return a human-readable kernel label for diagnostics.
 ///
 /// @details Some code objects carry empty kernel symbol names. Falling back to
@@ -349,9 +362,18 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
     }
   }
 
-  if (!patcher.replace_text(translated_text, kMaxTranslatedFileGrowth)) {
-    append_error(diagnostics, DiagnosticKind::ResourceLimit,
-                 "relocated .text could not be materialized safely; leaving code object unchanged");
+  const TextReplacementResult replacement =
+      patcher.replace_text(translated_text, kMaxTranslatedFileGrowth);
+  if (!replacement) {
+    std::string message = "relocated .text could not be materialized: " +
+                          std::string(text_replacement_outcome_name(replacement.outcome()));
+    if (replacement.required_file_growth()) {
+      message += ", required file growth " + std::to_string(*replacement.required_file_growth()) +
+                 " bytes";
+    }
+    message += "; leaving code object unchanged";
+    append_error(diagnostics, text_replacement_diagnostic_kind(replacement.outcome()),
+                 std::move(message));
     return std::nullopt;
   }
 

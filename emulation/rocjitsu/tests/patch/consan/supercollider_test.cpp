@@ -208,12 +208,70 @@ TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
   EXPECT_FALSE(replace_consan_text(patcher, malformed_text, default_options,
                                    "test malformed replacement", malformed));
   const std::string expected_malformed =
-      "ConSan test malformed replacement could not replace executable text (patched-image "
-      "remaining file growth limit 201326592 bytes, total limit 201326592 bytes (policy "
-      "absolute-bytes=201326592))";
+      "ConSan test malformed replacement could not replace executable text (outcome malformed "
+      "input, patched-image remaining file growth limit 201326592 bytes, total limit 201326592 "
+      "bytes (policy absolute-bytes=201326592))";
   EXPECT_NE(std::ranges::find(malformed.errors, expected_malformed), malformed.errors.end())
       << testing::PrintToString(malformed.errors);
   EXPECT_TRUE(malformed.patched_image_growth_rejections.empty());
+}
+
+TEST(ConSan, ReplacementDiagnosticsReportAllocationAndExactResolvedGrowth) {
+  GrowthPolicyFixture fixture = make_growth_policy_fixture();
+  mutate_elf_section(fixture.bytes, 2,
+                     [](Elf64_Shdr &section) { section.sh_addralign = uint64_t{1} << 63u; });
+  AmdGpuCodeObject code_object(fixture.bytes.data(), fixture.bytes.size());
+  ASSERT_TRUE(code_object.is_valid());
+  ASSERT_EQ(code_object.text_sections().size(), 1u);
+  CodeObjectPatcher patcher(code_object);
+  std::vector<uint8_t> replacement(code_object.text_sections().front()->size() + sizeof(uint32_t));
+  std::memcpy(replacement.data(), code_object.text_sections().front()->data(),
+              code_object.text_sections().front()->size());
+  ConSanOptions options;
+  options.patched_image_growth_limit.absolute_bytes = std::numeric_limits<uint64_t>::max();
+  options.patched_image_growth_input_bytes = fixture.bytes.size();
+  ConSanResult result;
+
+  EXPECT_FALSE(
+      replace_consan_text(patcher, replacement, options, "test allocation replacement", result));
+  const std::string expected =
+      "ConSan test allocation replacement could not replace executable text (outcome allocation "
+      "failure, patched-image remaining file growth limit " +
+      std::to_string(std::numeric_limits<size_t>::max()) + " bytes, total limit " +
+      std::to_string(std::numeric_limits<size_t>::max()) +
+      " bytes (policy absolute-bytes=" + std::to_string(std::numeric_limits<uint64_t>::max()) +
+      "), required file growth " + std::to_string(uint64_t{1} << 63u) + " bytes)";
+  EXPECT_NE(std::ranges::find(result.errors, expected), result.errors.end())
+      << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.patched_image_growth_rejections.empty());
+  EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), fixture.bytes));
+}
+
+TEST(ConSan, ReplacementDiagnosticsReportLateMalformedInputAndExactResolvedGrowth) {
+  GrowthPolicyFixture fixture = make_growth_policy_fixture();
+  mutate_elf_symbol_by_name(fixture.bytes, "lds_probe.kd",
+                            [](Elf64_Sym &symbol) { symbol.st_value = UINT64_MAX; });
+  AmdGpuCodeObject code_object(fixture.bytes.data(), fixture.bytes.size());
+  ASSERT_TRUE(code_object.is_valid());
+  ASSERT_EQ(code_object.text_sections().size(), 1u);
+  CodeObjectPatcher patcher(code_object);
+  std::vector<uint8_t> replacement(code_object.text_sections().front()->size() + sizeof(uint32_t));
+  std::memcpy(replacement.data(), code_object.text_sections().front()->data(),
+              code_object.text_sections().front()->size());
+  ConSanOptions options;
+  options.patched_image_growth_input_bytes = fixture.bytes.size();
+  ConSanResult result;
+
+  EXPECT_FALSE(replace_consan_text(patcher, replacement, options, "test late malformed replacement",
+                                   result));
+  const std::string expected =
+      "ConSan test late malformed replacement could not replace executable text (outcome malformed "
+      "input, patched-image remaining file growth limit 201326592 bytes, total limit 201326592 "
+      "bytes (policy absolute-bytes=201326592), required file growth 64 bytes)";
+  EXPECT_NE(std::ranges::find(result.errors, expected), result.errors.end())
+      << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.patched_image_growth_rejections.empty());
+  EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), fixture.bytes));
 }
 
 TEST(ConSan, FlatCheckTrapProofUsesIndirectIslandForFarAppendedCave) {

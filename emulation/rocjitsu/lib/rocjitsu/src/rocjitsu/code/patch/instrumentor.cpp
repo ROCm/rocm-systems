@@ -679,8 +679,16 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     append_words(new_text, probe.body_words);
   for (const auto &a : applied)
     append_words(new_text, a.bytes.trampoline_words);
-  if (!patcher.replace_text(new_text, kMaxInstrumentedFileGrowth)) {
-    result.errors.emplace_back("failed to replace .text with the instrumented code");
+  const TextReplacementResult replacement =
+      patcher.replace_text(new_text, kMaxInstrumentedFileGrowth);
+  if (!replacement) {
+    std::string error = "failed to replace .text with the instrumented code: " +
+                        std::string(text_replacement_outcome_name(replacement.outcome()));
+    if (replacement.required_file_growth()) {
+      error += ", required file growth " + std::to_string(*replacement.required_file_growth()) +
+               " bytes";
+    }
+    result.errors.push_back(std::move(error));
     return result;
   }
 

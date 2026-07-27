@@ -27,6 +27,7 @@ enum class DiagnosticKind {
   Legalization,
   ExpandMissing,
   ExpandFailed,
+  MalformedCodeObject,
   ResourceLimit,
   KernelSkipped,
 };

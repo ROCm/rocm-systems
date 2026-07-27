@@ -23,14 +23,70 @@ struct AppendedSidecarDescriptor {
   uint64_t vaddr = 0;
 };
 
-/// Resource-policy details for one transactional .text replacement attempt.
+enum class TextReplacementOutcome : uint8_t {
+  Success,
+  MalformedInput,
+  AllocationFailure,
+  FileGrowthLimitExceeded,
+};
+
+[[nodiscard]] constexpr std::string_view
+text_replacement_outcome_name(TextReplacementOutcome outcome) {
+  switch (outcome) {
+  case TextReplacementOutcome::Success:
+    return "success";
+  case TextReplacementOutcome::MalformedInput:
+    return "malformed input";
+  case TextReplacementOutcome::AllocationFailure:
+    return "allocation failure";
+  case TextReplacementOutcome::FileGrowthLimitExceeded:
+    return "file growth limit exceeded";
+  }
+  return "unknown";
+}
+
+/// Typed result of one transactional .text replacement attempt.
 ///
-/// `required_file_growth` is populated after ELF alignment requirements have
-/// been resolved, even when the caller's limit rejects the transaction. It is
-/// therefore the exact inserted byte count, including alignment padding.
-struct TextReplacementInfo {
-  std::optional<size_t> required_file_growth;
-  bool file_growth_limit_exceeded = false;
+/// A successful replacement and a file-growth-limit rejection always carry the
+/// exact inserted byte count, including alignment padding. Malformed-input and
+/// allocation failures carry that count only when alignment had already been
+/// resolved before the failure. An engaged zero is reserved for a transaction
+/// that was proven not to grow the file; unresolved growth is disengaged.
+class TextReplacementResult {
+public:
+  [[nodiscard]] static TextReplacementResult success(size_t required_file_growth) {
+    return {TextReplacementOutcome::Success, required_file_growth};
+  }
+
+  [[nodiscard]] static TextReplacementResult
+  malformed_input(std::optional<size_t> required_file_growth = std::nullopt) {
+    return {TextReplacementOutcome::MalformedInput, required_file_growth};
+  }
+
+  [[nodiscard]] static TextReplacementResult
+  allocation_failure(std::optional<size_t> required_file_growth = std::nullopt) {
+    return {TextReplacementOutcome::AllocationFailure, required_file_growth};
+  }
+
+  [[nodiscard]] static TextReplacementResult
+  file_growth_limit_exceeded(size_t required_file_growth) {
+    return {TextReplacementOutcome::FileGrowthLimitExceeded, required_file_growth};
+  }
+
+  [[nodiscard]] TextReplacementOutcome outcome() const { return outcome_; }
+  [[nodiscard]] bool succeeded() const { return outcome_ == TextReplacementOutcome::Success; }
+  [[nodiscard]] explicit operator bool() const { return succeeded(); }
+  /// Exact aligned file growth when it was resolved before this outcome.
+  [[nodiscard]] const std::optional<size_t> &required_file_growth() const {
+    return required_file_growth_;
+  }
+
+private:
+  TextReplacementResult(TextReplacementOutcome outcome, std::optional<size_t> required_file_growth)
+      : outcome_(outcome), required_file_growth_(required_file_growth) {}
+
+  TextReplacementOutcome outcome_;
+  std::optional<size_t> required_file_growth_;
 };
 
 class CodeObjectPatcher {
@@ -55,13 +111,11 @@ public:
   /// the ELF image to grow. This includes both the new text and any padding
   /// required to preserve section and segment alignment. Keeping the budget at
   /// the call site lets each transformation choose its own resource policy.
-  /// @param info Optional exact resource-policy details. This is reset before
-  /// the attempt and identifies a file-growth-limit rejection separately from
-  /// malformed input or allocation failure.
-  /// @returns false, without changing this patcher, when the replacement is
-  /// malformed, exceeds @p max_file_growth, or cannot be allocated.
-  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text, size_t max_file_growth,
-                                  TextReplacementInfo *info = nullptr) noexcept;
+  /// @returns A typed outcome that distinguishes success, malformed input,
+  /// allocation failure, and an exact @p max_file_growth rejection. Every
+  /// failure leaves this patcher unchanged.
+  [[nodiscard]] TextReplacementResult replace_text(std::span<const uint8_t> new_text,
+                                                   size_t max_file_growth) noexcept;
 
   /// @brief True if any relocation's place (r_offset) falls inside .text.
   ///
@@ -141,8 +195,8 @@ public:
   std::vector<uint8_t> emit() &&;
 
 private:
-  [[nodiscard]] bool replace_text_impl(std::span<const uint8_t> new_text, size_t max_file_growth,
-                                       TextReplacementInfo *info);
+  [[nodiscard]] TextReplacementResult replace_text_impl(std::span<const uint8_t> new_text,
+                                                        size_t max_file_growth);
 
   std::vector<uint8_t> image_;
   uint64_t text_offset_;

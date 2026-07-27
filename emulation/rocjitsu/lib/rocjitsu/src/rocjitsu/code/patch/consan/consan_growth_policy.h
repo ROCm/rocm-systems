@@ -70,19 +70,21 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
     return false;
   }
 
-  TextReplacementInfo info;
-  if (patcher.replace_text(new_text, budget->remaining_growth_bytes, &info))
+  const TextReplacementResult replacement =
+      patcher.replace_text(new_text, budget->remaining_growth_bytes);
+  if (replacement)
     return true;
 
-  if (info.file_growth_limit_exceeded && info.required_file_growth) {
+  if (replacement.outcome() == TextReplacementOutcome::FileGrowthLimitExceeded) {
+    const size_t transaction_growth = *replacement.required_file_growth();
     const size_t required_total =
-        consan_saturating_size_add(budget->existing_growth_bytes, *info.required_file_growth);
+        consan_saturating_size_add(budget->existing_growth_bytes, transaction_growth);
     result.patched_image_growth_rejections.push_back(
         {.operation = std::string(operation),
          .policy = options.patched_image_growth_limit,
          .input_image_bytes = input_image_bytes,
          .existing_growth_bytes = budget->existing_growth_bytes,
-         .transaction_growth_bytes = *info.required_file_growth,
+         .transaction_growth_bytes = transaction_growth,
          .required_total_growth_bytes = required_total,
          .limit_bytes = budget->total_limit_bytes});
     result.errors.emplace_back("ConSan " + std::string(operation) +
@@ -93,11 +95,30 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
     return false;
   }
 
-  std::string detail = "patched-image remaining file growth limit " +
+  std::string_view failure_outcome;
+  switch (replacement.outcome()) {
+  case TextReplacementOutcome::MalformedInput:
+    failure_outcome = text_replacement_outcome_name(TextReplacementOutcome::MalformedInput);
+    break;
+  case TextReplacementOutcome::AllocationFailure:
+    failure_outcome = text_replacement_outcome_name(TextReplacementOutcome::AllocationFailure);
+    break;
+  case TextReplacementOutcome::Success:
+    failure_outcome = text_replacement_outcome_name(TextReplacementOutcome::Success);
+    break;
+  case TextReplacementOutcome::FileGrowthLimitExceeded:
+    failure_outcome =
+        text_replacement_outcome_name(TextReplacementOutcome::FileGrowthLimitExceeded);
+    break;
+  }
+
+  std::string detail = "outcome " + std::string(failure_outcome) +
+                       ", patched-image remaining file growth limit " +
                        std::to_string(budget->remaining_growth_bytes) + " bytes, total limit " +
                        std::to_string(budget->total_limit_bytes) + " bytes (policy " + policy + ")";
-  if (info.required_file_growth)
-    detail += ", required file growth " + std::to_string(*info.required_file_growth) + " bytes";
+  if (replacement.required_file_growth())
+    detail +=
+        ", required file growth " + std::to_string(*replacement.required_file_growth()) + " bytes";
   result.errors.emplace_back("ConSan " + std::string(operation) +
                              " could not replace executable text (" + detail + ")");
   return false;

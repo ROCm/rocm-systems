@@ -254,8 +254,17 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_text_and_rodata() {
 
 constexpr size_t kTestFileGrowthBudget = size_t{16} * 1024 * 1024;
 
-void expect_text_growth_rejected_without_mutation(std::vector<uint8_t> image,
-                                                  size_t max_file_growth = kTestFileGrowthBudget) {
+enum class RequiredGrowthExpectation {
+  Unchecked,
+  Unknown,
+  Exact,
+};
+
+void expect_text_growth_rejected_without_mutation(
+    std::vector<uint8_t> image, size_t max_file_growth = kTestFileGrowthBudget,
+    TextReplacementOutcome expected_outcome = TextReplacementOutcome::MalformedInput,
+    RequiredGrowthExpectation growth_expectation = RequiredGrowthExpectation::Unchecked,
+    size_t expected_file_growth = 0) {
   AmdGpuCodeObject co(image.data(), image.size());
   ASSERT_TRUE(co.is_valid());
   ASSERT_EQ(co.text_sections().size(), 1u);
@@ -263,7 +272,15 @@ void expect_text_growth_rejected_without_mutation(std::vector<uint8_t> image,
   std::vector<uint8_t> replacement(co.text_sections().front()->size() + sizeof(uint32_t), 0);
 
   CodeObjectPatcher patcher(co);
-  EXPECT_FALSE(patcher.replace_text(replacement, max_file_growth));
+  const TextReplacementResult result = patcher.replace_text(replacement, max_file_growth);
+  EXPECT_FALSE(result.succeeded());
+  EXPECT_EQ(result.outcome(), expected_outcome);
+  if (growth_expectation == RequiredGrowthExpectation::Unknown) {
+    EXPECT_FALSE(result.required_file_growth());
+  } else if (growth_expectation == RequiredGrowthExpectation::Exact) {
+    ASSERT_TRUE(result.required_file_growth());
+    EXPECT_EQ(*result.required_file_growth(), expected_file_growth);
+  }
   EXPECT_EQ(patcher.emit(), original);
 }
 
@@ -1494,8 +1511,11 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   CodeObjectPatcher patcher(co);
   const std::array<uint32_t, 4> text_words = {0xBF800000u, 0xBF800000u, 0xDEADBEEFu, 0xCAFEBABEu};
   const auto *text_bytes = reinterpret_cast<const uint8_t *>(text_words.data());
-  ASSERT_TRUE(patcher.replace_text({text_bytes, text_words.size() * sizeof(uint32_t)},
-                                   kTestFileGrowthBudget));
+  const TextReplacementResult replacement = patcher.replace_text(
+      {text_bytes, text_words.size() * sizeof(uint32_t)}, kTestFileGrowthBudget);
+  ASSERT_TRUE(replacement);
+  ASSERT_TRUE(replacement.required_file_growth());
+  EXPECT_EQ(*replacement.required_file_growth(), 2u * sizeof(uint32_t));
 
   auto patched_bytes = patcher.emit();
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
@@ -1519,7 +1539,7 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   EXPECT_EQ(rodata_word, 0xA5A55A5Au);
 }
 
-TEST(CodeObjectPatcher, ReplaceTextReportsAndResetsResourcePolicyState) {
+TEST(CodeObjectPatcher, ReplaceTextReturnsTypedTransactionalOutcomes) {
   const auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
   AmdGpuCodeObject code_object(image.data(), image.size());
   ASSERT_TRUE(code_object.is_valid());
@@ -1529,27 +1549,19 @@ TEST(CodeObjectPatcher, ReplaceTextReportsAndResetsResourcePolicyState) {
   {
     CodeObjectPatcher patcher(code_object);
     std::vector<uint8_t> replacement(original_text_size + sizeof(uint32_t));
-    TextReplacementInfo info{
-        .required_file_growth = 123u,
-        .file_growth_limit_exceeded = false,
-    };
-    EXPECT_FALSE(patcher.replace_text(replacement, 0u, &info));
-    ASSERT_TRUE(info.required_file_growth);
-    EXPECT_EQ(*info.required_file_growth, sizeof(uint32_t));
-    EXPECT_TRUE(info.file_growth_limit_exceeded);
+    const TextReplacementResult result = patcher.replace_text(replacement, 0u);
+    EXPECT_EQ(result.outcome(), TextReplacementOutcome::FileGrowthLimitExceeded);
+    ASSERT_TRUE(result.required_file_growth());
+    EXPECT_EQ(*result.required_file_growth(), sizeof(uint32_t));
     EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), image));
   }
 
   {
     CodeObjectPatcher patcher(code_object);
     std::vector<uint8_t> malformed(original_text_size + 1u);
-    TextReplacementInfo info{
-        .required_file_growth = 123u,
-        .file_growth_limit_exceeded = true,
-    };
-    EXPECT_FALSE(patcher.replace_text(malformed, kTestFileGrowthBudget, &info));
-    EXPECT_FALSE(info.required_file_growth);
-    EXPECT_FALSE(info.file_growth_limit_exceeded);
+    const TextReplacementResult result = patcher.replace_text(malformed, kTestFileGrowthBudget);
+    EXPECT_EQ(result.outcome(), TextReplacementOutcome::MalformedInput);
+    EXPECT_FALSE(result.required_file_growth());
     EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), image));
   }
 
@@ -1568,14 +1580,10 @@ TEST(CodeObjectPatcher, ReplaceTextReportsAndResetsResourcePolicyState) {
     std::vector<uint8_t> replacement(late_malformed.text_sections().front()->size() +
                                      sizeof(uint32_t));
     CodeObjectPatcher patcher(late_malformed);
-    TextReplacementInfo info{
-        .required_file_growth = 123u,
-        .file_growth_limit_exceeded = true,
-    };
-    EXPECT_FALSE(patcher.replace_text(replacement, kTestFileGrowthBudget, &info));
-    ASSERT_TRUE(info.required_file_growth);
-    EXPECT_GT(*info.required_file_growth, 0u);
-    EXPECT_FALSE(info.file_growth_limit_exceeded);
+    const TextReplacementResult result = patcher.replace_text(replacement, kTestFileGrowthBudget);
+    EXPECT_EQ(result.outcome(), TextReplacementOutcome::MalformedInput);
+    ASSERT_TRUE(result.required_file_growth());
+    EXPECT_GT(*result.required_file_growth(), 0u);
     EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), late_malformed_image));
   }
 
@@ -1584,14 +1592,10 @@ TEST(CodeObjectPatcher, ReplaceTextReportsAndResetsResourcePolicyState) {
     const auto *text = code_object.text_sections().front();
     std::vector<uint8_t> replacement(text->size());
     std::memcpy(replacement.data(), text->data(), text->size());
-    TextReplacementInfo info{
-        .required_file_growth = 123u,
-        .file_growth_limit_exceeded = true,
-    };
-    ASSERT_TRUE(patcher.replace_text(replacement, 0u, &info));
-    ASSERT_TRUE(info.required_file_growth);
-    EXPECT_EQ(*info.required_file_growth, 0u);
-    EXPECT_FALSE(info.file_growth_limit_exceeded);
+    const TextReplacementResult result = patcher.replace_text(replacement, 0u);
+    EXPECT_EQ(result.outcome(), TextReplacementOutcome::Success);
+    ASSERT_TRUE(result.required_file_growth());
+    EXPECT_EQ(*result.required_file_growth(), 0u);
   }
 }
 
@@ -1729,7 +1733,9 @@ TEST(CodeObjectPatcher, RejectsAlignmentLcmOverflowWithoutMutation) {
   shdrs[3].sh_addralign = 3;
   write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
 
-  expect_text_growth_rejected_without_mutation(std::move(image));
+  expect_text_growth_rejected_without_mutation(std::move(image), kTestFileGrowthBudget,
+                                               TextReplacementOutcome::MalformedInput,
+                                               RequiredGrowthExpectation::Unknown);
 }
 
 TEST(CodeObjectPatcher, RejectsAlignmentPaddingBeyondCallerBudgetWithoutMutation) {
@@ -1742,7 +1748,43 @@ TEST(CodeObjectPatcher, RejectsAlignmentPaddingBeyondCallerBudgetWithoutMutation
 
   // The alignment is arithmetically representable but would otherwise request
   // hundreds of GiB of eagerly zeroed padding for this small input.
-  expect_text_growth_rejected_without_mutation(std::move(image), 1024 * 1024);
+  constexpr size_t kRequiredGrowth = size_t{1} << 38u;
+  expect_text_growth_rejected_without_mutation(std::move(image), 1024 * 1024,
+                                               TextReplacementOutcome::FileGrowthLimitExceeded,
+                                               RequiredGrowthExpectation::Exact, kRequiredGrowth);
+}
+
+TEST(CodeObjectPatcher, ReportsImpossibleAlignedAllocationWithoutMutation) {
+  auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  ASSERT_GE(shdrs.size(), 3u);
+  shdrs[2].sh_addralign = uint64_t{1} << 63u;
+  write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  constexpr size_t kRequiredGrowth = size_t{1} << 63u;
+  ASSERT_GT(kRequiredGrowth, std::vector<uint8_t>{}.max_size());
+  // The ELF arithmetic is valid, but materializing the aligned insertion is
+  // outside the host vector allocator's representable/resource range.
+  expect_text_growth_rejected_without_mutation(std::move(image), std::numeric_limits<size_t>::max(),
+                                               TextReplacementOutcome::AllocationFailure,
+                                               RequiredGrowthExpectation::Exact, kRequiredGrowth);
+}
+
+TEST(CodeObjectPatcher, PreservesExactGrowthWhenAlignedAllocationThrows) {
+  auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+  ASSERT_GE(shdrs.size(), 3u);
+  constexpr size_t kRequiredGrowth = size_t{1} << 62u;
+  shdrs[2].sh_addralign = kRequiredGrowth;
+  write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  ASSERT_LE(kRequiredGrowth, std::vector<uint8_t>{}.max_size() - image.size())
+      << "the request must reach the allocator instead of the max_size precheck";
+  expect_text_growth_rejected_without_mutation(std::move(image), std::numeric_limits<size_t>::max(),
+                                               TextReplacementOutcome::AllocationFailure,
+                                               RequiredGrowthExpectation::Exact, kRequiredGrowth);
 }
 
 static_assert(noexcept(std::declval<CodeObjectPatcher &>().replace_text(
