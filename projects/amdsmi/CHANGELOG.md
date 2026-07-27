@@ -34,8 +34,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A process was attributed to a GPU whenever it had a KFD context on that GPU, so a job with queues on a single GPU appeared under every GPU. Attribution now uses the process's active KFD queues plus any GPU where it holds a non-zero VRAM allocation, so a process is listed only against the GPUs it actually uses.
 
 - **Fixed `amd-smi` hanging in `amdsmi_init()` on UALink systems when the IFoE driver is unresponsive**.  
-  - `AMDSmiGPUDevice` opened the per-GPU IFoE/UALoE generic-netlink session in its constructor, so `amdsmi_init(AMDSMI_INIT_AMD_GPUS)` (and every CLI verb) blocked in an uninterruptible netlink wait when the Broadcom IFoE driver was wedged, even for queries that never use fabric data.
-  - The UALoE session is now opened lazily on the first fabric query via `get_ualoe_handle()`, so initialization and non-fabric queries no longer touch the IFoE driver.
+  - `amdsmi_init()` (and every CLI command) opened a per-GPU IFoE/UALoE fabric session up front, so it blocked indefinitely when the Broadcom IFoE driver was unresponsive, even for queries that never use fabric data.
+  - The fabric session is now opened only on the first fabric query, so initialization and non-fabric queries no longer touch the IFoE driver.
 
 ## amd_smi_lib for ROCm 7.14.0
 
