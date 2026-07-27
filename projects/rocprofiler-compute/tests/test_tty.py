@@ -4,11 +4,19 @@
 """Unit tests for src/utils/tty.py."""
 
 import argparse
+from io import StringIO
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
 
-from utils.tty import convert_time_columns, format_table_output, has_time_data
+from utils.tty import (
+    convert_time_columns,
+    format_table_output,
+    has_time_data,
+    show_all,
+)
 from utils.utils_common import is_gfx115x
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
@@ -256,6 +264,79 @@ def test_show_all_with_time_unit_conversion() -> None:
         assert converted_df.loc[0, "Avg"] == pytest.approx(
             3446.64 / TIME_UNITS[time_unit], abs=1e-10
         )
+
+
+@pytest.mark.parametrize(
+    "membw_analysis",
+    [
+        pytest.param(False, id="disabled"),
+        pytest.param(True, id="enabled"),
+    ],
+)
+def test_show_all_membw_analysis_panel_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    membw_analysis: bool,
+) -> None:
+    """Panel 3000 is rendered only when memory bandwidth analysis is enabled."""
+    args = argparse.Namespace(
+        decimal=2,
+        filter_metrics=None,
+        include_cols=None,
+        membw_analysis=membw_analysis,
+        normal_unit="per_wave",
+        path=[["fixture"]],
+        time_unit="ns",
+        view=None,
+    )
+    metric_dataframe = pd.DataFrame({
+        "Metric": ["EA read request fraction - HBM"],
+        "Avg": [50.0],
+        "Unit": ["Percent"],
+    })
+    table_config = {
+        "id": 3013,
+        "title": "EA Interface",
+        "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
+    }
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            3000: {
+                "id": 3000,
+                "title": "Memory Bandwidth Analysis",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={3013: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        )
+    }
+    process_table_data_mock = Mock(return_value=metric_dataframe)
+    format_table_output_mock = Mock(wraps=format_table_output)
+    monkeypatch.setattr("utils.tty.process_table_data", process_table_data_mock)
+    monkeypatch.setattr("utils.tty.format_table_output", format_table_output_mock)
+    rendered_output = StringIO()
+
+    show_all(
+        args,
+        runs,
+        arch_configs,
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+    )
+
+    output_lines = rendered_output.getvalue().splitlines()
+    assert process_table_data_mock.called is membw_analysis
+    assert format_table_output_mock.called is membw_analysis
+
+    if not membw_analysis:
+        assert output_lines == []
+        return
+
+    assert "30. Memory Bandwidth Analysis" in output_lines
+    assert "30.13 EA Interface" in output_lines
 
 
 def test_edge_cases_and_error_handling() -> None:
