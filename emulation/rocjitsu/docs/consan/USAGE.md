@@ -155,7 +155,14 @@ continues to return the HSA error to callers that correctly handle it.
 | `RJ_CONSAN_FLAT_PROVENANCE=likely|strict` | `likely` | Admit proven `Group` plus heuristic `MaybeGroup` flat LDS sites, or only proven `Group` sites. |
 | `RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES=N` | `201326592` (192 MiB) | Bound total additional ELF bytes, including alignment padding, across one code-object transformation. `N` is unsigned decimal; zero permits only no-growth rewrites. |
 | `RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT=N` | unset (absolute policy applies) | Use an alternative bound relative to the original code object: total additional ELF bytes may not exceed `floor(original input bytes * N / 100)`. `N` is unsigned decimal in `0..4294967295`; values above 100 intentionally allow growth larger than the original image. |
+| `RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES=N` | unset (unlimited) | Additionally bound the live aggregate of alignment-inclusive ELF growth across retained replacement code objects in this process. `N` is unsigned decimal; zero permits only no-growth replacements. Growth is released when a replacement load fails or its executable is destroyed. In fail-open mode, an over-budget code object runs uninstrumented and makes the final analysis verdict incomplete; use fail-closed mode when every applicable object must be instrumented. |
 | `RJ_CONSAN_DUMP_DIR=PATH` | unset | Write original and transformed `.hsaco` objects for inspection. |
+
+The process patched-image limit is charged after transformation, when the exact
+replacement size is known. It bounds the retained growth delta, not the full
+replacement image size or the transient peak memory used while transforming an
+object. The teardown summary reports the live and peak retained growth to help
+choose a workload-specific limit.
 
 For one transition, the old `RJ_CONSAN_FLAVOR`, `RJ_CONSAN_MOI_ENGINE`, and
 `RJ_CONSAN_MOI_BACKEND` variables remain accepted with deprecation warnings.

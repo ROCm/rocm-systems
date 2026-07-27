@@ -16,6 +16,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_process_growth_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
 #include "util/arena_alloc.h"
@@ -41,6 +42,7 @@
 #include <optional>
 #include <shared_mutex>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -368,6 +370,14 @@ struct ConSanStaticCoverage {
   bool complete = false;
   bool expert_limit = false;
 };
+
+void mark_consan_static_coverage_uninstrumented(ConSanStaticCoverage &coverage) {
+  coverage.access.patched = 0;
+  coverage.barrier.patched = 0;
+  coverage.atomic.patched = 0;
+  coverage.fence.patched = 0;
+  coverage.complete = false;
+}
 
 [[nodiscard]] bool is_consan_access_instrumentation_patch(rocjitsu::ConSanPatchKind kind) {
   switch (kind) {
@@ -1021,9 +1031,29 @@ private:
 /// size even after the temporary reader used for loading has been destroyed.
 /// ROCProfiler consumes that storage when the executable is frozen, which can
 /// happen after hsa_executable_load_agent_code_object() returns. Therefore the
-/// hook must not tie replacement storage to the load call's ConSanResult.
+/// hook must not tie replacement storage to the load call's ConSanResult. The
+/// registry reserves any configured process growth budget in the same critical
+/// section that retains the storage, and refunds it when storage is released.
 class ReplacementCodeObjectStorageRegistry {
 public:
+  enum class RetainOutcome : uint8_t {
+    Retained,
+    ProcessGrowthLimitExceeded,
+    GrowthAccountingOverflow,
+    AllocationFailure,
+  };
+
+  struct RetainResult {
+    RetainOutcome outcome = RetainOutcome::AllocationFailure;
+    uint64_t live_growth_bytes = 0;
+    uint64_t replacement_growth_bytes = 0;
+    uint64_t replacement_image_bytes = 0;
+    std::optional<uint64_t> required_total_growth_bytes;
+    std::optional<uint64_t> limit_bytes;
+
+    [[nodiscard]] explicit operator bool() const { return outcome == RetainOutcome::Retained; }
+  };
+
   static ReplacementCodeObjectStorageRegistry &instance() {
     // The HSA runtime may call OnUnload from a shared-library finalizer after
     // ordinary function-local statics have already been destroyed. Keep the
@@ -1033,22 +1063,59 @@ public:
     return *registry;
   }
 
-  [[nodiscard]] bool retain(hsa_executable_t executable,
-                            std::shared_ptr<const std::vector<uint8_t>> storage) {
+  [[nodiscard]] RetainResult retain(hsa_executable_t executable,
+                                    std::shared_ptr<const std::vector<uint8_t>> storage,
+                                    uint64_t replacement_growth_bytes, uint64_t replacement_size,
+                                    std::optional<uint64_t> process_growth_limit_bytes) {
     std::lock_guard lock(mutex_);
+    const ProcessGrowthBudget::ChargePlan growth_plan =
+        growth_budget_.plan_charge(replacement_growth_bytes, process_growth_limit_bytes);
+    RetainOutcome outcome;
+    switch (growth_plan.outcome) {
+    case ProcessGrowthBudget::ChargeOutcome::WithinLimit:
+      outcome = RetainOutcome::Retained;
+      break;
+    case ProcessGrowthBudget::ChargeOutcome::LimitExceeded:
+      outcome = RetainOutcome::ProcessGrowthLimitExceeded;
+      break;
+    case ProcessGrowthBudget::ChargeOutcome::AccountingOverflow:
+      outcome = process_growth_limit_bytes ? RetainOutcome::ProcessGrowthLimitExceeded
+                                           : RetainOutcome::GrowthAccountingOverflow;
+      break;
+    }
+    const RetainResult result = {
+        .outcome = outcome,
+        .live_growth_bytes = growth_plan.live_bytes,
+        .replacement_growth_bytes = replacement_growth_bytes,
+        .replacement_image_bytes = replacement_size,
+        .required_total_growth_bytes = growth_plan.required_bytes,
+        .limit_bytes = process_growth_limit_bytes,
+    };
+    if (result.outcome != RetainOutcome::Retained)
+      return result;
+
     try {
       auto entry = std::ranges::find(entries_, executable.handle, &Entry::executable);
       if (entry == entries_.end()) {
         Entry new_entry{.executable = executable.handle, .objects = {}};
-        new_entry.objects.push_back(std::move(storage));
+        new_entry.objects.push_back(
+            {.storage = std::move(storage), .growth_bytes = replacement_growth_bytes});
         entries_.push_back(std::move(new_entry));
       } else {
-        entry->objects.push_back(std::move(storage));
+        entry->objects.push_back(
+            {.storage = std::move(storage), .growth_bytes = replacement_growth_bytes});
       }
     } catch (const std::bad_alloc &) {
-      return false;
+      RetainResult failure = result;
+      failure.outcome = RetainOutcome::AllocationFailure;
+      return failure;
+    } catch (const std::length_error &) {
+      RetainResult failure = result;
+      failure.outcome = RetainOutcome::AllocationFailure;
+      return failure;
     }
-    return true;
+    growth_budget_.commit_charge(growth_plan);
+    return result;
   }
 
   void release(hsa_executable_t executable, const std::vector<uint8_t> *storage) {
@@ -1056,10 +1123,12 @@ public:
     const auto entry = std::ranges::find(entries_, executable.handle, &Entry::executable);
     if (entry == entries_.end())
       return;
-    const auto object =
-        std::ranges::find(entry->objects, storage, [](const auto &value) { return value.get(); });
-    if (object != entry->objects.end())
+    const auto object = std::ranges::find(entry->objects, storage,
+                                          [](const Object &value) { return value.storage.get(); });
+    if (object != entry->objects.end()) {
+      refund_growth(object->growth_bytes);
       entry->objects.erase(object);
+    }
     if (entry->objects.empty())
       entries_.erase(entry);
   }
@@ -1067,23 +1136,42 @@ public:
   void remove(hsa_executable_t executable) {
     std::lock_guard lock(mutex_);
     const auto entry = std::ranges::find(entries_, executable.handle, &Entry::executable);
-    if (entry != entries_.end())
+    if (entry != entries_.end()) {
+      for (const Object &object : entry->objects)
+        refund_growth(object.growth_bytes);
       entries_.erase(entry);
+    }
   }
 
-  void clear() {
+  [[nodiscard]] ProcessGrowthBudget::Summary summarize_and_clear() {
     std::lock_guard lock(mutex_);
+    const ProcessGrowthBudget::Summary summary = growth_budget_.summary();
     entries_.clear();
+    growth_budget_.clear();
+    return summary;
   }
 
 private:
+  struct Object {
+    std::shared_ptr<const std::vector<uint8_t>> storage;
+    uint64_t growth_bytes = 0;
+  };
+
   struct Entry {
     uint64_t executable = 0;
-    std::vector<std::shared_ptr<const std::vector<uint8_t>>> objects;
+    std::vector<Object> objects;
   };
+
+  void refund_growth(uint64_t growth_bytes) {
+    if (!growth_budget_.refund(growth_bytes)) {
+      std::fprintf(stderr, "[rocjitsu-dbi-hooks] ConSan internal invariant violation: "
+                           "replacement growth refund exceeded the live total\n");
+    }
+  }
 
   std::mutex mutex_;
   std::vector<Entry> entries_;
+  ProcessGrowthBudget growth_budget_;
 };
 
 class AutoScReportBufferRegistry {
@@ -1579,6 +1667,7 @@ public:
         "fault_barrier_index=%u "
         "delay_mode=%s delay_var_ssrc=%u "
         "patched_image_growth_limit_kind=%s patched_image_growth_limit_value=%llu "
+        "process_patched_image_growth_limit_bytes=%s "
         "max_patches=%u max_patches_source=%s tmp_vgpr=%s moi_exec_save_sgpr=%s "
         "moi_owner_source=%s flat_provenance=%s moi_owner_sgpr=%s moi_owner_vgpr=%s "
         "moi_epoch_vgpr=%s "
@@ -1607,6 +1696,9 @@ public:
         patched_image_growth_limit_kind_name(config.patched_image_growth_limit.kind),
         static_cast<unsigned long long>(
             patched_image_growth_limit_value(config.patched_image_growth_limit)),
+        config.process_patched_image_growth_limit_bytes
+            ? std::to_string(*config.process_patched_image_growth_limit_bytes).c_str()
+            : "unlimited",
         config.max_patches, config.max_patches_explicit ? "expert-limit" : "all-supported-default",
         config.scratch_vgpr ? std::to_string(*config.scratch_vgpr).c_str() : "auto",
         config.moi_exec_save_sgpr ? std::to_string(*config.moi_exec_save_sgpr).c_str() : "unset",
@@ -1654,6 +1746,12 @@ public:
     std::lock_guard lock(mutex_);
     const bool supercollider_active =
         config_ && config_->flavor == rocjitsu::ConSanFlavor::SuperCollider;
+    const std::optional<uint64_t> process_patched_image_growth_limit_bytes =
+        config_ ? config_->process_patched_image_growth_limit_bytes : std::nullopt;
+    const std::string process_patched_image_growth_ceiling =
+        process_patched_image_growth_limit_bytes
+            ? std::to_string(process_patched_image_growth_limit_bytes.value())
+            : "unlimited";
     if (active_ && core_ != nullptr) {
       if (core_->hsa_code_object_reader_create_from_file_fn ==
           rj_dbi_code_object_reader_create_from_file)
@@ -1686,6 +1784,8 @@ public:
         summarize_and_clear_auto_moi_report_buffers(core_);
     const ConSanStaticCoverageRegistry::Summary static_coverage_summary =
         ConSanStaticCoverageRegistry::instance().summarize_and_clear();
+    const ProcessGrowthBudget::Summary patched_image_growth_summary =
+        ReplacementCodeObjectStorageRegistry::instance().summarize_and_clear();
     const bool moi_require_records = moi_require_records_;
     const bool moi_require_diagnostics = moi_require_diagnostics_;
     const bool moi_forbid_diagnostics = moi_forbid_diagnostics_;
@@ -1694,7 +1794,6 @@ public:
     const std::optional<rocjitsu::ConSanFaultLoadSelector> fault_load_selector =
         fault_load_selector_;
     CodeObjectReaderRegistry::instance().clear();
-    ReplacementCodeObjectStorageRegistry::instance().clear();
     KernelPrivateDispatchRegistry::instance().clear();
     if (fault_load_selector) {
       log_message(kLogInfo,
@@ -1754,6 +1853,12 @@ public:
         static_cast<unsigned long long>(moi_report_summary.allocation_failure_count),
         static_cast<unsigned long long>(moi_report_summary.capacity_failure_count),
         static_cast<unsigned long long>(moi_report_summary.cleanup_failure_count));
+    std::fprintf(stderr,
+                 "[rocjitsu-dbi-hooks] ConSan patched-image growth memory live_before_cleanup=%llu "
+                 "live_after_cleanup=0 peak_growth_bytes=%llu process_ceiling=%s\n",
+                 static_cast<unsigned long long>(patched_image_growth_summary.live_bytes),
+                 static_cast<unsigned long long>(patched_image_growth_summary.peak_bytes),
+                 process_patched_image_growth_ceiling.c_str());
     const uint64_t dynamic_incomplete_count =
         sc_report_summary.allocation_failure_count + sc_report_summary.read_failure_count +
         sc_report_summary.cleanup_failure_count + moi_report_summary.allocation_failure_count +
@@ -2627,6 +2732,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   std::shared_ptr<const std::vector<uint8_t>> replacement_storage;
   rocjitsu::ConSanInstallAction install_action = rocjitsu::ConSanInstallAction::LoadOriginal;
   std::optional<rocjitsu::ConSanResult> patch_result_storage;
+  std::optional<ConSanStaticCoverage> static_coverage_storage;
   std::optional<rocjitsu::ConSanResult> reusable_moi_inventory;
   std::optional<rocjitsu::ConSanMoiAutoReportInventory> live_fault_auto_report_capacity_inventory;
   ProcessFaultApplicationReservation process_fault_application_reservation;
@@ -2634,6 +2740,16 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       ProcessFaultReservationOutcome::MutationAlreadyInstalled;
   bool process_fault_reservation_attempted = false;
   FaultInstallationEvidence fault_installation_evidence(code_object_reader.handle);
+  const auto record_static_coverage = [&](bool replacement_installed) {
+    if (!static_coverage_storage)
+      return;
+    if (install_action == rocjitsu::ConSanInstallAction::LoadReplacement &&
+        !replacement_installed) {
+      mark_consan_static_coverage_uninstrumented(*static_coverage_storage);
+    }
+    ConSanStaticCoverageRegistry::instance().record(*static_coverage_storage);
+    static_coverage_storage.reset();
+  };
 
   const CodeObjectReaderRegistry::ReaderBytes reader_bytes =
       CodeObjectReaderRegistry::instance().lookup(code_object_reader);
@@ -3098,6 +3214,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "fault_barrier_index=%u "
         "delay_mode=%s delay_var_ssrc=%u "
         "patched_image_growth_limit_kind=%s patched_image_growth_limit_value=%llu "
+        "process_patched_image_growth_limit_bytes=%s "
         "max_patches=%u max_patches_source=%s tmp_vgpr=%s moi_exec_save_sgpr=%s "
         "moi_owner_source=%s moi_owner_sgpr=%s moi_owner_vgpr=%s moi_epoch_vgpr=%s "
         "report_buffer=%s report_marker=%u "
@@ -3121,6 +3238,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         patched_image_growth_limit_kind_name(patch_options.patched_image_growth_limit.kind),
         static_cast<unsigned long long>(
             patched_image_growth_limit_value(patch_options.patched_image_growth_limit)),
+        config->process_patched_image_growth_limit_bytes
+            ? std::to_string(*config->process_patched_image_growth_limit_bytes).c_str()
+            : "unlimited",
         config->max_patches,
         config->max_patches_explicit ? "expert-limit" : "all-supported-default",
         config->scratch_vgpr ? std::to_string(*config->scratch_vgpr).c_str() : "auto",
@@ -3733,8 +3853,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 function_flat_maybe_group_hint_count, function_flat_maybe_private_hint_count,
                 function_flat_global_hint_count, function_flat_unknown_hint_count,
                 patch_result.patches.size(), patch_result.modified ? "true" : "false");
-    const ConSanStaticCoverage static_coverage =
-        compute_consan_static_coverage(patch_result, *config);
+    static_coverage_storage = compute_consan_static_coverage(patch_result, *config);
+    const ConSanStaticCoverage &static_coverage = *static_coverage_storage;
     log_message(
         kLogInfo,
         "ConSan coverage reader=%llu flavor=%s engine=%s "
@@ -3809,7 +3929,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   static_cast<unsigned long long>(site.text_offset), site.mnemonic.c_str(),
                   static_cast<unsigned long long>(load_id));
     }
-    ConSanStaticCoverageRegistry::instance().record(static_coverage);
     for (const rocjitsu::ConSanTextSection &text : patch_result.text_sections) {
       log_message(kLogVerbose, "ConSan text reader=%llu name=%s file=0x%llx vaddr=0x%llx size=%llu",
                   static_cast<unsigned long long>(code_object_reader.handle), text.name.c_str(),
@@ -4026,6 +4145,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                      "[rocjitsu-dbi-hooks] RJ_CONSAN_REQUIRE_PATCH requested, but no relevant "
                      "access, barrier, atomic, or fence patch was applied to a code object with "
                      "supported ConSan sites\n");
+        record_static_coverage(false);
         return reject_code_object_load(
             *config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT, code_object_reader.handle,
             "required-instrumentation-missing", fault_installation_evidence);
@@ -4044,27 +4164,82 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
 
   if (patch_result_storage && install_action == rocjitsu::ConSanInstallAction::LoadReplacement) {
     auto *original_create = layer().create_from_memory();
-    if (original_create == nullptr)
+    if (original_create == nullptr) {
+      record_static_coverage(false);
       return HSA_STATUS_ERROR;
+    }
 
+    const size_t input_size = patch_result_storage->input_size;
+    const size_t replacement_size = patch_result_storage->elf_bytes.size();
+    const uint64_t replacement_growth_bytes =
+        replacement_size > input_size ? static_cast<uint64_t>(replacement_size - input_size) : 0;
     try {
       replacement_storage =
           std::make_shared<const std::vector<uint8_t>>(std::move(patch_result_storage->elf_bytes));
     } catch (const std::bad_alloc &) {
       replacement_storage.reset();
     }
-    if (!replacement_storage ||
-        !ReplacementCodeObjectStorageRegistry::instance().retain(executable, replacement_storage)) {
-      std::fprintf(stderr,
-                   "[rocjitsu-dbi-hooks] failed to retain replacement code-object storage\n");
-      if (config->fail_closed)
+    std::optional<ReplacementCodeObjectStorageRegistry::RetainResult> retain_result;
+    if (replacement_storage) {
+      retain_result = ReplacementCodeObjectStorageRegistry::instance().retain(
+          executable, replacement_storage, replacement_growth_bytes,
+          static_cast<uint64_t>(replacement_size),
+          config->process_patched_image_growth_limit_bytes);
+    }
+    const bool process_growth_limit_exceeded =
+        retain_result &&
+        retain_result->outcome ==
+            ReplacementCodeObjectStorageRegistry::RetainOutcome::ProcessGrowthLimitExceeded;
+    if (!replacement_storage || !retain_result || !*retain_result) {
+      const char *rejection_reason = "replacement-storage-retention";
+      if (process_growth_limit_exceeded) {
+        rejection_reason = "process-patched-image-growth-limit";
+        if (retain_result->required_total_growth_bytes) {
+          std::fprintf(stderr,
+                       "[rocjitsu-dbi-hooks] ConSan process patched-image growth limit exceeded: "
+                       "live=%llu replacement_growth=%llu replacement_image=%llu "
+                       "required=%llu limit=%llu\n",
+                       static_cast<unsigned long long>(retain_result->live_growth_bytes),
+                       static_cast<unsigned long long>(retain_result->replacement_growth_bytes),
+                       static_cast<unsigned long long>(retain_result->replacement_image_bytes),
+                       static_cast<unsigned long long>(*retain_result->required_total_growth_bytes),
+                       static_cast<unsigned long long>(*retain_result->limit_bytes));
+        } else {
+          std::fprintf(stderr,
+                       "[rocjitsu-dbi-hooks] ConSan process patched-image growth limit exceeded: "
+                       "live=%llu replacement_growth=%llu replacement_image=%llu "
+                       "required=uint64-overflow limit=%llu\n",
+                       static_cast<unsigned long long>(retain_result->live_growth_bytes),
+                       static_cast<unsigned long long>(retain_result->replacement_growth_bytes),
+                       static_cast<unsigned long long>(retain_result->replacement_image_bytes),
+                       static_cast<unsigned long long>(*retain_result->limit_bytes));
+        }
+      } else if (retain_result && retain_result->outcome ==
+                                      ReplacementCodeObjectStorageRegistry::RetainOutcome::
+                                          GrowthAccountingOverflow) {
+        rejection_reason = "process-patched-image-growth-accounting";
+        std::fprintf(
+            stderr,
+            "[rocjitsu-dbi-hooks] ConSan process patched-image growth accounting overflow: "
+            "live=%llu replacement_growth=%llu replacement_image=%llu\n",
+            static_cast<unsigned long long>(retain_result->live_growth_bytes),
+            static_cast<unsigned long long>(retain_result->replacement_growth_bytes),
+            static_cast<unsigned long long>(retain_result->replacement_image_bytes));
+      } else {
+        std::fprintf(stderr,
+                     "[rocjitsu-dbi-hooks] failed to retain replacement code-object storage\n");
+      }
+      if (config->fail_closed) {
+        record_static_coverage(false);
         return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
-                                       code_object_reader.handle, "replacement-storage-retention",
+                                       code_object_reader.handle, rejection_reason,
                                        fault_installation_evidence);
+      }
       replacement_storage.reset();
       log_message(kLogInfo,
-                  "ConSan replacement storage retention failed; loading original reader=%llu",
-                  static_cast<unsigned long long>(code_object_reader.handle));
+                  "ConSan replacement storage retention failed reason=%s; "
+                  "loading original reader=%llu",
+                  rejection_reason, static_cast<unsigned long long>(code_object_reader.handle));
     } else {
       replacement_storage_retained = true;
     }
@@ -4082,9 +4257,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       replacement_storage_retained = false;
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] failed to create replacement patched reader: %d\n",
                    static_cast<int>(reader_status));
-      if (config->fail_closed)
+      if (config->fail_closed) {
+        record_static_coverage(false);
         return reject_code_object_load(*config, reader_status, code_object_reader.handle,
                                        "replacement-reader-creation", fault_installation_evidence);
+      }
       log_message(kLogInfo,
                   "ConSan replacement reader creation failed; loading original reader=%llu",
                   static_cast<unsigned long long>(code_object_reader.handle));
@@ -4133,6 +4310,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   }
   if (load_status != HSA_STATUS_SUCCESS && replacement_storage_retained)
     ReplacementCodeObjectStorageRegistry::instance().release(executable, replacement_storage.get());
+  record_static_coverage(load_status == HSA_STATUS_SUCCESS && using_replacement_reader);
   return load_status;
 }
 

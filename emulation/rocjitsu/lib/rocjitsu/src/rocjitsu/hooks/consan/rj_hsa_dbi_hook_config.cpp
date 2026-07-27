@@ -956,6 +956,12 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       return std::nullopt;
     }
   }
+  if (env_has_value("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES")) {
+    uint64_t process_limit = 0;
+    if (!parse_u64_env("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES", 0, &process_limit, 10))
+      return std::nullopt;
+    config.process_patched_image_growth_limit_bytes = process_limit;
+  }
   config.max_patches_explicit = env_has_value("RJ_CONSAN_MAX_PATCHES");
   if (!parse_u32_env("RJ_CONSAN_MAX_PATCHES", kConSanAllSupportedPatchBudget, &config.max_patches))
     return std::nullopt;

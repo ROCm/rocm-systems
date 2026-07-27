@@ -1780,6 +1780,7 @@ def _setting_metadata(name: str) -> dict:
         "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
         "RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES",
         "RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT",
+        "RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES",
     }:
         category = "workload-tuning"
     elif name == "RJ_CONSAN_LOG" or "_REQUIRE_" in name or "_FORBID_" in name:

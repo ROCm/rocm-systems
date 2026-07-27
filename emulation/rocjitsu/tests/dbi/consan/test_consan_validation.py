@@ -1606,6 +1606,7 @@ class ConSanValidationTest(unittest.TestCase):
         for name, value in (
             ("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4096"),
             ("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", "37"),
+            ("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES", "8192"),
         ):
             [setting] = validation._audited_settings({name: value})
             self.assertEqual(setting["category"], "workload-tuning")
