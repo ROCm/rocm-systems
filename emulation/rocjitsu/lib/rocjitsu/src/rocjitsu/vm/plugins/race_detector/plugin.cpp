@@ -15,6 +15,7 @@
 #include <format>
 #include <mutex>
 #include <sstream>
+#include <stdexcept>
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -31,9 +32,11 @@ void warn_cluster_peer_writes_ignored_once() {
 } // namespace
 
 // Declared in plugin.h (used by formatTrace tests in execution_plugin_test.cpp).
-std::optional<MarkedPc> findConflict(const RaceViolation &v, RaceDetector &detector) {
-  EventId eventId = v.conflictingEvent;
-  return MarkedPc{detector.events().pc(eventId), detector.events().waveId(eventId).value, -1};
+MarkedPc findConflict(const RaceViolation &v, RaceDetector &detector) {
+  EventId event_id = v.conflictingEvent;
+  if (!detector.events().contains(event_id))
+    throw std::out_of_range("race violation references an unavailable conflicting event");
+  return {detector.events().pc(event_id), detector.events().waveId(event_id).value, -1};
 }
 
 // Format a race trace showing the instruction stream between the memory
@@ -179,8 +182,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     auto *ws = get_state(wf);
     assert(ws && ws->race_state && "no wavefront state for race");
     auto *detector = ws->race_state->getDetector();
-    auto conflict = findConflict(v, *detector);
-    assert(conflict.has_value() && "conflict not found for race violation");
+    MarkedPc conflict = findConflict(v, *detector);
 
     std::ostringstream oss;
     if (v.space == RaceViolation::Space::VGPR)
@@ -201,10 +203,10 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
       bool is_new = !observed_races_.count({dispatch_id, pc}) &&
-                    !observed_races_.count({dispatch_id, conflict->pc});
+                    !observed_races_.count({dispatch_id, conflict.pc});
       observed_races_.emplace(dispatch_id, pc);
       if (is_new) {
-        observed_races_.emplace(dispatch_id, conflict->pc);
+        observed_races_.emplace(dispatch_id, conflict.pc);
         const char *space = v.space == RaceViolation::Space::VGPR   ? "VGPR"
                             : v.space == RaceViolation::Space::SGPR ? "SGPR"
                                                                     : "LDS";

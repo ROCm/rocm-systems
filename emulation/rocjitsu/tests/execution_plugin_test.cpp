@@ -1481,10 +1481,17 @@ TEST(FindConflictTest, UsesRecordedConflictingEvent) {
   ASSERT_NE(first, second);
 
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), second};
-  auto conflict = findConflict(violation, detector);
+  MarkedPc conflict = findConflict(violation, detector);
 
-  ASSERT_TRUE(conflict.has_value());
-  EXPECT_EQ(conflict->pc, 0x200u);
+  EXPECT_EQ(conflict.pc, 0x200u);
+}
+
+TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
+  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0),
+                        [](RaceViolation) {});
+  RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), EventId{}};
+
+  EXPECT_THROW(findConflict(violation, detector), std::out_of_range);
 }
 
 TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
