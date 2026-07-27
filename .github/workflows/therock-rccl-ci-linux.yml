@@ -12,7 +12,7 @@ on:
         default: ''
       package_version:
         type: string
-        required: true
+        default: ""
       cmake_options:
         type: string
       artifact_run_id:
@@ -23,6 +23,9 @@ on:
         type: string
         default: 'smoke'
       notify_email:
+        type: string
+        default: ''
+      notify_webhook:
         type: string
         default: ''
 
@@ -57,7 +60,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 22004a6bc8a28393f8b772b7f6e2a3040f11cd8d # 2026-07-20
+          ref: 2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
 
       - name: Install python deps
         run: |
@@ -180,6 +183,7 @@ jobs:
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       test_scope: ${{ inputs.test_scope }}
       notify_email: ${{ inputs.notify_email }}
+      notify_webhook: ${{ inputs.notify_webhook }}
 
   therock-test-jax-collective:
     name: "Test JAX collective (scheduled)"
@@ -192,3 +196,17 @@ jobs:
       test_runs_on: linux-gfx942-8gpu-ossci-rocm
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       notify_email: ${{ inputs.notify_email }}
+      notify_webhook: ${{ inputs.notify_webhook }}
+
+  therock-test-rocprof:
+    name: "Test rocprofv3 smoke"
+    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-rocprof.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: linux-gfx942-8gpu-ossci-rocm
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      notify_email: ${{ inputs.notify_email }}
+      notify_webhook: ${{ inputs.notify_webhook }}

@@ -29,18 +29,7 @@ target_link_libraries(
         rocjitsu_code
         rocjitsu_dbt_config
         rocjitsu_isa
-        rocjitsu_isa_registry
-        rocjitsu_isa_cdna1
-        rocjitsu_isa_cdna2
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna1
-        rocjitsu_isa_rdna2
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250
-        # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here.
+        rocjitsu_amdgpu_isa_registry
         rocjitsu_vm_amdgpu
         util
         flatbuffers

@@ -28,12 +28,31 @@ set(CLI_OUTPUTS "")
 foreach(file ${CLI_FILES})
     set(src ${CMAKE_CURRENT_SOURCE_DIR}/${file})
     set(dst ${PY_PACKAGE_DIR}/${file})
-    add_custom_command(
-        OUTPUT ${dst}
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${src} ${dst}
-        COMMAND ${CMAKE_COMMAND} -E touch_nocreate ${dst}
-        DEPENDS ${src}
-    )
+    # amdsmi_cli.py is the CLI entry point (symlinked to `amd-smi`). On RPM
+    # distros the amdsmi module lives in a version-specific site-packages, so its
+    # `#!/usr/bin/python3` shebang must be pinned to the exact interpreter that
+    # site-packages belongs to (AMDSMI_CLI_SHEBANG_INTERP, resolved in
+    # py-interface/CMakeLists.txt) -- otherwise a repointed /usr/bin/python3
+    # (alternatives / venv / newer default) runs the CLI under an interpreter
+    # that cannot import amdsmi. When the pin is empty (Debian, where
+    # dist-packages is version-agnostic) the shebang is left as-is.
+    if(file STREQUAL "amdsmi_cli.py" AND AMDSMI_CLI_SHEBANG_INTERP)
+        add_custom_command(
+            OUTPUT ${dst}
+            COMMAND
+                ${CMAKE_COMMAND} "-DIN=${src}" "-DOUT=${dst}" "-DINTERP=${AMDSMI_CLI_SHEBANG_INTERP}" -P
+                ${CMAKE_CURRENT_SOURCE_DIR}/pin_shebang.cmake
+            COMMAND ${CMAKE_COMMAND} -E touch_nocreate ${dst}
+            DEPENDS ${src} ${CMAKE_CURRENT_SOURCE_DIR}/pin_shebang.cmake
+        )
+    else()
+        add_custom_command(
+            OUTPUT ${dst}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${src} ${dst}
+            COMMAND ${CMAKE_COMMAND} -E touch_nocreate ${dst}
+            DEPENDS ${src}
+        )
+    endif()
     list(APPEND CLI_OUTPUTS ${dst})
 endforeach()
 

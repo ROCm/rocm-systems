@@ -596,6 +596,17 @@ rj_status_t rj_daemon_start(const char *json, const char *socket_path, rj_daemon
   if (status != ROCJITSU_STATUS_SUCCESS)
     return status;
 
+  // Daemon callers supply the same configuration as local-mode callers, so
+  // install its plugins before any client can submit work. With no explicit
+  // directory, the loader discovers modules relative to librocjitsu or the
+  // statically linked rocjitsu CLI.
+  status = rj_vm_load_plugins(created->vm, json, nullptr);
+  if (status != ROCJITSU_STATUS_SUCCESS) {
+    rj_vm_destroy(created->vm);
+    created->vm = nullptr;
+    return status;
+  }
+
   try {
     status = bind_socket(created.get());
   } catch (const std::bad_alloc &) {
