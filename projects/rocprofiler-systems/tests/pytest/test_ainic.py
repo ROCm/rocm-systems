@@ -94,15 +94,10 @@ def ainic_perf_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def ainic_download_url_1() -> str:
+def ainic_download_url() -> str:
     """Download URL for the first file to download."""
     return "https://github.com/ROCm/rocprofiler-systems/releases/download/rocm-6.4.1/rocprofiler-systems-1.0.1-ubuntu-22.04-ROCm-60400-PAPI-OMPT-Python3.sh"
 
-
-@pytest.fixture
-def ainic_download_url_2() -> str:
-    """Download URL for the second file to download."""
-    return "https://github.com/ROCm/rocprofiler-systems/releases/download/rocm-6.4.3/rocprofiler-systems-1.0.2-rhel-9.4-PAPI-OMPT-Python3.sh"
 
 
 @pytest.fixture
@@ -123,7 +118,7 @@ class TestAINIC(RocprofsysTest):
     PERFETTO_PASS_REGEX = [r"perfetto-trace\.proto validated"]
     PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.proto"]
 
-    # This test does _not_ requires NIC hardware, so "mark.ainic_required" is not added.
+    # No NIC hardware required
     @pytest.mark.timeout(30)
     def test_settings_present(self, rocprof_config: RocprofsysConfig):
         """AI NIC settings must be listed by ``rocprof-sys-avail --settings``.
@@ -174,8 +169,7 @@ class TestAINIC(RocprofsysTest):
     def test_performance_tracks(
         self,
         ainic_perf_env,
-        ainic_download_url_1,
-        ainic_download_url_2,
+        ainic_download_url,
         ainic_rocpd_rules,
         test_output_dir,
     ):
@@ -185,8 +179,7 @@ class TestAINIC(RocprofsysTest):
 
         download_cmd = [
             "--no-check-certificate",
-            ainic_download_url_1,
-            ainic_download_url_2,
+            ainic_download_url,
             "-O",
             str(test_output_dir / "rocprofiler-systems.test.bin"),
         ]
