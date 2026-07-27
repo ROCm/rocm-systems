@@ -26,11 +26,9 @@ RUN apt update --yes \
             libssl-dev \
             lsb-release \
             pkg-config \
-            pkg-config \
             python3-pip \
             software-properties-common \
             wget \
-            cmake \
         && apt clean \
         && rm -rf /var/cache/apt/ /var/lib/apt/lists/*
 
