@@ -563,21 +563,19 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
   return 0;
 }
 
-// Return the KFD proc-root "pid:<pid>-id:<n>" alternate-context directories that
-// belong to `pid`, as full paths.
+// Return the KFD proc-root "pid:<pid>-id:<n>" alternate-context dirs for `pid`
+// (a rarely-used layout for multi-context processes), as full paths.
 //
-// These directories are a rarely-populated alternate layout for multi-context
-// processes. Each per-PID lookup used to re-open and re-scan the entire KFD proc
-// root to find them, which made a sweep over P processes O(P^2). Instead we scan
-// the root at most once per short window, build a shared pid -> {dirs} index, and
-// answer each lookup from it. Callers are serialized only for the brief rebuild.
+// Scanning the proc root per PID makes a sweep over P processes O(P^2), so the
+// scan is cached process-wide and rebuilt when older than kTtl; a lookup can
+// therefore lag a just-created context by up to kTtl, which is fine for a
+// monitoring read. kTtl is a fixed internal constant on purpose: raising it
+// hides running processes for longer, lowering it restores the O(P^2) scan.
 static std::vector<std::string> KfdAltContextRootDirsForPid(long pid) {
   static std::mutex mtx;
   static std::unordered_map<long, std::vector<std::string>> index;
   static std::chrono::steady_clock::time_point built{};
   static bool valid = false;
-  // Long enough that one process-list sweep reuses a single scan; short enough
-  // that newly created contexts are picked up promptly.
   constexpr std::chrono::milliseconds kTtl{500};
 
   std::lock_guard<std::mutex> lock(mtx);

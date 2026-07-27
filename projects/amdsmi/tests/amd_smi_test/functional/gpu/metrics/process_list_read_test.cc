@@ -31,9 +31,9 @@
 #include <string>
 #include <vector>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/fdinfo.h"
+#include "test_common.h"
 
 TestProcessListRead::TestProcessListRead() : TestBase() {
   set_title("AMDSMI Process List Read Test");
