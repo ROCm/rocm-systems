@@ -387,7 +387,6 @@ __device__ __forceinline__ bool is_last_active_lane() {
   }
 }
 
-
 #define LOAD(VAR) __atomic_load_n((VAR), __ATOMIC_SEQ_CST)
 #define STORE(DST, SRC) __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST)
 
@@ -401,13 +400,43 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
-template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
+// UniformBase: true iff every active lane calling this copy_bulk instance is
+// guaranteed to pass the *same* dst/src (a group-cooperative copy, where only
+// tid/stride vary the per-lane offset -- e.g. memcpy_wave/memcpy_wg). This is
+// a correctness precondition, not a hint: when true, the buffer descriptor's
+// address is forced through v_readfirstlane_b32 (see
+// make_buffer_resource_uniform), which broadcasts whatever address is in lane
+// 0 to every active lane. If some lanes actually hold different dst/src (as
+// in memcpy_lane, where each lane copies its own independent element), that
+// broadcast silently corrupts every lane but lane 0's transfer. Callers must
+// only set UniformBase=true when they can prove the shared-base invariant
+// themselves; the hardware/compiler cannot check it.
+//
+// The perf motivation: dst/src are plain VGPR args across this __noinline__
+// boundary, so LLVM's divergence analysis can't prove uniformity on its own
+// even when it happens to be loop-invariant. Operand legalization for
+// raw.buffer.* checks uniformity per *use*, not per SSA value, so a
+// non-provably-uniform descriptor re-triggers a full
+// readfirstlane/compare/exec-mask waterfall at every one of the Unroll
+// load_buffer/store_buffer calls below. Forcing it through readfirstlane once
+// up front (only where it's actually safe) turns that into a single upfront
+// broadcast.
+template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy,
+          int Unroll, bool UniformBase = false>
 __device__ __noinline__ void copy_bulk(void* dst, void* src,
                                           int n_chunks, int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
 
   const uint32_t buf_bytes = static_cast<uint32_t>(n_chunks * ChunkSize);
+  i32x4_t src_rsrc, dst_rsrc;
+  if constexpr (UniformBase) {
+    src_rsrc = make_buffer_resource_uniform(src, buf_bytes);
+    dst_rsrc = make_buffer_resource_uniform(dst, buf_bytes);
+  } else {
+    src_rsrc = make_buffer_resource(src, buf_bytes);
+    dst_rsrc = make_buffer_resource(dst, buf_bytes);
+  }
   int chunk_batch = stride * Unroll;
   int offset = 0;
   T regs[Unroll] = {};
@@ -417,12 +446,12 @@ __device__ __noinline__ void copy_bulk(void* dst, void* src,
   for (; offset + chunk_batch <= n_chunks; offset += chunk_batch) {
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      regs[u] = Acc::load_buffer(src, buf_bytes,
+      regs[u] = Acc::load_buffer(src_rsrc,
           static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize));
     }
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      Acc::store_buffer(dst, buf_bytes,
+      Acc::store_buffer(dst_rsrc,
           static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize), regs[u]);
     }
   }
@@ -434,156 +463,223 @@ __device__ __noinline__ void copy_bulk(void* dst, void* src,
   }
 }
 
-// ==============================================================================
-// REMAINDER COPY (< 16 Bytes Fast Path)
-// ==============================================================================
 template <CachePolicy LP, CachePolicy SP>
-__device__ __forceinline__ void copy_remainder(uint8_t* dst,
-                                               uint8_t* src,
-                                               int remainder) {
-  if (remainder == 0) return;
-
-  if (remainder & 1) {
-    auto val = AsmAccess<1, LP, SP>::load(src);
-    AsmAccess<1, LP, SP>::store(dst, val);
-    if (remainder == 1) {
-      return;
-    }
-    dst += 1;
-    src += 1;
+__device__ __forceinline__ void copy_prefix(uint8_t* dst, uint8_t* src, size_t prefix) {
+  // Bottom-up evaluation mathematically guarantees alignment buildup without checking
+  if (prefix & 1) {
+    AsmAccess<1, LP, SP>::store(dst, AsmAccess<1, LP, SP>::load(src));
+    dst += 1; src += 1;
   }
-  if (remainder & 2) {
-    auto val = AsmAccess<2, LP, SP>::load(src);
-    AsmAccess<2, LP, SP>::store(dst, val);
-    if (remainder == 2) {
-      return;
-    }
-    dst += 2;
-    src += 2;
+  if (prefix & 2) {
+    AsmAccess<2, LP, SP>::store(dst, AsmAccess<2, LP, SP>::load(src));
+    dst += 2; src += 2;
   }
-  if (remainder & 4) {
-    auto val = AsmAccess<4, LP, SP>::load(src);
-    AsmAccess<4, LP, SP>::store(dst, val);
-    if (remainder == 4) {
-      return;
-    }
-    dst += 4;
-    src += 4;
+  if (prefix & 4) {
+    AsmAccess<4, LP, SP>::store(dst, AsmAccess<4, LP, SP>::load(src));
+    dst += 4; src += 4;
   }
-  if (remainder & 8) {
-    auto val = AsmAccess<8, LP, SP>::load(src);
-    AsmAccess<8, LP, SP>::store(dst, val);
+  if (prefix & 8) {
+    AsmAccess<8, LP, SP>::store(dst, AsmAccess<8, LP, SP>::load(src));
   }
 }
+
+template <CachePolicy LP, CachePolicy SP>
+__device__ __forceinline__ void copy_suffix(uint8_t* dst, uint8_t* src, size_t remainder) {
+  if (remainder & 8) {
+    AsmAccess<8, LP, SP>::store(dst, AsmAccess<8, LP, SP>::load(src));
+    dst += 8; src += 8;
+  }
+  if (remainder & 4) {
+    AsmAccess<4, LP, SP>::store(dst, AsmAccess<4, LP, SP>::load(src));
+    dst += 4; src += 4;
+  }
+  if (remainder & 2) {
+    AsmAccess<2, LP, SP>::store(dst, AsmAccess<2, LP, SP>::load(src));
+    dst += 2; src += 2;
+  }
+  if (remainder & 1) {
+    AsmAccess<1, LP, SP>::store(dst, AsmAccess<1, LP, SP>::load(src));
+  }
+}
+
+template <CachePolicy LP, CachePolicy SP>
+__device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int size) {
+  while (size > 0) {
+    // Dynamically check alignment at the current pointer position
+    uintptr_t align = reinterpret_cast<uintptr_t>(dst) | reinterpret_cast<uintptr_t>(src);
+
+    if (size >= 8 && (align & 7) == 0) {
+      auto val = AsmAccess<8, LP, SP>::load(src);
+      AsmAccess<8, LP, SP>::store(dst, val);
+      dst += 8; src += 8; size -= 8;
+    }
+    else if (size >= 4 && (align & 3) == 0) {
+      auto val = AsmAccess<4, LP, SP>::load(src);
+      AsmAccess<4, LP, SP>::store(dst, val);
+      dst += 4; src += 4; size -= 4;
+    }
+    else if (size >= 2 && (align & 1) == 0) {
+      auto val = AsmAccess<2, LP, SP>::load(src);
+      AsmAccess<2, LP, SP>::store(dst, val);
+      dst += 2; src += 2; size -= 2;
+    }
+    else {
+      auto val = AsmAccess<1, LP, SP>::load(src);
+      AsmAccess<1, LP, SP>::store(dst, val);
+      dst += 1; src += 1; size -= 1;
+    }
+  }
+}
+
+// Prefix/tail bytes (< ChunkSize) are copied via copy_bulk<1, ...> rather
+// than a single tid==0 lane running copy_remainder: with group-cooperative
+// callers (stride > 1), gating a multi-step byte copy behind one lane forces
+// every other active lane to sit masked-off through the branch until
+// reconvergence -- paid on *every* call. Routing it through copy_bulk<1>
+// spreads the (at most ChunkSize-1) leftover bytes one-per-lane across
+// tid/stride instead, so it costs a single parallel step. For memcpy_lane
+// (tid=0, stride=1) this degenerates back to the same serial byte-by-byte
+// copy it already did.
+template <int ChunkSize, CachePolicy LP, CachePolicy SP, int Unroll,
+          bool UniformBase = false>
+__device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
+                                                  size_t size, int tid,
+                                                  int stride) {
+  uintptr_t dst_addr = reinterpret_cast<uintptr_t>(dst);
+  size_t prefix = (-dst_addr) & (ChunkSize - 1);
+
+  if (prefix > size) {
+    prefix = size;
+  }
+
+  if (tid == 0 && prefix > 0) {
+    copy_prefix<LP, SP>(dst, src, prefix);
+  }
+
+  dst += prefix;
+  src += prefix;
+  size -= prefix;
+
+  int n_chunks = static_cast<int>(size / ChunkSize);
+  int remainder = static_cast<int>(size % ChunkSize);
+
+  copy_bulk<ChunkSize, LP, SP, Unroll, UniformBase>(dst, src, n_chunks, tid, stride);
+
+  if (tid == 0 && remainder > 0) {
+    copy_suffix<LP, SP>(
+        dst + static_cast<size_t>(n_chunks) * ChunkSize,
+        src + static_cast<size_t>(n_chunks) * ChunkSize,
+        remainder);
+  }
+}
+
 
 // ==============================================================================
 // LANE, WAVE, AND WG IMPLEMENTATIONS
 // ==============================================================================
 
 // Blocking variants additionally drain all in-flight VMEM ops before returning.
+//
+// memcpy_lane is per-lane: many lanes may call it concurrently, each with its
+// own independent dst/src (see e.g. tile_put's element-by-element fallback).
+// It must NOT set UniformBase=true on copy_aligned_best_effort/copy_bulk --
+// doing so would broadcast one lane's address to every lane via
+// readfirstlane and silently corrupt the others' transfers. Contrast with
+// memcpy_wave/memcpy_wg below, which are group-cooperative: every
+// participating lane is guaranteed to pass the same dst/src.
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src,
-                                                             size_t size) {
+[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
-  constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 8;
-  // Compile-time bypass policy: cache-bypass in the direction of the remote side.
-  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
+  constexpr int Unroll = 8;
+
+  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
-  int n_chunks  = static_cast<int>(size / ChunkSize);
-  int remainder = static_cast<int>(size % ChunkSize);
-
+  // Many threads, large transfer: use cached Standard policy + system fences
   if (size >= 16 && get_flat_block_size() > 4) {
-    // Many threads, large transfer: use cached Standard policy.
-    // Fences are direction-specific to maintain system-scope coherence.
     if constexpr (!is_put(Kind)) {
       detail::atomic::threadfence<detail::atomic::memory_scope_system,
                                   detail::atomic::memory_order_acquire>();
     }
 
-    if (n_chunks > 0) {
-      copy_bulk<ChunkSize, CachePolicy::Standard, CachePolicy::Standard, 8>(
-          dst, src, n_chunks, 0, 1);
-    }
-    copy_remainder<CachePolicy::Standard, CachePolicy::Standard>(
-        static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
-        static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
+    copy_aligned_body<16, CachePolicy::Standard, CachePolicy::Standard, Unroll>(
+        static_cast<uint8_t*>(dst), static_cast<uint8_t*>(src), size, 0, 1);
 
     if constexpr (is_put(Kind)) {
       detail::atomic::threadfence<detail::atomic::memory_scope_system,
                                   detail::atomic::memory_order_release>();
     }
-  } else {
-    // Small transfer or single-lane: cache-bypass policy provides direct
-    // remote visibility without explicit fences.
-    if (n_chunks > 0) {
-      copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, 0, 1);
+  }
+  // Normal cache-bypass path for small transfers or single-lane execution
+  else {
+    if (size >= 16) {
+      copy_aligned_body<16, LP, SP, Unroll>(static_cast<uint8_t*>(dst),
+                                            static_cast<uint8_t*>(src),
+                                            size, 0, 1);
+    } else {
+      copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
+                             static_cast<uint8_t*>(src),
+                             size);
     }
-    copy_remainder<LP, SP>(
-        static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
-        static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
   }
 }
 
+// memcpy_wave is group-cooperative: every lane in the wave passes the same
+// dst/src and only differs by wave_tid/wave_size (folded into the per-access
+// offset inside copy_bulk), so UniformBase=true is safe here.
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src,
-                                                             size_t size) {
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
-  constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 8;
+  constexpr int Unroll = 8;
 
-  constexpr CachePolicy LP =
-      is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
-  constexpr CachePolicy SP =
-      is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
+  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
+  constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int wave_tid = get_flat_block_id() % WF_SIZE;
   int wave_size{wave_SZ()};
-  int n_chunks = size / ChunkSize;
-  int remainder = size % ChunkSize;
 
-  if (n_chunks > 0) {
-    copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, wave_tid, wave_size);
-  }
-
-  // Remainder handled uniquely by the first thread in the wave
-  if (wave_tid == 0) {
-    copy_remainder<LP, SP>(static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
-                           static_cast<uint8_t*>(src) + n_chunks * ChunkSize, 
-                           remainder);
+  if (size >= 16) {
+    copy_aligned_body<16, LP, SP, Unroll, true>(static_cast<uint8_t*>(dst),
+                                                static_cast<uint8_t*>(src),
+                                                size, wave_tid, wave_size);
+  } else {
+    // The "Whatever Else" Path: Small sizes skip bulk setup entirely
+    if (wave_tid == 0) {
+      copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
+                             static_cast<uint8_t*>(src),
+                             size);
+    }
   }
 }
 
+// memcpy_wg is group-cooperative: every lane in the workgroup passes the same
+// dst/src and only differs by tid/stride (folded into the per-access offset
+// inside copy_bulk), so UniformBase=true is safe here.
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
-                                                           size_t size) {
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
-  constexpr int ChunkSize = 16;
-  constexpr int Unroll    = 8;
+  constexpr int Unroll = 8;
 
-  constexpr CachePolicy LP =
-      is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
-  constexpr CachePolicy SP =
-      is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
+  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
+  constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
-  int thread_id = get_flat_block_id();
-  int block_size = get_flat_block_size();
-  int n_chunks = size / ChunkSize;
-  int remainder = size % ChunkSize;
+  int tid = get_flat_block_id();
+  int stride = get_flat_block_size();
 
-  if (n_chunks > 0) {
-    copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, thread_id, block_size);
-  }
-
-  // Remainder handled uniquely by the first thread in the workgroup
-  if (thread_id == 0) {
-    copy_remainder<LP, SP>(static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
-                           static_cast<uint8_t*>(src) + n_chunks * ChunkSize,
-                           remainder);
+  if (size >= 16) {
+    copy_aligned_body<16, LP, SP, Unroll, true>(static_cast<uint8_t*>(dst),
+                                                static_cast<uint8_t*>(src),
+                                                size, tid, stride);
+  } else {
+    // Small sizes skip bulk setup entirely
+    if (tid == 0) {
+      copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
+                             static_cast<uint8_t*>(src),
+                             size);
+    }
   }
 }
 
