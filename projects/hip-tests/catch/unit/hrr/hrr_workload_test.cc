@@ -940,43 +940,76 @@ TEST_CASE("Unit_HRR_MemsetVariants_Direct", "[.][hrr-direct]") {
 // Workload: memset per-thread-default-stream variants (hipMemset*_spt)
 //
 // Exercises hipMemset_spt / hipMemsetAsync_spt / hipMemset2D_spt /
-// hipMemset2DAsync_spt. These are replayed faithfully (mirror the non-_spt
-// memset handlers); replay must reproduce the final byte pattern.
-// Final blob: every int == 0x2A2A2A2A.
+// hipMemset2DAsync_spt.  Each API fills its OWN buffer with its OWN byte
+// pattern and each buffer is read back by its OWN D2H, so every API has an
+// independent oracle: a NOOP playback handler for any single one of them leaves
+// that buffer at its replay zero-init value and fails that D2H.  Pointing all
+// four at one buffer would leave only the last writer observable.
+//
+// Pattern choice.  When the replayed and captured bytes are not identical the
+// D2H validator falls back to float tolerance (atol=rtol=1e-3), trying
+// f32/bf16/f16/f64 and accepting the first encoding with no out-of-tolerance
+// element.  So an expected value has to decode above atol/(1-rtol) = 1.001e-3
+// in EVERY candidate encoding before a zero-initialised replay buffer is
+// reported as a mismatch.  As a repeated byte, the smallest decode is always
+// the f16 one and the largest the f64 one:
+//   0x41 -> f16 2.63  f32 1.21e1  bf16 1.21e1  f64 2.26e6
+//   0x42 -> f16 3.13  f32 4.86e1  bf16 4.85e1  f64 1.57e11
+//   0x44 -> f16 4.27  f32 7.85e2  bf16 7.84e2  f64 7.48e20
+//   0x4C -> f16 17.2  f32 5.36e7  bf16 5.35e7  f64 3.55e59
+// A small-magnitude pattern would not do: 0x2A, for instance, decodes to
+// 1.51e-13 as f32, well inside the tolerance, so an all-zero replay buffer
+// would be accepted.  Unit_HRR_MemsetSptRoundtrip additionally pins
+// HIP_HRR_D2H_EXACT=1; the patterns keep the workload falsifiable without it.
+// Distinct per-API patterns also make a swapped destination pointer visible.
+// Final blobs: 0x41414141 / 0x42424242 / 0x44444444 / 0x4C4C4C4C.
 // ===========================================================================
 TEST_CASE("Unit_HRR_MemsetSpt_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipSetDevice(0));
-  constexpr int    N  = 1024;
-  constexpr size_t SZ = N * sizeof(int);  // 4096 bytes
+  constexpr int    N  = 256;
+  constexpr size_t SZ = N * sizeof(int);  // 1024 bytes per buffer
 
+  // 2-D geometry for the pitched variants: pitch == row width, so the memset
+  // covers the buffer contiguously and every validated byte is written by it.
+  constexpr size_t PITCH = 128;         // bytes per row
+  constexpr size_t ROWS  = SZ / PITCH;  // 8 rows
+
+  // The async variants take an explicitly created stream rather than the
+  // per-thread default one, so replay must translate the recorded stream too.
   hipStream_t s;
   HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
 
-  int* d = nullptr;
-  HIP_CHECK(hipMalloc(&d, SZ));
+  int* d_set          = nullptr;
+  int* d_set_async    = nullptr;
+  int* d_set2d        = nullptr;
+  int* d_set2d_async  = nullptr;
+  HIP_CHECK(hipMalloc(&d_set, SZ));
+  HIP_CHECK(hipMalloc(&d_set_async, SZ));
+  HIP_CHECK(hipMalloc(&d_set2d, SZ));
+  HIP_CHECK(hipMalloc(&d_set2d_async, SZ));
 
-  // 1D per-thread-stream memset (sync + async)
-  HIP_CHECK(hipMemset_spt(d, 0x11, SZ));
-  HIP_CHECK(hipMemsetAsync_spt(d, 0x22, SZ, s));
+  HIP_CHECK(hipMemset_spt(d_set, 0x41, SZ));
+  HIP_CHECK(hipMemsetAsync_spt(d_set_async, 0x42, SZ, s));
+  HIP_CHECK(hipMemset2D_spt(d_set2d, PITCH, 0x44, PITCH, ROWS));
+  HIP_CHECK(hipMemset2DAsync_spt(d_set2d_async, PITCH, 0x4C, PITCH, ROWS, s));
   HIP_CHECK(hipStreamSynchronize(s));
-
-  // 2D per-thread-stream memset covering the whole buffer as COLS x ROWS bytes
-  constexpr size_t COLS  = 32;
-  constexpr size_t ROWS  = N / COLS;            // 32 rows
-  constexpr size_t PITCH = COLS * sizeof(int);  // 128 bytes/row, contiguous
-  HIP_CHECK(hipMemset2D_spt(d, PITCH, 0x33, PITCH, ROWS));
-  HIP_CHECK(hipMemset2DAsync_spt(d, PITCH, 0x44, PITCH, ROWS, s));
-  HIP_CHECK(hipStreamSynchronize(s));
-
-  // Final known byte pattern for D2H validation: 0x2A -> int 0x2A2A2A2A.
-  HIP_CHECK(hipMemset_spt(d, 0x2A, SZ));
   HIP_CHECK(hipDeviceSynchronize());
 
+  // One D2H blob per API under test.
   int* h = new int[N]();
-  HIP_CHECK(hipMemcpy(h, d, SZ, hipMemcpyDeviceToHost));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 0x2A2A2A2A);
+  HIP_CHECK(hipMemcpy(h, d_set, SZ, hipMemcpyDeviceToHost));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 0x41414141);
+  HIP_CHECK(hipMemcpy(h, d_set_async, SZ, hipMemcpyDeviceToHost));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 0x42424242);
+  HIP_CHECK(hipMemcpy(h, d_set2d, SZ, hipMemcpyDeviceToHost));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 0x44444444);
+  HIP_CHECK(hipMemcpy(h, d_set2d_async, SZ, hipMemcpyDeviceToHost));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 0x4C4C4C4C);
 
-  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipFree(d_set));
+  HIP_CHECK(hipFree(d_set_async));
+  HIP_CHECK(hipFree(d_set2d));
+  HIP_CHECK(hipFree(d_set2d_async));
   HIP_CHECK(hipStreamDestroy(s));
   delete[] h;
 }
