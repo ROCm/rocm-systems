@@ -2268,18 +2268,22 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
     uint16_t s0, s1, s2, s3;
   } counts = {static_cast<uint16_t>(head_count), static_cast<uint16_t>(body_count),
               static_cast<uint16_t>(body_tail_count), static_cast<uint16_t>(tail_count)};
-  static_assert(sizeof(size_t) == sizeof(uint64_t),
-                "Kernel arg passing assumes 64-bit size_t");
+  // Convert size_t to uint64_t for kernel arguments to support both 32-bit and 64-bit builds
+  uint64_t body_tile_count_arg = static_cast<uint64_t>(body_tile_count);
+  uint64_t body_tile_passes_arg = static_cast<uint64_t>(body_tile_passes);
+  uint64_t globalWorkSize_arg = static_cast<uint64_t>(globalWorkSize);
+  uint64_t patternSize_arg = static_cast<uint64_t>(patternSize);
+  uint64_t tail_offset_arg = static_cast<uint64_t>(tail_offset);
   setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, origin[0]);
   setArgument(kernels_[kFillType], 1, sizeof(cl_mem), &pGpuCB);
   setArgument(kernels_[kFillType], 2, sizeof(tiled_pattern), &tiled_pattern);
   setArgument(kernels_[kFillType], 3, sizeof(body_pattern), &body_pattern);
   setArgument(kernels_[kFillType], 4, sizeof(body_tail_pattern), &body_tail_pattern);
-  setArgument(kernels_[kFillType], 5, sizeof(body_tile_count), &body_tile_count);
-  setArgument(kernels_[kFillType], 6, sizeof(body_tile_passes), &body_tile_passes);
-  setArgument(kernels_[kFillType], 7, sizeof(globalWorkSize), &globalWorkSize /* stride */);
-  setArgument(kernels_[kFillType], 8, sizeof(patternSize), &patternSize);
-  setArgument(kernels_[kFillType], 9, sizeof(tail_offset), &tail_offset);
+  setArgument(kernels_[kFillType], 5, sizeof(body_tile_count_arg), &body_tile_count_arg);
+  setArgument(kernels_[kFillType], 6, sizeof(body_tile_passes_arg), &body_tile_passes_arg);
+  setArgument(kernels_[kFillType], 7, sizeof(globalWorkSize_arg), &globalWorkSize_arg /* stride */);
+  setArgument(kernels_[kFillType], 8, sizeof(patternSize_arg), &patternSize_arg);
+  setArgument(kernels_[kFillType], 9, sizeof(tail_offset_arg), &tail_offset_arg);
   setArgument(kernels_[kFillType], 10, sizeof(cl_mem), &mem, origin[0] + body_offset);
   setArgument(kernels_[kFillType], 11, sizeof(cl_mem), &mem, origin[0] + body_tail_offset);
   setArgument(kernels_[kFillType], 12, sizeof(cl_mem), &mem, origin[0] + tail_offset);

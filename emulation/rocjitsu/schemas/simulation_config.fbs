@@ -118,6 +118,42 @@ table AmdgpuConfig {
   num_gpus: uint32 = 1;          // Number of simulated GPU instances.
 }
 
+enum DbtExecutionBackend: byte {
+  hardware,
+  simulator,
+}
+
+/// Silicon revision for a DBT translation side. gfx1250 A0 and B0 share an ELF
+/// machine ID, so the revision is carried out of band and selects the
+/// corresponding translation profile. `unspecified` is the default for
+/// architectures whose machine ID identifies the silicon.
+enum DbtSiliconRevision: byte {
+  unspecified,
+  gfx1250_a0,
+  gfx1250_b0,
+}
+
+/// DBT guest-GPU discovery mode.
+///
+/// The execution_backend selects whether the host agent is backed by real KFD
+/// hardware or by a simulation configuration. In both modes the KFD interposer
+/// appends one synthetic guest GPU to the execution topology.
+/// HSA hooks map execution-facing calls from the guest agent to the host agent
+/// and translate guest code objects to host code objects before loading them.
+table DbtGuestConfig {
+  enabled: bool = false;          // Enables GuestKfd discovery mode.
+  guest_isa: string;              // Guest ISA advertised by the synthetic agent, e.g. "gfx950".
+  host_isa: string;               // Host ISA used for execution and DBT output, e.g. "gfx942".
+  host_gpu_id: uint32 = 0;        // Preferred host KFD topology gpu_id, not HIP ordinal/node id; 0 matches topology to host_isa.
+  log_level: int32 = 0;           // DBT hook logging: 0 off, 1 info, 2 verbose, 3 debug.
+  signal_backtrace: bool = false; // Install a best-effort crash backtrace handler in the HSA hook.
+  guest_device: KfdDeviceInfo;    // Synthetic guest KFD/sysfs identity appended to host topology.
+  execution_backend: DbtExecutionBackend = hardware;
+  simulator_config: string;       // External host config; when set, overrides this file's VM/topology.
+  guest_revision: DbtSiliconRevision = unspecified;  // Guest silicon revision (gfx1250 A0/B0 disambiguation).
+  host_revision: DbtSiliconRevision = unspecified;   // Host silicon revision for DBT output.
+}
+
 /// A dispatch packet describing a kernel launch.
 table DispatchConfig {
   kernel_entry_pc: uint64;          // Byte address of kernel entry point.
@@ -200,8 +236,9 @@ table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
   num_threads: uint32;           // Number of simulation threads (partitions).
   exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
-  vm: VirtualMachineConfig;      // Virtual machine hardware model.
-  topology: TopologyDef;         // Declarative topology.
+  vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
+  topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
+  dbt_guest: DbtGuestConfig;     // Optional guest-GPU DBT interposition mode.
 }
 
 root_type SimulationConfig;

@@ -168,6 +168,21 @@ Notes:
   the job.
 * The underlying buffer ranges must not overlap a region that is already
   registered.
+* The maximum number of concurrently registered symmetric buffers is bounded
+  by the ``ROCSHMEM_MAX_SYMM_REGIONS`` environment variable.
+
+Backend behavior:
+
+* **IPC backend:** peer buffers are mapped into the local address space, so
+  registered buffers are reached directly through inter-process copies.
+* **GDA backend:** registered buffers are registered with each NIC's
+  protection domain and are reachable over the NIC by every peer. When the IPC
+  fast path is additionally available for node-local peers (see
+  ``ROCSHMEM_DISABLE_MIXED_IPC``), the buffer is also exposed to those peers
+  over IPC, and their accesses use the IPC path in preference to the NIC; the
+  NIC registration remains in place and is used for all other peers.
+* **RO (reverse offload) backend:** symmetric user-buffer registration is not
+  supported; this routine returns ``NULL``.
 
 ROCSHMEM_BUFFER_UNREGISTER_SYMMETRIC
 ------------------------------------

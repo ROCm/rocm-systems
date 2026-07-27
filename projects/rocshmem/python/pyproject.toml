@@ -1,9 +1,10 @@
 [build-system]
+# nanobind is the binding backend (used by TheRock).
 requires = [
     "setuptools>=40.8.0",
     "wheel",
     "cmake>=3.20,<4.0",
-    "pybind11>=2.13.1",
+    "nanobind>=2.12.0",
 ]
 build-backend = "setuptools.build_meta"
 
