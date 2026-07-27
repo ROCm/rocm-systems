@@ -28,56 +28,50 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     discovered_site_count += kernel.lds_sites.size();
   for (const ConSanFunctionInfo &function : result.functions)
     discovered_site_count += function.lds_sites.size();
-  std::vector<CanonicalLdsSite> canonical_sites;
-  canonical_sites.reserve(discovered_site_count);
-  std::unordered_map<uint64_t, size_t> canonical_site_index_by_file_offset;
-  canonical_site_index_by_file_offset.reserve(discovered_site_count);
-  const auto collect_site = [&](std::string_view container_name,
-                                uint64_t container_entry_text_offset, const ConSanLdsSite &site,
-                                std::vector<uint64_t> owners) {
-    owners.insert(owners.end(), site.owner_descriptor_file_offsets.begin(),
-                  site.owner_descriptor_file_offsets.end());
-    const auto [entry, inserted] =
-        canonical_site_index_by_file_offset.emplace(site.file_offset, canonical_sites.size());
-    if (inserted) {
-      canonical_sites.push_back({.container_name = container_name,
-                                 .container_entry_text_offset = container_entry_text_offset,
-                                 .site = site});
-      canonical_sites.back().site.owner_descriptor_file_offsets = std::move(owners);
-      return true;
-    }
-
-    CanonicalLdsSite &canonical = canonical_sites[entry->second];
-    if (canonical.container_entry_text_offset != container_entry_text_offset ||
-        !lds_site_semantics_equal(canonical.site, site)) {
-      result.errors.emplace_back(
-          "ConSan LDS physical site at file offset " + std::to_string(site.file_offset) +
-          " was decoded inconsistently through aliases '" + std::string(canonical.container_name) +
-          "' and '" + std::string(container_name) + "'");
-      return false;
-    }
-
-    // Kernel descriptors may export multiple symbols for one physical entry.
-    // Plan and patch that instruction once, but prove resource safety and
-    // apply descriptor growth for every dispatch that can execute it.
-    canonical.site.owner_descriptor_file_offsets.insert(
-        canonical.site.owner_descriptor_file_offsets.end(), owners.begin(), owners.end());
-    return true;
-  };
+  auto canonicalizer = consan_detail::make_physical_site_alias_canonicalizer<CanonicalLdsSite>(
+      result.errors, "ConSan LDS physical site",
+      [](const CanonicalLdsSite &candidate) { return candidate.site.file_offset; },
+      [](const CanonicalLdsSite &candidate) { return candidate.container_name; },
+      [&](const CanonicalLdsSite &lhs, const CanonicalLdsSite &rhs) {
+        return lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
+               lds_site_semantics_equal(lhs.site, rhs.site);
+      },
+      [](CanonicalLdsSite &retained, const CanonicalLdsSite &alias) {
+        // Plan and patch one physical instruction, but prove resource
+        // safety and descriptor growth for every aliasing dispatch.
+        retained.site.owner_descriptor_file_offsets.insert(
+            retained.site.owner_descriptor_file_offsets.end(),
+            alias.site.owner_descriptor_file_offsets.begin(),
+            alias.site.owner_descriptor_file_offsets.end());
+      },
+      discovered_site_count);
   for (const ConSanKernelInfo &kernel : result.kernels) {
     for (const ConSanLdsSite &site : kernel.lds_sites) {
-      if (!collect_site(kernel.name, kernel.entry_text_offset, site,
-                        {kernel.descriptor_file_offset}))
+      CanonicalLdsSite candidate{
+          .container_name = kernel.name,
+          .container_entry_text_offset = kernel.entry_text_offset,
+          .site = site,
+      };
+      candidate.site.owner_descriptor_file_offsets.push_back(kernel.descriptor_file_offset);
+      if (!canonicalizer.insert(std::move(candidate)))
         return;
     }
   }
   for (const ConSanFunctionInfo &function : result.functions) {
     for (const ConSanLdsSite &site : function.lds_sites) {
-      if (!collect_site(function.name, function.entry_text_offset, site,
-                        site.owner_descriptor_file_offsets))
+      if (!canonicalizer.insert({
+              .container_name = function.name,
+              .container_entry_text_offset = function.entry_text_offset,
+              .site = site,
+          }))
         return;
     }
   }
+  std::optional<std::vector<CanonicalLdsSite>> canonical_sites_result =
+      std::move(canonicalizer).take();
+  if (!canonical_sites_result)
+    return;
+  std::vector<CanonicalLdsSite> canonical_sites = std::move(*canonical_sites_result);
   for (CanonicalLdsSite &canonical : canonical_sites) {
     auto &owners = canonical.site.owner_descriptor_file_offsets;
     std::ranges::sort(owners);

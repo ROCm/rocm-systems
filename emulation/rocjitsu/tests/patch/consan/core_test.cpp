@@ -18,6 +18,24 @@ struct PhysicalAliasTestCandidate {
   bool operator==(const PhysicalAliasTestCandidate &) const = default;
 };
 
+auto make_physical_alias_test_canonicalizer(std::vector<std::string> &errors,
+                                            size_t expected_candidate_count = 0) {
+  return consan_detail::make_physical_site_alias_canonicalizer<PhysicalAliasTestCandidate>(
+      errors, "ConSan incremental test site",
+      [](const PhysicalAliasTestCandidate &candidate) { return candidate.file_offset; },
+      [](const PhysicalAliasTestCandidate &candidate) -> std::string_view {
+        return candidate.container_name;
+      },
+      [](const PhysicalAliasTestCandidate &lhs, const PhysicalAliasTestCandidate &rhs) {
+        return lhs.semantics == rhs.semantics;
+      },
+      [](PhysicalAliasTestCandidate &retained, const PhysicalAliasTestCandidate &alias) {
+        retained.owners.insert(retained.owners.end(), alias.owners.begin(), alias.owners.end());
+        retained.descriptor.reset();
+      },
+      expected_candidate_count);
+}
+
 TEST(ConSan, PhysicalSiteAliasCanonicalizationRetainsOrderAndRunsTypedMerge) {
   std::vector<PhysicalAliasTestCandidate> candidates{
       {.file_offset = 24u,
@@ -100,6 +118,115 @@ TEST(ConSan, PhysicalSiteAliasCanonicalizationReportsExactTypedConflict) {
             "ConSan test site at file offset 24 was decoded inconsistently through aliases "
             "'first' and 'conflict'");
   EXPECT_EQ(candidates, original);
+}
+
+TEST(ConSan, IncrementalPhysicalSiteAliasConflictIsFailFastAndTransactional) {
+  std::vector<std::string> errors;
+  auto canonicalizer = make_physical_alias_test_canonicalizer(errors, 4u);
+  ASSERT_TRUE(canonicalizer.insert({
+      .file_offset = 24u,
+      .container_name = "first",
+      .semantics = 3u,
+      .owners = {1u},
+      .descriptor = std::nullopt,
+  }));
+  ASSERT_TRUE(canonicalizer.insert({
+      .file_offset = 8u,
+      .container_name = "independent",
+      .semantics = 7u,
+      .owners = {9u},
+      .descriptor = std::nullopt,
+  }));
+  const std::vector<PhysicalAliasTestCandidate> accepted = canonicalizer.candidates();
+
+  EXPECT_FALSE(canonicalizer.insert({
+      .file_offset = 24u,
+      .container_name = "conflict",
+      .semantics = 4u,
+      .owners = {2u},
+      .descriptor = std::nullopt,
+  }));
+  EXPECT_TRUE(canonicalizer.failed());
+  EXPECT_EQ(canonicalizer.candidates(), accepted);
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors.front(),
+            "ConSan incremental test site at file offset 24 was decoded inconsistently through "
+            "aliases 'first' and 'conflict'");
+
+  // A conflict is sticky: later aliases cannot mutate the accepted inventory
+  // or create a cascade of secondary diagnostics.
+  EXPECT_FALSE(canonicalizer.insert({
+      .file_offset = 24u,
+      .container_name = "later-alias",
+      .semantics = 3u,
+      .owners = {3u},
+      .descriptor = std::nullopt,
+  }));
+  EXPECT_TRUE(canonicalizer.failed());
+  EXPECT_EQ(canonicalizer.candidates(), accepted);
+  EXPECT_EQ(errors.size(), 1u);
+
+  // A failed inventory cannot be mistaken for a complete one.
+  EXPECT_FALSE(std::move(canonicalizer).take());
+  EXPECT_TRUE(canonicalizer.candidates().empty());
+}
+
+TEST(ConSan, IncrementalPhysicalSiteAliasMergeRetainsOrderAndClosesAfterTake) {
+  std::vector<std::string> errors;
+  auto canonicalizer = make_physical_alias_test_canonicalizer(errors, 4u);
+  ASSERT_TRUE(canonicalizer.insert({
+      .file_offset = 24u,
+      .container_name = "first",
+      .semantics = 3u,
+      .owners = {1u},
+      .descriptor = 1u,
+  }));
+  ASSERT_TRUE(canonicalizer.insert({
+      .file_offset = 8u,
+      .container_name = "independent",
+      .semantics = 7u,
+      .owners = {9u},
+      .descriptor = 9u,
+  }));
+  ASSERT_TRUE(canonicalizer.insert({
+      .file_offset = 24u,
+      .container_name = "alias",
+      .semantics = 3u,
+      .owners = {2u},
+      .descriptor = 2u,
+  }));
+  ASSERT_TRUE(canonicalizer.insert({
+      .file_offset = 24u,
+      .container_name = "second-alias",
+      .semantics = 3u,
+      .owners = {3u},
+      .descriptor = 3u,
+  }));
+
+  EXPECT_FALSE(canonicalizer.failed());
+  std::optional<std::vector<PhysicalAliasTestCandidate>> canonical =
+      std::move(canonicalizer).take();
+  ASSERT_TRUE(canonical);
+  EXPECT_TRUE(errors.empty());
+  ASSERT_EQ(canonical->size(), 2u);
+  EXPECT_EQ((*canonical)[0].container_name, "first");
+  EXPECT_EQ((*canonical)[0].owners, (std::vector<uint64_t>{1u, 2u, 3u}));
+  EXPECT_FALSE((*canonical)[0].descriptor);
+  EXPECT_EQ((*canonical)[1].container_name, "independent");
+  EXPECT_EQ((*canonical)[1].owners, (std::vector<uint64_t>{9u}));
+  EXPECT_EQ((*canonical)[1].descriptor, 9u);
+  EXPECT_TRUE(canonicalizer.candidates().empty());
+
+  // Extraction permanently closes the object; later use fails safely.
+  EXPECT_FALSE(canonicalizer.insert({
+      .file_offset = 24u,
+      .container_name = "after-take",
+      .semantics = 3u,
+      .owners = {5u},
+      .descriptor = std::nullopt,
+  }));
+  EXPECT_FALSE(std::move(canonicalizer).take());
+  EXPECT_TRUE(canonicalizer.candidates().empty());
 }
 
 TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
