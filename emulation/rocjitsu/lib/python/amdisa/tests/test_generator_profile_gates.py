@@ -1776,6 +1776,103 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'inst.vdst.write_lane' not in true16_ternary
 
 
+def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
+    execute_shared_path: Path,
+    gfx1250_generated_root: Path,
+    rdna4_generated_root: Path,
+):
+    execute_shared = execute_shared_path.read_text()
+    shared_cases = [
+        ('v_s_exp_f32_vop3', 'v_s_log_f32_vop3'),
+        ('v_s_log_f32_vop3', 'v_s_rcp_f32_vop3'),
+        ('v_s_rcp_f32_vop3', 'v_s_rsq_f32_vop3'),
+        ('v_s_rsq_f32_vop3', 'v_s_sqrt_f32_vop3'),
+        ('v_s_sqrt_f32_vop3', 'v_sad_hi_u8_vop3'),
+    ]
+    for name, next_name in shared_cases:
+        body = _shared_execute_body(execute_shared, name, next_name)
+        assert 'wf.exec()' not in body
+        assert 'if (exec != 0)' not in body
+        assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
+        assert 'amdgpu::pseudo_scalar::execute_f32(' in body
+        assert 'wf.fp_round_mode_f32()' in body
+        assert 'wf.fp_denorm_mode_f32()' in body
+
+    f16_generated_cases = [
+        ('VSExpF16Vop3', 'VSLogF32Vop3'),
+        ('VSLogF16Vop3', 'VSRcpF32Vop3'),
+        ('VSRcpF16Vop3', 'VSRsqF32Vop3'),
+        ('VSRsqF16Vop3', 'VSSqrtF32Vop3'),
+        ('VSSqrtF16Vop3', 'VAddNcU16Vop3'),
+    ]
+    for generated_root, source_name in (
+        (gfx1250_generated_root, 'vop3_exec_alu.cpp'),
+        (rdna4_generated_root, 'vop3.cpp'),
+    ):
+        source = (generated_root / source_name).read_text()
+        constructor_source = (
+            generated_root
+            / (
+                'vop3_alu.cpp'
+                if generated_root == gfx1250_generated_root
+                else 'vop3.cpp'
+            )
+        ).read_text()
+        for class_name, next_class_name in f16_generated_cases:
+            body = _generated_method_body(source, class_name, next_class_name)
+            assert 'if (exec != 0)' not in body
+            assert 'vop3_opsel' not in body
+            assert 'read_vop3_true16_src' not in body
+            assert '>> 16' not in body
+            assert (
+                'static_cast<uint16_t>('
+                'amdgpu::RegisterAccess(wf).read_scalar(src0))' in body
+            )
+            assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
+            assert 'amdgpu::pseudo_scalar::execute_f16(' in body
+            assert 'wf.fp_round_mode_f16_f64()' in body
+            assert 'wf.fp_denorm_mode_f16_f64()' in body
+
+            constructor = _generated_constructor_body(constructor_source, class_name)
+            assert 'vop3_opsel' not in constructor
+            assert 'simm32 & 0xFFFFu' in constructor
+
+        pseudo_scalar_constructors = [
+            'VSExpF32Vop3',
+            'VSExpF16Vop3',
+            'VSLogF32Vop3',
+            'VSLogF16Vop3',
+            'VSRcpF32Vop3',
+            'VSRcpF16Vop3',
+            'VSRsqF32Vop3',
+            'VSRsqF16Vop3',
+            'VSSqrtF32Vop3',
+            'VSSqrtF16Vop3',
+        ]
+        for class_name in pseudo_scalar_constructors:
+            constructor = _generated_constructor_body(constructor_source, class_name)
+            assert 'OpSelSreg::OPR_SREG_VCC_LO' in constructor
+            assert 'OpSelSreg::OPR_SREG_VCC_HI' in constructor
+            assert 'may not use VCC as a destination' in constructor
+            assert '->opsel' not in constructor
+            assert 'vop3_opsel' not in constructor
+        assert constructor_source.count('may not use VCC as a destination') == len(
+            pseudo_scalar_constructors
+        )
+
+        generic_true16_constructor = _generated_constructor_body(
+            constructor_source, 'VAddF16Vop3'
+        )
+        assert 'amdgpu::vop3_opsel(inst_)' in generic_true16_constructor
+        assert 'may not use VCC as a destination' not in generic_true16_constructor
+
+    ordinary_exp = _shared_execute_body(
+        execute_shared, 'v_exp_f32_vop1', 'v_exp_f32_vop3'
+    )
+    assert 'amdgpu::transcendental::exp_f32(' in ordinary_exp
+    assert 'amdgpu::pseudo_scalar::' not in ordinary_exp
+
+
 def test_generated_scalar_f16_arithmetic_does_not_consume_fp16_ovfl(
     execute_shared_path: Path,
 ):

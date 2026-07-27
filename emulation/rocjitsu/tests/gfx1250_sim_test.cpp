@@ -3670,6 +3670,22 @@ TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
   EXPECT_EQ(sim.cu()->num_wfs(), 0u);
 }
 
+TEST(Gfx1250SimulationTest, DispatchedModeSetterControlsPseudoScalarRounding) {
+  constexpr uint32_t kExpectedRoundTowardPositive = 0x3FB504F4u;
+  const uint32_t code[] = {
+      0xB9800801u, // s_setreg_imm32_b32 hwreg(HW_REG_MODE, 0, 2), 1
+      0x00000001u,
+      0xD6800004u, // v_s_exp_f32 s4, 0.5
+      0x000000FFu, 0x3F000000u, S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *snapshot = dispatch_one_wave(sim, code, std::size(code));
+
+  ASSERT_NE(snapshot, nullptr);
+  EXPECT_EQ(snapshot->sgpr(4), kExpectedRoundTowardPositive);
+}
+
 TEST(Gfx1250SimulationTest, MultiWaveDispatchHonorsPackedTidComponentCount) {
   const uint32_t code[] = {S_ENDPGM_GFX12};
 

@@ -1810,7 +1810,7 @@ class Gfx1250Profile(Rdna4Profile):
             return 'data'
         if sem_class in {'vector_dot', 'vector_dot2c_bf16'}:
             return 'alu'
-        if sem_class == 'vector_unary':
+        if sem_class in {'pseudo_scalar_unary', 'vector_unary'}:
             return 'alu'
         if sem_class in {'nop', 'true_nop'}:
             return 'misc'

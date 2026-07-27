@@ -127,8 +127,10 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.op, c.dtype
     )
 
-    # Vector ALU — vector_unary, vector_binop, vector_ternary now handled
-    # by SemaAST pipeline (_SEMA_CLASSES).
+    # Vector ALU — vector_unary, pseudo_scalar_unary, vector_binop, and
+    # vector_ternary are handled by the SemaAST pipeline (_SEMA_CLASSES).
+    # pseudo_scalar_unary retains its VALU expression/encoding contract but
+    # uses ExecModel.SCALAR because the ISA says V_S_* ignores EXEC.
 
     # Vector compare — vector_cmp, vector_add_co handled by SemaAST pipeline
     # (_SEMA_CLASSES). vector_cmp_class is NOT: the SemaAST lowering mangles the

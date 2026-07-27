@@ -1476,6 +1476,42 @@ class TestDeriveVectorUnary:
             assert 'util::f32_to_bf16(' not in cpp
 
 
+class TestDerivePseudoScalarUnary:
+    @pytest.mark.parametrize(
+        ('name', 'operation'),
+        [
+            ('V_S_EXP_F32', 'exp2'),
+            ('V_S_LOG_F32', 'log2'),
+            ('V_S_RCP_F32', 'rcp'),
+            ('V_S_RSQ_F32', 'rsq'),
+            ('V_S_SQRT_F32', 'sqrt'),
+            ('V_S_EXP_F16', 'exp2'),
+            ('V_S_LOG_F16', 'log2'),
+            ('V_S_RCP_F16', 'rcp'),
+            ('V_S_RSQ_F16', 'rsq'),
+            ('V_S_SQRT_F16', 'sqrt'),
+        ],
+    )
+    def test_ignores_exec(self, name, operation):
+        sem = derive_semantics(name, 'ENC_VOP3')
+        assert sem is not None
+        assert sem.semantic_class == 'pseudo_scalar_unary'
+        assert sem.operation == operation
+
+        block = derive_sema_block(sem)
+        assert block is not None
+        assert block.pragma == ExecModel.SCALAR
+
+        cpp = lower_sema_block(block)
+        assert 'wf.exec()' not in cpp
+        assert 'if (exec != 0)' not in cpp
+        assert 'for (uint32_t lane = 0' not in cpp
+        assert 'write_scalar' in cpp
+        assert 'amdgpu::pseudo_scalar::execute_' in cpp
+        assert 'wf.fp_round_mode_' in cpp
+        assert 'wf.fp_denorm_mode_' in cpp
+
+
 class TestDeriveVectorBinop:
     def test_add_f32(self):
         sem = _FakeSem('V_ADD_F32', 'vector_binop', 'add', 'f32')
@@ -2814,6 +2850,7 @@ class TestDeriveAllClassesLower:
         }
         for cls_name in sorted(_DERIVE_REGISTRY.keys()):
             operation = {
+                'pseudo_scalar_unary': 'sqrt',
                 'scalar_saveexec': 'and',
                 'scalar_wrexec': 'andn1',
             }.get(cls_name, 'add')

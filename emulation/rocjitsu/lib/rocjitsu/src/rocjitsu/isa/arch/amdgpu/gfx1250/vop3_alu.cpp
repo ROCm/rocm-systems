@@ -5232,6 +5232,9 @@ VSExpF32Vop3::VSExpF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_EXP_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5256,14 +5259,14 @@ VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_EXP_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
-                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
-                              0xFFFFu),
-        true);
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -5284,6 +5287,9 @@ VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_LOG_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5308,14 +5314,14 @@ VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_LOG_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
-                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
-                              0xFFFFu),
-        true);
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -5336,6 +5342,9 @@ VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_RCP_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5360,14 +5369,14 @@ VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_RCP_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
-                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
-                              0xFFFFu),
-        true);
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -5388,6 +5397,9 @@ VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_RSQ_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5412,14 +5424,14 @@ VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_RSQ_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
-                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
-                              0xFFFFu),
-        true);
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);
@@ -5440,6 +5452,9 @@ VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_SQRT_F32 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5464,14 +5479,14 @@ VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_LO ||
+      reinterpret_cast<const OpEncoding *>(inst)->vdst == OpSelSreg::OPR_SREG_VCC_HI)
+    throw util::InvalidInst("V_S_SQRT_F16 may not use VCC as a destination", "");
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        16, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        static_cast<uint16_t>((reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 >>
-                               (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
-                              0xFFFFu),
-        true);
+    src0 =
+        Operand(16, OperandType::OPR_SIMM32,
+                static_cast<int>((
+                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 254) {
     const auto *words = reinterpret_cast<const uint32_t *>(inst);
     uint32_t literal_word = sizeof(OpEncoding) / sizeof(uint32_t);

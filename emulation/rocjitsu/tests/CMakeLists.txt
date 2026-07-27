@@ -407,6 +407,7 @@ add_executable(
     register_access_test.cpp
     instruction_execution_harness_test.cpp
     isa_target_registry_test.cpp
+    pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
