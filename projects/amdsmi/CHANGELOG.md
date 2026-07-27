@@ -14,6 +14,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
+### Fixed
+
+- **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.
+  - The common no-entries case printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. The command now always emits exactly one valid JSON document: `[]` when there are no entries, or a single aggregated array across all GPUs when there are. `--follow` mode stays silent until entries appear. The human-readable primary-partition warning is also suppressed in JSON mode so it no longer corrupts the output.
+
 ### Resolved Issues
 
 - **Fixed `amd-smi set --ptl-status` silently failing to change PTL state**.  
