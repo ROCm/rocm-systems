@@ -42,6 +42,8 @@ pub struct EmulatorInfo {
     pub description: String,
     /// Schema of the options this backend accepts (empty when none).
     pub options_schema: Vec<OptionDef>,
+    /// Plugin names this backend discovered on the current host.
+    pub plugins: Vec<String>,
     /// `true` if this backend's runtime is present on this machine.
     pub installed: bool,
     /// Whether this host's hardware/environment can run the backend.
@@ -58,11 +60,20 @@ pub fn registry() -> Vec<EmulatorInfo> {
         .into_iter()
         .map(|def| {
             let d = def.backend.description();
+            let mut plugins: Vec<String> = def
+                .backend
+                .discover_plugins()
+                .into_iter()
+                .flat_map(|selection| selection.into_keys())
+                .collect();
+            plugins.sort();
+            plugins.dedup();
             EmulatorInfo {
                 name: d.name,
                 version: d.version,
                 description: d.description,
                 options_schema: d.options_schema,
+                plugins,
                 installed: def.backend.installed(),
                 support: def.backend.supported(),
             }
@@ -112,6 +123,7 @@ mod tests {
             version: "0".to_string(),
             description: String::new(),
             options_schema: Vec::new(),
+            plugins: Vec::new(),
             installed,
             support: SupportStatus::supported("test"),
         }
@@ -134,5 +146,13 @@ mod tests {
     fn default_falls_back_to_noop() {
         let specs = [info("noop", true), info("hotswap", false)];
         assert_eq!(default_emulator(&specs).name, "noop");
+    }
+
+    #[test]
+    fn registry_serializes_discovered_plugins() {
+        let mut emulator = info("rocjitsu", true);
+        emulator.plugins = vec!["logging".to_string(), "race".to_string()];
+        let json = serde_json::to_value(&emulator).unwrap();
+        assert_eq!(json["plugins"], serde_json::json!(["logging", "race"]));
     }
 }

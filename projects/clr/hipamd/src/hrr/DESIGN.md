@@ -1,5 +1,13 @@
 # HIP Record & Replay (HRR) — In-Tree Dispatch Table Design
 
+HRR captures every HIP API call made by an application into a binary archive (`.hrr`
+directory), then replays that archive against a live GPU to reproduce the original
+workload — including multi-threaded submission, graph execution, and GPU memory
+transfers. Primary uses: bug reproduction, performance regression testing, and
+kernel benchmarking without the original application.
+
+User-facing quick start: [README.md](README.md).
+
 ## Quick Start
 
 ```bash
@@ -17,8 +25,25 @@ hrr-playback ./my_capture.hrr --info [--events]
 
 ## Implementation Summary
 
-### What It Does
-HRR captures every HIP API call made by an application into a binary archive (`.hrr` directory), then replays that archive against a live GPU to reproduce the original workload exactly — including multi-threaded submission, graph execution, and all GPU memory transfers. Primary uses: bug reproduction, performance regression testing, and kernel benchmarking without the original application.
+### Capture overhead
+
+Capture is **not free**. When `HIP_HRR_CAPTURE_OUTPUT` is set, every HIP API call
+flows through a capture shim (fixed-size event header + serialized arguments), and
+selected APIs add extra work:
+
+- **H2D / registered host memory:** host source buffers are hashed and written to
+  `blobs/` (content-addressed snapshots).
+- **D2H:** replay validation captures expected outputs after a forced stream sync at
+  capture time.
+- **Kernel launches:** argument scanning and embedded-pointer detection run per
+  launch; memoization exists because naive per-word probing would dominate cost on
+  large workloads.
+
+Expect **higher host CPU use, extra I/O, and longer runtimes** versus an uncaptured
+run — often acceptable for debugging and repro, but HRR is not intended for
+production performance measurement while capture is enabled. Replay has its own
+cost (re-executing the workload on GPU plus D2H validation); see sync and progress
+options in [README.md](README.md).
 
 ### Capture Layer (`hipamd/src/hrr/`)
 At HIP init time the capture layer snapshots the real `HipDispatchTable` and installs a parallel capture table with ~529 shim function pointers. Every HIP API call flows through one of these shims, which records a fixed-size `hrr_event_header` (32 bytes: type, sequence ID, timestamp, thread ID) followed by a variable-length payload of serialised arguments into a streaming `events.bin` file.
@@ -521,7 +546,8 @@ entry symbol `triton_` from many distinct code objects.
 
 ### Debugging kernel args (`HIP_HRR_DEBUG_ARGS`)
 
-Setting `HIP_HRR_DEBUG_ARGS=<non-empty>` dumps every captured arg to stderr
+Setting `HIP_HRR_DEBUG_ARGS` enables arg dumps at capture time (see
+[README.md](README.md#capture-environment)). Every captured arg is dumped to stderr
 (`[HRR args] <kernel> arg[i] kind=.. size=.. value/bytes=..`). Two markers make
 common failure modes unambiguous:
 
@@ -584,12 +610,9 @@ Shutdown uninstalls shims and flushes `events.bin` + `manifest.json`.
 
 ## Enable Flag
 
-```
-HIP_HRR_CAPTURE_OUTPUT=<directory>
-```
-
-Defined as a `cstring` release flag in `rocclr/utils/flags.hpp`. Capture is active
-only when the variable is set (non-default) and non-empty.
+Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a non-empty directory
+(see [README.md](README.md#capture-environment)). Defined as a `cstring` release flag in
+`rocclr/utils/flags.hpp`.
 
 ## Playback Tools
 
@@ -598,46 +621,12 @@ only when the variable is set (non-default) and non-empty.
 | `hrr-playback` | `hrr_playback.cpp` | Full replay + D2H validation + archive info |
 | `hrr-validate` | `hrr_validate.cpp` (test/) | Kernel-count + NaN/Inf correctness check |
 
-### `hrr-playback` Options
+User-facing **`hrr-playback` CLI options and environment knobs** (capture, replay,
+D2H validation) are documented in [README.md](README.md#configuration-reference).
 
-```
-hrr-playback <capture.hrr> [options]
-  --info                Print archive summary and exit (no GPU required)
-                        (reports Complete: yes/NO and Recovered: <n> events)
-  --repair              Rewrite a crash-truncated archive as a clean one and exit
-  --events              With --info: also print the full event log
-  --verbose             Print each event as it is processed
-  --skip-device-sync    Skip hipDeviceSynchronize / hipStreamSynchronize events
-  --multi-thread        One replay thread per captured thread (default: single-threaded)
-  --timing              Report wall time, GPU kernel time, GPU graph time, and combined total
-  --kernel-filter STR   Only launch kernels whose name contains STR
-                        (silent full warm-up pass runs first to populate GPU state)
-  --replace-kernel N=P  Launch the kernel whose recorded name is exactly N from the
-                        external code object at path P instead of the recorded one
-  --sync-after-launch   hipDeviceSynchronize after every kernel (surfaces GPU errors)
-  --sync-after-event    hipDeviceSynchronize after every event (HW hang debug; very slow)
-  --sync-watchdog-ms N  Abort with a diagnostic if any device sync exceeds N ms
-  --trace-kernels       Print one compact line before every kernel launch
-  --progress-kernels N  Print a heartbeat every N launched kernels
-  --progress-seconds S  Print a heartbeat at most every S seconds
-```
-
-Several options have `HIP_HRR_REPLAY_*` environment-variable equivalents (e.g.
-`HIP_HRR_REPLAY_TRACE_KERNELS`, `HIP_HRR_REPLAY_PROGRESS_KERNELS`,
-`HIP_HRR_REPLAY_PROGRESS_SECONDS`, `HIP_HRR_REPLAY_SYNC_WATCHDOG_MS`).
-
-**Replay `hipMalloc` padding:** `hip_playback.cpp` replays each device allocation at
-`max(recorded_size, min(recorded_size × factor, cap))` (defaults: factor **1** for
-exact recorded sizes, cap **1 GiB**).  Legacy pool-style workloads (MIOpen / large
-virtual batch grids) may need **`HIP_HRR_REPLAY_ALLOC_PAD_FACTOR=256`** so kernels
-that over-read contiguous pools do not fault when replay uses independent
-`hipMalloc`s.  That multiplier can make large LLM replays hit **`hipErrorMemoryAllocation`**
-early; lower **`HIP_HRR_REPLAY_ALLOC_PAD_MAX`** or use factor **1** (default) to reduce VRAM.
-
-```
-HIP_HRR_REPLAY_ALLOC_PAD_FACTOR=256   # legacy padding (more VRAM; fewer pool faults)
-HIP_HRR_REPLAY_ALLOC_PAD_MAX=268435456   # example: 256 MiB cap per allocation
-```
+**Replay allocation padding (summary):** replayed `hipMalloc` uses
+`max(recorded_size, min(recorded_size × factor, cap))` (defaults: factor **1**, cap **1 GiB**).
+Legacy pool-style workloads may need a higher pad factor; large LLM replays may OOM if set too high.
 
 **Zero-init of replayed allocations.** Replay zero-initialises each device
 allocation (`hrr_replay_zero_init`) so kernels that read padded/over-allocated tail
@@ -656,16 +645,7 @@ For each D2H memcpy event that has a captured expected-data blob:
 **Tolerance-based validation.** A byte-exact `memcmp` is tried first as a fast path.
 On mismatch, the validator interprets both buffers as each candidate float encoding
 (fp32, bf16, fp16, fp64) and passes when every element satisfies
-`|live − expected| ≤ atol + rtol·|expected|`. This absorbs benign GPU
-non-determinism (atomicAdd reduction order, dropout RNG ordering) that produces tiny
-floating-point differences without indicating a replay-fidelity bug. Thresholds and
-behavior are configurable:
-
-```
-HIP_HRR_D2H_ATOL=<float>   # absolute tolerance (default tuned for bf16/fp16)
-HIP_HRR_D2H_RTOL=<float>   # relative tolerance
-HIP_HRR_D2H_EXACT=1        # disable tolerance; require byte-exact match
-```
+`|live − expected| ≤ atol + rtol·|expected|`. Thresholds: see README D2H table.
 
 On failure the validator reports element counts, max absolute/relative error, and
 64-bit FNV-1a content hashes (useful for replay-vs-replay determinism comparison).

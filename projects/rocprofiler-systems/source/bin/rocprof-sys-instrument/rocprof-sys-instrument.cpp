@@ -218,9 +218,6 @@ exists(const std::string& name);
 bool
 is_file(std::string _name);
 
-bool
-is_directory(std::string _name);
-
 std::string
 get_cwd();
 
@@ -2775,7 +2772,7 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
         auto _orig = _name;
         for(auto itr : _search_paths)
         {
-            if(!is_directory(itr) || is_file(itr)) itr = path::parent_path(itr);
+            if(!path::is_directory(itr) || is_file(itr)) itr = path::parent_path(itr);
 
             auto _exists = false;
             ROCPROFSYS_ADD_LOG_ENTRY("searching", itr, "for", _name);
@@ -2869,14 +2866,6 @@ is_file(std::string _name)
     _name = path::realpath(_name);
     struct stat buffer;
     return (stat(_name.c_str(), &buffer) == 0 && S_ISREG(buffer.st_mode) != 0);
-}
-
-bool
-is_directory(std::string _name)
-{
-    _name = path::realpath(_name);
-    struct stat buffer;
-    return (stat(_name.c_str(), &buffer) == 0 && S_ISDIR(buffer.st_mode) != 0);
 }
 
 std::string

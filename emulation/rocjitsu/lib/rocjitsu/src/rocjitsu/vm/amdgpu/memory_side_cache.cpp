@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+
 #include <algorithm>
 #include <bit>
 #include <cassert>
@@ -25,13 +27,19 @@ void MemorySideCache::send_backing(uint64_t addr, uint8_t *data, uint32_t size,
 }
 
 void MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid) {
-  if (cache_.lookup(addr, nullptr, vmid))
-    return;
+  const uint64_t current_epoch = DeviceCacheCoherence::instance().current_epoch();
+  simdojo::CacheTag *resident = nullptr;
+  if (cache_.lookup(addr, &resident, vmid)) {
+    if (resident->coherence_epoch == current_epoch)
+      return;
+    assert(!resident->dirty && "stale write-through MSC line must be clean");
+    cache_.invalidate(addr, vmid);
+  }
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
   uint8_t evicted_data[LINE_SIZE];
-  cache_.allocate(addr, vmid, &evicted, evicted_data);
+  simdojo::CacheTag *allocated = cache_.allocate(addr, vmid, &evicted, evicted_data);
 
   if (evicted.valid && evicted.dirty) {
     static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
@@ -43,6 +51,7 @@ void MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid) {
   uint8_t line_buf[LINE_SIZE];
   send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ, vmid);
   cache_.fill_line(addr, line_buf, vmid);
+  allocated->coherence_epoch = current_epoch;
 }
 
 void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid) {
