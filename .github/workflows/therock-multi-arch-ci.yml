@@ -99,9 +99,9 @@ jobs:
       - name: Configure CI
         id: configure
         env:
-          # TEST OVERRIDE: Force amdsmi as changed project to test filtering
+          # TEST OVERRIDE: Force hip-clr as changed project to test filtering
           # TODO(aendurth): Remove after testing cross-repo artifact reuse
-          TEST_OVERRIDE_CHANGED_PROJECTS: "projects/amdsmi"
+          TEST_OVERRIDE_CHANGED_PROJECTS: "projects/hip-clr"
         run: |
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
