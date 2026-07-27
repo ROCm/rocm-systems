@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vglobal.h"
@@ -17,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -120,6 +122,10 @@ public:
 };
 
 struct Gfx1250Sim {
+  // Direct-construction tests intentionally bypass Decoder. Select the same
+  // immutable backend that a full gfx1250 decoder would inject while building
+  // their generated instruction and operand objects.
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   config::LoadedConfig loaded;
   SoC *soc = nullptr;
   amdgpu::GpuMemory *memory = nullptr;
@@ -274,7 +280,8 @@ private:
 class TranslatedSdmaQueueForTest {
 public:
   explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim) : sim_(sim), process_(kProcessId) {
-    sim_.memory->register_process(kProcessId, &process_.page_table_, &process_.page_table_mutex_);
+    sim_.memory->register_process(kProcessId, &process_.page_table_, &process_.page_table_mutex_,
+                                  process_.page_table_generation());
     process_.map_pages(kRingVa, ring_.data(), ring_.size() * sizeof(ring_[0]));
     process_.map_pages(kQueueStateVa, queue_state_.data(),
                        queue_state_.size() * sizeof(queue_state_[0]));
@@ -701,8 +708,7 @@ TEST(Gfx1250SdmaTest, GcrPacketSizeMatchesDialectAndKeepsRingInSync) {
 }
 
 // SDMA writes go straight to backing while L2 may still hold a dirty line that
-// overlaps the destination (e.g. left by a prior K$ writeback). The post-write
-// cache maintenance must not write that stale line back over the SDMA result.
+// overlaps the destination. Seed that state explicitly with writeback_line().
 // The fix flushes the caches before the direct write, so the dirty line is
 // published first and the SDMA data supersedes it. Regression for that ordering.
 TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyL2Line) {
@@ -737,12 +743,10 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyL2Line) {
   EXPECT_NE(sim.memory->read32(queue.dst_va(), kProcessId), kStaleWord);
 }
 
-// Same ordering hazard as above, but for a dirty scalar L1 (K$) line rather than
-// an L2 line. A CU can hold a dirty K$ line overlapping an SDMA destination. The
-// pre-write maintenance must write the K$ line back (through L2 to backing)
-// before the direct SDMA write, so the SDMA result is not later clobbered when
-// the stale scalar line is flushed. Regression for K$ inclusion in the flush.
-TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyScalarL1Line) {
+// A scalar L1 (K$) can retain a clean snapshot overlapping an SDMA destination.
+// The pre-write maintenance invalidates that snapshot, and later K$ maintenance
+// must not publish it over the direct SDMA result.
+TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingScalarL1Line) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   ASSERT_NE(cu, nullptr);
@@ -752,8 +756,8 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyScalarL1Line) {
   constexpr uint32_t kStaleWord = 0x11111111u;
   constexpr uint32_t kFillWord = 0x22222222u;
 
-  // Dirty a K$ line overlapping the SDMA destination via a scalar store. This
-  // leaves the line dirty in K$ (write-back), not yet in L2 or backing.
+  // Populate a K$ line overlapping the SDMA destination via a write-through
+  // scalar store. K$ retains a clean snapshot of the pre-fill value.
   cu->l1_scalar().store(queue.dst_va(), /*num_dwords=*/1, &kStaleWord, kProcessId);
 
   // CONST_FILL the destination line with a different pattern.
@@ -766,9 +770,14 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyScalarL1Line) {
   queue.submit(5);
   ASSERT_TRUE(sim.engine->step());
 
-  // Force any still-resident dirty K$ line out to backing, mimicking a later
-  // acquire/release flush. With the fix the K$ line was already published and
-  // invalidated before the SDMA write, so this does not resurrect stale data.
+  // The SDMA pre-write maintenance must have invalidated the old K$ snapshot,
+  // so the first scalar reload observes the fill rather than kStaleWord.
+  uint32_t scalar_value = 0;
+  cu->l1_scalar().load(queue.dst_va(), /*num_dwords=*/1, &scalar_value, kProcessId);
+  EXPECT_EQ(scalar_value, kFillWord);
+
+  // Mimic later acquire/release maintenance. The clean K$ snapshot must not
+  // resurrect stale data over the SDMA fill.
   cu->flush_l1(kProcessId);
   if (auto *l2 = sim.xcd()->l2_cache())
     l2->flush_all();
@@ -1090,8 +1099,11 @@ TEST(Gfx1250SdmaTest, PollMem64UnresolvedAddressDoesNotAdvance) {
   EXPECT_EQ(queue.read_idx(), 0u);
 }
 
-TEST(Gfx1250ExecutionTest, OperandExecutionBackendIsRegistered) {
-  EXPECT_NO_THROW(gfx1250::Operand::require_execution_backend());
+TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
+  const IsaTargetDescriptor *target = default_isa_target_registry().find("gfx1250");
+  ASSERT_NE(target, nullptr);
+  EXPECT_TRUE(target->supports_execution);
+  EXPECT_TRUE(gfx1250::Operand::full_execution_backend_complete());
 }
 
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {

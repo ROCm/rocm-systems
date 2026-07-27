@@ -233,6 +233,60 @@ TEST_F(PathTest, PathType_Nonexistent)
     EXPECT_FALSE(static_cast<bool>(pt));
 }
 
+TEST_F(PathTest, IsDirectory_ExistingDirectory) { EXPECT_TRUE(is_directory(m_test_dir)); }
+
+TEST_F(PathTest, IsDirectory_RegularFile)
+{
+    std::string file_path = create_file("isdir_file.txt");
+    EXPECT_FALSE(is_directory(file_path));
+}
+
+TEST_F(PathTest, IsDirectory_SymlinkToDirectory)
+{
+    std::string subdir    = create_subdir("isdir_target_dir");
+    std::string link_path = create_symlink(subdir, "isdir_link_to_dir");
+    EXPECT_TRUE(is_directory(link_path));
+}
+
+TEST_F(PathTest, IsDirectory_SymlinkToFile)
+{
+    std::string file_path = create_file("isdir_link_target.txt");
+    std::string link_path = create_symlink(file_path, "isdir_link_to_file");
+    EXPECT_FALSE(is_directory(link_path));
+}
+
+TEST_F(PathTest, IsDirectory_BrokenSymlink)
+{
+    std::string link_path = create_symlink("/nonexistent/target", "isdir_broken_link");
+    EXPECT_FALSE(is_directory(link_path));
+}
+
+TEST_F(PathTest, IsDirectory_NonexistentPath)
+{
+    EXPECT_FALSE(is_directory("/nonexistent/path"));
+}
+
+TEST_F(PathTest, IsDirectory_EmptyPath) { EXPECT_FALSE(is_directory("")); }
+
+TEST_F(PathTest, IsDirectory_AcceptsTrailingSlash)
+{
+    EXPECT_TRUE(is_directory(m_test_dir + "/"));
+}
+
+TEST_F(PathTest, IsDirectory_RelativePath)
+{
+    const std::string subdir_name = "isdir_relative_dir";
+    create_subdir(subdir_name);  // Creates in m_test_dir.
+
+    char saved_cwd[PATH_MAX];
+    ASSERT_NE(getcwd(saved_cwd, sizeof(saved_cwd)), nullptr);
+    ASSERT_EQ(chdir(m_test_dir.c_str()), 0);
+
+    EXPECT_TRUE(is_directory(subdir_name));
+
+    ASSERT_EQ(chdir(saved_cwd), 0);
+}
+
 TEST_F(PathTest, GetRocprofsysRoot_ReturnsNonEmptyAbsolute)
 {
     std::string root = get_rocprofsys_root();
@@ -265,29 +319,17 @@ TEST_F(PathTest, GetInternalLibpath_ContainsLib)
     EXPECT_NE(libpath.find("lib"), std::string::npos);
 }
 
-TEST_F(PathTest, GetDefaultLibSearchPaths_ReturnsNonEmpty)
-{
-    auto paths = get_default_lib_search_paths<std::string>();
-    EXPECT_FALSE(paths.empty());
-}
-
-TEST_F(PathTest, GetDefaultLibSearchPaths_AsVector)
-{
-    auto paths = get_default_lib_search_paths<std::vector<std::string>>();
-    EXPECT_FALSE(paths.empty());
-}
-
 TEST_F(PathTest, FindPath_AbsoluteExisting)
 {
     std::string file_path = create_file("findpath_test.txt");
-    std::string result    = find_path(file_path, 0);
+    std::string result    = find_path(file_path, 0, "");
     EXPECT_EQ(result, file_path);
 }
 
 TEST_F(PathTest, FindPath_NonexistentReturnsOriginal)
 {
     std::string nonexistent = "nonexistent_file_xyz.txt";
-    std::string result      = find_path(nonexistent, 0);
+    std::string result      = find_path(nonexistent, 0, m_test_dir);
     EXPECT_EQ(result, nonexistent);
 }
 

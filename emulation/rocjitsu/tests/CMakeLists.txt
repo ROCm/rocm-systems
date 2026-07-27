@@ -13,19 +13,6 @@ set(RJ_OBJECT_LIBS
     rocjitsu_code
     rocjitsu_isa
     rocjitsu_isa_registry
-    rocjitsu_isa_cdna1
-    rocjitsu_isa_cdna2
-    rocjitsu_isa_cdna3
-    rocjitsu_isa_cdna4
-    rocjitsu_isa_rdna1
-    rocjitsu_isa_rdna2
-    rocjitsu_isa_rdna3
-    rocjitsu_isa_rdna3_5
-    rocjitsu_isa_rdna4
-    rocjitsu_isa_gfx1250
-    # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here, and \
-    # wire any new *_sim_test.cpp and kernels/ coverage into this file.
-    rocjitsu_isa_risc_v
     simdojo
     rocjitsu_kmd
     rocjitsu_vm
@@ -384,6 +371,7 @@ add_executable(
     matmul_test.cpp
     vector_add_test.cpp
     gfx1250_sim_test.cpp
+    l2_cache_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
     simulated_kfd_test.cpp
@@ -417,8 +405,10 @@ add_executable(
     waitcnt_counter_test.cpp
     register_access_test.cpp
     instruction_execution_harness_test.cpp
+    isa_target_registry_test.cpp
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
+    scoped_temp_test.cpp
     decode_execute_benchmark.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
@@ -513,6 +503,7 @@ target_link_libraries(
         Threads::Threads
         GTest::gtest_main
 )
+target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(
@@ -543,7 +534,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_model_only_test
         PRIVATE
             rocjitsu_dbt_internal
-            rocjitsu_isa_gfx1250_model
+            rocjitsu_gfx1250_model_registry
             simdojo_headers
             GTest::gtest_main
     )
@@ -582,6 +573,88 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         WARNINGS
     )
     rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
+    add_test(
+        NAME Gfx1250B0ToA0Library.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0> -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
+    )
+
+    # This source-integrated NPI fixture is deliberately absent from the
+    # built-in provider list. It exercises per-consumer composition by canonical
+    # name; it does not model an open plugin ABI or a complete new architecture.
+    rj_add_object_library(
+        rocjitsu_downstream_isa_fixture
+        fixtures/downstream_isa_target_provider.cpp
+    )
+    target_include_directories(
+        rocjitsu_downstream_isa_fixture
+        PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+    )
+    rj_add_isa_target_provider(
+        rocjitsu_downstream_isa_fixture
+        HEADER downstream_isa_target_provider.h
+    )
+    rj_add_isa_target_registry(
+        rocjitsu_downstream_registry_fixture
+        PROVIDERS rocjitsu_downstream_isa_fixture
+    )
+    add_library(
+        rocjitsu_downstream_isa_registry_fixture
+        SHARED
+        fixtures/downstream_isa_registry_fixture.cpp
+    )
+    target_link_libraries(
+        rocjitsu_downstream_isa_registry_fixture
+        PRIVATE
+            rocjitsu_isa
+            rocjitsu_downstream_registry_fixture
+            simdojo_headers
+    )
+    rj_configure_target(rocjitsu_downstream_isa_registry_fixture LIB)
+
+    # These shared objects model independently composed final images. The
+    # driver links the all-target registry while each DSO retains its own
+    # default subset.
+    add_library(
+        rocjitsu_narrow_isa_registry_fixture
+        SHARED
+        fixtures/narrow_isa_registry_fixture.cpp
+    )
+    target_link_libraries(
+        rocjitsu_narrow_isa_registry_fixture
+        PRIVATE
+            rocjitsu_dbt_internal
+            rocjitsu_gfx1250_model_registry
+            simdojo_headers
+    )
+    rj_configure_target(rocjitsu_narrow_isa_registry_fixture LIB)
+
+    add_executable(
+        isa_registry_composition_test
+        isa_registry_composition_test.cpp
+    )
+    target_link_libraries(
+        isa_registry_composition_test
+        PRIVATE
+            ${RJ_OBJECT_LIBS}
+            rocjitsu_downstream_isa_registry_fixture
+            rocjitsu_narrow_isa_registry_fixture
+            util
+            flatbuffers
+            Threads::Threads
+            GTest::gtest_main
+    )
+    rj_configure_target(isa_registry_composition_test TEST)
+    rj_add_gtest_tests(isa_registry_composition_test)
+    add_test(
+        NAME IsaRegistryCompositionTest.NarrowSymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DNARROW_LIBRARY=$<TARGET_FILE:rocjitsu_narrow_isa_registry_fixture>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_narrow_registry_symbols.cmake
+    )
 endif()
 
 # --- CLI launcher preload tests ---
@@ -680,6 +753,7 @@ add_executable(
 target_include_directories(
     rj_dbt_translate_smoke_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
 )
@@ -966,6 +1040,7 @@ target_compile_definitions(
 target_include_directories(
     hsa_hooks_unit_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
         ${CMAKE_SOURCE_DIR}/lib/util/include

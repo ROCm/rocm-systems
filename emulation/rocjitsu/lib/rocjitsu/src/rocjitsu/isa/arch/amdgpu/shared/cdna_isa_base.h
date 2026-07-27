@@ -98,6 +98,7 @@ struct CdnaIsaBase {
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0;   ///< AccVGPRs (0 = absent; CDNA1 default).
   static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0x0F; ///< lgkmcnt mask in S_WAITCNT [11:8].
   static constexpr bool SRAM_ECC = false;               ///< CDNA1 default: no SRAM ECC.
+  static constexpr bool MODE_HAS_GPR_IDX_EN = true;     ///< MODE[27] is GPR_IDX_EN on CDNA.
 
   using Context = amdgpu::Wavefront;
 };

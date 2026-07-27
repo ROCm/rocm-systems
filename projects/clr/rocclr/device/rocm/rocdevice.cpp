@@ -1916,8 +1916,11 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   // Handle D3D10 device binding
   if (flags & amd::Context::Flags::D3D10DeviceKhr) {
     void* d3d10Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx];
-    if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device), gfxContext, validateOnly)) {
-      LogError("Failed D3D10Interop::associateD3D10Device()");
+    if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device),
+                                            gfxContext, validateOnly)) {
+      if (!validateOnly) {
+        LogError("Failed D3D10Interop::associateD3D10Device()");
+      }
       success = false;
     }
   }
@@ -1925,8 +1928,11 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   // Handle D3D11 device binding
   if (flags & amd::Context::Flags::D3D11DeviceKhr) {
     void* d3d11Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D11DeviceKhrIdx];
-    if (!D3D11Interop::associateD3D11Device(this, static_cast<ID3D11Device*>(d3d11Device), gfxContext, validateOnly)) {
-      LogError("Failed D3D11Interop::associateD3D11Device()");
+    if (!D3D11Interop::associateD3D11Device(this, static_cast<ID3D11Device*>(d3d11Device),
+                                            gfxContext, validateOnly)) {
+      if (!validateOnly) {
+        LogError("Failed D3D11Interop::associateD3D11Device()");
+      }
       success = false;
     }
   }
@@ -1935,8 +1941,10 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   // Handle GL device binding (existing code)
   if (flags & amd::Context::Flags::GLDeviceKhr) {
     void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-    if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice)) {
-      LogError("Failed GlInterop::glAssociate()");
+    if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice, validateOnly)) {
+      if (!validateOnly) {
+        LogError("Failed GlInterop::glAssociate()");
+      }
       success = false;
     }
   }
@@ -1964,7 +1972,8 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
   // Handle GL device cleanup (existing code)
   if (flags & amd::Context::Flags::GLDeviceKhr) {
     void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-    if (glDevice != nullptr) {
+    // validateOnly never started a session; nothing to dissociate.
+    if (glDevice != nullptr && !validateOnly) {
       if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
         LogWarning("Failed GlInterop::glDissociate()");
         success = false;

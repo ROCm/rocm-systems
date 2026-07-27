@@ -12,8 +12,7 @@ namespace rocjitsu {
 namespace gfx1250 {
 
 VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
-    : Vop3("v_fma_dx9_zero_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VFmaDx9ZeroF32Vop3>()),
+    : Vop3("v_fma_dx9_zero_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(768)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -81,8 +80,7 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
 }
 
 VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
-    : Vop3("v_mad_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMadI32I24Vop3>()),
+    : Vop3("v_mad_i32_i24", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(769)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(24, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(24, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -150,8 +148,7 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
 }
 
 VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
-    : Vop3("v_mad_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMadU32U24Vop3>()),
+    : Vop3("v_mad_u32_u24", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(770)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(24, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(24, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -219,8 +216,7 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
 }
 
 VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
-    : Vop3("v_bfe_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VBfeU32Vop3>()),
+    : Vop3("v_bfe_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(775)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -288,8 +284,7 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
 }
 
 VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
-    : Vop3("v_bfe_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VBfeI32Vop3>()),
+    : Vop3("v_bfe_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(776)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -357,8 +352,7 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
 }
 
 VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
-    : Vop3("v_bfi_b32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VBfiB32Vop3>()),
+    : Vop3("v_bfi_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(777)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -426,8 +420,7 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
 }
 
 VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
-    : Vop3("v_fma_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VFmaF32Vop3>()),
+    : Vop3("v_fma_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(778)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -495,8 +488,7 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
 }
 
 VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
-    : Vop3("v_fma_f64", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VFmaF64Vop3>()),
+    : Vop3("v_fma_f64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(779)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -570,8 +562,7 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
 }
 
 VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
-    : Vop3("v_lerp_u8", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VLerpU8Vop3>()),
+    : Vop3("v_lerp_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(780)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -639,8 +630,7 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
 }
 
 VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
-    : Vop3("v_alignbit_b32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAlignbitB32Vop3>()),
+    : Vop3("v_alignbit_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(781)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -712,8 +702,7 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
 }
 
 VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
-    : Vop3("v_alignbyte_b32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAlignbyteB32Vop3>()),
+    : Vop3("v_alignbyte_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(782)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -785,8 +774,7 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
 }
 
 VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
-    : Vop3("v_min3_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMin3I32Vop3>()),
+    : Vop3("v_min3_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(784)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -854,8 +842,7 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
 }
 
 VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
-    : Vop3("v_min3_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMin3U32Vop3>()),
+    : Vop3("v_min3_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(785)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -923,8 +910,7 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
 }
 
 VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
-    : Vop3("v_max3_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMax3I32Vop3>()),
+    : Vop3("v_max3_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(786)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -992,8 +978,7 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
 }
 
 VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
-    : Vop3("v_max3_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMax3U32Vop3>()),
+    : Vop3("v_max3_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(787)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1061,8 +1046,7 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
 }
 
 VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
-    : Vop3("v_med3_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMed3I32Vop3>()),
+    : Vop3("v_med3_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(788)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1130,8 +1114,7 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
 }
 
 VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
-    : Vop3("v_med3_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMed3U32Vop3>()),
+    : Vop3("v_med3_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(789)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1199,8 +1182,7 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
 }
 
 VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
-    : Vop3("v_sad_u8", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VSadU8Vop3>()),
+    : Vop3("v_sad_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(790)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1268,8 +1250,7 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
 }
 
 VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
-    : Vop3("v_sad_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VSadHiU8Vop3>()),
+    : Vop3("v_sad_hi_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(791)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1337,8 +1318,7 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
 }
 
 VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
-    : Vop3("v_sad_u16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VSadU16Vop3>()),
+    : Vop3("v_sad_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(792)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1406,8 +1386,7 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
 }
 
 VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
-    : Vop3("v_sad_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VSadU32Vop3>()),
+    : Vop3("v_sad_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(793)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1475,8 +1454,7 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
 }
 
 VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
-    : Vop3("v_min3_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMin3NumF32Vop3>()),
+    : Vop3("v_min3_num_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(797)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1544,8 +1522,7 @@ VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
 }
 
 VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
-    : Vop3("v_max3_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMax3NumF32Vop3>()),
+    : Vop3("v_max3_num_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(798)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1613,8 +1590,7 @@ VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
 }
 
 VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
-    : Vop3("v_min3_num_f16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMin3NumF16Vop3>()),
+    : Vop3("v_min3_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(799)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1700,8 +1676,7 @@ void VMin3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
-    : Vop3("v_max3_num_f16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMax3NumF16Vop3>()),
+    : Vop3("v_max3_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(800)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1787,8 +1762,7 @@ void VMax3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
-    : Vop3("v_minimum3_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMinimum3F32Vop3>()),
+    : Vop3("v_minimum3_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(801)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1856,8 +1830,7 @@ VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
 }
 
 VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
-    : Vop3("v_maximum3_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMaximum3F32Vop3>()),
+    : Vop3("v_maximum3_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(802)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1925,8 +1898,7 @@ VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
 }
 
 VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
-    : Vop3("v_minimum3_f16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMinimum3F16Vop3>()),
+    : Vop3("v_minimum3_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(803)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2012,8 +1984,7 @@ void VMinimum3F16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
-    : Vop3("v_maximum3_f16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMaximum3F16Vop3>()),
+    : Vop3("v_maximum3_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(804)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2099,8 +2070,7 @@ void VMaximum3F16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
-    : Vop3("v_med3_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMed3NumF32Vop3>()),
+    : Vop3("v_med3_num_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(805)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2168,8 +2138,7 @@ VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
 }
 
 VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
-    : Vop3("v_med3_num_f16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMed3NumF16Vop3>()),
+    : Vop3("v_med3_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(806)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2255,8 +2224,7 @@ void VMed3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMadU32Vop3::VMadU32Vop3(const MachineInst *inst)
-    : Vop3("v_mad_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMadU32Vop3>()),
+    : Vop3("v_mad_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(809)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2324,8 +2292,7 @@ VMadU32Vop3::VMadU32Vop3(const MachineInst *inst)
 }
 
 VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
-    : Vop3("v_msad_u8", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMsadU8Vop3>()),
+    : Vop3("v_msad_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(812)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2393,8 +2360,7 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
 }
 
 VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
-    : Vop3("v_xor3_b32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VXor3B32Vop3>()),
+    : Vop3("v_xor3_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(817)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2462,8 +2428,7 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
 }
 
 VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
-    : Vop3("v_mad_u16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMadU16Vop3>()),
+    : Vop3("v_mad_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(818)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2549,8 +2514,7 @@ void VMadU16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
-    : Vop3("v_xad_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VXadU32Vop3>()),
+    : Vop3("v_xad_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(822)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2618,8 +2582,7 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
 }
 
 VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
-    : Vop3("v_lshl_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VLshlAddU32Vop3>()),
+    : Vop3("v_lshl_add_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(823)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2687,8 +2650,7 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
 }
 
 VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
-    : Vop3("v_add_lshl_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAddLshlU32Vop3>()),
+    : Vop3("v_add_lshl_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(824)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2756,8 +2718,7 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
 }
 
 VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
-    : Vop3("v_fma_f16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VFmaF16Vop3>()),
+    : Vop3("v_fma_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(825)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2843,8 +2804,7 @@ void VFmaF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
-    : Vop3("v_min3_i16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMin3I16Vop3>()),
+    : Vop3("v_min3_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(826)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2930,8 +2890,7 @@ void VMin3I16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
-    : Vop3("v_min3_u16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMin3U16Vop3>()),
+    : Vop3("v_min3_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(827)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3017,8 +2976,7 @@ void VMin3U16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
-    : Vop3("v_max3_i16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMax3I16Vop3>()),
+    : Vop3("v_max3_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(828)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3104,8 +3062,7 @@ void VMax3I16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
-    : Vop3("v_max3_u16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMax3U16Vop3>()),
+    : Vop3("v_max3_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(829)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3191,8 +3148,7 @@ void VMax3U16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
-    : Vop3("v_med3_i16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMed3I16Vop3>()),
+    : Vop3("v_med3_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(830)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3278,8 +3234,7 @@ void VMed3I16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
-    : Vop3("v_med3_u16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMed3U16Vop3>()),
+    : Vop3("v_med3_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(831)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3365,8 +3320,7 @@ void VMed3U16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VLshlAddU64Vop3::VLshlAddU64Vop3(const MachineInst *inst)
-    : Vop3("v_lshl_add_u64", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VLshlAddU64Vop3>()),
+    : Vop3("v_lshl_add_u64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(832)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3434,8 +3388,7 @@ VLshlAddU64Vop3::VLshlAddU64Vop3(const MachineInst *inst)
 }
 
 VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
-    : Vop3("v_mad_i16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMadI16Vop3>()),
+    : Vop3("v_mad_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(833)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3521,8 +3474,7 @@ void VMadI16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
-    : Vop3("v_add3_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAdd3U32Vop3>()),
+    : Vop3("v_add3_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(835)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3590,8 +3542,7 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
 }
 
 VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
-    : Vop3("v_lshl_or_b32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VLshlOrB32Vop3>()),
+    : Vop3("v_lshl_or_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(836)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3659,8 +3610,7 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
 }
 
 VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
-    : Vop3("v_and_or_b32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAndOrB32Vop3>()),
+    : Vop3("v_and_or_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(837)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3728,8 +3678,7 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
 }
 
 VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
-    : Vop3("v_or3_b32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VOr3B32Vop3>()),
+    : Vop3("v_or3_b32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(838)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3797,8 +3746,7 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
 }
 
 VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
-    : Vop3("v_mad_u32_u16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMadU32U16Vop3>()),
+    : Vop3("v_mad_u32_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(839)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3874,8 +3822,7 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
 }
 
 VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
-    : Vop3("v_mad_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMadI32I16Vop3>()),
+    : Vop3("v_mad_i32_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(840)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3951,8 +3898,7 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
 }
 
 VAddMaxI32Vop3::VAddMaxI32Vop3(const MachineInst *inst)
-    : Vop3("v_add_max_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAddMaxI32Vop3>()),
+    : Vop3("v_add_max_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(844)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4020,8 +3966,7 @@ VAddMaxI32Vop3::VAddMaxI32Vop3(const MachineInst *inst)
 }
 
 VAddMaxU32Vop3::VAddMaxU32Vop3(const MachineInst *inst)
-    : Vop3("v_add_max_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAddMaxU32Vop3>()),
+    : Vop3("v_add_max_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(845)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4089,8 +4034,7 @@ VAddMaxU32Vop3::VAddMaxU32Vop3(const MachineInst *inst)
 }
 
 VAddMinI32Vop3::VAddMinI32Vop3(const MachineInst *inst)
-    : Vop3("v_add_min_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAddMinI32Vop3>()),
+    : Vop3("v_add_min_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(846)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4158,8 +4102,7 @@ VAddMinI32Vop3::VAddMinI32Vop3(const MachineInst *inst)
 }
 
 VAddMinU32Vop3::VAddMinU32Vop3(const MachineInst *inst)
-    : Vop3("v_add_min_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAddMinU32Vop3>()),
+    : Vop3("v_add_min_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(847)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4227,8 +4170,7 @@ VAddMinU32Vop3::VAddMinU32Vop3(const MachineInst *inst)
 }
 
 VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
-    : Vop3("v_maxmin_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMaxminU32Vop3>()),
+    : Vop3("v_maxmin_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(848)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4296,8 +4238,7 @@ VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
 }
 
 VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
-    : Vop3("v_minmax_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMinmaxU32Vop3>()),
+    : Vop3("v_minmax_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(849)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4365,8 +4306,7 @@ VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
 }
 
 VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
-    : Vop3("v_maxmin_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMaxminI32Vop3>()),
+    : Vop3("v_maxmin_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(850)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4434,8 +4374,7 @@ VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
 }
 
 VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
-    : Vop3("v_minmax_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMinmaxI32Vop3>()),
+    : Vop3("v_minmax_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(851)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4503,8 +4442,7 @@ VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
 }
 
 VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
-    : Vop3("v_minmax_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMinmaxNumF32Vop3>()),
+    : Vop3("v_minmax_num_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(852)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4572,8 +4510,7 @@ VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
 }
 
 VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
-    : Vop3("v_maxmin_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMaxminNumF32Vop3>()),
+    : Vop3("v_maxmin_num_f32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(853)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4641,8 +4578,7 @@ VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
 }
 
 VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
-    : Vop3("v_minmax_num_f16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMinmaxNumF16Vop3>()),
+    : Vop3("v_minmax_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(854)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4728,8 +4664,7 @@ void VMinmaxNumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
-    : Vop3("v_maxmin_num_f16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMaxminNumF16Vop3>()),
+    : Vop3("v_maxmin_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(855)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4816,7 +4751,7 @@ void VMaxminNumF16Vop3::implicit_uses(RegisterSet &uses) const {
 
 VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
     : Vop3("v_minimummaximum_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMinimummaximumF32Vop3>()),
+           selected_exec_fn(856)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4885,7 +4820,7 @@ VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
 
 VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
     : Vop3("v_maximumminimum_f32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMaximumminimumF32Vop3>()),
+           selected_exec_fn(857)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4954,7 +4889,7 @@ VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
 
 VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
     : Vop3("v_minimummaximum_f16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMinimummaximumF16Vop3>()),
+           selected_exec_fn(858)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5041,7 +4976,7 @@ void VMinimummaximumF16Vop3::implicit_uses(RegisterSet &uses) const {
 
 VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
     : Vop3("v_maximumminimum_f16", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMaximumminimumF16Vop3>()),
+           selected_exec_fn(859)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5127,8 +5062,7 @@ void VMaximumminimumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VAshrPkI8I32Vop3::VAshrPkI8I32Vop3(const MachineInst *inst)
-    : Vop3("v_ashr_pk_i8_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAshrPkI8I32Vop3>()),
+    : Vop3("v_ashr_pk_i8_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(874)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5202,8 +5136,7 @@ void VAshrPkI8I32Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VAshrPkU8I32Vop3::VAshrPkU8I32Vop3(const MachineInst *inst)
-    : Vop3("v_ashr_pk_u8_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VAshrPkU8I32Vop3>()),
+    : Vop3("v_ashr_pk_u8_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(875)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5277,8 +5210,7 @@ void VAshrPkU8I32Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMadNcU64U32Vop3::VMadNcU64U32Vop3(const MachineInst *inst)
-    : Vop3("v_mad_nc_u64_u32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMadNcU64U32Vop3>()),
+    : Vop3("v_mad_nc_u64_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(921)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5346,8 +5278,7 @@ VMadNcU64U32Vop3::VMadNcU64U32Vop3(const MachineInst *inst)
 }
 
 VMadNcI64I32Vop3::VMadNcI64I32Vop3(const MachineInst *inst)
-    : Vop3("v_mad_nc_i64_i32", reinterpret_cast<const OpEncoding *>(inst),
-           registered_exec_fn<VMadNcI64I32Vop3>()),
+    : Vop3("v_mad_nc_i64_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(922)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
