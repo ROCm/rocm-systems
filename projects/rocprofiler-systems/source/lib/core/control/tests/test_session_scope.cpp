@@ -22,22 +22,24 @@ public:
     mock_trigger(session& sess, std::string name, scope event_scope, action initial)
     : m_session{ sess }
     , m_name{ std::move(name) }
+    , m_scope{ event_scope }
     {
-        m_session.register_trigger(m_name, initial, event_scope);
+        m_session.register_trigger(m_name, initial, m_scope);
     }
 
-    ~mock_trigger() { m_session.unregister_trigger(m_name); }
+    ~mock_trigger() { m_session.unregister_trigger(m_name, m_scope); }
 
     mock_trigger(const mock_trigger&)            = delete;
     mock_trigger& operator=(const mock_trigger&) = delete;
     mock_trigger(mock_trigger&&)                 = delete;
     mock_trigger& operator=(mock_trigger&&)      = delete;
 
-    void set_action(action a) const { m_session.set_action(m_name, a); }
+    void set_action(action a) const { m_session.set_action(m_name, a, m_scope); }
 
 private:
     session&    m_session;
     std::string m_name;
+    scope       m_scope;
 };
 
 class session_scope_test : public ::testing::Test
@@ -119,4 +121,50 @@ TEST_F(session_scope_test, is_active_is_tracked_independently_per_scope)
 
     EXPECT_TRUE(s.is_active(scope::global));
     EXPECT_FALSE(s.is_active(scope::sampling_only));
+}
+
+TEST_F(session_scope_test,
+       same_named_triggers_in_different_scopes_do_not_clobber_each_other)
+{
+    // The global TRACE_DELAY window and the sampling-scoped SAMPLING_DURATION
+    // window are both time_window instances, so both report the same trigger
+    // name. Storing them under that name alone lets the second registration
+    // overwrite the first.
+    mock_trigger global_window{ s, "time_window", scope::global, action::pause };
+    mock_trigger sampling_window{ s, "time_window", scope::sampling_only, action::pause };
+
+    EXPECT_FALSE(s.is_active(scope::global));
+    EXPECT_FALSE(s.is_active(scope::sampling_only));
+
+    sampling_window.set_action(action::trace);
+    EXPECT_TRUE(s.is_active(scope::sampling_only));
+
+    // Force a fresh resolve of the global scope without touching
+    // global_window's own setter: if its entry had been overwritten, the
+    // global scope would now wrongly resolve active.
+    {
+        mock_trigger probe{ s, "probe", scope::global, action::trace };
+    }
+    EXPECT_FALSE(s.is_active(scope::global))
+        << "global_window's pause must survive the sampling window's registration";
+}
+
+TEST_F(session_scope_test, unregister_removes_only_the_matching_scope)
+{
+    mock_trigger sampling_window{ s, "time_window", scope::sampling_only, action::pause };
+    {
+        mock_trigger global_window{ s, "time_window", scope::global, action::pause };
+        EXPECT_FALSE(s.is_active(scope::global));
+    }
+
+    EXPECT_TRUE(s.is_active(scope::global))
+        << "the global window's entry should be gone once it unregisters";
+
+    // Force a fresh resolve of sampling_only: a shared entry erased by the
+    // global window's destructor would leave nothing to keep this scope paused.
+    {
+        mock_trigger probe{ s, "probe", scope::sampling_only, action::trace };
+    }
+    EXPECT_FALSE(s.is_active(scope::sampling_only))
+        << "unregistering the global window must not remove the same-named sampling one";
 }
