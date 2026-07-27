@@ -1085,6 +1085,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         hsa_hotswap_rocjitsu_unit_test
         PRIVATE hsa_hotswap_rocjitsu_testable GTest::gtest_main
     )
+    if(HAS_GFX1250_DBT_FIXTURE)
+        target_compile_definitions(
+            hsa_hotswap_rocjitsu_unit_test
+            PRIVATE
+                GFX1250_B0_TO_A0_FIXTURE="${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco"
+        )
+        add_dependencies(
+            hsa_hotswap_rocjitsu_unit_test
+            probe_relocation_function_table_dispatch_gfx1250
+        )
+    endif()
     rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
     gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
 endif()

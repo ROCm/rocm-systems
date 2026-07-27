@@ -4,10 +4,15 @@
 #include <gtest/gtest.h>
 
 #include "hsa/hsa_api_trace_minimal.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <new>
 #include <thread>
 #include <unordered_map>
@@ -29,6 +34,17 @@ struct ReaderView {
   size_t size;
 };
 
+using VendorReaderCreate = hsa_status_t (*)(hsa_file_t, size_t, size_t, hsa_code_object_reader_t *);
+
+struct FakeVendorLoaderTable {
+  void (*query_host_address)();
+  void (*query_segment_descriptors)();
+  void (*query_executable)();
+  void (*iterate_loaded_code_objects)();
+  void (*loaded_code_object_get_info)();
+  VendorReaderCreate create_reader_from_file;
+};
+
 uint64_t g_next_reader = 1;
 std::unordered_map<uint64_t, ReaderView> g_readers;
 std::vector<uint8_t> g_loaded_bytes;
@@ -41,6 +57,11 @@ int g_reader_destroy_calls = 0;
 int g_load_agent_calls = 0;
 int g_load_program_calls = 0;
 int g_load_deprecated_calls = 0;
+int g_get_extension_table_calls = 0;
+int g_vendor_reader_calls = 0;
+hsa_file_t g_vendor_file = -1;
+size_t g_vendor_offset = 0;
+size_t g_vendor_size = 0;
 bool g_throw_from_deprecated_load = false;
 
 void reset_fakes() {
@@ -56,6 +77,11 @@ void reset_fakes() {
   g_load_agent_calls = 0;
   g_load_program_calls = 0;
   g_load_deprecated_calls = 0;
+  g_get_extension_table_calls = 0;
+  g_vendor_reader_calls = 0;
+  g_vendor_file = -1;
+  g_vendor_offset = 0;
+  g_vendor_size = 0;
   g_throw_from_deprecated_load = false;
 }
 
@@ -152,9 +178,50 @@ hsa_status_t HSA_API fake_load_deprecated(hsa_executable_t, hsa_agent_t, hsa_cod
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t HSA_API fake_get_extension_table(uint16_t, uint16_t, size_t, void *) {
+hsa_status_t fake_vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
+                                       hsa_code_object_reader_t *reader) {
+  ++g_vendor_reader_calls;
+  g_vendor_file = file;
+  g_vendor_offset = offset;
+  g_vendor_size = size;
+  if (reader == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  *reader = hsa_code_object_reader_t{g_next_reader++};
   return HSA_STATUS_SUCCESS;
 }
+
+hsa_status_t HSA_API fake_get_extension_table(uint16_t extension, uint16_t version_major,
+                                              size_t table_length, void *table) {
+  ++g_get_extension_table_calls;
+  constexpr size_t reader_field_end =
+      offsetof(FakeVendorLoaderTable, create_reader_from_file) + sizeof(VendorReaderCreate);
+  if (extension == HSA_EXTENSION_AMD_LOADER && version_major == 1 && table != nullptr &&
+      table_length >= reader_field_end) {
+    static_cast<FakeVendorLoaderTable *>(table)->create_reader_from_file =
+        fake_vendor_reader_create;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+std::vector<uint8_t> make_invalid_gfx1250_elf() {
+  std::vector<uint8_t> image(sizeof(rocjitsu::Elf64_Ehdr), 0);
+  auto *header = reinterpret_cast<rocjitsu::Elf64_Ehdr *>(image.data());
+  std::memcpy(header->e_ident, rocjitsu::EI_MAGIC, rocjitsu::EI_MAGIC_SIZE);
+  header->e_ident[rocjitsu::EI_CLASS] = rocjitsu::ELFCLASS64;
+  header->e_machine = rocjitsu::EM_AMDGPU;
+  header->e_flags = rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250;
+  return image;
+}
+
+#ifdef GFX1250_B0_TO_A0_FIXTURE
+std::vector<uint8_t> read_translation_fixture() {
+  std::ifstream input(GFX1250_B0_TO_A0_FIXTURE, std::ios::binary);
+  if (!input)
+    return {};
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(input),
+                              std::istreambuf_iterator<char>());
+}
+#endif
 
 struct FakeApi {
   CoreApiTable core{};
@@ -255,6 +322,47 @@ TEST_F(HsaHotswapHookTest, UsesImmutableSnapshotForForwardedA0Load) {
   EXPECT_EQ(g_readers.count(g_loaded_reader.handle), 0u);
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_reader_destroy_calls, 1);
+}
+
+#ifdef GFX1250_B0_TO_A0_FIXTURE
+TEST_F(HsaHotswapHookTest, TranslatesGfx1250AndRetainsOutputUntilDestroy) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = read_translation_fixture();
+  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+
+  ASSERT_GE(g_loaded_bytes.size(), rocjitsu::EI_MAGIC_SIZE);
+  EXPECT_EQ(std::memcmp(g_loaded_bytes.data(), rocjitsu::EI_MAGIC, rocjitsu::EI_MAGIC_SIZE), 0);
+  EXPECT_NE(g_loaded_bytes, source);
+  EXPECT_NE(g_loaded_reader.handle, reader.handle);
+  EXPECT_EQ(g_load_agent_calls, 1);
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 1u);
+
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+}
+#endif
+
+TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::vector<uint8_t> source = make_invalid_gfx1250_elf();
+
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(
+      api.core.hsa_code_object_reader_create_from_memory_fn(source.data(), source.size(), &reader),
+      HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(g_load_agent_calls, 0);
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
 }
 
 // The translated backing storage retained for an A0 load must SURVIVE OnUnload()
@@ -407,6 +515,61 @@ TEST_F(HsaHotswapHookTest, FileCaptureFailureDestroysCreatedReader) {
             HSA_STATUS_ERROR_OUT_OF_RESOURCES);
   EXPECT_EQ(reader.handle, 0u);
   EXPECT_EQ(g_reader_destroy_calls, 1);
+}
+
+TEST_F(HsaHotswapHookTest, VendorLoaderReaderIsReplacedCapturedAndForwarded) {
+  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+
+  FakeVendorLoaderTable loader{};
+  ASSERT_EQ(api.core.hsa_system_get_major_extension_table_fn(HSA_EXTENSION_AMD_LOADER, 1,
+                                                             sizeof(loader), &loader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(loader.create_reader_from_file, nullptr);
+  EXPECT_NE(loader.create_reader_from_file, fake_vendor_reader_create);
+  EXPECT_EQ(g_get_extension_table_calls, 1);
+
+  constexpr std::array<uint8_t, 8> kFileBytes = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80};
+  constexpr size_t kOffset = 2;
+  constexpr size_t kSize = 4;
+  std::FILE *file = std::tmpfile();
+  ASSERT_NE(file, nullptr);
+  ASSERT_EQ(std::fwrite(kFileBytes.data(), 1, kFileBytes.size(), file), kFileBytes.size());
+  ASSERT_EQ(std::fflush(file), 0);
+  const int file_descriptor = fileno(file);
+  ASSERT_GE(file_descriptor, 0);
+
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(loader.create_reader_from_file(file_descriptor, kOffset, kSize, &reader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_vendor_reader_calls, 1);
+  EXPECT_EQ(g_vendor_file, file_descriptor);
+  EXPECT_EQ(g_vendor_offset, kOffset);
+  EXPECT_EQ(g_vendor_size, kSize);
+  ASSERT_EQ(std::fclose(file), 0);
+
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                              nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  const std::vector<uint8_t> expected(kFileBytes.begin() + kOffset,
+                                      kFileBytes.begin() + kOffset + kSize);
+  EXPECT_EQ(g_loaded_bytes, expected);
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 1u);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+
+  EXPECT_EQ(loader.create_reader_from_file(file_descriptor, 0, 0, nullptr),
+            HSA_STATUS_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(g_vendor_reader_calls, 1);
+
+  FakeVendorLoaderTable short_loader{};
+  short_loader.create_reader_from_file = fake_vendor_reader_create;
+  constexpr size_t reader_field_end =
+      offsetof(FakeVendorLoaderTable, create_reader_from_file) + sizeof(VendorReaderCreate);
+  ASSERT_GT(reader_field_end, 0u);
+  ASSERT_EQ(api.core.hsa_system_get_major_extension_table_fn(HSA_EXTENSION_AMD_LOADER, 1,
+                                                             reader_field_end - 1, &short_loader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(short_loader.create_reader_from_file, fake_vendor_reader_create);
 }
 
 // A null output reader pointer is rejected BEFORE forwarding to the lower/vendor
