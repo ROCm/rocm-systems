@@ -909,6 +909,16 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       *((bool*)value) = core::Runtime::runtime_singleton_->VirtualMemApiSupported();
       break;
     }
+    case HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED: {
+      // Host memory DMA-BUF allocation via vmem APIs requires:
+      //  - Virtual Memory APIs supported by the driver
+      //  - At least one GPU agent (needed for drm ops)
+      bool supported = false;
+      if (core::Runtime::runtime_singleton_->VirtualMemApiSupported())
+        supported = !core::Runtime::runtime_singleton_->gpu_agents().empty();
+      *((bool*)value) = supported;
+      break;
+    }
     case HSA_AMD_SYSTEM_INFO_XNACK_ENABLED: {
       *((bool*)value) = core::Runtime::runtime_singleton_->XnackEnabled();
       break;
