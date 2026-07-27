@@ -282,7 +282,7 @@ add_upcoming_samples(const device_handle     device,
             // Samples without a live dispatch mapping cannot be attributed and
             // may contain undefined wave state from a late trap. Keep reporting
             // the parser error, but expose the record as explicitly invalid.
-            pc_sample.size           = 0;
+            pc_sample.size = 0;
             // TODO: introduce ROCPROFILER_DISPATCH_ID_INTERNAL_NONE
             pc_sample.dispatch_id    = 0;
             pc_sample.correlation_id = {.internal = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE,

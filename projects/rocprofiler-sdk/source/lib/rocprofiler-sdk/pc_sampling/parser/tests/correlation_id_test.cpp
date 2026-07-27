@@ -416,12 +416,12 @@ TEST(pcs_parser, multi_buffer)
 
 TEST(pcs_parser, invalid_host_trap_samples)
 {
-    auto buffer   = std::make_shared<
-        MockRuntimeBuffer<rocprofiler_pc_sampling_record_host_trap_v0_t>>();
-    auto queue    = std::make_shared<
-        MockQueue<rocprofiler_pc_sampling_record_host_trap_v0_t>>(16, buffer);
-    auto dispatch = std::make_shared<
-        MockDispatch<rocprofiler_pc_sampling_record_host_trap_v0_t>>(queue);
+    auto buffer =
+        std::make_shared<MockRuntimeBuffer<rocprofiler_pc_sampling_record_host_trap_v0_t>>();
+    auto queue =
+        std::make_shared<MockQueue<rocprofiler_pc_sampling_record_host_trap_v0_t>>(16, buffer);
+    auto dispatch =
+        std::make_shared<MockDispatch<rocprofiler_pc_sampling_record_host_trap_v0_t>>(queue);
 
     Parser::CorrelationMap corr_map;
     corr_map.newDispatch(buffer->packets.at(0).dispatch_id);
