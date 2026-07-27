@@ -82,8 +82,6 @@ set(CUID_HEADERS
     ${SRC_DIR}/gim_util.h
 )
 
-set_property(TARGET amdcuid_static PROPERTY POSITION_INDEPENDENT_CODE ON)
-
 add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
 add_library(amdcuid_shared SHARED ${CUID_SOURCES} ${CUID_HEADERS})
 
