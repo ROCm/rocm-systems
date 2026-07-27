@@ -59,6 +59,7 @@ set(CUID_SOURCES
     ${SRC_DIR}/pci_util.cc
     ${SRC_DIR}/acpi_parser.cc
     ${SRC_DIR}/smbios_util.cc
+    ${SRC_DIR}/gim_util.cc
 )
 
 set(CUID_HEADERS
@@ -78,6 +79,7 @@ set(CUID_HEADERS
     ${SRC_DIR}/acpi_parser.h
     ${SRC_DIR}/smbios_util.h
     ${SRC_DIR}/cuid_internal.h
+    ${SRC_DIR}/gim_util.h
 )
 
 add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})

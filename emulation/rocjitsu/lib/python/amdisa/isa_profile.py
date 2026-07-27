@@ -290,6 +290,11 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def split_execution_sources(self) -> bool:
+        """True when execution bodies are emitted to separate source files."""
+        return False
+
+    @property
     def uses_true16_vop3_opsel(self) -> bool:
         """True when VOP3 16-bit operands use op_sel half selectors."""
         return False
@@ -303,31 +308,6 @@ class IsaProfile(ABC):
     def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
         """True when buffer-store data operands use the destination VGPR-MSB bank."""
         return False
-
-    @property
-    def use_hwreg_helpers(self) -> bool:
-        """True when generated SOPK getreg/setreg should use target hwreg helpers."""
-        return False
-
-    @property
-    def hwreg_mode_id(self) -> int | None:
-        """Hardware-register ID for MODE, when modeled by generated setreg code."""
-        return None
-
-    @property
-    def hwreg_status_id(self) -> int:
-        """Hardware-register ID for STATUS in generated getreg/setreg code."""
-        return 1
-
-    @property
-    def hwreg_ib_sts2_id(self) -> int | None:
-        """Hardware-register ID for IB_STS2, when exposed by the target."""
-        return None
-
-    @property
-    def hwreg_wave_sched_mode_id(self) -> int | None:
-        """Hardware-register ID for WAVE_SCHED_MODE, when exposed by the target."""
-        return None
 
     @property
     def generate_scaled_wmma_vop3px2(self) -> bool:
@@ -834,9 +814,24 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def uses_ttmp_workgroup_ids(self) -> bool:
+        """Whether dispatch workgroup IDs are carried in TTMP registers."""
+        return False
+
+    @property
+    def uses_cluster_ttmp_workgroup_ids(self) -> bool:
+        """Whether the TTMP workgroup-ID payload uses cluster coordinates."""
+        return False
+
+    @property
     def max_addressable_vgprs_per_wf(self) -> int:
         """Maximum VGPR index space addressable by one wavefront."""
         return 256
+
+    @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        """Whether zero SGPR granule fields still use descriptor encoding."""
+        return True
 
     @property
     def has_acc_vgpr(self) -> bool:
@@ -1229,6 +1224,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        return False
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx10'
 
@@ -1345,6 +1344,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def supports_wgp_mode(self) -> bool:
         return True
+
+    @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        return False
 
     @property
     def waitcnt_family(self) -> str:
@@ -1482,6 +1485,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def supports_wgp_mode(self) -> bool:
         return True
+
+    @property
+    def uses_ttmp_workgroup_ids(self) -> bool:
+        return True
+
+    @property
+    def descriptor_sgpr_count_encoded(self) -> bool:
+        return False
 
     @property
     def waitcnt_family(self) -> str:
@@ -1632,6 +1643,10 @@ class Gfx1250Profile(Rdna4Profile):
         return False
 
     @property
+    def uses_cluster_ttmp_workgroup_ids(self) -> bool:
+        return True
+
+    @property
     def max_addressable_vgprs_per_wf(self) -> int:
         return 1024
 
@@ -1652,28 +1667,12 @@ class Gfx1250Profile(Rdna4Profile):
         return True
 
     @property
+    def split_execution_sources(self) -> bool:
+        return True
+
+    @property
     def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
         return True
-
-    @property
-    def use_hwreg_helpers(self) -> bool:
-        return True
-
-    @property
-    def hwreg_mode_id(self) -> int | None:
-        return 1
-
-    @property
-    def hwreg_status_id(self) -> int:
-        return 2
-
-    @property
-    def hwreg_ib_sts2_id(self) -> int | None:
-        return 28
-
-    @property
-    def hwreg_wave_sched_mode_id(self) -> int | None:
-        return 26
 
     @property
     def generate_scaled_wmma_vop3px2(self) -> bool:

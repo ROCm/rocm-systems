@@ -53,8 +53,9 @@
 #   * torch/HIP dispatch  -> AMD_LOG_LEVEL=3 makes the ROCm runtime print every
 #     HIP kernel launch; PYTORCH_JIT_LOG_LEVEL / PYTORCH_SHOW_DISPATCH_TRACE add
 #     the aten dispatch trace on instrumented torch builds.
-#   * rocjitsu emulator   -> RJ_LOG=1 enables the interposer's kernel-logging
-#     plugin and RJ_SINKS=stderr streams each emulated kernel to stderr.
+#   * rocjitsu emulator   -> `--plugin logging` adds the logging plugin to the
+#     resolved profile config; its default stderr sink streams each emulated
+#     kernel to the workload's stderr.
 #
 set -euo pipefail
 
@@ -67,17 +68,17 @@ HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 PYTHON="${PYTHON:-python3}"
 LOG_KERNELS="${LOG_KERNELS:-0}"
 
-# Build the list of --env flags that enable kernel-execution logging. Only
+# Build the list of arguments that enable kernel-execution logging. Only
 # populated when LOG_KERNELS=1 so the default run stays quiet.
-KERNEL_LOG_ENV=()
+KERNEL_LOG_ARGS=()
 if [[ "$LOG_KERNELS" == "1" ]]; then
-  KERNEL_LOG_ENV+=(
+  KERNEL_LOG_ARGS+=(
     # torch / HIP kernel dispatch trace.
     --env AMD_LOG_LEVEL=3
     --env PYTORCH_JIT_LOG_LEVEL=kernels
     --env PYTORCH_SHOW_DISPATCH_TRACE=1
-    # rocjitsu emulator kernel-execution logging (interposer plugin -> stderr).
-    --env RJ_LOG=1
+    # rocjitsu kernel logging, merged into the runtime config by mirage.
+    --plugin logging
   )
 fi
 
@@ -123,5 +124,5 @@ cd "$MIRAGE_DIR"
   --image "$IMAGE" \
   --mount "$FIXTURE_DIR:$CONTAINER_FIXTURE_DIR:ro" \
   --mount "$HF_CACHE:/root/.cache/huggingface" \
-  "${KERNEL_LOG_ENV[@]}" \
+  "${KERNEL_LOG_ARGS[@]}" \
   -- "$PYTHON" "$CONTAINER_FIXTURE"

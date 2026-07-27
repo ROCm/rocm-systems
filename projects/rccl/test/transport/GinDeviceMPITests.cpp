@@ -35,12 +35,19 @@ std::string ginEnvDisabledReason() {
   return "";
 }
 
+// GIN type requested for this run (2=proxy, 4=rocshmem-gda); 0 if unset.
+int requestedGinType() {
+  const char* t = std::getenv("NCCL_GIN_TYPE");
+  return t ? std::atoi(t) : 0;
+}
+
 std::string ginTypeReason() {
   const char* ginType = std::getenv("NCCL_GIN_TYPE");
   if (!ginType)
-    return "GIN type not set (required NCCL_GIN_TYPE=2)";
-  if (std::atoi(ginType) != 2)
-    return std::string("Invalid GIN type: ") + ginType + " (required NCCL_GIN_TYPE=2)";
+    return "GIN type not set (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
+  int t = requestedGinType();
+  if (t != 2 && t != 4)
+    return std::string("Invalid GIN type: ") + ginType + " (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
   return "";
 }
 
@@ -1091,8 +1098,10 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
 __global__ void barrierSessionLsaKernel(
     ncclWindow_t win, size_t off, int iters, int* dErr,
     struct ncclDevComm devComm) {
-  ncclBarrierSession<ncclCoopCta> bar{
-      ncclCoopCta(), ncclTeamTagLsa(), devComm, /*index=*/blockIdx.x};
+  // Dedicated LSA barrier session reads comm.lsaBarrier (sized by reqs.lsaBarrierCount, no GIN); the composite
+  // ncclBarrierSession(ncclTeamTagLsa) reads the 0-sized comm.hybridLsaBarrier and overruns for LSA teams >2 ranks.
+  ncclLsaBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), devComm, ncclTeamTagLsa(), /*index=*/blockIdx.x};
   ncclTeam lsa = ncclTeamLsa(devComm);
   int* myBuf = static_cast<int*>(ncclGetLocalPointer(win, off));
   for (int it = 1; it <= iters; ++it) {
@@ -1104,14 +1113,14 @@ __global__ void barrierSessionLsaKernel(
     }
     // Publish our writes to LSA peers and acquire theirs (acq_rel so the loads
     // below are ordered after every peer's store, not relaxed).
-    bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel, ncclGinFenceLevel::Relaxed);
+    bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
     if (threadIdx.x == 0) {
       for (int p = 0; p < lsa.nRanks; ++p) {
         if (myBuf[p] != it) atomicExch(dErr, it);
       }
     }
     // Gate the next round's overwrites on all peers having read this round.
-    bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
+    bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
   }
 }
 
@@ -1220,14 +1229,11 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
 
   constexpr int kIters = 16;
 
-  // World-team barrier needs both pools: lsaBarrierCount for the inner LSA
-  // arm, railGinBarrierCount for the outer rail-GIN arm. ginForceEnable is
-  // required so GIN actually activates (ginHandles[] populated) on a single
-  // node -- without it the outer barrier's waitSignal dereferences a NULL
-  // proxy ctx and faults (see Barrier_TwoRanks).
+  // The world-team ncclBarrierSession sizes its hybrid LSA+rail-GIN barriers from
+  // reqs.barrierCount (not lsa/railGinBarrierCount); 0 hangs the rail arm. ginForceEnable
+  // activates GIN so the outer barrier's waitSignal has a valid ctx (see Barrier_TwoRanks).
   ncclDevCommRequirements reqs = defaultGinReqs();
-  reqs.lsaBarrierCount     = 1;
-  reqs.railGinBarrierCount = 1;
+  reqs.barrierCount        = 1;
   reqs.ginForceEnable      = true;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
@@ -1735,7 +1741,7 @@ __global__ void alltoallPureKernel(
     ncclWindow_t recvwin, size_t recvoffset,
     size_t count, struct ncclDevComm devComm) {
   constexpr int ginContext = 0;
-  constexpr unsigned int signalIndex = 0;
+  unsigned int signalIndex = blockIdx.x;
   ncclGin gin{devComm, ginContext};
   // Capture current signal cell so a count-sweep that reuses the same
   // kernel/devComm doesn't conflate increments from past iterations.
@@ -1746,7 +1752,7 @@ __global__ void alltoallPureKernel(
   ncclGinBarrierSession<ncclCoopCta> bar{
       ncclCoopCta(), gin, ncclTeamWorld(devComm),
       devComm.railGinBarrier, blockIdx.x};
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int nthreads = blockDim.x * gridDim.x;
@@ -1763,7 +1769,9 @@ __global__ void alltoallPureKernel(
         size, ncclGin_SignalInc{signalIndex});
   }
 
-  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
+  int receivingCta = (devComm.rank % nthreads) / blockDim.x;
+  if (blockIdx.x == receivingCta)
+    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   gin.flush(ncclCoopCta());
 }
 
@@ -1962,13 +1970,11 @@ TEST_F(GinMPIDeviceTests, AlltoallHybrid_Reference) {
   ASSERT_GE(nRanks, 2);
   ASSERT_LE(nRanks, 8);
 
-  // Both barrier pools (LSA + rail-GIN) are used by ncclBarrierSession
-  // under ncclTeamTagWorld(); both must cover our single-CTA launch
-  // (barrierIndex=0). ginSignalCount=1 covers the cross-node signal cell
-  // and triggers GIN activation.
+  // The world-team ncclBarrierSession sizes its hybrid LSA+rail-GIN barriers from
+  // reqs.barrierCount (not lsa/railGinBarrierCount); 0 hangs the rail arm.
+  // ginSignalCount=1 covers the cross-node signal cell and triggers GIN activation.
   ncclDevCommRequirements reqs = defaultGinReqs();
-  reqs.lsaBarrierCount     = 1;
-  reqs.railGinBarrierCount = 1;
+  reqs.barrierCount        = 1;
   reqs.ginSignalCount      = 1;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
@@ -2794,8 +2800,8 @@ TEST_F(GinMPIDeviceTests, Properties_NLsaTeams) {
   ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
   ASSERT_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
 
-  // GIN proxy backend selected via NCCL_GIN_TYPE=2.
-  EXPECT_EQ(NCCL_GIN_TYPE_PROXY, props.ginType);
+  // Backend type must match the requested NCCL_GIN_TYPE (2=proxy, 4=rocshmem-gda).
+  EXPECT_EQ(requestedGinType(), (int)props.ginType);
 
   // nLsaTeams = nRanks / lsaSize: >= 1 and must evenly divide nRanks.
   // Skip when the runtime reports nLsaTeams==0 on this configuration.
@@ -2868,8 +2874,17 @@ TEST_F(GinMPIDeviceTests, MultiContext_Exclusive) {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
 
-  ASSERT_EQ(kNumContexts, (int)devComm.ginContextCount)
-      << "exclusive allocation returned " << (int)devComm.ginContextCount;
+  // The runtime rounds the requested context count up to a multiple of the GIN
+  // connection count, so expect ROUNDUP(kNumContexts, ginConnectionCount) rather
+  // than an exact match. Kernels below only drive [0, kNumContexts), so extras are harmless.
+  const int connCount = (int)devComm.ginConnectionCount;
+  const int expectedCtxs = connCount > 0
+      ? ((kNumContexts + connCount - 1) / connCount) * connCount
+      : kNumContexts;
+  ASSERT_EQ(expectedCtxs, (int)devComm.ginContextCount)
+      << "exclusive allocation returned " << (int)devComm.ginContextCount
+      << " for " << connCount << " connection(s) (requested " << kNumContexts << ")";
+  ASSERT_GE((int)devComm.ginContextCount, kNumContexts);
 
   std::vector<uint8_t> hostSrc(kBufBytes, 0), hostDst(kBufBytes, 0);
   for (int b = 0; b < kNumContexts; b++)
@@ -2933,6 +2948,10 @@ __global__ void putVASignalConsumerKernel(
 TEST_F(GinMPIDeviceTests, VASignal_Put) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
+  // rocSHMEM-GDA (type 4) implements only INDEXED signals; VA signals are
+  // unsupported (Put/PutValue address the signal via indexedSignal.signalId).
+  if (requestedGinType() == 4)
+    GTEST_SKIP() << "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=4)";
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
@@ -3056,6 +3075,8 @@ std::string intraNodeSymReason() {
 // symmetric-memory RS kernel (RailA2A_LsaLD) eligible, so this drives the
 // production kernel path -- not a hand-written reference kernel.
 TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric) {
+  if (requestedGinType() == 4)
+    GTEST_SKIP() << "Skipping symmetric ReduceScatter (RailA2A_LsaLD) for rocSHMEM-GDA";
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
@@ -3143,6 +3164,8 @@ TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric) {
 // Same as ReduceScatter_Symmetric but exercises ncclAvg, which drives the
 // FuncSumPostDiv post-divide path on the symmetric RS kernel (RailA2A_LsaLD).
 TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric_Avg) {
+  if (requestedGinType() == 4)
+    GTEST_SKIP() << "Skipping symmetric ReduceScatter (RailA2A_LsaLD) for rocSHMEM-GDA";
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 

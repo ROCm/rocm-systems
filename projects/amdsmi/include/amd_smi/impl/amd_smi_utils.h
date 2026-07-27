@@ -66,7 +66,9 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
                                                        char* market_name);
 amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device,
                                                            bool* enabled);
-std::string smi_split_string(std::string str, char delim);
+amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* device,
+                                                uint32_t* vcn_busy_percent);
+std::string smi_amdgpu_split_string(std::string str, char delim);
 std::vector<std::string> split_string(const std::string& line, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 

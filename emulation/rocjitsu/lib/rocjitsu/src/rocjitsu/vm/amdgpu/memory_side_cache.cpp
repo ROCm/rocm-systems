@@ -3,13 +3,59 @@
 
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+
 #include <algorithm>
 #include <bit>
 #include <cassert>
 #include <cstring>
+#include <shared_mutex>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+void WriterPreferredAccessGate::lock_shared() {
+  std::unique_lock lock(mutex_);
+  cv_.wait(lock, [this] { return !writer_active_ && waiting_writers_ == 0; });
+  ++active_readers_;
+}
+
+bool WriterPreferredAccessGate::try_lock_shared() {
+  std::lock_guard lock(mutex_);
+  if (writer_active_ || waiting_writers_ != 0)
+    return false;
+  ++active_readers_;
+  return true;
+}
+
+void WriterPreferredAccessGate::unlock_shared() {
+  bool notify_writer = false;
+  {
+    std::lock_guard lock(mutex_);
+    assert(active_readers_ != 0 && "unlock_shared without an active reader");
+    --active_readers_;
+    notify_writer = active_readers_ == 0 && waiting_writers_ != 0;
+  }
+  if (notify_writer)
+    cv_.notify_all();
+}
+
+void WriterPreferredAccessGate::lock() {
+  std::unique_lock lock(mutex_);
+  ++waiting_writers_;
+  cv_.wait(lock, [this] { return !writer_active_ && active_readers_ == 0; });
+  --waiting_writers_;
+  writer_active_ = true;
+}
+
+void WriterPreferredAccessGate::unlock() {
+  {
+    std::lock_guard lock(mutex_);
+    assert(writer_active_ && "unlock without an active writer");
+    writer_active_ = false;
+  }
+  cv_.notify_all();
+}
 
 void MemorySideCache::send_backing(uint64_t addr, uint8_t *data, uint32_t size,
                                    simdojo::MessageOp op, uint32_t vmid) {
@@ -25,13 +71,19 @@ void MemorySideCache::send_backing(uint64_t addr, uint8_t *data, uint32_t size,
 }
 
 void MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid) {
-  if (cache_.lookup(addr, nullptr, vmid))
-    return;
+  const uint64_t current_epoch = DeviceCacheCoherence::instance().current_epoch();
+  simdojo::CacheTag *resident = nullptr;
+  if (cache_.lookup(addr, &resident, vmid)) {
+    if (resident->coherence_epoch == current_epoch)
+      return;
+    assert(!resident->dirty && "stale write-through MSC line must be clean");
+    cache_.invalidate(addr, vmid);
+  }
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
   uint8_t evicted_data[LINE_SIZE];
-  cache_.allocate(addr, vmid, &evicted, evicted_data);
+  simdojo::CacheTag *allocated = cache_.allocate(addr, vmid, &evicted, evicted_data);
 
   if (evicted.valid && evicted.dirty) {
     static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
@@ -43,9 +95,11 @@ void MemorySideCache::ensure_line(uint64_t addr, uint32_t vmid) {
   uint8_t line_buf[LINE_SIZE];
   send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ, vmid);
   cache_.fill_line(addr, line_buf, vmid);
+  allocated->coherence_epoch = current_epoch;
 }
 
 void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid) {
+  std::shared_lock access_lock(access_gate_);
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -60,6 +114,7 @@ void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t 
 }
 
 void MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid) {
+  std::shared_lock access_lock(access_gate_);
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -81,18 +136,15 @@ void MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size, ui
 }
 
 void MemorySideCache::flush_all() {
-  // flush_all iterates all sets, so acquire all stripes to prevent concurrent access.
-  // This is only called after engine->run() completes (single-threaded), so no contention.
-  std::lock_guard<std::mutex> flush_lock(flush_mutex_);
-  for (auto &s : stripes_)
-    s.lock();
+  // Exclude reads and writes while iterating every set. Ordinary accesses hold
+  // this gate in shared mode and retain their per-stripe concurrency. Once a
+  // flush waits, the gate blocks new shared entrants so the flush makes progress.
+  std::unique_lock access_lock(access_gate_);
   cache_.for_each_dirty([this](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
     send_backing(line_addr, data, LINE_SIZE, simdojo::MessageOp::WRITE, tag.vmid);
     tag.dirty = false;
   });
   cache_.invalidate_all();
-  for (auto &s : stripes_)
-    s.unlock();
 }
 
 } // namespace amdgpu

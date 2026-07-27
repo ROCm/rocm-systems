@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vglobal.h"
@@ -17,13 +18,16 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/except.h"
@@ -42,18 +46,34 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <optional>
 #include <set>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
+
+namespace rocjitsu::amdgpu {
+
+class WriterPreferredAccessGateTestAccess {
+public:
+  static bool has_waiting_writer(WriterPreferredAccessGate &gate) {
+    std::lock_guard lock(gate.mutex_);
+    return gate.waiting_writers_ != 0;
+  }
+};
+
+} // namespace rocjitsu::amdgpu
 
 namespace {
 
@@ -120,6 +140,10 @@ public:
 };
 
 struct Gfx1250Sim {
+  // Direct-construction tests intentionally bypass Decoder. Select the same
+  // immutable backend that a full gfx1250 decoder would inject while building
+  // their generated instruction and operand objects.
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   config::LoadedConfig loaded;
   SoC *soc = nullptr;
   amdgpu::GpuMemory *memory = nullptr;
@@ -274,7 +298,8 @@ private:
 class TranslatedSdmaQueueForTest {
 public:
   explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim) : sim_(sim), process_(kProcessId) {
-    sim_.memory->register_process(kProcessId, &process_.page_table_, &process_.page_table_mutex_);
+    sim_.memory->register_process(kProcessId, &process_.page_table_, &process_.page_table_mutex_,
+                                  process_.page_table_generation());
     process_.map_pages(kRingVa, ring_.data(), ring_.size() * sizeof(ring_[0]));
     process_.map_pages(kQueueStateVa, queue_state_.data(),
                        queue_state_.size() * sizeof(queue_state_[0]));
@@ -701,8 +726,7 @@ TEST(Gfx1250SdmaTest, GcrPacketSizeMatchesDialectAndKeepsRingInSync) {
 }
 
 // SDMA writes go straight to backing while L2 may still hold a dirty line that
-// overlaps the destination (e.g. left by a prior K$ writeback). The post-write
-// cache maintenance must not write that stale line back over the SDMA result.
+// overlaps the destination. Seed that state explicitly with writeback_line().
 // The fix flushes the caches before the direct write, so the dirty line is
 // published first and the SDMA data supersedes it. Regression for that ordering.
 TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyL2Line) {
@@ -737,12 +761,10 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyL2Line) {
   EXPECT_NE(sim.memory->read32(queue.dst_va(), kProcessId), kStaleWord);
 }
 
-// Same ordering hazard as above, but for a dirty scalar L1 (K$) line rather than
-// an L2 line. A CU can hold a dirty K$ line overlapping an SDMA destination. The
-// pre-write maintenance must write the K$ line back (through L2 to backing)
-// before the direct SDMA write, so the SDMA result is not later clobbered when
-// the stale scalar line is flushed. Regression for K$ inclusion in the flush.
-TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyScalarL1Line) {
+// A scalar L1 (K$) can retain a clean snapshot overlapping an SDMA destination.
+// The pre-write maintenance invalidates that snapshot, and later K$ maintenance
+// must not publish it over the direct SDMA result.
+TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingScalarL1Line) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   ASSERT_NE(cu, nullptr);
@@ -752,8 +774,8 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyScalarL1Line) {
   constexpr uint32_t kStaleWord = 0x11111111u;
   constexpr uint32_t kFillWord = 0x22222222u;
 
-  // Dirty a K$ line overlapping the SDMA destination via a scalar store. This
-  // leaves the line dirty in K$ (write-back), not yet in L2 or backing.
+  // Populate a K$ line overlapping the SDMA destination via a write-through
+  // scalar store. K$ retains a clean snapshot of the pre-fill value.
   cu->l1_scalar().store(queue.dst_va(), /*num_dwords=*/1, &kStaleWord, kProcessId);
 
   // CONST_FILL the destination line with a different pattern.
@@ -766,9 +788,14 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyScalarL1Line) {
   queue.submit(5);
   ASSERT_TRUE(sim.engine->step());
 
-  // Force any still-resident dirty K$ line out to backing, mimicking a later
-  // acquire/release flush. With the fix the K$ line was already published and
-  // invalidated before the SDMA write, so this does not resurrect stale data.
+  // The SDMA pre-write maintenance must have invalidated the old K$ snapshot,
+  // so the first scalar reload observes the fill rather than kStaleWord.
+  uint32_t scalar_value = 0;
+  cu->l1_scalar().load(queue.dst_va(), /*num_dwords=*/1, &scalar_value, kProcessId);
+  EXPECT_EQ(scalar_value, kFillWord);
+
+  // Mimic later acquire/release maintenance. The clean K$ snapshot must not
+  // resurrect stale data over the SDMA fill.
   cu->flush_l1(kProcessId);
   if (auto *l2 = sim.xcd()->l2_cache())
     l2->flush_all();
@@ -1088,6 +1115,13 @@ TEST(Gfx1250SdmaTest, PollMem64UnresolvedAddressDoesNotAdvance) {
   queue.submit(8);
   ASSERT_TRUE(sim.engine->step());
   EXPECT_EQ(queue.read_idx(), 0u);
+}
+
+TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
+  const IsaTargetDescriptor *target = default_isa_target_registry().find("gfx1250");
+  ASSERT_NE(target, nullptr);
+  EXPECT_TRUE(target->supports_execution);
+  EXPECT_TRUE(gfx1250::Operand::full_execution_backend_complete());
 }
 
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
@@ -1591,6 +1625,18 @@ TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsKeepsIoffsetOnGlobalDestinatio
 }
 
 TEST(Gfx1250ExecutionTest, DispatchEntryClusterMathCoversMultiDimensionalShapes) {
+  auto expect_rank_period = [](const amdgpu::DispatchEntry &candidate, uint64_t expected_period) {
+    ASSERT_TRUE(candidate.cluster_grid_is_complete());
+    EXPECT_EQ(candidate.cluster_rank_period(), expected_period);
+    const uint32_t workgroup_count =
+        candidate.grid_wgs_x * candidate.grid_wgs_y * candidate.grid_wgs_z;
+    for (uint32_t flat_wg_id = 0; flat_wg_id < workgroup_count; ++flat_wg_id) {
+      EXPECT_EQ(candidate.cluster_rank_for_flat_wg_id(flat_wg_id),
+                candidate.cluster_rank_for_flat_wg_id(
+                    flat_wg_id + static_cast<uint32_t>(candidate.cluster_rank_period())));
+    }
+  };
+
   amdgpu::DispatchEntry entry{};
   entry.grid_wgs_x = 4;
   entry.grid_wgs_y = 4;
@@ -1604,9 +1650,10 @@ TEST(Gfx1250ExecutionTest, DispatchEntryClusterMathCoversMultiDimensionalShapes)
 
   EXPECT_TRUE(entry.cluster_grid_is_complete());
   EXPECT_EQ(entry.cluster_size(), 8u);
-  EXPECT_EQ(entry.cluster_rank_for_local_wg(0), 0u);
-  EXPECT_EQ(entry.cluster_rank_for_local_wg(5), 3u);
-  EXPECT_EQ(entry.cluster_rank_for_local_wg(21), 7u);
+  expect_rank_period(entry, 32u);
+  EXPECT_EQ(entry.cluster_rank_for_flat_wg_id(0), 0u);
+  EXPECT_EQ(entry.cluster_rank_for_flat_wg_id(5), 3u);
+  EXPECT_EQ(entry.cluster_rank_for_flat_wg_id(21), 7u);
   EXPECT_EQ(entry.cluster_peer_local_wg_id(0, 0), 0u);
   EXPECT_EQ(entry.cluster_peer_local_wg_id(0, 1), 1u);
   EXPECT_EQ(entry.cluster_peer_local_wg_id(0, 2), 4u);
@@ -1619,6 +1666,30 @@ TEST(Gfx1250ExecutionTest, DispatchEntryClusterMathCoversMultiDimensionalShapes)
   EXPECT_EQ(entry.cluster_base_local_wg_id_for_ordinal(1), 2u);
   EXPECT_EQ(entry.cluster_base_local_wg_id_for_ordinal(2), 8u);
   EXPECT_EQ(entry.cluster_base_local_wg_id_for_ordinal(4), 32u);
+
+  amdgpu::DispatchEntry one_dimensional{};
+  one_dimensional.grid_wgs_x = 8;
+  one_dimensional.grid_wgs_y = 1;
+  one_dimensional.grid_wgs_z = 1;
+  one_dimensional.cluster_count_x = 2;
+  one_dimensional.cluster_count_y = 1;
+  one_dimensional.cluster_count_z = 1;
+  one_dimensional.cluster_size_x = 4;
+  one_dimensional.cluster_size_y = 1;
+  one_dimensional.cluster_size_z = 1;
+  expect_rank_period(one_dimensional, 4u);
+
+  amdgpu::DispatchEntry two_dimensional{};
+  two_dimensional.grid_wgs_x = 8;
+  two_dimensional.grid_wgs_y = 6;
+  two_dimensional.grid_wgs_z = 1;
+  two_dimensional.cluster_count_x = 2;
+  two_dimensional.cluster_count_y = 2;
+  two_dimensional.cluster_count_z = 1;
+  two_dimensional.cluster_size_x = 4;
+  two_dimensional.cluster_size_y = 3;
+  two_dimensional.cluster_size_z = 1;
+  expect_rank_period(two_dimensional, 24u);
 
   entry.grid_wgs_x = 3;
   entry.grid_wgs_y = 2;
@@ -2239,6 +2310,20 @@ TEST(Gfx1250SimulationTest, RejectsUnsupportedClusterSize) {
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1,
                            /*cluster_size_x=*/amdgpu::kClusterMulticastMaskBits + 1,
+                           /*workgroup_size_x=*/32);
+
+  EXPECT_THROW((void)sim.engine->step(), std::runtime_error);
+}
+
+TEST(Gfx1250SimulationTest, RejectsMisalignedClusteredWorkgroupIdOffset) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
+  sim.cp()->set_workgroup_id_offset(1);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/32);
 
   EXPECT_THROW((void)sim.engine->step(), std::runtime_error);
@@ -3168,6 +3253,25 @@ TEST(Gfx1250DecodeTest, Vop3SdstLiteralConsumesThreeDwords) {
   EXPECT_EQ(inst->size(), sizeof(words));
 }
 
+TEST(Gfx1250DecodeTest, VFmamkF64ImpliedLiteralConsumesThreeDwords) {
+  const uint32_t words[] = {
+      0x46040504u, // v_fmamk_f64 v[2:3], v[4:5], -30.0, v[2:3]
+      0x00000000u, 0xC1F00000u,
+      0x7E042B02u, // v_cvt_u32_f64_e32 v2, v[2:3]
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> fmamk(decoder->decode(words));
+  ASSERT_NE(fmamk, nullptr);
+  EXPECT_EQ(fmamk->mnemonic(), "v_fmamk_f64_e32");
+  EXPECT_EQ(fmamk->size(), 3 * sizeof(uint32_t));
+
+  std::unique_ptr<Instruction> next(decoder->decode(words + 3));
+  ASSERT_NE(next, nullptr);
+  EXPECT_EQ(next->mnemonic(), "v_cvt_u32_f64_e32");
+}
+
 TEST(Gfx1250DecodeTest, SWaitXcntHasWaitcntMetadata) {
   const uint32_t words[] = {
       0xBFC50000u, // s_wait_xcnt 0
@@ -3194,14 +3298,33 @@ TEST(Gfx1250DecodeTest, BufferOffenUsesSingleVaddrRegister) {
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "buffer_load_b128");
-  ASSERT_GE(inst->num_src_operands(), 1);
+  ASSERT_EQ(inst->num_dst_operands(), 1);
+  ASSERT_EQ(inst->num_src_operands(), 4);
+
+  const Operand *vdst = inst->dst_operand(0);
+  ASSERT_NE(vdst, nullptr);
+  EXPECT_FALSE(vdst->is_fieldless());
+  EXPECT_EQ(vdst->name(), "v[32:35]");
 
   const Operand *vaddr = inst->src_operand(0);
   ASSERT_NE(vaddr, nullptr);
+  EXPECT_FALSE(vaddr->is_fieldless());
   EXPECT_EQ(vaddr->size_bits(), 32);
   ASSERT_TRUE(vaddr->to_register_ref().has_value());
   EXPECT_EQ(*vaddr->to_register_ref(), (RegisterRef{RegClass::VGPR, 7, 1}));
-  EXPECT_NE(inst->disassemble().find("v7"), std::string::npos);
+
+  const Operand *gpumem = inst->src_operand(3);
+  ASSERT_NE(gpumem, nullptr);
+  EXPECT_TRUE(gpumem->is_fieldless());
+  EXPECT_EQ(gpumem->size_bits(), 128);
+  EXPECT_FALSE(gpumem->to_register_ref().has_value());
+  // End-to-end: the decoded memory pseudo-operand is inert through the normal
+  // accessors, driven by the capability flags the generated ctor applies.
+  EXPECT_FALSE(gpumem->reads_value());
+  EXPECT_FALSE(gpumem->is_writable());
+  EXPECT_FALSE(gpumem->is_vgpr());
+
+  EXPECT_EQ(inst->disassemble(), "buffer_load_b128 v[32:35], v7, s[4:7], NULL offen");
 }
 
 TEST(Gfx1250DecodeTest, BufferWithoutIdxenOffenDoesNotExposeVaddrRegister) {
@@ -3216,13 +3339,22 @@ TEST(Gfx1250DecodeTest, BufferWithoutIdxenOffenDoesNotExposeVaddrRegister) {
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "buffer_load_b128");
-  ASSERT_GE(inst->num_src_operands(), 1);
+  ASSERT_EQ(inst->num_dst_operands(), 1);
+  ASSERT_EQ(inst->num_src_operands(), 4);
 
   const Operand *vaddr = inst->src_operand(0);
   ASSERT_NE(vaddr, nullptr);
+  EXPECT_FALSE(vaddr->is_fieldless());
   EXPECT_EQ(vaddr->size_bits(), 0);
   EXPECT_FALSE(vaddr->to_register_ref().has_value());
-  EXPECT_EQ(inst->disassemble().find("v7"), std::string::npos);
+
+  const Operand *gpumem = inst->src_operand(3);
+  ASSERT_NE(gpumem, nullptr);
+  EXPECT_TRUE(gpumem->is_fieldless());
+  EXPECT_EQ(gpumem->size_bits(), 128);
+  EXPECT_FALSE(gpumem->to_register_ref().has_value());
+
+  EXPECT_EQ(inst->disassemble(), "buffer_load_b128 v[32:35], s[4:7], NULL");
 }
 
 TEST(Gfx1250DecodeTest, WmmaF8f6f4UsesMatrixFormatOperandWidths) {
@@ -3674,6 +3806,170 @@ TEST(Gfx1250SimulationTest, TtmpWorkgroupIdsUseGridCoordinatesFor2DDispatch) {
   // TTMP9 (s117) holds grid_wg_id_x; TTMP7 (s115) packs wg_id_y/z.
   EXPECT_EQ(target->sgpr(117), 1u);
   EXPECT_EQ(target->sgpr(115), 1u);
+}
+
+TEST(Gfx1250SimulationTest, Ttmp7ClusterGridYDoesNotBleedIntoZAt16BitBoundary) {
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 128);
+  constexpr uint32_t kWorkgroupIdOffset = 0x10000;
+  sim.cp()->set_workgroup_id_offset(kWorkgroupIdOffset);
+
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 2;
+  pkt.workgroup_size_x = 32;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 32;
+  pkt.grid_size_y = 0x10001;
+  pkt.grid_size_z = 1;
+  pkt.kernel_object = kernel_object;
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.submit(pkt);
+  ASSERT_TRUE(sim.engine->step());
+
+  amdgpu::Wavefront *target = nullptr;
+  amdgpu::ComputeUnitCore *target_cu = nullptr;
+  for (uint32_t se_idx = 0; se_idx < sim.xcd()->num_shader_engines(); ++se_idx) {
+    auto *se = sim.xcd()->shader_engine(se_idx);
+    for (uint32_t cu_idx = 0; cu_idx < se->num_compute_units(); ++cu_idx) {
+      auto *cu = se->compute_unit(cu_idx);
+      for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+        auto *wf = cu->wf(wf_idx);
+        if (wf && wf->sgpr_alloc().count > 0 && wf->wg_id() == kWorkgroupIdOffset) {
+          target = wf;
+          target_cu = cu;
+          break;
+        }
+      }
+      if (target)
+        break;
+    }
+    if (target)
+      break;
+  }
+
+  ASSERT_NE(target, nullptr);
+  ASSERT_NE(target_cu, nullptr);
+  EXPECT_EQ(target_cu->read_sgpr(target->sgpr_alloc().base + 115), 0u);
+}
+
+TEST(Gfx1250SimulationTest, IbSts2ClusterFieldsAreZeroForOrdinaryDispatch) {
+  const uint32_t code[] = {
+      0xB882199Cu, // s_getreg_b32 s2, hwreg(IB_STS2, 6, 4)
+      0xB8831D5Cu, // s_getreg_b32 s3, hwreg(IB_STS2, 21, 4)
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 128);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
+  step_until_halted(*sim.engine, *sim.cu());
+
+  auto *wf = sim.cu()->wf(0);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  EXPECT_EQ(sim.cu()->read_sgpr(sbase + 2), 0u);
+  EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), 0u);
+}
+
+TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlignedOffset) {
+  // Scalar workgroup-ID reconstruction emitted by clang 23 when cluster
+  // dimensions are not fixed by an amdgpu-cluster-dims attribute.
+  const uint32_t code[] = {
+      0x9302FF72u,    0x0004000Cu, // s_bfe_u32 s2, ttmp6, 0x4000c
+      0x9305FF72u,    0x00040010u, // s_bfe_u32 s5, ttmp6, 0x40010
+      0x9309FF72u,    0x00040014u, // s_bfe_u32 s9, ttmp6, 0x40014
+      0x81038102u,                 // s_add_co_i32 s3, s2, 1
+      0x8B06FF73u,    0x0000FFFFu, // s_and_b32 s6, ttmp7, 0xffff
+      0x81078105u,                 // s_add_co_i32 s7, s5, 1
+      0x850A9073u,                 // s_lshr_b32 s10, ttmp7, 16
+      0x810B8109u,                 // s_add_co_i32 s11, s9, 1
+      0x8B048F72u,                 // s_and_b32 s4, ttmp6, 15
+      0x96030375u,                 // s_mul_i32 s3, ttmp9, s3
+      0x96070706u,                 // s_mul_i32 s7, s6, s7
+      0x9308FF72u,    0x00040004u, // s_bfe_u32 s8, ttmp6, 0x40004
+      0x960B0B0Au,                 // s_mul_i32 s11, s10, s11
+      0x930CFF72u,    0x00040008u, // s_bfe_u32 s12, ttmp6, 0x40008
+      0xB88D199Cu,                 // s_getreg_b32 s13, hwreg(IB_STS2, 6, 4)
+      0x81030304u,                 // s_add_co_i32 s3, s4, s3
+      0x81070708u,                 // s_add_co_i32 s7, s8, s7
+      0x810B0B0Cu,                 // s_add_co_i32 s11, s12, s11
+      0xBF06800Du,                 // s_cmp_eq_u32 s13, 0
+      0x980A0B0Au,                 // s_cselect_b32 s10, s10, s11
+      0x98030375u,                 // s_cselect_b32 s3, ttmp9, s3
+      0x98060706u,                 // s_cselect_b32 s6, s6, s7
+      0xB8821D5Cu,                 // s_getreg_b32 s2, hwreg(IB_STS2, 21, 4)
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 128);
+  constexpr uint32_t kWorkgroupIdOffset = 16;
+  sim.cp()->set_workgroup_id_offset(kWorkgroupIdOffset);
+
+  amdgpu::AmdExtKernelDispatchPacket pkt{};
+  pkt.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  pkt.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  pkt.setup = 3;
+  pkt.workgroup_size_x = 32;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.cluster_count_x = 2;
+  pkt.cluster_count_y = 2;
+  pkt.cluster_count_z = 2;
+  pkt.cluster_size_x = 4;
+  pkt.cluster_size_y = 2;
+  pkt.cluster_size_z = 1;
+  pkt.kernel_object = kernel_object;
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.submit(pkt);
+  step_until_xcd_halted(sim);
+
+  struct LaunchState {
+    uint32_t workgroup_id;
+    uint32_t ttmp6;
+    uint32_t ttmp7;
+    uint32_t ttmp9;
+    uint32_t cluster_rank;
+    uint32_t global_x;
+    uint32_t global_y;
+    uint32_t global_z;
+    uint32_t cluster_id;
+  };
+  std::vector<LaunchState> states;
+  for (const auto &wf : sim.snapshot->snapshots())
+    states.push_back({wf.wg_id, wf.sgpr(114), wf.sgpr(115), wf.sgpr(117), wf.sgpr(2), wf.sgpr(3),
+                      wf.sgpr(6), wf.sgpr(10), wf.sgpr(13)});
+  std::sort(states.begin(), states.end(), [](const LaunchState &lhs, const LaunchState &rhs) {
+    return lhs.workgroup_id < rhs.workgroup_id;
+  });
+
+  ASSERT_EQ(states.size(), 64u);
+  for (uint32_t local_workgroup_id = 0; local_workgroup_id < states.size(); ++local_workgroup_id) {
+    const uint32_t workgroup_id = local_workgroup_id + kWorkgroupIdOffset;
+    const uint32_t workgroup_x = workgroup_id % 8;
+    const uint32_t workgroup_y = (workgroup_id / 8) % 4;
+    const uint32_t workgroup_z = workgroup_id / 32;
+    const uint32_t local_x = workgroup_x % 4;
+    const uint32_t local_y = workgroup_y % 2;
+    const uint32_t local_z = workgroup_z % 1;
+    const auto &state = states[local_workgroup_id];
+    EXPECT_EQ(state.workgroup_id, workgroup_id);
+    EXPECT_EQ(state.ttmp6, 0x07013000u | local_x | (local_y << 4) | (local_z << 8));
+    EXPECT_EQ(state.ttmp7, (workgroup_z << 16) | (workgroup_y / 2));
+    EXPECT_EQ(state.ttmp9, workgroup_x / 4);
+    EXPECT_EQ(state.cluster_rank, local_x + 4 * local_y);
+    EXPECT_EQ(state.global_x, workgroup_x);
+    EXPECT_EQ(state.global_y, workgroup_y);
+    EXPECT_EQ(state.global_z, workgroup_z);
+    EXPECT_EQ(state.cluster_id, 1u);
+  }
 }
 
 TEST(Gfx1250SimulationTest, SGetPcI64ReturnsNextInstructionAddress) {
@@ -4839,6 +5135,124 @@ TEST(Gfx1250SimulationTest, BufferStoreUsesM0Soffset) {
     EXPECT_EQ(sim.memory->read32(output_addr + lane * 32), 0u) << "lane " << lane;
     EXPECT_EQ(sim.memory->read32(output_addr + 16 + lane * 32), 7u) << "lane " << lane;
   }
+}
+
+TEST(Gfx1250SimulationTest, MemorySideCacheFlushSerializesConcurrentAccess) {
+  constexpr uint64_t output_addr = 0x2000;
+  constexpr uint32_t iterations = 32;
+
+  Gfx1250Sim sim;
+  auto *msc = sim.soc->iod(0)->msc();
+  std::barrier start(3);
+
+  std::thread writer([&] {
+    start.arrive_and_wait();
+    for (uint32_t value = 1; value <= iterations; ++value) {
+      msc->write(output_addr, reinterpret_cast<const uint8_t *>(&value), sizeof(value));
+      std::this_thread::yield();
+    }
+  });
+  std::thread reader([&] {
+    start.arrive_and_wait();
+    for (uint32_t i = 0; i < iterations; ++i) {
+      uint32_t value = 0;
+      msc->read(output_addr, reinterpret_cast<uint8_t *>(&value), sizeof(value));
+      EXPECT_LE(value, iterations);
+      std::this_thread::yield();
+    }
+  });
+  std::thread flusher([&] {
+    start.arrive_and_wait();
+    for (uint32_t i = 0; i < iterations; ++i) {
+      msc->flush_all();
+      std::this_thread::yield();
+    }
+  });
+
+  writer.join();
+  reader.join();
+  flusher.join();
+  msc->flush_all();
+
+  EXPECT_EQ(sim.memory->read32(output_addr), iterations);
+}
+
+TEST(WriterPreferredAccessGateTest, WaitingWriterBlocksLateSharedEntrant) {
+  amdgpu::WriterPreferredAccessGate gate;
+  std::shared_lock active_reader(gate);
+  bool writer_acquired = false;
+  std::thread writer([&] {
+    std::unique_lock waiting_writer(gate);
+    writer_acquired = true;
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (!amdgpu::WriterPreferredAccessGateTestAccess::has_waiting_writer(gate) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+
+  const bool writer_waiting = amdgpu::WriterPreferredAccessGateTestAccess::has_waiting_writer(gate);
+  EXPECT_TRUE(writer_waiting);
+  if (writer_waiting) {
+    const bool late_reader_acquired = gate.try_lock_shared();
+    EXPECT_FALSE(late_reader_acquired);
+    if (late_reader_acquired)
+      gate.unlock_shared();
+  }
+
+  active_reader.unlock();
+  writer.join();
+  EXPECT_TRUE(writer_acquired);
+}
+
+TEST(Gfx1250SimulationTest, MemorySideCacheFlushMakesProgressUnderContinuousReads) {
+  constexpr uint64_t output_addr = 0x2000;
+  constexpr uint32_t reader_count = 4;
+
+  Gfx1250Sim sim;
+  auto *msc = sim.soc->iod(0)->msc();
+  std::barrier start(reader_count + 1);
+  std::atomic<bool> stop_readers = false;
+  std::atomic<uint32_t> readers_started = 0;
+  std::vector<std::thread> readers;
+  readers.reserve(reader_count);
+  for (uint32_t i = 0; i < reader_count; ++i) {
+    readers.emplace_back([&] {
+      start.arrive_and_wait();
+      bool first_read = true;
+      while (!stop_readers.load(std::memory_order_acquire)) {
+        uint32_t value = 0;
+        msc->read(output_addr, reinterpret_cast<uint8_t *>(&value), sizeof(value));
+        if (first_read) {
+          readers_started.fetch_add(1, std::memory_order_release);
+          first_read = false;
+        }
+      }
+    });
+  }
+
+  start.arrive_and_wait();
+  while (readers_started.load(std::memory_order_acquire) < reader_count)
+    std::this_thread::yield();
+
+  std::atomic<bool> flush_completed = false;
+  std::thread flusher([&] {
+    msc->flush_all();
+    flush_completed.store(true, std::memory_order_release);
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (!flush_completed.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  const bool completed_while_readers_active = flush_completed.load(std::memory_order_acquire);
+
+  stop_readers.store(true, std::memory_order_release);
+  for (auto &reader : readers)
+    reader.join();
+  flusher.join();
+
+  EXPECT_TRUE(completed_while_readers_active);
 }
 
 } // namespace
