@@ -31,41 +31,17 @@ struct AtomicRecordCandidate {
 
 [[nodiscard]] bool canonicalize_atomic_record_candidates_by_physical_site(
     std::vector<AtomicRecordCandidate> &candidates, ConSanResult &result) {
-  std::unordered_map<uint64_t, size_t> canonical_index_by_file_offset;
-  canonical_index_by_file_offset.reserve(candidates.size());
-  std::vector<AtomicRecordCandidate> canonical;
-  canonical.reserve(candidates.size());
-  for (AtomicRecordCandidate &candidate : candidates) {
-    const auto [entry, inserted] =
-        canonical_index_by_file_offset.emplace(candidate.site.file_offset, canonical.size());
-    if (inserted) {
-      canonical.push_back(std::move(candidate));
-      continue;
-    }
-    AtomicRecordCandidate &retained = canonical[entry->second];
-    if (!atomic_record_candidate_semantics_equal(retained, candidate)) {
-      result.errors.emplace_back(
-          "ConSan MOI atomic site at file offset " + std::to_string(candidate.site.file_offset) +
-          " was decoded inconsistently through aliases '" + retained.container_name + "' and '" +
-          candidate.container_name + "'");
-      return false;
-    }
-    retained.kernel_descriptor_file_offset.reset();
-  }
-  candidates = std::move(canonical);
-  return true;
+  return consan_detail::canonicalize_physical_site_aliases(
+      candidates, result.errors, "ConSan MOI atomic site",
+      [](const AtomicRecordCandidate &candidate) { return candidate.site.file_offset; },
+      [](const AtomicRecordCandidate &candidate) -> std::string_view {
+        return candidate.container_name;
+      },
+      atomic_record_candidate_semantics_equal,
+      consan_detail::invalidate_physical_site_single_owner_hint);
 }
 
-struct SampledAtomicSemantics {
-  ConSanMoiSampledSyncRole role = ConSanMoiSampledSyncRole::None;
-  ConSanMoiSampledSyncScope scope = ConSanMoiSampledSyncScope::None;
-  ConSanMoiSampledSyncOutcome outcome = ConSanMoiSampledSyncOutcome::NotApplicable;
-  uint32_t byte_count = 0;
-  uint32_t descriptor = 0;
-  std::optional<uint32_t> cas_failure_descriptor;
-};
-
-[[nodiscard]] std::optional<SampledAtomicSemantics>
+[[nodiscard]] std::optional<consan_detail::SampledAtomicSemantics>
 sampled_atomic_semantics_for_site(const ConSanResult &result,
                                   const MoiSyncInventoryIndex &sync_index,
                                   std::string_view container_name, bool in_kernel,
@@ -85,7 +61,7 @@ sampled_atomic_semantics_for_site(const ConSanResult &result,
     return std::nullopt;
   }
 
-  SampledAtomicSemantics semantics;
+  consan_detail::SampledAtomicSemantics semantics;
   switch (sequence->memory_role) {
   case ConSanSyncMemoryRole::Release:
     semantics.role = ConSanMoiSampledSyncRole::RmwRelease;

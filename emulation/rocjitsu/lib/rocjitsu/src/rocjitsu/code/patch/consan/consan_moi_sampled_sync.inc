@@ -1567,7 +1567,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
   struct Candidate {
     AtomicRecordCandidate atomic;
-    SampledAtomicSemantics semantics;
+    consan_detail::SampledAtomicSemantics semantics;
     uint32_t selected_slot = 0;
     bool deferred_acquire = false;
   };
@@ -1621,35 +1621,23 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
              std::string::npos;
     });
   }
-  std::unordered_map<uint64_t, size_t> canonical_index_by_file_offset;
-  canonical_index_by_file_offset.reserve(candidates.size());
-  std::vector<Candidate> canonical_candidates;
-  canonical_candidates.reserve(candidates.size());
-  for (Candidate &candidate : candidates) {
-    const auto [entry, inserted] = canonical_index_by_file_offset.emplace(
-        candidate.atomic.site.file_offset, canonical_candidates.size());
-    if (inserted) {
-      canonical_candidates.push_back(std::move(candidate));
-      continue;
-    }
-    Candidate &retained = canonical_candidates[entry->second];
-    if (!atomic_record_candidate_semantics_equal(retained.atomic, candidate.atomic) ||
-        std::tie(retained.semantics.role, retained.semantics.scope, retained.semantics.outcome,
-                 retained.semantics.byte_count, retained.semantics.descriptor,
-                 retained.semantics.cas_failure_descriptor) !=
-            std::tie(candidate.semantics.role, candidate.semantics.scope,
-                     candidate.semantics.outcome, candidate.semantics.byte_count,
-                     candidate.semantics.descriptor, candidate.semantics.cas_failure_descriptor)) {
-      result.errors.emplace_back("ConSan MOI sampled atomic site at file offset " +
-                                 std::to_string(candidate.atomic.site.file_offset) +
-                                 " was decoded inconsistently through aliases '" +
-                                 retained.atomic.container_name + "' and '" +
-                                 candidate.atomic.container_name + "'");
-      return;
-    }
-    retained.atomic.kernel_descriptor_file_offset.reset();
+  if (!consan_detail::canonicalize_physical_site_aliases(
+          candidates, result.errors, "ConSan MOI sampled atomic site",
+          [](const Candidate &candidate) { return candidate.atomic.site.file_offset; },
+          [](const Candidate &candidate) -> std::string_view {
+            return candidate.atomic.container_name;
+          },
+          [](const Candidate &lhs, const Candidate &rhs) {
+            return atomic_record_candidate_semantics_equal(lhs.atomic, rhs.atomic) &&
+                   lhs.semantics == rhs.semantics;
+          },
+          [](Candidate &retained, const Candidate &) {
+            // The hint is nested here, so the common direct-member invalidator
+            // cannot be used.
+            retained.atomic.kernel_descriptor_file_offset.reset();
+          })) {
+    return;
   }
-  candidates = std::move(canonical_candidates);
   std::sort(candidates.begin(), candidates.end(), [](const Candidate &lhs, const Candidate &rhs) {
     return lhs.atomic.site.text_offset < rhs.atomic.site.text_offset;
   });

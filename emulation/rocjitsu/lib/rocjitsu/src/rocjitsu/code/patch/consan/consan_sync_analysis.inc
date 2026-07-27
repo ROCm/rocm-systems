@@ -425,29 +425,13 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes, ConSanResult &re
     return entry == entries.end() ? std::nullopt : std::optional<uint64_t>(entry->second);
   };
 
-  std::unordered_map<uint64_t, size_t> canonical_index_by_file_offset;
-  canonical_index_by_file_offset.reserve(result.sync_events.size());
-  std::vector<ConSanSyncEvent> canonical_events;
-  canonical_events.reserve(result.sync_events.size());
-  for (ConSanSyncEvent &event : result.sync_events) {
-    const auto [entry, inserted] =
-        canonical_index_by_file_offset.emplace(event.file_offset, canonical_events.size());
-    if (inserted) {
-      canonical_events.push_back(std::move(event));
-      continue;
-    }
-    const ConSanSyncEvent &canonical = canonical_events[entry->second];
-    if (container_entry(canonical) != container_entry(event) ||
-        !sync_event_semantics_equal(canonical, event)) {
-      result.errors.emplace_back(
-          "ConSan synchronization site at file offset " + std::to_string(event.file_offset) +
-          " was decoded inconsistently through aliases '" + canonical.container_name + "' and '" +
-          event.container_name + "'");
-      return false;
-    }
-  }
-  result.sync_events = std::move(canonical_events);
-  return true;
+  return consan_detail::canonicalize_physical_site_aliases(
+      result.sync_events, result.errors, "ConSan synchronization site",
+      [](const ConSanSyncEvent &event) { return event.file_offset; },
+      [](const ConSanSyncEvent &event) -> std::string_view { return event.container_name; },
+      [&](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
+        return container_entry(lhs) == container_entry(rhs) && sync_event_semantics_equal(lhs, rhs);
+      });
 }
 
 [[nodiscard]] ConSanSyncSequenceKind sync_sequence_kind(ConSanSyncEventKind kind) {

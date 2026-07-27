@@ -3,8 +3,104 @@
 
 #include "consan_test_support.h"
 
+#include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
+
 namespace rocjitsu {
 namespace {
+
+struct PhysicalAliasTestCandidate {
+  uint64_t file_offset = 0;
+  std::string container_name;
+  uint32_t semantics = 0;
+  std::vector<uint64_t> owners;
+  std::optional<uint64_t> descriptor;
+
+  bool operator==(const PhysicalAliasTestCandidate &) const = default;
+};
+
+TEST(ConSan, PhysicalSiteAliasCanonicalizationRetainsOrderAndRunsTypedMerge) {
+  std::vector<PhysicalAliasTestCandidate> candidates{
+      {.file_offset = 24u,
+       .container_name = "first",
+       .semantics = 3u,
+       .owners = {1u},
+       .descriptor = 1u},
+      {.file_offset = 8u,
+       .container_name = "independent",
+       .semantics = 7u,
+       .owners = {9u},
+       .descriptor = 9u},
+      {.file_offset = 24u,
+       .container_name = "alias",
+       .semantics = 3u,
+       .owners = {2u},
+       .descriptor = 2u},
+      {.file_offset = 24u,
+       .container_name = "second-alias",
+       .semantics = 3u,
+       .owners = {3u},
+       .descriptor = 3u},
+  };
+  std::vector<std::string> errors;
+
+  ASSERT_TRUE(consan_detail::canonicalize_physical_site_aliases(
+      candidates, errors, "ConSan test site",
+      [](const PhysicalAliasTestCandidate &candidate) { return candidate.file_offset; },
+      [](const PhysicalAliasTestCandidate &candidate) -> std::string_view {
+        return candidate.container_name;
+      },
+      [](const PhysicalAliasTestCandidate &lhs, const PhysicalAliasTestCandidate &rhs) {
+        return lhs.semantics == rhs.semantics;
+      },
+      [](PhysicalAliasTestCandidate &retained, const PhysicalAliasTestCandidate &alias) {
+        retained.owners.insert(retained.owners.end(), alias.owners.begin(), alias.owners.end());
+        retained.descriptor.reset();
+      }));
+
+  EXPECT_TRUE(errors.empty());
+  ASSERT_EQ(candidates.size(), 2u);
+  EXPECT_EQ(candidates[0].file_offset, 24u);
+  EXPECT_EQ(candidates[0].container_name, "first");
+  EXPECT_EQ(candidates[0].owners, (std::vector<uint64_t>{1u, 2u, 3u}));
+  EXPECT_FALSE(candidates[0].descriptor);
+  EXPECT_EQ(candidates[1].file_offset, 8u);
+  EXPECT_EQ(candidates[1].owners, (std::vector<uint64_t>{9u}));
+  EXPECT_EQ(candidates[1].descriptor, 9u);
+}
+
+TEST(ConSan, PhysicalSiteAliasCanonicalizationReportsExactTypedConflict) {
+  std::vector<PhysicalAliasTestCandidate> candidates{
+      {.file_offset = 24u,
+       .container_name = "first",
+       .semantics = 3u,
+       .owners = {},
+       .descriptor = std::nullopt},
+      {.file_offset = 24u,
+       .container_name = "conflict",
+       .semantics = 4u,
+       .owners = {},
+       .descriptor = std::nullopt},
+  };
+  const std::vector<PhysicalAliasTestCandidate> original = candidates;
+  std::vector<std::string> errors;
+
+  EXPECT_FALSE(consan_detail::canonicalize_physical_site_aliases(
+      candidates, errors, "ConSan test site",
+      [](const PhysicalAliasTestCandidate &candidate) { return candidate.file_offset; },
+      [](const PhysicalAliasTestCandidate &candidate) -> std::string_view {
+        return candidate.container_name;
+      },
+      [](const PhysicalAliasTestCandidate &lhs, const PhysicalAliasTestCandidate &rhs) {
+        return lhs.semantics == rhs.semantics;
+      },
+      [](PhysicalAliasTestCandidate &, const PhysicalAliasTestCandidate &) {}));
+
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors.front(),
+            "ConSan test site at file offset 24 was decoded inconsistently through aliases "
+            "'first' and 'conflict'");
+  EXPECT_EQ(candidates, original);
+}
 
 TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   const std::vector<uint8_t> bytes = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};

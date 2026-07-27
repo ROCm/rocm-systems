@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_moi.h"
+
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -83,6 +85,19 @@ struct ScalarOwnerContextSummary {
 struct ScalarOwnerContextResolution {
   std::vector<size_t> context_indices;
   uint32_t tail_floor = 0;
+};
+
+/// Fully encoded semantic identity for one sampled atomic synchronization
+/// candidate. Physical aliases may fold only when every field matches.
+struct SampledAtomicSemantics {
+  ConSanMoiSampledSyncRole role = ConSanMoiSampledSyncRole::None;
+  ConSanMoiSampledSyncScope scope = ConSanMoiSampledSyncScope::None;
+  ConSanMoiSampledSyncOutcome outcome = ConSanMoiSampledSyncOutcome::NotApplicable;
+  uint32_t byte_count = 0;
+  uint32_t descriptor = 0;
+  std::optional<uint32_t> cas_failure_descriptor;
+
+  bool operator==(const SampledAtomicSemantics &) const = default;
 };
 
 /// Return the inline-shadow transaction scratch size shared by placement and

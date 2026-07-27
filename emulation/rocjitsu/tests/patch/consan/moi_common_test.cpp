@@ -3,10 +3,56 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu {
 namespace {
+
+TEST(ConSanMoi, SampledAtomicPhysicalAliasRejectsEverySemanticMismatch) {
+  using Semantics = consan_detail::SampledAtomicSemantics;
+  struct Candidate {
+    uint64_t file_offset = 24u;
+    std::string container_name;
+    Semantics semantics;
+  };
+  const Semantics baseline{
+      .role = ConSanMoiSampledSyncRole::RmwRelease,
+      .scope = ConSanMoiSampledSyncScope::Agent,
+      .outcome = ConSanMoiSampledSyncOutcome::RmwNoReturn,
+      .byte_count = 4u,
+      .descriptor = 0x123u,
+      .cas_failure_descriptor = std::nullopt,
+  };
+  std::array<Semantics, 6> mismatches;
+  mismatches.fill(baseline);
+  mismatches[0].role = ConSanMoiSampledSyncRole::RmwAcquire;
+  mismatches[1].scope = ConSanMoiSampledSyncScope::System;
+  mismatches[2].outcome = ConSanMoiSampledSyncOutcome::RmwReturnsOld;
+  mismatches[3].byte_count = 8u;
+  mismatches[4].descriptor = 0x456u;
+  mismatches[5].cas_failure_descriptor = 0x789u;
+
+  for (size_t mismatch_index = 0; mismatch_index < mismatches.size(); ++mismatch_index) {
+    SCOPED_TRACE(mismatch_index);
+    std::vector<Candidate> candidates = {
+        {.container_name = "first", .semantics = baseline},
+        {.container_name = "conflict", .semantics = mismatches[mismatch_index]},
+    };
+    std::vector<std::string> errors;
+
+    EXPECT_FALSE(consan_detail::canonicalize_physical_site_aliases(
+        candidates, errors, "ConSan MOI sampled atomic site",
+        [](const Candidate &candidate) { return candidate.file_offset; },
+        [](const Candidate &candidate) -> std::string_view { return candidate.container_name; },
+        [](const Candidate &lhs, const Candidate &rhs) { return lhs.semantics == rhs.semantics; }));
+
+    ASSERT_EQ(errors.size(), 1u);
+    EXPECT_EQ(errors.front(),
+              "ConSan MOI sampled atomic site at file offset 24 was decoded inconsistently "
+              "through aliases 'first' and 'conflict'");
+  }
+}
 
 TEST(ConSanMoi, WorkgroupSourceRequiresExactlyOneOperandKind) {
   const ConSanMoiWorkgroupSource absent;

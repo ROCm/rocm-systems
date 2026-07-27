@@ -191,6 +191,55 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   EXPECT_EQ(barrier_patch->owner_descriptor_file_offsets.size(), 2u);
 }
 
+TEST(ConSanMoi, RecordReplayPatchesAliasedAtomicOnceForEveryOwner) {
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_aliased_ordered_atomic_code_object();
+  ASSERT_FALSE(bytes.empty());
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto first =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto alias =
+      std::ranges::find(original.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first, original.kernels().end());
+  ASSERT_NE(alias, original.kernels().end());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 16u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_id_sgpr = 70u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(
+      /*access_record_capacity=*/1u, /*diagnostic_capacity=*/0u,
+      /*exact_shadow_entry_capacity=*/0u, /*sampled_watchpoint_capacity=*/0u,
+      /*barrier_record_capacity=*/0u, /*atomic_record_capacity=*/1u,
+      /*fence_record_capacity=*/1u);
+  options.max_patches = 3u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto atomic_patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord, &ConSanPatchInfo::kind);
+  ASSERT_NE(atomic_patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(atomic_patch->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_NE(
+      std::ranges::find(atomic_patch->owner_descriptor_file_offsets, first->descriptor_file_offset),
+      atomic_patch->owner_descriptor_file_offsets.end());
+  EXPECT_NE(
+      std::ranges::find(atomic_patch->owner_descriptor_file_offsets, alias->descriptor_file_offset),
+      atomic_patch->owner_descriptor_file_offsets.end());
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, RecordReplayDenseAliasedKernelBarriersUseKernelRelayBounds) {
   constexpr uint32_t kSiteCount = 17u;
   TwoKernelSharedFixtureOptions fixture;

@@ -617,38 +617,16 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
 }
 
 [[nodiscard]] bool canonicalize_moi_candidates_by_physical_site(ConSanResult &result) {
-  std::unordered_map<uint64_t, size_t> canonical_index_by_file_offset;
-  canonical_index_by_file_offset.reserve(result.moi_candidates.size());
-  std::vector<ConSanMoiCandidate> canonical_candidates;
-  canonical_candidates.reserve(result.moi_candidates.size());
-
-  for (ConSanMoiCandidate &candidate : result.moi_candidates) {
-    const auto [entry, inserted] =
-        canonical_index_by_file_offset.emplace(candidate.file_offset, canonical_candidates.size());
-    if (inserted) {
-      canonical_candidates.push_back(std::move(candidate));
-      continue;
-    }
-
-    ConSanMoiCandidate &canonical = canonical_candidates[entry->second];
-    if (!moi_candidate_semantics_equal(canonical, candidate)) {
-      result.errors.emplace_back(
-          "ConSan MOI physical site at file offset " + std::to_string(candidate.file_offset) +
-          " was decoded inconsistently through aliases '" + canonical.container_name + "' and '" +
-          candidate.container_name + "'");
-      return false;
-    }
-
-    // A physical instruction reached through multiple kernel descriptors is
-    // emitted once, but resource planning must prove a safe register window
-    // and apply descriptor growth for every dispatch that can execute it.
-    // Clearing the single-owner hint makes plan_moi_resource_site derive that
-    // complete owner set from the shared CFG block.
-    canonical.kernel_descriptor_file_offset.reset();
-  }
-
-  result.moi_candidates = std::move(canonical_candidates);
-  return true;
+  return consan_detail::canonicalize_physical_site_aliases(
+      result.moi_candidates, result.errors, "ConSan MOI physical site",
+      [](const ConSanMoiCandidate &candidate) { return candidate.file_offset; },
+      [](const ConSanMoiCandidate &candidate) -> std::string_view {
+        return candidate.container_name;
+      },
+      moi_candidate_semantics_equal,
+      // Clearing the single-owner hint makes plan_moi_resource_site derive the
+      // complete owner set from the shared CFG block.
+      consan_detail::invalidate_physical_site_single_owner_hint);
 }
 
 [[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,

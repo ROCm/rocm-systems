@@ -1482,6 +1482,76 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
   return make_two_kernel_shared_helper_code_object(options, ROCJITSU_CODE_ARCH_RDNA4);
 }
 
+std::vector<uint8_t> make_rdna4_two_kernel_aliased_ordered_atomic_code_object() {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.entry_nop_words = 16u;
+  std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  EXPECT_TRUE(original.is_valid());
+  if (!original.is_valid())
+    return {};
+  const auto first =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto alias =
+      std::ranges::find(original.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  EXPECT_NE(first, original.kernels().end());
+  EXPECT_NE(alias, original.kernels().end());
+  EXPECT_FALSE(original.text_sections().empty());
+  if (first == original.kernels().end() || alias == original.kernels().end() ||
+      original.text_sections().empty()) {
+    return {};
+  }
+
+  const uint64_t target_entry_address =
+      original.text_sections().front()->vaddr() + first->entry_text_offset;
+  const uint64_t alias_descriptor_address = original.kernel_descriptor_offset(alias->name);
+  mutate_kernel_descriptor(bytes, alias->name, [&](KD &descriptor) {
+    descriptor.kernel_code_entry_byte_offset =
+        static_cast<int64_t>(target_entry_address) - static_cast<int64_t>(alias_descriptor_address);
+  });
+  mutate_elf_symbol_by_name(bytes, alias->name, [&](Elf64_Sym &symbol) {
+    symbol.st_value = target_entry_address;
+    symbol.st_size = first->code_size;
+  });
+
+  const auto atomic_words = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/2u, /*vsrc=*/1u, /*vdst=*/0u, /*return_old_value=*/false,
+      /*scope=*/2u, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_TRUE(atomic_words);
+  if (!atomic_words)
+    return {};
+  std::vector<uint32_t> aliased_body(first->code_size / sizeof(uint32_t),
+                                     build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  const std::array<uint32_t, 2> access = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+  };
+  const std::array<uint32_t, 3> release = {
+      0xEE0B0000u, 0x00000000u,
+      0x00000000u, // global_wb
+  };
+  const size_t minimum_word_count =
+      access.size() + release.size() + atomic_words->size() + 1u; // s_endpgm
+  EXPECT_GE(aliased_body.size(), minimum_word_count);
+  if (aliased_body.size() < minimum_word_count)
+    return {};
+  auto body_cursor = std::ranges::copy(access, aliased_body.begin()).out;
+  body_cursor = std::ranges::copy(release, body_cursor).out;
+  // flat_atomic_add_u32 v[2:3], v1
+  std::ranges::copy(*atomic_words, body_cursor);
+  aliased_body.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  const uint64_t body_file_offset = first->text_file_offset + first->entry_text_offset;
+  EXPECT_LE(body_file_offset, bytes.size());
+  if (body_file_offset > bytes.size())
+    return {};
+  EXPECT_LE(aliased_body.size() * sizeof(uint32_t), bytes.size() - body_file_offset);
+  if (aliased_body.size() * sizeof(uint32_t) > bytes.size() - body_file_offset)
+    return {};
+  std::memcpy(bytes.data() + body_file_offset, aliased_body.data(),
+              aliased_body.size() * sizeof(uint32_t));
+  return bytes;
+}
+
 std::vector<uint8_t> make_rdna4_three_kernel_overlapping_shared_helpers_code_object(
     std::span<const uint32_t> helper_ab_words, std::span<const uint32_t> helper_bc_words,
     std::array<uint32_t, 3> private_bytes) {

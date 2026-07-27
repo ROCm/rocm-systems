@@ -32,29 +32,14 @@ struct BarrierRecordCandidate {
 
 [[nodiscard]] bool canonicalize_barrier_record_candidates_by_physical_site(
     std::vector<BarrierRecordCandidate> &candidates, ConSanResult &result) {
-  std::unordered_map<uint64_t, size_t> canonical_index_by_file_offset;
-  canonical_index_by_file_offset.reserve(candidates.size());
-  std::vector<BarrierRecordCandidate> canonical;
-  canonical.reserve(candidates.size());
-  for (BarrierRecordCandidate &candidate : candidates) {
-    const auto [entry, inserted] =
-        canonical_index_by_file_offset.emplace(candidate.site.file_offset, canonical.size());
-    if (inserted) {
-      canonical.push_back(std::move(candidate));
-      continue;
-    }
-    BarrierRecordCandidate &retained = canonical[entry->second];
-    if (!barrier_record_candidate_semantics_equal(retained, candidate)) {
-      result.errors.emplace_back(
-          "ConSan MOI barrier site at file offset " + std::to_string(candidate.site.file_offset) +
-          " was decoded inconsistently through aliases '" + retained.container_name + "' and '" +
-          candidate.container_name + "'");
-      return false;
-    }
-    retained.kernel_descriptor_file_offset.reset();
-  }
-  candidates = std::move(canonical);
-  return true;
+  return consan_detail::canonicalize_physical_site_aliases(
+      candidates, result.errors, "ConSan MOI barrier site",
+      [](const BarrierRecordCandidate &candidate) { return candidate.site.file_offset; },
+      [](const BarrierRecordCandidate &candidate) -> std::string_view {
+        return candidate.container_name;
+      },
+      barrier_record_candidate_semantics_equal,
+      consan_detail::invalidate_physical_site_single_owner_hint);
 }
 
 class MoiPatchAnchorRangeIndex {
