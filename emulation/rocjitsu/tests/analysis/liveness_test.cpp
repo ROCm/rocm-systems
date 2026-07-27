@@ -803,6 +803,53 @@ TEST(CfgAnalysis, RocrAbortTrapStopsTemporaryPcBuilderCfg) {
   EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
 }
 
+TEST(CfgAnalysis, UnreachablePostRocrAbortBlockDoesNotPoisonPcBuilder) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // Model the generated complex-math kernels from the offline corpus:
+  //
+  //   builder --conditional--------------------------> call
+  //                 |
+  //                 +--> s_trap 2 -X-> dead branch --^
+  //
+  // ROCr's trap 2 aborts instead of returning, so the block after it has no
+  // predecessor. It is not an implicit external entry: DBT supplies every
+  // hardware-visible kernel entry explicitly, builds a reachable scope from
+  // each one, and duplicates shared reachable blocks per kernel scope. Treating
+  // the dead block as an external root would invent an unconstrained s[8:9]
+  // path into the call and make this otherwise dominated builder incomplete.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      40,                                                  // 0x08: 0x04 + 40 = helper at 0x2c.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      pack_sopp(5, 3),                                     // 0x10: s_cbranch_scc0 -> 0x20.
+      build_s_trap(ROCJITSU_CODE_ARCH_CDNA4, 2),           // 0x14: abort terminator.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x18: dead edge -> 0x20.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x1c: dead padding.
+      pack_sop1(0x1e, kReturnSreg, kPcSreg),               // 0x20: s_swappc_b64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: call continuation.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x28: padding.
+      pack_sop1(0x1d, 0, kReturnSreg),                     // 0x2c: helper return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *consumer = block_starting_at(blocks, 32);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  const auto &fixup = consumer->static_indirect_call_fixups()[0];
+  EXPECT_EQ(fixup.source_target_offset, 44u);
+  EXPECT_FALSE(fixup.source_incomplete)
+      << "unreachable code after a non-returning trap must remain dataflow BOTTOM";
+}
+
 TEST(CfgAnalysis, DirectCallEdgeUsesTerminatorOffset) {
   constexpr uint16_t kReturnSreg = 30;
 

@@ -1535,10 +1535,11 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
   //
   // entry[B] = JOIN(exit[P]) for every predecessor P of B.
   //
-  // Blocks with no predecessors keep an empty entry map. Empty does not mean
-  // "known empty set"; it means every pair is at unconstrained kernel-entry
-  // state unless a predecessor later mentions that pair. Consumers interpret a
-  // missing fact as unresolved.
+  // Explicit external entries begin with an empty map. Empty does not mean
+  // "known empty set"; at those entries every pair has an unconstrained
+  // hardware-supplied value unless a predecessor later mentions it. A
+  // predecessorless non-entry is instead unreachable (BOTTOM), so its empty
+  // map must not participate in a successor join.
   std::vector<std::vector<size_t>> predecessors(blocks.size());
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     for (size_t successor : blocks[block_index].successors)
@@ -1566,8 +1567,16 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
   // Treating that backedge as unconstrained permanently poisons an otherwise
   // dominated PC builder (the RCCL call-loop shape). Section entry and every
   // caller-provided kernel entry are nevertheless external roots even when
-  // they have structural predecessors. Blocks with no predecessors remain
-  // conservative analysis roots because they may also be externally entered.
+  // they have structural predecessors.
+  //
+  // Do not infer an external entry merely because a block has no predecessor.
+  // In the DBT pipeline every descriptor- or firmware-visible kernel entry is
+  // supplied in extra_leaders. Translation then walks each entry's reachable
+  // CFG and emits shared blocks separately in every kernel-local scope. A
+  // callable helper is either an explicit leader itself or has a direct or
+  // recovered predecessor edge; a predecessorless block after a non-returning
+  // instruction such as s_trap 2 cannot acquire a hidden incoming edge from
+  // another kernel scope.
   std::vector<bool> reachable(blocks.size(), false);
   // Keep key presence separate from the sparse fact vectors. The dataflow
   // join needs the union of predecessor keys on every worklist visit; caching
@@ -1589,7 +1598,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
     LatticeFacts new_entry;
     std::bitset<REGISTER_SET_MAX_SGPRS> mentioned_pairs;
     const bool new_reachable =
-        external_entries[block_index] != 0 || predecessors[block_index].empty() ||
+        external_entries[block_index] != 0 ||
         std::ranges::any_of(predecessors[block_index],
                             [&](size_t predecessor) { return reachable[predecessor]; });
     if (new_reachable && !predecessors[block_index].empty()) {
