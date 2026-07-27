@@ -319,6 +319,28 @@ class Primitives<
                 1, ncclShmem.groups[group].dsts,
                 workSize);
           } else {
+#if defined(RCCL_ENABLE_ASYNC_REDUCE) && ASYNC_COPY_SUPPORTED
+            // gfx1250 async global<->LDS DMA reduce-copy path (prototype).
+            // Only plain reductions/copies qualify: no multimem, no bias
+            // accumulator, no pipelined reduceCopy. Per-warp LDS staging comes
+            // from the SIMPLE dynamic scratch (ncclShmemPerWarp), which is idle
+            // during this reduceCopy. Falls back to reduceCopy otherwise.
+            constexpr bool asyncEligible =
+                (MultimemSrcs == 0) && (MultimemDsts == 0) &&
+                (useAcc == 0) && (Pipeline == 0);
+            constexpr uint32_t asyncLdsBytes = (uint32_t)ncclShmemScratchWarpSize();
+            const int asyncNSrcs = Recv * fan.nrecv() + Src;
+            const bool asyncFits =
+                asyncEligible && asyncNSrcs >= 1 &&
+                asyncLdsBytes / (uint32_t)asyncNSrcs >= 128u;
+            if (asyncFits) {
+              reduceCopyAsync<RedOp, T, PreOpSrcs>
+                (tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp,
+                  asyncNSrcs, ncclShmem.groups[group].srcs,
+                  Send * fan.nsend() + Dst, ncclShmem.groups[group].dsts,
+                  workSize, ncclShmemPerWarp, asyncLdsBytes);
+            } else
+#endif
             reduceCopy<Unroll, useAcc && Dst, RedOp, T,
               MultimemSrcs, Recv + Src, Recv * MaxRecv + Src,
               MultimemDsts, Send + Dst, Send * MaxSend + Dst, PreOpSrcs, Pipeline>

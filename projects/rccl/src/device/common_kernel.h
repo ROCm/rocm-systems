@@ -12,6 +12,7 @@
 #include "op128.h"
 #include "nccl_device/utility.h"
 #include "reduce_kernel.h"
+#include "tdm/asyncCopy.h"   // gfx1250 async global<->LDS DMA (reduceCopyAsync prototype)
 #include <cstdio>
 #include <cstdint>
 
@@ -797,5 +798,136 @@ __device__ __forceinline__ void reduceCopy(
      nSrcs, [=]__device__(int i) { return srcPtrs[i]; },
      nDsts, [=]__device__(int i) { return dstPtrs[i]; }, nElts, [=]__device__() { return accPtr; });
 }
+
+// ===========================================================================
+//  reduceCopyAsync  (gfx1250 async global<->LDS DMA reduce-copy) -- PROTOTYPE
+// ---------------------------------------------------------------------------
+// Same load -> reduce -> store shape as reduceCopy(), but the global-memory
+// legs are routed through the async-to/from-LDS engine (tdm/asyncCopy.h):
+//   1. DMA every source into its own per-warp LDS window (asyncLoadToLDS).
+//   2. Reduce the windows *out of LDS* in place into window 0, reusing the
+//      existing applyPreOp/applyReduce/applyPostOp math verbatim.
+//   3. DMA the reduced window out to every destination (asyncStoreFromLDS).
+// Single-buffered: we drain after the loads (RAW) and after the stores (WAR),
+// exactly like async::detail::stageLoop, with the reduction inserted between.
+//
+// The whole block (all `nThreads`) must call this collectively -- the async
+// builtins are warp-collective and work is partitioned per warp.
+//
+// Caller-enforced preconditions (see the eligibility gate in prims_simple.h):
+//   * MultimemSrcs == MultimemDsts == 0, useAcc == 0, Pipeline == 0
+//   * every src/dst pointer is global (HBM)
+//   * `lds` is this block's per-warp scratch base and `ldsBytesPerWarp` bytes
+//     are private to each warp (>= nSrcs * 128).
+//
+// NOTE: prototype. Not yet double-buffered (so overlap is limited, as called
+// out in tdm/asyncCopy.h), and must be compiled/validated on a gfx1250 target.
+// ===========================================================================
+#if ASYNC_COPY_SUPPORTED
+template<typename RedFn, typename T, int PreOpSrcs,
+         CachePolicy cp = DEFAULT_CACHE_POLICY, typename IntBytes>
+__device__ __forceinline__ void reduceCopyAsync(
+    int thread, int nThreads,
+    uint64_t redArg, bool postOp,
+    int nSrcs, void** srcPtrs, int nDsts, void** dstPtrs,
+    IntBytes nElts, void* lds, uint32_t ldsBytesPerWarp
+  ) {
+  constexpr uint32_t GRAIN    = 128;          // window / partition granularity
+  constexpr int      EltBytes = sizeof(T);
+
+  const uint32_t W      = WARP_SIZE;
+  const uint32_t warp   = thread / W;
+  const uint32_t lane   = thread % W;
+  const uint32_t nWarps = nThreads / W;
+  if (nWarps == 0 || nSrcs < 1) return;
+
+  const size_t totalBytes = (size_t)nElts * sizeof(T);
+  if (totalBytes == 0) return;
+
+  RedFn redFn(redArg);
+
+  // Per-warp LDS carved into `nSrcs` windows; we reduce in place into window 0
+  // and store that window, so no separate output window is needed.
+  uint8_t* myLds  = reinterpret_cast<uint8_t*>(lds) + (size_t)warp * ldsBytesPerWarp;
+  uint32_t window = (ldsBytesPerWarp / (uint32_t)nSrcs) & ~(GRAIN - 1);
+  if (window == 0) return;                    // caller guarantees enough LDS
+
+  // Partition totalBytes across warps in contiguous 128B-aligned blocks; the
+  // last warp mops up the < 128B tail so coverage is contiguous and gap-free.
+  const size_t nGrains = totalBytes / GRAIN;
+  const size_t tail    = totalBytes - nGrains * GRAIN;
+  const size_t baseG   = nGrains / nWarps;
+  const size_t extraG  = nGrains % nWarps;
+  const size_t myG     = baseG + (warp < extraG ? 1u : 0u);
+  const size_t startG  = (size_t)warp * baseG + (warp < extraG ? warp : extraG);
+  size_t myStart = startG * GRAIN;
+  size_t myBytes = myG * GRAIN;
+  if (warp == nWarps - 1) myBytes += tail;
+  if (myBytes == 0) return;
+
+  for (size_t o = 0; o < myBytes; o += window) {
+    const size_t chunk = (myBytes - o < window) ? (myBytes - o) : window;
+    const size_t base  = myStart + o;
+
+    // 1) DMA each source into its own LDS window (issued back-to-back).
+    #pragma unroll 1
+    for (int s = 0; s < nSrcs; s++) {
+      asyncLoadToLDS<SyncPolicy::Async, cp>(
+          reinterpret_cast<const uint8_t*>(srcPtrs[s]) + base,
+          myLds + (size_t)s * window, chunk);
+    }
+    asyncWait<0>();                            // RAW: sources landed in LDS
+
+    // 2) Reduce windows [0, nSrcs) in place into window 0, out of LDS. Each
+    //    lane owns a disjoint set of 16B packs (stride W*16), matching the
+    //    lane->offset mapping that asyncStoreFromLDS uses, so a lane reads back
+    //    exactly the LDS it wrote below -- no cross-lane LDS dependency.
+    const size_t nPack = chunk / 16;
+    for (size_t i = lane; i < nPack; i += W) {
+      BytePack<16>* w0 = reinterpret_cast<BytePack<16>*>(myLds + i * 16);
+      BytePack<16> acc = *w0;
+      if (0 < PreOpSrcs) acc = applyPreOp(redFn, acc);
+      #pragma unroll 1
+      for (int s = 1; s < nSrcs; s++) {
+        BytePack<16> t = *reinterpret_cast<BytePack<16>*>(myLds + (size_t)s * window + i * 16);
+        if (s < PreOpSrcs) t = applyPreOp(redFn, t);
+        acc = applyReduce(redFn, acc, t);
+      }
+      if (postOp) acc = applyPostOp(redFn, acc);
+      *w0 = acc;
+    }
+    // Tail (< 16B), reduced in units of the element type T.
+    const size_t packedBytes = nPack * 16;
+    const size_t remElts     = (chunk - packedBytes) / EltBytes;
+    for (size_t e = lane; e < remElts; e += W) {
+      uint8_t* p0 = myLds + packedBytes + e * EltBytes;
+      BytePack<EltBytes> acc = *reinterpret_cast<BytePack<EltBytes>*>(p0);
+      if (0 < PreOpSrcs) acc = applyPreOp(redFn, acc);
+      #pragma unroll 1
+      for (int s = 1; s < nSrcs; s++) {
+        BytePack<EltBytes> t =
+            *reinterpret_cast<BytePack<EltBytes>*>(myLds + (size_t)s * window + packedBytes + e * EltBytes);
+        if (s < PreOpSrcs) t = applyPreOp(redFn, t);
+        acc = applyReduce(redFn, acc, t);
+      }
+      if (postOp) acc = applyPostOp(redFn, acc);
+      *reinterpret_cast<BytePack<EltBytes>*>(p0) = acc;
+    }
+
+    // Ensure this warp's LDS writes are complete/visible before the async store
+    // reads them back (ds_write -> global_store_async_from_lds ordering).
+    __threadfence_block();
+
+    // 3) DMA the reduced window out to every destination.
+    #pragma unroll 1
+    for (int d = 0; d < nDsts; d++) {
+      asyncStoreFromLDS<SyncPolicy::Async, cp>(
+          myLds, reinterpret_cast<uint8_t*>(dstPtrs[d]) + base, chunk);
+    }
+    asyncWait<0>();                            // WAR: drain stores before reuse
+    __threadfence_block();
+  }
+}
+#endif // ASYNC_COPY_SUPPORTED
 
 #endif // COMMON_KERNEL_H_
