@@ -1136,8 +1136,12 @@ TEST(ExecutionPluginTest, Rdna4DppTrue16SourceReportsOpSelHalf) {
   }
 }
 
-TEST(ExecutionPluginTest, Dpp64BitSourceStagesBothPhysicalDwords) {
-  ForceScalarOverride force_scalar(true);
+TEST(ExecutionPluginTest, Dpp64BitSourceSimdStagesBothPhysicalDwords) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+    return;
+  }
+  ForceScalarOverride force_simd(false);
   PluginFixture f(/*num_wf_slots=*/1);
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();

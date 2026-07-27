@@ -12,6 +12,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -543,77 +544,39 @@ class StagedOperand : public Operand {
 public:
   static constexpr int MAX_LANES = 64;
 
-  StagedOperand() = default;
+  StagedOperand();
+  ~StagedOperand() override;
 
   /// @brief Construct from 32-bit staged lane values.
   /// @param base The underlying operand (for name/size/scalar reads).
   /// @param data Staged values (one per lane).
   /// @param lane_count Number of valid lanes.
-  StagedOperand(const Operand &base, const uint32_t *data, int lane_count)
-      : Operand(base.size_bits_, base.encoding_value_), lane_count_(lane_count) {
-    for (int i = 0; i < lane_count && i < MAX_LANES; ++i)
-      data_lo_[i] = data[i];
-  }
+  StagedOperand(const Operand &base, const uint32_t *data, int lane_count);
 
   /// @brief Construct from 64-bit staged lane values.
-  StagedOperand(const Operand &base, const uint64_t *data, int lane_count)
-      : Operand(base.size_bits_, base.encoding_value_), lane_count_(lane_count) {
-    for (int i = 0; i < lane_count && i < MAX_LANES; ++i) {
-      data_lo_[i] = static_cast<uint32_t>(data[i]);
-      data_hi_[i] = static_cast<uint32_t>(data[i] >> 32);
-    }
-  }
+  StagedOperand(const Operand &base, const uint64_t *data, int lane_count);
 
   std::string name() const override { return "dpp_src"; }
 
   bool simd_capable() const override { return true; }
 
 private:
-  uint32_t read_lane(const amdgpu::Wavefront & /*wf*/, uint32_t lane) const override {
-    return (lane < static_cast<uint32_t>(lane_count_)) ? data_lo_[lane] : 0;
-  }
-
-  uint64_t read_lane64(const amdgpu::Wavefront & /*wf*/, uint32_t lane) const override {
-    if (lane >= static_cast<uint32_t>(lane_count_))
-      return 0;
-    return uint64_t{data_lo_[lane]} | (uint64_t{data_hi_[lane]} << 32);
-  }
-
-  uint32_t read_scalar(const amdgpu::Wavefront & /*wf*/) const override { return data_lo_[0]; }
-
-  uint64_t read_scalar64(const amdgpu::Wavefront & /*wf*/) const override {
-    return uint64_t{data_lo_[0]} | (uint64_t{data_hi_[0]} << 32);
-  }
-
-  void read_lane_chunk(const amdgpu::Wavefront & /*wf*/, uint32_t lane_base, uint32_t count,
-                       uint32_t *out) const override {
-    uint32_t lanes = static_cast<uint32_t>(lane_count_);
-    for (uint32_t i = 0; i < count; ++i) {
-      uint32_t l = lane_base + i;
-      out[i] = (l < lanes) ? data_lo_[l] : 0u;
-    }
-  }
+  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
+  uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const override;
+  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
+  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
+  void read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                       uint32_t *out) const override;
 
   /// @brief Expose staged low dwords as read-only SIMD storage.
-  const amdgpu::VgprStorage *
-  simd_vgpr_storage_impl(const amdgpu::Wavefront & /*wf*/) const override {
-    static_assert(sizeof(data_lo_) == MAX_LANES * sizeof(uint32_t),
-                  "StagedOperand low data must be layout-compatible with VgprStorage");
-    return reinterpret_cast<const amdgpu::VgprStorage *>(&data_lo_);
-  }
+  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;
 
   amdgpu::ConstVgprStoragePair64
-  simd_vgpr_storage64_impl(const amdgpu::Wavefront & /*wf*/) const override {
-    static_assert(sizeof(data_hi_) == MAX_LANES * sizeof(uint32_t),
-                  "StagedOperand high data must be layout-compatible with VgprStorage");
-    return {
-        reinterpret_cast<const amdgpu::VgprStorage *>(&data_lo_),
-        reinterpret_cast<const amdgpu::VgprStorage *>(&data_hi_),
-    };
-  }
+  simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const override;
 
-  uint32_t data_lo_[MAX_LANES]{};
-  uint32_t data_hi_[MAX_LANES]{};
+  // Keep the execution-only storage type out of the model-facing include graph.
+  struct Storage;
+  std::unique_ptr<Storage> storage_;
   int lane_count_ = 0;
 };
 
