@@ -39,11 +39,15 @@ Options:
 - `--debug-continue-after-failure`: keep scanning instructions after recoverable
   translation failures so one run can report multiple diagnostics. The output
   code object is still left unchanged when any error diagnostic is emitted.
-- `--verify-idempotence`: when the input and output use the same architecture
-  family, translate the first output again with the same policy and require the
-  complete ELF bytes to stay unchanged. A second-pass failure or byte difference
-  makes the command fail. This option cannot be combined with
-  `--skip-failed-kernels`.
+- `--skip-failed-kernels`: replace kernels that fail translation with
+  non-dispatchable `s_endpgm` stubs so diagnostic modes can continue inspecting
+  other kernels. Executable code-object output is rejected when any kernel was
+  skipped.
+- `--verify-idempotence`: translate the first output again with the same policy
+  and require the complete ELF bytes to stay unchanged. The command rejects
+  requests whose input and output architecture families differ. A second-pass
+  failure or byte difference makes the command fail. This option cannot be
+  combined with `--skip-failed-kernels` or `--list-code-objects`.
 - `--list-code-objects`: list extractable code objects and exit.
 - `--help`: print command-line help.
 
@@ -80,6 +84,10 @@ translation request, and compares the first and second outputs byte-for-byte
 before writing stdout. On a mismatch, stderr identifies the first differing
 executable code-section location when possible, falling back to the complete
 ELF image.
+
+Verification roughly doubles translation work. While comparing the result it
+also retains both translated byte buffers and their parsed code-object copies,
+so peak memory can approach four copies of a large code object.
 
 This is deliberately stricter than checking whether the second pass applies
 another instruction legalization. Relocation, branch layout, symbol sizes, and
