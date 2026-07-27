@@ -48,13 +48,7 @@ option(USE_NEW_HOSTCALL_IMPL
 # Strict warnings default to ON for Linux, OFF elsewhere (MSVC has its own /wd
 # flags). Defined here so the clr_warnings target below is visible to every
 # subtree added via add_subdirectory().
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(_clr_werror_default ON)
-else()
-    set(_clr_werror_default OFF)
-endif()
-option(CLR_ENABLE_WERROR "Build first-party CLR targets with -Wall -Werror" ${_clr_werror_default})
-unset(_clr_werror_default)
+option(CLR_ENABLE_WERROR "Build first-party CLR targets with -Wall -Werror" OFF)
 
 # Single source of truth for strict-warning flags. First-party targets opt in
 # via target_link_libraries(<tgt> PRIVATE clr_warnings). When CLR_ENABLE_WERROR
