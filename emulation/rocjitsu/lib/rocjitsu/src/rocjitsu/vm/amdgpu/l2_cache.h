@@ -49,7 +49,7 @@ class GpuMemory; // Forward declaration for backing store writeback.
 /// THREAD SAFETY: The L2's read(), write(), fetch_line(), writeback_line(),
 /// ensure_line(), and flush_line() methods are NOT thread-safe. They operate on
 /// the underlying CacheStore without locking. Only atomic_rmw() is protected
-/// (via striped mutexes for cross-CU atomics to the same L2).
+/// (via address-striped mutexes shared by all XCD L2s).
 ///
 /// All CUs sharing an L2 instance MUST be assigned to the same simulation
 /// partition. This invariant ensures that only one worker thread accesses the
@@ -139,6 +139,11 @@ public:
   template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
     uint32_t stripe = (addr >> LINE_SIZE_BITS) & (ATOMIC_STRIPE_COUNT - 1);
     std::lock_guard<std::mutex> lock(atomic_stripes_[stripe]);
+
+    // Independent XCD L2s may hold clean copies of the same line. Refetch
+    // under the GPU-wide atomic lock so every RMW observes the preceding
+    // write-through update from another XCD.
+    flush_line(addr, vmid);
     ensure_line(addr, vmid);
 
     uint32_t offset = CacheStore::line_offset(addr);
@@ -204,10 +209,8 @@ private:
   CacheStore cache_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
-  /// @brief Striped locks for atomic RMW serialization. Each stripe covers
-  /// a range of cache lines, allowing atomics to different lines to proceed
-  /// in parallel (matching real L2 arbitration behavior).
-  std::array<std::mutex, ATOMIC_STRIPE_COUNT> atomic_stripes_;
+  /// @brief GPU-wide striped locks for cross-XCD atomic RMW serialization.
+  inline static std::array<std::mutex, ATOMIC_STRIPE_COUNT> atomic_stripes_;
   std::vector<simdojo::Port *> cpl_ports_;
   uint64_t write_count_ = 0; ///< Debug: total L2 writes (for trace).
   // Relaxed atomics: striped atomic_rmw() calls can update these concurrently.

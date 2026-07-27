@@ -730,6 +730,33 @@ TEST(L2CacheTest, UcStoreInvalidatesResidentLineBeforeAtomicRmw) {
   EXPECT_EQ(second_old, 0u);
 }
 
+TEST(L2CacheTest, AtomicRmwRefetchesLinesCachedByAnotherXcd) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache first_l2("first_l2");
+  amdgpu::L2Cache second_l2("second_l2");
+  first_l2.set_backing_memory(&mem);
+  second_l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x2040;
+  mem.write32(kAddr, 1);
+
+  auto atomic_add = [&](amdgpu::L2Cache &l2, uint32_t increment) {
+    uint32_t old_value = 0;
+    l2.atomic_rmw(kAddr, sizeof(uint32_t), [&](uint8_t *line, uint32_t offset) {
+      std::memcpy(&old_value, line + offset, sizeof(old_value));
+      const uint32_t new_value = old_value + increment;
+      std::memcpy(line + offset, &new_value, sizeof(new_value));
+    });
+    return old_value;
+  };
+
+  EXPECT_EQ(atomic_add(first_l2, 0), 1u);
+  EXPECT_EQ(atomic_add(second_l2, 0), 1u);
+  EXPECT_EQ(atomic_add(first_l2, 1), 1u);
+  EXPECT_EQ(atomic_add(second_l2, 1), 2u);
+  EXPECT_EQ(mem.read32(kAddr), 3u);
+}
+
 TEST(L2CacheTest, UcReadFlushesDirtyResidentLine) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");
