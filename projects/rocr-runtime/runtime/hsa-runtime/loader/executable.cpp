@@ -1401,13 +1401,15 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     }
   }
 
-  // Check if this is an AIE code object.
-  // For AIE code objects, use a different loading path.
+  // AIE code objects take a separate loading path. The AIE loader (AMD::AieCode,
+  // amd_aie_code.cpp) is Linux-only (SRC_XDNA), so gate the sniff+dispatch to match.
+#if defined(__linux__)
   if (AMD::AieCode::IsAieCodeObject(reinterpret_cast<const void*>(code_object.handle),
                                     code_object_size)) {
     return LoadAieCodeObject(agent, reinterpret_cast<const void*>(code_object.handle),
                              code_object_size, uri, loaded_code_object);
   }
+#endif
 
   LoaderOptions loaderOptions;
   if (options && !loaderOptions.ParseOptions(options)) {
@@ -1580,6 +1582,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   return HSA_STATUS_SUCCESS;
 }
 
+// Linux-only: see the gated call site in LoadCodeObject.
+#if defined(__linux__)
 hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* data, size_t size,
                                                const std::string& uri,
                                                hsa_loaded_code_object_t* loaded_code_object) {
@@ -1598,7 +1602,9 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   }
   auto* aie_agent = static_cast<AMD::AieAgent*>(core_agent);
 
-  // Arch-vs-agent validation: the section name must match the one the agent accepts.
+  // Arch-vs-agent validation: the AIE section name IS the arch name, and the agent is the sole
+  // authority on which arch it accepts (arch_name from node_props.AMDName). The parser identifies
+  // the section structurally (by header magic) and carries no arch allowlist of its own.
   if (aie_code->GetArchSectionName() != aie_agent->arch_name()) {
     logger_ << "LoaderError: code object arch does not match agent\n";
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
@@ -1678,7 +1684,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     loaded_obj->descriptors.push_back(std::move(desc));
 
     auto kernel_sym =
-        std::make_shared<AieKernelSymbol>(kernel_name, desc_ptr, ki->kernarg_size, ki->num_cols);
+        std::make_shared<AieKernelSymbol>(kernel_name, desc_ptr, ki->kernarg_size);
     kernel_sym->agent = agent;
     staged_symbols.push_back(std::move(kernel_sym));
   }
@@ -1702,6 +1708,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   }
   return HSA_STATUS_SUCCESS;
 }
+#endif  // defined(__linux__)
 
 hsa_status_t ExecutableImpl::LoadSegments(hsa_agent_t agent,
                                           const code::AmdHsaCode *c,

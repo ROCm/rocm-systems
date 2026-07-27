@@ -61,12 +61,8 @@ class AieCode {
   AieCode() = default;
   bool Parse();
 
-  /// @brief Parsed ELF view over the caller's buffer.
+  /// @brief Parsed ELF view over the caller's buffer; owns the base/size (data()/size()).
   std::unique_ptr<amd::elf::Image> elf_;
-  /// @brief Start of the caller's ELF buffer.
-  const uint8_t* elf_base_ = nullptr;
-  /// @brief Size of the caller's ELF buffer.
-  size_t elf_size_ = 0;
   /// @brief Start of the arch section in the ELF buffer.
   const uint8_t* section_base_ = nullptr;
   /// @brief Size of the arch section in bytes.
