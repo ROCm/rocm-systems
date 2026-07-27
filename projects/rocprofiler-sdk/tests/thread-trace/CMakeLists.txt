@@ -83,7 +83,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     thread-trace-api-many-contexts-test
     TARGET thread-trace-test-app
-    TIMEOUT 300
+    TIMEOUT 60
     LABELS "integration-tests"
     PRELOAD "$<TARGET_FILE:thread-trace-many-contexts-tool>"
     # The app emits 2 dispatches/iteration; device rotation advances ~1 context every 2-3
@@ -94,7 +94,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     thread-trace-api-many-contexts-dispatch-test
     TARGET thread-trace-test-app
-    TIMEOUT 300
+    TIMEOUT 60
     LABELS "integration-tests"
     PRELOAD "$<TARGET_FILE:thread-trace-many-contexts-tool>"
     ENVIRONMENT "ATT_NUM_CONTEXTS=400;ATT_APP_LOOPCOUNT=800;ATT_TRACE_MODE=dispatch"
