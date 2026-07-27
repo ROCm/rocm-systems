@@ -678,16 +678,18 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     cave_cursor += probe.body_words.size() * sizeof(uint32_t);
   }
 
-  // Temporary SGPR-allocation bound. The probe-call return-link pair is fixed
-  // by the calling convention, so the kernel must allocate up to it.
-  const std::optional<uint32_t> kernel_sgpr_count = obj_.min_kernel_sgpr_count(arch_);
-
   // Register spilling targets a single-kernel code object for now: any site that
   // must spill grows that one kernel's per-lane scratch. The SpillManager is
   // created lazily on the first spilling site and shared by the rest; its final
   // size is written back to the descriptor after all sites succeed.
   const std::vector<KernelDescriptorInfo> kernels =
       scan_kernel_descriptors(patcher.image_bytes(), patcher.text_offset(), patcher.text_size());
+
+  // Temporary SGPR-allocation bound. The probe-call return-link pair is fixed
+  // by the calling convention, so the kernel must allocate up to it. Derived from
+  // the descriptors already scanned above.
+  const std::optional<uint32_t> kernel_sgpr_count =
+      AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
 

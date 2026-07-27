@@ -361,6 +361,22 @@ TEST(InstructionBuilder, ScalarOperandCodesMatchGeneratedTables) {
   EXPECT_EQ(kScalarOperandExecLo, rdna2::OPR_SDST_EXEC_LO);
   EXPECT_EQ(kScalarOperandExecLo, rdna4::OPR_SDST_EXEC_LO);
   EXPECT_EQ(kScalarOperandExecLo, gfx1250::OPR_SDST_EXEC_LO);
+
+  // Inline-constant source for -1 (193), also generation-stable.
+  EXPECT_EQ(kScalarInlineNegOne, 193);
+  EXPECT_EQ(kScalarInlineNegOne, cdna1::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(kScalarInlineNegOne, cdna4::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(kScalarInlineNegOne, rdna2::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(kScalarInlineNegOne, rdna4::OPR_SRC_NEG_INT_MIN);
+  EXPECT_EQ(kScalarInlineNegOne, gfx1250::OPR_SRC_NEG_INT_MIN);
+
+  // Base for non-negative inline integers (128 = 0), also generation-stable.
+  EXPECT_EQ(kScalarPositiveInlineBase, 128);
+  EXPECT_EQ(kScalarPositiveInlineBase, cdna1::OPR_SRC_POS_INT_MIN);
+  EXPECT_EQ(kScalarPositiveInlineBase, cdna4::OPR_SRC_POS_INT_MIN);
+  EXPECT_EQ(kScalarPositiveInlineBase, rdna2::OPR_SRC_POS_INT_MIN);
+  EXPECT_EQ(kScalarPositiveInlineBase, rdna4::OPR_SRC_POS_INT_MIN);
+  EXPECT_EQ(kScalarPositiveInlineBase, gfx1250::OPR_SRC_POS_INT_MIN);
 }
 
 // M0 moved from 124 (gfx9/gfx10.x) to 125 (gfx11+); each arch resolves to its

@@ -13,9 +13,11 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -287,26 +289,36 @@ namespace {
 
 } // namespace
 
-std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
+std::optional<uint32_t>
+AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch,
+                                       std::span<const KernelDescriptorInfo> kernels) {
   namespace kd = rocr::llvm::amdhsa;
 
-  const std::span<const uint8_t> image{reinterpret_cast<const uint8_t *>(image_data()),
-                                       image_size()};
   std::optional<uint32_t> min_count;
-  // Discover descriptors through the shared scanner (the single DBT/DBI discovery
-  // path) rather than re-walking sections here. scan_kernel_descriptors() filters
-  // to a single .text extent, so visit each text section to cover every kernel.
-  for (const Section *text : text_sections()) {
-    for (const KernelDescriptorInfo &kernel :
-         scan_kernel_descriptors(image, text->sectionOffset(), text->size())) {
-      const uint32_t granulated =
-          AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
-                          kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-      const uint32_t count = sgpr_count_from_granulated(granulated, arch);
-      min_count = min_count ? std::min(*min_count, count) : count;
-    }
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    const uint32_t granulated =
+        AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
+                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+    const uint32_t count = sgpr_count_from_granulated(granulated, arch);
+    min_count = min_count ? std::min(*min_count, count) : count;
   }
   return min_count;
+}
+
+std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
+  const std::span<const uint8_t> image{reinterpret_cast<const uint8_t *>(image_data()),
+                                       image_size()};
+  // Discover descriptors through the shared scanner rather than re-walking sections
+  // here. scan_kernel_descriptors() filters to a single .text extent, so visit each
+  // text section to cover every kernel, then reduce via the span overload.
+  std::vector<KernelDescriptorInfo> kernels;
+  for (const Section *text : text_sections()) {
+    std::vector<KernelDescriptorInfo> found =
+        scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+    kernels.insert(kernels.end(), std::make_move_iterator(found.begin()),
+                   std::make_move_iterator(found.end()));
+  }
+  return min_kernel_sgpr_count(arch, kernels);
 }
 
 } // namespace rocjitsu
