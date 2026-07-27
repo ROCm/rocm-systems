@@ -14,16 +14,18 @@ static __global__ void wg_split_barrier(float *out, float *in) {
   size_t i = threadIdx.x;
   auto tb = cg::this_thread_block();
 
-  out[i] = in[i] * 2.0f;
-
-  auto tok = tb.barrier_arrive();
-
-  // use tid 0 to populate shared mem
+  // Must precede arrive: only pre-arrive stores are visible to peers after
+  // their wait.
   if (i == 0) {
     for (size_t j = 0; j < 32; j++) {
       mid[j] = in[j];
     }
   }
+
+  auto tok = tb.barrier_arrive();
+
+  // Thread-local, so safe in the arrive/wait gap.
+  out[i] = in[i] * 2.0f;
 
   tb.barrier_wait(std::move(tok));
 
@@ -46,6 +48,7 @@ HIP_TEST_CASE(Unit_coop_thread_block_split_barrier) {
   HIP_CHECK(
       hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
   wg_split_barrier<<<1, size>>>(d_out, d_in);
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size,
                       hipMemcpyDeviceToHost));
 
@@ -63,11 +66,13 @@ static __global__ void grid_split_barrier(int *data, int *result, int N) {
   cg::grid_group grid = cg::this_grid();
 
   int gid = blockIdx.x * blockDim.x + threadIdx.x;
-  auto tok = grid.barrier_arrive();
+  // Must precede arrive: thread 0 reads every other block's write after the
+  // wait, so writing in the gap would be a cross-block race.
   if (gid < N) {
     data[gid] = gid + 1;
   }
 
+  auto tok = grid.barrier_arrive();
   grid.barrier_wait(std::move(tok));
 
   if (grid.thread_rank() == 0) {
@@ -81,32 +86,34 @@ static __global__ void grid_split_barrier(int *data, int *result, int N) {
 HIP_TEST_CASE(Unit_coop_grids_split_barrier) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
-
-  if (prop.cooperativeLaunch != 0) {
-    int N = 1024;
-    const int threads = 128;
-    const int blocks = (N + threads - 1) / threads;
-
-    int *d_in, *d_out;
-    HIP_CHECK(hipMalloc(&d_in, N * sizeof(int)));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(int)));
-
-    void *args[] = {&d_in, &d_out, &N};
-
-    dim3 grid(blocks);
-    dim3 block(threads);
-
-    HIP_CHECK(hipLaunchCooperativeKernel((void *)grid_split_barrier, grid,
-                                         block, args, 0, 0));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    int out = 0;
-    HIP_CHECK(hipMemcpy(&out, d_out, sizeof(int), hipMemcpyDeviceToHost));
-
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
-    REQUIRE(out == ((N * (N + 1)) / 2));
+  if (prop.cooperativeLaunch == 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
+
+  int N = 1024;
+  const int threads = 128;
+  const int blocks = (N + threads - 1) / threads;
+
+  int *d_in, *d_out;
+  HIP_CHECK(hipMalloc(&d_in, N * sizeof(int)));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(int)));
+
+  void *args[] = {&d_in, &d_out, &N};
+
+  dim3 grid(blocks);
+  dim3 block(threads);
+
+  HIP_CHECK(hipLaunchCooperativeKernel((void *)grid_split_barrier, grid, block,
+                                       args, 0, 0));
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int out = 0;
+  HIP_CHECK(hipMemcpy(&out, d_out, sizeof(int), hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipFree(d_in));
+  HIP_CHECK(hipFree(d_out));
+  REQUIRE(out == ((N * (N + 1)) / 2));
 }
 
 // Multiple sequential arrive/wait pairs in one kernel: each phase produces
@@ -335,8 +342,7 @@ HIP_TEST_CASE(Unit_coop_grids_split_barrier_Multiple) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   if (prop.cooperativeLaunch == 0) {
-    SUCCEED("Cooperative launch not supported on this device");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   for (const int phases : {1, 2, 5}) {
@@ -355,6 +361,7 @@ HIP_TEST_CASE(Unit_coop_grids_split_barrier_Multiple) {
 
     HIP_CHECK(hipLaunchCooperativeKernel((void*)grid_split_barrier_multi, grid,
                                          block, args, 0, 0));
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     int out = 0;
@@ -366,5 +373,193 @@ HIP_TEST_CASE(Unit_coop_grids_split_barrier_Multiple) {
     const int expected = (N * (N + 1)) / 2 + N * phases;
     INFO("phases " << phases);
     REQUIRE(out == expected);
+  }
+}
+
+// Returns 1 when the hardware s_barrier_signal path is compiled in for this
+// arch, 0 for the s_barrier fallback, -1 on a non-AMD compile.
+static __device__ int split_barrier_hw_path() {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__)
+  return __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal) ? 1 : 0;
+#else
+  return -1;
+#endif
+}
+
+static __global__ void wg_split_barrier_probe(int* out, const int* in,
+                                              int* hw_path) {
+  namespace cg = cooperative_groups;
+  extern __shared__ int sb_probe[];
+  auto tb = cg::this_thread_block();
+  size_t i = threadIdx.x;
+
+  if (i == 0) *hw_path = split_barrier_hw_path();
+
+  sb_probe[i] = in[i];  // publish before arrive
+  auto tok = tb.barrier_arrive();
+  int local = sb_probe[i] * 2;  // independent, thread-local gap work
+  tb.barrier_wait(std::move(tok));
+  // Neighbour's pre-arrive write, only correct if the wait synchronised every
+  // wave in the block.
+  int nb = sb_probe[(i + 1) % blockDim.x];
+  out[i] = local + nb;
+}
+
+HIP_TEST_CASE(Unit_coop_thread_block_split_barrier_Sanity) {
+  hipDeviceProp_t prop;
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  std::cout << "[split_barrier] device gcnArchName: " << prop.gcnArchName
+            << std::endl;
+
+  // Multi-wave blocks, so arrive/wait is not a single-wave no-op.
+  for (const unsigned size : {256u, 512u, 1024u}) {
+    if (size > static_cast<unsigned>(prop.maxThreadsPerBlock)) continue;
+
+    int *d_out, *d_in, *d_hw;
+    HIP_CHECK(hipMalloc(&d_out, sizeof(int) * size));
+    HIP_CHECK(hipMalloc(&d_in, sizeof(int) * size));
+    HIP_CHECK(hipMalloc(&d_hw, sizeof(int)));
+    HIP_CHECK(hipMemset(d_hw, 0, sizeof(int)));
+
+    std::vector<int> in(size), out(size, 0), expected(size);
+    for (unsigned i = 0; i < size; i++) in[i] = static_cast<int>(i + 1);
+    HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(int) * size,
+                        hipMemcpyHostToDevice));
+
+    wg_split_barrier_probe<<<1, size, sizeof(int) * size>>>(d_out, d_in, d_hw);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(int) * size,
+                        hipMemcpyDeviceToHost));
+    int hw = -2;
+    HIP_CHECK(hipMemcpy(&hw, d_hw, sizeof(int), hipMemcpyDeviceToHost));
+
+    HIP_CHECK(hipFree(d_out));
+    HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_hw));
+
+    if (size == 256u) {
+      const char* path = (hw == 1)   ? "hardware s_barrier_signal/s_barrier_wait"
+                         : (hw == 0)  ? "s_barrier fallback"
+                                      : "non-AMD / unknown";
+      std::cout << "[split_barrier] thread_block barrier_arrive path: " << path
+                << std::endl;
+    }
+
+    for (unsigned i = 0; i < size; i++) {
+      expected[i] = in[i] * 2 + in[(i + 1) % size];
+      INFO("arch " << prop.gcnArchName << " size " << size << " idx " << i);
+      REQUIRE(out[i] == expected[i]);
+    }
+  }
+}
+
+// Thread 0 does far more gap work than its peers, so the light threads arrive
+// long before they can be released.
+static __global__ void wg_split_barrier_imbalanced(int* out, const int* in,
+                                                   int heavy_iters) {
+  namespace cg = cooperative_groups;
+  extern __shared__ int sh_imb[];
+  auto tb = cg::this_thread_block();
+  size_t i = threadIdx.x;
+
+  sh_imb[i] = in[i];  // publish before arrive
+  auto tok = tb.barrier_arrive();
+
+  const int iters = (i == 0) ? heavy_iters : 8;
+  int acc = 0;
+  for (int k = 0; k < iters; ++k) acc += in[i] + k;
+
+  tb.barrier_wait(std::move(tok));
+
+  int nb = sh_imb[(i + 1) % blockDim.x];  // consume neighbour after wait
+  out[i] = nb + acc;
+}
+
+HIP_TEST_CASE(Unit_coop_thread_block_split_barrier_ImbalancedWorkload) {
+  constexpr unsigned size = 256;
+  const int heavy = 4096;
+
+  int *d_out, *d_in;
+  HIP_CHECK(hipMalloc(&d_out, sizeof(int) * size));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(int) * size));
+
+  std::vector<int> in(size), out(size, 0), expected(size);
+  for (unsigned i = 0; i < size; i++) in[i] = static_cast<int>(i + 1);
+  HIP_CHECK(
+      hipMemcpy(d_in, in.data(), sizeof(int) * size, hipMemcpyHostToDevice));
+
+  for (unsigned i = 0; i < size; i++) {
+    const int iters = (i == 0) ? heavy : 8;
+    int acc = 0;
+    for (int k = 0; k < iters; ++k) acc += in[i] + k;
+    expected[i] = acc + in[(i + 1) % size];
+  }
+
+  wg_split_barrier_imbalanced<<<1, size, sizeof(int) * size>>>(d_out, d_in,
+                                                               heavy);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(int) * size,
+                      hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in));
+
+  for (unsigned i = 0; i < size; i++) {
+    INFO("idx " << i);
+    REQUIRE(out[i] == expected[i]);
+  }
+}
+
+// The token must stay valid when arrive and wait happen in different scopes.
+static __device__ cooperative_groups::thread_block::arrival_token
+arrive_in_helper(const cooperative_groups::thread_block& tb) {
+  return tb.barrier_arrive();
+}
+
+static __global__ void wg_split_barrier_token_lifetime(int* out,
+                                                       const int* in) {
+  namespace cg = cooperative_groups;
+  extern __shared__ int sh_tok[];
+  auto tb = cg::this_thread_block();
+  size_t i = threadIdx.x;
+
+  sh_tok[i] = in[i] + 1;  // publish before arrive
+  auto tok = arrive_in_helper(tb);
+  int local = in[i] * 3;  // independent gap work
+  {
+    tb.barrier_wait(std::move(tok));
+  }
+  out[i] = sh_tok[(i + 1) % blockDim.x] + local;
+}
+
+HIP_TEST_CASE(Unit_coop_thread_block_split_barrier_TokenLifetime) {
+  constexpr unsigned size = 256;
+
+  int *d_out, *d_in;
+  HIP_CHECK(hipMalloc(&d_out, sizeof(int) * size));
+  HIP_CHECK(hipMalloc(&d_in, sizeof(int) * size));
+
+  std::vector<int> in(size), out(size, 0), expected(size);
+  for (unsigned i = 0; i < size; i++) in[i] = static_cast<int>(i + 1);
+  HIP_CHECK(
+      hipMemcpy(d_in, in.data(), sizeof(int) * size, hipMemcpyHostToDevice));
+
+  for (unsigned i = 0; i < size; i++) {
+    expected[i] = (in[(i + 1) % size] + 1) + in[i] * 3;
+  }
+
+  wg_split_barrier_token_lifetime<<<1, size, sizeof(int) * size>>>(d_out, d_in);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(int) * size,
+                      hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipFree(d_in));
+
+  for (unsigned i = 0; i < size; i++) {
+    INFO("idx " << i);
+    REQUIRE(out[i] == expected[i]);
   }
 }
