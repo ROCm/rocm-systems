@@ -876,13 +876,11 @@ bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
 }
 
 bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
-                                      size_t* foffset_ptr, size_t* mapped_size_ptr) {
-  // Defaults to 0; only a file-backed mapping yields a meaningful bound,
-  // which is set on success below.
-  if (mapped_size_ptr != nullptr) {
-    *mapped_size_ptr = 0;
+                                      size_t* foffset_ptr, size_t* region_bound_ptr) {
+  // Fail closed: callers must never read a stale bound on any early-return path.
+  if (region_bound_ptr != nullptr) {
+    *region_bound_ptr = 0;
   }
-
   // Get the list of mapped file list
   bool ret_value = false;
   std::ifstream proc_maps;
@@ -912,18 +910,17 @@ bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
       tokens >> permissions >> std::hex >> offset >> std::dec >> device >> inode;
       std::getline(tokens >> std::ws, uri_file_path);
 
+      // Readable bytes from image to the end of this mapping (anonymous or not).
+      if (region_bound_ptr != nullptr && !permissions.empty() && permissions[0] == 'r') {
+        *region_bound_ptr = static_cast<size_t>(high_address - address);
+      }
+
       if (inode == 0 || uri_file_path.empty()) {
         return ret_value;
       }
 
       *fname_ptr = uri_file_path;
       *foffset_ptr = offset + address - low_address;
-
-      // The mapping is file-backed, so its end address bounds how many bytes
-      // can be safely read starting at `image`.
-      if (mapped_size_ptr != nullptr) {
-        *mapped_size_ptr = static_cast<size_t>(high_address - address);
-      }
       ret_value = true;
       break;
     }

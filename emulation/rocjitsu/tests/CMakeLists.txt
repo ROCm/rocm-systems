@@ -13,25 +13,13 @@ set(RJ_OBJECT_LIBS
     rocjitsu_code
     rocjitsu_isa
     rocjitsu_isa_registry
-    rocjitsu_isa_cdna1
-    rocjitsu_isa_cdna2
-    rocjitsu_isa_cdna3
-    rocjitsu_isa_cdna4
-    rocjitsu_isa_rdna1
-    rocjitsu_isa_rdna2
-    rocjitsu_isa_rdna3
-    rocjitsu_isa_rdna3_5
-    rocjitsu_isa_rdna4
-    rocjitsu_isa_gfx1250
-    # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here, and \
-    # wire any new *_sim_test.cpp and kernels/ coverage into this file.
-    rocjitsu_isa_risc_v
     simdojo
     rocjitsu_kmd
     rocjitsu_vm
     rocjitsu_vm_amdgpu
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
+    rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
     rocjitsu_dbt_config
@@ -331,6 +319,49 @@ endfunction()
 
 # --- Unit / integration test suite ---
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(PLUGIN_LOADER_FIXTURE_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/plugin_loader_fixtures"
+    )
+    function(rj_add_plugin_loader_fixture name)
+        add_library(
+            plugin_loader_fixture_${name}
+            MODULE
+            plugin_loader_fixture.cpp
+        )
+        target_include_directories(
+            plugin_loader_fixture_${name}
+            PRIVATE
+                ${ROCJITSU_INCLUDE_DIR}
+                ${ROCJITSU_SRC_DIR}
+                ${HSA_INCLUDE_DIR}
+                $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
+                $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
+        )
+        target_compile_definitions(
+            plugin_loader_fixture_${name}
+            PRIVATE PLUGIN_FIXTURE_NAME="${name}" ${ARGN}
+        )
+        set_target_properties(
+            plugin_loader_fixture_${name}
+            PROPERTIES
+                OUTPUT_NAME rocjitsu_plugin_${name}
+                LIBRARY_OUTPUT_DIRECTORY ${PLUGIN_LOADER_FIXTURE_DIR}
+                CXX_VISIBILITY_PRESET hidden
+                VISIBILITY_INLINES_HIDDEN ON
+        )
+        rj_configure_target(plugin_loader_fixture_${name} TEST)
+    endfunction()
+
+    rj_add_plugin_loader_fixture(good)
+    rj_add_plugin_loader_fixture(
+        badabi
+        PLUGIN_FIXTURE_ABI=::rocjitsu::kPluginAbiVersion+1
+    )
+    rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
+    rj_add_plugin_loader_fixture(duplicate)
+endif()
+
 add_executable(
     rocjitsu_tests
     rvsim_test.cpp
@@ -340,6 +371,7 @@ add_executable(
     matmul_test.cpp
     vector_add_test.cpp
     gfx1250_sim_test.cpp
+    l2_cache_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
     simulated_kfd_test.cpp
@@ -373,8 +405,10 @@ add_executable(
     waitcnt_counter_test.cpp
     register_access_test.cpp
     instruction_execution_harness_test.cpp
+    isa_target_registry_test.cpp
     scalar_scc_test.cpp
     cdna3_predicate_mask_test.cpp
+    scoped_temp_test.cpp
     decode_execute_benchmark.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
@@ -427,6 +461,8 @@ add_executable(
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
+    plugin_config_resolver_test.cpp
+    plugin_loader_test.cpp
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
@@ -467,7 +503,21 @@ target_link_libraries(
         Threads::Threads
         GTest::gtest_main
 )
+target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE PLUGIN_LOADER_FIXTURE_DIR="${PLUGIN_LOADER_FIXTURE_DIR}"
+    )
+    add_dependencies(
+        rocjitsu_tests
+        plugin_loader_fixture_good
+        plugin_loader_fixture_badabi
+        plugin_loader_fixture_missing
+        plugin_loader_fixture_duplicate
+    )
+endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*').
@@ -484,7 +534,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_model_only_test
         PRIVATE
             rocjitsu_dbt_internal
-            rocjitsu_isa_gfx1250_model
+            rocjitsu_gfx1250_model_registry
             simdojo_headers
             GTest::gtest_main
     )
@@ -523,6 +573,88 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         WARNINGS
     )
     rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
+    add_test(
+        NAME Gfx1250B0ToA0Library.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DMODEL_BINARY=$<TARGET_FILE:hsa_hotswap_rocjitsu> -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
+    )
+
+    # This source-integrated NPI fixture is deliberately absent from the
+    # built-in provider list. It exercises per-consumer composition by canonical
+    # name; it does not model an open plugin ABI or a complete new architecture.
+    rj_add_object_library(
+        rocjitsu_downstream_isa_fixture
+        fixtures/downstream_isa_target_provider.cpp
+    )
+    target_include_directories(
+        rocjitsu_downstream_isa_fixture
+        PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+    )
+    rj_add_isa_target_provider(
+        rocjitsu_downstream_isa_fixture
+        HEADER downstream_isa_target_provider.h
+    )
+    rj_add_isa_target_registry(
+        rocjitsu_downstream_registry_fixture
+        PROVIDERS rocjitsu_downstream_isa_fixture
+    )
+    add_library(
+        rocjitsu_downstream_isa_registry_fixture
+        SHARED
+        fixtures/downstream_isa_registry_fixture.cpp
+    )
+    target_link_libraries(
+        rocjitsu_downstream_isa_registry_fixture
+        PRIVATE
+            rocjitsu_isa
+            rocjitsu_downstream_registry_fixture
+            simdojo_headers
+    )
+    rj_configure_target(rocjitsu_downstream_isa_registry_fixture LIB)
+
+    # These shared objects model independently composed final images. The
+    # driver links the all-target registry while each DSO retains its own
+    # default subset.
+    add_library(
+        rocjitsu_narrow_isa_registry_fixture
+        SHARED
+        fixtures/narrow_isa_registry_fixture.cpp
+    )
+    target_link_libraries(
+        rocjitsu_narrow_isa_registry_fixture
+        PRIVATE
+            rocjitsu_dbt_internal
+            rocjitsu_gfx1250_model_registry
+            simdojo_headers
+    )
+    rj_configure_target(rocjitsu_narrow_isa_registry_fixture LIB)
+
+    add_executable(
+        isa_registry_composition_test
+        isa_registry_composition_test.cpp
+    )
+    target_link_libraries(
+        isa_registry_composition_test
+        PRIVATE
+            ${RJ_OBJECT_LIBS}
+            rocjitsu_downstream_isa_registry_fixture
+            rocjitsu_narrow_isa_registry_fixture
+            util
+            flatbuffers
+            Threads::Threads
+            GTest::gtest_main
+    )
+    rj_configure_target(isa_registry_composition_test TEST)
+    rj_add_gtest_tests(isa_registry_composition_test)
+    add_test(
+        NAME IsaRegistryCompositionTest.NarrowSymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DNARROW_LIBRARY=$<TARGET_FILE:rocjitsu_narrow_isa_registry_fixture>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_narrow_registry_symbols.cmake
+    )
 endif()
 
 # --- CLI launcher preload tests ---
@@ -621,6 +753,7 @@ add_executable(
 target_include_directories(
     rj_dbt_translate_smoke_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
 )
@@ -907,6 +1040,7 @@ target_compile_definitions(
 target_include_directories(
     hsa_hooks_unit_test
     PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
         ${CMAKE_SOURCE_DIR}/lib/util/include
@@ -930,6 +1064,41 @@ target_link_libraries(
 )
 rj_configure_target(hsa_hooks_unit_test TEST)
 gtest_discover_tests(hsa_hooks_unit_test)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        hsa_hotswap_rocjitsu_unit_test
+        dbt/hsa_hotswap_rocjitsu_unit_test.cpp
+    )
+    target_include_directories(
+        hsa_hotswap_rocjitsu_unit_test
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+    )
+    target_include_directories(
+        hsa_hotswap_rocjitsu_unit_test
+        SYSTEM
+        PRIVATE ${HSA_INCLUDE_DIR}
+    )
+    target_link_libraries(
+        hsa_hotswap_rocjitsu_unit_test
+        PRIVATE hsa_hotswap_rocjitsu_testable GTest::gtest_main
+    )
+    if(HAS_GFX1250_DBT_FIXTURE)
+        target_compile_definitions(
+            hsa_hotswap_rocjitsu_unit_test
+            PRIVATE
+                GFX1250_B0_TO_A0_FIXTURE="${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco"
+        )
+        add_dependencies(
+            hsa_hotswap_rocjitsu_unit_test
+            probe_relocation_function_table_dispatch_gfx1250
+        )
+    endif()
+    rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
+    gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
+endif()
 
 # --- Interposer loader initialization regression tests ---
 
@@ -1852,7 +2021,7 @@ if(RJ_ENABLE_HIP_TESTS)
         cmake_parse_arguments(
             ARG
             ""
-            "CONFIG;NAME;TIMEOUT"
+            "CONFIG;INSTALL_CONFIG;NAME;TIMEOUT"
             "ENVIRONMENT"
             ${ARGN}
         )
@@ -1862,7 +2031,14 @@ if(RJ_ENABLE_HIP_TESTS)
         if(NOT ARG_NAME)
             set(ARG_NAME ${TEST_CASE})
         endif()
-        get_filename_component(_install_config_name "${ARG_CONFIG}" NAME)
+        if(ARG_INSTALL_CONFIG)
+            set(_install_config "${ARG_INSTALL_CONFIG}")
+        else()
+            get_filename_component(_install_config_name "${ARG_CONFIG}" NAME)
+            set(_install_config
+                "\${RJ_INSTALLED_CONFIG_DIR}/${_install_config_name}"
+            )
+        endif()
         set(_install_env)
         foreach(_env_entry IN LISTS ARG_ENVIRONMENT)
             if(_env_entry MATCHES "^ROCJITSU_HIPKITTENS_KERNEL_DIR=")
@@ -1920,7 +2096,7 @@ if(RJ_ENABLE_HIP_TESTS)
             "-DTEST_EXECUTABLE=bin/${TEST_BIN}"
             "-DTEST_FILTER=${TEST_CASE}"
             "-DTEST_LAUNCHER=\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            "-DTEST_CONFIG=\${RJ_INSTALLED_CONFIG_DIR}/${_install_config_name}"
+            "-DTEST_CONFIG=${_install_config}"
             "-P"
             "rj_run_filtered_gtest.cmake"
         )
@@ -1978,6 +2154,27 @@ if(RJ_ENABLE_HIP_TESTS)
             "${CMAKE_INSTALL_LIBDIR}"
             "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}"
         )
+
+        # Daemon-mode plugin coverage uses a placeholder sink directory that
+        # the test rewrites to a private runtime path.
+        set(RJ_TEST_SINK_DIR "__RJ_DAEMON_SINK_DIR__")
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json.in
+            ${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json
+            @ONLY
+        )
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES ${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs
+            )
+        endif()
+        _rj_path_from_installed_test_bin(
+            _rj_installed_daemon_logging_config
+            "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+            "daemon_logging_config.json"
+        )
+
         add_executable(daemon_test daemon_test.cpp)
         target_compile_definitions(
             daemon_test
@@ -1991,6 +2188,8 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
                 RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
                 RJ_INTERPOSER_DUP_BIN="$<TARGET_FILE:interposer_dup_test>"
+                RJ_DAEMON_LOGGING_CONFIG="${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json"
+                RJ_DAEMON_LOGGING_SINK_TOKEN="__RJ_DAEMON_SINK_DIR__"
                 RJ_INSTALLED_DAEMON_BIN="${_rj_installed_rocjitsu_bin}"
                 RJ_INSTALLED_DAEMON_CONFIG="${_rj_installed_daemon_config}"
                 RJ_INSTALLED_DAEMON_CONFIG_2GPU="${_rj_installed_daemon_config_2gpu}"
@@ -1999,6 +2198,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_INSTALLED_HIP_MEMCPY_BIN="hip_memcpy_test"
                 RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
                 RJ_INSTALLED_INTERPOSER_DUP_BIN="interposer_dup_test"
+                RJ_INSTALLED_DAEMON_LOGGING_CONFIG="${_rj_installed_daemon_logging_config}"
         )
         target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
         add_dependencies(
@@ -2035,6 +2235,16 @@ if(RJ_ENABLE_HIP_TESTS)
                     "--gtest_filter=${TC}"
             )
         endforeach()
+
+        rj_add_test(
+            NAME DaemonTest.LoggingPlugin
+            COMMAND daemon_test --gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged
+            TIMEOUT 120
+            LABELS daemon
+            INSTALL_COMMAND
+                "bin/daemon_test"
+                "--gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged"
+        )
 
         # --- RCCL collective test ---
         find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
@@ -2161,13 +2371,38 @@ if(RJ_ENABLE_HIP_TESTS)
         set(LOGGING_RUNTIME_DIR ${LOGGING_SINK_DIR}/runtime)
         file(MAKE_DIRECTORY ${LOGGING_SINK_DIR})
         file(MAKE_DIRECTORY ${LOGGING_RUNTIME_DIR})
+        set(RJ_TEST_SINK_DIR ${LOGGING_SINK_DIR})
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json.in
+            ${LOGGING_SINK_DIR}/config.json
+            @ONLY
+        )
+        set(RJ_TEST_SINK_DIR runtime/logging_test_output)
+        set(LOGGING_INSTALLED_CONFIG_DIR
+            ${CMAKE_CURRENT_BINARY_DIR}/install-configs
+        )
+        set(LOGGING_INSTALLED_CONFIG
+            ${LOGGING_INSTALLED_CONFIG_DIR}/logging.json
+        )
+        file(MAKE_DIRECTORY ${LOGGING_INSTALLED_CONFIG_DIR})
+        configure_file(
+            ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json.in
+            ${LOGGING_INSTALLED_CONFIG}
+            @ONLY
+        )
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES ${LOGGING_INSTALLED_CONFIG}
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
+            )
+        endif()
         rj_add_hip_test_case(
             hip_logging_test "LoggingTest.dispatch_logged"
+            CONFIG ${LOGGING_SINK_DIR}/config.json
+            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/logging.json"
             TIMEOUT 30
             ENVIRONMENT
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
-                "RJ_LOG=1"
-                "RJ_SINKS=file"
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
         )
 
@@ -2181,13 +2416,21 @@ if(RJ_ENABLE_HIP_TESTS)
         set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
         file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
         file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES
+                    ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs/tests
+                RENAME profiled.json
+            )
+        endif()
         rj_add_hip_test_case(
             hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
+            CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
+            INSTALL_CONFIG "\${RJ_INSTALLED_CONFIG_DIR}/tests/profiled.json"
             TIMEOUT 30
             ENVIRONMENT
                 "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
-                "RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1"
-                "RJ_SINKS=file"
                 "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
         )
 

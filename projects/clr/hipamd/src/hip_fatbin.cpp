@@ -442,8 +442,11 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (fdesc != amd::Os::FDescInit()) amd::Os::CloseFileHandle(fdesc);
   });
 
-  // Bytes safely readable from image_, used only to bound the parsing below.
-  // 0 means unknown, which leaves the bounds checks as best-effort no-ops.
+  // Readable bytes from image_ to the end of its mapping; used to bound the
+  // parsing below (compressed/uncompressed bundle headers and the ELF parse on
+  // the in-memory path, e.g. hipModuleLoadData, where no length is given).
+  // 0 means unknown; the bundle-header checks treat it as best-effort, while the
+  // ELF path fails closed since getElfSize requires a known bound.
   size_t readable_size = 0;
 
   if (image_ != nullptr) {
@@ -476,11 +479,19 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   // It better be elf if its neither compressed nor uncompressed
   if (!is_compressed && !is_uncompressed) {
     if (IsCodeObjectElf(image_, readable_size)) {
-      // Load the binary directly
-      auto elf_size = amd::Elf::getElfSize(image_);
-      if (readable_size != 0 && (elf_size == 0 || elf_size > readable_size)) {
-        LogPrintfError("ELF size out of bounds: elf_size=%zu mapped=%zu",
-                       static_cast<size_t>(elf_size), readable_size);
+      // Use the exact file size when known, else the mapping bound derived above.
+      // Both flow through readable_size (fsize on the file path, region bound on
+      // the in-memory path). getElfSize fails closed when the bound is unknown.
+      if (readable_size == 0) {
+        LogError("Cannot determine bounds of in-memory code object");
+        return hipErrorInvalidImage;
+      }
+      auto elf_size = amd::Elf::getElfSize(image_, readable_size);
+      // If we got 0, validation has failed.
+      if (elf_size == 0) {
+        LogPrintfError(
+            "Invalid ELF code object: failed size/bounds validation, image_size is: %zu",
+            readable_size);
         return hipErrorInvalidImage;
       }
       for (auto* device : devices) {

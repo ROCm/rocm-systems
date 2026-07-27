@@ -26,6 +26,7 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "scoped_temp.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -622,11 +623,7 @@ struct FakeApiTable {
   }
 };
 
-void write_runtime_config_path() {
-  std::filesystem::path runtime_dir =
-      std::filesystem::temp_directory_path() /
-      ("rocjitsu-hsa-hooks-unit-" + std::to_string(static_cast<long long>(::getpid())));
-  std::filesystem::create_directories(runtime_dir);
+void write_runtime_config_path(const std::string &runtime_dir) {
   setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
 
   std::ofstream config_path(rocjitsu::rpc_default_config_file_path());
@@ -635,9 +632,9 @@ void write_runtime_config_path() {
 
 class InstalledHook {
 public:
-  explicit InstalledHook(FakeApiTable &api) {
+  explicit InstalledHook(FakeApiTable &api) : runtime_dir_("rocjitsu-hsa-hooks-unit-") {
     OnUnload();
-    write_runtime_config_path();
+    write_runtime_config_path(runtime_dir_.path());
     installed_ = OnLoad(&api.table, 0, 0, nullptr);
   }
   ~InstalledHook() { OnUnload(); }
@@ -645,6 +642,7 @@ public:
   [[nodiscard]] bool installed() const { return installed_; }
 
 private:
+  rocjitsu::test::ScopedTempDirectory runtime_dir_;
   bool installed_ = false;
 };
 

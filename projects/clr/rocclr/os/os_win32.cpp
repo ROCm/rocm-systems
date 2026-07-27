@@ -675,30 +675,24 @@ bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t
   return true;
 }
 
-// Returns the number of bytes that can be safely read starting at `image`,
-// bounded by the end of the file-backed region (mapped image or file) that
-// contains it. Returns 0 for heap memory (MEM_PRIVATE), whose region
-// is shared with unrelated allocations and so is not a meaningful bound.
-static size_t MappedSizeFromAddress(const void* image) {
-  MEMORY_BASIC_INFORMATION mbi;
-  if (VirtualQuery(image, &mbi, sizeof(mbi)) == 0) {
-    return 0;
-  }
-  if (mbi.State != MEM_COMMIT || (mbi.Type != MEM_IMAGE && mbi.Type != MEM_MAPPED)) {
-    return 0;
-  }
-  const uintptr_t region_end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
-  const uintptr_t address = reinterpret_cast<uintptr_t>(image);
-  if (address >= region_end) {
-    return 0;
-  }
-  return static_cast<size_t>(region_end - address);
-}
-
 bool Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr, size_t* foffset_ptr,
-                                 size_t* mapped_size_ptr) {
-  if (mapped_size_ptr != nullptr) {
-    *mapped_size_ptr = MappedSizeFromAddress(image);
+                                 size_t* region_bound_ptr) {
+  // Fail closed: callers must never read a stale bound if we can't compute one.
+  if (region_bound_ptr != nullptr) {
+    *region_bound_ptr = 0;
+  }
+  // Readable bytes from image to the end of its committed region (anonymous or not).
+  if (region_bound_ptr != nullptr && image != nullptr) {
+    MEMORY_BASIC_INFORMATION mbi;
+    const DWORD readable = PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ |
+                           PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_WRITECOPY;
+    // A PAGE_GUARD page reads as readable but faults (STATUS_GUARD_PAGE_VIOLATION)
+    // on first access, so it must not count toward a "safe to read" bound.
+    if (VirtualQuery(image, &mbi, sizeof(mbi)) != 0 && mbi.State == MEM_COMMIT &&
+        (mbi.Protect & readable) != 0 && (mbi.Protect & PAGE_GUARD) == 0) {
+      uintptr_t region_end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+      *region_bound_ptr = static_cast<size_t>(region_end - reinterpret_cast<uintptr_t>(image));
+    }
   }
 
   HMODULE hm = NULL;

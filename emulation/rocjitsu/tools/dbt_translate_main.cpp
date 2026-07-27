@@ -68,6 +68,7 @@ struct CliOptions {
   bool saw_output_target = false;
   bool saw_input_revision = false;
   bool saw_output_revision = false;
+  bool show_all_translations = false;
 };
 
 void print_supported_targets(std::ostream &os) {
@@ -92,9 +93,10 @@ void print_help() {
       << "  --debug-conservative-liveness N Only allocate free VGPR scratch at or above N\n"
       << "  --debug-continue-after-failure Continue collecting diagnostics after failures\n"
       << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
+      << "  --show-all-translations         Include unchanged identity mappings in diff output\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
-      << "Note: gfx1250 b0-to-a0 applies the errata policy; equal revisions are identity.\n\n"
+      << "Note: gfx1250 b0-to-a0 selects its translation profile; equal revisions are identity.\n\n"
       << "Supported target names: ";
   print_supported_targets(std::cout);
   std::cout << ".\n";
@@ -254,6 +256,8 @@ void print_help() {
         return false;
       }
       options.output_mode = *mode;
+    } else if (arg == "--show-all-translations") {
+      options.show_all_translations = true;
     } else {
       if (!arg.empty() && arg.front() != '-') {
         if (options.saw_input) {
@@ -454,14 +458,15 @@ void print_code_object_report(std::ostream &os, std::string_view label,
   }
 }
 
-void print_instruction_translation_report(std::ostream &os, const TranslateOutput &output) {
+void print_instruction_translation_report(std::ostream &os, const TranslateOutput &output,
+                                          bool show_all_translations) {
   const auto &translations = output.instruction_translations;
   size_t shown = 0;
   size_t changed = 0;
   for (const auto &translation : translations) {
     if (translation.changed)
       ++changed;
-    if (should_show_translation(translation))
+    if (show_all_translations || should_show_translation(translation))
       ++shown;
   }
 
@@ -477,7 +482,7 @@ void print_instruction_translation_report(std::ostream &os, const TranslateOutpu
      << " semantic=" << count_semantic_lowerings(translations) << "\n";
 
   for (const auto &translation : translations) {
-    if (!should_show_translation(translation))
+    if (!show_all_translations && !should_show_translation(translation))
       continue;
 
     os << "  " << hex_offset(translation.source_offset) << " "
@@ -509,7 +514,7 @@ void print_text_report(std::ostream &os, const CliOptions &options,
 
   print_code_object_report(os, "source", output.source_report);
   print_code_object_report(os, "translated", output.translated_report);
-  print_instruction_translation_report(os, output);
+  print_instruction_translation_report(os, output, options.show_all_translations);
 
   os << "\ndiagnostics: " << output.diagnostics.size() << "\n";
   os << "errors: " << result.errors.size() << "\n";

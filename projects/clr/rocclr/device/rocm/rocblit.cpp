@@ -490,8 +490,9 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   uint32_t copyMask = 0;
   bool kUseRegularCopyApi = false;
   constexpr size_t kRetainCountThreshold = 8;
-  bool forceSDMA =
+  const bool requireSDMA =
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
+  bool forceSDMA = requireSDMA;
   HwQueueEngine engine = HwQueueEngine::Unknown;
 
   hsa_agent_t copyAgent, peerAgent;
@@ -558,9 +559,12 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
                 &gpu(), copyMask, engine);
       } else {
         ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-                "Failed to allocate SDMA engine for VirtualGPU %p, falling back to regular copy",
-                &gpu());
-        kUseRegularCopyApi = true;
+                "Failed to allocate SDMA engine for VirtualGPU %p", &gpu());
+        if (requireSDMA) {
+          status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+        } else {
+          kUseRegularCopyApi = true;
+        }
       }
     }
 
@@ -577,7 +581,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       status =
           Hsa::memory_async_copy_on_engine(dst, peerAgent, src, copyAgent, size, wait_events.size(),
                                            wait_events.data(), active, copyEngine, forceSDMA);
-    } else {
+    } else if (!requireSDMA) {
       kUseRegularCopyApi = true;
     }
   }
@@ -599,7 +603,11 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
     gpu().setFenceDirty(false);
   } else {
     gpu().Barriers().ResetCurrentSignal();
-    LogPrintfError("HSA copy failed with code %d, falling to Blit copy", status);
+    if (requireSDMA) {
+      LogPrintfError("Required SDMA copy failed with code %d", status);
+    } else {
+      LogPrintfError("HSA copy failed with code %d, falling to Blit copy", status);
+    }
   }
 
   return (status == HSA_STATUS_SUCCESS);
@@ -3251,11 +3259,14 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
 
   const Memory& srcRocMemory = gpuMem(srcMemory);
   const Memory& dstRocMemory = gpuMem(dstMemory);
+  const bool requireSDMA =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
   bool useLimitedP2pBlitWg = false;
   const bool useShaderCopyBuffer =
       useShaderCopyBufferPath(srcRocMemory, dstRocMemory, sizeIn[0], copyMetadata,
                               &useLimitedP2pBlitWg);
-  const bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ || useShaderCopyBuffer;
+  const bool useShaderCopyPath =
+      !requireSDMA && (setup_.disableHwlCopyBuffer_ || useShaderCopyBuffer);
   if (useLimitedP2pBlitWg) {
     constexpr uint32_t kLimitWgForKernelP2p = 16;
     blitWg = kLimitWgForKernelP2p;
@@ -3276,7 +3287,9 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
   }
 
   if (!result) {
-    if (DEBUG_CLR_DISABLE_FALLBACK) {
+    if (requireSDMA) {
+      LogError("SDMA copy failed and shader fallback is not permitted");
+    } else if (DEBUG_CLR_DISABLE_FALLBACK) {
       guarantee(false, "DMA copy failed and fallback path is disabled");
     } else {
       // Check CL_MEM_SVM_ATOMICS flag to see if we used system_coarse_segment_
