@@ -1675,6 +1675,13 @@ void VMin3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMin3NumF16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
     : Vop3("v_max3_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(800)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -1759,6 +1766,13 @@ void VMax3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VMax3NumF16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
@@ -1983,6 +1997,13 @@ void VMinimum3F16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMinimum3F16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
     : Vop3("v_maximum3_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(804)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2067,6 +2088,13 @@ void VMaximum3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VMaximum3F16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
@@ -2221,6 +2249,13 @@ void VMed3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VMed3NumF16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VMadU32Vop3::VMadU32Vop3(const MachineInst *inst)
@@ -2513,6 +2548,12 @@ void VMadU16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMadU16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
     : Vop3("v_xad_u32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(822)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2803,6 +2844,12 @@ void VFmaF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VFmaF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
     : Vop3("v_min3_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(826)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2887,6 +2934,12 @@ void VMin3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VMin3I16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
@@ -2975,6 +3028,12 @@ void VMin3U16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMin3U16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
     : Vop3("v_max3_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(828)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -3059,6 +3118,12 @@ void VMax3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VMax3I16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
@@ -3147,6 +3212,12 @@ void VMax3U16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMax3U16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
     : Vop3("v_med3_i16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(830)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -3233,6 +3304,12 @@ void VMed3I16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMed3I16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
     : Vop3("v_med3_u16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(831)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -3317,6 +3394,12 @@ void VMed3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VMed3U16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VLshlAddU64Vop3::VLshlAddU64Vop3(const MachineInst *inst)
@@ -3471,6 +3554,12 @@ void VMadI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VMadI16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
@@ -4663,6 +4752,13 @@ void VMinmaxNumF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMinmaxNumF16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
     : Vop3("v_maxmin_num_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(855)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4747,6 +4843,13 @@ void VMaxminNumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VMaxminNumF16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
@@ -4974,6 +5077,13 @@ void VMinimummaximumF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMinimummaximumF16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
     : Vop3("v_maximumminimum_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(859)),
@@ -5061,6 +5171,13 @@ void VMaximumminimumF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMaximumminimumF16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VAshrPkI8I32Vop3::VAshrPkI8I32Vop3(const MachineInst *inst)
     : Vop3("v_ashr_pk_i8_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(874)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -5135,6 +5252,13 @@ void VAshrPkI8I32Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VAshrPkI8I32Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VAshrPkU8I32Vop3::VAshrPkU8I32Vop3(const MachineInst *inst)
     : Vop3("v_ashr_pk_u8_i32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(875)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -5207,6 +5331,13 @@ void VAshrPkU8I32Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VAshrPkU8I32Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VMadNcU64U32Vop3::VMadNcU64U32Vop3(const MachineInst *inst)
