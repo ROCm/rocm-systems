@@ -148,8 +148,9 @@ public:
   ///
   /// Picks the call-envelope registers and computes the envelope word count
   /// without choosing layout or emitting bytes. On success, fills
-  /// `plan.is_probe_call`, `link_pair_base`, `target_pair_base`, `preserve_scc`,
-  /// `scc_temp`, `builder_clobbers`, and `before_word_count`, then returns true.
+  /// `plan.is_probe_call`, `link_pair_base`, `target_pair_base`, `scc_temp`,
+  /// `special_state_saves`, `builder_clobbers`, and `before_word_count`, then
+  /// returns true. (`preserve_scc`/`preserve_*` are inputs, read but not written.)
   ///
   /// Policy:
   ///   - Link pair is derived from @p cc via link_pair_for(); an unknown
@@ -162,8 +163,12 @@ public:
   ///     (saved before materialization, restored after), so it must avoid both
   ///     the live set and @p probe_body_clobbers. Extending this is deferred.
   ///   - EXEC/VCC/M0 are preserved when the corresponding plan.preserve_* flag is
-  ///     set (the orchestrator sets it from the probe's clobbers). Each gets its
-  ///     own dead SGPR temp (a pair for EXEC/VCC, single for M0) recorded in
+  ///     set. The orchestrator sets preserve_exec/preserve_vcc unconditionally
+  ///     (implicit v_cmp->VCC / v_cmpx->EXEC defs are invisible to the clobber
+  ///     summary, so they must always be saved) and gates preserve_m0 on the
+  ///     probe's clobbers; EXEC is additionally preserved here when the site spills
+  ///     (it is forced to -1 around the store/load). Each preserved register gets
+  ///     its own dead SGPR temp (a pair for EXEC/VCC, single for M0) recorded in
   ///     plan.special_state_saves, drawn from the same dead pool as the SCC temp.
   ///
   /// Returns false and writes a diagnostic naming the unavailable resource to

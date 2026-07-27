@@ -192,8 +192,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
   // Reject if either lane of the link pair is live at the anchor; saving a live
   // link pair is deferred.
   if (any_sgpr_in_range(live_at_anchor, kLinkPairBase, 2)) {
-    report(error_out, "probe-call resource planning: return-link pair s[30:31] is live at the "
-                      "anchor; cannot yet save a live link pair");
+    report(error_out, ("probe-call resource planning: return-link pair s[" +
+                       std::to_string(kLinkPairBase) + ":" + std::to_string(kLinkPairBase + 1) +
+                       "] is live at the anchor; cannot yet save a live link pair")
+                          .c_str());
     return false;
   }
 
