@@ -16,26 +16,35 @@ namespace rocr {
 namespace AMD {
 
 namespace {
-constexpr const char* kArchSectionNames[] = {"aie2", "aie2p"};
-
-/// @brief Returns the arch section (by name) if present, else @c nullptr, and sets out_name if not
+/// @brief Returns the arch section if present, else @c nullptr, and sets out_name if not
 /// @c nullptr.
-/// @param elf ELF image to search.
-/// @param out_name Set to the matched section's name on success.
-/// @return The matched section, or @c nullptr if none of the known arch sections are present.
+///
+/// The section is identified structurally by its @ref aie_section_header magic, not by a
+/// hardcoded name allowlist: the section's name IS the arch name, and which arch names are
+/// acceptable is the AIE agent's decision (validated in the loader against AieAgent::arch_name),
+/// not the parser's. This keeps a single source of truth for the accepted arch.
+///
+/// @param elf ELF image to search (buffer-backed via initAsBuffer).
+/// @param out_name Set to the matched section's name (the arch name) on success.
+/// @return The matched section, or @c nullptr if no section carries a valid AIE header.
 amd::elf::Section* FindArchSection(amd::elf::Image* elf, std::string* out_name) {
+  const auto* elf_base = reinterpret_cast<const uint8_t*>(elf->data());
+  const uint64_t elf_size = elf->size();
   for (size_t i = 0; i < elf->sectionCount(); ++i) {
     amd::elf::Section* sec = elf->section(i);
     if (!sec) continue;
-    const std::string name = sec->Name();
-    for (const char* arch : kArchSectionNames) {
-      if (name == arch) {
-        if (out_name) {
-          *out_name = name;
-        }
-        return sec;
-      }
+    const uint64_t off = sec->offset();
+    const uint64_t sz = sec->size();
+    // The magic lives at the section start; require the header to fit within the buffer before
+    // reading it, since offset()/size() come from the (possibly malformed) section header.
+    if (sz < sizeof(aie_section_header)) continue;
+    if (off > elf_size || sz > elf_size - off) continue;
+    if (reinterpret_cast<const aie_section_header*>(elf_base + off)->magic != kAieSectionMagic)
+      continue;
+    if (out_name) {
+      *out_name = sec->Name();
     }
+    return sec;
   }
   return nullptr;
 }
@@ -54,8 +63,6 @@ bool AieCode::IsAieCodeObject(const void* data, size_t size) {
 std::unique_ptr<AieCode> AieCode::Create(const void* data, size_t size) {
   if (!data || size == 0) return nullptr;
   auto code = std::unique_ptr<AieCode>(new AieCode());
-  code->elf_base_ = static_cast<const uint8_t*>(data);
-  code->elf_size_ = size;
   code->elf_.reset(amd::elf::NewElf64Image());
   // initAsBuffer keeps a pointer into the caller's buffer (no copy), which is
   // required since AieKernelInfo::insts_data/pdi_data point into that buffer.
@@ -65,21 +72,14 @@ std::unique_ptr<AieCode> AieCode::Create(const void* data, size_t size) {
 }
 
 bool AieCode::Parse() {
+  // FindArchSection has already bounds-checked the section header and matched the magic.
   amd::elf::Section* sec = FindArchSection(elf_.get(), &arch_section_name_);
   if (!sec) return false;
 
   section_size_ = sec->size();
-  if (section_size_ < sizeof(aie_section_header)) return false;
-  // Section has no direct data() accessor; compute the pointer into the ELF
-  // buffer from the section's file offset. Validate the section's [offset, size)
-  // lies within the caller's buffer before dereferencing — sec->offset()/size()
-  // come straight from the (possibly malformed) section header.
-  const uint64_t sec_offset = sec->offset();
-  if (sec_offset > elf_size_ || section_size_ > elf_size_ - sec_offset) return false;
-  section_base_ = elf_base_ + sec_offset;
+  section_base_ = reinterpret_cast<const uint8_t*>(elf_->data()) + sec->offset();
 
   const auto* hdr = reinterpret_cast<const aie_section_header*>(section_base_);
-  if (hdr->magic != kAieSectionMagic) return false;
   if (hdr->version_major != kAieSectionVersionMajor) return false;
   if (hdr->header_size + static_cast<uint64_t>(hdr->kernel_count) * hdr->kernel_entry_size >
       section_size_) {

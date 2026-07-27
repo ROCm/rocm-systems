@@ -317,9 +317,7 @@ class AieKernelSymbol final : public SymbolImpl {
   /// @param _symbol_name Kernel name.
   /// @param _descriptor_ptr Host pointer to the kernel's AieKernelDescriptor.
   /// @param _kernarg_size Kernel argument buffer size in bytes.
-  /// @param _num_cols Number of NPU columns the kernel uses.
-  AieKernelSymbol(const std::string& _symbol_name, uint64_t _descriptor_ptr, uint32_t _kernarg_size,
-                  uint32_t _num_cols = 1)
+  AieKernelSymbol(const std::string& _symbol_name, uint64_t _descriptor_ptr, uint32_t _kernarg_size)
       : SymbolImpl(true,  // is_loaded
                    HSA_SYMBOL_KIND_KERNEL,
                    "",  // module_name
@@ -327,16 +325,9 @@ class AieKernelSymbol final : public SymbolImpl {
                    true,  // is_definition
                    _descriptor_ptr),
         descriptor_ptr(_descriptor_ptr),
-        kernarg_size(_kernarg_size),
-        num_cols(_num_cols) {}
+        kernarg_size(_kernarg_size) {}
 
   bool GetInfo(hsa_symbol_info32_t symbol_info, void* value) override;
-
-  /// @brief Gets the size of the kernel argument buffer.
-  uint32_t GetKernargSize() const { return kernarg_size; }
-
-  /// @brief Gets the number of NPU columns used by this kernel.
-  uint32_t GetNumCols() const { return num_cols; }
 
   /// @brief Marks the kernel_object handle as visible (called at executable freeze).
   void SetFrozen() { frozen = true; }
@@ -345,8 +336,6 @@ class AieKernelSymbol final : public SymbolImpl {
   uint64_t descriptor_ptr;
   /// @brief Kernel argument buffer size in bytes.
   uint32_t kernarg_size;
-  /// @brief Number of NPU columns the kernel uses.
-  uint32_t num_cols;
   /// @brief KERNEL_OBJECT returns 0 until set at freeze (GPU-parity contract).
   bool frozen = false;
 };
@@ -471,9 +460,6 @@ class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject
   AieLoadedCodeObjectImpl(ExecutableImpl* owner_, hsa_agent_t agent_, const void* elf_data_,
                           size_t elf_size_)
       : ExecutableObject(owner_, agent_), elf_data(elf_data_), elf_size(elf_size_) {}
-
-  const void* ElfData() const { return elf_data; }
-  size_t ElfSize() const { return elf_size; }
 
   /// @brief Host-owned kernel descriptors; the kernel_object handles point at these.
   std::vector<std::unique_ptr<AMD::AieKernelDescriptor>> descriptors;
@@ -694,7 +680,8 @@ public:
   size_t id() { return id_; }
 
  private:
-  /// @brief Loads an AIE code object.
+  /// @brief Loads an AIE code object. Defined only on Linux (SRC_XDNA); the sole
+  /// caller is likewise gated, so this is never referenced on other platforms.
   ///
   /// @param agent AIE agent to load the code object for.
   /// @param data Pointer to the code object data.
