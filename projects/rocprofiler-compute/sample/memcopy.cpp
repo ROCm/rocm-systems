@@ -1,6 +1,3 @@
-// Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
-
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <iomanip>

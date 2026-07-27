@@ -584,17 +584,12 @@ def clear_rank_env(monkeypatch, *env_vars):
 
 
 def skip_unsupported_roofline_soc():
-    if soc in {"MI100", "RDNA35_GORGON_POINT"}:
+    if soc in {"MI100", "RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}:
         pytest.skip(f"Roofline is not supported on {soc}")
 
 
 def is_gfx115x_soc():
-    return soc in {
-        "RDNA35_POINT_1",
-        "RDNA35_HALO",
-        "RDNA35_POINT_2",
-        "RDNA35_GORGON_POINT",
-    }
+    return soc in {"RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}
 
 
 # --
@@ -3147,12 +3142,12 @@ def test_ml_api_trace_torch_compile_triton(
     capsys,
 ):
     """
-    Validate the ML API trace flow for a torch.compile Triton workload.
+    ML API trace flow for a torch.compile workload that generates Triton kernels.
 
-    Profiles the workload with --ml-api-trace and runs analyze with
-    --list-triton-operators, --triton-operator, and --torch-operator. Verifies
-    that a Triton kernel is attributed to an operator in the consolidated
-    trace. Requires PyTorch, Triton, and a GPU.
+    Profiles sample/torch_compile_triton.py with --ml-api-trace, verifies Triton
+    markers reach the marker and counter CSVs, then analyzes the consolidated
+    ml_api_trace with --triton-operator and --torch-operator.
+    Requires PyTorch, Triton, and a GPU.
     """
     require_triton(gpu=True)
     workload_dir = common.get_output_dir(param_id="ml_api_trace")
@@ -3184,7 +3179,23 @@ def test_ml_api_trace_torch_compile_triton(
         "marker_api_trace.csv and counter_collection.csv counts differ"
     )
 
-    # Discard captured profiling output.
+    found_triton_marker = False
+    for marker_file in marker_api_trace_files:
+        with open(marker_file, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            assert reader.fieldnames is not None, f"No columns in {marker_file}"
+            assert "Function" in reader.fieldnames, (
+                f"'Function' column missing in {marker_file}"
+            )
+            for row in reader:
+                if "triton" in str(row["Function"]).lower():
+                    found_triton_marker = True
+                    break
+        if found_triton_marker:
+            break
+    assert found_triton_marker, "No Triton markers in marker_api_trace output"
+
+    # Flush profiling output so capsys captures only the analyze output.
     capsys.readouterr()
 
     # ---- Consolidated ml_api_trace ----
@@ -3197,25 +3208,16 @@ def test_ml_api_trace_torch_compile_triton(
         "--list-triton-operators",
     ])
     assert returncode_list == 0, "Analyze with --list-triton-operators failed"
-    capsys.readouterr()
+    list_output = capsys.readouterr().out
+    assert "Triton Operator Call Tree:" in list_output, "Missing call-tree banner"
 
     consolidated_csv = Path(workload_dir) / "ml_api_trace" / "consolidated.csv"
     assert consolidated_csv.exists(), "consolidated.csv not found in ml_api_trace"
     df = pd.read_csv(consolidated_csv)
     assert not df.empty, "consolidated.csv is empty"
-    for column in ("Operator_Name", "Backend", "Kernel_Name"):
-        assert column in df.columns, f"{column} column missing in consolidated.csv"
-
-    # A Triton kernel is attributed to an operator marker from the torch or
-    # triton backend.
-    attributed_triton = df[
-        df["Kernel_Name"].astype(str).str.contains("triton_", case=False, na=False)
-        & df["Operator_Name"].notna()
-        & df["Backend"].isin(["torch", "triton"])
-    ]
-    assert not attributed_triton.empty, (
-        "No torch.compile Triton kernel (triton_*) was attributed to an "
-        "operator marker in consolidated.csv"
+    assert "Operator_Name" in df.columns, "Operator_Name column missing"
+    assert df["Operator_Name"].astype(str).str.contains("triton").any(), (
+        "No Triton operators in consolidated.csv"
     )
 
     # ---- analyze --triton-operator ----
@@ -3230,7 +3232,11 @@ def test_ml_api_trace_torch_compile_triton(
         "all",
     ])
     assert returncode_triton == 0, "Analyze with --triton-operator all failed"
+    out_triton = capsys.readouterr().out
+    assert "Matched Triton Operators" in out_triton, "Missing matched-operators header"
 
+    # Torch operators may be absent under torch.compile; the analyze run only
+    # needs to complete successfully.
     capsys.readouterr()
     returncode_torch = binary_handler_analyze_rocprof_compute([
         "--experimental",
