@@ -274,7 +274,7 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 [[nodiscard]] bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_anchor,
                                     const std::vector<SpillSlot> &vgpr_spills,
                                     uint32_t kernel_vgpr_count, SpillManager &spills,
-                                    rj_code_arch_t arch, std::vector<SgprSpillSlot> &out,
+                                    rj_code_arch_t arch, std::vector<SpillSlot> &out,
                                     uint16_t &out_bridge, std::string *error_out = nullptr);
 
 /// @brief Does a kernel that allocates @p kernel_sgpr_count SGPRs own the fixed

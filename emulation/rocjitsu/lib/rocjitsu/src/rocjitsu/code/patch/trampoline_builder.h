@@ -33,19 +33,19 @@ struct InlineAsmItem {
   std::vector<uint32_t> words;
 };
 
-/// @brief One saved register: a VGPR live at the anchor and clobbered by
-///        instrumentation, with its stable per-lane byte offset in the DBI
-///        spill zone (assigned by SpillManager).
+/// @brief One saved register live at the anchor and clobbered by instrumentation,
+///        with its stable per-lane byte offset in the DBI spill zone (assigned by
+///        SpillManager). @ref cls selects the emit path in build_spill_bracket: a
+///        VGPR spills straight to scratch; an SGPR is bridged through a VGPR lane
+///        (writelane/readlane) because SGPRs cannot reach scratch directly.
+///
+/// VGPR and SGPR slots are held in separate vectors (TrampolinePlan::vgpr_spills /
+/// sgpr_spills), so @ref cls is redundant with the owning vector but records the
+/// register file explicitly for the emitter and future classes (AccVGPR).
 struct SpillSlot {
-  uint16_t vgpr = 0;        ///< VGPR index to save before / restore after the call.
-  uint32_t byte_offset = 0; ///< Per-lane scratch byte offset for this slot.
-};
-
-/// @brief One saved SGPR, bridged through a VGPR lane (writelane/readlane)
-///        because SGPRs cannot reach scratch directly. Uniform, so lane 0.
-struct SgprSpillSlot {
-  uint16_t sgpr = 0;        ///< SGPR index to save/restore.
-  uint32_t byte_offset = 0; ///< Per-lane scratch byte offset.
+  RegClass cls = RegClass::VGPR; ///< Register file: VGPR (direct) or SGPR (bridged).
+  uint16_t reg = 0;              ///< Register index to save before / restore after the call.
+  uint32_t byte_offset = 0;      ///< Per-lane scratch byte offset for this slot.
 };
 
 /// @brief One special register (EXEC/VCC/M0) saved to a dead SGPR temp before the
@@ -115,7 +115,7 @@ struct TrampolinePlan {
   std::vector<SpillSlot> vgpr_spills;
 
   /// SGPRs to save/restore, each bridged through `spill_bridge_vgpr`.
-  std::vector<SgprSpillSlot> sgpr_spills;
+  std::vector<SpillSlot> sgpr_spills;
 
   /// Dead-at-anchor VGPR bridging SGPR<->scratch. Valid iff sgpr_spills non-empty.
   uint16_t spill_bridge_vgpr = 0;

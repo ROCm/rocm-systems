@@ -18,6 +18,7 @@
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/except.h"
 
 #include <algorithm>
 #include <array>
@@ -127,7 +128,7 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
 
 // VGPR-count encoding granule for @p arch. Descriptor VGPR count =
 // (GRANULATED_WORKITEM_VGPR_COUNT + 1) * granule. Matches LLVM's
-// AMDGPUBaseInfo::getVGPREncodingGranule().
+// AMDGPUBaseInfo::getVGPREncodingGranule(). Throws for an unmodeled arch.
 uint32_t vgpr_encoding_granule(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_GFX1250:
@@ -141,7 +142,7 @@ uint32_t vgpr_encoding_granule(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
     return 8;
   default:
-    return 4;
+    throw util::UnimplementedInst("VGPR encoding granule for target architecture");
   }
 }
 
@@ -341,7 +342,7 @@ bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_cod
              " exceeds the scratch instruction offset field";
       ok = false;
     } else {
-      out.push_back(SpillSlot{ref.index, *off});
+      out.push_back(SpillSlot{RegClass::VGPR, ref.index, *off});
     }
   });
   if (!ok) {
@@ -354,7 +355,7 @@ bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_cod
 
 bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_anchor,
                       const std::vector<SpillSlot> &vgpr_spills, uint32_t kernel_vgpr_count,
-                      SpillManager &spills, rj_code_arch_t arch, std::vector<SgprSpillSlot> &out,
+                      SpillManager &spills, rj_code_arch_t arch, std::vector<SpillSlot> &out,
                       uint16_t &out_bridge, std::string *error_out) {
   out.clear();
 
@@ -390,7 +391,7 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_a
     if (live_at_anchor.contains(RegisterRef{RegClass::VGPR, v, 1}))
       continue;
     if (std::any_of(vgpr_spills.begin(), vgpr_spills.end(),
-                    [v](const SpillSlot &s) { return s.vgpr == v; }))
+                    [v](const SpillSlot &s) { return s.reg == v; }))
       continue;
     bridge = v;
     break;
@@ -415,7 +416,7 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_a
              " exceeds the scratch instruction offset field";
       ok = false;
     } else {
-      out.push_back(SgprSpillSlot{ref.index, *off});
+      out.push_back(SpillSlot{RegClass::SGPR, ref.index, *off});
     }
   });
   if (!ok) {
