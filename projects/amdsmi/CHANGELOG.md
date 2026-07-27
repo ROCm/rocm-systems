@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Bumped the library major version to 27.0.0** (breaking).  
+  - The shared library SONAME is now `libamd_smi.so.27`. Consumers linked against `libamd_smi.so.26` must relink; no source changes are required beyond the API changes listed elsewhere in this release.
+
 - **Restructured AMD SMI C++ tests into unit and functional suites**.  
   - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
   - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
@@ -40,8 +43,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A process was attributed to a GPU whenever it had a KFD context on that GPU, so a job with queues on a single GPU appeared under every GPU. Attribution now uses the process's active KFD queues plus any GPU where it holds a non-zero VRAM allocation, so a process is listed only against the GPUs it actually uses.
 
 - **Fixed `amd-smi` hanging in `amdsmi_init()` on UALink systems when the IFoE driver is unresponsive**.  
-  - `AMDSmiGPUDevice` opened the per-GPU IFoE/UALoE generic-netlink session in its constructor, so `amdsmi_init(AMDSMI_INIT_AMD_GPUS)` (and every CLI verb) blocked in an uninterruptible netlink wait when the Broadcom IFoE driver was wedged, even for queries that never use fabric data.
-  - The UALoE session is now opened lazily on the first fabric query via `get_ualoe_handle()`, so initialization and non-fabric queries no longer touch the IFoE driver.
+  - `amdsmi_init()` (and every CLI command) opened a per-GPU IFoE/UALoE fabric session up front, so it blocked indefinitely when the Broadcom IFoE driver was unresponsive, even for queries that never use fabric data.
+  - The fabric session is now opened only on the first fabric query, so initialization and non-fabric queries no longer touch the IFoE driver.
 
 ## amd_smi_lib for ROCm 7.14.0
 
