@@ -43,11 +43,11 @@ using amd::smi::AMDSmiSocket;
 using amd::smi::WSLGPUBackend;
 
 // IsActive() is false before any TryPopulate() call.
-TEST(GpuUnit,InactiveByDefault) { EXPECT_FALSE(WSLGPUBackend::IsActive()); }
+TEST(GpuUnit, InactiveByDefault) { EXPECT_FALSE(WSLGPUBackend::IsActive()); }
 
 // TryPopulate() on a machine without /dev/dxg returns NOT_SUPPORTED.
 // Skipped on real WSL machines where /dev/dxg is present.
-TEST(GpuUnit,TryPopulateWithoutDxg) {
+TEST(GpuUnit, TryPopulateWithoutDxg) {
   if (access("/dev/dxg", F_OK) == 0) {
     GTEST_SKIP() << "/dev/dxg present — skipped on WSL machines";
   }
