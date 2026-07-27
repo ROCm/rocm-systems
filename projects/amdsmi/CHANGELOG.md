@@ -13,6 +13,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Field access simplifies from `fabric_info.fabric_version.v1.<field>` to `fabric_info.v1.<field>`, and `fabric_info.version` becomes `fabric_version`.
   - The change is ABI-preserving: field offsets and the overall structure size are unchanged. The Python `amdsmi_get_gpu_fabric_info()` dictionary keys are also unchanged.
 
+- **Bumped the library major version to 27.0.0** (breaking).  
+  - The shared library SONAME is now `libamd_smi.so.27`. Consumers linked against `libamd_smi.so.26` must relink; no source changes are required beyond the API changes listed elsewhere in this release.
+
 - **Restructured AMD SMI C++ tests into unit and functional suites**.  
   - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
   - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
