@@ -8,6 +8,7 @@ Tests LimitedSet, CounterFile, and the bin-packing helpers used by
 perfmon_coalesce — no GPU hardware required.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -40,6 +41,40 @@ PERFMON_CONFIG = {
     "GDS": 4,
 }
 
+# One unique sentinel counter per metric table, so the counter set returned by
+# detect_counters() reveals exactly which tables were selected.
+BASELINE_SENTINEL = "SQ_BASELINE_SENTINEL"  # table 201, outside block 30
+TABLE_3012_SENTINEL = "TCC_BOTTLENECK_SENTINEL"  # block 30, table 3012
+TABLE_3013_SENTINEL = "TCC_EA_SENTINEL"  # block 30, table 3013
+ALL_SENTINELS = {BASELINE_SENTINEL, TABLE_3012_SENTINEL, TABLE_3013_SENTINEL}
+
+BASELINE_ANALYSIS_CONFIG = f"""\
+Panel Config:
+  id: 200
+  data source:
+  - metric_table:
+      id: 201
+      metric:
+        Baseline:
+          value: SUM({BASELINE_SENTINEL})
+"""
+
+MEMBW_ANALYSIS_CONFIG = f"""\
+Panel Config:
+  id: 3000
+  data source:
+  - metric_table:
+      id: 3012
+      metric:
+        L2 Bottleneck Detection Indicators:
+          value: SUM({TABLE_3012_SENTINEL})
+  - metric_table:
+      id: 3013
+      metric:
+        EA Interface:
+          value: SUM({TABLE_3013_SENTINEL})
+"""
+
 
 @pytest.fixture
 def perfmon_config():
@@ -49,6 +84,39 @@ def perfmon_config():
 @pytest.fixture
 def empty_counter_file(perfmon_config):
     return CounterFile("0", perfmon_config)
+
+
+@pytest.fixture
+def membw_analysis_soc(tmp_path: Path) -> OmniSoC_Base:
+    config_root = tmp_path / "gfx950"
+    config_root.mkdir()
+    (config_root / "0200_baseline.yaml").write_text(
+        BASELINE_ANALYSIS_CONFIG,
+        encoding="utf-8",
+    )
+    (config_root / "3000_mem_bw.yaml").write_text(
+        MEMBW_ANALYSIS_CONFIG,
+        encoding="utf-8",
+    )
+
+    args = SimpleNamespace(
+        config_dir=tmp_path,
+        filter_blocks=[],
+        membw_analysis=False,
+        roof_only=False,
+        set_selected=None,
+    )
+    machine_specs = SimpleNamespace(
+        gpu_arch="gfx950",
+        gpu_series="MI350",
+        l2_banks=1,
+        num_xcd=1,
+        rocminfo_lines=None,
+    )
+    with patch("rocprof_compute_soc.soc_base.console_debug"):
+        soc = OmniSoC_Base(args, machine_specs)
+    soc.set_arch("gfx950")
+    return soc
 
 
 def _make_soc(perfmon_config, arch="gfx908", num_xcd=1, l2_banks=4):
@@ -393,3 +461,72 @@ def test_filter_token_known_alias_resolves_without_crash(monkeypatch):
         _fake_soc_for_filter_token(), "lds", {}, "/cfg", texts
     )
     assert texts == []
+
+
+# =============================================================================
+# I. Memory Bandwidth Analysis counter selection
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("membw_analysis", "filter_blocks", "expected_sentinels"),
+    [
+        pytest.param(
+            False,
+            [],
+            {BASELINE_SENTINEL},
+            id="flag_off_drops_the_whole_block_30_file",
+        ),
+        pytest.param(
+            True,
+            [],
+            {BASELINE_SENTINEL, TABLE_3012_SENTINEL, TABLE_3013_SENTINEL},
+            id="flag_on_no_filter_keeps_every_table",
+        ),
+        pytest.param(
+            True,
+            ["30"],
+            {TABLE_3012_SENTINEL, TABLE_3013_SENTINEL},
+            id="block_30_keeps_both_block_30_tables_and_drops_baseline",
+        ),
+        pytest.param(
+            True,
+            ["30.12"],
+            {TABLE_3012_SENTINEL},
+            id="block_30_12_keeps_only_table_3012",
+        ),
+        pytest.param(
+            True,
+            ["30.13"],
+            {TABLE_3013_SENTINEL},
+            id="block_30_13_keeps_only_table_3013",
+        ),
+        pytest.param(
+            True,
+            ["2", "30.13"],
+            {BASELINE_SENTINEL, TABLE_3013_SENTINEL},
+            id="ordinary_block_and_membw_table_are_combined",
+        ),
+    ],
+)
+def test_membw_analysis_counter_selection(
+    membw_analysis_soc: OmniSoC_Base,
+    membw_analysis: bool,
+    filter_blocks: list[str],
+    expected_sentinels: set[str],
+) -> None:
+    """--membw-analysis admits block 30; --block then narrows within it.
+
+    Each config table in the fixture owns one sentinel counter, so the selected
+    sentinels identify exactly which tables survived. The mirror 30.12 and 30.13
+    cases prove selection is by table id, while the mixed case proves a
+    memory-bandwidth table composes with an ordinary report block.
+    """
+    args = membw_analysis_soc.get_args()
+    args.membw_analysis = membw_analysis
+    args.filter_blocks = filter_blocks
+
+    counters, effective_filter_blocks = membw_analysis_soc.detect_counters()
+
+    assert counters & ALL_SENTINELS == expected_sentinels
+    assert effective_filter_blocks == filter_blocks
