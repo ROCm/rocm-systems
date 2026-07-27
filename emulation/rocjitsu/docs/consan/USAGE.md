@@ -74,7 +74,10 @@ static site, three-dimensional workgroup, and wave-owner identity. Either
 table reaching its bounded 256-probe limit is a typed, report-wide
 dynamic-incomplete saturation signal; it is never silent cross-identity reuse.
 Caller-owned size-derived buffers retain single-bank behavior with exact
-dispatch/workgroup qualification. A clean replay remains inconclusive.
+dispatch/workgroup qualification. Both automatic and caller-owned layouts
+capture the complete 32-bit `(workgroup_x, workgroup_y, workgroup_z)` tuple at
+kernel entry; later probes never assume descriptor SGPRs or RDNA launch TTMPs
+still contain launch values. A clean replay remains inconclusive.
 
 Ordinary runs do not need a register number, report-buffer size, barrier
 switch, atomic switch, or sampling setting. The hook logs
@@ -245,7 +248,10 @@ overrides, not ordinary setup:
 - `RJ_CONSAN_MOI_INIT_OWNER_EPOCH`
 
 Overrides remain subject to ownership, alignment, liveness, overlap, and
-descriptor checks. They cannot force an unsafe plan. See
+descriptor checks. They cannot force an unsafe plan. For Record/Replay,
+`RJ_CONSAN_MOI_OWNER_VGPR` and `RJ_CONSAN_MOI_EPOCH_VGPR` are one paired
+override: setting only one is rejected as unsupported instead of silently
+dropping instrumentation. See
 [SPILLING.md](SPILLING.md).
 
 ## Malformed-input guard

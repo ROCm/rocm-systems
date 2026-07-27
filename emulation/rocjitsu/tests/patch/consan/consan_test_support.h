@@ -123,6 +123,26 @@ ConSanOptions moi_options(ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay
   return options;
 }
 
+size_t non_entry_prologue_patch_count(const ConSanResult &result) {
+  return std::ranges::count_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind != ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
+           patch.kind != ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+  });
+}
+
+const ConSanPatchInfo &only_non_entry_prologue_patch(const ConSanResult &result) {
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind != ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
+           item.kind != ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+  });
+  if (patch == result.patches.end() || non_entry_prologue_patch_count(result) != 1u) {
+    ADD_FAILURE() << "expected exactly one non-entry-prologue patch";
+    static const ConSanPatchInfo invalid{};
+    return invalid;
+  }
+  return *patch;
+}
+
 ConSanRegisterRequest vgpr_request(uint16_t count, uint16_t current_allocation_count,
                                    uint16_t max_referenced_count) {
   ConSanRegisterRequest request;
@@ -892,7 +912,7 @@ std::vector<uint8_t> make_cdna4_lds_code_object(std::span<const uint32_t> text_w
                                                 std::string_view kernel_name = "lds_probe",
                                                 uint32_t vgpr_granulated = 0u,
                                                 bool uses_dynamic_stack = false,
-                                                uint32_t workgroup_id_dimension_mask = 0u,
+                                                uint32_t workgroup_id_dimension_mask = 7u,
                                                 uint32_t group_segment_fixed_size = 0u) {
   std::vector<uint8_t> image = make_rdna4_lds_code_object(
       text_words, kernel_name, vgpr_granulated, /*wave32=*/false, uses_dynamic_stack,
@@ -906,7 +926,7 @@ std::vector<uint8_t> make_cdna3_lds_code_object(std::span<const uint32_t> text_w
                                                 std::string_view kernel_name = "lds_probe",
                                                 uint32_t vgpr_granulated = 0u,
                                                 bool uses_dynamic_stack = false,
-                                                uint32_t workgroup_id_dimension_mask = 0u,
+                                                uint32_t workgroup_id_dimension_mask = 7u,
                                                 uint32_t group_segment_fixed_size = 0u) {
   std::vector<uint8_t> image = make_rdna4_lds_code_object(
       text_words, kernel_name, vgpr_granulated, /*wave32=*/false, uses_dynamic_stack,
@@ -2234,7 +2254,7 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().kind, expected_kind);
   EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
-  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
   expect_bounded_static_record_replay_probe_size(result.patches.front().original_size);
 }

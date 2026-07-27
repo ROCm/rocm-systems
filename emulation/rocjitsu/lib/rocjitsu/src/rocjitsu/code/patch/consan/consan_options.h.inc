@@ -208,6 +208,19 @@ struct ConSanMoiPersistentWorkgroupRegisters {
   auto operator<=>(const ConSanMoiPersistentWorkgroupRegisters &) const = default;
 };
 
+/// Per-workitem private offsets holding the exact Record/Replay workgroup
+/// tuple when no lifetime-safe persistent register window exists.
+struct ConSanMoiPersistentWorkgroupPrivateOffsets {
+  std::optional<uint32_t> x;
+  std::optional<uint32_t> y;
+  std::optional<uint32_t> z;
+
+  [[nodiscard]] bool empty() const { return !x && !y && !z; }
+  [[nodiscard]] bool complete() const { return x && y && z; }
+
+  auto operator<=>(const ConSanMoiPersistentWorkgroupPrivateOffsets &) const = default;
+};
+
 /// Persistent vector state selected for one connected set of owning kernels.
 /// A shared helper connects all of its owners because its instruction stream
 /// must use one tuple, while unrelated kernels may use different safe tails.
@@ -434,11 +447,12 @@ struct ConSanOptions {
   std::optional<uint16_t> moi_persistent_owner_sgpr;
   std::optional<uint16_t> moi_persistent_epoch_sgpr;
   std::optional<uint16_t> moi_persistent_workgroup_key_sgpr;
-  /// Exact persistent workgroup coordinates used by automatic banked
-  /// Record/Replay. All three registers are assigned together; absent launch
+  /// Exact persistent workgroup coordinates used by every Record/Replay
+  /// layout. All three registers are assigned together; absent launch
   /// dimensions are initialized to zero at kernel entry.
   ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_sgprs;
   ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
+  ConSanMoiPersistentWorkgroupPrivateOffsets moi_record_replay_workgroup_private_offsets;
   /// Persistent packed workgroup identity used only by Inline Shadow. Launch
   /// SGPRs or RDNA TTMPs are copied into this VGPR at entry because they are
   /// not stable after arbitrary guest code.

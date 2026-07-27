@@ -849,7 +849,7 @@ TEST(ConSanMoi, RecordReplayCaptureRejectsPartialBarrierEpochMembership) {
   EXPECT_EQ(diagnostics[0].kind, 77u);
 }
 
-TEST(ConSanMoi, RecordReplayBarrierPrefersPersistentEpochOverPrivateRecords) {
+TEST(ConSanMoi, RecordReplayBarrierRecordsUsePersistentEpochState) {
   constexpr uint32_t kBarrierWait = 0xBF940000u;
   const std::array<uint32_t, 5> text_words = {
       0xD8340000u,
@@ -879,13 +879,10 @@ TEST(ConSanMoi, RecordReplayBarrierPrefersPersistentEpochOverPrivateRecords) {
   EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                &ConSanPatchInfo::kind),
-            0);
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
-                               &ConSanPatchInfo::kind),
             1);
 }
 
-TEST(ConSanMoi, RecordReplayBarrierOnlyObjectSkipsAutomaticPersistentState) {
+TEST(ConSanMoi, RecordReplayBarrierOnlyObjectCapturesPersistentEntryState) {
   constexpr uint32_t kBarrierWait = 0xBF940000u;
   const std::array<uint32_t, 2> text_words = {
       kBarrierWait,
@@ -904,21 +901,19 @@ TEST(ConSanMoi, RecordReplayBarrierOnlyObjectSkipsAutomaticPersistentState) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
-            0);
+            1);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                &ConSanPatchInfo::kind),
             1);
+  EXPECT_TRUE(result.resolved_moi_owner_vgpr);
+  EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
+  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [](const auto &plan) {
     return plan.site_kind == ConSanResourceSiteKind::Barrier;
   }));
-  EXPECT_NE(
-      std::ranges::find(
-          result.warnings,
-          "ConSan MOI record/replay uses probe-local owner derivation without access records"),
-      result.warnings.end());
 }
 
-TEST(ConSanMoi, RecordReplayAtomicOnlyObjectUsesProbeLocalOwner) {
+TEST(ConSanMoi, RecordReplayAtomicOnlyObjectCapturesPersistentEntryState) {
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
@@ -936,14 +931,10 @@ TEST(ConSanMoi, RecordReplayAtomicOnlyObjectUsesProbeLocalOwner) {
             1);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
-            0);
-  EXPECT_FALSE(result.resolved_moi_owner_vgpr);
-  EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
-  EXPECT_NE(
-      std::ranges::find(
-          result.warnings,
-          "ConSan MOI record/replay uses probe-local owner derivation without access records"),
-      result.warnings.end());
+            1);
+  EXPECT_TRUE(result.resolved_moi_owner_vgpr);
+  EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
+  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
 }
 
 TEST(ConSanMoi, RecordReplayAtomicAcquireSuppressesSameEpochConflict) {
@@ -1556,6 +1547,48 @@ TEST(ConSanMoi, RecordReplayDoesNotCompareAccessesFromDifferentDispatches) {
   EXPECT_FALSE(replay.conflict);
   EXPECT_EQ(replay.processed_access_count, 2u);
   EXPECT_EQ(header.diagnostic_count, 0u);
+}
+
+TEST(ConSanMoi, CallerOwnedSingleBankReplayKeepsExactWorkgroupsDistinct) {
+  // Values above 16 bits ensure the legacy packed key cannot satisfy this
+  // exact-tuple regression by accident.
+  const auto replay_with_second_workgroup = [](std::array<uint32_t, 3> second_workgroup) {
+    ConSanMoiReportHeader header = make_consan_moi_report_header(
+        /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
+        /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+        /*sampled_watchpoint_capacity=*/0);
+    header.access_record_count = 2;
+
+    std::array<ConSanMoiAccessRecord, 2> records{};
+    records[0].generation = 7;
+    records[0].workgroup_x = 70'000u;
+    records[0].workgroup_y = 80'000u;
+    records[0].workgroup_z = 90'000u;
+    records[0].wave_id = 0;
+    records[0].event_index = 0;
+    records[0].instruction_offset = 0x10;
+    records[0].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    records[0].lds_byte_count = 4;
+    records[0].cell_count = 1;
+
+    records[1] = records[0];
+    records[1].workgroup_x = second_workgroup[0];
+    records[1].workgroup_y = second_workgroup[1];
+    records[1].workgroup_z = second_workgroup[2];
+    records[1].wave_id = 1;
+    records[1].event_index = 1;
+    records[1].instruction_offset = 0x20;
+    records[1].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read);
+
+    std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+    std::array<uint64_t, 1> shadow{};
+    return consan_moi_record_replay_access_records(header, records, diagnostics, shadow).conflict;
+  };
+
+  EXPECT_FALSE(replay_with_second_workgroup({70'001u, 80'000u, 90'000u}));
+  EXPECT_FALSE(replay_with_second_workgroup({70'000u, 80'001u, 90'000u}));
+  EXPECT_FALSE(replay_with_second_workgroup({70'000u, 80'000u, 90'001u}));
+  EXPECT_TRUE(replay_with_second_workgroup({70'000u, 80'000u, 90'000u}));
 }
 
 TEST(ConSanMoi, RecordReplayBarrierEventsAdvanceOnlyTheirWorkgroup) {

@@ -76,6 +76,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     std::optional<VgprSpillSequence> spill;
     std::optional<InlineSgprSpillSequence> scalar_spill;
     std::optional<MoiPrivateRecordOwnerPlan> private_owner;
+    std::optional<MoiPrivateEpochLayout> private_layout;
   };
   std::vector<PlannedAtomicRecord> selected_candidates;
   selected_candidates.reserve(max_candidates);
@@ -154,23 +155,42 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
+    std::optional<MoiPrivateEpochLayout> private_layout;
+    if (options.automatic_moi_private_epoch) {
+      private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
+                                                      /*include_owner=*/options.moi_owner_source ==
+                                                          ConSanMoiOwnerSource::WorkitemId,
+                                                      /*include_workgroup_key=*/false,
+                                                      /*include_record_replay_workgroup=*/true);
+      if (!private_layout)
+        continue;
+      candidate_options.moi_record_replay_workgroup_private_offsets =
+          private_layout->record_replay_workgroup_offsets;
+    }
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch found no common transient SGPR assignment");
       continue;
     }
+    if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
+                                                        resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI atomic record patch found no common entry workgroup assignment");
+      continue;
+    }
     std::optional<MoiPrivateRecordOwnerPlan> private_owner;
     if (moi_record_uses_private_owner(candidate_options)) {
-      private_owner = resolve_moi_private_record_owner(bytes, result, *resources, result.warnings);
+      private_owner =
+          resolve_moi_private_record_owner(bytes, *resources, *private_layout, result.warnings);
       if (!private_owner)
         continue;
     }
     std::optional<uint32_t> private_layout_base;
     // Keep this as a separate assignment: GCC 13 otherwise diagnoses the
     // equivalent conditional optional construction as maybe-uninitialized.
-    if (private_owner)
-      private_layout_base = private_owner->private_state_end;
+    if (private_layout)
+      private_layout_base = private_layout->ephemeral_base;
     std::optional<VgprSpillSequence> spill;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
         moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
@@ -188,7 +208,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
     }
     selected_candidates.push_back({std::move(planned_candidate), *resources, address_plan,
-                                   std::move(spill), std::move(scalar_spill), private_owner});
+                                   std::move(spill), std::move(scalar_spill), private_owner,
+                                   private_layout});
   }
   // Do not prune a release based on module-local absence of an acquire. Real
   // applications can split producers and consumers across code objects, and
@@ -209,10 +230,24 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
           it->second = std::max(it->second, planned.scalar_spill->total_private_bytes);
       }
     }
+    if (planned.private_layout) {
+      for (uint64_t descriptor_offset : planned.resources.owner_descriptor_file_offsets) {
+        auto [it, inserted] =
+            private_requirements.emplace(descriptor_offset, planned.private_layout->ephemeral_base);
+        if (!inserted)
+          it->second = std::max(it->second, planned.private_layout->ephemeral_base);
+      }
+    }
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     ConSanOptions candidate_options = options;
+    if (planned.private_layout) {
+      candidate_options.moi_record_replay_workgroup_private_offsets =
+          planned.private_layout->record_replay_workgroup_offsets;
+    }
     if (apply_moi_transient_sgpr_assignment(candidate_options,
-                                            planned.resources.owner_descriptor_file_offsets)) {
+                                            planned.resources.owner_descriptor_file_offsets) &&
+        apply_record_replay_entry_workgroup_assignment(
+            candidate_options, planned.resources.owner_descriptor_file_offsets)) {
       note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
     }
   }
@@ -247,10 +282,20 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     const uint64_t return_text_offset = physical_anchor_offset + site.size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    if (planned.private_layout) {
+      candidate_options.moi_record_replay_workgroup_private_offsets =
+          planned.private_layout->record_replay_workgroup_offsets;
+    }
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI atomic record patch lost its transient SGPR assignment");
+      return;
+    }
+    if (!apply_record_replay_entry_workgroup_assignment(
+            candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI atomic record patch lost its entry workgroup assignment");
       return;
     }
     uint32_t guest_instruction_offset = 0;
@@ -333,13 +378,18 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
-    if (planned.private_owner) {
-      info.persistent_owner_private_offset = planned.private_owner->offset;
-      info.persistent_private_state_end = planned.private_owner->private_state_end;
+    if (planned.private_layout) {
+      info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
+      info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+      info.persistent_record_replay_workgroup_private_offsets =
+          planned.private_layout->record_replay_workgroup_offsets;
+      info.persistent_private_state_end = planned.private_layout->ephemeral_base;
+      info.required_private_segment_size = planned.private_layout->ephemeral_base;
     }
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
-      info.required_private_segment_size = planned.spill->total_private_bytes;
+      info.required_private_segment_size =
+          std::max(info.required_private_segment_size, planned.spill->total_private_bytes);
       note_dynamic_stack_private_requirement(info, &*planned.spill);
     }
     if (planned.scalar_spill) {

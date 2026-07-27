@@ -296,11 +296,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
       return narrow_current();
     };
     const auto narrow_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
-      if (!record.load(offset, value) ||
-          !append_compare_moi_report_dispatch_id_word(words, options, value, expected, high_word,
-                                                      arch,
-                                                      ConSanMoiLiteralDispatchIdPolicy::
-                                                          AnyArchitecture)) {
+      if (!record.load(offset, value) || !append_compare_moi_report_dispatch_id_word(
+                                             words, options, value, expected, high_word, arch,
+                                             ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
         return false;
       }
       return narrow_current();
@@ -860,13 +858,13 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     }
     const uint64_t representative_descriptor =
         sequence.execution_owners.front().descriptor_file_offset;
-    candidates.push_back({&sequence,
-                          {(sequence.in_kernel ? "kernel:" : "function:") + sequence.container_name,
-                           sequence.in_kernel, completing_sites.front(), representative_descriptor,
-                           container_entry_text_offset, container_code_size,
-                           container_text_file_offset},
-                          std::move(windows),
-                          uses_cluster_workgroup_id});
+    candidates.push_back(
+        {&sequence,
+         {(sequence.in_kernel ? "kernel:" : "function:") + sequence.container_name,
+          sequence.in_kernel, completing_sites.front(), representative_descriptor,
+          container_entry_text_offset, container_code_size, container_text_file_offset},
+         std::move(windows),
+         uses_cluster_workgroup_id});
   }
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -1594,8 +1592,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       if (!event_kind)
         continue;
       std::string reason;
-      const auto semantics = sampled_atomic_semantics_for_site(
-          result, sync_index, name, in_kernel, normalized, reason);
+      const auto semantics = sampled_atomic_semantics_for_site(result, sync_index, name, in_kernel,
+                                                               normalized, reason);
       if (!semantics) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped " + std::string(name) +
                                      ": " + reason);
@@ -1603,9 +1601,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       }
       const ConSanSyncEvent *event =
           sync_index.event(ConSanSyncEventKind::Atomic, name, in_kernel, site.text_offset);
-      if (descriptor &&
-          (event == nullptr || event->execution_owners.size() != 1u ||
-           event->execution_owners.front().descriptor_file_offset != *descriptor))
+      if (descriptor && (event == nullptr || event->execution_owners.size() != 1u ||
+                         event->execution_owners.front().descriptor_file_offset != *descriptor))
         descriptor.reset();
       candidates.push_back({{(in_kernel ? "kernel:" : "function:") + std::string(name), normalized,
                              descriptor, *event_kind},
@@ -1645,11 +1642,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
             std::tie(candidate.semantics.role, candidate.semantics.scope,
                      candidate.semantics.outcome, candidate.semantics.byte_count,
                      candidate.semantics.descriptor, candidate.semantics.cas_failure_descriptor)) {
-      result.errors.emplace_back(
-          "ConSan MOI sampled atomic site at file offset " +
-          std::to_string(candidate.atomic.site.file_offset) +
-          " was decoded inconsistently through aliases '" + retained.atomic.container_name +
-          "' and '" + candidate.atomic.container_name + "'");
+      result.errors.emplace_back("ConSan MOI sampled atomic site at file offset " +
+                                 std::to_string(candidate.atomic.site.file_offset) +
+                                 " was decoded inconsistently through aliases '" +
+                                 retained.atomic.container_name + "' and '" +
+                                 candidate.atomic.container_name + "'");
       return;
     }
     retained.atomic.kernel_descriptor_file_offset.reset();
@@ -2218,15 +2215,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
   const auto persistent_workgroup_sources =
       record_replay_persistent_workgroup_sources(options, arch);
-  ConSanMoiWorkgroupSources workgroup_sources =
-      persistent_workgroup_sources.value_or(ConSanMoiWorkgroupSources{});
-  if (!persistent_workgroup_sources && candidate.kernel_descriptor_file_offset) {
-    const auto sources = moi_descriptor_workgroup_sources(
-        bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
-    if (!sources)
-      return std::nullopt;
-    workgroup_sources = record_replay_workgroup_sources(*sources, options, arch);
+  if (!persistent_workgroup_sources) {
+    errors.emplace_back(
+        "ConSan MOI Record/Replay fence requires one exact entry-captured workgroup tuple");
+    return std::nullopt;
   }
+  const ConSanMoiWorkgroupSources workgroup_sources = *persistent_workgroup_sources;
 
   std::vector<uint32_t> words;
   const std::optional<uint16_t> vgpr_msb_mode =

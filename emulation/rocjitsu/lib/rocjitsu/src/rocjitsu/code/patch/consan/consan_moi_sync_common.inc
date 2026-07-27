@@ -586,30 +586,12 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                                        rj_code_arch_t arch) {
   if (!source.is_well_formed())
     return false;
-  const auto operand = source.operand();
-  if (!operand) {
+  if (!source.has_value()) {
     const auto zero = instrumentation::build_v_mov_b32_literal(destination_vgpr, 0u, arch);
     InstructionSequence sequence(words);
     return sequence.emit(zero);
   }
-  words.push_back(build_v_mov_b32_e32(destination_vgpr, *operand, arch));
-  if (source.mask_low_16) {
-    const auto left = instrumentation::build_v_lshlrev_b32(
-        destination_vgpr, scalar_positive_inline_u32(16), destination_vgpr, arch);
-    const auto right = instrumentation::build_v_lshrrev_b32(
-        destination_vgpr, scalar_positive_inline_u32(16), destination_vgpr, arch);
-    InstructionSequence sequence(words);
-    if (!sequence.emit_all(left, right))
-      return false;
-  }
-  if (source.shift_right_16) {
-    const auto shift = instrumentation::build_v_lshrrev_b32(
-        destination_vgpr, scalar_positive_inline_u32(16), destination_vgpr, arch);
-    InstructionSequence sequence(words);
-    if (!sequence.emit(shift))
-      return false;
-  }
-  return true;
+  return consan_detail::append_workgroup_source_value(words, source, destination_vgpr, arch);
 }
 
 [[nodiscard]] bool append_inline_workgroup_key(std::vector<uint32_t> &words,

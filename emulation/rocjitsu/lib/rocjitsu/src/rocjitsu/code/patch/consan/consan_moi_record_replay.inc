@@ -1,7 +1,6 @@
 [[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
-atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index,
-                           std::string_view container_name, bool in_kernel,
-                           const ConSanAtomicSite &site);
+atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_view container_name,
+                           bool in_kernel, const ConSanAtomicSite &site);
 
 void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                const ConSanOptions &options, rj_code_arch_t arch,
@@ -23,8 +22,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       options, options.moi_track_barriers, options.moi_track_atomics, options.moi_track_atomics);
   if (options.max_patches == 0 || layout.access_record_capacity == 0)
     return;
-  if (!options.moi_dynamic_access_records &&
-      layout.record_replay_access_dispatch_bank_count > 1u &&
+  if (!options.moi_dynamic_access_records && layout.record_replay_access_dispatch_bank_count > 1u &&
       !options.moi_dispatch_id_sgpr) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
@@ -97,6 +95,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::optional<uint32_t> private_epoch_offset;
     std::optional<uint32_t> private_owner_offset;
     std::optional<uint16_t> private_owner_shift;
+    ConSanMoiPersistentWorkgroupPrivateOffsets private_record_replay_workgroup_offsets;
     uint32_t persistent_private_state_end = 0;
     uint32_t required_private_bytes = 0;
     uint32_t probe_guest_instruction_offset = 0;
@@ -466,12 +465,16 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             private_layout_by_descriptor.try_emplace(descriptor, std::nullopt);
         if (inserted) {
           cached->second = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
-                                                          /*include_owner=*/persist_workitem_owner);
+                                                          /*include_owner=*/persist_workitem_owner,
+                                                          /*include_workgroup_key=*/false,
+                                                          /*include_record_replay_workgroup=*/true);
         }
         private_layout = cached->second;
       } else {
         private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
-                                                        /*include_owner=*/persist_workitem_owner);
+                                                        /*include_owner=*/persist_workitem_owner,
+                                                        /*include_workgroup_key=*/false,
+                                                        /*include_record_replay_workgroup=*/true);
       }
       if (private_layout && private_layout->owner_offset)
         private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
@@ -485,10 +488,20 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     }
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
+    if (private_layout) {
+      candidate_options.moi_record_replay_workgroup_private_offsets =
+          private_layout->record_replay_workgroup_offsets;
+    }
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe found no common transient SGPR assignment");
+      continue;
+    }
+    if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
+                                                        resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI first-light probe found no common entry workgroup assignment");
       continue;
     }
     std::optional<VgprSpillSequence> spill;
@@ -547,8 +560,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           "logical-range inventory exceeds the report ABI");
       continue;
     }
-    const uint32_t candidate_record_count =
-        static_cast<uint32_t>(candidate_record_count_wide);
+    const uint32_t candidate_record_count = static_cast<uint32_t>(candidate_record_count_wide);
     if (!options.moi_dynamic_access_records &&
         (planned_record_count > layout.access_record_capacity ||
          candidate_record_count > layout.access_record_capacity - planned_record_count)) {
@@ -699,6 +711,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       planned.private_epoch_offset = private_layout->epoch_offset;
       planned.private_owner_offset = private_layout->owner_offset;
       planned.private_owner_shift = private_owner_shift;
+      planned.private_record_replay_workgroup_offsets =
+          private_layout->record_replay_workgroup_offsets;
       planned.persistent_private_state_end = private_layout->ephemeral_base;
     }
     planned.required_private_bytes = required_private_bytes;
@@ -728,8 +742,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
     ConSanOptions candidate_options = options;
+    candidate_options.moi_record_replay_workgroup_private_offsets =
+        planned_patch.private_record_replay_workgroup_offsets;
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              planned_patch.resources.owner_descriptor_file_offsets))
+      continue;
+    if (!apply_record_replay_entry_workgroup_assignment(
+            candidate_options, planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
                                arch);
@@ -1039,18 +1058,21 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       candidate_options.moi_spill_overlaps_guest_operands =
           planned_patch.spill_overlaps_guest_operands;
+      candidate_options.moi_record_replay_workgroup_private_offsets =
+          planned_patch.private_record_replay_workgroup_offsets;
       if (!apply_moi_transient_sgpr_assignment(
+              candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+          !apply_record_replay_entry_workgroup_assignment(
               candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
           !candidate_options.moi_exec_save_sgpr) {
         result.errors.emplace_back(
-            "ConSan MOI first-light probe lost its owner-local transient SGPR assignment");
+            "ConSan MOI first-light probe lost its owner-local register assignment");
         return;
       }
       auto words = build_first_light_access_record_words(
           bytes, candidate, candidate_options, arch, planned_patch.record_index,
           planned_record_count, planned_patch.logical_range_index, layout,
-          planned_patch.spill ? &*planned_patch.spill : nullptr,
-          planned_patch.private_epoch_offset,
+          planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
           planned_patch.private_owner_offset, planned_patch.private_owner_shift, result.errors);
       if (!words)
         return;
@@ -1064,6 +1086,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
       info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+      info.persistent_record_replay_workgroup_private_offsets =
+          planned_patch.private_record_replay_workgroup_offsets;
       if (planned_patch.private_epoch_offset)
         info.persistent_private_state_end = planned_patch.persistent_private_state_end;
       info.required_private_segment_size = planned_patch.required_private_bytes;
@@ -1243,11 +1267,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
       const uint64_t growth =
           new_text.size() > old_text.size() ? new_text.size() - old_text.size() : 0u;
-      result.errors.emplace_back(
-          "ConSan MOI first-light probe could not grow .text from " +
-          std::to_string(old_text.size()) + " to " + std::to_string(new_text.size()) +
-          " bytes (growth " + std::to_string(growth) + ", limit " +
-          std::to_string(kConSanMaxPatchedFileGrowth) + ")");
+      result.errors.emplace_back("ConSan MOI first-light probe could not grow .text from " +
+                                 std::to_string(old_text.size()) + " to " +
+                                 std::to_string(new_text.size()) + " bytes (growth " +
+                                 std::to_string(growth) + ", limit " +
+                                 std::to_string(kConSanMaxPatchedFileGrowth) + ")");
       return;
     }
     result.elf_bytes = patcher.emit();
@@ -1264,14 +1288,17 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             candidate_options.scratch_vgpr = planned_patch.resources.base;
             candidate_options.moi_spill_overlaps_guest_operands =
                 planned_patch.spill_overlaps_guest_operands;
+            candidate_options.moi_record_replay_workgroup_private_offsets =
+                planned_patch.private_record_replay_workgroup_offsets;
             if (!apply_moi_transient_sgpr_assignment(
+                    candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
+                !apply_record_replay_entry_workgroup_assignment(
                     candidate_options, planned_patch.resources.owner_descriptor_file_offsets))
               return std::optional<std::vector<uint32_t>>{};
             return build_first_light_access_record_words(
                 bytes, *planned_patch.candidate, candidate_options, arch,
-                planned_patch.record_index, planned_record_count,
-                planned_patch.logical_range_index, layout,
-                planned_patch.spill ? &*planned_patch.spill : nullptr,
+                planned_patch.record_index, planned_record_count, planned_patch.logical_range_index,
+                layout, planned_patch.spill ? &*planned_patch.spill : nullptr,
                 planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
                 planned_patch.private_owner_shift, result.errors);
           },
@@ -1287,6 +1314,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                 planned_patch.resources.owner_descriptor_file_offsets;
             info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
             info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+            info.persistent_record_replay_workgroup_private_offsets =
+                planned_patch.private_record_replay_workgroup_offsets;
             if (planned_patch.private_epoch_offset)
               info.persistent_private_state_end = planned_patch.persistent_private_state_end;
             info.required_private_segment_size = planned_patch.required_private_bytes;

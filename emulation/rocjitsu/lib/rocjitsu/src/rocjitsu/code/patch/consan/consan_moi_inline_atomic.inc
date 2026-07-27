@@ -434,16 +434,12 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
   const auto persistent_workgroup_sources =
       record_replay_persistent_workgroup_sources(options, arch);
-  ConSanMoiWorkgroupSources workgroup_sources =
-      persistent_workgroup_sources.value_or(ConSanMoiWorkgroupSources{});
-  if (!persistent_workgroup_sources && candidate.kernel_descriptor_file_offset) {
-    const auto descriptor_workgroup_sources = moi_descriptor_workgroup_sources(
-        bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
-    if (!descriptor_workgroup_sources)
-      return std::nullopt;
-    workgroup_sources =
-        record_replay_workgroup_sources(*descriptor_workgroup_sources, options, arch);
+  if (!persistent_workgroup_sources) {
+    errors.emplace_back(
+        "ConSan MOI Record/Replay atomic requires one exact entry-captured workgroup tuple");
+    return std::nullopt;
   }
+  const ConSanMoiWorkgroupSources workgroup_sources = *persistent_workgroup_sources;
 
   if (candidate.site.file_offset > bytes.size() ||
       candidate.site.size > bytes.size() - candidate.site.file_offset) {
@@ -1361,10 +1357,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   };
   const auto narrow_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
     if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch) ||
-        !append_compare_moi_report_dispatch_id_word(words, options, value, expected, high_word,
-                                                    arch,
-                                                    ConSanMoiLiteralDispatchIdPolicy::
-                                                        AnyArchitecture)) {
+        !append_compare_moi_report_dispatch_id_word(
+            words, options, value, expected, high_word, arch,
+            ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
       return false;
     }
     const auto narrow =

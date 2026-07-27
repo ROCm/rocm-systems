@@ -758,7 +758,9 @@ Important current simplifications:
 - Caller-owned size-derived layouts remain single-bank first-light buffers.
   They are bounded and do not gain automatic multi-dispatch retention, but
   occupied-slot reuse is now qualified by exact dispatch and workgroup
-  identity rather than silently accepting a different workgroup.
+  identity rather than silently accepting a different workgroup. They capture
+  the same exact three-coordinate workgroup tuple at kernel entry as automatic
+  layouts; single-bank describes retention, not a weaker identity lifetime.
 - Dynamic access append automatically allocates its EXEC/VCC/SCC scalar window;
   `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` is an optional debug override.
 - Dynamic append can consume records quickly because it writes per active lane.
@@ -927,14 +929,21 @@ MOI separates:
 - workgroup identity: `(workgroup_x, workgroup_y, workgroup_z)`;
 - owner identity: the logical peer inside a workgroup used by conflict checks.
 
-Current workgroup identity is stronger than current owner identity. Automatic
-banked Record/Replay captures the exact 32-bit
+Current workgroup identity is stronger than current owner identity. Every
+Record/Replay layout captures the exact 32-bit
 `(workgroup_x, workgroup_y, workgroup_z)` tuple at kernel entry and publishes
 those three components directly. It therefore has no Inline Shadow packing
-limit. Inline Shadow separately captures the compact key required by its
-shadow-cell representation. Caller-owned single-bank Record/Replay layouts
-retain their documented coalescing behavior until their caller-owned
-persistent identity is migrated to the exact tuple.
+limit. Caller-owned layouts retain one first-light bank but use the same exact
+tuple and entry-state lifetime contract. Inline Shadow separately captures the
+compact key required by its shadow-cell representation.
+
+On CDNA3/CDNA4, ConSan enables the complete x/y/z system-SGPR launch payload
+for every patched Record/Replay owner before execution. The entry prologue
+captures that full payload, then reconstructs the guest's original compact
+system-SGPR suffix (including workgroup-info when present) before returning to
+guest code. An absent descriptor dimension is therefore neither assumed to be
+zero nor allowed to change the guest ABI. RDNA4-family patching likewise
+enables and captures its full launch payload explicitly.
 
 This is an entry-state lifetime invariant, not an engine-specific
 optimization: a probe that can execute after arbitrary guest code may consume
@@ -954,7 +963,8 @@ automatically allocated persistent owner state when possible.
 
 Expert/debug alternatives are:
 
-- an explicit owner VGPR through `RJ_CONSAN_MOI_OWNER_VGPR`;
+- an explicit owner/epoch VGPR pair through `RJ_CONSAN_MOI_OWNER_VGPR` and
+  `RJ_CONSAN_MOI_EPOCH_VGPR` (Record/Replay rejects either one in isolation);
 - explicit prologue initialization through
   `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1`; and
 - `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id`, which uses RDNA4 `HW_ID1` low bits. An

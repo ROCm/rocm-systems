@@ -8,11 +8,10 @@
   return true;
 }
 
-[[nodiscard]] bool
-append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
-                                       const ConSanMoiDispatchIdPreloadPlan &plan,
-                                       std::optional<uint16_t> persistent_dispatch_sgpr,
-                                       rj_code_arch_t arch, std::vector<std::string> &errors) {
+[[nodiscard]] bool append_dispatch_id_capture_and_restore(
+    std::vector<uint32_t> &words, const ConSanMoiDispatchIdPreloadPlan &plan,
+    std::optional<uint16_t> persistent_dispatch_sgpr, bool restore_system_sgprs,
+    rj_code_arch_t arch, std::vector<std::string> &errors) {
   if (!plan.supported()) {
     errors.emplace_back("ConSan MOI dispatch-ID prologue received an unsupported preload plan");
     return false;
@@ -62,15 +61,17 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
       return false;
     }
   }
-  for (uint16_t i = 0; i < plan.shifted_system_sgpr_count; ++i) {
-    const uint16_t destination = static_cast<uint16_t>(plan.original_user_sgpr_count + i);
-    if (!append_moi_entry_salu_write(
-            words,
-            build_s_mov_b32(destination,
-                            static_cast<uint16_t>(destination + plan.system_sgpr_shift), arch),
-            arch)) {
-      errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode a system-SGPR restore");
-      return false;
+  if (restore_system_sgprs) {
+    for (uint16_t i = 0; i < plan.shifted_system_sgpr_count; ++i) {
+      const uint16_t destination = static_cast<uint16_t>(plan.original_user_sgpr_count + i);
+      if (!append_moi_entry_salu_write(
+              words,
+              build_s_mov_b32(destination,
+                              static_cast<uint16_t>(destination + plan.system_sgpr_shift), arch),
+              arch)) {
+        errors.emplace_back("ConSan MOI dispatch-ID prologue cannot encode a system-SGPR restore");
+        return false;
+      }
     }
   }
   if (plan.requires_kernarg_reload()) {
@@ -95,6 +96,43 @@ append_dispatch_id_capture_and_restore(std::vector<uint32_t> &words,
       return false;
     }
     words.push_back(*wait);
+  }
+  return true;
+}
+
+[[nodiscard]] bool
+append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
+                                           const ConSanMoiWorkgroupSources &sources,
+                                           rj_code_arch_t arch, std::vector<std::string> &errors) {
+  if (!sources.cdna_full_payload_base && !sources.cdna_guest_payload_base &&
+      sources.cdna_guest_payload_mask == 0u) {
+    return true;
+  }
+  if (!sources.cdna_full_payload_base || !sources.cdna_guest_payload_base ||
+      (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)) {
+    errors.emplace_back("ConSan MOI found an incomplete CDNA workgroup-ID payload repair");
+    return false;
+  }
+
+  uint16_t destination = *sources.cdna_guest_payload_base;
+  for (uint16_t dimension = 0; dimension < 3u; ++dimension) {
+    if ((sources.cdna_guest_payload_mask & (1u << dimension)) == 0u)
+      continue;
+    const uint16_t source = static_cast<uint16_t>(*sources.cdna_full_payload_base + dimension);
+    if (destination != source &&
+        !append_moi_entry_salu_write(words, build_s_mov_b32(destination, source, arch), arch)) {
+      errors.emplace_back("ConSan MOI could not restore a guest CDNA workgroup-ID SGPR");
+      return false;
+    }
+    ++destination;
+  }
+  if ((sources.cdna_guest_payload_mask & (1u << 3u)) != 0u) {
+    const uint16_t source = static_cast<uint16_t>(*sources.cdna_full_payload_base + 3u);
+    if (destination != source &&
+        !append_moi_entry_salu_write(words, build_s_mov_b32(destination, source, arch), arch)) {
+      errors.emplace_back("ConSan MOI could not restore the guest CDNA workgroup-info SGPR");
+      return false;
+    }
   }
   return true;
 }
@@ -618,8 +656,11 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     std::vector<std::string> &errors) {
   std::vector<uint32_t> words;
   words.reserve(48);
-  if (dispatch_plan && !append_dispatch_id_capture_and_restore(
-                           words, *dispatch_plan, persistent_dispatch_sgpr, arch, errors)) {
+  if (dispatch_plan &&
+      !append_dispatch_id_capture_and_restore(
+          words, *dispatch_plan, persistent_dispatch_sgpr,
+          !workgroup_sources || !workgroup_sources->cdna_full_payload_base.has_value(), arch,
+          errors)) {
     return std::nullopt;
   }
   if (runtime_sample_counter_sgpr) {
@@ -710,19 +751,19 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
         record_replay_workgroup_vgprs.z};
     for (size_t index = 0; index < sources.size(); ++index) {
       const ConSanMoiWorkgroupSource &source = *sources[index];
-      if (!source.is_well_formed()) {
+      if (!source.is_well_formed() || !source.has_value()) {
         errors.emplace_back(
-            "ConSan MOI exact workgroup-tuple prologue found an invalid launch source");
+            "ConSan MOI exact workgroup-tuple prologue requires all launch coordinates");
         return std::nullopt;
       }
       if (scalar_destinations[index]) {
-        if (source.vector_src) {
+        if (!source.scalar_src) {
           errors.emplace_back(
               "ConSan MOI exact scalar workgroup tuple requires scalar launch sources");
           return std::nullopt;
         }
         const uint16_t destination = *scalar_destinations[index];
-        const uint16_t source_operand = source.scalar_src.value_or(scalar_positive_inline_u32(0u));
+        const uint16_t source_operand = *source.scalar_src;
         if (!append_moi_entry_salu_write(words, build_s_mov_b32(destination, source_operand, arch),
                                          arch) ||
             (source.mask_low_16 &&
@@ -746,7 +787,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       } else if (vector_destinations[index]) {
         const uint16_t destination = *vector_destinations[index];
         if (source.has_value()) {
-          if (!append_workgroup_source_value(words, source, destination, arch)) {
+          if (!consan_detail::append_workgroup_source_value(words, source, destination, arch)) {
             errors.emplace_back(
                 "ConSan MOI exact vector workgroup-tuple prologue could not copy a launch source");
             return std::nullopt;
@@ -890,6 +931,10 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       return std::nullopt;
     words.push_back(*restore_exec);
   }
+  if (workgroup_sources &&
+      !append_cdna_full_workgroup_payload_restore(words, *workgroup_sources, arch, errors)) {
+    return std::nullopt;
+  }
   if (!persistent_owner_sgpr)
     switch (owner_source) {
     case ConSanMoiOwnerSource::WorkitemId: {
@@ -957,8 +1002,9 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_private_epoch_prologue_words(
     uint64_t prologue_text_offset, uint64_t original_entry_text_offset, uint16_t scratch_vgpr,
     uint32_t epoch_offset, std::optional<uint32_t> owner_offset,
-    std::optional<uint32_t> workgroup_key_offset, const VgprSpillSequence &spill,
-    std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
+    std::optional<uint32_t> workgroup_key_offset,
+    const ConSanMoiPersistentWorkgroupPrivateOffsets &record_replay_workgroup_offsets,
+    const VgprSpillSequence &spill, std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources,
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan,
     std::optional<uint16_t> persistent_dispatch_sgpr,
@@ -973,9 +1019,25 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   if (workgroup_key_offset)
     workgroup_key_store =
         instrumentation::build_private_store_b32(scratch_vgpr, *workgroup_key_offset, arch);
+  std::array<std::optional<std::vector<uint32_t>>, 3> record_replay_workgroup_stores;
+  const std::array<std::optional<uint32_t>, 3> record_replay_workgroup_offset_values = {
+      record_replay_workgroup_offsets.x, record_replay_workgroup_offsets.y,
+      record_replay_workgroup_offsets.z};
+  for (size_t index = 0; index < record_replay_workgroup_offset_values.size(); ++index) {
+    if (record_replay_workgroup_offset_values[index]) {
+      record_replay_workgroup_stores[index] = instrumentation::build_private_store_b32(
+          scratch_vgpr, *record_replay_workgroup_offset_values[index], arch);
+    }
+  }
   const auto wait_store = instrumentation::build_s_wait_private_store0(arch);
   if (!epoch_store || (owner_offset && !owner_store) ||
-      (workgroup_key_offset && !workgroup_key_store) || !wait_store) {
+      (workgroup_key_offset && !workgroup_key_store) ||
+      std::ranges::any_of(std::views::iota(size_t{0}, record_replay_workgroup_stores.size()),
+                          [&](size_t index) {
+                            return record_replay_workgroup_offset_values[index] &&
+                                   !record_replay_workgroup_stores[index];
+                          }) ||
+      !wait_store) {
     errors.emplace_back(
         "ConSan MOI private-epoch prologue could not encode persistent-state initialization");
     return std::nullopt;
@@ -983,8 +1045,11 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
 
   std::vector<uint32_t> words;
   words.reserve(spill.save_words.size() + spill.restore_words.size() + 48u);
-  if (dispatch_plan && !append_dispatch_id_capture_and_restore(
-                           words, *dispatch_plan, persistent_dispatch_sgpr, arch, errors)) {
+  if (dispatch_plan &&
+      !append_dispatch_id_capture_and_restore(
+          words, *dispatch_plan, persistent_dispatch_sgpr,
+          !workgroup_sources || !workgroup_sources->cdna_full_payload_base.has_value(), arch,
+          errors)) {
     return std::nullopt;
   }
   if (runtime_sample_counter_sgpr) {
@@ -1037,6 +1102,28 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       return std::nullopt;
     words.push_back(*restore_exec);
   }
+  if (record_replay_workgroup_offsets.complete()) {
+    if (!workgroup_sources) {
+      errors.emplace_back("ConSan MOI private exact workgroup tuple requires entry ABI sources");
+      return std::nullopt;
+    }
+    const std::array<ConSanMoiWorkgroupSource, 3> sources = {
+        workgroup_sources->x, workgroup_sources->y, workgroup_sources->z};
+    for (size_t index = 0; index < sources.size(); ++index) {
+      if (!sources[index].has_value() || !consan_detail::append_workgroup_source_value(
+                                             words, sources[index], scratch_vgpr, arch)) {
+        errors.emplace_back(
+            "ConSan MOI private prologue requires every exact workgroup coordinate");
+        return std::nullopt;
+      }
+      words.insert(words.end(), record_replay_workgroup_stores[index]->begin(),
+                   record_replay_workgroup_stores[index]->end());
+    }
+  }
+  if (workgroup_sources &&
+      !append_cdna_full_workgroup_payload_restore(words, *workgroup_sources, arch, errors)) {
+    return std::nullopt;
+  }
   words.push_back(build_v_mov_b32_e32(scratch_vgpr, scalar_positive_inline_u32(0), arch));
   words.insert(words.end(), epoch_store->begin(), epoch_store->end());
   words.push_back(*wait_store);
@@ -1066,13 +1153,24 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
 [[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch, ConSanResult &result) {
   result.moi_full_workgroup_id_descriptor_offsets.clear();
   if (result.elf_bytes.empty() ||
-      (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
+      (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+       arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
     return true;
   }
 
   std::unordered_set<uint64_t> owner_descriptor_offsets;
   std::unordered_set<std::string_view> owner_names;
   for (const ConSanPatchInfo &patch : result.patches) {
+    const bool exact_cdna_workgroup_capture =
+        patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
+        patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+    if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+        (!exact_cdna_workgroup_capture ||
+         (!result.resolved_moi_record_replay_workgroup_sgprs.complete() &&
+          !patch.persistent_record_replay_workgroup_vgprs.complete() &&
+          !patch.persistent_record_replay_workgroup_private_offsets.complete()))) {
+      continue;
+    }
     for (uint64_t descriptor_offset : patch.owner_descriptor_file_offsets) {
       owner_descriptor_offsets.insert(descriptor_offset);
       const auto owner = std::ranges::find(result.kernels, descriptor_offset,
@@ -1113,6 +1211,20 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     }
     KD descriptor{};
     std::memcpy(&descriptor, current_image.data() + descriptor_offset, sizeof(descriptor));
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      const uint32_t user_sgpr_count = moi_descriptor_user_sgpr_count(descriptor);
+      const uint32_t required_sgpr_count =
+          user_sgpr_count + 3u +
+          (AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                           kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO) != 0
+               ? 1u
+               : 0u);
+      if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_sgpr_count)) {
+        result.errors.emplace_back(
+            "ConSan MOI could not allocate the full CDNA workgroup-ID payload");
+        return false;
+      }
+    }
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                     1u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
@@ -1299,13 +1411,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
   for (const ConSanKernelInfo &kernel : result.kernels) {
     const auto access_patch =
         std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-          return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
-                  patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
-                  patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
-                  patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
-                  patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-                  patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) &&
-                 patch.scratch_vgpr && kernel_owns_patch(kernel, patch);
+          return patch.persistent_epoch_private_offset && patch.scratch_vgpr &&
+                 kernel_owns_patch(kernel, patch);
         });
     if (access_patch == result.patches.end())
       continue;
@@ -1352,6 +1459,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     const bool has_private_owner = access_patch->persistent_owner_private_offset.has_value();
     const bool has_private_workgroup_key =
         access_patch->persistent_workgroup_key_private_offset.has_value();
+    const bool has_private_record_replay_workgroup =
+        access_patch->persistent_record_replay_workgroup_private_offsets.complete();
     uint32_t persistent_end =
         *access_patch->persistent_epoch_private_offset + SpillManager::kSlotBytes;
     if (has_private_owner)
@@ -1361,10 +1470,19 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       persistent_end =
           std::max(persistent_end, *access_patch->persistent_workgroup_key_private_offset +
                                        SpillManager::kSlotBytes);
+    for (const std::optional<uint32_t> offset :
+         {access_patch->persistent_record_replay_workgroup_private_offsets.x,
+          access_patch->persistent_record_replay_workgroup_private_offsets.y,
+          access_patch->persistent_record_replay_workgroup_private_offsets.z}) {
+      if (offset)
+        persistent_end = std::max(persistent_end, *offset + SpillManager::kSlotBytes);
+    }
     MoiPrivateEpochLayout layout{
         .epoch_offset = *access_patch->persistent_epoch_private_offset,
         .owner_offset = access_patch->persistent_owner_private_offset,
         .workgroup_key_offset = access_patch->persistent_workgroup_key_private_offset,
+        .record_replay_workgroup_offsets =
+            access_patch->persistent_record_replay_workgroup_private_offsets,
         .ephemeral_base = access_patch->persistent_private_state_end.value_or(persistent_end)};
 
     const auto private_limit = address_free_scratch_private_limit(arch);
@@ -1410,10 +1528,26 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
                   .visible_evidence_sgpr = std::nullopt,
               });
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
-    if (has_private_workgroup_key) {
+    if (has_private_workgroup_key || has_private_record_replay_workgroup) {
       std::vector<std::string> source_errors;
+      std::optional<uint16_t> full_payload_user_sgpr_count;
+      if (has_private_record_replay_workgroup &&
+          (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+        if (active_kernel->descriptor_file_offset > active_bytes.size() ||
+            sizeof(KD) > active_bytes.size() - active_kernel->descriptor_file_offset) {
+          result.errors.emplace_back("ConSan MOI private exact-tuple descriptor exceeds ELF bytes");
+          return;
+        }
+        KD descriptor{};
+        std::memcpy(&descriptor, active_bytes.data() + active_kernel->descriptor_file_offset,
+                    sizeof(descriptor));
+        full_payload_user_sgpr_count =
+            dispatch_plan ? dispatch_plan->expanded_user_sgpr_count
+                          : static_cast<uint16_t>(moi_descriptor_user_sgpr_count(descriptor));
+      }
       workgroup_sources = moi_descriptor_workgroup_sources(
-          active_bytes, active_kernel->descriptor_file_offset, arch, source_errors);
+          active_bytes, active_kernel->descriptor_file_offset, arch, source_errors,
+          /*uses_gfx1250_cluster_workgroup_id=*/false, full_payload_user_sgpr_count);
       if (!workgroup_sources) {
         result.errors.insert(result.errors.end(), source_errors.begin(), source_errors.end());
         return;
@@ -1472,9 +1606,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     auto words = build_private_epoch_prologue_words(
         prologue_text_offset, item.active_entry_text_offset, item.scratch_vgpr,
         item.layout.epoch_offset, item.layout.owner_offset, item.layout.workgroup_key_offset,
-        item.spill, prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
-        options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(options),
-        options.moi_exec_save_sgpr, arch, result.errors);
+        item.layout.record_replay_workgroup_offsets, item.spill, prologue_workgroup_shadow,
+        item.workgroup_sources, item.dispatch_plan, options.moi_dispatch_id_sgpr,
+        moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch, result.errors);
     if (!words)
       return;
     if (!patcher.redirect_kernel_entry(item.active_descriptor_file_offset,
@@ -1491,10 +1625,10 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       auto secondary_words = build_private_epoch_prologue_words(
           secondary_prologue_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
           item.scratch_vgpr, item.layout.epoch_offset, item.layout.owner_offset,
-          item.layout.workgroup_key_offset, item.spill, prologue_workgroup_shadow,
-          item.workgroup_sources, item.dispatch_plan, options.moi_dispatch_id_sgpr,
-          moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch,
-          result.errors);
+          item.layout.workgroup_key_offset, item.layout.record_replay_workgroup_offsets, item.spill,
+          prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
+          options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(options),
+          options.moi_exec_save_sgpr, arch, result.errors);
       if (!secondary_words)
         return;
       if (words->size() * sizeof(uint32_t) <= kAmdhsaKernelEntryAlignment &&
@@ -1508,19 +1642,20 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
         words = build_private_epoch_prologue_words(
             *primary_body_offset, item.active_entry_text_offset, item.scratch_vgpr,
             item.layout.epoch_offset, item.layout.owner_offset, item.layout.workgroup_key_offset,
-            item.spill, prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
-            options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(options),
-            options.moi_exec_save_sgpr, arch, result.errors);
+            item.layout.record_replay_workgroup_offsets, item.spill, prologue_workgroup_shadow,
+            item.workgroup_sources, item.dispatch_plan, options.moi_dispatch_id_sgpr,
+            moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch,
+            result.errors);
         if (!words)
           return;
         secondary_body_offset = *primary_body_offset + words->size() * sizeof(uint32_t);
         secondary_words = build_private_epoch_prologue_words(
             *secondary_body_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
             item.scratch_vgpr, item.layout.epoch_offset, item.layout.owner_offset,
-            item.layout.workgroup_key_offset, item.spill, prologue_workgroup_shadow,
-            item.workgroup_sources, item.dispatch_plan, options.moi_dispatch_id_sgpr,
-            moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch,
-            result.errors);
+            item.layout.workgroup_key_offset, item.layout.record_replay_workgroup_offsets,
+            item.spill, prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
+            options.moi_dispatch_id_sgpr, moi_runtime_sample_counter_sgpr(options),
+            options.moi_exec_save_sgpr, arch, result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, *primary_body_offset);
         const auto secondary_relay = compute_sopp_branch_simm16(
@@ -1553,6 +1688,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     info.persistent_epoch_private_offset = item.layout.epoch_offset;
     info.persistent_owner_private_offset = item.layout.owner_offset;
     info.persistent_workgroup_key_private_offset = item.layout.workgroup_key_offset;
+    info.persistent_record_replay_workgroup_private_offsets =
+        item.layout.record_replay_workgroup_offsets;
     info.persistent_private_state_end = item.layout.ephemeral_base;
     info.spilled_vgpr_count = item.spill.vgpr_count;
     info.required_private_segment_size = item.required_private_bytes;
@@ -1798,12 +1935,22 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       continue;
     }
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
-    if (kernel_options.moi_workgroup_key_vgpr || kernel_options.moi_persistent_workgroup_key_sgpr ||
+    const bool has_record_replay_workgroup_tuple =
         !kernel_options.moi_record_replay_workgroup_vgprs.empty() ||
-        !kernel_options.moi_record_replay_workgroup_sgprs.empty()) {
+        !kernel_options.moi_record_replay_workgroup_sgprs.empty();
+    if (kernel_options.moi_workgroup_key_vgpr || kernel_options.moi_persistent_workgroup_key_sgpr ||
+        has_record_replay_workgroup_tuple) {
       std::vector<std::string> source_errors;
+      std::optional<uint16_t> full_payload_user_sgpr_count;
+      if (has_record_replay_workgroup_tuple &&
+          (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+        full_payload_user_sgpr_count =
+            dispatch_plan ? dispatch_plan->expanded_user_sgpr_count
+                          : static_cast<uint16_t>(moi_descriptor_user_sgpr_count(descriptor));
+      }
       workgroup_sources = moi_descriptor_workgroup_sources(
-          active_bytes, active.descriptor_file_offset, arch, source_errors);
+          active_bytes, active.descriptor_file_offset, arch, source_errors,
+          /*uses_gfx1250_cluster_workgroup_id=*/false, full_payload_user_sgpr_count);
       if (!workgroup_sources) {
         result.errors.insert(result.errors.end(), source_errors.begin(), source_errors.end());
         return;
@@ -1907,11 +2054,14 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         std::ranges::find(result.kernels, kernel.name, &ConSanKernelInfo::name);
     const auto composed_entry_patch =
         std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-          const bool chainable_access =
+          const bool chainable_instrumentation =
               patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
               patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
-              patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
-          return chainable_access && patch.anchor_offset == kernel.entry_text_offset &&
+              patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
+              patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord ||
+              patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord ||
+              patch.kind == ConSanPatchKind::TrampolineMoiFenceRecord;
+          return chainable_instrumentation && patch.anchor_offset == kernel.entry_text_offset &&
                  patch.original_size != 0u && patch.trampoline_size != 0u &&
                  original_kernel != result.kernels.end() &&
                  kernel_owns_patch(*original_kernel, patch);

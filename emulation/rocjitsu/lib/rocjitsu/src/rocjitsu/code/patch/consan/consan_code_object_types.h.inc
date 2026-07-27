@@ -498,6 +498,9 @@ struct ConSanPatchInfo {
   /// Entry-captured exact workgroup identity for kernels whose ordinary VGPR
   /// bank has no lifetime-safe persistent slot below ACCUM_OFFSET.
   std::optional<uint32_t> persistent_workgroup_key_private_offset;
+  /// Full Record/Replay coordinates captured at entry. Unlike the compact
+  /// Inline key above, these offsets preserve x/y/z without packing limits.
+  ConSanMoiPersistentWorkgroupPrivateOffsets persistent_record_replay_workgroup_private_offsets;
   /// First private byte available after all persistent MOI state.
   std::optional<uint32_t> persistent_private_state_end;
   /// Persistent instrumentation-owned SGPR pair receiving the full hardware

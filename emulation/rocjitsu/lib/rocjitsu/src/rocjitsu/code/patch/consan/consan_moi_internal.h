@@ -23,20 +23,27 @@ namespace rocjitsu {
 
 struct ConSanOptions;
 
-/// One scalar or vector source for a workgroup-coordinate component.
+/// One scalar, vector, or entry-captured private-state source for a
+/// workgroup-coordinate component.
 ///
-/// The neither-set state represents an absent dimension. The both-set state is
-/// malformed and never has an operand. Keeping this release-active invariant
-/// beside the representation prevents individual emitters from interpreting
-/// ambiguous sources differently.
+/// The none-set state represents an absent dimension. More than one set source
+/// is malformed. Keeping this release-active invariant beside the
+/// representation prevents individual emitters from interpreting ambiguous
+/// sources differently.
 struct ConSanMoiWorkgroupSource {
   std::optional<uint16_t> scalar_src;
   std::optional<uint16_t> vector_src;
+  std::optional<uint32_t> private_offset;
   bool shift_right_16 = false;
   bool mask_low_16 = false;
 
-  [[nodiscard]] bool has_value() const { return scalar_src.has_value() != vector_src.has_value(); }
-  [[nodiscard]] bool is_well_formed() const { return !(scalar_src && vector_src); }
+  [[nodiscard]] uint8_t source_count() const {
+    return static_cast<uint8_t>(scalar_src.has_value()) +
+           static_cast<uint8_t>(vector_src.has_value()) +
+           static_cast<uint8_t>(private_offset.has_value());
+  }
+  [[nodiscard]] bool has_value() const { return source_count() == 1u; }
+  [[nodiscard]] bool is_well_formed() const { return source_count() <= 1u; }
   [[nodiscard]] std::optional<uint16_t> operand() const;
 
   [[nodiscard]] static ConSanMoiWorkgroupSource scalar(uint16_t source, bool shift_right_16 = false,
@@ -53,6 +60,11 @@ struct ConSanMoiWorkgroupSource {
     result.vector_src = source;
     result.shift_right_16 = shift_right_16;
     result.mask_low_16 = mask_low_16;
+    return result;
+  }
+  [[nodiscard]] static ConSanMoiWorkgroupSource private_state(uint32_t offset) {
+    ConSanMoiWorkgroupSource result;
+    result.private_offset = offset;
     return result;
   }
 
@@ -108,6 +120,12 @@ resolve_scalar_owner_contexts(bool planning_state_valid,
 [[nodiscard]] bool validate_scalar_state_temporaries(const ConSanOptions &options,
                                                      std::string_view consumer,
                                                      std::vector<std::string> &errors);
+
+/// Materialize one persistent workgroup-coordinate source, including any
+/// ABI-specific extraction applied after a scalar, vector, or private load.
+[[nodiscard]] bool append_workgroup_source_value(std::vector<uint32_t> &words,
+                                                 const ConSanMoiWorkgroupSource &source,
+                                                 uint16_t value_vgpr, rj_code_arch_t arch);
 
 } // namespace consan_detail
 } // namespace rocjitsu

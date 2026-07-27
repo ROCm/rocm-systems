@@ -55,7 +55,7 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 
 std::optional<uint16_t> ConSanMoiWorkgroupSource::operand() const {
-  if (!has_value())
+  if (!has_value() || private_offset)
     return std::nullopt;
   return scalar_src ? *scalar_src : vector_source_vgpr(*vector_src);
 }
@@ -96,6 +96,43 @@ bool consan_detail::validate_scalar_state_temporaries(const ConSanOptions &optio
                       std::string(options.moi_owner_vgpr ? "set" : "unset") +
                       ", epoch=" + std::string(options.moi_epoch_vgpr ? "set" : "unset") + ")");
   return false;
+}
+
+bool consan_detail::append_workgroup_source_value(std::vector<uint32_t> &words,
+                                                  const ConSanMoiWorkgroupSource &source,
+                                                  uint16_t value_vgpr, rj_code_arch_t arch) {
+  if (!source.is_well_formed() || !source.has_value())
+    return false;
+  if (source.private_offset) {
+    const auto load =
+        instrumentation::build_private_load_b32(value_vgpr, *source.private_offset, arch);
+    const auto wait = instrumentation::build_s_wait_private_load0(arch);
+    InstructionSequence sequence(words);
+    if (!sequence.emit_all(load, wait))
+      return false;
+  } else {
+    const auto operand = source.operand();
+    if (!operand)
+      return false;
+    words.push_back(build_v_mov_b32_e32(value_vgpr, *operand, arch));
+  }
+  if (source.mask_low_16) {
+    const auto shift_left = instrumentation::build_v_lshlrev_b32(
+        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
+    const auto shift_right = instrumentation::build_v_lshrrev_b32(
+        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
+    InstructionSequence sequence(words);
+    if (!sequence.emit_all(shift_left, shift_right))
+      return false;
+  }
+  if (source.shift_right_16) {
+    const auto shift = instrumentation::build_v_lshrrev_b32(
+        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
+    InstructionSequence sequence(words);
+    if (!sequence.emit(shift))
+      return false;
+  }
+  return true;
 }
 
 struct MoiSyncSiteKey {
@@ -418,22 +455,17 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   const bool explicit_persistent_state =
       effective_options.moi_owner_vgpr || effective_options.moi_epoch_vgpr;
   if (effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-      result.moi_candidates.empty() && !explicit_persistent_state) {
-    // Without access records there is no epoch-bearing consumer for a
-    // persistent owner/epoch prologue. Barrier, atomic, and fence records can
-    // derive their wave owner at the probe from the common owning descriptor;
-    // avoiding unused persistent VGPRs also keeps shared-helper transforms
-    // independent of entry-prologue reachability.
+      result.moi_candidates.empty() && !explicit_persistent_state && !has_supported_barrier &&
+      !atomic_or_fence_relevant) {
+    // Do not synthesize persistent state for an inventory-only object.
+    // Standalone barrier, atomic, and fence records still require an exact
+    // entry-captured workgroup tuple, so only the true no-consumer case can
+    // disable the prologue.
     effective_options.moi_init_owner_epoch = false;
-    if (!has_supported_barrier && !atomic_or_fence_relevant) {
-      effective_options.moi_track_barriers = false;
-      result.warnings.emplace_back(
-          "ConSan MOI record/replay skipped persistent state for a code object "
-          "with no admitted access, barrier, atomic, or fence sites");
-    } else {
-      result.warnings.emplace_back(
-          "ConSan MOI record/replay uses probe-local owner derivation without access records");
-    }
+    effective_options.moi_track_barriers = false;
+    result.warnings.emplace_back(
+        "ConSan MOI record/replay skipped persistent state for a code object "
+        "with no admitted access, barrier, atomic, or fence sites");
   }
   bool inline_atomic_without_access = false;
   if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow) {
@@ -597,22 +629,23 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
                                               resource_planning_state, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
       !explicit_persistent_state &&
-      std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
-        return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
-               patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
-      })) {
-    // Planning may admit access sites whose bodies all fail placement. In
-    // that case standalone barrier/atomic/fence records must use their proven
-    // probe-local owner, just like a code object with no access candidates.
-    // Leaving the automatic owner/epoch pair enabled would add an unconsumed
-    // entry prologue; dynamic-stack kernels can have no reachable prologue
-    // island and would transactionally lose otherwise valid barrier records.
+      std::ranges::none_of(result.patches,
+                           [](const ConSanPatchInfo &patch) {
+                             return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+                                    patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+                           }) &&
+      !has_supported_barrier && !atomic_or_fence_relevant) {
+    // Planning may admit access sites whose bodies all fail placement. Drop
+    // automatic state only when no standalone record can consume it.
     effective_options.moi_init_owner_epoch = false;
     effective_options.moi_owner_vgpr.reset();
     effective_options.moi_epoch_vgpr.reset();
+    effective_options.moi_record_replay_workgroup_vgprs = {};
+    effective_options.moi_record_replay_workgroup_sgprs = {};
+    effective_options.moi_persistent_vgpr_assignments.clear();
     result.warnings.emplace_back(
-        "ConSan MOI record/replay reverted to probe-local state after all access probes failed "
-        "placement");
+        "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "
+        "failed placement");
   }
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay)
     try_apply_atomic_record_patch(code_object_bytes, effective_options, arch, result);
@@ -624,13 +657,18 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (result.errors.empty())
     try_apply_fence_record_patch(code_object_bytes, effective_options, arch, result);
   // Sampled and inline prologues only initialize state consumed by an emitted
-  // access or sync probe. Do not turn their otherwise unsupported/inventory-
-  // only transforms into vacuous modifications containing setup code alone.
-  // Record/replay retains standalone prologue emission for its explicit
-  // prologue controls and host-level lowering tests.
+  // access or sync probe. The automatic Record/Replay report-sizing pass also
+  // has no buffer and therefore cannot emit a consumer yet; keep its semantic
+  // inventory pristine so the allocated-buffer retry can select and emit the
+  // exact entry tuple. Explicit Record/Replay register controls retain their
+  // standalone prologue behavior for host-level lowering tests.
+  const bool automatic_record_replay_inventory =
+      effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
+      !effective_options.moi_report_buffer_address && !explicit_persistent_state;
   const bool prologue_needs_consumer =
       effective_options.moi_engine == ConSanMoiEngine::Sampled ||
-      effective_options.moi_engine == ConSanMoiEngine::InlineShadow;
+      effective_options.moi_engine == ConSanMoiEngine::InlineShadow ||
+      automatic_record_replay_inventory;
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
       (!prologue_needs_consumer || result.modified))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, arch, result);

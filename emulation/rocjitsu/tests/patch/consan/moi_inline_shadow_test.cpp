@@ -245,7 +245,9 @@ TEST(ConSanMoi, Cdna4InlineShadowRecoversFullWindowKernargPreloadTail) {
   text_words[1] = 0x00000302u; // ds_write_b32 v2, v3 offset:4
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   std::vector<uint8_t> bytes =
-      make_cdna4_lds_code_object(text_words, "full_window_kernarg_preload");
+      make_cdna4_lds_code_object(text_words, "full_window_kernarg_preload",
+                                 /*vgpr_granulated=*/0u, /*uses_dynamic_stack=*/false,
+                                 /*workgroup_id_dimension_mask=*/0u);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
@@ -304,7 +306,9 @@ TEST(ConSanMoi, Cdna3InlineShadowRecoversFullWindowKernargPreloadTail) {
   std::ranges::copy(*store, text_words.begin());
   text_words.back() = build_s_endpgm(kArch);
   std::vector<uint8_t> bytes =
-      make_cdna3_lds_code_object(text_words, "full_window_kernarg_preload");
+      make_cdna3_lds_code_object(text_words, "full_window_kernarg_preload",
+                                 /*vgpr_granulated=*/0u, /*uses_dynamic_stack=*/false,
+                                 /*workgroup_id_dimension_mask=*/0u);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
@@ -4143,7 +4147,7 @@ TEST(ConSanMoi, Cdna4InlineSpillsMixedVgprSourcesThroughDynamicStackFrames) {
   constexpr uint32_t kCdna4Wave64FortyVgprsGranulated = 4u;
   std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
       text_words, "inline_full_pressure_dynamic_stack", kCdna4Wave64FortyVgprsGranulated,
-      /*uses_dynamic_stack=*/true);
+      /*uses_dynamic_stack=*/true, /*workgroup_id_dimension_mask=*/0u);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
@@ -4449,6 +4453,7 @@ TEST(ConSanMoi, InlineShadowProbeRejectsSmallExactShadowCapacity) {
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 8;
   options.moi_owner_vgpr = 20;
+  options.moi_epoch_vgpr = 21;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = sizeof(ConSanMoiReportHeader) +
                                    4u * sizeof(ConSanMoiDiagnosticRecord) + 64u * sizeof(uint64_t);
@@ -4460,7 +4465,7 @@ TEST(ConSanMoi, InlineShadowProbeRejectsSmallExactShadowCapacity) {
   bool saw_capacity_warning = false;
   for (const std::string &warning : result.warnings)
     saw_capacity_warning |= warning.find("full 64 KiB LDS address range") != std::string::npos;
-  EXPECT_TRUE(saw_capacity_warning);
+  EXPECT_TRUE(saw_capacity_warning) << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, SharedInlineShadowUsesOnePersistentPairForEveryOwner) {
@@ -5093,7 +5098,7 @@ TEST(ConSanMoi, FirstLightProbeUsesAppendedCaveWhenInlinePaddingIsUnavailable) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
-  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
   EXPECT_EQ(patch.anchor_offset, 0u);
@@ -5104,7 +5109,7 @@ TEST(ConSanMoi, FirstLightProbeUsesAppendedCaveWhenInlinePaddingIsUnavailable) {
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  EXPECT_EQ(patched.text_sections().front()->size(),
+  EXPECT_GE(patched.text_sections().front()->size(),
             text_words.size() * sizeof(uint32_t) + patch.trampoline_size);
 
   std::vector<uint32_t> actual_words(patched.text_sections().front()->size() / sizeof(uint32_t));
@@ -5116,14 +5121,17 @@ TEST(ConSanMoi, FirstLightProbeUsesAppendedCaveWhenInlinePaddingIsUnavailable) {
   EXPECT_EQ(actual_words[0], build_s_branch(*fwd, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_EQ(actual_words[1], build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_EQ(actual_words[2], build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(actual_words[actual_words.size() - 3u], 0xD8340000u);
-  EXPECT_EQ(actual_words[actual_words.size() - 2u], 0x00000000u);
+  const std::vector<uint32_t> trampoline_words =
+      text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+  ASSERT_GE(trampoline_words.size(), 3u);
+  EXPECT_EQ(trampoline_words[trampoline_words.size() - 3u], 0xD8340000u);
+  EXPECT_EQ(trampoline_words[trampoline_words.size() - 2u], 0x00000000u);
   EXPECT_EQ(std::count(actual_words.begin(), actual_words.end(), 0xBFC60000u), 0u);
   const uint64_t return_branch_pc =
       patch.trampoline_offset + patch.trampoline_size - sizeof(uint32_t);
   const auto ret = compute_sopp_branch_simm16(return_branch_pc, 2u * sizeof(uint32_t));
   ASSERT_TRUE(ret);
-  EXPECT_EQ(actual_words.back(), build_s_branch(*ret, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(trampoline_words.back(), build_s_branch(*ret, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST(ConSanMoi, InlineShadowPublishesStronglyClassifiedFlatLdsCell) {

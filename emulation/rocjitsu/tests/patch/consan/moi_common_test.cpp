@@ -31,6 +31,37 @@ TEST(ConSanMoi, WorkgroupSourceRequiresExactlyOneOperandKind) {
   EXPECT_FALSE(ambiguous.operand());
 }
 
+TEST(ConSanMoi, PrivateWorkgroupSourceAppliesPackedCoordinateExtraction) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint16_t kValueVgpr = 12u;
+  constexpr uint32_t kPrivateOffset = 36u;
+  for (const auto &[mask_low, extract_high] : {std::pair{true, false}, std::pair{false, true}}) {
+    SCOPED_TRACE("mask_low=" + std::to_string(mask_low) +
+                 " shift_right=" + std::to_string(extract_high));
+    ConSanMoiWorkgroupSource source = ConSanMoiWorkgroupSource::private_state(kPrivateOffset);
+    source.mask_low_16 = mask_low;
+    source.shift_right_16 = extract_high;
+    std::vector<uint32_t> words;
+
+    ASSERT_TRUE(consan_detail::append_workgroup_source_value(words, source, kValueVgpr, kArch));
+
+    const auto load = instrumentation::build_private_load_b32(kValueVgpr, kPrivateOffset, kArch);
+    const auto shift_left = instrumentation::build_v_lshlrev_b32(
+        kValueVgpr, scalar_positive_inline_u32(16), kValueVgpr, kArch);
+    const auto shift_right = instrumentation::build_v_lshrrev_b32(
+        kValueVgpr, scalar_positive_inline_u32(16), kValueVgpr, kArch);
+    ASSERT_TRUE(load && shift_left && shift_right);
+    EXPECT_TRUE(contains_subsequence(words, *load));
+    if (mask_low) {
+      EXPECT_NE(std::ranges::find(words, *shift_left), words.end());
+      EXPECT_NE(std::ranges::find(words, *shift_right), words.end());
+    } else {
+      EXPECT_EQ(std::ranges::find(words, *shift_left), words.end());
+      EXPECT_NE(std::ranges::find(words, *shift_right), words.end());
+    }
+  }
+}
+
 TEST(ConSanMoi, ScalarPersistentTemporaryValidationIsNoopWhenDisabled) {
   ConSanOptions disabled;
   std::vector<std::string> errors;
@@ -124,9 +155,19 @@ TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {
     for (uint16_t live_sgpr_count : {96u, 98u}) {
       SCOPED_TRACE(testing::PrintToString(engine) +
                    " live_sgprs=" + std::to_string(live_sgpr_count));
-      const std::vector<uint8_t> bytes =
+      std::vector<uint8_t> bytes =
           make_cdna4_disconnected_scalar_pressure_code_object(live_sgpr_count);
       ASSERT_FALSE(bytes.empty());
+      for (std::string_view kernel_name : {"lds_probe", "lds_helper"}) {
+        mutate_kernel_descriptor(bytes, kernel_name, [](KD &descriptor) {
+          AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1u);
+          AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1u);
+          AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1u);
+        });
+      }
       ConSanOptions options = moi_options(engine);
       options.moi_track_barriers = false;
       options.moi_track_atomics = false;
@@ -218,7 +259,7 @@ TEST(ConSanMoi, Gfx1250TwoAddressLoadScratchAvoidsCompleteDestinationPair) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   ASSERT_TRUE(result.resource_plans.front().scratch_vgpr);
   EXPECT_GE(*result.resource_plans.front().scratch_vgpr, 3u);
-  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
 }
 
@@ -641,10 +682,22 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
   std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture, kArch, helper);
   ASSERT_FALSE(bytes.empty());
   mutate_kernel_descriptor(bytes, "shared_owner_0", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    1u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 4u);
   });
   mutate_kernel_descriptor(bytes, "shared_owner_1", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    1u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 9u);
   });
@@ -681,9 +734,17 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
         << testing::PrintToString(result.warnings);
     ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
     EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
-    EXPECT_EQ(*result.resolved_moi_persistent_owner_sgpr, 80u);
+    EXPECT_EQ(*result.resolved_moi_persistent_epoch_sgpr,
+              *result.resolved_moi_persistent_owner_sgpr + 1u);
     if (engine == ConSanMoiEngine::RecordReplay) {
       EXPECT_FALSE(result.resolved_moi_persistent_workgroup_key_sgpr);
+      ASSERT_TRUE(result.resolved_moi_record_replay_workgroup_sgprs.complete());
+      EXPECT_EQ(*result.resolved_moi_record_replay_workgroup_sgprs.x,
+                *result.resolved_moi_persistent_epoch_sgpr + 1u);
+      EXPECT_EQ(*result.resolved_moi_record_replay_workgroup_sgprs.y,
+                *result.resolved_moi_record_replay_workgroup_sgprs.x + 1u);
+      EXPECT_EQ(*result.resolved_moi_record_replay_workgroup_sgprs.z,
+                *result.resolved_moi_record_replay_workgroup_sgprs.y + 1u);
     }
     const auto access_patch =
         std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -720,9 +781,10 @@ TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
   ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.resolved_moi_owner_vgpr);
-  EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+  EXPECT_TRUE(result.resolved_moi_owner_vgpr);
+  EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
+  EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
   EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   const auto atomic_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -734,12 +796,7 @@ TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
                           [](const ConSanPatchInfo &patch) {
                             return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
                           }),
-            0);
-  EXPECT_NE(
-      std::ranges::find(
-          result.warnings,
-          "ConSan MOI record/replay uses probe-local owner derivation without access records"),
-      result.warnings.end());
+            2);
 }
 
 TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
@@ -819,7 +876,7 @@ TEST(ConSanMoi, SharedHelperPatchNamesEveryOwnerAndLeavesUnrelatedDescriptorUnch
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified);
-  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
   EXPECT_EQ(patch.anchor_offset, 20u);
@@ -904,7 +961,7 @@ TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(result.resource_plans.front().original_private_segment_size, 20u);
-  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.spilled_vgpr_count, 6u);
   EXPECT_EQ(patch.required_private_segment_size, 56u);
@@ -951,7 +1008,7 @@ TEST(ConSanMoi, IndirectSharedHelperSpillUsesEveryRecoveredOwner) {
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::None);
   EXPECT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
-  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(result.patches.front().owner_descriptor_file_offsets,
             plan.owner_descriptor_file_offsets);
 }
@@ -976,7 +1033,7 @@ TEST(ConSanMoi, ScopedSpillPlanningExcludesUnselectedFullVgprCandidate) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(result.patches.front().required_private_segment_size, 56u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().text_offset, result.patches.front().anchor_offset);

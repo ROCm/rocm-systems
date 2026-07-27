@@ -1789,7 +1789,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
         workgroup_sources.cluster_workgroup_id}) {
     if (!source.scalar_src)
       continue;
-    if (!append_workgroup_source_value(words, source, temporary_vgpr, arch) || !mix(temporary_vgpr))
+    if (!consan_detail::append_workgroup_source_value(words, source, temporary_vgpr, arch) ||
+        !mix(temporary_vgpr))
       return false;
   }
   const auto shift = instrumentation::build_v_lshrrev_b32(
@@ -2332,11 +2333,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     return reject_unless_equal_vgpr(offset, high_vgpr);
   };
   const auto reject_unless_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
-    if (!record.load(offset, low_vgpr) ||
-        !append_compare_moi_report_dispatch_id_word(words, options, low_vgpr, high_vgpr, high_word,
-                                                    arch,
-                                                    ConSanMoiLiteralDispatchIdPolicy::
-                                                        AnyArchitecture)) {
+    if (!record.load(offset, low_vgpr) || !append_compare_moi_report_dispatch_id_word(
+                                              words, options, low_vgpr, high_vgpr, high_word, arch,
+                                              ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture)) {
       return false;
     }
     return sequence.emit_branch(different_identity_label, InstructionSequence::BranchKind::VccZero);
@@ -2345,7 +2344,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
                                                  const ConSanMoiWorkgroupSource &source) -> bool {
     if (!source.scalar_src)
       return reject_unless_equal_literal(offset, 0u);
-    if (!append_workgroup_source_value(words, source, high_vgpr, arch))
+    if (!consan_detail::append_workgroup_source_value(words, source, high_vgpr, arch))
       return false;
     return reject_unless_equal_vgpr(offset, high_vgpr);
   };

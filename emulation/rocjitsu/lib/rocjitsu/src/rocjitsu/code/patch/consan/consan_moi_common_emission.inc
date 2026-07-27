@@ -2,6 +2,7 @@ struct MoiPrivateEpochLayout {
   uint32_t epoch_offset = 0;
   std::optional<uint32_t> owner_offset;
   std::optional<uint32_t> workgroup_key_offset;
+  ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
   uint32_t ephemeral_base = 0;
 };
 
@@ -48,44 +49,19 @@ struct MoiPrivateRecordOwnerPlan {
          !options.moi_persistent_owner_sgpr;
 }
 
-[[nodiscard]] std::optional<MoiPrivateRecordOwnerPlan>
-resolve_moi_private_record_owner(std::span<const uint8_t> image, const ConSanResult &result,
-                                 const ResolvedMoiScratchPlan &resources,
-                                 std::vector<std::string> &warnings) {
-  std::optional<uint32_t> common_offset;
-  std::optional<uint32_t> common_state_end;
-  for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
-    const auto owner_patch =
-        std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-          return patch.persistent_owner_private_offset && patch.persistent_private_state_end &&
-                 std::ranges::find(patch.owner_descriptor_file_offsets, descriptor_offset) !=
-                     patch.owner_descriptor_file_offsets.end();
-        });
-    if (owner_patch == result.patches.end()) {
-      warnings.emplace_back(
-          "ConSan MOI private owner has no captured state for an owning kernel descriptor");
-      return std::nullopt;
-    }
-    if (common_offset && *common_offset != *owner_patch->persistent_owner_private_offset) {
-      warnings.emplace_back("ConSan MOI shared private owner has incompatible state offsets");
-      return std::nullopt;
-    }
-    if (common_state_end && *common_state_end != *owner_patch->persistent_private_state_end) {
-      warnings.emplace_back("ConSan MOI shared private owner has incompatible state sizes");
-      return std::nullopt;
-    }
-    common_offset = owner_patch->persistent_owner_private_offset;
-    common_state_end = owner_patch->persistent_private_state_end;
-  }
-  if (!common_offset || !common_state_end) {
-    warnings.emplace_back("ConSan MOI private owner requires an owning kernel descriptor");
+[[nodiscard]] std::optional<MoiPrivateRecordOwnerPlan> resolve_moi_private_record_owner(
+    std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources,
+    const MoiPrivateEpochLayout &layout, std::vector<std::string> &warnings) {
+  if (!layout.owner_offset) {
+    warnings.emplace_back("ConSan MOI private owner requires an entry-captured owner slot");
     return std::nullopt;
   }
   const auto common_shift = common_moi_private_owner_shift(image, resources, warnings);
   if (!common_shift)
     return std::nullopt;
-  return MoiPrivateRecordOwnerPlan{
-      .offset = *common_offset, .shift = *common_shift, .private_state_end = *common_state_end};
+  return MoiPrivateRecordOwnerPlan{.offset = *layout.owner_offset,
+                                   .shift = *common_shift,
+                                   .private_state_end = layout.ephemeral_base};
 }
 
 struct MoiRecordOwnerDerivation {
@@ -271,7 +247,8 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 [[nodiscard]] std::optional<MoiPrivateEpochLayout>
 build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
                                rj_code_arch_t arch, std::vector<std::string> &warnings,
-                               bool include_owner = false, bool include_workgroup_key = false) {
+                               bool include_owner = false, bool include_workgroup_key = false,
+                               bool include_record_replay_workgroup = false) {
   if (resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back("ConSan MOI private epoch requires an owning kernel descriptor");
     return std::nullopt;
@@ -299,6 +276,16 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
       include_workgroup_key ? std::optional<uint64_t>(persistent_end) : std::nullopt;
   if (workgroup_key_offset)
     persistent_end += SpillManager::kSlotBytes;
+  ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
+  std::optional<std::array<uint64_t, 3>> record_replay_workgroup_offset_values;
+  if (include_record_replay_workgroup) {
+    record_replay_workgroup_offset_values = std::array<uint64_t, 3>{
+        persistent_end,
+        persistent_end + SpillManager::kSlotBytes,
+        persistent_end + 2u * SpillManager::kSlotBytes,
+    };
+    persistent_end += 3u * SpillManager::kSlotBytes;
+  }
   const auto private_limit = address_free_scratch_private_limit(arch);
   if (!private_limit) {
     warnings.emplace_back(
@@ -308,6 +295,13 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
   if (persistent_end > std::numeric_limits<uint32_t>::max()) {
     warnings.emplace_back("ConSan MOI private epoch exceeds address-free scratch capacity");
     return std::nullopt;
+  }
+  if (record_replay_workgroup_offset_values) {
+    record_replay_workgroup_offsets = {
+        .x = static_cast<uint32_t>((*record_replay_workgroup_offset_values)[0]),
+        .y = static_cast<uint32_t>((*record_replay_workgroup_offset_values)[1]),
+        .z = static_cast<uint32_t>((*record_replay_workgroup_offset_values)[2]),
+    };
   }
   const auto ephemeral_base =
       normalize_address_free_scratch_private_size(arch, static_cast<uint32_t>(persistent_end));
@@ -323,6 +317,7 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
           workgroup_key_offset
               ? std::optional<uint32_t>(static_cast<uint32_t>(*workgroup_key_offset))
               : std::nullopt,
+      .record_replay_workgroup_offsets = record_replay_workgroup_offsets,
       .ephemeral_base = *ephemeral_base};
 }
 
@@ -862,16 +857,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   }
   const auto persistent_workgroup_sources =
       record_replay_persistent_workgroup_sources(options, arch);
-  ConSanMoiWorkgroupSources workgroup_sources =
-      persistent_workgroup_sources.value_or(ConSanMoiWorkgroupSources{});
-  if (!persistent_workgroup_sources && candidate.kernel_descriptor_file_offset) {
-    const auto descriptor_workgroup_sources = moi_descriptor_workgroup_sources(
-        bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
-    if (!descriptor_workgroup_sources)
-      return std::nullopt;
-    workgroup_sources =
-        record_replay_workgroup_sources(*descriptor_workgroup_sources, options, arch);
+  if (!persistent_workgroup_sources) {
+    errors.emplace_back(
+        "ConSan MOI Record/Replay access requires one exact entry-captured workgroup tuple");
+    return std::nullopt;
   }
+  const ConSanMoiWorkgroupSources workgroup_sources = *persistent_workgroup_sources;
 
   std::vector<uint32_t> words;
   words.reserve(candidate.size / sizeof(uint32_t) + 1u + 7u * 12u + 9u + 10u + 20u + 24u +
@@ -1536,7 +1527,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         return false;
       words.insert(words.end(), mix->begin(), mix->end());
       if (source.has_value()) {
-        if (!append_workgroup_source_value(words, source, record_value_vgpr, arch)) {
+        if (!consan_detail::append_workgroup_source_value(words, source, record_value_vgpr, arch)) {
           return false;
         }
       } else {
@@ -2003,7 +1994,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       if (!record.load(offset, record_value_vgpr))
         return false;
       if (source.has_value()) {
-        if (!append_workgroup_source_value(words, source, record_compare_vgpr, arch))
+        if (!consan_detail::append_workgroup_source_value(words, source, record_compare_vgpr, arch))
           return false;
       } else {
         words.push_back(

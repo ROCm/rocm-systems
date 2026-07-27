@@ -3235,6 +3235,45 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     }
   }
   for (const ConSanPatchInfo &patch : result.patches) {
+    const ConSanMoiPersistentWorkgroupPrivateOffsets &private_workgroup =
+        patch.persistent_record_replay_workgroup_private_offsets;
+    if (!private_workgroup.empty() && !private_workgroup.complete()) {
+      errors.emplace_back(
+          "ConSan final validation found an incomplete private Record/Replay workgroup tuple");
+    }
+    if (private_workgroup.complete()) {
+      const std::array<uint32_t, 3> offsets = {
+          *private_workgroup.x,
+          *private_workgroup.y,
+          *private_workgroup.z,
+      };
+      if (!patch.persistent_private_state_end) {
+        errors.emplace_back(
+            "ConSan final validation found a private Record/Replay workgroup tuple without a "
+            "persistent-state boundary");
+      } else {
+        for (uint32_t offset : offsets) {
+          if (offset % sizeof(uint32_t) != 0u ||
+              offset > std::numeric_limits<uint32_t>::max() - sizeof(uint32_t) ||
+              offset + sizeof(uint32_t) > *patch.persistent_private_state_end) {
+            errors.emplace_back(
+                "ConSan final validation found a private Record/Replay workgroup coordinate "
+                "outside persistent state");
+            break;
+          }
+        }
+        if (std::ranges::adjacent_find(offsets) != offsets.end() || offsets[0] == offsets[2]) {
+          errors.emplace_back(
+              "ConSan final validation found overlapping private Record/Replay workgroup "
+              "coordinates");
+        }
+        if (patch.required_private_segment_size < *patch.persistent_private_state_end) {
+          errors.emplace_back(
+              "ConSan final validation found private Record/Replay state beyond the patch's "
+              "private-segment requirement");
+        }
+      }
+    }
     if (patch.dynamic_private_segment_addend != 0) {
       if (patch.required_private_segment_size < patch.dynamic_private_segment_addend) {
         errors.emplace_back(
@@ -3263,7 +3302,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
       apply_to_owner(owner, [&](DescriptorRequirement &requirement) {
         requirement.allow_resource_delta = true;
         requirement.require_full_workgroup_id |=
-            std::ranges::binary_search(result.moi_full_workgroup_id_descriptor_offsets, owner);
+            std::ranges::binary_search(result.moi_full_workgroup_id_descriptor_offsets, owner) ||
+            private_workgroup.complete();
         requirement.required_private_bytes =
             std::max(requirement.required_private_bytes, patch.required_private_segment_size);
         requirement.required_group_bytes =
@@ -3412,9 +3452,12 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           return patch.owner_descriptor_file_offsets.empty() && patch.scratch_vgpr.has_value();
         });
     KernelDescriptor normalized = replacement_descriptor;
+    const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
     const bool requires_full_workgroup_id =
         requirement.require_full_workgroup_id &&
-        (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250);
+        (!cdna || std::ranges::binary_search(result.moi_full_workgroup_id_descriptor_offsets,
+                                             original_kernel.descriptor_file_offset)) &&
+        (cdna || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250);
     const auto normalize_workgroup_id_payload = [&](uint32_t &rsrc2) {
       AMDHSA_BITS_SET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                       AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,

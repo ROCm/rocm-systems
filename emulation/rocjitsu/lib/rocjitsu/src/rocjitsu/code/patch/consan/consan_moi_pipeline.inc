@@ -59,6 +59,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     std::optional<VgprSpillSequence> spill;
     std::optional<InlineSgprSpillSequence> scalar_spill;
     std::optional<MoiPrivateRecordOwnerPlan> private_owner;
+    std::optional<MoiPrivateEpochLayout> private_layout;
   };
   std::vector<PlannedFenceRecord> selected;
   MoiResourcePlanningState resource_state(bytes, arch, options, result);
@@ -105,10 +106,28 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     ResolvedMoiScratchPlan active_resources = *resources;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
+    std::optional<MoiPrivateEpochLayout> private_layout;
+    if (options.automatic_moi_private_epoch) {
+      private_layout = build_moi_private_epoch_layout(
+          result, active_resources, arch, result.warnings,
+          /*include_owner=*/options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
+          /*include_workgroup_key=*/false,
+          /*include_record_replay_workgroup=*/true);
+      if (!private_layout)
+        continue;
+      candidate_options.moi_record_replay_workgroup_private_offsets =
+          private_layout->record_replay_workgroup_offsets;
+    }
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI fence record patch found no common transient SGPR assignment");
+      continue;
+    }
+    if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
+                                                        resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI fence record patch found no common entry workgroup assignment");
       continue;
     }
     std::optional<VgprSpillSequence> spill;
@@ -158,13 +177,13 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     }
     std::optional<MoiPrivateRecordOwnerPlan> private_owner;
     if (moi_record_uses_private_owner(candidate_options)) {
-      private_owner =
-          resolve_moi_private_record_owner(bytes, result, active_resources, result.warnings);
+      private_owner = resolve_moi_private_record_owner(bytes, active_resources, *private_layout,
+                                                       result.warnings);
       if (!private_owner)
         continue;
     }
-    const uint32_t private_layout_base = private_owner
-                                             ? private_owner->private_state_end
+    const uint32_t private_layout_base = private_layout
+                                             ? private_layout->ephemeral_base
                                              : active_resources.original_private_segment_size;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
         moi_scalar_spill_requires_dynamic_vgpr_frame(result, active_resources, candidate_options)) {
@@ -189,8 +208,16 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     }
     note_descriptor_requirements(descriptor_requirements, active_resources);
     note_moi_sgpr_requirements(scalar_requirements, active_resources, candidate_options, arch);
+    if (private_layout) {
+      for (uint64_t descriptor_offset : active_resources.owner_descriptor_file_offsets) {
+        auto [it, inserted] =
+            private_requirements.emplace(descriptor_offset, private_layout->ephemeral_base);
+        if (!inserted)
+          it->second = std::max(it->second, private_layout->ephemeral_base);
+      }
+    }
     selected.push_back({std::move(candidate), active_resources, address_plan, std::move(spill),
-                        std::move(scalar_spill), private_owner});
+                        std::move(scalar_spill), private_owner, private_layout});
   }
   if (selected.empty()) {
     result.warnings.emplace_back("ConSan MOI fence record patch found no patchable fences");
@@ -254,10 +281,20 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     const uint64_t cave_text_offset = placement_planner.appended_end();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    if (planned.private_layout) {
+      candidate_options.moi_record_replay_workgroup_private_offsets =
+          planned.private_layout->record_replay_workgroup_offsets;
+    }
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI fence record patch lost its transient SGPR assignment");
+      return;
+    }
+    if (!apply_record_replay_entry_workgroup_assignment(
+            candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+      result.errors.emplace_back(
+          "ConSan MOI fence record patch lost its entry workgroup assignment");
       return;
     }
     const bool direct_entry =
@@ -537,13 +574,18 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
-    if (planned.private_owner) {
-      info.persistent_owner_private_offset = planned.private_owner->offset;
-      info.persistent_private_state_end = planned.private_owner->private_state_end;
+    if (planned.private_layout) {
+      info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
+      info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+      info.persistent_record_replay_workgroup_private_offsets =
+          planned.private_layout->record_replay_workgroup_offsets;
+      info.persistent_private_state_end = planned.private_layout->ephemeral_base;
+      info.required_private_segment_size = planned.private_layout->ephemeral_base;
     }
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
-      info.required_private_segment_size = planned.spill->total_private_bytes;
+      info.required_private_segment_size =
+          std::max(info.required_private_segment_size, planned.spill->total_private_bytes);
       note_dynamic_stack_private_requirement(info, &*planned.spill);
     }
     if (planned.scalar_spill) {
@@ -572,12 +614,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     for (const ConSanFunctionInfo &function : result.functions)
       append_barrier_epoch_candidates(function, candidates);
     apply_test_container_filter(candidates, options);
-    const bool uses_coalesced_epoch =
-        options.moi_engine == ConSanMoiEngine::InlineShadow ||
-        (options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_init_owner_epoch &&
-         (options.moi_epoch_vgpr || options.moi_persistent_epoch_sgpr ||
-          options.automatic_moi_private_epoch));
-    if (uses_coalesced_epoch) {
+    if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
       std::erase_if(candidates, [](const BarrierRecordCandidate &candidate) {
         return candidate.site.operation == ConSanBarrierSite::Operation::Signal;
       });
@@ -595,8 +632,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                      : 7u)
           : options.moi_engine == ConSanMoiEngine::InlineShadow
               ? inline_shadow_barrier_scratch_count(options)
-          : uses_coalesced_epoch ? 1u
-                                 : 6u));
+              : 6u));
     }
   }
   if (options.moi_track_atomics) {
@@ -624,11 +660,11 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       return;
     for (size_t index = 0; index < candidates.size(); ++index) {
       const AtomicRecordCandidate &candidate = candidates[index];
-      const uint16_t scratch_count =
-          options.moi_engine == ConSanMoiEngine::Sampled ? sampled_atomic_scratch_count()
-          : options.moi_engine == ConSanMoiEngine::InlineShadow
-              ? inline_shadow_atomic_scratch_count(state.arch)
-              : atomic_record_scratch_count(candidate.site, state.arch);
+      const uint16_t scratch_count = options.moi_engine == ConSanMoiEngine::Sampled
+                                         ? sampled_atomic_scratch_count()
+                                     : options.moi_engine == ConSanMoiEngine::InlineShadow
+                                         ? inline_shadow_atomic_scratch_count(state.arch)
+                                         : atomic_record_scratch_count(candidate.site, state.arch);
       result.resource_plans.push_back(plan_moi_resource_site(
           state, options, ConSanResourceSiteKind::Atomic, index, candidate.site.text_offset,
           candidate.kernel_descriptor_file_offset, scratch_count, nullptr, &candidate.site));
@@ -810,14 +846,11 @@ void append_moi_barrier_site_dispositions(const Container &container, const ConS
   const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
   if (in_kernel && is_rocclr_runtime_kernel_name(container.name))
     return;
-  const bool uses_coalesced_epoch =
-      options.moi_engine == ConSanMoiEngine::InlineShadow ||
-      (options.moi_engine == ConSanMoiEngine::RecordReplay && options.moi_init_owner_epoch &&
-       (options.moi_epoch_vgpr || options.moi_persistent_epoch_sgpr ||
-        options.automatic_moi_private_epoch));
   for (const ConSanBarrierSite &site : container.barrier_sites) {
-    if (uses_coalesced_epoch && site.operation == ConSanBarrierSite::Operation::Signal)
+    if (options.moi_engine == ConSanMoiEngine::InlineShadow &&
+        site.operation == ConSanBarrierSite::Operation::Signal) {
       continue;
+    }
     if (options.moi_engine == ConSanMoiEngine::InlineShadow && !in_kernel &&
         (result.moi_persistent_vgprs_automatic || result.moi_private_epoch_automatic)) {
       const ConSanCandidateResourcePlan *plan =
@@ -827,10 +860,11 @@ void append_moi_barrier_site_dispositions(const Container &container, const ConS
     }
     ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
     if (options.moi_engine == ConSanMoiEngine::Sampled) {
-      const ConSanSyncEvent *event = sync_index.event(
-          ConSanSyncEventKind::Barrier, container.name, in_kernel, site.text_offset);
-      const ConSanSyncSequence *sequence =
-          event == nullptr || event->size != site.size ? nullptr : sync_index.sequence(event->identity);
+      const ConSanSyncEvent *event = sync_index.event(ConSanSyncEventKind::Barrier, container.name,
+                                                      in_kernel, site.text_offset);
+      const ConSanSyncSequence *sequence = event == nullptr || event->size != site.size
+                                               ? nullptr
+                                               : sync_index.sequence(event->identity);
       const bool qualified =
           sequence != nullptr && consan_moi_sampled_qualifies_barrier_sequence(*sequence);
       if (!qualified)
@@ -875,8 +909,7 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
     const bool unowned_communication =
         communication != nullptr && communication->execution_owners.empty();
     const ConSanSyncEvent *fence_event = sync_index.event(fence.fence_event_identity);
-    const bool unowned_fence =
-        fence_event != nullptr && fence_event->execution_owners.empty();
+    const bool unowned_fence = fence_event != nullptr && fence_event->execution_owners.empty();
     const bool unassociated_cache_operation =
         fence.rejection_reason == "fence-not-associated-with-addressed-communication-sequence";
     if (!fence.eligible) {

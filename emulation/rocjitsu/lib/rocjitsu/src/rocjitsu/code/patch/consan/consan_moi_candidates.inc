@@ -116,6 +116,29 @@ resolve_record_replay_report_layout(const ConSanOptions &options, bool include_b
              options, options.moi_report_layout->record_replay_dispatch_token_capacity);
 }
 
+/// Every Record/Replay record is interpreted after the kernel has completed,
+/// so its workgroup identity must come from entry-captured persistent state.
+/// The report layout controls banking and scratch needs, not this lifetime
+/// requirement.
+[[nodiscard]] bool record_replay_requires_entry_workgroup_capture(const ConSanOptions &options) {
+  return options.moi_engine == ConSanMoiEngine::RecordReplay;
+}
+
+[[nodiscard]] uint8_t record_replay_entry_workgroup_capture_count(const ConSanOptions &options) {
+  return static_cast<uint8_t>(options.moi_record_replay_workgroup_sgprs.complete()) +
+         static_cast<uint8_t>(options.moi_record_replay_workgroup_vgprs.complete()) +
+         static_cast<uint8_t>(options.moi_record_replay_workgroup_private_offsets.complete());
+}
+
+[[nodiscard]] bool record_replay_has_entry_workgroup_capture(const ConSanOptions &options) {
+  return record_replay_entry_workgroup_capture_count(options) != 0u;
+}
+
+[[nodiscard]] bool
+record_replay_entry_workgroup_capture_is_unambiguous(const ConSanOptions &options) {
+  return record_replay_entry_workgroup_capture_count(options) <= 1u;
+}
+
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
 }
@@ -125,6 +148,13 @@ struct ConSanMoiWorkgroupSources {
   ConSanMoiWorkgroupSource y;
   ConSanMoiWorkgroupSource z;
   ConSanMoiWorkgroupSource cluster_workgroup_id;
+  // CDNA exposes descriptor-selected system SGPRs as a packed suffix after
+  // the user-SGPR window. Exact Record/Replay capture requests a full x/y/z
+  // launch payload, then restores the guest's original packed suffix before
+  // returning from the entry prologue.
+  std::optional<uint16_t> cdna_full_payload_base;
+  std::optional<uint16_t> cdna_guest_payload_base;
+  uint8_t cdna_guest_payload_mask = 0;
 
   auto operator<=>(const ConSanMoiWorkgroupSources &) const = default;
 };
@@ -852,32 +882,6 @@ find_first_light_access_record_candidates(const ConSanResult &result,
   return sequence.emit_all(load, wait);
 }
 
-[[nodiscard]] bool append_workgroup_source_value(std::vector<uint32_t> &words,
-                                                 const ConSanMoiWorkgroupSource &source,
-                                                 uint16_t value_vgpr, rj_code_arch_t arch) {
-  const auto operand = source.operand();
-  if (!operand)
-    return false;
-  words.push_back(build_v_mov_b32_e32(value_vgpr, *operand, arch));
-  if (source.mask_low_16) {
-    const auto shift_left = instrumentation::build_v_lshlrev_b32(
-        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
-    const auto shift_right = instrumentation::build_v_lshrrev_b32(
-        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
-    InstructionSequence sequence(words);
-    if (!sequence.emit_all(shift_left, shift_right))
-      return false;
-  }
-  if (source.shift_right_16) {
-    const auto shift = instrumentation::build_v_lshrrev_b32(
-        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
-    InstructionSequence sequence(words);
-    if (!sequence.emit(shift))
-      return false;
-  }
-  return true;
-}
-
 /// Emits fields relative to one materialized GPU record address.
 ///
 /// The address and temporary VGPRs are explicit because record layouts often
@@ -927,7 +931,7 @@ public:
       return false;
     if (!source.has_value())
       return missing == MissingWorkgroupSource::Skip ? true : store_literal(offset, 0u);
-    return append_workgroup_source_value(words_, source, temporary_vgpr_, arch_) &&
+    return consan_detail::append_workgroup_source_value(words_, source, temporary_vgpr_, arch_) &&
            store_vgpr(offset, temporary_vgpr_);
   }
 
@@ -1359,27 +1363,8 @@ static_assert(static_cast<size_t>(kDynamicDiagnosticRecordLayout.stride) ==
   if (!source.has_value())
     return true;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + layout.value_vgpr_offset);
-  const auto operand = source.operand();
-  if (!operand)
+  if (!consan_detail::append_workgroup_source_value(words, source, value_vgpr, arch))
     return false;
-  words.push_back(build_v_mov_b32_e32(value_vgpr, *operand, arch));
-  if (source.mask_low_16) {
-    const auto shift_left = instrumentation::build_v_lshlrev_b32(
-        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
-    const auto shift_right = instrumentation::build_v_lshrrev_b32(
-        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
-    if (!shift_left || !shift_right)
-      return false;
-    words.push_back(*shift_left);
-    words.push_back(*shift_right);
-  }
-  if (source.shift_right_16) {
-    const auto shift = instrumentation::build_v_lshrrev_b32(
-        value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
-    if (!shift)
-      return false;
-    words.push_back(*shift);
-  }
   return append_dynamic_record_store_u32_vgpr(words, layout, field_address, value_vgpr, slot_vgpr,
                                               scratch_vgpr, arch);
 }
