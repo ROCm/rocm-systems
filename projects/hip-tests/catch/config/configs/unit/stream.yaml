@@ -182,6 +182,10 @@ stream:
     # Note: needs to be enabled when streamPerThread issues are fixed
     disabled: [amd_windows, amd_wsl]
     tags: [synchronization]
+  Unit_hipStreamKilledWorkerThread:
+    <<: *level_2
+    disabled: [amd_linux]
+    tags: [synchronization]
   Unit_hipStreamQuery_WithNoWork:
     <<: *level_2
     tags: [synchronization]
