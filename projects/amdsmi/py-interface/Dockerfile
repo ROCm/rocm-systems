@@ -9,9 +9,12 @@ ARG DEBCONF_NONINTERACTIVE_SEEN=true
 ENV TZ="America/Chicago"
 RUN ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime && echo ${TZ} > /etc/timezone
 
+RUN useradd -m rocm
+
 RUN apt update --yes \
         && apt install --yes \
             build-essential \
+            ca-certificates \
             cmake \
             git \
             gnupg \
@@ -20,37 +23,35 @@ RUN apt update --yes \
             libnl-3-dev \
             libnl-genl-3-dev \
             libpython3-dev \
+            libssl-dev \
             lsb-release \
             pkg-config \
             pkg-config \
             python3-pip \
             software-properties-common \
             wget \
+            cmake \
         && apt clean \
         && rm -rf /var/cache/apt/ /var/lib/apt/lists/*
 
-# install clang
-RUN TEMPDIR=$(mktemp -d) \
-        && cd $TEMPDIR \
-        && wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh \
-        && ./llvm.sh 16 \
+# install clang-16 from apt.llvm.org
+# Acquire::https peer verification is disabled for apt.llvm.org to account for
+# proxy intercepting TLS and presenting untrusted cert.
+# Package integrity guaranteed by the GPG signature on the repo metadata.
+RUN echo 'Acquire::https::apt.llvm.org::Verify-Peer "false";' > /etc/apt/apt.conf.d/99llvm-no-verify \
+        && apt update --yes \
+        && apt install --yes apt-transport-https \
+        && apt clean \
+        && rm -rf /var/cache/apt/ /var/lib/apt/lists/* \
+        && wget --no-check-certificate -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+        | gpg --dearmor | tee /etc/apt/trusted.gpg.d/apt.llvm.org.gpg > /dev/null \
+        && echo "deb https://apt.llvm.org/jammy/ llvm-toolchain-jammy-16 main" > /etc/apt/sources.list.d/llvm-16.list \
+        && apt update --yes \
+        && apt install --yes clang-16 \
+        && apt clean \
+        && rm -rf /var/cache/apt/ /var/lib/apt/lists/* \
         && update-alternatives --install /usr/bin/clang clang $(which clang-16) 91 --slave /usr/bin/clang++ clang++ $(which clang++-16) \
-        && python3 -m pip install --no-cache-dir clang==16.0.1 ctypeslib2==2.4.0 -U \
-        && rm -rf $TEMPDIR
-
-# install cmake
-ARG CMAKE_VERSION=3.29.2
-RUN TEMPDIR=$(mktemp -d) \
-        && cd $TEMPDIR \
-        && gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys CBA23971357C2E6590D9EFD3EC8FEF3A7BFB4EDA \
-        && wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.sh \
-        && wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-SHA-256.txt \
-        && wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-SHA-256.txt.asc \
-        && gpg --verify cmake-${CMAKE_VERSION}-SHA-256.txt.asc cmake-${CMAKE_VERSION}-SHA-256.txt \
-        && grep "cmake-${CMAKE_VERSION}-linux-x86_64.sh" cmake-${CMAKE_VERSION}-SHA-256.txt | sha256sum -c \
-        && chmod +x cmake-${CMAKE_VERSION}-linux-x86_64.sh \
-        && ./cmake-${CMAKE_VERSION}-linux-x86_64.sh --skip-license --prefix=/usr \
-        && rm -rf $TEMPDIR
+        && python3 -m pip install --no-cache-dir --trusted-host pypi.org --trusted-host files.pythonhosted.org clang==16.0.1 ctypeslib2==2.4.0 -U
 
 WORKDIR /src
 CMD ["sh", "-c", "\

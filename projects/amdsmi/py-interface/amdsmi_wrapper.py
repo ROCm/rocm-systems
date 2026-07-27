@@ -187,8 +187,17 @@ from pathlib import Path
 # alternate .so explicitly.
 # ---------------------------------------------------------------------------
 
+_libraries = {}
 
-# Versioned SONAME the system package ships; matches src/CMakeLists.txt SOVERSION.
+
+# Versioned SONAME the SYSTEM package ships (case 3 below). This is always
+# libamd_smi.so.<major> -- the name the rpm/deb installs and the dynamic linker
+# resolves -- regardless of which library THIS wrapper was generated against.
+# It must NOT be derived from the -l build library: when the wrapper is
+# generated for the wheel (-l libamd_smi_python.so), the system fallback still
+# has to name the system lib, not the wheel-private libamd_smi_python.so (which
+# the system package never ships). The major matches src/CMakeLists.txt
+# SOVERSION (= AMDSMI_LIB_VERSION_MAJOR in amdsmi.h).
 _AMDSMI_LIB_SONAME = "libamd_smi.so.27"
 
 # Whether the loader may fall back to the system SONAME after the bundled
@@ -265,6 +274,7 @@ try:
 except OSError as _load_err:
     _libraries['libamd_smi.so'] = _MissingLibrary(_load_err)
     _loaded_lib_path = None
+
 
 #Add support for amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
