@@ -1,11 +1,18 @@
 // Minimal nccl.h stub for CPU-only RCCL unit tests.
-// Provides result codes and basic types without pulling in HIP.
 #pragma once
 
 #include <cstdint>
 #include <cstddef>
+#include <climits>
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
+
+#define NCCL_VERSION_CODE 23004
+#define NCCL_API_MAGIC 0xcafebeef
+#define NCCL_CONFIG_UNDEF_INT INT_MIN
+#define NCCL_CONFIG_UNDEF_PTR NULL
+#define NCCL_NET_HANDLE_MAXSIZE 256
+#define NCCL_UUID_NBYTES 16
 
 typedef enum {
     ncclSuccess                 =  0,
@@ -21,12 +28,12 @@ typedef enum {
 } ncclResult_t;
 
 typedef struct ncclComm* ncclComm_t;
+struct ncclWindow_vidmem;
+typedef struct ncclWindow_vidmem* ncclWindow_t;
 
-// Public API declarations used by TimeoutTests
 const char* ncclGetErrorString(ncclResult_t code);
 ncclResult_t ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t* asyncError);
 
-// Data types (needed by CollCommon.h and other headers)
 typedef enum {
     ncclInt8       = 0, ncclChar       = 0,
     ncclUint8      = 1,
@@ -52,3 +59,24 @@ typedef enum {
     ncclNumOps     = 5,
     ncclMaxRedOp   = 0x7fff
 } ncclRedOp_t;
+
+typedef enum {
+  ncclStatGpuMemSuspend      = 0,
+  ncclStatGpuMemSuspended    = 1,
+  ncclStatGpuMemPersist      = 2,
+  ncclStatGpuMemTotal        = 3
+} ncclCommMemStat_t;
+
+struct ncclUniqueId { char internal[128]; };
+
+struct ncclConfig_v21701 {
+  size_t size; unsigned int magic; unsigned int version;
+  int blocking; int cgaClusterSize; int minCTAs; int maxCTAs;
+  const char* netName; int splitShare; int trafficClass;
+  const char* commName; int collnetEnable; int CTAPolicy;
+  int shrinkShare; int nvlsCTAs; int nChannelsPerNetPeer;
+  int nvlinkCentricSched;
+};
+typedef struct ncclConfig_v21701 ncclConfig_t;
+
+#define NCCL_NUM_FUNCTIONS 5
