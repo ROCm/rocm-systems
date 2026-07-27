@@ -371,12 +371,19 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // CU mask lock
   std::mutex mask_lock_;
 
+  // Serializes HotSwap dispatch intercept packet inspection/rewrite before the
+  // doorbell is rung.
+  std::mutex hotswap_dispatch_lock_;
+
   // Mutex to prevent AsyncReclaimScratch and HandleInsufficientScratch from
   // happening at the same time.
   std::mutex scratch_lock_;
 
   // Current CU mask
   std::vector<uint32_t> cu_mask_;
+
+  uint64_t last_doorbell_value_;
+  std::vector<uint64_t> hotswap_patched_generations_;
 
   class metadata_prefetch_pkt_version {
     public:

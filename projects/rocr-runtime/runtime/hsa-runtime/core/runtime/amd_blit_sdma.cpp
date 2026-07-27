@@ -172,10 +172,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   }
 
   // Cache ISA version for capability detection below.
-  const auto isa_version = agent_->supported_isas()[0]->GetVersion();
-  const auto major = agent_->supported_isas()[0]->GetMajorVersion();
-  const auto minor = agent_->supported_isas()[0]->GetMinorVersion();
-  const auto stepping = agent_->supported_isas()[0]->GetStepping();
+  const auto isa_version = agent_->execution_isas()[0]->GetVersion();
+  const auto major = agent_->execution_isas()[0]->GetMajorVersion();
+  const auto minor = agent_->execution_isas()[0]->GetMinorVersion();
+  const auto stepping = agent_->execution_isas()[0]->GetStepping();
 
   // Some GFX9 devices require a minimum of 64 DWORDS per ring buffer submission.
   if (isa_version >= core::Isa::Version(9, 0, 0) &&
@@ -261,9 +261,9 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
 
   // Cache gfx90x SW poll workaround flag to avoid static-local guard overhead
   // on every SubmitCommand call.
-  sw_poll_workaround_ = agent_->supported_isas()[0]->GetMajorVersion() == 9 &&
-                        agent_->supported_isas()[0]->GetMinorVersion() == 0 &&
-                        agent_->supported_isas()[0]->GetStepping() != 10;
+  sw_poll_workaround_ = agent_->execution_isas()[0]->GetMajorVersion() == 9 &&
+                        agent_->execution_isas()[0]->GetMinorVersion() == 0 &&
+                        agent_->execution_isas()[0]->GetStepping() != 10;
 
   if (core::g_use_interrupt_wait) {
     signals_[0].reset(new core::InterruptSignal(0));
@@ -1872,7 +1872,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
 
   // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
   const bool isGFX12Plus =
-                        (agent_->supported_isas()[0]->GetMajorVersion() >= 12);
+                        (agent_->execution_isas()[0]->GetMajorVersion() >= 12);
 
   // Common and GFX12 packet must match in size to use same code for vector/append.
   static_assert(sizeof(SDMA_PKT_COPY_LINEAR_RECT) == sizeof(SDMA_PKT_COPY_LINEAR_RECT_GFX12), "");
@@ -2090,7 +2090,7 @@ void BlitSdma<useGCR, scopeFields>::BuildFenceCommand(char* fence_command_addr, 
   assert(fence_command_addr != NULL);
 
   // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
-  if (agent_->supported_isas()[0]->GetMajorVersion() >= 12) {
+  if (agent_->execution_isas()[0]->GetMajorVersion() >= 12) {
     SDMA_PKT_FENCE_GFX12* packet_addr =
       reinterpret_cast<SDMA_PKT_FENCE_GFX12*>(fence_command_addr);
 
@@ -2117,7 +2117,7 @@ void BlitSdma<useGCR, scopeFields>::BuildFenceCommand(char* fence_command_addr, 
 
     packet_addr->HEADER_UNION.op = SDMA_OP_FENCE;
 
-    if (agent_->supported_isas()[0]->GetMajorVersion() >= 10) {
+    if (agent_->execution_isas()[0]->GetMajorVersion() >= 10) {
       packet_addr->HEADER_UNION.mtype = 3;
     }
 
@@ -2454,7 +2454,7 @@ void BlitSdma<useGCR, scopeFields>::BuildCopyRectCommand(const std::function<voi
 
   // GFX12 or later use a different packet format that is incompatible (fields changed in size and location).
   const bool isGFX12Plus =
-                      (agent_->supported_isas()[0]->GetMajorVersion() >= 12);
+                      (agent_->execution_isas()[0]->GetMajorVersion() >= 12);
 
   // Limits in terms of element count
   const uint32_t max_pitch = 1    << (isGFX12Plus ? SDMA_PKT_COPY_LINEAR_RECT_GFX12::pitch_bits   : SDMA_PKT_COPY_LINEAR_RECT::pitch_bits);

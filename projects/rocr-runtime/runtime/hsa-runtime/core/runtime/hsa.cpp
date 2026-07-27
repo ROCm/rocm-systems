@@ -65,6 +65,7 @@
 #include "inc/hsa_ven_amd_aqlprofile.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hotswap.hpp"
+#include "core/inc/hotswap_env.hpp"
 #include "core/util/os.h"
 
 namespace rocr {
@@ -2145,6 +2146,10 @@ hsa_status_t LoadSizedCodeObject(
                               uri, loaded_code_object);
 }
 
+bool HotswapPresentationModeEnabled() {
+  return hotswap::IsPresentationModeEnabled();
+}
+
 } // namespace anonymous
 
 hsa_status_t hsa_code_object_reader_create_from_file(
@@ -2366,6 +2371,12 @@ hsa_status_t hsa_executable_load_agent_code_object(
   code_object.data = reader->GetCodeObjectMemory();
   code_object.size = reader->GetCodeObjectSize();
   code_object.uri = reader->GetUri();
+
+  if (HotswapPresentationModeEnabled()) {
+    return exec->LoadCodeObject(
+        agent, {reinterpret_cast<uint64_t>(code_object.data)}, code_object.size,
+        options, code_object.uri, loaded_code_object);
+  }
 
   hotswap::LoadAgentCodeObjectCallbacks callbacks;
   callbacks.context = exec;

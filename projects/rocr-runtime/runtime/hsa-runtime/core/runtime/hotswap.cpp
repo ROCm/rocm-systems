@@ -41,10 +41,9 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "core/inc/hotswap.hpp"
+#include "core/inc/hotswap_env.hpp"
 
-#include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -128,22 +127,6 @@ enum class Gfx1250Stepping {
   kB0,
   kA0,
 };
-
-bool IsEnvFlagEnabled(const char* name) {
-  if (!os::IsEnvVarSet(name)) {
-    return false;
-  }
-
-  std::string value = os::GetEnvVar(name);
-  if (value.empty()) {
-    return false;
-  }
-
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char c) { return std::tolower(c); });
-  return value != "0" && value != "off" && value != "false" && value != "no" && value != "n" &&
-      value != "f";
-}
 
 bool IsHotswapDisabledByEnv() { return IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE"); }
 

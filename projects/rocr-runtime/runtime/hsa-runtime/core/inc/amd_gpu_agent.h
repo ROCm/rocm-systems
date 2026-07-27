@@ -96,6 +96,22 @@ class GpuAgentInt : public core::Agent {
 
    virtual void ReleaseResources() = 0;
 
+   // @brief Invoke the user provided callback for each region accessible by
+   // this agent.
+   //
+   // @param [in] include_peer If true, the callback will be also invoked on
+   // each peer memory region accessible by this agent. If false, only invoke
+   // the callback on memory region owned by this agent.
+   // @param [in] callback User provided callback function.
+   // @param [in] data User provided pointer as input for @p callback.
+   //
+   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
+   // region returns ::HSA_STATUS_SUCCESS.
+   virtual hsa_status_t
+   VisitRegion(bool include_peer,
+               hsa_status_t (*callback)(hsa_region_t region, void *data),
+               void *data) const = 0;
+
    // @brief Carve scratch memory for main from scratch pool.
    //
    // @param [in,out] scratch Structure to be populated with the carved memory
@@ -423,6 +439,11 @@ class GpuAgent : public GpuAgentInt {
   const std::vector<const core::Isa *>& supported_isas() const override {
                                                       return supported_isas_;}
 
+  const std::vector<const core::Isa *>& execution_isas() const override {
+                                                      return supported_isas_;}
+
+  __forceinline const core::Isa *execution_isa() const { return isa_; }
+
   // @brief Override from AMD::GpuAgentInt.
   __forceinline hsa_profile_t profile() const override { return profile_; }
 
@@ -486,8 +507,8 @@ class GpuAgent : public GpuAgentInt {
   const size_t MAX_SCRATCH_APERTURE_PER_XCC_GFX12 = (2ULL << 32); // 8GB
   __forceinline size_t MaxScratchDevice() const {
     return properties_.NumXcc *
-          (supported_isas()[0]->GetMajorVersion() >= 12 ? MAX_SCRATCH_APERTURE_PER_XCC_GFX12 :
-                                                           MAX_SCRATCH_APERTURE_PER_XCC);
+        (execution_isa()->GetMajorVersion() >= 12 ? MAX_SCRATCH_APERTURE_PER_XCC_GFX12
+                                                  : MAX_SCRATCH_APERTURE_PER_XCC);
   }
 
   void ReserveScratch();
@@ -503,9 +524,9 @@ class GpuAgent : public GpuAgentInt {
     if (!core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim())
       return false;
 
-    switch (supported_isas()[0]->GetMajorVersion()) {
+    switch (execution_isa()->GetMajorVersion()) {
       case 9:
-        switch (supported_isas()[0]->GetMinorVersion()) {
+        switch (execution_isa()->GetMinorVersion()) {
           case 4:
             return (properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED);
           case 5:
@@ -515,7 +536,7 @@ class GpuAgent : public GpuAgentInt {
         }
         break;
       case 12:
-        return (supported_isas()[0]->GetMinorVersion() >= 5);
+        return (execution_isa()->GetMinorVersion() >= 5);
       default:
         break;
     }
@@ -762,6 +783,12 @@ class GpuAgent : public GpuAgentInt {
   // @brief Enumeration index
   uint32_t enum_index_;
 
+ private:
+  const core::Isa* isa_;
+  const core::Isa* presented_isa_;
+  std::vector<const core::Isa*> presented_isas_;
+
+ protected:
   // @brief HDP flush registers
   hsa_amd_hdp_flush_t HDP_flush_ = {nullptr, nullptr};
 

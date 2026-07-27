@@ -418,7 +418,7 @@ PerfCounter::PerfCounter(
   info_.eventIndex_ = eventIndex;      // Counter Event Selection (counter_id)
 
   // these block indices are valid for the SI (Gfx8) & Gfx9 devices
-  switch (roc_device_.isa().versionMajor()) {
+  switch (roc_device_.executionIsa().versionMajor()) {
     case (9):
       gfxVersion_ = ROC_GFX9;
       if (blockIndex < gfx9BlockIdOrcaToRocrSize) {

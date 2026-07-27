@@ -72,11 +72,25 @@
 #include "core/inc/amd_gpu_pm4.h"
 #include "core/inc/hsa_amd_tool_int.hpp"
 #include "core/inc/amd_core_dump.hpp"
+#include "loader/AMDHSAKernelDescriptor.h"
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+#include "core/runtime/hotswap_aql_patch.h"
+#include "loader/executable.hpp"
+#endif
 
 namespace rocr {
 namespace AMD {
 
 #define SCRATCH_ALT_RATIO 4
+
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+// This file already uses x86 sfence for hardware doorbell ordering. Keep the
+// HotSwap packet-body fence on the same host target set.
+#if !defined(__x86_64__) && !defined(_M_X64)
+#error "ROCR_HOTSWAP_COMGR_ADAPTER packet fencing requires x86 sfence support"
+#endif
+static void HotSwapPacketBodyFence() { _mm_sfence(); }
+#endif
 
 AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
                    HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback,
@@ -100,7 +114,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       exceptionState(0),
       suspended_(false),
       priority_(HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL),
-      exception_signal_(nullptr) {
+      exception_signal_(nullptr),
+      last_doorbell_value_(UINT64_MAX) {
 
   // Queue size is a function of several restrictions.
   const uint32_t min_pkts = ComputeRingBufferMinPkts();
@@ -118,8 +133,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_metadata_prefetch &&
       metadata_prefetch &&
-      agent_->supported_isas()[0]->GetMajorVersion() == 12
-      && agent_->supported_isas()[0]->GetMinorVersion() >= 5) {
+      agent_->execution_isas()[0]->GetMajorVersion() == 12
+      && agent_->execution_isas()[0]->GetMinorVersion() >= 5) {
     /* First valid version of meta data prefetch - Version is 0.0 */
     dispatch_version_.set_version(0, 0);
     barrier_version_.set_version(0, 0);
@@ -128,6 +143,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   // Allocate the AQL packet ring buffer.
   AllocRegisteredRingBuffer(queue_size_pkts);
   if (ring_buf_ == nullptr) throw std::bad_alloc();
+  hotswap_patched_generations_.assign(queue_size_pkts, UINT64_MAX);
   MAKE_NAMED_SCOPE_GUARD(RingGuard, [&]() { FreeQueueMemory(); });
 
   // Zero the amd_queue_ structure to clear RPTR/WPTR before queue attach.
@@ -199,7 +215,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     assert(amd_queue_.private_segment_aperture_base_hi != 0 && "No private region found.");
   }
 
-  if (agent_->supported_isas()[0]->GetMajorVersion() >= 11)
+  if (agent_->execution_isas()[0]->GetMajorVersion() >= 11)
     queue_scratch_.mem_alignment_size = 256;
   else
     queue_scratch_.mem_alignment_size = 1024;
@@ -480,6 +496,51 @@ uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
 }
 
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  if (rocr::amd::hsa::loader::ShouldCheckHotSwapDispatchKernelObjects()) {
+    std::lock_guard<std::mutex> lock(hotswap_dispatch_lock_);
+    // HotSwap's dispatch intercept relies on seeing every published dispatch
+    // before the CP does. It is only valid for producers that ring the doorbell
+    // for each submitted range; a producer that publishes write_dispatch_id
+    // without ringing this signal cannot use presentation-mode HotSwap safely.
+    core::AqlPacket* packets =
+        reinterpret_cast<core::AqlPacket*>(amd_queue_.hsa_queue.base_address);
+    const uint64_t end = static_cast<uint64_t>(value);
+    const uint64_t queue_size = amd_queue_.hsa_queue.size;
+    uint64_t first = 0;
+    bool has_work = false;
+    const char* failure_reason = nullptr;
+    if (!rocr::AMD::hotswap::lazy::ComputeDoorbellPatchRange(
+            last_doorbell_value_, end, queue_size, first, has_work,
+            failure_reason)) {
+      fprintf(stderr, "hotswap: refusing doorbell patch: %s\n",
+              failure_reason ? failure_reason : "invalid AQL doorbell range");
+      std::abort();
+    }
+
+    for (uint64_t index = first; has_work && index <= end; ++index) {
+      const uint64_t slot = index % queue_size;
+      if (hotswap_patched_generations_[slot] == index) continue;
+      core::AqlPacket& packet = packets[slot];
+      // The producer has already published a valid packet header by the time
+      // the doorbell signal reaches us. Hide the packet while HotSwap resolves
+      // and rewrites the body, then republish the original header with release
+      // ordering before ringing the hardware doorbell below. Lazy translation
+      // is synchronous here: the COMGR/loader path must not submit work to this
+      // queue while its packet is hidden behind this doorbell.
+      if (!rocr::AMD::hotswap::lazy::PatchPublishedKernelDispatchPacket(
+              packet, rocr::amd::hsa::loader::PrepareHotSwapDispatchKernelObject,
+              IsDeviceMemRingBuf() && needsPcieOrdering()
+                  ? HotSwapPacketBodyFence
+                  : nullptr))
+        continue;
+      hotswap_patched_generations_[slot] = index;
+    }
+    if (last_doorbell_value_ == UINT64_MAX || end > last_doorbell_value_)
+      last_doorbell_value_ = end;
+  }
+#endif
+
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
         core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
@@ -1103,7 +1164,7 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
     // For gfx10+ devices we must attempt to assign the smaller of 256 lanes or 16 groups to each
     // engine.
-    if (agent_->supported_isas()[0]->GetMajorVersion() >= 10 &&
+    if (agent_->execution_isas()[0]->GetMajorVersion() >= 10 &&
         maxGroupsPerEngine < 16 &&
                               lanes_per_group * maxGroupsPerEngine < 256) {
       uint64_t groups_per_interleave = (256 + lanes_per_group - 1) / lanes_per_group;
@@ -1227,7 +1288,7 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   if (scratch.large) {
     amd_queue_.queue_properties |= AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE;
     // Set system release fence to flush scratch stores with older firmware versions.
-    if ((agent_->supported_isas()[0]->GetMajorVersion() == 8) && (agent_->GetMicrocodeVersion() < 729)) {
+    if ((agent_->execution_isas()[0]->GetMajorVersion() == 8) && (agent_->GetMicrocodeVersion() < 729)) {
       pkt->dispatch.header &=
           ~(((1 << HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE) - 1)
             << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
@@ -1476,8 +1537,8 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   // dump is generated by hsa-runtime.
   std::vector<AMD::AqlQueue*> suspended_queues;
   if (!core::Runtime::runtime_singleton_->KfdVersion().supports_core_dump &&
-                !(queue->agent_->supported_isas()[0]->GetMajorVersion() == 11
-                  && queue->agent_->supported_isas()[0]->GetMinorVersion() < 5)) {
+                !(queue->agent_->execution_isas()[0]->GetMajorVersion() == 11
+                  && queue->agent_->execution_isas()[0]->GetMinorVersion() < 5)) {
 
     if (pcs::PcsRuntime::instance()->SessionsActive())
       fprintf(stderr, "GPU core dump skipped because PC Sampling active\n");
@@ -1553,9 +1614,9 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
 
     // Devices with WGPs must conform to even-indexed contiguous pairwise CU enablement.
     // Disable WGP mode check for gfx1250
-    if (agent_->supported_isas()[0]->GetMajorVersion() >= 10 &&
-        !(agent_->supported_isas()[0]->GetMajorVersion() == 12 &&
-          agent_->supported_isas()[0]->GetMinorVersion() >= 5)) {
+    if (agent_->execution_isa()->GetMajorVersion() >= 10 &&
+        !(agent_->execution_isa()->GetMajorVersion() == 12 &&
+          agent_->execution_isa()->GetMinorVersion() >= 5)) {
       for (int i = 0; i < mask.size() * 32; i += 2) {
         uint32_t cu_pair = (mask[i / 32] >> (i % 32)) & 0x3;
         if (cu_pair && cu_pair != 0x3) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1624,7 +1685,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
 
   uint32_t ib_jump_cmd[ib_jump_size_dw] = {
       PM4_HDR(PM4_HDR_IT_OPCODE_INDIRECT_BUFFER, ib_jump_size_dw,
-                              agent_->supported_isas()[0]->GetMajorVersion()),
+                              agent_->execution_isas()[0]->GetMajorVersion()),
       PM4_INDIRECT_BUFFER_DW1_IB_BASE_LO(uint32_t(uintptr_t(pm4_ib_buf_) >> 2)),
       PM4_INDIRECT_BUFFER_DW2_IB_BASE_HI(uint32_t(uintptr_t(pm4_ib_buf_) >> 32)),
       (PM4_INDIRECT_BUFFER_DW3_IB_SIZE(uint32_t(cmd_size_b / sizeof(uint32_t))) |
@@ -1636,7 +1697,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   hsa_signal_t local_signal = {0};
   hsa_status_t err = HSA_STATUS_SUCCESS;
 
-  if (agent_->supported_isas()[0]->GetMajorVersion() <= 8) {
+  if (agent_->execution_isas()[0]->GetMajorVersion() <= 8) {
     // Construct a set of PM4 to fit inside the AQL packet slot.
     uint32_t slot_dw_idx = 0;
 
@@ -1648,7 +1709,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
     slot_dw_idx += nop_pad_size_dw;
 
     nop_pad[0] = PM4_HDR(PM4_HDR_IT_OPCODE_NOP, nop_pad_size_dw,
-                              agent_->supported_isas()[0]->GetMajorVersion());
+                              agent_->execution_isas()[0]->GetMajorVersion());
 
     for (uint32_t i = 1; i < nop_pad_size_dw; ++i) {
       nop_pad[i] = 0;
@@ -1668,14 +1729,14 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
     uint32_t* rel_mem = &slot_data[slot_dw_idx];
 
     rel_mem[0] = PM4_HDR(PM4_HDR_IT_OPCODE_RELEASE_MEM, rel_mem_size_dw,
-                              agent_->supported_isas()[0]->GetMajorVersion());
+                              agent_->execution_isas()[0]->GetMajorVersion());
     rel_mem[1] = PM4_RELEASE_MEM_DW1_EVENT_INDEX(PM4_RELEASE_MEM_EVENT_INDEX_AQL);
     rel_mem[2] = 0;
     rel_mem[3] = 0;
     rel_mem[4] = 0;
     rel_mem[5] = 0;
     rel_mem[6] = 0;
-  } else if (agent_->supported_isas()[0]->GetMajorVersion() >= 9) {
+  } else if (agent_->execution_isas()[0]->GetMajorVersion() >= 9) {
     // Construct an AQL packet to jump to the PM4 IB.
     struct amd_aql_pm4_ib {
       uint16_t header;
@@ -1726,7 +1787,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   doorbell->StoreRelease(write_idx);
 
   // Wait for the packet to be consumed.
-  if (agent_->supported_isas()[0]->GetMajorVersion() <= 8) {
+  if (agent_->execution_isas()[0]->GetMajorVersion() <= 8) {
     while (queue->LoadReadIndexRelaxed() <= write_idx)
       os::YieldThread();
 
@@ -2009,7 +2070,7 @@ void AqlQueue::FillComputeTmpRingSize_Gfx12() {
 // @brief Define the Scratch Buffer Descriptor and related parameters
 // that enable kernel access scratch memory
 void AqlQueue::InitScratchSRD() {
-  switch (agent_->supported_isas()[0]->GetMajorVersion()) {
+  switch (agent_->execution_isas()[0]->GetMajorVersion()) {
     case 12:
       FillBufRsrcWord0();
       FillBufRsrcWord1_Gfx11();

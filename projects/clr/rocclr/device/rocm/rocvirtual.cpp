@@ -2240,7 +2240,7 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
                                             << HSA_PACKET_HEADER_TYPE);
 
   if (device.settings().fenceScopeAgent_) {
-    const auto& isa = device.isa();
+    const auto& isa = device.executionIsa();
     const bool isGfx12 = (isa.versionMajor() == 12) && (isa.versionMinor() == 0) &&
                          (isa.versionStepping() == 0 || isa.versionStepping() == 1);
 
@@ -2350,7 +2350,7 @@ bool VirtualGPU::create() {
                                        dedicated_queue_));
   if (!gpu_queue_) return false;
 
-  if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() >= 5) {
+  if (dev().executionIsa().versionMajor() == 12 && dev().executionIsa().versionMinor() >= 5) {
     metadata_preloader_.SetLaunchDescriptorVersion(AMD_LAUNCH_DESCRIPTOR_VERSION_GFX1250);
   }
 
@@ -4745,6 +4745,12 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
                                             gpuKernel.KernargSegmentAlignment(), dev().index());
       command_->SetKernelName(gpuKernel.getDemangledName());
     } else {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+              "Kernel name = %s, argSize = %zu, "
+              "KernargSegmentByteSize = %lu "
+              "KernargSegmentAlignment = %lu",
+              gpuKernel.getDemangledName().c_str(), argSize,
+              gpuKernel.KernargSegmentByteSize(), gpuKernel.KernargSegmentAlignment());
       argBuffer = reinterpret_cast<address>(
           allocKernArg(gpuKernel.KernargSegmentByteSize(), gpuKernel.KernargSegmentAlignment()));
     }
@@ -4836,7 +4842,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       auto& dispatchPacketExt = dispatchPacketUnion.extKernelDispatch;
       // Encodings [1, 127] represent a range from 0% (no group memory) to 100% (maximum
       // group memory)
-      if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() == 5) {
+      if (dev().executionIsa().versionMajor() == 12 && dev().executionIsa().versionMinor() == 5) {
         dispatchPacketExt.perf_hint.group_mem_carveout = 127;
       } else {
         dispatchPacketExt.perf_hint.group_mem_carveout = (percent + 1) * 1.26F;

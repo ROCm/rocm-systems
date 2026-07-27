@@ -249,7 +249,9 @@ class HostQueue : public CommandQueue {
 
   //! Get the current batch size
   size_t GetSubmissionBatchSize() const {
-    std::scoped_lock sl(vdev()->execution());
+    auto* virtualDevice = vdev();
+    guarantee(virtualDevice != nullptr, "HostQueue has no virtual device");
+    std::scoped_lock sl(virtualDevice->execution());
     return size_;
   }
 
@@ -301,7 +303,11 @@ class HostQueue : public CommandQueue {
   //! Set the force destory to terminate queue without checking last command
   void SetForceDestroy(bool forceDestroy) { forceDestroy_ = forceDestroy; }
 
-  uint64_t getQueueID() { return thread_.vdev()->getQueueID(); }
+  uint64_t getQueueID() {
+    auto* virtualDevice = thread_.vdev();
+    guarantee(virtualDevice != nullptr, "HostQueue has no virtual device");
+    return virtualDevice->getQueueID();
+  }
 
   //! Returns Synchronization Policy for the current stream
   amd::SyncPolicy GetSyncPolicy() const { return sync_policy_; }

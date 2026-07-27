@@ -51,14 +51,20 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <atomic>
 #include <fstream>
+#include <mutex>
 #include "inc/amd_hsa_elf.h"
 #include "inc/amd_hsa_kernel_code.h"
+#include "core/inc/agent.h"
 #include "core/inc/amd_hsa_code.hpp"
+#include "core/inc/amd_loader_context.hpp"
+#include "core/inc/hotswap_env.hpp"
 #include "amd_hsa_code_util.hpp"
 #include "amd_options.hpp"
 #include "core/util/utils.h"
@@ -66,6 +72,11 @@
 #include "executable.hpp"
 
 #include "AMDHSAKernelDescriptor.h"
+
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+#include "amd_comgr.h"
+#include "hotswap_kernel_registry.h"
+#endif
 
 using namespace rocr::amd::hsa;
 using namespace rocr::amd::hsa::common;
@@ -105,6 +116,141 @@ void _loader_debug_state() {
 namespace amd {
 namespace hsa {
 namespace loader {
+
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+static std::string JsonEscape(const std::string& s);
+static void AppendHotSwapProofJson(const std::string& fields);
+static void RegisterHotSwapKernelObject(uint64_t address, const std::string& name,
+                                        HotSwapKernelKind kind);
+
+// A source-ISA code object whose translation is deferred until first dispatch.
+// It retains everything COMGR needs to translate an individual kernel later:
+// the source ELF, the source/target ISA names, and the target agent/profile.
+struct HotSwapLazyCodeObject {
+  std::vector<uint8_t> SourceElf;
+  std::string SourceIsa;
+  std::string TargetIsa;
+  std::string SourceGfx;
+  std::string TargetGfx;
+  uint8_t SourceMach = 0;
+  hsa_agent_t Agent = {};
+  hsa_profile_t Profile = HSA_PROFILE_FULL;
+};
+
+namespace {
+
+HotSwapKernelRegistry& HotSwapKernelRegistryInstance() {
+  static auto* Registry = new HotSwapKernelRegistry();
+  return *Registry;
+}
+
+std::vector<std::shared_ptr<ExecutableImpl>>&
+HotSwapRuntimeLifetimeTranslatedExecutables() {
+  // Translated one-kernel code objects back AQL packet kernel descriptors.
+  // Queue packets and runtime teardown can outlive the source loaded-code-object
+  // destruction point, so these private target code objects are owned for the
+  // runtime lifetime instead of by source-symbol registry entries.
+  static auto* Executables = new std::vector<std::shared_ptr<ExecutableImpl>>();
+  return *Executables;
+}
+
+std::mutex& HotSwapRuntimeLifetimeTranslatedExecutablesMutex() {
+  static auto* Mutex = new std::mutex();
+  return *Mutex;
+}
+
+// Lazy target executables are owned by HotSwap's runtime-lifetime list, not by
+// AmdHsaCodeLoader::executables, so give them an ID outside the loader index
+// namespace.
+constexpr size_t HotSwapRuntimeTranslatedExecutableId = static_cast<size_t>(-1);
+
+thread_local HotSwapKernelKind CurrentHotSwapKernelKind =
+    HotSwapKernelKind::Untranslated;
+thread_local std::shared_ptr<HotSwapLazyCodeObject> CurrentHotSwapLazyCodeObject;
+thread_local bool CurrentHotSwapLoadingTranslatedTarget = false;
+
+void RegisterHotSwapLoadedKernelObject(uint64_t address,
+                                       const std::string& name) {
+  if (!ShouldCheckHotSwapDispatchKernelObjects()) return;
+  RegisterHotSwapKernelObject(address, name, CurrentHotSwapKernelKind);
+}
+
+}  // namespace
+
+static void RegisterHotSwapKernelObject(uint64_t address, const std::string& name,
+                                        HotSwapKernelKind kind) {
+  HotSwapKernelRegistryInstance().RegisterKernelObject(
+      address, name, kind, CurrentHotSwapLazyCodeObject);
+}
+
+// Registers ROCr's own blit shaders, which are already built for the execution
+// ISA, as target kernels so the dispatch intercept passes them through unchanged
+// instead of trying to translate them.
+void RegisterHotSwapRocrBlitTargetKernelObject(uint64_t address,
+                                               size_t size,
+                                               const char* target_gfx) {
+  if (!ShouldCheckHotSwapDispatchKernelObjects()) return;
+  std::string TargetGfx = target_gfx ? std::string(target_gfx) : std::string();
+  const std::string Name = "rocr_blit";
+  const std::string SourceKind = "rocr_blit";
+  const std::string Reason = "embedded_rocr_target_blit_shader";
+  const std::string InvalidReason =
+      "rocr_blit target ISA or allocation could not be identified";
+  std::shared_ptr<HotSwapKernelRecord> Record =
+      HotSwapKernelRegistryInstance().RegisterRocrBlitTargetKernelObject(
+          address, size, TargetGfx, Reason, InvalidReason);
+  const HotSwapKernelKind Kind =
+      Record->Kind.load(std::memory_order_acquire);
+  const bool HasTargetIsa = Kind == HotSwapKernelKind::RuntimeTargetInternal;
+
+  std::ostringstream proof;
+  proof << "\"event\":\"hotswap_runtime_target_internal_registered\""
+        << ",\"kernel_name\":\"" << JsonEscape(Name) << "\""
+        << ",\"kernel_object\":\"0x" << std::hex << address << "\""
+        << std::dec
+        << ",\"object_size\":" << size
+        << ",\"kind\":\"" << HotSwapKernelKindName(
+                                 HasTargetIsa ? HotSwapKernelKind::RuntimeTargetInternal
+                                              : HotSwapKernelKind::Untranslated)
+        << "\""
+        << ",\"source_kind\":\"" << JsonEscape(SourceKind) << "\"";
+  if (!TargetGfx.empty())
+    proof << ",\"target_gfx\":\"" << JsonEscape(TargetGfx) << "\"";
+  proof << ",\"reason\":\""
+        << JsonEscape(HasTargetIsa ? Reason
+                                   : InvalidReason)
+        << "\"";
+  AppendHotSwapProofJson(proof.str());
+}
+
+void UnregisterHotSwapRocrBlitTargetKernelObject(uint64_t address) {
+  if (!ShouldCheckHotSwapDispatchKernelObjects()) return;
+  HotSwapKernelRegistryInstance().UnregisterRocrBlitTargetKernelObject(address);
+}
+
+static void UnregisterHotSwapKernelObject(uint64_t address) {
+  HotSwapKernelRegistryInstance().UnregisterLoadedKernelObject(address);
+}
+
+static std::shared_ptr<HotSwapKernelRecord> LookupHotSwapKernelRecord(uint64_t address) {
+  return HotSwapKernelRegistryInstance().Lookup(address);
+}
+
+static void UpdateHotSwapKernelObjectLaunchMetadata(uint64_t address,
+                                                    uint32_t groupSegmentSize,
+                                                    uint32_t privateSegmentSize) {
+  HotSwapKernelRegistryInstance().UpdateLaunchMetadata(
+      address, groupSegmentSize, privateSegmentSize);
+}
+
+// Master gate for the dispatch-time intercept: true only in presentation mode
+// (HSA_HOTSWAP_PRESENT_ISA set and HotSwap not disabled). When false every
+// HotSwap check below short-circuits and the runtime behaves as it does today.
+bool ShouldCheckHotSwapDispatchKernelObjects() {
+  return rocr::hotswap::IsPresentationModeEnabled();
+}
+
+#endif
 
 class LoaderOptions {
 public:
@@ -262,6 +408,657 @@ static bool CodeObjectIsaIsGfx125Family(const std::string& codeIsa) {
   if (codeIsa.find("gfx12-5-generic") != std::string::npos) return true;
   return codeIsa.find("gfx125") != std::string::npos;
 }
+
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+static std::string JsonEscape(const std::string& s) {
+  std::ostringstream os;
+  for (char c : s) {
+    switch (c) {
+      case '\\':
+        os << "\\\\";
+        break;
+      case '"':
+        os << "\\\"";
+        break;
+      case '\n':
+        os << "\\n";
+        break;
+      case '\r':
+        os << "\\r";
+        break;
+      case '\t':
+        os << "\\t";
+        break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          os << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+             << static_cast<unsigned>(static_cast<unsigned char>(c)) << std::dec
+             << std::setfill(' ');
+        } else {
+          os << c;
+        }
+    }
+  }
+  return os.str();
+}
+
+// Proof logging is a process-run decision: cache the selected path so all proof
+// emission uses the same destination even if the environment changes later.
+static const std::string& HotSwapProofLogPath() {
+  static const std::string Path = [] {
+    constexpr char EnvName[] = "HSA_HOTSWAP_PROOF_LOG";
+    if (!rocr::os::IsEnvVarSet(EnvName)) return std::string();
+    return rocr::os::GetEnvVar(EnvName);
+  }();
+  return Path;
+}
+
+// Keep call sites cheap and explicit without repeating the path lookup rule.
+static bool HotSwapProofLogEnabled() {
+  return !HotSwapProofLogPath().empty();
+}
+
+// Appends one JSON object (the given comma-separated fields) as a line to the
+// file named by HSA_HOTSWAP_PROOF_LOG. Best-effort and inert when unset; used to
+// prove which kernels were translated/dispatched during a run.
+static void AppendHotSwapProofJson(const std::string& jsonFields) {
+  const std::string& Path = HotSwapProofLogPath();
+  if (Path.empty()) return;
+  static std::mutex ProofLogMutex;
+  std::lock_guard<std::mutex> Guard(ProofLogMutex);
+  static std::ofstream Out;
+  if (!Out.is_open()) {
+    Out.clear();
+    Out.open(Path, std::ios::app);
+  }
+  if (!Out) {
+    std::cerr << "hotswap: failed to open proof log '" << Path
+              << "' for append\n";
+    return;
+  }
+  Out << "{" << jsonFields << "}\n";
+  Out.flush();
+  if (!Out) {
+    std::cerr << "hotswap: failed to write proof log '" << Path << "'\n";
+    Out.close();
+    Out.clear();
+  }
+}
+
+// Returns the trailing gfx processor token (e.g. "gfx1250") from an ISA name, or
+// "" if none is present.
+static std::string ExtractGfxName(const std::string& isa) {
+  size_t pos = isa.rfind("gfx");
+  if (pos == std::string::npos) return "";
+  size_t end = pos + 3;
+  while (end < isa.size() &&
+         ((isa[end] >= '0' && isa[end] <= '9') || (isa[end] >= 'a' && isa[end] <= 'z'))) {
+    ++end;
+  }
+  return isa.substr(pos, end - pos);
+}
+
+// Returns the gfx name of the agent's physical execution ISA (what the hardware
+// actually runs), which may differ from the ISA presented to the application.
+static std::string ExecutionGfxName(hsa_agent_t agent) {
+  if (agent.handle == 0) return "";
+  const rocr::core::Agent* agent_object = rocr::core::Agent::Convert(agent);
+  if (!agent_object || agent_object->execution_isas().empty()) return "";
+  return agent_object->execution_isas()[0]->GetProcessorName();
+}
+
+// Reports the target agent's per-workgroup LDS (group segment) capacity so a
+// translated kernel's group-segment usage can be validated before dispatch.
+// Returns false with a reason in `failure` if it cannot be determined.
+static bool GetAgentGroupSegmentLimit(hsa_agent_t agent, uint32_t& limit,
+                                      std::string& failure) {
+  limit = 0;
+  if (agent.handle == 0) {
+    failure = "translated HotSwap kernel has no target agent";
+    return false;
+  }
+  const rocr::core::Agent* agent_object = rocr::core::Agent::Convert(agent);
+  if (!agent_object) {
+    failure = "translated HotSwap target agent is invalid";
+    return false;
+  }
+  // HSA exposes the per-workgroup LDS capacity as the agent's group segment.
+  for (const auto& region : agent_object->regions()) {
+    if (!region) continue;
+    hsa_region_segment_t segment = HSA_REGION_SEGMENT_READONLY;
+    if (region->GetInfo(HSA_REGION_INFO_SEGMENT, &segment) != HSA_STATUS_SUCCESS ||
+        segment != HSA_REGION_SEGMENT_GROUP)
+      continue;
+    size_t size = 0;
+    if (region->GetInfo(HSA_REGION_INFO_SIZE, &size) == HSA_STATUS_SUCCESS) {
+      limit = size > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(size);
+      return true;
+    }
+  }
+  failure = "translated HotSwap target agent has no LDS region";
+  return false;
+}
+
+static std::string EnvGfxName(const char* name) {
+  const char* env = std::getenv(name);
+  if (!env || !env[0] || std::strcmp(env, "0") == 0) return "";
+  if (std::strcmp(env, "1") == 0) return "1";
+  std::string gfx = ExtractGfxName(env);
+  if (gfx.empty() && std::strncmp(env, "gfx", 3) == 0) gfx = env;
+  return gfx;
+}
+
+// Debug aid: writes each incoming (pre-translation) code object to
+// HSA_HOTSWAP_INPUT_DUMP_DIR. Inert unless that variable is set.
+static void DumpHotSwapInputCodeObject(const void* elfData, size_t elfSize, uint32_t codeNum,
+                                       const std::string& codeIsa) {
+  const char* DumpDir = std::getenv("HSA_HOTSWAP_INPUT_DUMP_DIR");
+  if (!DumpDir || !DumpDir[0] || !elfData || elfSize == 0) return;
+
+  std::string Gfx = ExtractGfxName(codeIsa);
+  if (Gfx.empty()) Gfx = "unknown";
+  std::ostringstream Path;
+  Path << DumpDir << "/hotswap_input_" << std::setfill('0') << std::setw(5) << codeNum << "_" << Gfx
+       << ".co";
+  std::ofstream Out(Path.str(), std::ios::binary | std::ios::trunc);
+  if (!Out) return;
+  Out.write(reinterpret_cast<const char*>(elfData), elfSize);
+}
+
+static const char* LookupStatusString(amd_comgr_hotswap_cache_lookup_status_t status) {
+  switch (status) {
+    case AMD_COMGR_HOTSWAP_CACHE_LOOKUP_DISABLED:
+      return "disabled";
+    case AMD_COMGR_HOTSWAP_CACHE_LOOKUP_BYPASSED:
+      return "bypassed";
+    case AMD_COMGR_HOTSWAP_CACHE_LOOKUP_MISS:
+      return "miss";
+    case AMD_COMGR_HOTSWAP_CACHE_LOOKUP_HIT:
+      return "hit";
+    case AMD_COMGR_HOTSWAP_CACHE_LOOKUP_INVALID:
+      return "invalid";
+  }
+  return "invalid";
+}
+
+static const char* WriteStatusString(amd_comgr_hotswap_cache_write_status_t status) {
+  switch (status) {
+    case AMD_COMGR_HOTSWAP_CACHE_WRITE_NOT_ATTEMPTED:
+      return "not_attempted";
+    case AMD_COMGR_HOTSWAP_CACHE_WRITE_SUCCESS:
+      return "success";
+    case AMD_COMGR_HOTSWAP_CACHE_WRITE_FAILED:
+      return "failed";
+  }
+  return "failed";
+}
+
+static bool GetComgrResultString(amd_comgr_hotswap_transpile_result_t result,
+                                 amd_comgr_hotswap_transpile_result_string_t field,
+                                 std::string& out) {
+  size_t size = 0;
+  amd_comgr_status_t status =
+      amd_comgr_hotswap_transpile_result_get_string(result, field, &size, nullptr);
+  if (status != AMD_COMGR_STATUS_SUCCESS) return false;
+  out.assign(size, '\0');
+  status = amd_comgr_hotswap_transpile_result_get_string(result, field, &size, out.data());
+  if (status != AMD_COMGR_STATUS_SUCCESS) return false;
+  if (!out.empty() && out.back() == '\0') out.pop_back();
+  return true;
+}
+
+template <typename T>
+static bool GetComgrResultInfo(amd_comgr_hotswap_transpile_result_t result,
+                               amd_comgr_hotswap_transpile_result_info_t info, T& value) {
+  return amd_comgr_hotswap_transpile_result_get_info(result, info, &value) ==
+      AMD_COMGR_STATUS_SUCCESS;
+}
+
+static void AppendHotSwapComgrProof(const char* event, amd_comgr_hotswap_transpile_result_t result,
+                                    size_t elfSize = 0, const char* overrideFailReason = nullptr,
+                                    const char* overrideFailDetail = nullptr) {
+  if (!HotSwapProofLogEnabled()) return;
+
+  bool success = false;
+  bool cacheHit = false;
+  int64_t lifted = 0;
+  int64_t total = 0;
+  amd_comgr_hotswap_cache_lookup_status_t lookupStatus = AMD_COMGR_HOTSWAP_CACHE_LOOKUP_DISABLED;
+  amd_comgr_hotswap_cache_write_status_t writeStatus = AMD_COMGR_HOTSWAP_CACHE_WRITE_NOT_ATTEMPTED;
+  std::string backend, sourceGfx, targetGfx, cacheKey, cacheDetail, kernelName;
+  std::string cacheMetadata, cacheObject, failReason, failDetail;
+
+  if (!GetComgrResultInfo(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_SUCCESS, success) ||
+      !GetComgrResultInfo(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_CACHE_HIT, cacheHit) ||
+      !GetComgrResultInfo(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_CACHE_LOOKUP, lookupStatus) ||
+      !GetComgrResultInfo(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_CACHE_WRITE, writeStatus) ||
+      !GetComgrResultInfo(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_LIFTED_COUNT, lifted) ||
+      !GetComgrResultInfo(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_TOTAL_COUNT, total) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_BACKEND, backend) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_SOURCE_GFX, sourceGfx) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_TARGET_GFX, targetGfx) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_CACHE_KEY, cacheKey) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_CACHE_DETAIL, cacheDetail) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_CACHE_METADATA_PATH,
+                            cacheMetadata) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_CACHE_OBJECT_PATH,
+                            cacheObject) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_FAIL_REASON, failReason) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_FAIL_DETAIL, failDetail) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_KERNEL_NAME,
+                            kernelName)) {
+    std::cerr << "hotswap: failed to query COMGR result metadata\n";
+    return;
+  }
+
+  if (overrideFailReason) {
+    success = false;
+    failReason = overrideFailReason;
+    failDetail = overrideFailDetail ? overrideFailDetail : "";
+  }
+
+  std::ostringstream proof;
+  proof << "\"event\":\"" << event << "\""
+        << ",\"backend\":\"" << JsonEscape(backend) << "\""
+        << ",\"source_gfx\":\"" << JsonEscape(sourceGfx) << "\""
+        << ",\"target_gfx\":\"" << JsonEscape(targetGfx) << "\""
+        << ",\"success\":" << (success ? "true" : "false")
+        << ",\"cache_hit\":" << (cacheHit ? "true" : "false") << ",\"cache_status\":\""
+        << LookupStatusString(lookupStatus) << "\""
+        << ",\"cache_write_status\":\"" << WriteStatusString(writeStatus) << "\""
+        << ",\"lifted_count\":" << lifted << ",\"total_count\":" << total;
+  if (elfSize > 0) proof << ",\"elf_size\":" << elfSize;
+  if (!cacheKey.empty()) proof << ",\"cache_key\":\"" << JsonEscape(cacheKey) << "\"";
+  if (!cacheMetadata.empty())
+    proof << ",\"cache_metadata\":\"" << JsonEscape(cacheMetadata) << "\"";
+  if (!cacheObject.empty()) proof << ",\"cache_object\":\"" << JsonEscape(cacheObject) << "\"";
+  if (!cacheDetail.empty()) proof << ",\"cache_detail\":\"" << JsonEscape(cacheDetail) << "\"";
+  if (!kernelName.empty()) proof << ",\"kernel_name\":\"" << JsonEscape(kernelName) << "\"";
+  if (!failReason.empty()) proof << ",\"fail_reason\":\"" << JsonEscape(failReason) << "\"";
+  if (!failDetail.empty()) proof << ",\"fail_detail\":\"" << JsonEscape(failDetail) << "\"";
+  AppendHotSwapProofJson(proof.str());
+}
+
+static void LogComgrCacheDebug(amd_comgr_hotswap_transpile_result_t result) {
+  const char* cacheDebug = std::getenv("HSA_HOTSWAP_CACHE_DEBUG");
+  if (!cacheDebug || !cacheDebug[0]) return;
+  amd_comgr_hotswap_cache_lookup_status_t lookupStatus = AMD_COMGR_HOTSWAP_CACHE_LOOKUP_DISABLED;
+  std::string sourceGfx, targetGfx;
+  if (!GetComgrResultInfo(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_CACHE_LOOKUP, lookupStatus) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_SOURCE_GFX, sourceGfx) ||
+      !GetComgrResultString(result, AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_TARGET_GFX, targetGfx))
+    return;
+  std::cerr << "hotswap_cache: " << LookupStatusString(lookupStatus) << " (" << sourceGfx << " -> "
+            << targetGfx << ")\n";
+}
+
+static bool LoadLazyTranslatedKernel(std::shared_ptr<HotSwapKernelRecord> record,
+                                     std::string& failure) {
+  std::shared_ptr<HotSwapLazyCodeObject> lazy = record->LazyCodeObject;
+  if (!lazy) {
+    failure = "lazy source record has no source code object";
+    return false;
+  }
+
+  amd_comgr_data_t comgrInput = {0};
+  amd_comgr_status_t comgrStatus =
+      amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &comgrInput);
+  if (comgrStatus != AMD_COMGR_STATUS_SUCCESS) {
+    failure = "COMGR failed to create HotSwap input data";
+    return false;
+  }
+
+  comgrStatus = amd_comgr_set_data(
+      comgrInput, lazy->SourceElf.size(),
+      reinterpret_cast<const char*>(lazy->SourceElf.data()));
+  if (comgrStatus != AMD_COMGR_STATUS_SUCCESS) {
+    amd_comgr_release_data(comgrInput);
+    failure = "COMGR failed to set HotSwap input data";
+    return false;
+  }
+
+  amd_comgr_data_t comgrOutput = {0};
+  amd_comgr_hotswap_transpile_result_t comgrResult = {0};
+  amd_comgr_hotswap_transpile_options_v2_t comgrOptions = {};
+  const std::string lazyCacheDir = ResolveLazyHotSwapCacheDir(
+      std::getenv("HSA_HOTSWAP_LAZY_CACHE_DIR"),
+      std::getenv("HSA_HOTSWAP_CACHE_DIR"));
+  comgrOptions.version = AMD_COMGR_HOTSWAP_TRANSPILE_OPTIONS_VERSION_2;
+  comgrOptions.cache_directory = lazyCacheDir.empty() ? nullptr : lazyCacheDir.c_str();
+  comgrOptions.cache_skip_kernels = std::getenv("HSA_HOTSWAP_CACHE_SKIP_KERNELS");
+  comgrOptions.hotswap_rules_path = std::getenv("HSA_HOTSWAP_RULES");
+  comgrOptions.kernel_name = record->Name.c_str();
+  comgrOptions.flags |= AMD_COMGR_HOTSWAP_TRANSPILE_OPTIONS_V2_USE_KERNEL_NAME;
+  if (rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_CACHE_DISABLE"))
+    comgrOptions.flags |= AMD_COMGR_HOTSWAP_TRANSPILE_OPTIONS_V2_CACHE_DISABLE;
+  if (rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_CACHE_READONLY"))
+    comgrOptions.flags |= AMD_COMGR_HOTSWAP_TRANSPILE_OPTIONS_V2_CACHE_READONLY;
+  if (rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_STRICT"))
+    comgrOptions.flags |= AMD_COMGR_HOTSWAP_TRANSPILE_OPTIONS_V2_STRICT;
+  if (rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_ASSUME_GLOBAL_OFFSET_ZERO") ||
+      rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_ASSUME_HIP_GLOBAL_OFFSET_ZERO"))
+    comgrOptions.flags |=
+        AMD_COMGR_HOTSWAP_TRANSPILE_OPTIONS_V2_ASSUME_HIP_GLOBAL_OFFSET_ZERO;
+  comgrStatus = amd_comgr_hotswap_transpile_with_options_v2(
+      comgrInput, lazy->SourceIsa.c_str(), lazy->TargetIsa.c_str(), &comgrOptions,
+      &comgrOutput, &comgrResult);
+  amd_comgr_release_data(comgrInput);
+
+  if (comgrResult.handle) {
+    AppendHotSwapComgrProof("hotswap_cache", comgrResult);
+    LogComgrCacheDebug(comgrResult);
+  }
+
+  if (comgrStatus != AMD_COMGR_STATUS_SUCCESS) {
+    failure = "COMGR HotSwap per-kernel transpilation failed for " + record->Name;
+    if (comgrResult.handle) {
+      AppendHotSwapComgrProof("hotswap_result", comgrResult);
+      amd_comgr_destroy_hotswap_transpile_result(comgrResult);
+    }
+    if (comgrOutput.handle) amd_comgr_release_data(comgrOutput);
+    return false;
+  }
+
+  size_t comgrOutputSize = 0;
+  comgrStatus = amd_comgr_get_data(comgrOutput, &comgrOutputSize, nullptr);
+  if (comgrStatus != AMD_COMGR_STATUS_SUCCESS || comgrOutputSize == 0) {
+    amd_comgr_release_data(comgrOutput);
+    if (comgrResult.handle) {
+      AppendHotSwapComgrProof("hotswap_result", comgrResult, 0,
+                              "comgr_empty_output",
+                              "COMGR produced no translated HSACO bytes");
+      amd_comgr_destroy_hotswap_transpile_result(comgrResult);
+    }
+    failure = "COMGR produced no translated HSACO bytes for " + record->Name;
+    return false;
+  }
+
+  std::vector<uint8_t> targetBytes(comgrOutputSize, 0);
+  comgrStatus = amd_comgr_get_data(
+      comgrOutput, &comgrOutputSize, reinterpret_cast<char*>(targetBytes.data()));
+  amd_comgr_release_data(comgrOutput);
+  if (comgrStatus != AMD_COMGR_STATUS_SUCCESS) {
+    if (comgrResult.handle) {
+      AppendHotSwapComgrProof("hotswap_result", comgrResult, 0,
+                              "comgr_read_output",
+                              "COMGR translated HSACO read failed");
+      amd_comgr_destroy_hotswap_transpile_result(comgrResult);
+    }
+    failure = "failed to read COMGR translated HSACO for " + record->Name;
+    return false;
+  }
+
+  auto targetExec = std::make_shared<ExecutableImpl>(
+      lazy->Profile, std::make_unique<rocr::amd::LoaderContext>(),
+      HotSwapRuntimeTranslatedExecutableId,
+      HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT);
+  hsa_code_object_t targetCodeObject = {
+      reinterpret_cast<uint64_t>(targetBytes.data())};
+  const bool previousTargetLoad = CurrentHotSwapLoadingTranslatedTarget;
+  CurrentHotSwapLoadingTranslatedTarget = true;
+  hsa_status_t status = targetExec->LoadCodeObject(
+      lazy->Agent, targetCodeObject, nullptr, "hotswap-lazy-kernel", nullptr);
+  CurrentHotSwapLoadingTranslatedTarget = previousTargetLoad;
+  if (status != HSA_STATUS_SUCCESS) {
+    failure = "ROCR failed to load translated HotSwap kernel " + record->Name;
+    if (comgrResult.handle) {
+      AppendHotSwapComgrProof("hotswap_result", comgrResult, targetBytes.size(),
+                              "target_load_failed", failure.c_str());
+      amd_comgr_destroy_hotswap_transpile_result(comgrResult);
+    }
+    return false;
+  }
+  status = targetExec->Freeze(nullptr);
+  if (status != HSA_STATUS_SUCCESS) {
+    failure = "ROCR failed to freeze translated HotSwap kernel " + record->Name;
+    if (comgrResult.handle) {
+      AppendHotSwapComgrProof("hotswap_result", comgrResult, targetBytes.size(),
+                              "target_freeze_failed", failure.c_str());
+      amd_comgr_destroy_hotswap_transpile_result(comgrResult);
+    }
+    return false;
+  }
+
+  std::string targetSymbolName = record->Name + ".kd";
+  Symbol* symbol = targetExec->GetSymbol(targetSymbolName.c_str(), &lazy->Agent);
+  if (!symbol) {
+    failure = "translated HotSwap kernel symbol not found: " + targetSymbolName;
+    if (comgrResult.handle) {
+      AppendHotSwapComgrProof("hotswap_result", comgrResult, targetBytes.size(),
+                              "target_symbol_missing", failure.c_str());
+      amd_comgr_destroy_hotswap_transpile_result(comgrResult);
+    }
+    return false;
+  }
+
+  uint64_t targetKernelObject = 0;
+  uint32_t targetPrivateSegmentSize = 0;
+  uint32_t targetGroupSegmentSize = 0;
+  if (!symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                       &targetKernelObject) ||
+      !symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
+                       &targetPrivateSegmentSize) ||
+      !symbol->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE,
+                       &targetGroupSegmentSize) ||
+      targetKernelObject == 0) {
+    failure = "translated HotSwap kernel metadata missing: " + record->Name;
+    if (comgrResult.handle) {
+      AppendHotSwapComgrProof("hotswap_result", comgrResult, targetBytes.size(),
+                              "target_metadata_missing", failure.c_str());
+      amd_comgr_destroy_hotswap_transpile_result(comgrResult);
+    }
+    return false;
+  }
+
+  uint32_t targetGroupSegmentLimit = 0;
+  if (!GetAgentGroupSegmentLimit(lazy->Agent, targetGroupSegmentLimit, failure)) {
+    if (comgrResult.handle) {
+      AppendHotSwapComgrProof("hotswap_result", comgrResult, targetBytes.size(),
+                              "target_lds_limit_missing", failure.c_str());
+      amd_comgr_destroy_hotswap_transpile_result(comgrResult);
+    }
+    return false;
+  }
+
+  record->TargetKernelObject = targetKernelObject;
+  record->TargetPrivateSegmentSize = targetPrivateSegmentSize;
+  record->TargetGroupSegmentSize = targetGroupSegmentSize;
+  record->TargetGroupSegmentLimit = targetGroupSegmentLimit;
+  int64_t scaledDispatchFactor = 1;
+  GetComgrResultInfo(comgrResult,
+                     AMD_COMGR_HOTSWAP_TRANSPILE_RESULT_SCALED_DISPATCH_FACTOR,
+                     scaledDispatchFactor);
+  record->ScaledDispatchFactor = static_cast<uint32_t>(scaledDispatchFactor);
+  record->TranslationSucceeded = true;
+  {
+    std::lock_guard<std::mutex> Guard(
+        HotSwapRuntimeLifetimeTranslatedExecutablesMutex());
+    HotSwapRuntimeLifetimeTranslatedExecutables().push_back(std::move(targetExec));
+  }
+  record->Kind.store(HotSwapKernelKind::Translated, std::memory_order_release);
+  if (comgrResult.handle) {
+    AppendHotSwapComgrProof("hotswap_result", comgrResult, targetBytes.size());
+    amd_comgr_destroy_hotswap_transpile_result(comgrResult);
+  }
+  return true;
+}
+
+[[noreturn]] static void FatalHotSwapDispatch(uint64_t address,
+                                              const std::string& name,
+                                              HotSwapKernelKind kind,
+                                              const std::string& reason,
+                                              const std::string& sourceKind = "",
+                                              const std::string& targetGfx = "") {
+  std::ostringstream proof;
+  proof << "\"event\":\"hotswap_lazy_dispatch_reject\""
+        << ",\"kernel_name\":\"" << JsonEscape(name.empty() ? "<unknown>" : name)
+        << "\""
+        << ",\"kernel_object\":\"0x" << std::hex << address << "\""
+        << std::dec
+        << ",\"kind\":\"" << HotSwapKernelKindName(kind) << "\"";
+  if (!sourceKind.empty())
+    proof << ",\"source_kind\":\"" << JsonEscape(sourceKind) << "\"";
+  if (!targetGfx.empty())
+    proof << ",\"target_gfx\":\"" << JsonEscape(targetGfx) << "\"";
+  proof << ",\"reason\":\"" << JsonEscape(reason) << "\"";
+  AppendHotSwapProofJson(proof.str());
+  std::cerr << "hotswap: refusing kernel dispatch";
+  if (!name.empty()) std::cerr << " for " << name;
+  std::cerr << " (kind=" << HotSwapKernelKindName(kind)
+            << (sourceKind.empty() ? "" : ", source_kind=") << sourceKind
+            << (targetGfx.empty() ? "" : ", target_gfx=") << targetGfx
+            << "): " << reason << "\n";
+  std::abort();
+}
+
+// Applies the translated-target rewrite at dispatch time and preserves the
+// existing fail-closed diagnostics and proof logging on any patch failure.
+static void PatchHotSwapDispatchToTargetOrAbort(
+    const std::shared_ptr<HotSwapKernelRecord>& record, uint64_t* address,
+    uint32_t* private_segment_size, uint32_t* group_segment_size,
+    uint32_t* scaled_dispatch_factor, HotSwapKernelKind kind) {
+  const uint64_t sourceKernelObject = *address;
+  std::string segmentFailure;
+  if (!PatchHotSwapTranslatedDispatch(
+          *record, *address, *private_segment_size, *group_segment_size,
+          segmentFailure))
+    FatalHotSwapDispatch(sourceKernelObject, record->Name, kind, segmentFailure);
+
+  *scaled_dispatch_factor = record->ScaledDispatchFactor;
+
+  std::ostringstream proof;
+  proof << "\"event\":\"hotswap_lazy_dispatch_patch\""
+        << ",\"kernel_name\":\"" << JsonEscape(record->Name) << "\""
+        << ",\"source_kernel_object\":\"0x" << std::hex << sourceKernelObject
+        << "\""
+        << ",\"target_kernel_object\":\"0x" << record->TargetKernelObject
+        << "\"" << std::dec
+        << ",\"private_segment_size\":" << *private_segment_size
+        << ",\"group_segment_size\":" << *group_segment_size;
+  if (record->ScaledDispatchFactor > 1)
+    proof << ",\"scaled_dispatch_factor\":" << record->ScaledDispatchFactor;
+  AppendHotSwapProofJson(proof.str());
+}
+
+// Dispatch-time hook invoked by the AQL doorbell intercept for each dispatched
+// kernel. Given the packet's kernel_object it looks up the HotSwap record and, on
+// success, rewrites *address (and the segment sizes) to the translated target
+// kernel: already-translated kernels pass through, lazy-source kernels are
+// translated via COMGR on first use and cached, and anything unsupported or
+// unregistered aborts the dispatch. Returns true once the packet is safe to run.
+bool PrepareHotSwapDispatchKernelObject(uint64_t* address,
+                                        uint32_t* private_segment_size,
+                                        uint32_t* group_segment_size,
+                                        uint32_t* scaled_dispatch_factor) {
+  if (!address || !private_segment_size || !group_segment_size ||
+      !scaled_dispatch_factor)
+    FatalHotSwapDispatch(0, "", HotSwapKernelKind::Untranslated,
+                         "invalid dispatch packet pointer");
+  // A kernel needs x-extent scaling only if it was raised under the comgr
+  // ScaledModuloReplicationProjection; PatchHotSwapDispatchToTargetOrAbort
+  // reports the factor once the target record is known.
+  *scaled_dispatch_factor = 1;
+
+  std::shared_ptr<HotSwapKernelRecord> record =
+      LookupHotSwapKernelRecord(*address);
+  if (!record)
+    FatalHotSwapDispatch(*address, "", HotSwapKernelKind::Untranslated,
+                         "unregistered kernel object");
+
+  HotSwapKernelKind kind = record->Kind.load(std::memory_order_acquire);
+  if (kind == HotSwapKernelKind::Translated) {
+    if (record->TargetKernelObject != 0)
+      PatchHotSwapDispatchToTargetOrAbort(record, address, private_segment_size,
+                                          group_segment_size,
+                                          scaled_dispatch_factor, kind);
+    return true;
+  }
+
+  if (kind == HotSwapKernelKind::RuntimeTargetInternal) {
+    if (!record->IsRegisteredRocrBlit(*address))
+      FatalHotSwapDispatch(*address, record->Name, kind,
+                           "runtime target-internal kernel is not a registered ROCR blit shader",
+                           record->SourceKind, record->TargetGfx);
+
+    std::ostringstream proof;
+    proof << "\"event\":\"hotswap_runtime_target_internal_dispatch\""
+          << ",\"kernel_name\":\"" << JsonEscape(record->Name) << "\""
+          << ",\"kernel_object\":\"0x" << std::hex << *address << "\""
+          << std::dec
+          << ",\"kind\":\"runtime_target_internal\"";
+    if (!record->SourceKind.empty())
+      proof << ",\"source_kind\":\"" << JsonEscape(record->SourceKind) << "\"";
+    if (!record->TargetGfx.empty())
+      proof << ",\"target_gfx\":\"" << JsonEscape(record->TargetGfx) << "\"";
+    if (!record->Failure.empty())
+      proof << ",\"reason\":\"" << JsonEscape(record->Failure) << "\"";
+    AppendHotSwapProofJson(proof.str());
+    return true;
+  }
+
+  if (kind != HotSwapKernelKind::LazySource)
+    FatalHotSwapDispatch(*address, record->Name, kind,
+                         record->Failure.empty()
+                             ? "kernel object is not translated"
+                             : record->Failure,
+                         record->SourceKind, record->TargetGfx);
+
+  std::lock_guard<std::mutex> Guard(record->Mutex);
+  if (!record->TranslationAttempted) {
+    record->TranslationAttempted = true;
+    std::string failure;
+    // Submitting the source kernel object would execute foreign-ISA code.
+    // Treat unsupported lazy translation as a fail-closed process abort rather
+    // than letting a bad dispatch escape to hardware.
+    if (!LoadLazyTranslatedKernel(record, failure)) {
+      record->Failure = failure;
+      FatalHotSwapDispatch(*address, record->Name, kind, failure);
+    }
+  }
+  if (!record->TranslationSucceeded || record->TargetKernelObject == 0)
+    FatalHotSwapDispatch(*address, record->Name, kind,
+                         record->Failure.empty()
+                             ? "lazy translation did not produce a target kernel"
+                             : record->Failure);
+
+  kind = record->Kind.load(std::memory_order_acquire);
+  PatchHotSwapDispatchToTargetOrAbort(record, address, private_segment_size,
+                                      group_segment_size,
+                                      scaled_dispatch_factor, kind);
+
+  return true;
+}
+
+struct HotSwapGfxMach {
+  const char* name;
+  uint32_t mach;
+};
+
+// AMDGPU e_flags processor values are the only target identity available before
+// the ROCR code object parser accepts a presented-source object. Keep this table
+// limited to the gfx names supported by the HotSwap presentation mode.
+static constexpr HotSwapGfxMach kHotSwapGfxMachMap[] = {
+    {"gfx900", 0x02c},  {"gfx902", 0x02d},  {"gfx904", 0x02e},  {"gfx906", 0x02f},
+    {"gfx908", 0x030},  {"gfx909", 0x031},  {"gfx90a", 0x03f},  {"gfx90c", 0x032},
+    {"gfx942", 0x04c},  {"gfx950", 0x04f},  {"gfx1010", 0x033}, {"gfx1011", 0x034},
+    {"gfx1012", 0x035}, {"gfx1030", 0x036}, {"gfx1031", 0x037}, {"gfx1032", 0x038},
+    {"gfx1033", 0x039}, {"gfx1034", 0x03e}, {"gfx1035", 0x03d}, {"gfx1100", 0x041},
+    {"gfx1101", 0x046}, {"gfx1102", 0x047}, {"gfx1103", 0x044}, {"gfx1150", 0x043},
+    {"gfx1151", 0x04a}, {"gfx1200", 0x048}, {"gfx1201", 0x04e}, {"gfx1250", 0x049},
+    {"gfx1251", 0x05a}, {nullptr, 0},
+};
+
+static bool HotSwapMachFromGfxName(const std::string& gfx, uint32_t& mach) {
+  for (const HotSwapGfxMach* entry = kHotSwapGfxMachMap; entry->name; ++entry) {
+    if (gfx == entry->name) {
+      mach = entry->mach;
+      return true;
+    }
+  }
+  return false;
+}
+
+#endif
 
 Loader* Loader::Create(Context* context)
 {
@@ -850,6 +1647,21 @@ void Segment::Destroy()
   owner->context()->SegmentFree(segment, agent, ptr, size);
 }
 
+void LoadedCodeObjectImpl::Destroy() {
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  for (uint64_t address : hotswap_kernel_objects_) {
+    UnregisterHotSwapKernelObject(address);
+  }
+  hotswap_kernel_objects_.clear();
+#endif
+}
+
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+void LoadedCodeObjectImpl::RecordHotSwapKernelObject(uint64_t address) {
+  hotswap_kernel_objects_.push_back(address);
+}
+#endif
+
 //===----------------------------------------------------------------------===//
 // ExecutableImpl.                                                                //
 //===----------------------------------------------------------------------===//
@@ -1373,6 +2185,20 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     logger_ << "LoaderError: failed to determine code object's ISA\n";
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  DumpHotSwapInputCodeObject(code->ElfData(), code->ElfSize(), codeNum, codeIsa);
+#endif
+
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  if (HotSwapProofLogEnabled()) {
+    std::ostringstream proof;
+    proof << "\"event\":\"hsa_load_code_object\""
+          << ",\"code_isa\":\"" << JsonEscape(codeIsa) << "\""
+          << ",\"source_gfx\":\"" << JsonEscape(ExtractGfxName(codeIsa)) << "\""
+          << ",\"elf_size\":" << code->ElfSize();
+    AppendHotSwapProofJson(proof.str());
+  }
+#endif
 
   // Kernel-entry trampolines (gfx125x). Disabled by default for gfx125x.
   // Set LOADER_ENABLE_TRAMPOLINE=1 to enable (for testing only). The stub leads
@@ -1409,25 +2235,186 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
   }
 
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  std::vector<uint8_t> ownedCodeObject;
+  bool ownsCodeObject = false;
+  bool translatedInThisCall = CurrentHotSwapLoadingTranslatedTarget;
+  bool lazySourceInThisCall = false;
+  std::shared_ptr<HotSwapLazyCodeObject> lazyCodeObjectForThisCall;
+  const std::string presentedGfx = EnvGfxName("HSA_HOTSWAP_PRESENT_ISA");
+  const bool presentationMode =
+      !rocr::hotswap::IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE") && !presentedGfx.empty();
+  std::string hotswapTargetGfx;
+  std::string hotswapTargetFailure;
+  if (!ResolveHotSwapPresentationTarget(
+          presentationMode, EnvGfxName("HSA_HOTSWAP_TARGET"),
+          EnvGfxName("HSA_HOTSWAP_ISA_OVERRIDE"), ExecutionGfxName(agent),
+          hotswapTargetGfx, hotswapTargetFailure)) {
+    logger_ << "LoaderError: " << hotswapTargetFailure << "\n";
+    return HSA_STATUS_ERROR_INVALID_ISA_NAME;
+  }
+
+  if (CurrentHotSwapLoadingTranslatedTarget) {
+    ownedCodeObject.assign(reinterpret_cast<const uint8_t*>(code->ElfData()),
+                           reinterpret_cast<const uint8_t*>(code->ElfData()) +
+                               code->ElfSize());
+    code = std::make_unique<code::AmdHsaCode>();
+    if (!code->InitAsBuffer(ownedCodeObject.data(), ownedCodeObject.size())) {
+      logger_ << "LoaderError: lazy translated HotSwap HSACO failed to initialize\n";
+      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+    }
+    ownsCodeObject = true;
+  }
+
+  if (presentationMode) {
+    std::string targetGfx = hotswapTargetGfx;
+
+    if (!targetGfx.empty()) {
+      std::string sourceGfx;
+      uint8_t sourceMach = 0;
+      const std::string codeGfx = ExtractGfxName(codeIsa);
+      bool presentationInterceptForHotSwap = false;
+
+      if (!codeGfx.empty() && codeGfx == presentedGfx && codeGfx != targetGfx) {
+        uint32_t autoSourceMach = 0;
+        if (HotSwapMachFromGfxName(codeGfx, autoSourceMach)) {
+          sourceGfx = codeGfx;
+          sourceMach = static_cast<uint8_t>(autoSourceMach & 0xffu);
+          presentationInterceptForHotSwap = true;
+        }
+      } else if (!codeGfx.empty() && codeGfx != targetGfx) {
+        std::ostringstream proof;
+        proof << "\"event\":\"hotswap_skip\""
+              << ",\"backend\":\"comgr\""
+              << ",\"reason\":\"not_presented_source\""
+              << ",\"source_gfx\":\"" << JsonEscape(codeGfx) << "\""
+              << ",\"target_gfx\":\"" << JsonEscape(targetGfx) << "\""
+              << ",\"elf_size\":" << code->ElfSize();
+        AppendHotSwapProofJson(proof.str());
+      }
+      if (presentationInterceptForHotSwap && sourceGfx != targetGfx) {
+        const std::string sourceIsa = std::string("amdgcn-amd-amdhsa--") + sourceGfx;
+        const std::string targetIsa = std::string("amdgcn-amd-amdhsa--") + targetGfx;
+
+        {
+          std::ostringstream proof;
+          proof << "\"event\":\"transpile_decision\""
+                << ",\"source\":\"presented_source\""
+                << ",\"source_gfx\":\"" << JsonEscape(sourceGfx) << "\""
+                << ",\"target_gfx\":\"" << JsonEscape(targetGfx) << "\""
+                << ",\"orig_mach\":\"0x" << std::hex << static_cast<unsigned>(sourceMach)
+                << std::dec << "\""
+                << ",\"code_isa\":\"" << JsonEscape(codeIsa) << "\"";
+          AppendHotSwapProofJson(proof.str());
+        }
+
+        std::vector<uint8_t> comgrSource(
+            reinterpret_cast<const uint8_t*>(code->ElfData()),
+            reinterpret_cast<const uint8_t*>(code->ElfData()) + code->ElfSize());
+
+        ownedCodeObject = std::move(comgrSource);
+        code = std::make_unique<code::AmdHsaCode>();
+        if (!code->InitAsBuffer(ownedCodeObject.data(), ownedCodeObject.size())) {
+          logger_ << "LoaderError: HotSwap source HSACO failed to initialize\n";
+          return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+        }
+        ownsCodeObject = true;
+        lazySourceInThisCall = true;
+        lazyCodeObjectForThisCall = std::make_shared<HotSwapLazyCodeObject>();
+        lazyCodeObjectForThisCall->SourceElf = ownedCodeObject;
+        lazyCodeObjectForThisCall->SourceIsa = sourceIsa;
+        lazyCodeObjectForThisCall->TargetIsa = targetIsa;
+        lazyCodeObjectForThisCall->SourceGfx = sourceGfx;
+        lazyCodeObjectForThisCall->TargetGfx = targetGfx;
+        lazyCodeObjectForThisCall->SourceMach = sourceMach;
+        lazyCodeObjectForThisCall->Agent = agent;
+        lazyCodeObjectForThisCall->Profile = profile();
+        if (!code->GetIsa(codeIsa, &genericVersion)) {
+          logger_ << "LoaderError: failed to determine HotSwap source code object's ISA\n";
+          return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        }
+        if (!code->GetCodeObjectVersion(&majorVersion, &minorVersion)) {
+          logger_ << "LoaderError: failed to determine HotSwap source code object's version\n";
+          return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        }
+        std::ostringstream proof;
+        proof << "\"event\":\"hotswap_lazy_source_registered\""
+              << ",\"backend\":\"comgr\""
+              << ",\"source_gfx\":\"" << JsonEscape(sourceGfx) << "\""
+              << ",\"target_gfx\":\"" << JsonEscape(targetGfx) << "\""
+              << ",\"elf_size\":" << ownedCodeObject.size();
+        AppendHotSwapProofJson(proof.str());
+      }
+    }
+  }
+#endif
+
   hsa_isa_t objectsIsa = context_->IsaFromName(codeIsa.c_str());
   if (!objectsIsa.handle) {
     logger_ << "LoaderError: code object's ISA (" << codeIsa.c_str() << ") is invalid\n";
     return HSA_STATUS_ERROR_INVALID_ISA_NAME;
   }
 
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  if (presentationMode && agent.handle != 0) {
+    const std::string codeGfx = ExtractGfxName(codeIsa);
+    const bool targetObject = !hotswapTargetGfx.empty() && codeGfx == hotswapTargetGfx;
+    if (targetObject && !translatedInThisCall) {
+      logger_ << "LoaderError: target-ISA code object (" << codeIsa.c_str()
+              << ") was not produced by HotSwap in this load call\n";
+      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+    }
+  }
+#endif
+
   if (agent.handle != 0 && !context_->IsaSupportedByAgent(agent, objectsIsa, genericVersion)) {
-    logger_ << "LoaderError: code object's ISA (" << codeIsa.c_str() << ") is not supported by the agent\n";
-    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+    if (lazySourceInThisCall) {
+      std::ostringstream proof;
+      proof << "\"event\":\"hotswap_lazy_source_isa_bypass\""
+            << ",\"backend\":\"comgr\""
+            << ",\"code_isa\":\"" << JsonEscape(codeIsa) << "\""
+            << ",\"source_gfx\":\"" << JsonEscape(ExtractGfxName(codeIsa)) << "\""
+            << ",\"target_gfx\":\"" << JsonEscape(hotswapTargetGfx) << "\""
+            << ",\"reason\":\"lazy_source_requires_dispatch_translation\"";
+      AppendHotSwapProofJson(proof.str());
+    } else
+#endif
+    {
+      logger_ << "LoaderError: code object's ISA (" << codeIsa.c_str()
+              << ") is not supported by the agent\n";
+      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+    }
   }
 
   hsa_status_t status;
 
-  objects.push_back(std::make_shared<LoadedCodeObjectImpl>(this, agent, code->ElfData(), code->ElfSize()));
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  if (ownsCodeObject) {
+    objects.push_back(
+        std::make_shared<LoadedCodeObjectImpl>(this, agent, std::move(ownedCodeObject)));
+  } else
+#endif
+  {
+    objects.push_back(
+        std::make_shared<LoadedCodeObjectImpl>(this, agent, code->ElfData(), code->ElfSize()));
+  }
   loaded_code_objects.push_back(std::static_pointer_cast<LoadedCodeObjectImpl>(objects.back()));
 
   status = LoadSegments(agent, code.get(), majorVersion);
   if (status != HSA_STATUS_SUCCESS) return status;
 
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  HotSwapKernelKind PreviousHotSwapKernelKind = CurrentHotSwapKernelKind;
+  std::shared_ptr<HotSwapLazyCodeObject> PreviousHotSwapLazyCodeObject =
+      CurrentHotSwapLazyCodeObject;
+  CurrentHotSwapKernelKind = translatedInThisCall
+      ? HotSwapKernelKind::Translated
+      : (lazySourceInThisCall ? HotSwapKernelKind::LazySource
+                              : HotSwapKernelKind::Untranslated);
+  CurrentHotSwapLazyCodeObject =
+      lazySourceInThisCall ? lazyCodeObjectForThisCall : nullptr;
+#endif
   for (size_t i = 0; i < code->SymbolCount(); ++i) {
     if (majorVersion >= 2 &&
         code->GetSymbol(i)->elfSym()->type() != STT_AMDGPU_HSA_KERNEL &&
@@ -1435,8 +2422,18 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
       continue;
 
     status = LoadSymbol(agent, code->GetSymbol(i), majorVersion);
-    if (status != HSA_STATUS_SUCCESS) { return status; }
+    if (status != HSA_STATUS_SUCCESS) {
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+      CurrentHotSwapKernelKind = PreviousHotSwapKernelKind;
+      CurrentHotSwapLazyCodeObject = PreviousHotSwapLazyCodeObject;
+#endif
+      return status;
+    }
   }
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  CurrentHotSwapKernelKind = PreviousHotSwapKernelKind;
+  CurrentHotSwapLazyCodeObject = PreviousHotSwapLazyCodeObject;
+#endif
 
   status = ApplyRelocations(agent, code.get());
   if (status != HSA_STATUS_SUCCESS) { return status; }
@@ -1766,6 +2763,22 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
                                     64,
                                     uses_wave32 ? 32 : 64,
                                     address);
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+    if (ShouldCheckHotSwapDispatchKernelObjects()) {
+      std::string KernelName;
+      std::string KernelNameFailure;
+      if (!DeriveHotSwapKernelRecordName(kernel_symbol->symbol_name, true,
+                                         KernelName, KernelNameFailure)) {
+        logger_ << "LoaderError: " << KernelNameFailure << ": "
+                << kernel_symbol->symbol_name << "\n";
+        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      }
+      RegisterHotSwapLoadedKernelObject(address, KernelName);
+      UpdateHotSwapKernelObjectLaunchMetadata(address, group_segment_size,
+                                              private_segment_size);
+      loaded_code_objects.back()->RecordHotSwapKernelObject(address);
+    }
+#endif
     symbol = kernel_symbol;
   } else if (sym->IsVariableSymbol()) {
     symbol = std::make_shared<VariableSymbol>(true,
@@ -1821,6 +2834,22 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
       kernel_symbol->debug_info.elf_size = code->ElfSize();
       kernel_symbol->debug_info.kernel_name = kernel_symbol->full_name.c_str();
       kernel_symbol->debug_info.owning_segment = (void*)SymbolSegment(agent, sym)->Address(sym->GetSection()->addr());
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+    if (ShouldCheckHotSwapDispatchKernelObjects()) {
+      std::string KernelName;
+      std::string KernelNameFailure;
+      if (!DeriveHotSwapKernelRecordName(kernel_symbol->full_name, false,
+                                         KernelName, KernelNameFailure)) {
+        logger_ << "LoaderError: " << KernelNameFailure << ": "
+                << kernel_symbol->full_name << "\n";
+        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      }
+      RegisterHotSwapLoadedKernelObject(address, KernelName);
+      UpdateHotSwapKernelObjectLaunchMetadata(address, group_segment_size,
+                                              private_segment_size);
+      loaded_code_objects.back()->RecordHotSwapKernelObject(address);
+    }
+#endif
       symbol = kernel_symbol;
 
       // \todo kzhuravl 10/15/15 This is a debugger backdoor: needs to be

@@ -41,6 +41,15 @@ inline static std::vector<std::string> splitSpaceSeparatedString(const char* str
   return vec;
 }
 
+inline static bool shouldUseWavefrontSize64Option(const amd::Device& device) {
+  if (!device.settings().lcWavefrontSize64_) {
+    return false;
+  }
+  // In presentation mode the selected code object follows the presented ISA.
+  // Keep the existing wave64 option behavior everywhere else.
+  return !amd::hotswap::PresentationEnabled() || device.isa().versionMajor() < 10;
+}
+
 // ================================================================================================
 Program::Program(amd::Device& device, amd::Program& owner)
     : device_(device),
@@ -533,7 +542,7 @@ bool Program::compileImpl(const std::string& sourceCode,
     driverOptions.push_back("-mcumode");
   }
 
-  if (device().settings().lcWavefrontSize64_) {
+  if (shouldUseWavefrontSize64Option(device())) {
     driverOptions.push_back("-mwavefrontsize64");
   }
   driverOptions.push_back("-mcode-object-version=" +
@@ -800,7 +809,7 @@ bool Program::linkImpl(amd::option::Options* options) {
     if (options->oVariables->UnsafeMathOpt || options->oVariables->FastRelaxedMath) {
       linkOptions.push_back("unsafe_math");
     }
-    if (device().settings().lcWavefrontSize64_) {
+    if (shouldUseWavefrontSize64Option(device())) {
       linkOptions.push_back("wavefrontsize64");
     }
     linkOptions.push_back("code_object_v" +
@@ -866,7 +875,7 @@ bool Program::linkImpl(amd::option::Options* options) {
     codegenOptions.push_back("-mcumode");
   }
 
-  if (device().settings().lcWavefrontSize64_) {
+  if (shouldUseWavefrontSize64Option(device())) {
     codegenOptions.push_back("-mwavefrontsize64");
   }
   codegenOptions.push_back("-mcode-object-version=" +
@@ -1751,6 +1760,8 @@ ComgrBinaryData::~ComgrBinaryData() {
 }
 
 bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
+  hotSwapSource_ = false;
+
   ComgrBinaryData binaryData;
   if (!binaryData.create(AMD_COMGR_DATA_KIND_EXECUTABLE, binary, binSize)) {
     buildLog_ += "Error: COMGR failed to create code object data object.\n";
@@ -1780,20 +1791,23 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
       return false;
     }
 
-    if (!amd::Isa::isCompatible(*binaryIsa, device().isa())) {
-      // HotSwap: let a supported foreign source ISA past the gate; loader transpiles downstream.
-      const std::string binaryIsaNameStr(binaryIsaName.data());
-      const bool hotswap_ok =
-          amd::hotswap::Enabled() &&
-          amd::hotswap::IsSupportedPair(binaryIsa->processorName(),
-                                        device().isa().processorName());
-      if (!hotswap_ok) {
-        buildLog_ += "Error: The program ISA " + binaryIsaNameStr;
-        buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
-        return false;
-      }
-      buildLog_ += "HotSwap: allowing foreign program ISA " + binaryIsaNameStr +
-                   " for transpilation to " + device().isa().isaName() + "\n";
+    const bool compatibleWithPresentedIsa =
+        binaryIsa != nullptr && amd::Isa::isCompatible(*binaryIsa, device().isa());
+    const bool compatibleWithExecutionIsa =
+        binaryIsa != nullptr && amd::Isa::isCompatible(*binaryIsa, device().executionIsa());
+    // In presentation mode the binary matches the presented ISA but not the physical
+    // execution ISA; admit it as a HotSwap source so the HSA loader can translate it.
+    // COMGR refuses translations it cannot perform, so no static pair allowlist is needed.
+    hotSwapSource_ = binaryIsa != nullptr && amd::hotswap::Enabled() &&
+                     compatibleWithPresentedIsa && !compatibleWithExecutionIsa;
+    if (!compatibleWithPresentedIsa && !hotSwapSource_) {
+      buildLog_ += "Error: The program ISA " + std::string(binaryIsaName.data());
+      buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
+      return false;
+    } else if (hotSwapSource_) {
+      buildLog_ += "HotSwap: allowing source ISA " + std::string(binaryIsaName.data());
+      buildLog_ +=
+          " to reach HSA loader for execution ISA " + device().executionIsa().isaName() + "\n";
     }
   }
 

@@ -247,7 +247,7 @@ bool Event::awaitCompletion() {
     ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Waiting for event %p to complete, current status %d",
             this, status());
     auto* queue = command().queue();
-    if ((queue != nullptr) && queue->vdev()->ActiveWait()) {
+    if ((queue != nullptr) && queue->vdev() != nullptr && queue->vdev()->ActiveWait()) {
       while (status() > CL_COMPLETE) {
         amd::Os::yield();
       }
@@ -372,6 +372,11 @@ void Command::enqueue() {
   // update will occur later after flush() with a wait
   if (AMD_DIRECT_DISPATCH) {
     setStatus(CL_QUEUED);
+    if (queue_->vdev() == nullptr) {
+      LogError("Command enqueue failed: command queue has no virtual device");
+      setStatus(CL_INVALID_OPERATION);
+      return;
+    }
 
     // Notify all commands about the waiter. Barrier will be sent in order to obtain
     // HSA signal for a wait on the current queue

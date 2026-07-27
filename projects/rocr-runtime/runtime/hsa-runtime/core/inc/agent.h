@@ -347,6 +347,10 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   // and AIE agents, this list will be empty.
   virtual const std::vector<const core::Isa *>& supported_isas() const = 0;
 
+  virtual const std::vector<const core::Isa *>& execution_isas() const {
+    return supported_isas();
+  }
+
   virtual uint64_t HiveId() const { return 0; }
 
   // @brief Returns the device type (CPU/GPU/Others).

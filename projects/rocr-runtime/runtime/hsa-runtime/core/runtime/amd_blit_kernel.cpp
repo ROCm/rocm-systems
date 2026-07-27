@@ -51,6 +51,7 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"
 #include "core/util/utils.h"
+#include "loader/executable.hpp"
 
 namespace rocr {
 namespace AMD {
@@ -578,6 +579,14 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
     KernelCode& kernel = kernels_[kernel_name.first];
     gpuAgent->AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL, kernel.code_buf_,
                             kernel.code_buf_size_);
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+    std::string target_gfx = "<unknown>";
+    if (!agent_->execution_isas().empty() && agent_->execution_isas()[0])
+      target_gfx = agent_->execution_isas()[0]->GetProcessorName();
+    rocr::amd::hsa::loader::RegisterHotSwapRocrBlitTargetKernelObject(
+        reinterpret_cast<uint64_t>(kernel.code_buf_), kernel.code_buf_size_,
+        target_gfx.c_str());
+#endif
   }
 
   if (agent_->profiling_enabled()) {
@@ -593,6 +602,10 @@ hsa_status_t BlitKernel::Destroy() {
   const AMD::GpuAgent* gpuAgent = static_cast<const AMD::GpuAgent*>(agent_);
 
   for (auto kernel_pair : kernels_) {
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+    rocr::amd::hsa::loader::UnregisterHotSwapRocrBlitTargetKernelObject(
+        reinterpret_cast<uint64_t>(kernel_pair.second.code_buf_));
+#endif
     gpuAgent->ReleaseShader(kernel_pair.second.code_buf_,
                            kernel_pair.second.code_buf_size_);
   }

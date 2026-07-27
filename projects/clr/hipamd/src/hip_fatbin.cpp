@@ -483,9 +483,9 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   // HotSwap: also request supported source ISAs for forwarding (skipped when forcing SPIRV).
   if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
     for (auto device : devices) {
-      const std::string target_gfx = device->devices()[0]->isa().processorName();
-      for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
-        if (target_gfx == p.target) {
+      const std::string presented_gfx = device->devices()[0]->isa().processorName();
+      for (const amd::hotswap::SourcePresentedPair& p : amd::hotswap::kSourceForwardingPairs) {
+        if (amd::hotswap::IsSourceForwardingPair(p.source, presented_gfx)) {
           unique_isa_names.insert(std::string("amdgcn-amd-amdhsa--") + p.source);
         }
       }
@@ -521,9 +521,9 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       // HotSwap: pick the first supported source bundle for this device's target.
       auto hotswap_co = code_obj_map.end();
       if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        const std::string target_gfx = device->devices()[0]->isa().processorName();
-        for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
-          if (target_gfx != p.target) {
+        const std::string presented_gfx = device->devices()[0]->isa().processorName();
+        for (const amd::hotswap::SourcePresentedPair& p : amd::hotswap::kSourceForwardingPairs) {
+          if (!amd::hotswap::IsSourceForwardingPair(p.source, presented_gfx)) {
             continue;
           }
           for (auto it = code_obj_map.begin(); it != code_obj_map.end(); ++it) {

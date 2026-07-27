@@ -49,6 +49,28 @@ else()
         cmake/hsa-runtime64
         lib/cmake/hsa-runtime64
         lib64/cmake/hsa-runtime64)
+    if(DEFINED ROCR_RUNTIME_INCLUDE_DIR)
+      get_target_property(_HSA_RUNTIME_INCLUDE_DIRS hsa-runtime64::hsa-runtime64
+        INTERFACE_INCLUDE_DIRECTORIES)
+      get_filename_component(_ROCR_RUNTIME_INCLUDE_DIR_ABS
+        "${ROCR_RUNTIME_INCLUDE_DIR}" ABSOLUTE)
+      set(_ROCR_RUNTIME_INCLUDE_MATCH FALSE)
+      foreach(_HSA_RUNTIME_INCLUDE_DIR ${_HSA_RUNTIME_INCLUDE_DIRS})
+        get_filename_component(_HSA_RUNTIME_INCLUDE_DIR_ABS
+          "${_HSA_RUNTIME_INCLUDE_DIR}" ABSOLUTE)
+        if("${_ROCR_RUNTIME_INCLUDE_DIR_ABS}" STREQUAL "${_HSA_RUNTIME_INCLUDE_DIR_ABS}" OR
+           "${_ROCR_RUNTIME_INCLUDE_DIR_ABS}" STREQUAL "${_HSA_RUNTIME_INCLUDE_DIR_ABS}/hsa")
+          set(_ROCR_RUNTIME_INCLUDE_MATCH TRUE)
+        endif()
+      endforeach()
+      if(NOT _ROCR_RUNTIME_INCLUDE_MATCH)
+        message(FATAL_ERROR
+          "ROCR_RUNTIME_INCLUDE_DIR must come from the same hsa-runtime64 package "
+          "that ROCclr links")
+      endif()
+      target_include_directories(rocclr BEFORE PUBLIC ${ROCR_RUNTIME_INCLUDE_DIR})
+      target_include_directories(rocclr BEFORE PUBLIC ${ROCR_RUNTIME_INCLUDE_DIR}/..)
+    endif()
   else()
     find_package(hsa-runtime64 1.11 REQUIRED CONFIG
       PATHS

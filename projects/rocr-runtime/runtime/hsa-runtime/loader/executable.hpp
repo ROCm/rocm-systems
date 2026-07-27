@@ -143,6 +143,18 @@ class KernelSymbol;
 class VariableSymbol;
 class ExecutableImpl;
 
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+void RegisterHotSwapRocrBlitTargetKernelObject(uint64_t address,
+                                               size_t size,
+                                               const char* target_gfx);
+void UnregisterHotSwapRocrBlitTargetKernelObject(uint64_t address);
+bool ShouldCheckHotSwapDispatchKernelObjects();
+bool PrepareHotSwapDispatchKernelObject(uint64_t* address,
+                                        uint32_t* private_segment_size,
+                                        uint32_t* group_segment_size,
+                                        uint32_t* scaled_dispatch_factor);
+#endif
+
 //===----------------------------------------------------------------------===//
 // SymbolImpl.                                                                //
 //===----------------------------------------------------------------------===//
@@ -365,13 +377,23 @@ private:
   LoadedCodeObjectImpl(const LoadedCodeObjectImpl&);
   LoadedCodeObjectImpl& operator=(const LoadedCodeObjectImpl&);
 
+  std::vector<uint8_t> owned_elf_data;
   const void *elf_data;
   const size_t elf_size;
   std::vector<Segment*> loaded_segments;
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  std::vector<uint64_t> hotswap_kernel_objects_;
+#endif
 
 public:
   LoadedCodeObjectImpl(ExecutableImpl *owner_, hsa_agent_t agent_, const void *elf_data_, size_t elf_size_)
     : ExecutableObject(owner_, agent_), elf_data(elf_data_), elf_size(elf_size_) {
+      memset(&r_debug_info, 0, sizeof(r_debug_info));
+    }
+
+  LoadedCodeObjectImpl(ExecutableImpl *owner_, hsa_agent_t agent_, std::vector<uint8_t> elf_data_)
+    : ExecutableObject(owner_, agent_), owned_elf_data(std::move(elf_data_)),
+      elf_data(owned_elf_data.data()), elf_size(owned_elf_data.size()) {
       memset(&r_debug_info, 0, sizeof(r_debug_info));
     }
 
@@ -389,7 +411,11 @@ public:
 
   void Print(std::ostream& out) override;
 
-  void Destroy() override {}
+  void Destroy() override;
+
+#ifdef ROCR_HOTSWAP_COMGR_ADAPTER
+  void RecordHotSwapKernelObject(uint64_t address);
+#endif
 
   hsa_agent_t getAgent() const override;
   hsa_executable_t getExecutable() const override;
