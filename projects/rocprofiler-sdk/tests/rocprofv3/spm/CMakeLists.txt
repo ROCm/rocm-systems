@@ -30,3 +30,4 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 add_subdirectory(json)
+add_subdirectory(rocpd)

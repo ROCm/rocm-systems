@@ -8,6 +8,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- hipFILE (GPU-direct storage) API tracing. Add `hipfile_api` to
+  `ROCPROFSYS_ROCM_DOMAINS` (shorthand: `hipfile`) to capture hipFILE API traces. Requires ROCProfiler-SDK version 1.3.5 or later.
+
 - `--exe-only` flag for `rocprof-sys-instrument`: shorthand for excluding every shared
   library from instrumentation, leaving only the main executable.
 
@@ -22,9 +25,23 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   function include/restrict (`--function-include`/`-I`, `--function-restrict`/`-R`)
   regexes.
 
+- rocSHMEM host-stream API tracing via `ROCPROFSYS_ROCM_DOMAINS=rocshmem_api`.
+  ROCm Systems Profiler now captures the nine host-stream rocSHMEM API calls
+  (`putmem_on_stream`, `getmem_on_stream`, `putmem_signal_on_stream`,
+  `signal_wait_until_on_stream`, `broadcastmem_on_stream`, `alltoallmem_on_stream`,
+  `barrier_all_on_stream`, `sync_all_on_stream`, `quiet_on_stream`) as
+  `rocm_rocshmem_api` spans in Perfetto traces and rocpd databases. Requires
+  rocprofiler-sdk >= 1.3.4 and rocSHMEM >= 3.6.0 (included in ROCm 7.15).
+  As of rocSHMEM 3.6.0, `USE_ROCPROFILER_REGISTER` defaults to `ON`, so
+  package installations automatically include this support. A `rocshmem` example
+  demonstrating two-PE usage of all nine APIs is included under `examples/rocshmem`.
+
 ### Changed
 
 - `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
+
+- Introduced the new `profiler-hub` writer backend for trace persistence, as a
+  replacement for the existing SQLite3/rocpd backend.
 
 ### Removed
 
@@ -208,7 +225,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
 - SDMA (System Direct Memory Access) utilization metrics support via AMD SMI, showing device-level SDMA usage percentage aggregated from all processes. Configure via `ROCPROFSYS_AMD_SMI_METRICS=sdma_usage`.
 - `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via ROCprofiler-SDK rocattach API (experimental).
-- Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_SHMEM=ON` configuration setting.
+- Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_OPENSHMEM=ON` configuration setting.
 
 ### Changed
 

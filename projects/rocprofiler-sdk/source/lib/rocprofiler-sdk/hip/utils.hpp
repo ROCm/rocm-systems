@@ -29,7 +29,7 @@
 #include "lib/rocprofiler-sdk/hip/details/format.hpp"
 #include "lib/rocprofiler-sdk/hip/details/ostream.hpp"
 
-#include "fmt/core.h"
+#include "fmt/format.h"
 #include "fmt/ranges.h"
 
 #include <sstream>

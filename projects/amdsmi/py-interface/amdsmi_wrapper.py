@@ -165,54 +165,106 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 _libraries = {}
 from pathlib import Path
-# libamd_smi.so can be located in several different places.
-# Look for it with below priority:
-# 0. Relative to amdsmi_wrapper.py in TheRock:
-#    `amdsmi_wrapper.py` is located in
-#    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
-#    `_rocm_sdk_core/lib`.
-# 1. ROCM_HOME/ROCM_PATH environment variables
-#    - ROCM_HOME/lib
-#    - ROCM_PATH/lib (usually set to /opt/rocm/)
-# 2. Decided by the linker
-#    - LD_LIBRARY_PATH env var
-#    - defined path in /etc/ld.so.conf.d/
-# 3. Relative to amdsmi_wrapper.py
-#    - parent directory
-#    - current directory
-def find_smi_library():
-    err = OSError("Could not load libamd_smi.so")
-    possible_locations = []
-    # 0.
-    libamd_smi_path = Path(__file__).resolve().parent.parent.parent.parent / "lib/libamd_smi.so.26"
-    possible_locations.append(libamd_smi_path)
-    # 1.
-    rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
-    if rocm_path:
-        possible_locations.append(os.path.join(rocm_path, "lib/libamd_smi.so"))
-    # 2.
-    possible_locations.append("libamd_smi.so")
-    # 3.
-    libamd_smi_parent_dir = Path(__file__).resolve().parent / "libamd_smi.so"
-    libamd_smi_cwd = Path.cwd() / "libamd_smi.so"
-    possible_locations.append(libamd_smi_parent_dir)
-    possible_locations.append(libamd_smi_cwd)
 
-    for location in possible_locations:
-        try:
-            lib = ctypes.CDLL(location)
-            return lib, location
-        except OSError as e:
-            err = e
-            continue
-    raise err
+# ---------------------------------------------------------------------------
+# Dynamic library loading
+# ---------------------------------------------------------------------------
+# This wrapper supports two self-contained install paths:
+#
+#   1. pip wheel
+#      The wheel ships ``libamd_smi_python.so`` next to this file.
+#
+#   2. system package (rpm / deb)
+#      The wrapper is placed in the system Python's ``site-packages``;
+#      the package also drops an ``ld.so.conf.d`` entry pointing at
+#      ``/opt/rocm/lib`` so the dynamic linker resolves the SONAME
+#      ``libamd_smi.so.<SOVERSION>`` without further help.
+#
+# A user installs ONE of those two packages. We never combine paths
+# from both -- no ROCM_HOME / ROCM_PATH ladders, no walking up to a
+# ROCm root, no LD_LIBRARY_PATH probing. ``AMDSMI_LIB_OVERRIDE`` stays
+# as a single-purpose escape hatch for ABI tests that need to load an
+# alternate .so explicitly.
+# ---------------------------------------------------------------------------
+
+
+# Versioned SONAME the system package ships; matches src/CMakeLists.txt SOVERSION.
+_AMDSMI_LIB_SONAME = "libamd_smi.so.26"
+
+# Whether the loader may fall back to the system SONAME after the bundled
+# wheel-library check. The committed wrapper and the system rpm/deb keep this
+# True. The pip wheel build flips it to False at package time so a wheel never
+# loads a system libamd_smi.so -- a wheel missing its bundled
+# libamd_smi_python.so fails loudly instead of silently importing an unrelated
+# system library (which would risk symbol conflicts inside PyTorch / JAX).
+_AMDSMI_ALLOW_SYSTEM_FALLBACK = True
+
+
+def _load_library():
+    """Load the AMD SMI shared library.
+
+    Order:
+      1. ``AMDSMI_LIB_OVERRIDE`` env var (ABI-test escape hatch).
+      2. ``libamd_smi_python.so`` next to this file (pip wheel).
+      3. SONAME via the dynamic linker (system rpm / deb); skipped when
+         _AMDSMI_ALLOW_SYSTEM_FALLBACK is False (pip wheel).
+    """
+    mode = getattr(ctypes, "RTLD_LOCAL", 0)
+
+    override = os.getenv("AMDSMI_LIB_OVERRIDE")
+    if override:
+        return ctypes.CDLL(override, mode=mode), override
+
+    bundled = Path(__file__).resolve().parent / "libamd_smi_python.so"
+    if bundled.exists():
+        return ctypes.CDLL(str(bundled), mode=mode), str(bundled)
+
+    if not _AMDSMI_ALLOW_SYSTEM_FALLBACK:
+        raise OSError(
+            "bundled libamd_smi_python.so is missing from this amdsmi wheel; "
+            "refusing to fall back to a system libamd_smi.so"
+        )
+
+    return ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode), _AMDSMI_LIB_SONAME
+
+
+class _MissingLibrary:
+    """Sentinel installed when the .so could not be loaded.
+
+    Module import stays tolerant so doc / lint / multi-stage container
+    builds work without a runtime ROCm install. Any *call* of a wrapped
+    C symbol raises OSError with the underlying error.
+    """
+
+    __slots__ = ("_err",)
+
+    def __init__(self, err=None):
+        object.__setattr__(self, "_err", err)
+
+    def _raise(self):
+        raise OSError(
+            "AMD SMI shared library could not be loaded.\n"
+            f"Underlying error: {self._err}\n"
+            "Hint: install amd-smi-lib (rpm/deb) or pip-install the amdsmi wheel."
+        )
+
+    def __getattr__(self, name):
+        if not name.startswith("amdsmi_"):
+            raise AttributeError(name)
+        return _MissingLibrary(self._err)
+
+    def __setattr__(self, name, value):
+        pass
+
+    def __call__(self, *args, **kwargs):
+        self._raise()
+
 
 try:
-    _libraries['libamd_smi.so'], location = find_smi_library()
-    #print(f"found smi lib in [", location, "]")
-except OSError as e:
-    print(e)
-    print("Unable to find libamd_smi.so library try installing amd-smi-lib from your package manager")
+    _libraries['libamd_smi.so'], _loaded_lib_path = _load_library()
+except OSError as _load_err:
+    _libraries['libamd_smi.so'] = _MissingLibrary(_load_err)
+    _loaded_lib_path = None
 
 #Add support for amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
@@ -3267,6 +3319,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_vcn_busy_percent = _libraries['libamd_smi.so'].amdsmi_get_vcn_busy_percent
+    amdsmi_get_vcn_busy_percent.restype = amdsmi_status_t
+    amdsmi_get_vcn_busy_percent.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_utilization_count = _libraries['libamd_smi.so'].amdsmi_get_utilization_count
     amdsmi_get_utilization_count.restype = amdsmi_status_t
     amdsmi_get_utilization_count.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_utilization_counter_t), uint32_t, ctypes.POINTER(ctypes.c_uint64)]
@@ -5040,13 +5098,14 @@ __all__ = \
     'amdsmi_board_info_t', 'amdsmi_cache_property_type_t',
     'amdsmi_card_form_factor_t', 'amdsmi_clean_gpu_local_data',
     'amdsmi_clk_info_t', 'amdsmi_clk_limit_type_t',
-    'amdsmi_clk_type_t', 'amdsmi_compute_partition_type_t',
-    'amdsmi_container_types_t', 'amdsmi_counter_command_t',
-    'amdsmi_counter_value_t', 'amdsmi_cper_guid_t',
-    'amdsmi_cper_hdr_t', 'amdsmi_cper_notify_type_t',
-    'amdsmi_cper_sev_t', 'amdsmi_cper_timestamp_t',
-    'amdsmi_cper_valid_bits_t', 'amdsmi_cpu_apb_disable',
-    'amdsmi_cpu_apb_enable', 'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
+    'amdsmi_clk_type_t', 'amdsmi_compute_partition_mem_alloc_mode_t',
+    'amdsmi_compute_partition_type_t', 'amdsmi_container_types_t',
+    'amdsmi_counter_command_t', 'amdsmi_counter_value_t',
+    'amdsmi_cper_guid_t', 'amdsmi_cper_hdr_t',
+    'amdsmi_cper_notify_type_t', 'amdsmi_cper_sev_t',
+    'amdsmi_cper_timestamp_t', 'amdsmi_cper_valid_bits_t',
+    'amdsmi_cpu_apb_disable', 'amdsmi_cpu_apb_enable',
+    'amdsmi_cpu_info_t', 'amdsmi_cpu_util_t',
     'amdsmi_cpusocket_handle', 'amdsmi_ddr_bw_metrics_t',
     'amdsmi_dev_perf_level_t', 'amdsmi_dimm_power_t',
     'amdsmi_dimm_thermal_t', 'amdsmi_dpm_level_t',
@@ -5184,9 +5243,10 @@ __all__ = \
     'amdsmi_get_socket_info', 'amdsmi_get_supported_power_cap',
     'amdsmi_get_temp_metric', 'amdsmi_get_threads_per_core',
     'amdsmi_get_ttm_info', 'amdsmi_get_utilization_count',
-    'amdsmi_get_violation_status', 'amdsmi_get_xgmi_info',
-    'amdsmi_get_xgmi_plpd', 'amdsmi_gpu_block_t',
-    'amdsmi_gpu_cache_info_t', 'amdsmi_gpu_control_counter',
+    'amdsmi_get_vcn_busy_percent', 'amdsmi_get_violation_status',
+    'amdsmi_get_xgmi_info', 'amdsmi_get_xgmi_plpd',
+    'amdsmi_gpu_block_t', 'amdsmi_gpu_cache_info_t',
+    'amdsmi_gpu_control_counter',
     'amdsmi_gpu_counter_group_supported', 'amdsmi_gpu_create_counter',
     'amdsmi_gpu_destroy_counter', 'amdsmi_gpu_driver_reload',
     'amdsmi_gpu_metrics_t', 'amdsmi_gpu_ras_policy_info_t',
