@@ -23,10 +23,16 @@
 // rocprofiler-sdk-rocpd 1.3.2 (upstream PR #5267). Older installs (e.g. ROCm <= 7.2,
 // version 1.3.1) still use the 8-argument signature without it.
 #    define PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION (ROCPD_VERSION >= 10302)
+// ROCPD_SQL_SCHEMA_ROCPD_METADATA was added to rocpd_sql_schema_kind_t in the same
+// upstream PR (#5267 / rocpd 1.3.2) that added schema_version, so gate on the same
+// version check -- older installs don't have this enumerator at all.
+#    define PROFILER_HUB_ROCPD_SQL_HAS_METADATA_KIND                                     \
+        PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
 #else
 #    include <regex>
 
 #    include "schema/data_views.hpp"
+#    include "schema/rocpd_metadata.hpp"
 #    include "schema/rocpd_tables.hpp"
 #    include "schema/rocpd_views.hpp"
 #    include "schema/summary_views.hpp"
@@ -41,9 +47,14 @@ enum rocpd_sql_schema_kind_t
     ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
+    ROCPD_SQL_SCHEMA_ROCPD_METADATA,
     ROCPD_SQL_SCHEMA_LAST,
 };
 }  // namespace
+
+// This local schema is always sourced fresh (bundled or cloned) so the METADATA kind
+// is always present, unlike the installed rocprofiler-sdk-rocpd library above.
+#    define PROFILER_HUB_ROCPD_SQL_HAS_METADATA_KIND 1
 
 #endif
 
@@ -135,6 +146,9 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
         case ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS:
             schema_content = rocpd::data_storage::schema::SUMMARY_VIEWS_SQL;
             break;
+        case ROCPD_SQL_SCHEMA_ROCPD_METADATA:
+            schema_content = rocpd::data_storage::schema::ROCPD_METADATA_SQL;
+            break;
         default:
             throw std::runtime_error("Unknown schema kind: " +
                                      std::to_string(schema_kind));
@@ -146,9 +160,21 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
     std::regex guid_pattern("\\{\\{guid\\}\\}");
     std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
 
+    // rocpd_metadata.sql references these; hardcoded to the baseline schema version
+    // (3.0.0) for now until schema files are selected by version rather than always
+    // taking the latest cloned/bundled copy.
+    std::regex schema_version_pattern("\\{\\{schema_version\\}\\}");
+    std::regex schema_version_major_pattern("\\{\\{schema_version_major\\}\\}");
+    std::regex schema_version_minor_pattern("\\{\\{schema_version_minor\\}\\}");
+    std::regex schema_version_patch_pattern("\\{\\{schema_version_patch\\}\\}");
+
     query_str = std::regex_replace(query_str, upid_pattern, "_" + uuid);
     query_str = std::regex_replace(query_str, guid_pattern, uuid);
     query_str = std::regex_replace(query_str, view_upid_pattern, "");
+    query_str = std::regex_replace(query_str, schema_version_pattern, "3.0.0");
+    query_str = std::regex_replace(query_str, schema_version_major_pattern, "3");
+    query_str = std::regex_replace(query_str, schema_version_minor_pattern, "0");
+    query_str = std::regex_replace(query_str, schema_version_patch_pattern, "0");
 
     return query_str;
 #endif
