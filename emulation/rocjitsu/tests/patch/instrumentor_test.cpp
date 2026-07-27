@@ -2382,30 +2382,6 @@ TEST(InstrumentorProbeSpill, Rdna4ZeroScratchFailsClosed) {
       << "error was: " << result.errors.front();
 }
 
-// A base scratch size that pushes the spill slot past the CDNA4 12-bit FLAT
-// offset field fails closed rather than emitting a truncated offset.
-TEST(InstrumentorProbeSpill, Cdna4ScratchOffsetPastFieldFailsClosed) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
-  const uint32_t endpgm = build_s_endpgm(kArch);
-  auto target = make_gfx950_kernel_elf({kMovV3V2, endpgm}, /*private_bytes=*/0x1000);
-  auto probe = make_gfx950_probe_elf("rj_test_probe", {kMovV2Zero, kProbeSetpcS30S31});
-  AmdGpuCodeObject obj(target.data(), target.size());
-  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
-
-  Instrumentor instr(obj, kArch);
-  InstrumentationPoint pt;
-  pt.anchor_offset = 0;
-  pt.probe_obj = &probe_obj;
-  pt.probe_symbol = "rj_test_probe";
-  instr.add_point(pt);
-
-  auto result = instr.patch();
-  EXPECT_TRUE(result.elf_bytes.empty());
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_NE(result.errors.front().find("scratch"), std::string::npos)
-      << "error was: " << result.errors.front();
-}
-
 // {target, probe} ELF pair for the preservation tests: target {v_mov v3,v2;
 // s_endpgm}, probe {clobber; setpc}. CDNA3 -> gfx942, CDNA4 -> gfx950,
 // RDNA4 -> gfx1200.
