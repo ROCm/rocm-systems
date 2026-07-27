@@ -1794,11 +1794,13 @@ struct VectorLaneFlowState {
 // scratch registers in stripes of eight at a stride of sixteen starting at
 // v40: v40-47, v56-63, v72-79, ... A conforming callee must preserve these
 // across a call, so a PC stashed in one survives an intervening call even
-// though the analysis does not descend into the callee body. Non-conforming
-// callee code (which clobbers a callee-saved VGPR without saving it) would
-// violate this assumption; that risk is accepted until deployment shows a
-// violation, at which point this predicate is the single seam to replace with
-// a verified-conformance analysis. See llvm AMDGPUCallingConv.td.
+// though the analysis does not descend into the callee body.
+//
+// TODO: Replace this calling-convention assumption with analysis that proves
+// every reachable callee preserves the stashed physical VGPR before allowing
+// the stash to survive a call. A compiler-generated callee violating the ABI is
+// highly unlikely, but hand-written or otherwise non-conforming code may still
+// do so. See the LLVM AMDGPU User Guide and AMDGPUCallingConv.td.
 //
 // @p phys_vgpr is the resolved physical index, which for gfx1250 VGPR_MSB
 // banking may exceed 255 (bank*256 + selector). The ABI table only defines the
