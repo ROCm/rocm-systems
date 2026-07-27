@@ -216,7 +216,7 @@ print(sysconfig.get_paths()["purelib"])
 ]]
 )
 # The module must land where the system's DEFAULT python3 looks -- that is the
-# interpreter /opt/rocm/bin/amd-smi runs under (its `#!/usr/bin/python3` shebang)
+# interpreter /opt/rocm/bin/amd-smi runs under (its `#!/usr/bin/env python3` shebang)
 # and the one a plain `import amdsmi` uses. We must NOT detect from a
 # non-default interpreter: RHEL build/CI images frequently repoint
 # /usr/bin/python3 to a newer python via `alternatives` (e.g. to run a 3.7+
