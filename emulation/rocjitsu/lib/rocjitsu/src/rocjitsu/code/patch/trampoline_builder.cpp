@@ -120,6 +120,13 @@ struct SpillBracket {
     const auto rl = build_v_readlane_b32(slot.sgpr, bridge_vgpr, kUniformLane, arch);
     bracket.epilogue.insert(bracket.epilogue.end(), rl.begin(), rl.end());
   }
+
+  // Drain all scratch stores before the call: the store's async read of the source
+  // register must finish before the probe clobbers it, which also orders each store
+  // ahead of its reload. RDNA4 stores live on STORECNT, which s_wait_loadcnt misses.
+  if (!vgpr_spills.empty() || !sgpr_spills.empty())
+    bracket.prologue.push_back(build_wait_stores_complete(arch));
+
   return bracket;
 }
 

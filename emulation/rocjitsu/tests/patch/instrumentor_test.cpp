@@ -2247,9 +2247,19 @@ TEST(InstrumentorProbeSpill, Rdna4SpillsLiveClobberedVgpr) {
   const auto store = build_scratch_store_dword(2, 64, kArch);
   const auto load = build_scratch_load_dword(2, 64, kArch);
   const uint32_t wait = build_wait_loads_complete(kArch);
-  EXPECT_NE(std::search(cave.begin(), cave.end(), store.begin(), store.end()), cave.end());
-  EXPECT_NE(std::search(cave.begin(), cave.end(), load.begin(), load.end()), cave.end());
+  const auto store_it = std::search(cave.begin(), cave.end(), store.begin(), store.end());
+  const auto load_it = std::search(cave.begin(), cave.end(), load.begin(), load.end());
+  EXPECT_NE(store_it, cave.end());
+  EXPECT_NE(load_it, cave.end());
   EXPECT_NE(std::find(cave.begin(), cave.end(), wait), cave.end());
+
+  // The STORECNT fence must sit after the store and before the reload; the load
+  // wait does not cover stores on RDNA4, so its absence would corrupt the reload.
+  const uint32_t store_wait = build_wait_stores_complete(kArch);
+  const auto store_wait_it = std::find(cave.begin(), cave.end(), store_wait);
+  ASSERT_NE(store_wait_it, cave.end()) << "missing RDNA4 store-counter fence before the reload";
+  EXPECT_LT(store_it, store_wait_it) << "store-counter fence must follow the store";
+  EXPECT_LT(store_wait_it, load_it) << "store-counter fence must precede the reload";
 
   EXPECT_EQ(patched_private_segment_size(patched), 68u);
 }

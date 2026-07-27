@@ -335,5 +335,13 @@ TEST(InstructionBuilder, BuildWaitLoadsComplete) {
   EXPECT_EQ(build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4), 0xBFC00000u);
 }
 
+TEST(InstructionBuilder, BuildWaitStoresComplete) {
+  // CDNA3 and CDNA4: s_waitcnt 0 (unified vmcnt covers stores).
+  EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA3), 0xBF8C0000u);
+  EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA4), 0xBF8C0000u);
+  // RDNA4: s_wait_storecnt 0 (split counter, distinct from s_wait_loadcnt).
+  EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_RDNA4), 0xBFC10000u);
+}
+
 } // namespace
 } // namespace rocjitsu
