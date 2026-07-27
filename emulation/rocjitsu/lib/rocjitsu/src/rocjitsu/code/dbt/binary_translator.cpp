@@ -966,7 +966,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // helper block, Phase 3 emits that helper into both relocated bodies so every
   // branch or call target can be resolved through the current kernel's placement
   // map without borrowing another kernel's return continuation.
-  auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders);
+  auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders,
+                                  ExternalEntryPolicy::ExplicitOnly);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
   const auto relocation_table_dispatches =
