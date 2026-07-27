@@ -160,6 +160,9 @@ ncclResult_t ncclTuningGetChannels(struct ncclTuningInput_t* const input, struct
     } else {
       nc = input->comm->nvlsChannels;
     }
+  } else if (result->algo == NCCL_ALGO_PAT && !input->comm->isOneRPN) {
+    // Multi-RPN PAT uses NVLS for intra-node transfers.
+    nc = std::min(input->comm->nChannels, input->comm->nvlsChannels);
   } else {
     // Ring/Tree channel tuning
     while (input->nBytes < nc * nt * threadThreshold) {

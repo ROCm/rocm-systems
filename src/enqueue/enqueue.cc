@@ -509,6 +509,10 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
         isNvls = 1;
         isCollnet = agg.algorithm == NCCL_ALGO_NVLS && comm->nNodes > 1;
         break;
+      case NCCL_ALGO_PAT:
+        // Multi-RPN PAT uses NVLS for intra-node transfers.
+        isNvls = !comm->isOneRPN;
+        break;
       case NCCL_ALGO_COLLNET_CHAIN:
       case NCCL_ALGO_COLLNET_DIRECT:
         isCollnet = 1;

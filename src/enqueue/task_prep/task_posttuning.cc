@@ -597,6 +597,10 @@ static ncclResult_t applyTuningToCollTask(struct ncclComm* comm, struct ncclTask
     task->isNvls = 1;
     task->isCollnet = (task->algorithm == NCCL_ALGO_NVLS && comm->nNodes > 1) ? 1 : 0;
     break;
+  case NCCL_ALGO_PAT:
+    // Multi-RPN PAT uses NVLS for intra-node transfers.
+    task->isNvls = !comm->isOneRPN;
+    break;
   case NCCL_ALGO_COLLNET_CHAIN:
   case NCCL_ALGO_COLLNET_DIRECT:
     task->isCollnet = 1;
