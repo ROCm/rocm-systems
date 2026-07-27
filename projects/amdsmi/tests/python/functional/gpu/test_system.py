@@ -91,17 +91,10 @@ class TestGpuSystem(unittest.TestCase):
     def test_status_code_to_string(self):
         self.common.print_func_name("")
 
-        # Skip the two catch-all codes; a real code resolving to either is a
-        # library bug this test is meant to catch:
-        #   * AMDSMI_STATUS_UNKNOWN_ERROR -> a `case` is missing from
-        #     amdsmi_status_code_to_string() (e.g. TIMEOUT / MORE_DATA).
-        #   * AMDSMI_STATUS_MAP_ERROR -> a lower-level rsmi/esmi/nic status has
-        #     no amdsmi mapping.
-        fallback_descs = ("AMDSMI_STATUS_UNKNOWN_ERROR", "AMDSMI_STATUS_MAP_ERROR")
+        # Every code, including the two catch-all codes, must resolve to a
+        # description that begins with its own enum name.
         for status in amdsmi.AmdSmiStatus:
             error_name = f"AMDSMI_STATUS_{status.name}"
-            if error_name in fallback_descs:
-                continue
             msg = f"\t### amdsmi_status_code_to_string({error_name}={status.value}):"
 
             ret = None

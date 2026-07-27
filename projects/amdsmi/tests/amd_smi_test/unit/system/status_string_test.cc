@@ -144,7 +144,7 @@ bool starts_with(const std::string& s, const std::string& prefix) {
 // The Python unit test (test_status_code_to_string) covers the same ground, but
 // it needs an initialized library and drivers; this C++ test is driver-free and
 // runs in CI without a GPU.
-TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
+TEST(SystemUnit, StatusStringEveryCodeResolvesToItsOwnName) {
   if (!enum_reflect::kAvailable) {
     GTEST_SKIP() << "enum reflection unavailable on this compiler (" << enum_reflect::compiler_id()
                  << "). This test needs Clang or GCC >= 9 "
@@ -199,7 +199,7 @@ TEST(AmdSmiStatusStringTest, EveryStatusCodeResolvesToItsOwnName) {
 }
 
 // Reflection-free spot check for the regressed codes + a few other common returns.
-TEST(AmdSmiStatusStringTest, KnownStatusCodesResolveToTheirOwnName) {
+TEST(SystemUnit, StatusStringKnownCodesResolveToTheirOwnName) {
   const std::vector<std::pair<amdsmi_status_t, const char*>> spot_checks = {
       // The two codes whose missing cases prompted this fix.
       {AMDSMI_STATUS_TIMEOUT, "AMDSMI_STATUS_TIMEOUT"},
@@ -229,14 +229,17 @@ TEST(AmdSmiStatusStringTest, KnownStatusCodesResolveToTheirOwnName) {
 // Negative: a lower-level (rocm_smi) status that amdsmi has no mapping for must
 // surface AMDSMI_STATUS_MAP_ERROR. This guards against rocm_smi adding a new
 // status that silently goes untranslated through rsmi_to_amdsmi_status().
-TEST(AmdSmiStatusStringTest, UnmappedLowerLevelStatusYieldsMapError) {
+TEST(SystemUnit, RsmiStatusMappingUnmappedYieldsMapError) {
   // A value that is intentionally not present in amd::smi::rsmi_status_map.
   const auto unmapped_rsmi_status = static_cast<rsmi_status_t>(0x0BADF00D);
   EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(unmapped_rsmi_status), AMDSMI_STATUS_MAP_ERROR)
       << "An unmapped rocm_smi status must translate to AMDSMI_STATUS_MAP_ERROR; "
       << "a new rsmi status is missing from amd::smi::rsmi_status_map.";
+}
 
-  // Sanity: known mappings must NOT produce MAP_ERROR.
+// Known rocm_smi statuses must translate to their mapped amdsmi code, never to
+// the MAP_ERROR fallback.
+TEST(SystemUnit, RsmiStatusMappingKnownCodesMapToAmdsmi) {
   EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_INVALID_ARGS), AMDSMI_STATUS_INVAL);
   EXPECT_EQ(amd::smi::rsmi_to_amdsmi_status(RSMI_STATUS_NOT_SUPPORTED),
@@ -245,7 +248,7 @@ TEST(AmdSmiStatusStringTest, UnmappedLowerLevelStatusYieldsMapError) {
 
 // A value that is not a defined status code (an enum gap) must hit the default
 // path and report AMDSMI_STATUS_UNKNOWN_ERROR rather than a stale string.
-TEST(AmdSmiStatusStringTest, UndefinedStatusCodeYieldsUnknownError) {
+TEST(SystemUnit, StatusStringUndefinedCodeYieldsUnknownError) {
   const char* status_string = nullptr;
   // 100 sits in an enum gap (above the highest normal code, below the two
   // high-value error codes).
@@ -260,6 +263,6 @@ TEST(AmdSmiStatusStringTest, UndefinedStatusCodeYieldsUnknownError) {
 }
 
 // A null output pointer must be rejected, not dereferenced.
-TEST(AmdSmiStatusStringTest, NullOutputPointerYieldsInval) {
+TEST(SystemUnit, StatusStringNullOutputPointerYieldsInval) {
   EXPECT_EQ(amdsmi_status_code_to_string(AMDSMI_STATUS_SUCCESS, nullptr), AMDSMI_STATUS_INVAL);
 }

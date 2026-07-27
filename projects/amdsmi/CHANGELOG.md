@@ -218,6 +218,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amdsmi_status_code_to_string()` returning `AMDSMI_STATUS_UNKNOWN_ERROR` for valid status codes**.  
   - Added the missing `case` entries for `AMDSMI_STATUS_TIMEOUT` and `AMDSMI_STATUS_MORE_DATA`, which previously fell through to the unknown-error description.
+  - Calling with a null `status_string` now returns `AMDSMI_STATUS_INVAL` instead of dereferencing the null pointer.
 
 - **Fixed a crash in `amdsmi_get_gpu_vram_vendor()` and made `amdsmi_get_gpu_vram_info()` resilient to DRM failures**.  
   - `amdsmi_get_gpu_vram_vendor()` now validates the output buffer and only writes it on success, fixing a null-pointer dereference on the not-supported path.
