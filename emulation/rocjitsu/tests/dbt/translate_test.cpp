@@ -525,6 +525,25 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text() {
   return make_minimal_amdgpu_elf_with_descriptor_after_text({0xBF800000u, 0xBF800000u});
 }
 
+template <size_t N>
+std::vector<uint8_t>
+make_gfx1250_image_with_live_sgprs(const std::array<uint32_t, N> &instruction_words,
+                                   uint16_t live_sgprs) {
+  if (live_sgprs > REGISTER_SET_ALLOCATABLE_SGPRS) {
+    ADD_FAILURE() << "liveness wall exceeds the allocatable SGPR range";
+    return {};
+  }
+  constexpr uint16_t kGfx1250M0Operand = 125;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  std::vector<uint32_t> words(instruction_words.begin(), instruction_words.end());
+  for (uint16_t sgpr = 0; sgpr < live_sgprs; ++sgpr) {
+    words.push_back(gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(sgpr),
+                                                                .sdst = kGfx1250M0Operand})[0]);
+  }
+  words.push_back(kGfx1250SEndpgm);
+  return make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+}
+
 std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch) {
   auto decoder = Decoder::create(arch);
   if (!decoder)
@@ -8215,6 +8234,74 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtF32Fp8E5m3ForA0) {
   EXPECT_EQ(bfe_count, 1) << "E5M3 unpack must isolate the byte with exactly one v_bfe_u32";
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250E5m3CompareMasksTargetDeadSgprs) {
+  constexpr auto conversion = gfx1250::build_vop3(
+      gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .opsel = 2, .clamp = 1, .src0 = 256 + 22});
+  constexpr uint16_t kLiveSgprs = 8;
+  auto image = rocjitsu::make_gfx1250_image_with_live_sgprs(conversion, kLiveSgprs);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  std::optional<uint16_t> nan_mask;
+  std::optional<uint16_t> exp31_mask;
+  std::vector<uint16_t> cndmask_predicates;
+  for (const auto &inst : decoded) {
+    if (inst->mnemonic() == "v_cmp_eq_u32" || inst->mnemonic() == "v_cmp_lt_u32") {
+      ASSERT_NE(inst->raw_encoding(), nullptr);
+      gfx1250::Vop3MachineInst encoded{};
+      std::memcpy(&encoded, inst->raw_encoding(), sizeof(encoded));
+      if (inst->mnemonic() == "v_cmp_eq_u32")
+        nan_mask = static_cast<uint16_t>(encoded.vdst);
+      else
+        exp31_mask = static_cast<uint16_t>(encoded.vdst);
+    } else if (inst->mnemonic() == "v_cndmask_b32") {
+      const rocjitsu::Operand *predicate = inst->src_operand(2);
+      ASSERT_NE(predicate, nullptr);
+      cndmask_predicates.push_back(predicate->encoding_value());
+    }
+  }
+  ASSERT_TRUE(nan_mask.has_value());
+  ASSERT_TRUE(exp31_mask.has_value());
+  ASSERT_EQ(cndmask_predicates.size(), 2u);
+  EXPECT_NE(*nan_mask, *exp31_mask);
+  EXPECT_GE(*nan_mask, kLiveSgprs);
+  EXPECT_GE(*exp31_mask, kLiveSgprs);
+  EXPECT_EQ(cndmask_predicates[0], *exp31_mask);
+  EXPECT_EQ(cndmask_predicates[1], *nan_mask);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250E5m3UnpackFailsClosedWithoutPredicateSgprs) {
+  constexpr auto conversion = gfx1250::build_vop3(
+      gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .opsel = 2, .clamp = 1, .src0 = 256 + 22});
+  for (const uint16_t live_sgprs :
+       {static_cast<uint16_t>(rocjitsu::REGISTER_SET_ALLOCATABLE_SGPRS - 1u),
+        static_cast<uint16_t>(rocjitsu::REGISTER_SET_ALLOCATABLE_SGPRS)}) {
+    SCOPED_TRACE(live_sgprs);
+    auto image = rocjitsu::make_gfx1250_image_with_live_sgprs(conversion, live_sgprs);
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    const auto result = translator.translate(source);
+
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.elf_bytes, image);
+    EXPECT_TRUE(rocjitsu::has_error_containing(
+        result, rocjitsu::DiagnosticKind::ExpandFailed,
+        "gfx1250 E5M3 unpack could not allocate two dead SGPR masks"));
+  }
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250CopiesWmmaOutsideB0ToA0Profile) {
   constexpr auto source_wmma = gfx1250::build_vop3p(
       gfx1250::kVWmmaF3216x16x32Bf16Vop3p, {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
@@ -8536,6 +8623,22 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
       (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
           gfx1250::kVSwmmacI3216x16x128Iu8Vop3p,
       (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
           gfx1250::kVWmmaF3232x16x128F4Vop3p,
   };
   EXPECT_EQ(liveness_free_rules, expected);
@@ -8598,17 +8701,20 @@ TEST(BinaryTranslatorE2E, Gfx1250LowersF32K128Fp8Bf8WmmaToNeutralRegularScale) {
 
     const auto *words = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
     const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
-    EXPECT_NE(std::find(words, words + word_count, 0x7f7f7f7fu), words + word_count);
     const auto prefix = std::find_if(words, words + word_count, [](uint32_t word) {
       return ((word >> 24) & 0xffu) == 0xccu && ((word >> 16) & 0xffu) == 0x35u;
     });
     ASSERT_NE(prefix, words + word_count);
     ASSERT_GE(words + word_count - prefix, 4);
-    const uint16_t scale_a = static_cast<uint16_t>(prefix[1] & 0x1ffu);
-    const uint16_t scale_b = static_cast<uint16_t>((prefix[1] >> 9) & 0x1ffu);
-    EXPECT_EQ(scale_a, scale_b);
-    EXPECT_LT(scale_a, 106u);
-    EXPECT_EQ((prefix[1] >> 18) & 0x1ffu, 0x100u);
+    gfx1250::Vop3pMachineInst scale_prefix{};
+    std::memcpy(&scale_prefix, prefix, sizeof(scale_prefix));
+    EXPECT_EQ(scale_prefix.src0, 128u);
+    EXPECT_EQ(scale_prefix.src1, 128u);
+    EXPECT_EQ(scale_prefix.src2, 256u);
+    EXPECT_EQ(scale_prefix.neg, 0u);
+    EXPECT_EQ(scale_prefix.neg_hi, 0u);
+    EXPECT_EQ(scale_prefix.opsel, 0u);
+    EXPECT_EQ(scale_prefix.opsel_hi, 0u);
 
     gfx1250::Vop3pMachineInst replacement{};
     std::memcpy(&replacement, prefix + 2, sizeof(replacement));
@@ -8623,34 +8729,6 @@ TEST(BinaryTranslatorE2E, Gfx1250LowersF32K128Fp8Bf8WmmaToNeutralRegularScale) {
     EXPECT_EQ(replacement.opsel_hi, test_case.matrix_b_fmt);
     EXPECT_EQ(replacement.neg, fields.neg);
   }
-}
-
-TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaFailsClosedWithoutNeutralScaleSgpr) {
-  constexpr auto source_wmma =
-      gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-                           {.vdst = 54, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48});
-  constexpr uint16_t kGfx1250M0Operand = 125;
-  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  std::vector<uint32_t> words{source_wmma[0], source_wmma[1]};
-  for (uint16_t sgpr = 0; sgpr < rocjitsu::REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
-    words.push_back(gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(sgpr),
-                                                                .sdst = kGfx1250M0Operand})[0]);
-  }
-  words.push_back(kGfx1250SEndpgm);
-
-  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
-  const auto result = translator.translate(source);
-
-  EXPECT_FALSE(result.ok());
-  EXPECT_EQ(result.elf_bytes, image);
-  EXPECT_TRUE(
-      rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
-                                     "K=128 WMMA could not allocate a dead neutral-scale SGPR"));
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaRejectsNonVgprMatrixInputs) {
@@ -8906,6 +8984,7 @@ TEST(BinaryTranslatorE2E, Gfx1250WrapsBareF8f6f4WmmaInNeutralScaleForA0) {
   };
   constexpr auto wmma = gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p, fields);
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr size_t kPrefixAndMatrixWords = 4;
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
       {wmma[0], wmma[1], kGfx1250SEndpgm});
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -8925,18 +9004,25 @@ TEST(BinaryTranslatorE2E, Gfx1250WrapsBareF8f6f4WmmaInNeutralScaleForA0) {
   ASSERT_GE(decoded.size(), 2u);
   EXPECT_EQ(decoded[0]->mnemonic(), "v_wmma_scale_f32_16x16x128_f8f6f4");
   EXPECT_EQ(decoded[0]->size(), 4 * static_cast<int>(sizeof(uint32_t)));
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
 
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  ASSERT_GE(translated.text_sections()[0]->size() / sizeof(uint32_t), kPrefixAndMatrixWords + 1u);
   gfx1250::Vop3pMachineInst prefix{};
   std::memcpy(&prefix, target_words, sizeof(prefix));
   EXPECT_EQ(prefix.op, 0x35u);
   EXPECT_EQ(prefix.src0, 128u);
   EXPECT_EQ(prefix.src1, 128u);
   EXPECT_EQ(prefix.src2, 256u);
+  EXPECT_EQ(prefix.neg, 0u);
+  EXPECT_EQ(prefix.neg_hi, 0u);
+  EXPECT_EQ(prefix.opsel, 0u);
+  EXPECT_EQ(prefix.opsel_hi, 0u);
+  EXPECT_EQ(prefix.pad_14, 0u);
   EXPECT_EQ(target_words[2], wmma[0]);
   EXPECT_EQ(target_words[3], wmma[1]);
-  EXPECT_EQ(target_words[4], kGfx1250SEndpgm);
+  EXPECT_EQ(target_words[kPrefixAndMatrixWords], kGfx1250SEndpgm);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250CopiesSupportedK64LowPrecisionWmmaThroughForA0) {
