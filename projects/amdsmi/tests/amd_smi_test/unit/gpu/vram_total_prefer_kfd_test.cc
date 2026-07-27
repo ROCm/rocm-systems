@@ -65,10 +65,14 @@ TEST(GpuUnit, VramTotalZeroSysfsPrefersKfd) {
 TEST(GpuUnit, VramTotalUsableNonPartitionedKeepsSysfs) {
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "SPX", kSampleVramTotal));
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "", kSampleVramTotal));
+  // A zero KFD total must never override a usable sysfs value.
+  EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "SPX", 0));
 }
 
 // In a multi-partition mode, sysfs reports the whole device split evenly and is
-// misleading, so the per-partition KFD total must be preferred.
+// misleading, so the per-partition KFD total must be preferred. The KFD value
+// here is smaller than sysfs, so the result is driven by the partition clause,
+// not the size heuristic.
 TEST(GpuUnit, VramTotalUsablePartitionedPrefersKfd) {
   for (const char* mode : {"CPX", "DPX", "TPX", "QPX"}) {
     EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, mode, kSampleVramTotal / 6))
@@ -89,8 +93,10 @@ TEST(GpuUnit, VramTotalMi300xSpxKeepsSysfs) {
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kMi300xSpxTotal, "SPX", kMi300xSpxTotal));
 }
 
-// Discrete GPU: sysfs and KFD agree, so the sysfs value is kept.
+// Discrete GPU: the KFD FB_PUBLIC bank is not larger than sysfs, so the final
+// clause stays false and the sysfs value is kept.
 TEST(GpuUnit, VramTotalDiscreteKeepsSysfs) {
-  EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "SPX", kSampleVramTotal));
-  EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "", kSampleVramTotal));
+  const uint64_t kfd_smaller = kSampleVramTotal - 1;
+  EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "SPX", kfd_smaller));
+  EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "", kfd_smaller));
 }

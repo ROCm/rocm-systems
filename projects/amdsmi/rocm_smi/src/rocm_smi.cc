@@ -4184,8 +4184,7 @@ rsmi_status_t rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t* sensor
   CATCH
 }
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 // Prefer the KFD topology (mem_banks) total over sysfs mem_info_vram_total in
 // three cases: sysfs is unusable (0 or failure, e.g. MI300A where the node is
 // absent); a multi-partition mode (CPX/DPX/TPX/QPX), where sysfs splits the
@@ -4206,8 +4205,7 @@ bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
   }
   return kfd_total > 0 && kfd_total > sysfs_total;
 }
-}  // namespace smi
-}  // namespace amd
+}  // namespace amd::smi
 
 rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
                                         uint64_t* total) {
