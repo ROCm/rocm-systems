@@ -9,11 +9,11 @@
 #include "platform/context.hpp"
 #include "platform/object.hpp"
 #include "platform/memory.hpp"
+#include "platform/ndrange.hpp"
 
 namespace amd {
 class Device;
 class KernelSignature;
-class NDRange;
 
 struct KernelParameterDescriptor {
   enum Desc {
@@ -311,8 +311,8 @@ class Kernel {
 
   //! Finds local workgroup size
   void FindLocalWorkSize(size_t workDim,                   //!< Work dimension
-                         const amd::NDRange& gblWorkSize,  //!< Global work size
-                         amd::NDRange& lclWorkSize         //!< Calculated local work size
+                         const amd::NDRange<>& gblWorkSize,  //!< Global work size
+                         amd::NDRange<>& lclWorkSize         //!< Calculated local work size
   ) const;
 
   const uint64_t KernelCodeHandle() const { return kernelCodeHandle_; }
