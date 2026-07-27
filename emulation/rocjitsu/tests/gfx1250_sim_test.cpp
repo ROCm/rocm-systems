@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vglobal.h"
@@ -17,13 +18,16 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/except.h"
@@ -42,18 +46,34 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <optional>
 #include <set>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
+
+namespace rocjitsu::amdgpu {
+
+class WriterPreferredAccessGateTestAccess {
+public:
+  static bool has_waiting_writer(WriterPreferredAccessGate &gate) {
+    std::lock_guard lock(gate.mutex_);
+    return gate.waiting_writers_ != 0;
+  }
+};
+
+} // namespace rocjitsu::amdgpu
 
 namespace {
 
@@ -120,6 +140,10 @@ public:
 };
 
 struct Gfx1250Sim {
+  // Direct-construction tests intentionally bypass Decoder. Select the same
+  // immutable backend that a full gfx1250 decoder would inject while building
+  // their generated instruction and operand objects.
+  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
   config::LoadedConfig loaded;
   SoC *soc = nullptr;
   amdgpu::GpuMemory *memory = nullptr;
@@ -274,7 +298,8 @@ private:
 class TranslatedSdmaQueueForTest {
 public:
   explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim) : sim_(sim), process_(kProcessId) {
-    sim_.memory->register_process(kProcessId, &process_.page_table_, &process_.page_table_mutex_);
+    sim_.memory->register_process(kProcessId, &process_.page_table_, &process_.page_table_mutex_,
+                                  process_.page_table_generation());
     process_.map_pages(kRingVa, ring_.data(), ring_.size() * sizeof(ring_[0]));
     process_.map_pages(kQueueStateVa, queue_state_.data(),
                        queue_state_.size() * sizeof(queue_state_[0]));
@@ -701,8 +726,7 @@ TEST(Gfx1250SdmaTest, GcrPacketSizeMatchesDialectAndKeepsRingInSync) {
 }
 
 // SDMA writes go straight to backing while L2 may still hold a dirty line that
-// overlaps the destination (e.g. left by a prior K$ writeback). The post-write
-// cache maintenance must not write that stale line back over the SDMA result.
+// overlaps the destination. Seed that state explicitly with writeback_line().
 // The fix flushes the caches before the direct write, so the dirty line is
 // published first and the SDMA data supersedes it. Regression for that ordering.
 TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyL2Line) {
@@ -737,12 +761,10 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyL2Line) {
   EXPECT_NE(sim.memory->read32(queue.dst_va(), kProcessId), kStaleWord);
 }
 
-// Same ordering hazard as above, but for a dirty scalar L1 (K$) line rather than
-// an L2 line. A CU can hold a dirty K$ line overlapping an SDMA destination. The
-// pre-write maintenance must write the K$ line back (through L2 to backing)
-// before the direct SDMA write, so the SDMA result is not later clobbered when
-// the stale scalar line is flushed. Regression for K$ inclusion in the flush.
-TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyScalarL1Line) {
+// A scalar L1 (K$) can retain a clean snapshot overlapping an SDMA destination.
+// The pre-write maintenance invalidates that snapshot, and later K$ maintenance
+// must not publish it over the direct SDMA result.
+TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingScalarL1Line) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   ASSERT_NE(cu, nullptr);
@@ -752,8 +774,8 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyScalarL1Line) {
   constexpr uint32_t kStaleWord = 0x11111111u;
   constexpr uint32_t kFillWord = 0x22222222u;
 
-  // Dirty a K$ line overlapping the SDMA destination via a scalar store. This
-  // leaves the line dirty in K$ (write-back), not yet in L2 or backing.
+  // Populate a K$ line overlapping the SDMA destination via a write-through
+  // scalar store. K$ retains a clean snapshot of the pre-fill value.
   cu->l1_scalar().store(queue.dst_va(), /*num_dwords=*/1, &kStaleWord, kProcessId);
 
   // CONST_FILL the destination line with a different pattern.
@@ -766,9 +788,14 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingDirtyScalarL1Line) {
   queue.submit(5);
   ASSERT_TRUE(sim.engine->step());
 
-  // Force any still-resident dirty K$ line out to backing, mimicking a later
-  // acquire/release flush. With the fix the K$ line was already published and
-  // invalidated before the SDMA write, so this does not resurrect stale data.
+  // The SDMA pre-write maintenance must have invalidated the old K$ snapshot,
+  // so the first scalar reload observes the fill rather than kStaleWord.
+  uint32_t scalar_value = 0;
+  cu->l1_scalar().load(queue.dst_va(), /*num_dwords=*/1, &scalar_value, kProcessId);
+  EXPECT_EQ(scalar_value, kFillWord);
+
+  // Mimic later acquire/release maintenance. The clean K$ snapshot must not
+  // resurrect stale data over the SDMA fill.
   cu->flush_l1(kProcessId);
   if (auto *l2 = sim.xcd()->l2_cache())
     l2->flush_all();
@@ -1090,8 +1117,11 @@ TEST(Gfx1250SdmaTest, PollMem64UnresolvedAddressDoesNotAdvance) {
   EXPECT_EQ(queue.read_idx(), 0u);
 }
 
-TEST(Gfx1250ExecutionTest, OperandExecutionBackendIsRegistered) {
-  EXPECT_NO_THROW(gfx1250::Operand::require_execution_backend());
+TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
+  const IsaTargetDescriptor *target = default_isa_target_registry().find("gfx1250");
+  ASSERT_NE(target, nullptr);
+  EXPECT_TRUE(target->supports_execution);
+  EXPECT_TRUE(gfx1250::Operand::full_execution_backend_complete());
 }
 
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
@@ -3223,6 +3253,25 @@ TEST(Gfx1250DecodeTest, Vop3SdstLiteralConsumesThreeDwords) {
   EXPECT_EQ(inst->size(), sizeof(words));
 }
 
+TEST(Gfx1250DecodeTest, VFmamkF64ImpliedLiteralConsumesThreeDwords) {
+  const uint32_t words[] = {
+      0x46040504u, // v_fmamk_f64 v[2:3], v[4:5], -30.0, v[2:3]
+      0x00000000u, 0xC1F00000u,
+      0x7E042B02u, // v_cvt_u32_f64_e32 v2, v[2:3]
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> fmamk(decoder->decode(words));
+  ASSERT_NE(fmamk, nullptr);
+  EXPECT_EQ(fmamk->mnemonic(), "v_fmamk_f64_e32");
+  EXPECT_EQ(fmamk->size(), 3 * sizeof(uint32_t));
+
+  std::unique_ptr<Instruction> next(decoder->decode(words + 3));
+  ASSERT_NE(next, nullptr);
+  EXPECT_EQ(next->mnemonic(), "v_cvt_u32_f64_e32");
+}
+
 TEST(Gfx1250DecodeTest, SWaitXcntHasWaitcntMetadata) {
   const uint32_t words[] = {
       0xBFC50000u, // s_wait_xcnt 0
@@ -3249,14 +3298,33 @@ TEST(Gfx1250DecodeTest, BufferOffenUsesSingleVaddrRegister) {
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "buffer_load_b128");
-  ASSERT_GE(inst->num_src_operands(), 1);
+  ASSERT_EQ(inst->num_dst_operands(), 1);
+  ASSERT_EQ(inst->num_src_operands(), 4);
+
+  const Operand *vdst = inst->dst_operand(0);
+  ASSERT_NE(vdst, nullptr);
+  EXPECT_FALSE(vdst->is_fieldless());
+  EXPECT_EQ(vdst->name(), "v[32:35]");
 
   const Operand *vaddr = inst->src_operand(0);
   ASSERT_NE(vaddr, nullptr);
+  EXPECT_FALSE(vaddr->is_fieldless());
   EXPECT_EQ(vaddr->size_bits(), 32);
   ASSERT_TRUE(vaddr->to_register_ref().has_value());
   EXPECT_EQ(*vaddr->to_register_ref(), (RegisterRef{RegClass::VGPR, 7, 1}));
-  EXPECT_NE(inst->disassemble().find("v7"), std::string::npos);
+
+  const Operand *gpumem = inst->src_operand(3);
+  ASSERT_NE(gpumem, nullptr);
+  EXPECT_TRUE(gpumem->is_fieldless());
+  EXPECT_EQ(gpumem->size_bits(), 128);
+  EXPECT_FALSE(gpumem->to_register_ref().has_value());
+  // End-to-end: the decoded memory pseudo-operand is inert through the normal
+  // accessors, driven by the capability flags the generated ctor applies.
+  EXPECT_FALSE(gpumem->reads_value());
+  EXPECT_FALSE(gpumem->is_writable());
+  EXPECT_FALSE(gpumem->is_vgpr());
+
+  EXPECT_EQ(inst->disassemble(), "buffer_load_b128 v[32:35], v7, s[4:7], NULL offen");
 }
 
 TEST(Gfx1250DecodeTest, BufferWithoutIdxenOffenDoesNotExposeVaddrRegister) {
@@ -3271,13 +3339,22 @@ TEST(Gfx1250DecodeTest, BufferWithoutIdxenOffenDoesNotExposeVaddrRegister) {
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "buffer_load_b128");
-  ASSERT_GE(inst->num_src_operands(), 1);
+  ASSERT_EQ(inst->num_dst_operands(), 1);
+  ASSERT_EQ(inst->num_src_operands(), 4);
 
   const Operand *vaddr = inst->src_operand(0);
   ASSERT_NE(vaddr, nullptr);
+  EXPECT_FALSE(vaddr->is_fieldless());
   EXPECT_EQ(vaddr->size_bits(), 0);
   EXPECT_FALSE(vaddr->to_register_ref().has_value());
-  EXPECT_EQ(inst->disassemble().find("v7"), std::string::npos);
+
+  const Operand *gpumem = inst->src_operand(3);
+  ASSERT_NE(gpumem, nullptr);
+  EXPECT_TRUE(gpumem->is_fieldless());
+  EXPECT_EQ(gpumem->size_bits(), 128);
+  EXPECT_FALSE(gpumem->to_register_ref().has_value());
+
+  EXPECT_EQ(inst->disassemble(), "buffer_load_b128 v[32:35], s[4:7], NULL");
 }
 
 TEST(Gfx1250DecodeTest, WmmaF8f6f4UsesMatrixFormatOperandWidths) {
@@ -5058,6 +5135,124 @@ TEST(Gfx1250SimulationTest, BufferStoreUsesM0Soffset) {
     EXPECT_EQ(sim.memory->read32(output_addr + lane * 32), 0u) << "lane " << lane;
     EXPECT_EQ(sim.memory->read32(output_addr + 16 + lane * 32), 7u) << "lane " << lane;
   }
+}
+
+TEST(Gfx1250SimulationTest, MemorySideCacheFlushSerializesConcurrentAccess) {
+  constexpr uint64_t output_addr = 0x2000;
+  constexpr uint32_t iterations = 32;
+
+  Gfx1250Sim sim;
+  auto *msc = sim.soc->iod(0)->msc();
+  std::barrier start(3);
+
+  std::thread writer([&] {
+    start.arrive_and_wait();
+    for (uint32_t value = 1; value <= iterations; ++value) {
+      msc->write(output_addr, reinterpret_cast<const uint8_t *>(&value), sizeof(value));
+      std::this_thread::yield();
+    }
+  });
+  std::thread reader([&] {
+    start.arrive_and_wait();
+    for (uint32_t i = 0; i < iterations; ++i) {
+      uint32_t value = 0;
+      msc->read(output_addr, reinterpret_cast<uint8_t *>(&value), sizeof(value));
+      EXPECT_LE(value, iterations);
+      std::this_thread::yield();
+    }
+  });
+  std::thread flusher([&] {
+    start.arrive_and_wait();
+    for (uint32_t i = 0; i < iterations; ++i) {
+      msc->flush_all();
+      std::this_thread::yield();
+    }
+  });
+
+  writer.join();
+  reader.join();
+  flusher.join();
+  msc->flush_all();
+
+  EXPECT_EQ(sim.memory->read32(output_addr), iterations);
+}
+
+TEST(WriterPreferredAccessGateTest, WaitingWriterBlocksLateSharedEntrant) {
+  amdgpu::WriterPreferredAccessGate gate;
+  std::shared_lock active_reader(gate);
+  bool writer_acquired = false;
+  std::thread writer([&] {
+    std::unique_lock waiting_writer(gate);
+    writer_acquired = true;
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (!amdgpu::WriterPreferredAccessGateTestAccess::has_waiting_writer(gate) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+
+  const bool writer_waiting = amdgpu::WriterPreferredAccessGateTestAccess::has_waiting_writer(gate);
+  EXPECT_TRUE(writer_waiting);
+  if (writer_waiting) {
+    const bool late_reader_acquired = gate.try_lock_shared();
+    EXPECT_FALSE(late_reader_acquired);
+    if (late_reader_acquired)
+      gate.unlock_shared();
+  }
+
+  active_reader.unlock();
+  writer.join();
+  EXPECT_TRUE(writer_acquired);
+}
+
+TEST(Gfx1250SimulationTest, MemorySideCacheFlushMakesProgressUnderContinuousReads) {
+  constexpr uint64_t output_addr = 0x2000;
+  constexpr uint32_t reader_count = 4;
+
+  Gfx1250Sim sim;
+  auto *msc = sim.soc->iod(0)->msc();
+  std::barrier start(reader_count + 1);
+  std::atomic<bool> stop_readers = false;
+  std::atomic<uint32_t> readers_started = 0;
+  std::vector<std::thread> readers;
+  readers.reserve(reader_count);
+  for (uint32_t i = 0; i < reader_count; ++i) {
+    readers.emplace_back([&] {
+      start.arrive_and_wait();
+      bool first_read = true;
+      while (!stop_readers.load(std::memory_order_acquire)) {
+        uint32_t value = 0;
+        msc->read(output_addr, reinterpret_cast<uint8_t *>(&value), sizeof(value));
+        if (first_read) {
+          readers_started.fetch_add(1, std::memory_order_release);
+          first_read = false;
+        }
+      }
+    });
+  }
+
+  start.arrive_and_wait();
+  while (readers_started.load(std::memory_order_acquire) < reader_count)
+    std::this_thread::yield();
+
+  std::atomic<bool> flush_completed = false;
+  std::thread flusher([&] {
+    msc->flush_all();
+    flush_completed.store(true, std::memory_order_release);
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (!flush_completed.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  const bool completed_while_readers_active = flush_completed.load(std::memory_order_acquire);
+
+  stop_readers.store(true, std::memory_order_release);
+  for (auto &reader : readers)
+    reader.join();
+  flusher.join();
+
+  EXPECT_TRUE(completed_while_readers_active);
 }
 
 } // namespace

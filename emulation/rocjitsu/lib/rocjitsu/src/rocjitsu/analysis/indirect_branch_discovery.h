@@ -16,6 +16,18 @@ namespace rocjitsu {
 
 class Instruction;
 
+/// @brief How indirect-target discovery identifies externally reachable blocks.
+enum class ExternalEntryPolicy : uint8_t {
+  /// Treat every predecessorless block as a possible external function entry.
+  /// This preserves conservative recovery when callers do not have a complete
+  /// list of entries for all functions sharing one .text section.
+  InferPredecessorless,
+  /// Treat only section entry and caller-supplied leaders as external entries.
+  /// Callers may use this when their supplied leader list contains every
+  /// externally reachable entry; other predecessorless blocks remain unreachable.
+  ExplicitOnly,
+};
+
 /// @brief Recovered indirect PC-relative branch through a statically-built PC register.
 ///
 /// @details BasicBlock construction uses this metadata in two ways. A recovered
@@ -33,6 +45,12 @@ struct IndirectCallFixup {
   uint64_t source_target_offset = 0;         ///< Recovered source branch target offset.
   uint16_t source_call_sreg = 0;             ///< Low SGPR of the recovered PC pair.
   bool source_is_call = false;               ///< Whether the consumer is a call-like swappc.
+  /// @brief True when the recovered fact for this consumer was incomplete: at least
+  /// one predecessor path left the PC pair at an unconstrained value. The concrete
+  /// targets are still valid for relocation and liveness, but the consumer must NOT
+  /// be replaced with a direct transfer window — an unconstrained path would be
+  /// redirected to a concrete target it never dynamically reaches.
+  bool source_incomplete = false;
   uint16_t source_return_sreg = 0;           ///< Low SGPR receiving the return PC for calls.
   uint64_t target_getpc_offset = 0;          ///< Relocated offset of the s_getpc_b64 producer.
   uint64_t target_recovery_begin_offset = 0; ///< Relocated first byte of replaceable builder code.
@@ -64,10 +82,11 @@ struct IndirectCallFixup {
 /// @param text Raw .text bytes matching @p insts.
 /// @param arch ISA architecture used for scalar instruction matching.
 /// @param extra_leaders Additional known block starts, usually kernel entries.
+/// @param entry_policy Whether predecessorless blocks are inferred to be external entries.
 /// @returns Recovered indirect branch/call metadata.
-[[nodiscard]] std::vector<IndirectCallFixup>
-discover_indirect_branch_edges(std::span<const Instruction *const> insts,
-                               std::span<const uint8_t> text, rj_code_arch_t arch,
-                               std::span<const uint64_t> extra_leaders = {});
+[[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const uint64_t> extra_leaders = {},
+    ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless);
 
 } // namespace rocjitsu

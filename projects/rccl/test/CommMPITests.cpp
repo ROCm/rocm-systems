@@ -346,4 +346,148 @@ TEST_F(CtaConfigMPITest, DefaultConfigDoesNotClampChannels)
     }
 }
 
+namespace
+{
+/**
+ * @brief True if any single line of `log` contains both `needle_a` and `needle_b`.
+ *
+ * Used to disambiguate log substrings that appear verbatim in more than one
+ * INFO call site (e.g. "- Destroy COMPLETE" is emitted by both commFree() and
+ * COLLTRACE): a plain std::string::find() on the combined log would be
+ * satisfied by either line, so same-line co-occurrence is required instead.
+ */
+bool logHasLineContainingBoth(const std::string& log, const char* needle_a, const char* needle_b)
+{
+    std::size_t line_start = 0;
+    while(line_start <= log.size())
+    {
+        const std::size_t line_end = log.find('\n', line_start);
+        const std::size_t line_len = (line_end == std::string::npos) ? std::string::npos : (line_end - line_start);
+        const std::string line     = log.substr(line_start, line_len);
+        if(line.find(needle_a) != std::string::npos && line.find(needle_b) != std::string::npos)
+        {
+            return true;
+        }
+        if(line_end == std::string::npos)
+        {
+            break;
+        }
+        line_start = line_end + 1;
+    }
+    return false;
+}
+} // namespace
+
+/**
+ * @class DestroySubsysMPITest
+ * @brief Regression coverage for the NCCL 2.30.3 log-volume-reduction cherry-pick
+ *        (upstream sync PR #6837 brought in NCCL_DESTROY and retagged the shared
+ *        comm-destroy/plugin-unload call sites; this covers the RCCL-only call
+ *        sites the sync did not touch: COLLTRACE's destroy-time INFO lines).
+ *
+ * NCCL_DESTROY is not part of the default NCCL_DEBUG_SUBSYS mask
+ * (NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV), so destroy/teardown INFO lines
+ * disappear from plain `NCCL_DEBUG=INFO` output while remaining reachable via
+ * `NCCL_DEBUG_SUBSYS=DESTROY` (or ALL). These tests use the
+ * "comm ... - Destroy COMPLETE" line emitted unconditionally from commFree()
+ * (src/init.cc) as the marker, since it fires on every plain ncclCommDestroy().
+ */
+class DestroySubsysMPITest : public MPITestBase {};
+
+/**
+ * @test DestroySubsysMPITest.DefaultSubsys_ExcludesDestroyNoise
+ * @brief Under the default subsystem mask, destroy-time INFO noise must be absent.
+ */
+TEST_F(DestroySubsysMPITest, DefaultSubsys_ExcludesDestroyNoise)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+    // Force NCCL_DEBUG_SUBSYS unset so RCCL falls back to its default mask,
+    // regardless of any ambient value left by CI or a previous test.
+    MPIHelpers::MpiEnvUnsetGuard subsysGuard("NCCL_DEBUG_SUBSYS");
+    // Enable the RCCL-only COLLTRACE latency profiler so ncclCommInitRank*()
+    // actually constructs a CollTrace instance and its destroy-time INFO
+    // lines get emitted. Without this, collTraceInit() (gated on this env
+    // var) never runs and this test would only exercise the shared
+    // commFree() marker, not the COLLTRACE-specific retag this PR fixes.
+    MPIHelpers::MpiEnvGuard latencyProfilerGuard("RCCL_LATENCY_PROFILER", "1");
+    MPIHelpers::resetNcclDebugState();
+
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    // Destroy while log_ctx is still alive so destroy-time output is captured
+    // before TearDown() restores NCCL_DEBUG_FILE (and possibly unlinks the log).
+    ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+
+    static constexpr const char* kCollTraceDestroyNeedle = "- Destroy START"; // unique to CollTrace::~CollTrace()
+    const std::string            from_nccl               = log_ctx.readNcclDebugLog();
+    const std::string            from_rank_log            = log_ctx.readPerRankStderrLog();
+    const std::string            combined                 = from_nccl + from_rank_log;
+    // "comm " (with trailing space) + "- Destroy COMPLETE" on the same line is
+    // specific to commFree()'s "comm %p rank ... - %s COMPLETE" line; the
+    // substring "- Destroy COMPLETE" alone would also match COLLTRACE's
+    // "COLLTRACE: commHash ... - Destroy COMPLETE" line.
+    const bool hit_comm_free = logHasLineContainingBoth(combined, "comm ", "- Destroy COMPLETE");
+    const bool hit_colltrace = combined.find(kCollTraceDestroyNeedle) != std::string::npos;
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("commFree() destroy marker under default subsys mask: %s",
+                   hit_comm_free ? "unexpectedly present" : "correctly absent");
+        TEST_INFO("COLLTRACE destroy marker under default subsys mask: %s",
+                   hit_colltrace ? "unexpectedly present" : "correctly absent");
+    }
+
+    ASSERT_MPI_FALSE(hit_comm_free);
+    ASSERT_MPI_FALSE(hit_colltrace);
+}
+
+/**
+ * @test DestroySubsysMPITest.DestroySubsys_IncludesDestroyNoise
+ * @brief With NCCL_DEBUG_SUBSYS=DESTROY, the same destroy-time INFO line must be visible.
+ */
+TEST_F(DestroySubsysMPITest, DestroySubsys_IncludesDestroyNoise)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+    MPIHelpers::MpiEnvGuard subsysGuard("NCCL_DEBUG_SUBSYS", "DESTROY");
+    // See DefaultSubsys_ExcludesDestroyNoise: without this, CollTrace is never
+    // constructed and this test would not exercise the COLLTRACE-specific retag.
+    MPIHelpers::MpiEnvGuard latencyProfilerGuard("RCCL_LATENCY_PROFILER", "1");
+    MPIHelpers::resetNcclDebugState();
+
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
+
+    static constexpr const char* kCollTraceDestroyNeedle = "- Destroy START"; // unique to CollTrace::~CollTrace()
+    const std::string            from_nccl               = log_ctx.readNcclDebugLog();
+    const std::string            from_rank_log            = log_ctx.readPerRankStderrLog();
+    const std::string            combined                 = from_nccl + from_rank_log;
+    // "comm " (with trailing space) + "- Destroy COMPLETE" on the same line is
+    // specific to commFree()'s "comm %p rank ... - %s COMPLETE" line; the
+    // substring "- Destroy COMPLETE" alone would also match COLLTRACE's
+    // "COLLTRACE: commHash ... - Destroy COMPLETE" line.
+    const bool hit_comm_free = logHasLineContainingBoth(combined, "comm ", "- Destroy COMPLETE");
+    const bool hit_colltrace = combined.find(kCollTraceDestroyNeedle) != std::string::npos;
+
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("commFree() destroy marker under NCCL_DEBUG_SUBSYS=DESTROY: %s",
+                   hit_comm_free ? "present" : "unexpectedly absent");
+        TEST_INFO("COLLTRACE destroy marker under NCCL_DEBUG_SUBSYS=DESTROY: %s",
+                   hit_colltrace ? "present" : "unexpectedly absent");
+    }
+
+    ASSERT_MPI_TRUE(hit_comm_free);
+    ASSERT_MPI_TRUE(hit_colltrace);
+}
+
 #endif // MPI_TESTS_ENABLED
