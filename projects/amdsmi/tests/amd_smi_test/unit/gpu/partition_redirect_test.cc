@@ -50,47 +50,47 @@ constexpr uint32_t kUnqueryable = std::numeric_limits<uint32_t>::max();
 
 // A device that exposes a single logical GPU has no separate primary partition,
 // so nothing is redirected.
-TEST(AmdSmiPartitionRedirectTest, SinglePartitionIsNotRedirected) {
+TEST(GpuUnit, PartitionRedirectSinglePartitionIsNotRedirected) {
   EXPECT_EQ(amd::smi::primary_partition_redirect_index({0}, 0), -1);
 }
 
 // A device with no partitions is likewise never redirected.
-TEST(AmdSmiPartitionRedirectTest, EmptyDeviceIsNotRedirected) {
+TEST(GpuUnit, PartitionRedirectEmptyDeviceIsNotRedirected) {
   EXPECT_EQ(amd::smi::primary_partition_redirect_index({}, 0), -1);
 }
 
 // The primary partition already answers partition queries directly, so it is
 // not redirected to itself.
-TEST(AmdSmiPartitionRedirectTest, PrimaryPartitionIsNotRedirected) {
+TEST(GpuUnit, PartitionRedirectPrimaryPartitionIsNotRedirected) {
   EXPECT_EQ(amd::smi::primary_partition_redirect_index({0, 1, 2, 3}, 0), -1);
 }
 
 // A logical sub-partition (partition_id > 0) is redirected to the primary
 // sibling's index.
-TEST(AmdSmiPartitionRedirectTest, SubPartitionRedirectsToPrimary) {
+TEST(GpuUnit, PartitionRedirectSubPartitionRedirectsToPrimary) {
   EXPECT_EQ(amd::smi::primary_partition_redirect_index({0, 1, 2, 3}, 3), 0);
   EXPECT_EQ(amd::smi::primary_partition_redirect_index({0, 1, 2, 3}, 1), 0);
 }
 
 // The primary need not be the first entry; its actual index is returned.
-TEST(AmdSmiPartitionRedirectTest, PrimaryFoundAtNonZeroIndex) {
+TEST(GpuUnit, PartitionRedirectPrimaryFoundAtNonZeroIndex) {
   EXPECT_EQ(amd::smi::primary_partition_redirect_index({5, 0, 3}, 2), 1);
 }
 
 // When no sibling reports partition_id == 0 there is nothing to redirect to.
-TEST(AmdSmiPartitionRedirectTest, NoPrimaryPresentIsNotRedirected) {
+TEST(GpuUnit, PartitionRedirectNoPrimaryPresentIsNotRedirected) {
   EXPECT_EQ(amd::smi::primary_partition_redirect_index({1, 2, 3}, 0), -1);
 }
 
 // Siblings whose partition id could not be read (UINT32_MAX) are skipped and do
 // not shadow the real primary.
-TEST(AmdSmiPartitionRedirectTest, UnqueryableSiblingsAreSkipped) {
+TEST(GpuUnit, PartitionRedirectUnqueryableSiblingsAreSkipped) {
   EXPECT_EQ(amd::smi::primary_partition_redirect_index({kUnqueryable, 0, kUnqueryable}, 0), 1);
   EXPECT_EQ(amd::smi::primary_partition_redirect_index({kUnqueryable, kUnqueryable}, 0), -1);
 }
 
 // The querying partition is always skipped, so a device whose only primary is
 // the caller itself is not redirected.
-TEST(AmdSmiPartitionRedirectTest, SelfIsSkippedWhenLocatingPrimary) {
+TEST(GpuUnit, PartitionRedirectSelfIsSkippedWhenLocatingPrimary) {
   EXPECT_EQ(amd::smi::primary_partition_redirect_index({0, 5}, 0), -1);
 }
