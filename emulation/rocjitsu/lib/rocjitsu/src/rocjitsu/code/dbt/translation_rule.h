@@ -389,9 +389,10 @@ struct LaneLayout;
 ///
 /// @param inst          The decoded guest instruction to expand.
 /// @param arch          Target ISA architecture.
-/// @param offset        Byte offset of the instruction in .text.
-/// @param source_text   Full source .text bytes, used when trailing modifier/literal words are
-///                      not retained by the decoded Instruction object.
+/// @param offset        Byte offset of the instruction in @p source_text.
+/// @param source_text   Full source .text bytes for all kernels. Rules may inspect the
+///                      instruction's trailing words or surrounding instructions, but must
+///                      enforce their own instruction and kernel boundaries.
 /// @param liveness      Kernel-scoped live-before data for safe scratch register allocation.
 /// @param guest_layout  Source matrix lane layout (nullptr if not a matrix op).
 /// @param host_layout   Target matrix lane layout (nullptr if not a matrix op).

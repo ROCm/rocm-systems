@@ -940,13 +940,15 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
 ///
 /// @details gfx1250 requires nine separating V_NOPs when dense IU8 WMMA feeds a
 /// following XDL matrix input, and five for sparse IU8 SWMMAC. These bounds also
-/// cover their shorter WMMA-to-VALU hazard windows. This temporary local
-/// lowering does not inspect following control-flow successors, so it appends
-/// the full instruction-family bound unconditionally.
-ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, uint64_t,
-                                             std::span<const uint8_t>, const LivenessAnalysis &,
-                                             TranslationContext &, const LaneLayout *,
-                                             const LaneLayout *) {
+/// cover their shorter WMMA-to-VALU hazard windows. Count exact consecutive
+/// V_NOPs already following the instruction and append only the missing slots.
+/// This local lowering still does not credit independent VALU or inspect
+/// following control-flow successors. The source span covers the whole .text
+/// section, so a well-formed kernel terminator also bounds this linear scan.
+ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, uint64_t offset,
+                                             std::span<const uint8_t> source_text,
+                                             const LivenessAnalysis &, TranslationContext &,
+                                             const LaneLayout *, const LaneLayout *) {
   if (inst.mnemonic() != "v_wmma_i32_16x16x64_iu8" &&
       inst.mnemonic() != "v_swmmac_i32_16x16x128_iu8")
     return ExpandResult::not_handled();
@@ -956,10 +958,25 @@ ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, 
   std::vector<uint32_t> words(inst.raw_encoding(),
                               inst.raw_encoding() + inst.size() / sizeof(uint32_t));
   const int required_slots = inst.mnemonic() == "v_wmma_i32_16x16x64_iu8" ? 9 : 5;
-  // TODO: Replace fixed padding with a whole-kernel lookahead that counts
-  // existing V_NOPs/independent VALU and inserts exactly the required slots.
-  for (int slot = 0; slot < required_slots; ++slot)
-    append_words(words, gfx1250::build_vop1(gfx1250::kVNopVop1));
+  const uint32_t v_nop = gfx1250::build_vop1(gfx1250::kVNopVop1)[0];
+  int existing_slots = 0;
+  if (offset <= source_text.size() &&
+      static_cast<uint64_t>(inst.size()) <= source_text.size() - offset) {
+    uint64_t cursor = offset + static_cast<uint64_t>(inst.size());
+    while (existing_slots < required_slots && sizeof(uint32_t) <= source_text.size() - cursor) {
+      uint32_t word = 0;
+      std::memcpy(&word, source_text.data() + cursor, sizeof(word));
+      if (word != v_nop)
+        break;
+      ++existing_slots;
+      cursor += sizeof(uint32_t);
+    }
+  }
+
+  // TODO: Replace canonical V_NOP counting with whole-kernel scheduling that
+  // can also credit independent VALU in each reachable successor.
+  for (int slot = existing_slots; slot < required_slots; ++slot)
+    words.push_back(v_nop);
   return ExpandResult::success(std::move(words));
 }
 

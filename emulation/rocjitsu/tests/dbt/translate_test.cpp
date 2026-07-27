@@ -9433,17 +9433,32 @@ TEST(BinaryTranslatorE2E, Gfx1250ConservativelyPadsIu8WmmaForA0) {
   struct Case {
     uint16_t opcode;
     size_t required_slots;
+    size_t existing_slots;
+    bool interrupted;
+    size_t trailing_slots;
   };
   constexpr std::array cases = {
-      Case{gfx1250::kVWmmaI3216x16x64Iu8Vop3p, 9},
-      Case{gfx1250::kVSwmmacI3216x16x128Iu8Vop3p, 5},
+      Case{gfx1250::kVWmmaI3216x16x64Iu8Vop3p, 9, 0, false, 0},
+      Case{gfx1250::kVSwmmacI3216x16x128Iu8Vop3p, 5, 0, false, 0},
+      Case{gfx1250::kVWmmaI3216x16x64Iu8Vop3p, 9, 4, false, 0},
+      Case{gfx1250::kVSwmmacI3216x16x128Iu8Vop3p, 5, 3, false, 0},
+      Case{gfx1250::kVSwmmacI3216x16x128Iu8Vop3p, 5, 5, false, 0},
+      Case{gfx1250::kVWmmaI3216x16x64Iu8Vop3p, 9, 12, false, 0},
+      Case{gfx1250::kVWmmaI3216x16x64Iu8Vop3p, 9, 0, true, 8},
   };
+  const uint32_t v_nop = gfx1250::build_vop1(gfx1250::kVNopVop1)[0];
+  const uint32_t v_mov = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 128, .vdst = 0})[0];
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   for (const Case &test_case : cases) {
     const auto source_wmma = gfx1250::build_vop3p(
         test_case.opcode, {.vdst = 32, .src0 = 256 + 64, .src1 = 256 + 128, .src2 = 256 + 192});
-    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
-        {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+    std::vector<uint32_t> source_words = {source_wmma[0], source_wmma[1]};
+    source_words.insert(source_words.end(), test_case.existing_slots, v_nop);
+    if (test_case.interrupted)
+      source_words.push_back(v_mov);
+    source_words.insert(source_words.end(), test_case.trailing_slots, v_nop);
+    source_words.push_back(kGfx1250SEndpgm);
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(source_words);
     rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
 
     rocjitsu::BinaryTranslator translator(
@@ -9458,12 +9473,26 @@ TEST(BinaryTranslatorE2E, Gfx1250ConservativelyPadsIu8WmmaForA0) {
     ASSERT_FALSE(translated.text_sections().empty());
     const auto *target_words =
         reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    const size_t expected_prefix_slots =
+        std::max(test_case.required_slots, test_case.existing_slots);
+    const size_t expected_word_count =
+        2 + expected_prefix_slots + (test_case.interrupted ? 1 : 0) + test_case.trailing_slots + 1;
+    ASSERT_EQ(translated.text_sections()[0]->size(), expected_word_count * sizeof(uint32_t));
     EXPECT_EQ(target_words[0], source_wmma[0]);
     EXPECT_EQ(target_words[1], source_wmma[1]);
-    const uint32_t v_nop = gfx1250::build_vop1(gfx1250::kVNopVop1)[0];
-    for (size_t slot = 0; slot < test_case.required_slots; ++slot)
+    for (size_t slot = 0; slot < expected_prefix_slots; ++slot)
       EXPECT_EQ(target_words[2 + slot], v_nop);
-    EXPECT_EQ(target_words[2 + test_case.required_slots], kGfx1250SEndpgm);
+    size_t cursor = 2 + expected_prefix_slots;
+    if (test_case.interrupted)
+      EXPECT_EQ(target_words[cursor++], v_mov);
+    for (size_t slot = 0; slot < test_case.trailing_slots; ++slot)
+      EXPECT_EQ(target_words[cursor++], v_nop);
+    EXPECT_EQ(target_words[cursor], kGfx1250SEndpgm);
+
+    auto second_result = translator.translate(translated);
+    ASSERT_TRUE(second_result.ok())
+        << (second_result.diagnostics.empty() ? "" : second_result.diagnostics.front().message);
+    EXPECT_EQ(second_result.elf_bytes, result.elf_bytes);
   }
 }
 
