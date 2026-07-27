@@ -272,7 +272,7 @@ tabulate==0.9.0
     # via
     #   jupyter-cache
     #   sphinx-markdown-builder
-tornado==6.4.2
+tornado==6.5.7
     # via
     #   ipykernel
     #   jupyter-client
