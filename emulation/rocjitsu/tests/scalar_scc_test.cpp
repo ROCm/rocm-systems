@@ -690,8 +690,9 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
       ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 
-      // s_addk_i32 sets SCC, modeled as an inert fieldless dst operand;
-      // s_mulk_i32 does not touch SCC. SCC carries no def/use either way.
+      // s_addk_i32 sets SCC through a fieldless dst operand (no RegisterRef);
+      // s_mulk_i32 does not. InstDefUse records that SCC write as a singleton
+      // special member of defs, kept out of the ordinary projection below.
       const bool sets_scc = mnemonic != std::string_view{"s_mulk_i32"};
       ASSERT_EQ(inst->num_src_operands(), 2) << profile.name << " " << mnemonic;
       ASSERT_EQ(inst->num_dst_operands(), sets_scc ? 2 : 1) << profile.name << " " << mnemonic;
