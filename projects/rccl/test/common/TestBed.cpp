@@ -474,16 +474,43 @@ namespace RcclUnitTesting
     InteractiveWait("Starting DestroyComms");
 
     int const cmd = TestBedChild::CHILD_DESTROY_COMMS;
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
+
+    // Send DestroyComms command to all active child processes first so they can
+    // work in parallel, then collect acknowledgements in a second pass. Run the
+    // pipe traffic inside a lambda: the PIPE_WRITE/PIPE_CHECK macros call
+    // gtest's ASSERT_*/FAIL() which return on failure, so a failed write to one
+    // child would otherwise skip Finalize() and orphan the remaining children.
+    // The lambda confines that early return, so Finalize() always runs.
+    using Clock = std::chrono::steady_clock;
+    [&]()
     {
-      // Send DestroyComms command to each active child process
-      PIPE_WRITE(childId, cmd);
+      // Timestamps are only consumed when verbose, so skip the clock reads on
+      // the common (non-verbose) path, which is hot in the test suite.
+      Clock::time_point sendStart, waitStart;
+      if (ev.verbose) sendStart = Clock::now();
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
+        PIPE_WRITE(childId, cmd);
+      }
+      if (ev.verbose) waitStart = Clock::now();
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
+        // Wait for child acknowledgement
+        PIPE_CHECK(childId);
+      }
 
-      // Wait for child acknowledgement
-      PIPE_CHECK(childId);
-    }
+      if (ev.verbose)
+      {
+        using std::chrono::duration_cast;
+        using std::chrono::milliseconds;
+        long long const sendMs = duration_cast<milliseconds>(waitStart - sendStart).count();
+        long long const waitMs = duration_cast<milliseconds>(Clock::now() - waitStart).count();
+        TEST_INFO("DestroyComms: %d children, send %lld ms, parallel teardown %lld ms",
+                  this->numActiveChildren, sendMs, waitMs);
+      }
+    }();
 
-    // Close any open child processes
+    // Close any open child processes (always, even if the teardown above failed)
     Finalize();
 
     InteractiveWait("Finishing DestroyComms");
@@ -496,12 +523,15 @@ namespace RcclUnitTesting
     int const cmd = TestBedChild::CHILD_DESTROY_GRAPHS;
     for (int currGroup = 0; currGroup < this->numGroupCalls; ++currGroup)
     {
+      // Send DestroyGraphs command to all active child processes first so they
+      // can work in parallel, then collect acknowledgements in a second pass.
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
-        // Send DestroyGraphs command to each active child process
         PIPE_WRITE(childId, cmd);
         PIPE_WRITE(childId, currGroup);
-
+      }
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
         // Wait for child acknowledgement
         PIPE_CHECK(childId);
       }

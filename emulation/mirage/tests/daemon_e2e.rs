@@ -6,6 +6,10 @@
 //! `mirage host` subprocesses via `MIRAGE_BIN` (set to the test
 //! mirage binary), giving us full end-to-end coverage of the same
 //! code path users hit.
+//!
+//! Gated on the `webui` feature: the `mirage webui` subcommand and the
+//! served SPA only exist when the web UI is compiled in.
+#![cfg(feature = "webui")]
 
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -187,16 +191,21 @@ fn paths_endpoint_reports_overridden_dirs() {
 fn profile_crud_via_http() {
     let d = Daemon::spawn();
 
-    // Initially empty.
-    let (_, v) = d.get_json("/api/profiles");
-    assert_eq!(v, json!([]));
+    // Preserve the auto-seeded builtin profiles as the CRUD baseline.
+    let (_, initial_profiles) = d.get_json("/api/profiles");
+    let initial_count = initial_profiles
+        .as_array()
+        .expect("profile list should be an array")
+        .len();
 
     // Create.
     create_profile(&d, "p1");
 
     // List.
     let (_, v) = d.get_json("/api/profiles");
-    assert_eq!(v, json!(["p1"]));
+    let names = v.as_array().expect("profile list should be an array");
+    assert_eq!(names.len(), initial_count + 1);
+    assert!(names.contains(&json!("p1")));
 
     // Get.
     let (_, v) = d.get_json("/api/profiles/p1");
@@ -206,7 +215,7 @@ fn profile_crud_via_http() {
     let (s, _) = d.delete("/api/profiles/p1");
     assert!(s.is_success());
     let (_, v) = d.get_json("/api/profiles");
-    assert_eq!(v, json!([]));
+    assert_eq!(v, initial_profiles);
 }
 
 #[test]

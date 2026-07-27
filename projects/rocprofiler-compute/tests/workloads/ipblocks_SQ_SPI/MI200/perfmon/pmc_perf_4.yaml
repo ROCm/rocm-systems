@@ -1,0 +1,5 @@
+jobs:
+- pmc:
+  - SQ_THREAD_CYCLES_VALU
+  - SQ_VALU_MFMA_BUSY_CYCLES
+  - SQ_WAVES

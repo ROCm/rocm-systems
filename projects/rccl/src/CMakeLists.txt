@@ -12,6 +12,9 @@ set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
 # net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
 add_subdirectory(transport/net_ib_cast)
 
+# devcomm: populate DEVCOMM_SOURCES and DEVCOMM_INCLUDE_DIRS
+add_subdirectory(devcomm)
+
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
@@ -29,8 +32,15 @@ set(SRC_FILES
   dda_reduce_scatter_ipc.cu
   dda_all_gather_ipc.cu
   dda_alltoall_ipc.cu
+  dda_all_reduce_fabric.cu
+  dda_reduce_scatter_fabric.cu
+  dda_all_gather_fabric.cu
+  dda_alltoall_fabric.cu
   device_buffer.cc
   enqueue.cc
+  fabric_gpu_barrier.cu
+  fabric_init.cu
+  fabric_mem_handler.cc
   group.cc
   ipc_gpu_barrier.cu
   ipc_init.cu
@@ -76,6 +86,7 @@ set(SRC_FILES
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
   device/symmetric/reduce_scatter_gin.cuh
+  device/symmetric/tma_ptx.cuh
   graph/connect.cc
   graph/paths.cc
   graph/rings.cc
@@ -99,6 +110,10 @@ set(SRC_FILES
   include/algorithms/reduce_scatter/reduce_scatter_dda.h
   include/algorithms/all_gather/all_gather_dda.h
   include/algorithms/alltoall/alltoall_dda.h
+  include/algorithms/all_reduce/all_reduce_dda_fabric.h
+  include/algorithms/reduce_scatter/reduce_scatter_dda_fabric.h
+  include/algorithms/all_gather/all_gather_dda_fabric.h
+  include/algorithms/alltoall/alltoall_dda_fabric.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
@@ -120,16 +135,20 @@ set(SRC_FILES
   include/core.h
   include/cpuset.h
 # include/cudawrap.h
-  include/dda_all_reduce_ipc.h
-  include/dda_reduce_scatter_ipc.h
-  include/dda_all_gather_ipc.h
-  include/dda_alltoall_ipc.h
+  include/dda_all_reduce.h
+  include/dda_reduce_scatter.h
+  include/dda_all_gather.h
+  include/dda_alltoall.h
+  include/dda_init_detail.h
   include/debug.h
   include/dev_runtime.h
   include/device.h
   include/env.h
   include/device_buffer.h
   include/enqueue.h
+  include/fabric_init.h
+  include/fabric_gpu_barrier.h
+  include/fabric_mem_handler.h
   include/gdrwrap.h
   include/git_version.h
   include/graph.h
@@ -137,6 +156,9 @@ set(SRC_FILES
   include/gin.h
   include/gin/gin_host.h
   include/gin/gin_host_proxy.h
+  include/gin/gin_host_rocshmem_gda.h
+  include/gin/gin_rocshmem_gda_factory.h
+  include/gin/gin_host_anvil_sdma.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -144,7 +166,6 @@ set(SRC_FILES
   include/info.h
   include/ipc_gpu_barrier.h
   include/ipc_init.h
-  include/ipc_init_detail.h
   include/ipc_mem_handler.h
   include/ipcsocket.h
   include/mem_manager.h
@@ -182,13 +203,13 @@ set(SRC_FILES
   include/trees.h
   include/tuner.h
   include/utils.h
+  include/kernel_config.h
   include/mlx5/mlx5dvcore.h
   include/mlx5/mlx5dvsymbols.h
   include/mlx5/mlx5dvwrap.h
   include/ionic/ionicdvcore.h
   include/ionic/ionicdvsymbols.h
   include/ionic/ionicdvwrap.h
-  include/nccl_merge_stubs.h
   include/nccl_device/comm.h
   include/nccl_device/coop.h
   include/nccl_device/core.h
@@ -202,6 +223,14 @@ set(SRC_FILES
   include/nccl_device/gin/gin_device_host_common.h
   include/nccl_device/gin/proxy/gin_proxy.h
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
+  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
+  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
+  include/nccl_device/gin/rocshmem_gda/queue_pair_device.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
@@ -264,7 +293,7 @@ set(SRC_FILES
   include/nvtx3/nvtxDetail/nvtxInitDefs.h
   include/nvtx3/nvtxDetail/nvtxLinkOnce.h
   include/nvtx3/nvtxDetail/nvtxTypes.h
-  include/proxy_trace/proxy_trace.h
+  include/proxy_diag_counters.h
   include/plugin/nccl_net.h
   include/plugin/nccl_profiler.h
   include/plugin/nccl_tuner.h
@@ -277,6 +306,7 @@ set(SRC_FILES
   include/plugin/net/net_v9.h
   include/plugin/net/net_v10.h
   include/plugin/net/net_v11.h
+  include/plugin/net/net_v12.h
   include/plugin/profiler/net_ib_v1.h
   include/plugin/profiler/net_ib.h
   include/plugin/profiler/net_socket_v1.h
@@ -291,6 +321,7 @@ set(SRC_FILES
   include/plugin/tuner/tuner_v3.h
   include/plugin/tuner/tuner_v4.h
   include/plugin/tuner/tuner_v5.h
+  include/plugin/tuner/tuner_v6.h
   include/plugin/nccl_gin.h
   include/plugin/gin/gin_v11.h
   include/plugin/gin/gin_v12.h
@@ -304,13 +335,14 @@ set(SRC_FILES
 # misc/gdrwrap.cc
   misc/ibvsymbols.cc
   misc/ibvwrap.cc
-  misc/ipcsocket.cc
+  os/linux_ipcsocket.cc
   misc/mlx5dvsymbols.cc
   misc/mlx5dvwrap.cc
   misc/ionicdvsymbols.cc
   misc/ionicdvwrap.cc
 # misc/nvmlwrap.cc
   misc/nvmlwrap_stub.cc
+  misc/kernel_config.cc
   misc/param.cc
   misc/rocmwrap.cc
   misc/roctx.cc
@@ -320,7 +352,6 @@ set(SRC_FILES
   misc/socket.cc
   misc/strongstream.cc
   misc/utils.cc
-  misc/proxy_trace/proxy_trace.cc
   nccl_device/core.cc
   nccl_device/gin_barrier.cc
   nccl_device/gin_scratch.cc
@@ -328,6 +359,21 @@ set(SRC_FILES
   nccl_device/lsa_barrier.cc
   os/linux.cc
   include/os.h
+  include/os/linux.h
+  include/os/windows.h
+  param/c_api.cc
+  param/param.cc
+  param/param_registry.cc
+  include/param/common.h
+  include/param/param.h
+  include/param/param_registry.h
+  include/param/parser_bitset.h
+  include/param/parser_common.h
+  include/param/parser_default.h
+  include/param/parser_enum.h
+  include/param/parser_list.h
+  include/param/parsers.h
+  include/param/utils.h
   rma/rma.cc
   rma/rma_ce.cc
   rma/rma_proxy.cc
@@ -336,6 +382,7 @@ set(SRC_FILES
   include/rma/rma.h
   include/rma/rma_ce.h
   include/rma/rma_proxy.h
+  include/rma/rma_proxy_mem.h
   plugin/net.cc
   plugin/env.cc
   plugin/env/env_v1.cc
@@ -348,6 +395,7 @@ set(SRC_FILES
   plugin/net/net_v9.cc
   plugin/net/net_v10.cc
   plugin/net/net_v11.cc
+  plugin/net/net_v12.cc
   plugin/profiler/profiler_v1.cc
   plugin/profiler/profiler_v2.cc
   plugin/profiler/profiler_v3.cc
@@ -358,6 +406,7 @@ set(SRC_FILES
   plugin/tuner/tuner_v3.cc
   plugin/tuner/tuner_v4.cc
   plugin/tuner/tuner_v5.cc
+  plugin/tuner/tuner_v6.cc
   plugin/tuner/csv_tuner.cc
   plugin/gin.cc
   plugin/gin/gin_v11.cc
@@ -391,6 +440,8 @@ set(SRC_FILES
   transport/net_ib/p2p.h
   transport/net_ib/p2p_resiliency.cc
   transport/net_ib/p2p_resiliency.h
+  transport/net_ib/p2p_resiliency_recovery.cc
+  transport/net_ib/p2p_resiliency_recovery.h
   transport/net_ib/reg.cc
   transport/net_ib_cast/net_ib_cast_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
@@ -418,6 +469,16 @@ list(TRANSFORM SRC_FILES PREPEND "src/")
 
 # Conditional source files based on build options
 #==================================================================================================
+if(ENABLE_ROCSHMEM_GIN)
+  list(APPEND SRC_FILES
+    src/gin/gin_plugin_rocshmem_gda.cc
+    src/gin/gin_rocshmem_gda_factory.cc
+    src/gin/gin_plugin_anvil_sdma.cc
+    src/gin/gin_anvil_ipc_table_host.cc
+    src/gin/gin_anvil_sdma_oss7_device.cc
+  )
+endif()
+
 if(USE_AMDSMI)
   set(SMI_SOURCES
     src/include/amdsmi_wrap.h
@@ -434,6 +495,8 @@ endif()
 list(APPEND SRC_FILES ${SMI_SOURCES})
 # NET_IB_CAST_SOURCES already carry the src/ prefix (set by transport/net_ib_cast/CMakeLists.txt)
 list(APPEND SRC_FILES ${NET_IB_CAST_SOURCES})
+# DEVCOMM_SOURCES already carry the src/ prefix (set by devcomm/CMakeLists.txt)
+list(APPEND SRC_FILES ${DEVCOMM_SOURCES})
 
 # Hipify source files (copy of source generated into hipify directory)
 #==================================================================================================
@@ -504,14 +567,41 @@ add_custom_command(
 list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
 list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
 
+# proxy_trace headers are not produced by hipify-perl; copy from src so the
+# hipify include tree matches (unit tests search hipify paths before src/include).
+set(PROXY_TRACE_HDR_SRC "${RCCL_SOURCE_DIR}/src/include/proxy_trace/proxy_trace.h")
+set(PROXY_TRACE_HDR_DST "${HIPIFY_DIR}/src/include/proxy_trace/proxy_trace.h")
 add_custom_command(
-  OUTPUT ${NCCL_DEVICE_HEADER}
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
-  COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
-  DEPENDS ${NCCL_DEVICE_HIP_FILES}
-  VERBATIM
+  OUTPUT ${PROXY_TRACE_HDR_DST}
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPIFY_DIR}/src/include/proxy_trace"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROXY_TRACE_HDR_SRC} ${PROXY_TRACE_HDR_DST}
+  MAIN_DEPENDENCY ${PROXY_TRACE_HDR_SRC}
+  COMMENT "Copying proxy_trace/proxy_trace.h (no hipification)"
 )
+list(APPEND HIP_SOURCES ${PROXY_TRACE_HDR_DST})
+
+# copy_directory_if_different was added in CMake 3.26.  On older toolchains
+# fall back to the unconditional copy_directory (same behaviour, just causes
+# unnecessary recompilation on no-op rebuilds).
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
+  add_custom_command(
+    OUTPUT ${NCCL_DEVICE_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    DEPENDS ${NCCL_DEVICE_HIP_FILES}
+    VERBATIM
+  )
+else()
+  add_custom_command(
+    OUTPUT ${NCCL_DEVICE_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
+    COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    DEPENDS ${NCCL_DEVICE_HIP_FILES}
+    VERBATIM
+  )
+endif()
 add_custom_target(copy_nccl_device_headers DEPENDS ${NCCL_DEVICE_HEADER})
 
 # Adding custom target to hipify all the source files
@@ -612,7 +702,11 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_ipc\\.cu\\.cpp$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp)")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric\\.cu\\.cpp$")
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_alltoall_fabric.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
@@ -652,6 +746,7 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/nccl_device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
 target_include_directories(rccl PRIVATE ${NET_IB_CAST_INCLUDE_DIRS})
+target_include_directories(rccl PRIVATE ${DEVCOMM_INCLUDE_DIRS})
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/transport)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/transport/net_ib)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
@@ -690,12 +785,26 @@ endif()
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
-if("${hip_version_string}" VERSION_GREATER_EQUAL "7.12.60540")
+if(ENABLE_ROCSHMEM_GIN)
+  target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM_GIN)
+endif()
+# Uncached (fine-grained) VMM/cuMem allocation type. Available natively on
+# HIP >= 7.12.60540 and via the ROCm 7.0.2.x backport range [7.0.51831, 7.0.60000).
+if(HIP_VMM_UNCACHED_MEMORY_AVAILABLE AND
+   (("${hip_version_string}" VERSION_GREATER_EQUAL "7.12.60540") OR
+    (("${hip_version_string}" VERSION_GREATER_EQUAL "7.0.51831") AND
+     ("${hip_version_string}" VERSION_LESS "7.0.60000"))))
   target_compile_definitions(rccl PRIVATE HIP_VMM_UNCACHED_MEMORY)
+  message(STATUS "HIP_VMM_UNCACHED_MEMORY enabled")
+else()
+  message(STATUS "HIP_VMM_UNCACHED_MEMORY disabled")
 endif()
 
 # ==== rocSHMEM integration (optional) ====
-if (ENABLE_ROCSHMEM)
+# ENABLE_ROCSHMEM: full rocshmem (device + host), links librocshmem.a into librccl.so
+# ENABLE_ROCSHMEM_GIN: GIN host code only (no device deps), rocshmem host symbols
+#   resolved at runtime from the executable that links librocshmem.a
+if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
   # Ensure rocSHMEM is fully built/installed before compiling rccl
   if (TARGET rocshmem_ext)
@@ -706,6 +815,17 @@ if (ENABLE_ROCSHMEM)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
   endif()
 
+  if (ROCSHMEM_SOURCE_DIR)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
+    if (ROCSHMEM_BUILD_DIR)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
+    else()
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
+    endif()
+  endif()
+endif()
+if (ENABLE_ROCSHMEM)
   # Moved to where rocSHMEM target_links
   ## target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
@@ -791,6 +911,10 @@ endif()
 if(CE_ENABLED)
   target_compile_definitions(rccl PRIVATE CE_BATCH_ASYNC_SUPPORTED)
   message(STATUS "CE_BATCH_ASYNC_SUPPORTED compile definition enabled")
+endif()
+if(CUMEM_DMABUF_EXPORT_ENABLED)
+  target_compile_definitions(rccl PRIVATE RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+  message(STATUS "RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED compile definition enabled")
 endif()
 
 ## Set RCCL compile options
@@ -987,25 +1111,30 @@ else()
   target_link_libraries(rccl PRIVATE hip::device)
 endif()
 target_link_libraries(rccl PRIVATE   dl)
+# Direct-link the HSA runtime. RCCL already depends on it transitively through the
+# HIP runtime, so this is runtime-neutral. The linker records DT_NEEDED
+# libhsa-runtime64.so.1 automatically (no SONAME string in source) and it resolves
+# via librccl's existing RPATH, the same entry that already resolves libamdhip64.
+# This replaces the previous dlopen("libhsa-runtime64.so") which broke on runtime
+# trees (e.g. TheRock pip wheels) that ship no unversioned developer symlink.
+target_link_libraries(rccl PRIVATE   hsa-runtime64::hsa-runtime64)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
+# librocm-core provides getROCmVersion() for reporting the runtime ROCm version.
+if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
+  target_link_libraries(rccl PRIVATE -L${ROCM_PATH}/lib -lrocm-core)
+endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,
 # a FetchContent-built fmt-header-only target leaks into rccl's link
 # interface and breaks install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM)
-  target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
-  target_link_libraries(rccl PRIVATE ${IBVERBS})
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
-  # The __hip_gpubin_handle_* symbols referenced by __hip_module_ctor in the
-  # librocshmem.a objects are only defined by the RDC device-link step.
-  # --hip-link tells amdclang++ to perform that step as part of the final
-  # librccl.so link; -fgpu-rdc marks the link as RDC-mode.  --offload-arch
-  # flags use RCCL's GPU_TARGETS (stripped of feature suffixes like :xnack-)
-  # so the device-link covers every arch RCCL is built for.
-  # RCCL's own device code (already embedded in device_build/common.o by the
-  # custom device-linker pipeline) is NOT compiled with -fgpu-rdc and is
-  # therefore unaffected by this device-link step.
+  # --hip-link tells amdclang++ to perform the RDC device-link step as part
+  # of the final librccl.so link.
+  target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  target_link_libraries(rccl PRIVATE hsakmt)
+  target_link_libraries(rccl PRIVATE ${IBVERBS})
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
     string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
@@ -1013,6 +1142,12 @@ if(ENABLE_ROCSHMEM)
   endforeach()
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
+elseif(ENABLE_ROCSHMEM_GIN)
+  # GIN-only: rocshmem device symbols (QueuePair methods for GDA backend)
+  # are left unresolved in librccl.so and resolved from the executable
+  # that links librocshmem.a. This avoids duplicating rocshmem device state
+  # (__constant__ memory) across librccl.so and the executable.
+  target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 
 ## Set RCCL link options
@@ -1072,6 +1207,42 @@ if(CMAKE_BUILD_SUBTYPE MATCHES "DebugFast" AND NOT ENABLE_DEVICE_LINKER)
 endif()
 if(TIMETRACE)
   target_link_options(rccl PRIVATE -ftime-trace)
+endif()
+
+# .hip_fatbin tail-placement linker script.
+#
+# Splices the merged .hip_fatbin output section to the end of librccl.so via
+# lld's INSERT AFTER directive (the default linker script is preserved).
+# Keeps text<->data distances small so host PC32/PLT32/GOTPCRELX/32S
+# relocations stay in range when the bundled device image grows past
+# INT32_MAX.  Applies to the host link only; the offload device-link does
+# not see the script, so it works identically for ENABLE_DEVICE_LINKER=ON
+# (custom pipeline) and OFF (-fgpu-rdc --hip-link).  No-op for static builds
+# (which go through --emit-static-lib and never run ld).
+if(BUILD_SHARED_LIBS AND RCCL_HIP_FATBIN_AT_TAIL)
+  set(_rccl_fatbin_script "${PROJECT_SOURCE_DIR}/cmake/linker_scripts/hip_fatbin_tail.ld")
+  if(NOT EXISTS "${_rccl_fatbin_script}")
+    message(FATAL_ERROR "RCCL_HIP_FATBIN_AT_TAIL=ON but linker script not found: ${_rccl_fatbin_script}")
+  endif()
+  target_link_options(rccl PRIVATE "LINKER:-T,${_rccl_fatbin_script}")
+  set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS "${_rccl_fatbin_script}")
+  message(STATUS "RCCL: .hip_fatbin will be placed at end of librccl.so (${_rccl_fatbin_script})")
+
+  # Post-build safety check: parse the ELF section table and confirm the
+  # host sections (everything except the inert .hip_fatbin spacer) fit within
+  # a 2 GiB window, which is the exact condition for small-code-model host
+  # relocations (PC32/PLT32/GOTPCRELX/32S) to stay in range.  Fails the build
+  # if the window exceeds 2 GiB -- e.g. if the linker silently ignored the
+  # tail-placement script -- so the regression is caught here rather than as
+  # a confusing relocation overflow once the fatbin grows.  Skips cleanly on
+  # non-x86-64 hosts.
+  add_custom_command(TARGET rccl POST_BUILD
+    COMMAND ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/cmake/scripts/check_hip_fatbin_tail.py
+            $<TARGET_FILE:rccl>
+    COMMENT "Verifying host sections stay within 2 GiB of each other in librccl.so"
+    VERBATIM
+  )
 endif()
 
 if(NOT BUILD_SHARED_LIBS)

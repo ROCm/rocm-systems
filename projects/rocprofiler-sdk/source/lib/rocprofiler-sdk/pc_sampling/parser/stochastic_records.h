@@ -41,7 +41,7 @@ typedef struct rocprofiler_pc_sampling_record_stochastic_header_t
 } rocprofiler_pc_sampling_record_stochastic_header_t;
 
 /**
- * @brief Enumaration describing sampled instruction type.
+ * @brief Enumeration describing sampled instruction type.
  */
 typedef enum rocprofiler_pc_sampling_instruction_type_t
 {
@@ -67,7 +67,7 @@ typedef enum rocprofiler_pc_sampling_instruction_type_t
 } rocprofiler_pc_sampling_instruction_type_t;
 
 /**
- * @brief Enumaration describing reason for not issuing an instruction.
+ * @brief Enumeration describing reason for not issuing an instruction.
  */
 typedef enum pcsample_reason_not_issued
 {

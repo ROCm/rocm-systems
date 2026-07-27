@@ -62,6 +62,11 @@ public:
                       ro_net_types type, volatile char *status,
                       bool blocking) override;
 
+  void team_reduce_scatter(void *dst, void *src, int nreduce, int win_id,
+                           int contextId, MPI_Comm team, ROCSHMEM_OP op,
+                           ro_net_types type, volatile char *status,
+                           bool blocking) override;
+
   void team_broadcast(void *dst, void *src, int size, int win_id,
                       int contextId, MPI_Comm team, int PE_root,
                       ro_net_types type, volatile char *status,

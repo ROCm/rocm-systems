@@ -55,9 +55,8 @@
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
+#include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
 #include "amd_smi/impl/scoped_fd.h"
-#include "amdsmi_unified/interface/smi_nic_interface.h"
-#include "config/amd_smi_config.h"
 
 #ifdef BRCM_NIC
 #include "amd_smi/impl/nic/amd_smi_lspci_commands.h"
@@ -854,6 +853,7 @@ amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handl
   *info = ainic_info.asic;
   return AMDSMI_STATUS_SUCCESS;
 }
+
 amdsmi_status_t amdsmi_get_nic_bus_info(amdsmi_processor_handle processor_handle,
                                         amdsmi_nic_bus_info_t* info) {
   AMDSMI_CHECK_INIT();
@@ -869,6 +869,7 @@ amdsmi_status_t amdsmi_get_nic_bus_info(amdsmi_processor_handle processor_handle
   *info = ainic_info.bus;
   return AMDSMI_STATUS_SUCCESS;
 }
+
 amdsmi_status_t amdsmi_get_nic_driver_info(amdsmi_processor_handle processor_handle,
                                            amdsmi_nic_driver_info_t* info) {
   AMDSMI_CHECK_INIT();
@@ -899,6 +900,7 @@ amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handl
   *info = ainic_info.numa;
   return AMDSMI_STATUS_SUCCESS;
 }
+
 amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handle,
                                          amdsmi_nic_port_info_t* info) {
   AMDSMI_CHECK_INIT();
@@ -914,6 +916,7 @@ amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handl
   *info = ainic_info.port;
   return AMDSMI_STATUS_SUCCESS;
 }
+
 amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_handle,
                                              amdsmi_nic_rdma_devices_info_t* info) {
   AMDSMI_CHECK_INIT();
@@ -928,6 +931,28 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
   }
   *info = ainic_info.rdma_dev;
   return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
+                                       amdsmi_nic_fw_info_t* info) {
+  return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
+}
+
+amdsmi_status_t amdsmi_get_nic_device_bdf(amdsmi_processor_handle processor_handle,
+                                          amdsmi_bdf_t* bdf) {
+  return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
+}
+
+amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor_handle,
+                                               uint32_t port_index, uint32_t* num_stats,
+                                               amdsmi_nic_stat_t* stats) {
+  return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
+}
+
+amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
+                                                 uint32_t port_index, uint32_t* num_stats,
+                                                 amdsmi_nic_stat_t* stats) {
+  return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
 }
 
 #ifdef BRCM_NIC
@@ -1151,6 +1176,7 @@ amdsmi_status_t amdsmi_get_switch_metrics_info(amdsmi_processor_handle processor
 
   return AMDSMI_STATUS_SUCCESS;
 }
+
 amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
                                        amdsmi_brcm_nic_firmware_t* info) {
   AMDSMI_CHECK_INIT();
@@ -1631,10 +1657,10 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
   }
 
   amd::smi::AMDSmiLibraryLoader libdrm;
-  amdsmi_status_t status = libdrm.load(LIBDRM_AMDGPU_SONAME);
+  amdsmi_status_t status = libdrm.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm.unload();
-    ss << __PRETTY_FUNCTION__ << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
+    ss << __PRETTY_FUNCTION__ << " | Failed to load libdrm_amdgpu"
        << "; Returning: " << smi_amdgpu_get_status_string(status, false);
     LOG_ERROR(ss);
     return status;
@@ -2432,10 +2458,10 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   }
 
   amd::smi::AMDSmiLibraryLoader libdrm;
-  status = libdrm.load(LIBDRM_AMDGPU_SONAME);
+  status = libdrm.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm.unload();
-    ss << __PRETTY_FUNCTION__ << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
+    ss << __PRETTY_FUNCTION__ << " | Failed to load libdrm_amdgpu"
        << "; Returning: " << smi_amdgpu_get_status_string(status, false);
     LOG_ERROR(ss);
     return status;
@@ -2627,10 +2653,16 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
 
 amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle, char* brand,
                                            uint32_t len) {
-  amdsmi_vram_info_t info;
+  if (brand == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  amdsmi_vram_info_t info = {};
   amdsmi_status_t r = amdsmi_get_gpu_vram_info(processor_handle, &info);
+  if (r != AMDSMI_STATUS_SUCCESS) {
+    return r;
+  }
   snprintf(brand, len, "%s", info.vram_vendor);
-  return (r);
+  return r;
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle,
@@ -2656,94 +2688,112 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
   info->vram_max_bandwidth = std::numeric_limits<decltype(info->vram_max_bandwidth)>::max();
 
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
-  std::string render_name = gpu_device->get_gpu_path();
-  std::string path = "/dev/dri/" + render_name;
-  if (render_name.empty()) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
 
-  ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
-  if (!drm_fd.valid()) {
-    ss << __PRETTY_FUNCTION__ << " | Failed to open " << path << ": " << strerror(errno)
-       << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_FILE_ERROR;
-  }
-
-  amd::smi::AMDSmiLibraryLoader libdrm;
-  amdsmi_status_t status = libdrm.load(LIBDRM_AMDGPU_SONAME);
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    libdrm.unload();
-    ss << __PRETTY_FUNCTION__ << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
-       << "; Returning: " << smi_amdgpu_get_status_string(status, false);
-    LOG_ERROR(ss);
-    return status;
-  }
-
-  ss << __PRETTY_FUNCTION__ << " | about to load drmCommandWrite symbol";
-  LOG_INFO(ss);
-
-  // extern int drmCommandWrite(int fd, unsigned long drmCommandIndex,
-  //                            void *data, unsigned long size);
-  typedef int (*drmCommandWrite_t)(int fd, unsigned long drmCommandIndex, void* data,
-                                   unsigned long size);
-  drmCommandWrite_t drmCommandWrite = nullptr;
-
-  // load symbol from libdrm
-  status =
-      libdrm.load_symbol(reinterpret_cast<drmCommandWrite_t*>(&drmCommandWrite), "drmCommandWrite");
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    libdrm.unload();
-    ss << __PRETTY_FUNCTION__ << " | Failed to load drmCommandWrite symbol"
-       << " | Returning: " << smi_amdgpu_get_status_string(status, false);
-    LOG_ERROR(ss);
-    return status;
-  }
-  ss << __PRETTY_FUNCTION__ << " | drmCommandWrite symbol loaded successfully";
-  LOG_INFO(ss);
-
-  struct drm_amdgpu_info_device dev_info = {};
-  memset(&dev_info, 0, sizeof(struct drm_amdgpu_info_device));
-  struct drm_amdgpu_info request = {};
-  memset(&request, 0, sizeof(request));
-  request.return_pointer = reinterpret_cast<unsigned long long>(&dev_info);
-  request.return_size = sizeof(struct drm_amdgpu_info_device);
-  request.query = AMDGPU_INFO_DEV_INFO;
-  auto drm_write =
-      drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request, sizeof(struct drm_amdgpu_info));
-  if (drm_write != 0) {
-    libdrm.unload();
-    ss << __PRETTY_FUNCTION__ << " | Issue - drm_write failed, drm_write: " << std::dec << drm_write
-       << "\n"
-       << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false);
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_DRM_ERROR;
-  }
-
-  info->vram_type = amd::smi::vram_type_value(dev_info.vram_type);
-  info->vram_bit_width = dev_info.vram_bit_width;
-  libdrm.unload();
-  // if vram type is greater than the max enum set it to unknown
-  if (info->vram_type > AMDSMI_VRAM_TYPE__MAX) info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
-
-  // set info->vram_max_bandwidth to gpu_metrics vram_max_bandwidth if it is not set
-  amdsmi_gpu_metrics_t metric_info = {};
-  r = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
-  if (r == AMDSMI_STATUS_SUCCESS) {
-    info->vram_max_bandwidth = metric_info.vram_max_bandwidth;
-  }
-
-  // map the vendor name to enum
+  // --- sysfs first: vendor + total size (no DRM dependency) ---
+  // The vendor string is only exposed via sysfs (mem_info_vram_vendor); the DRM
+  // ioctl carries no vendor field. Read it before attempting the ioctl so callers
+  // (e.g. amdsmi_get_gpu_vram_vendor) still get the vendor when DRM is unavailable.
   char brand[256] = {'\0'};
-  r = rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, 255);
-  if (r == AMDSMI_STATUS_SUCCESS) {
+  amdsmi_status_t vendor_status =
+      rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, 255);
+  if (vendor_status == AMDSMI_STATUS_SUCCESS) {
     for (auto& x : brand) x = static_cast<char>(toupper(x));
     snprintf(info->vram_vendor, AMDSMI_MAX_STRING_LENGTH, "%s", brand);
   }
+
   uint64_t total = 0;
-  r = rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0, RSMI_MEM_TYPE_VRAM, &total);
-  if (r == AMDSMI_STATUS_SUCCESS) {
+  amdsmi_status_t size_status =
+      rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0, RSMI_MEM_TYPE_VRAM, &total);
+  if (size_status == AMDSMI_STATUS_SUCCESS) {
     info->vram_size = total / (1024 * 1024);
+  }
+
+  // --- DRM ioctl fallback: vram_type + bit_width + max_bandwidth (best effort) ---
+  // Failures here are non-fatal: the function still succeeds as long as the sysfs
+  // vendor or size read above succeeded.
+  amdsmi_status_t drm_status = [&]() -> amdsmi_status_t {
+    std::string render_name = gpu_device->get_gpu_path();
+    std::string path = "/dev/dri/" + render_name;
+    if (render_name.empty()) {
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (!drm_fd.valid()) {
+      ss << __PRETTY_FUNCTION__ << " | Failed to open " << path << ": " << strerror(errno)
+         << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
+      LOG_ERROR(ss);
+      return AMDSMI_STATUS_FILE_ERROR;
+    }
+
+    amd::smi::AMDSmiLibraryLoader libdrm;
+    amdsmi_status_t status = libdrm.load(amd::smi::libdrm_amdgpu_sonames());
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      libdrm.unload();
+      ss << __PRETTY_FUNCTION__ << " | Failed to load libdrm_amdgpu"
+         << "; Returning: " << smi_amdgpu_get_status_string(status, false);
+      LOG_ERROR(ss);
+      return status;
+    }
+
+    ss << __PRETTY_FUNCTION__ << " | about to load drmCommandWrite symbol";
+    LOG_INFO(ss);
+
+    // extern int drmCommandWrite(int fd, unsigned long drmCommandIndex,
+    //                            void *data, unsigned long size);
+    typedef int (*drmCommandWrite_t)(int fd, unsigned long drmCommandIndex, void* data,
+                                     unsigned long size);
+    drmCommandWrite_t drmCommandWrite = nullptr;
+
+    // load symbol from libdrm
+    status = libdrm.load_symbol(reinterpret_cast<drmCommandWrite_t*>(&drmCommandWrite),
+                                "drmCommandWrite");
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      libdrm.unload();
+      ss << __PRETTY_FUNCTION__ << " | Failed to load drmCommandWrite symbol"
+         << " | Returning: " << smi_amdgpu_get_status_string(status, false);
+      LOG_ERROR(ss);
+      return status;
+    }
+    ss << __PRETTY_FUNCTION__ << " | drmCommandWrite symbol loaded successfully";
+    LOG_INFO(ss);
+
+    struct drm_amdgpu_info_device dev_info = {};
+    memset(&dev_info, 0, sizeof(struct drm_amdgpu_info_device));
+    struct drm_amdgpu_info request = {};
+    memset(&request, 0, sizeof(request));
+    request.return_pointer = reinterpret_cast<unsigned long long>(&dev_info);
+    request.return_size = sizeof(struct drm_amdgpu_info_device);
+    request.query = AMDGPU_INFO_DEV_INFO;
+    auto drm_write =
+        drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request, sizeof(struct drm_amdgpu_info));
+    if (drm_write != 0) {
+      libdrm.unload();
+      ss << __PRETTY_FUNCTION__ << " | Issue - drm_write failed, drm_write: " << std::dec
+         << drm_write << "\n"
+         << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false);
+      LOG_ERROR(ss);
+      return AMDSMI_STATUS_DRM_ERROR;
+    }
+
+    info->vram_type = amd::smi::vram_type_value(dev_info.vram_type);
+    info->vram_bit_width = dev_info.vram_bit_width;
+    libdrm.unload();
+    // if vram type is greater than the max enum set it to unknown
+    if (info->vram_type > AMDSMI_VRAM_TYPE__MAX) info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
+
+    // set info->vram_max_bandwidth to gpu_metrics vram_max_bandwidth if it is not set
+    amdsmi_gpu_metrics_t metric_info = {};
+    if (amdsmi_get_gpu_metrics_info(processor_handle, &metric_info) == AMDSMI_STATUS_SUCCESS) {
+      info->vram_max_bandwidth = metric_info.vram_max_bandwidth;
+    }
+    return AMDSMI_STATUS_SUCCESS;
+  }();
+
+  // Succeed if at least one source provided data; otherwise surface the DRM error.
+  if (vendor_status != AMDSMI_STATUS_SUCCESS && size_status != AMDSMI_STATUS_SUCCESS &&
+      drm_status != AMDSMI_STATUS_SUCCESS) {
+    return drm_status;
   }
 
   ss << __PRETTY_FUNCTION__ << " | info->vram_type: " << std::dec << info->vram_type << "\n"
@@ -3026,6 +3076,9 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(
 amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t* mode) {
   AMDSMI_CHECK_INIT();
+  if (mode == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   std::ostringstream ss;
   auto status = rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_get, processor_handle, 0,
                              reinterpret_cast<rsmi_compute_partition_mem_alloc_mode_t*>(mode));
@@ -3038,6 +3091,10 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
 amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode) {
   AMDSMI_CHECK_INIT();
+  if (mode != AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING &&
+      mode != AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL) {
+    return AMDSMI_STATUS_INVAL;
+  }
   return rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_set, processor_handle, 0,
                       static_cast<rsmi_compute_partition_mem_alloc_mode_t>(mode));
 }
@@ -3962,6 +4019,7 @@ amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle pr
   }
 
   copy_rsmi_gpu_metrics_to_amdsmi(rsmi_metrics, pgpu_metrics);
+  apply_gfx_activity_overrides(processor_handle, pgpu_metrics);
   return status;
 }
 
@@ -3980,6 +4038,7 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
   }
 
   copy_rsmi_gpu_metrics_to_amdsmi(rsmi_metrics, pgpu_metrics);
+  apply_gfx_activity_overrides(processor_handle, pgpu_metrics);
   return status;
 }
 
@@ -4427,15 +4486,54 @@ amdsmi_status_t amdsmi_gpu_driver_reload(void) {
 
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* gpu_busy_percent) {
-  return rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
+  auto status = rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
+  if (status == AMDSMI_STATUS_SUCCESS && gpu_busy_percent != nullptr &&
+      is_gfx_activity_silenced(processor_handle)) {
+    // Sole output is gfx activity: return the N/A sentinel and report unsupported.
+    *gpu_busy_percent = std::numeric_limits<uint32_t>::max();
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  return status;
+}
+
+amdsmi_status_t amdsmi_get_vcn_busy_percent(amdsmi_processor_handle processor_handle,
+                                            uint32_t* vcn_busy_percent) {
+  if (!vcn_busy_percent) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  amd::smi::AMDSmiGPUDevice* gpudevice = nullptr;
+  amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpudevice);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  return smi_amdgpu_get_vcn_busy_percent(gpudevice, vcn_busy_percent);
 }
 
 amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
                                              amdsmi_utilization_counter_t utilization_counters[],
                                              uint32_t count, uint64_t* timestamp) {
-  return rsmi_wrapper(rsmi_utilization_count_get, processor_handle, 0,
-                      reinterpret_cast<rsmi_utilization_counter_t*>(utilization_counters), count,
-                      timestamp);
+  auto status = rsmi_wrapper(rsmi_utilization_count_get, processor_handle, 0,
+                             reinterpret_cast<rsmi_utilization_counter_t*>(utilization_counters),
+                             count, timestamp);
+  if (status == AMDSMI_STATUS_SUCCESS && utilization_counters != nullptr &&
+      is_gfx_activity_silenced(processor_handle)) {
+    uint32_t silenced = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+      if (utilization_counters[i].type == AMDSMI_COARSE_GRAIN_GFX_ACTIVITY ||
+          utilization_counters[i].type == AMDSMI_FINE_GRAIN_GFX_ACTIVITY) {
+        utilization_counters[i].value = std::numeric_limits<uint64_t>::max();
+        utilization_counters[i].fine_value[0] = std::numeric_limits<uint64_t>::max();
+        utilization_counters[i].fine_value_count = 0;
+        ++silenced;
+      }
+    }
+    // Only unsupported when every requested counter was a silenced gfx type;
+    // a mixed request still returns its non-gfx values.
+    if (count > 0 && silenced == count) {
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+  }
+  return status;
 }
 
 amdsmi_status_t amdsmi_get_energy_count(amdsmi_processor_handle processor_handle,
@@ -4674,10 +4772,10 @@ amdsmi_status_t amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_hand
   }
 
   amd::smi::AMDSmiLibraryLoader libdrm;
-  status = libdrm.load(LIBDRM_AMDGPU_SONAME);
+  status = libdrm.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm.unload();
-    ss << __PRETTY_FUNCTION__ << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
+    ss << __PRETTY_FUNCTION__ << " | Failed to load libdrm_amdgpu"
        << "; Returning: " << smi_amdgpu_get_status_string(status, false);
     LOG_ERROR(ss);
     return status;
@@ -5330,10 +5428,10 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
     return AMDSMI_STATUS_FILE_ERROR;
   }
   amd::smi::AMDSmiLibraryLoader libdrm;
-  status = libdrm.load(LIBDRM_AMDGPU_SONAME);
+  status = libdrm.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm.unload();
-    ss << __PRETTY_FUNCTION__ << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
+    ss << __PRETTY_FUNCTION__ << " | Failed to load libdrm_amdgpu"
        << "; Returning: " << smi_amdgpu_get_status_string(status, false);
     LOG_ERROR(ss);
     return status;
@@ -5855,10 +5953,10 @@ amdsmi_status_t amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle proce
   }
 
   amd::smi::AMDSmiLibraryLoader libdrm;
-  status = libdrm.load(LIBDRM_AMDGPU_SONAME);
+  status = libdrm.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm.unload();
-    ss << __PRETTY_FUNCTION__ << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
+    ss << __PRETTY_FUNCTION__ << " | Failed to load libdrm_amdgpu"
        << "; Returning: " << smi_amdgpu_get_status_string(status, false);
     LOG_ERROR(ss);
     return status;

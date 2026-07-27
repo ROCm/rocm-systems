@@ -16,7 +16,8 @@
 namespace hipFile {
 
 struct MBackend : Backend {
-    MOCK_METHOD(int, score, (std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t, hoff_t, hoff_t),
+    MOCK_METHOD(int, score,
+                (const std::shared_ptr<IFile> &, const std::shared_ptr<IBuffer> &, size_t, hoff_t, hoff_t),
                 (const, override));
     MOCK_METHOD(ssize_t, io,
                 (hipFile::IoType type, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t, hoff_t,
@@ -29,7 +30,8 @@ struct MBackend : Backend {
 };
 
 struct MBackendWithFallback : BackendWithFallback {
-    MOCK_METHOD(int, score, (std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t, hoff_t, hoff_t),
+    MOCK_METHOD(int, score,
+                (const std::shared_ptr<IFile> &, const std::shared_ptr<IBuffer> &, size_t, hoff_t, hoff_t),
                 (const, override));
     MOCK_METHOD(ssize_t, _io_impl,
                 (IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,

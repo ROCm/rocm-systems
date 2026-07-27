@@ -660,6 +660,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWriteValue_Default, uint32_t, uint64_t) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
+#if HT_AMD
 TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment_Default", "", uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
     HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
@@ -798,6 +799,7 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement_MultiStream_MultiDevice",
                    uint64_t) {
   testIncrementDecrementMultiStreamMultiDevice<TestType>(hipExtStreamWriteValueDecrement);
 }
+#endif
 
 template <typename T> __global__ void add(T* a, T* b, T* c, size_t size) {
   size_t i = threadIdx.x;

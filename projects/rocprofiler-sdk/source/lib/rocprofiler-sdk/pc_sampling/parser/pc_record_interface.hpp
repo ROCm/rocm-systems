@@ -102,7 +102,7 @@ public:
      */
     void newDispatch(const dispatch_pkt_id_t& pkt);
     /**
-     * @brief Checkes if a dispatch packet will generate a collision with dorbell_id and
+     * @brief Checks if a dispatch packet will generate a collision with doorbell_id and
      * dispatch_index.
      * @param[in] pkt Struct containing the dispatch packet data.
      * @returns boolean

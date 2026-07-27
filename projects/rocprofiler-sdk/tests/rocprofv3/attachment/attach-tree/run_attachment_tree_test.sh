@@ -177,13 +177,13 @@ CHILD_DIR=$(dirname "$CHILD_JSON")
 # reference them without knowing the hostname or PID at configure time.
 for src in "${CHILD_DIR}/${CHILD_PID}"_*.json "${CHILD_DIR}/${CHILD_PID}"_*.db; do
     [ -f "$src" ] || continue
-    dst_name=$(basename "$src" | sed "s/^${CHILD_PID}_/out_/")
+    dst_name=$(basename "$src" | sed "s/^${CHILD_PID}_/${OUTPUT_FILENAME}_/")
     cp "$src" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"
     echo "Copied $(basename $src) -> ${dst_name}"
 done
 
 # Verify the well-known files exist
-for expected_file in "out_results.json" "out_results.db"; do
+for expected_file in "${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db"; do
     if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file}" ]; then
         echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file} not found"
         exit 1

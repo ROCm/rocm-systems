@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "amo_bitwise_tester.hpp"
+#include "host_rma_tester.hpp"
 #include "amo_extended_tester.hpp"
 #include "amo_standard_tester.hpp"
 #include "default_ctx_primitive_tester.hpp"
@@ -61,7 +62,11 @@
 #include "team_ctx_infra_tester.hpp"
 #include "team_ctx_primitive_tester.hpp"
 #include "team_fcollect_tester.hpp"
+#include "fcollect_wave_tester.hpp"
 #include "team_reduction_tester.hpp"
+#include "team_reduce_scatter_tester.hpp"
+#include "reduce_wave_tester.hpp"
+#include "team_reduce_scatter_wave_tester.hpp"
 #include "wavefront_primitives.hpp"
 #include "workgroup_primitives.hpp"
 #include "flood_tester.hpp"
@@ -71,9 +76,14 @@
 #include "library_info_tester.hpp"
 #include "fence_ordering_tester.hpp"
 #include "tile_rma_tester.hpp"
+#include "tile_broadcast_tester.hpp"
+#include "tile_allgather_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
+#include "host_team_sync_barrier_tester.hpp"
+#include "broadcast_wave_tester.hpp"
+#include "alltoall_wave_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -96,6 +106,10 @@ Tester::Tester(TesterArguments args) : args(args) {
     case WAVEGetNBITestType:
     case WAVEPutTestType:
     case WAVEPutNBITestType:
+    case BroadcastWaveTestType:
+    case AllToAllWaveTestType:
+    case FcollectWaveTestType:
+    case ReduceWaveTestType:
       num_timers = args.num_wgs * num_warps;
       break;
     default:
@@ -132,6 +146,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WAVEPutNBITestType:
       case WAVEPutSignalTestType:
       case WAVEPutSignalNBITestType:
+      case ReduceWaveTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / num_warps;
         break;
       case WGGetTestType:
@@ -143,12 +158,17 @@ Tester::Tester(TesterArguments args) : args(args) {
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case TeamBroadcastTestType:
+      case BroadcastWaveTestType:
       case TeamReductionTestType:
+      case TeamReduceScatterTestType:
+      case TeamReduceScatterWaveTestType:
       case TeamFCollectTestType:
+      case FcollectWaveTestType:
       case CollectTestType:
       case TeamAllToAllTestType:
       case TeamAllToAllvTestType:
       case TeamAlltoallmemOnStreamTestType:
+      case AllToAllWaveTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / args.numprocs;
         break;
       default:
@@ -287,6 +307,54 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
                                                    std::to_string(n_pes));
           }));
       break;
+    case TeamReduceScatterTestType:
+      test_name = "Team-based Reduce-Scatter";
+      testers.push_back(new TeamReduceScatterTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float& f1, float& f2) {
+            f1 = 1;
+            f2 = 0;
+          },
+          [](float v, float n_pes) {
+            return (v == n_pes)
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false, "Got " + std::to_string(v) +
+                                                   ", Expect " +
+                                                   std::to_string(n_pes));
+          }));
+      break;
+    case ReduceWaveTestType:
+      test_name = "Wave-level Reduction";
+      testers.push_back(new ReduceWaveTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float& f1, float& f2) {
+            f1 = 1;
+            f2 = 1;
+          },
+          [](float v, float n_pes) {
+            return (v == n_pes)
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false, "Got " + std::to_string(v) +
+                                                   ", Expect " +
+                                                   std::to_string(n_pes));
+          }));
+      break;
+    case TeamReduceScatterWaveTestType:
+      test_name = "Team-based Reduce-Scatter Wave";
+      testers.push_back(new TeamReduceScatterWaveTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float& f1, float& f2) {
+            f1 = 1;
+            f2 = 0;
+          },
+          [](float v, float n_pes) {
+            return (v == n_pes)
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false, "Got " + std::to_string(v) +
+                                                   ", Expect " +
+                                                   std::to_string(n_pes));
+          }));
+      break;
     case TeamBroadcastTestType:
       test_name = "Team Broadcast Test";
       testers.push_back(new TeamBroadcastTester<int64_t>(args));
@@ -296,6 +364,13 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new TeamBroadcastTester<double>(args));
       testers.push_back(new TeamBroadcastTester<char>(args));
       testers.push_back(new TeamBroadcastTester<unsigned char>(args));
+      break;
+    case BroadcastWaveTestType:
+      test_name = "Broadcast Wave Test";
+      testers.push_back(new BroadcastWaveTester<int>(args));
+      testers.push_back(new BroadcastWaveTester<long long>(args));
+      testers.push_back(new BroadcastWaveTester<float>(args));
+      testers.push_back(new BroadcastWaveTester<double>(args));
       break;
     case TeamAllToAllTestType:
       test_name = "Alltoall Test";
@@ -308,6 +383,12 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TeamAlltoallmemOnStreamTestType:
       test_name = "Alltoallmem_On_Stream";
       testers.push_back(new TeamAlltoallmemOnStreamTester(args));
+      break;
+    case AllToAllWaveTestType:
+      test_name = "AllToAll Wave Test";
+      testers.push_back(new AlltoallWaveTester<float>(args));
+      testers.push_back(new AlltoallWaveTester<char>(args));
+      testers.push_back(new AlltoallWaveTester<int>(args));
       break;
     case BarrierAllOnStreamTestType:
       test_name = "Barrier_All_On_Stream";
@@ -333,6 +414,116 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Putmem_On_Stream";
       testers.push_back(new PutmemOnStreamTester(args));
       break;
+    case HostPutmemTestType:
+      test_name = "Host_Putmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostGetmemTestType:
+      test_name = "Host_Getmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoFAddTestType:
+      test_name = "Host_Amo_FAdd";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoFCswapTestType:
+      test_name = "Host_Amo_FCswap";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostCtxPutmemTestType:
+      test_name = "Host_Ctx_Putmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostCtxGetmemTestType:
+      test_name = "Host_Ctx_Getmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostIntAmoFAddTestType:
+      test_name = "Host_Int_Amo_FAdd";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostIntAmoFCswapTestType:
+      test_name = "Host_Int_Amo_FCswap";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoAllPesTestType:
+      test_name = "Host_Amo_AllPes";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoSelfTestType:
+      test_name = "Host_Amo_Self";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoAddTestType:
+      test_name = "Host_Amo_Add";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilTestType:
+      test_name = "Host_Wait_Until";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostTestTestType:
+      test_name = "Host_Test";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllTestType:
+      test_name = "Host_Wait_Until_All";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyTestType:
+      test_name = "Host_Wait_Until_Any";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeTestType:
+      test_name = "Host_Wait_Until_Some";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllVectorTestType:
+      test_name = "Host_Wait_Until_All_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyVectorTestType:
+      test_name = "Host_Wait_Until_Any_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeVectorTestType:
+      test_name = "Host_Wait_Until_Some_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllStatusTestType:
+      test_name = "Host_Wait_Until_All_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyStatusTestType:
+      test_name = "Host_Wait_Until_Any_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeStatusTestType:
+      test_name = "Host_Wait_Until_Some_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
     case PutmemSignalOnStreamTestType:
       test_name = "Putmem_Signal_On_Stream";
       testers.push_back(new PutmemSignalOnStreamTester(args));
@@ -350,6 +541,16 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new TeamFcollectTester<double>(args));
       testers.push_back(new TeamFcollectTester<char>(args));
       testers.push_back(new TeamFcollectTester<unsigned char>(args));
+      break;
+    case FcollectWaveTestType:
+      test_name = "Fcollect Wave Test";
+      testers.push_back(new FcollectWaveTester<int64_t>(args));
+      testers.push_back(new FcollectWaveTester<int>(args));
+      testers.push_back(new FcollectWaveTester<long long>(args));
+      testers.push_back(new FcollectWaveTester<float>(args));
+      testers.push_back(new FcollectWaveTester<double>(args));
+      testers.push_back(new FcollectWaveTester<char>(args));
+      testers.push_back(new FcollectWaveTester<unsigned char>(args));
       break;
     case AMO_FAddTestType:
       test_name = "AMO Fetch_Add";
@@ -707,6 +908,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get Arbitrary Strides";
       testers.push_back(new TileRMATester(args));
       break;
+    case HostTeamSyncBarrierTestType:
+      test_name = "Host Team Sync/Barrier";
+      testers.push_back(new HostTeamSyncBarrierTester(args));
+      break;
     case ReduceOnStreamTestType:
       test_name = "Reduce On Stream";
       testers.push_back(new ReduceOnStreamTester(args));
@@ -717,6 +922,30 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TeamSplit2DTestType:
       test_name = "Team Split 2D";
       testers.push_back(new TeamSplit2DTester(args));
+      break;
+    case TileBroadcastTestType:
+      test_name = "Tile Broadcast";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileBroadcastWaveTestType:
+      test_name = "Tile Broadcast Wave-Collective";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileBroadcastWGTestType:
+      test_name = "Tile Broadcast Workgroup-Collective";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileAllgatherTestType:
+      test_name = "Tile Allgather";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
+    case TileAllgatherWaveTestType:
+      test_name = "Tile Allgather Wave-Collective";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
+    case TileAllgatherWGTestType:
+      test_name = "Tile Allgather Workgroup-Collective";
+      testers.push_back(new TileAllgatherTester(args));
       break;
     default:
       test_name = "Empty";
@@ -824,6 +1053,9 @@ bool Tester::peLaunchesKernel() {
   switch (_type) {
     case ReduceOnStreamTestType:
     case TeamReductionTestType:
+    case TeamReduceScatterTestType:
+    case ReduceWaveTestType:
+    case TeamReduceScatterWaveTestType:
     case TeamBroadcastTestType:
     case TeamCtxInfraTestType:
     case TeamCtxInfraSingleTestType:
@@ -834,6 +1066,7 @@ bool Tester::peLaunchesKernel() {
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamFCollectTestType:
+    case FcollectWaveTestType:
     case PingPongTestType:
     case BarrierAllTestType:
     case WAVEBarrierAllTestType:
@@ -873,6 +1106,37 @@ bool Tester::peLaunchesKernel() {
     case FenceOrderPutLargeSmallTestType:
     case FenceOrderFanoutTestType:
     case FenceOrderPutWaveNbiChunksTestType:
+    case TileBroadcastTestType:
+    case TileBroadcastWaveTestType:
+    case TileBroadcastWGTestType:
+    case TileAllgatherTestType:
+    case TileAllgatherWaveTestType:
+    case TileAllgatherWGTestType:
+    case BroadcastWaveTestType:
+    case AllToAllWaveTestType:
+      is_launcher = true;
+      break;
+    case HostPutmemTestType:
+    case HostGetmemTestType:
+    case HostAmoFAddTestType:
+    case HostAmoFCswapTestType:
+    case HostCtxPutmemTestType:
+    case HostCtxGetmemTestType:
+    case HostIntAmoFAddTestType:
+    case HostIntAmoFCswapTestType:
+    case HostAmoAllPesTestType:
+    case HostAmoSelfTestType:
+    case HostWaitUntilTestType:
+    case HostTestTestType:
+    case HostWaitUntilAllTestType:
+    case HostWaitUntilAnyTestType:
+    case HostWaitUntilSomeTestType:
+    case HostWaitUntilAllVectorTestType:
+    case HostWaitUntilAnyVectorTestType:
+    case HostWaitUntilSomeVectorTestType:
+    case HostWaitUntilAllStatusTestType:
+    case HostWaitUntilAnyStatusTestType:
+    case HostWaitUntilSomeStatusTestType:
       is_launcher = true;
       break;
     default:

@@ -4,54 +4,106 @@
 
 #include "gsl_assert.h"
 
-const char* MockInputParameters::get_output_path()
+#include <utility>
+
+std::string_view MockInputParameters::get_output_path()
 {
-    return m_output_path.c_str();
+    if (!m_output_path_set || m_output_path.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::kDefaultOutputPath;
+    return std::string_view{m_output_path};
 }
 
-const char* MockInputParameters::get_requested_counters()
+std::string_view MockInputParameters::get_requested_counters()
 {
-    return m_requested_counters.c_str();
+    if (!m_requested_counters_set || m_requested_counters.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::kDefaultRequestedCounters;
+    return std::string_view{m_requested_counters};
 }
 
-const char* MockInputParameters::get_iteration_multiplexing_mode()
+std::string_view MockInputParameters::get_iteration_multiplexing_mode()
 {
-    return m_iteration_multiplexing_mode.c_str();
+    if (!m_iteration_multiplexing_mode_set || m_iteration_multiplexing_mode.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::kDefaultIterationMultiplexingMode;
+    return std::string_view{m_iteration_multiplexing_mode};
 }
 
-const char* MockInputParameters::get_kernel_filter_include_regex()
+std::string_view MockInputParameters::get_kernel_filter_include_regex()
 {
-    return m_kernel_filter_include_regex.c_str();
+    if (!m_kernel_filter_include_regex_set || m_kernel_filter_include_regex.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::kDefaultKernelFilterIncludeRegex;
+    return std::string_view{m_kernel_filter_include_regex};
 }
 
-const char* MockInputParameters::get_kernel_filter_range()
+std::string_view MockInputParameters::get_kernel_filter_range()
 {
-    return m_kernel_filter_range.c_str();
+    if (!m_kernel_filter_range_set || m_kernel_filter_range.empty())
+        return rocprofiler_compute_tool::EnvInputParameters::kDefaultKernelFilterRange;
+    return std::string_view{m_kernel_filter_range};
+}
+
+std::string_view MockInputParameters::get_pc_sampling_method()
+{
+    return std::string_view{m_pc_sampling_method};
+}
+
+void MockInputParameters::set_pc_sampling_method(const std::string& method)
+{
+    m_pc_sampling_method = method;
 }
 
 void MockInputParameters::set_output_path(const std::string& output_path)
 {
-    m_output_path = output_path;
+    m_output_path     = output_path;
+    m_output_path_set = true;
 }
 
 void MockInputParameters::set_requested_counters(const std::string& counters)
 {
-    m_requested_counters = counters;
+    m_requested_counters     = counters;
+    m_requested_counters_set = true;
 }
 
 void MockInputParameters::set_iteration_multiplexing_mode(const std::string& mode)
 {
-    m_iteration_multiplexing_mode = mode;
+    m_iteration_multiplexing_mode     = mode;
+    m_iteration_multiplexing_mode_set = true;
 }
 
 void MockInputParameters::set_kernel_filter_include_regex(const std::string& regex)
 {
-    m_kernel_filter_include_regex = regex;
+    m_kernel_filter_include_regex     = regex;
+    m_kernel_filter_include_regex_set = true;
 }
 
 void MockInputParameters::set_kernel_filter_range(const std::string& range)
 {
-    m_kernel_filter_range = range;
+    m_kernel_filter_range     = range;
+    m_kernel_filter_range_set = true;
+}
+
+void MockInputParameters::unset_output_path()
+{
+    m_output_path_set = false;
+}
+
+void MockInputParameters::unset_requested_counters()
+{
+    m_requested_counters_set = false;
+}
+
+void MockInputParameters::unset_iteration_multiplexing_mode()
+{
+    m_iteration_multiplexing_mode_set = false;
+}
+
+void MockInputParameters::unset_kernel_filter_include_regex()
+{
+    m_kernel_filter_include_regex_set = false;
+}
+
+void MockInputParameters::unset_kernel_filter_range()
+{
+    m_kernel_filter_range_set = false;
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -170,6 +222,18 @@ const std::vector<MockSdkWrapper::create_counter_config_info>& MockSdkWrapper::g
     return m_create_counter_config_info;
 }
 
+void MockSdkWrapper::at_intercept_table_registration_hsa(rocprofiler_intercept_library_cb_t callback,
+                                                         void* user_data)
+{
+    m_hsa_intercept_registration_info.push_back({callback, user_data});
+}
+
+const std::vector<MockSdkWrapper::hsa_intercept_registration_info>&
+    MockSdkWrapper::get_hsa_intercept_registration_info() const
+{
+    return m_hsa_intercept_registration_info;
+}
+
 const std::vector<MockSdkWrapper::query_counter_record_info>& MockSdkWrapper::get_query_counter_record_info() const
 {
     return m_query_counter_record_info;
@@ -191,4 +255,91 @@ void MockCountersWriter::write_counters(rocprofiler_compute_tool::tool_data_t* t
 const std::vector<MockCountersWriter::write_counters_info>& MockCountersWriter::get_write_counters_info() const
 {
     return m_write_counters_args;
+}
+
+void MockCodeObjectWriter::start_code_obj(size_t obj_id)
+{
+    m_empty = false;
+    m_start_code_obj_ids.push_back(obj_id);
+}
+
+void MockCodeObjectWriter::end_code_obj() {}
+
+void MockCodeObjectWriter::start_symbol(const rocprofiler_compute_tool::symbol_t& /*symbol*/)
+{
+    m_empty = false;
+}
+
+void MockCodeObjectWriter::end_symbol() {}
+
+void MockCodeObjectWriter::write_instruction(const rocprofiler_compute_tool::instruction_t& /*inst*/)
+{
+    m_empty = false;
+}
+
+std::string MockCodeObjectWriter::get_result()
+{
+    return {};
+}
+
+void MockCodeObjectWriter::flush(const std::filesystem::path& output_file_path)
+{
+    m_flush_calls.push_back(output_file_path);
+}
+
+bool MockCodeObjectWriter::empty() const
+{
+    return m_empty;
+}
+
+const std::vector<size_t>& MockCodeObjectWriter::get_start_code_obj_ids() const
+{
+    return m_start_code_obj_ids;
+}
+
+const std::vector<std::filesystem::path>& MockCodeObjectWriter::get_flush_calls() const
+{
+    return m_flush_calls;
+}
+
+void MockPcSamplingCollector::on_code_object_load(
+    const rocprofiler_callback_tracing_code_object_load_data_t& /*info*/)
+{
+    ++load_count;
+}
+
+void MockPcSamplingCollector::finalize(rocprofiler_compute_tool::code_object_writer_t& writer)
+{
+    ++finalize_count;
+    if (!m_has_code_objects)
+        return;
+
+    writer.start_code_obj(1);
+    writer.end_code_obj();
+}
+
+void MockPcSamplingCollector::set_has_code_objects(bool has_code_objects)
+{
+    m_has_code_objects = has_code_objects;
+}
+
+const std::set<std::filesystem::path>& MockPcSamplingCollector::get_source_paths() const
+{
+    return m_source_paths;
+}
+
+void MockPcSamplingCollector::set_source_paths(const std::set<std::filesystem::path>& source_paths)
+{
+    m_source_paths = source_paths;
+}
+
+void MockSourceSnapshotter::snapshot(const std::set<std::filesystem::path>& source_paths,
+                                     const std::filesystem::path&           destination_root)
+{
+    m_snapshot_calls.push_back({source_paths, destination_root});
+}
+
+const std::vector<MockSourceSnapshotter::snapshot_call_t>& MockSourceSnapshotter::get_snapshot_calls() const
+{
+    return m_snapshot_calls;
 }

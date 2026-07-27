@@ -136,7 +136,7 @@ extern "C" __global__ void test_typed_float_put_get(
 }
 
 extern "C" __global__ void test_typed_atomic(
-    int64_t *sym_counter, int64_t *out_old, int my_pe, int n_pes)
+    int64_t *sym_counter, int64_t *out_old, int my_pe, [[maybe_unused]] int n_pes)
 {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     int64_t old = rocshmem_int64_atomic_fetch_add(sym_counter, 10, my_pe);

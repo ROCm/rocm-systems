@@ -18,6 +18,8 @@ pytestmark = [
     pytest.mark.xnack,
     pytest.mark.hip,
     pytest.mark.kfd,
+    # rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
+    pytest.mark.rocprofiler_sdk_min_version("1.2.2"),
 ]
 
 # =============================================================================
@@ -65,6 +67,9 @@ class TestKFD(RocprofsysTest):
       - Unmap-from-GPU events (MMU notify, migrate, unmap from CPU)
     """
 
+    UM_DEFAULT_TEST_PASS_REGEX = ["9 tests completed"]
+    UM_ALL_TEST_PASS_REGEX = ["19 tests completed"]
+
     run_args = ["-s", "32", "-p", "256", "-i", "4"]
 
     @pytest.mark.timeout(120)
@@ -85,7 +90,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"6 tests completed"],
+            pass_regex=self.UM_DEFAULT_TEST_PASS_REGEX,
         )
 
         self.assert_perfetto(
@@ -110,6 +115,7 @@ class TestKFD(RocprofsysTest):
             subtest_name="Perfetto KFD queue validation",
             categories=["rocm_kfd_queue"],
             print_output=True,
+            pass_regex=[r"QUEUE_EVICT_SVM"],
         )
 
         self.assert_perfetto(
@@ -150,7 +156,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"6 tests completed"],
+            pass_regex=self.UM_DEFAULT_TEST_PASS_REGEX,
         )
 
         if not is_apu:
@@ -167,6 +173,7 @@ class TestKFD(RocprofsysTest):
             subtest_name="Perfetto KFD queue validation",
             categories=["rocm_kfd_queue"],
             print_output=True,
+            pass_regex=[r"QUEUE_EVICT_SVM"],
         )
 
         if not is_apu:
@@ -218,7 +225,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"16 tests completed"],
+            pass_regex=self.UM_ALL_TEST_PASS_REGEX,
         )
 
         self.assert_perfetto(
@@ -243,6 +250,7 @@ class TestKFD(RocprofsysTest):
             subtest_name="Perfetto KFD queue validation (pressure)",
             categories=["rocm_kfd_queue"],
             print_output=True,
+            pass_regex=[r"QUEUE_EVICT_SVM"],
         )
 
         self.assert_perfetto(

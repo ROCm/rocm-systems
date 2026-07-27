@@ -25,15 +25,18 @@
 
 #include <stdint.h>
 
+#include <algorithm>
 #include <set>
 #include <map>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "lib/aqlprofile/aqlprofile.hpp"  // aqlprofile_cu_bitmap_t (gated aql_profile_v2.h)
 #include "lib/aqlprofile/def/gpu_block_info.h"
 #include "lib/aqlprofile/pm4/cmd_config.h"
-#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"  // AgentInfo
 
 namespace pm4_builder
 {
@@ -77,7 +80,7 @@ public:
     {
         if(is_mi300_)
         {
-            // PRED_EXEC aplies to MI300 only
+            // PRED_EXEC applies to MI300 only
             pos_ = cmd_buffer->DwSize();
             builder.BuildPredExecPacket(cmd_buffer, target_xcc_, 0);
             initial_buff_size_ = cmd_buffer->DwSize();
@@ -88,7 +91,7 @@ public:
     {
         if(is_mi300_)
         {
-            // PRED_EXEC aplies to MI300 only
+            // PRED_EXEC applies to MI300 only
             CmdBuffer pred_exec;
             // update first PRED_EXEC packet to its correct value
             builder.BuildPredExecPacket(
@@ -153,6 +156,13 @@ private:
     // TODO: Temporary patch for gfx1250's asymmetric CU design, will remove
     //       after CU mask support is added to agent_info
     bool asymmetric_cu_patch;
+
+    // Per-(SE, SA) CU-activity mask (2 CU bits per WGP) from the DRM cu_bitmap.
+    // bIsWGPcounter11 reads active WGPs and zero-fills harvested ones (reading a
+    // harvested WGP aliases onto an active one). Indexed by physical WGP slot, so
+    // no remap is needed and the emitted sample count stays == GetNumWGPs().
+    // Synthesized fully-active when no bitmap is present (V0/V1 agents).
+    std::vector<std::vector<uint32_t>> sa_cu_mask_;
 
     void DebugTrace(uint32_t value)
     {
@@ -282,18 +292,73 @@ private:
                    : instance_index;
     }
 
+    // Populate sa_cu_mask_[se][sa] from the agent cu_bitmap; on GFX11 also grow
+    // wgp_per_sa_ to the physical WGP span (highest active WGP + 1) so the read
+    // loop's fixed [0, wgp_per_sa_) bound reaches a middle-harvested WGP (e.g.
+    // gfx1151 active {0,1,2,4} -> span 5). GFX12 keeps its cu_num-derived count.
+    //
+    // Each logical (se, sa) maps to a raw bitmap slot: when logical SEs exceed
+    // the bitmap's SE dimension, upper SEs fold into higher SA columns, mirroring
+    // the kernel's gfx_v11_0_get_cu_info packing cu_bitmap[i%4][j+(i/4)*sh_per_se]
+    // (validated on Navi31, 6 SE; else SE 4-5 would miss the bitmap). Out-of-window
+    // or empty entries fall back to fully active (cu_bitmap.bits is fixed-size;
+    // out-of-window reads would be UB).
+    void build_sa_cu_mask(const AgentInfo* agent_info)
+    {
+        // Fits Navi31 (6 x 2), MI200 (8 x 1), and any future SE x SA-per-SE
+        // topology too large for a hardcoded kMaxSA.
+        sa_cu_mask_.assign(se_number_, std::vector<uint32_t>(sarrays_per_se_, 0u));
+
+        constexpr uint32_t kMaxWgpPerSa  = 16;
+        constexpr uint32_t bitmap_se_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
+        constexpr uint32_t bitmap_sa_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
+        // Highest active WGP index across all SAs (physical span = index + 1).
+        uint32_t max_wgp_index = 0;
+        for(uint32_t se = 0; se < se_number_; ++se)
+        {
+            for(uint32_t sa = 0; sa < sarrays_per_se_; ++sa)
+            {
+                const uint32_t raw_se = se % bitmap_se_lim;
+                const uint32_t raw_sa = sa + (se / bitmap_se_lim) * sarrays_per_se_;
+
+                uint32_t cu_bm = (raw_se < bitmap_se_lim && raw_sa < bitmap_sa_lim)
+                                     ? agent_info->cu_bitmap.bits[raw_se][raw_sa]
+                                     : 0u;
+                if(cu_bm == 0)
+                {
+                    // No bitmap: synthesize a fully-active mask. Guards avoid UB:
+                    // clz(0), and (1u << 32) when wgp_per_sa_ spans the full
+                    // 32-bit window (16 WGPs * 2 CU bits).
+                    if(wgp_per_sa_ == 0) continue;
+                    cu_bm = (wgp_per_sa_ >= kMaxWgpPerSa) ? ~0u : ((1u << (wgp_per_sa_ * 2u)) - 1u);
+                }
+                sa_cu_mask_.at(se).at(sa) = cu_bm;
+
+                const uint32_t max_cu_bit = 31u - __builtin_clz(cu_bm);
+                const uint32_t max_wgp    = max_cu_bit / 2u;
+                if(max_wgp > max_wgp_index) max_wgp_index = max_wgp;
+            }
+        }
+
+        if constexpr(Primitives::GFXIP_LEVEL == 11)
+            wgp_per_sa_ = std::max(wgp_per_sa_, max_wgp_index + 1);
+    }
+
 public:
     explicit GpuPmcBuilder(const AgentInfo* agent_info)
     : PmcBuilder()
-    , builder(acquire_ip_offset_table(agent_info))
     , se_number_(agent_info->se_num / agent_info->xcc_num)
+    , sarrays_per_se_(agent_info->shader_arrays_per_se)
     , xcc_number_(agent_info->xcc_num)
     , xcc_per_aid_(agent_info->xcc_per_aid)
-    , sarrays_per_se_(agent_info->shader_arrays_per_se)
+    , builder(acquire_ip_offset_table(agent_info))
     {
         this->wgp_per_sa_ = (agent_info->cu_num / 2 + sarrays_per_se_ * se_number_ - 1) /
                             (se_number_ * sarrays_per_se_);
         this->wgp_per_sa_ /= agent_info->xcc_num;
+
+        build_sa_cu_mask(agent_info);
+
         // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
         // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
         builder.bUsePerfCounterMode = (xcc_number_ > 1) ? false : true;
@@ -306,7 +371,7 @@ public:
         return 1;
     };
 
-    // Build PMC enable PM4 comands - enable CP counting for a specific queue
+    // Build PMC enable PM4 commands - enable CP counting for a specific queue
     void Enable(CmdBuffer* cmd_buffer)
     {
         // Program Compute Perfcount Enable register to support perf counting
@@ -314,7 +379,7 @@ public:
                                       Primitives::COMPUTE_PERFCOUNT_ENABLE_ADDR,
                                       Primitives::cp_perfcount_enable_value());
     }
-    // Build PMC disable PM4 comands - enable CP counting for a specific queue
+    // Build PMC disable PM4 commands - enable CP counting for a specific queue
     void Disable(CmdBuffer* cmd_buffer)
     {
         // Program Compute Perfcount Enable register to support perf counting
@@ -322,14 +387,14 @@ public:
                                       Primitives::COMPUTE_PERFCOUNT_ENABLE_ADDR,
                                       Primitives::cp_perfcount_disable_value());
     }
-    // Build PMC waite-idle PM4 comands - enable CP counting for a specific queue
+    // Build PMC waite-idle PM4 commands - enable CP counting for a specific queue
     void WaitIdle(CmdBuffer* cmd_buffer)
     {
         // Program Compute Perfcount WaiteIdle register to support perf counting
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }
 
-    // Build PMC start PM4 comands
+    // Build PMC start PM4 commands
     void Start(CmdBuffer* cmd_buffer, const counters_vector& counters_vec) override
     {
         // Issue barrier command
@@ -346,7 +411,7 @@ public:
         // Reset perf counters
         SetPerfmonCntl(
             cmd_buffer, Primitives::cp_perfmon_cntl_reset_value(), counters_vec.get_attr());
-        // Enable SQ Counter Control enable perfomance counter in graphics pipeline if implied
+        // Enable SQ Counter Control enable performance counter in graphics pipeline if implied
         Primitives::validate_counters(counters_vec.get_attr());
         if(counters_vec.get_attr() & CounterBlockTcAttr)
         {
@@ -472,7 +537,7 @@ public:
                 }
                 else
                 {
-                    // MI200 and MI300 have seperate select and control registers
+                    // MI200 and MI300 have separate select and control registers
                     const auto sdma_index = counter_des.block_des.index;
                     const auto target_aid_index =
                         sdma_index / (block_info->instance_count / MAX_AID);
@@ -746,7 +811,7 @@ public:
             }
             else if(block_info->attr & CounterBlockSdmaAttr)
             {
-                // Stop SDMA: this code path appplies only to non-MI300
+                // Stop SDMA: this code path applies only to non-MI300
                 if(reg_info.control_addr.offset == 0)
                 {
                     // MI100: stopped per instance
@@ -826,28 +891,41 @@ public:
 
                         if(bIsWGPcounter11)
                         {
-                            for(int wgp = 0; wgp < wgp_per_sa_; wgp++)
+                            // Read active WGPs at their physical slot; zero-fill
+                            // harvested ones (see sa_cu_mask_). Fixed [0, wgp_per_sa_)
+                            // bound == GetNumWGPs(), so no remap and the reader
+                            // stays in sync.
+                            const uint32_t cu_bm = sa_cu_mask_.at(se_index).at(sarray);
+                            for(uint32_t wgp = 0; wgp < wgp_per_sa_; ++wgp)
                             {
-                                if(block_info->instance_count > 1)
-                                    grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(
-                                        block_des.index, se_index, sarray, wgp);
-                                else
-                                    grbm_value = Primitives::grbm_se_sh_wgp_index_value(
-                                        se_index, sarray, wgp);
-                                SetGrbmGfxIndex(cmd_buffer, grbm_value);
-                                uint32_t dw_mask = reg_info.register_addr_hi.offset ? 3 : 1;
-                                builder.BuildCopyCounterDataPacket(cmd_buffer,
-                                                                   reg_info.register_addr_lo,
-                                                                   reg_info.register_addr_hi,
-                                                                   buf + read_counter,
-                                                                   dw_mask);
-                                if(buf && (dw_mask == 1)) buf[read_counter + 1] = 0;
+                                if(cu_bm & (3u << (wgp * 2)))
+                                {
+                                    if(block_info->instance_count > 1)
+                                        grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(
+                                            block_des.index, se_index, sarray, wgp);
+                                    else
+                                        grbm_value = Primitives::grbm_se_sh_wgp_index_value(
+                                            se_index, sarray, wgp);
+                                    SetGrbmGfxIndex(cmd_buffer, grbm_value);
+                                    uint32_t dw_mask = reg_info.register_addr_hi.offset ? 3 : 1;
+                                    builder.BuildCopyCounterDataPacket(cmd_buffer,
+                                                                       reg_info.register_addr_lo,
+                                                                       reg_info.register_addr_hi,
+                                                                       buf + read_counter,
+                                                                       dw_mask);
+                                    if(buf && (dw_mask == 1)) buf[read_counter + 1] = 0;
+                                }
+                                else if(buf != nullptr)
+                                {
+                                    buf[read_counter]     = 0;
+                                    buf[read_counter + 1] = 0;
+                                }
                                 read_counter += 2;
                             }
                         }
                         else if(bIsWGPcounter12)
                         {
-                            for(int wgp = 0; wgp < wgp_per_sa_; wgp++)
+                            for(uint32_t wgp = 0; wgp < wgp_per_sa_; wgp++)
                             {
                                 // TODO: This patch is needed to avoid soft-hang for some WGP
                                 //       blocks, will remove after CU mask support is added to
@@ -907,7 +985,7 @@ public:
         return read_counter * sizeof(uint32_t);
     }
 
-    // Build PMC stop PM4 comands
+    // Build PMC stop PM4 commands
     void Stop(CmdBuffer* cmd_buffer, const counters_vector& counters_vec) override
     {
         GCMode gc_mode =
@@ -1003,7 +1081,7 @@ public:
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }
 
-    // Build PMC read PM4 comands
+    // Build PMC read PM4 commands
     uint32_t Read(CmdBuffer*             cmd_buffer,
                   const counters_vector& counters_vec,
                   void*                  data_buffer) override

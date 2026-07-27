@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from utils.logger import console_error, console_warning, demarcate
+from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
@@ -21,8 +22,9 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import SUPPORTED_FIELD, calc_builtin_var
-from utils.utils_counter_defs import get_build_in_vars
+from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
+from utils.utils_common import SUPPORTED_FIELD
+from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
@@ -38,17 +40,25 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
             "FP16Flops",
             "FP32Flops",
             "FP64Flops",
+            "MFMAF6F4Flops",
             "MFMAF64Flops",
             "MFMAF32Flops",
             "MFMAF16Flops",
             "MFMABF16Flops",
             "MFMAF8Flops",
             "MFMAI8Ops",
+            "WMMAF6F4Flops",
+            "WMMAF64Flops",
+            "WMMAF32Flops",
+            "WMMAF16Flops",
+            "WMMABF16Flops",
+            "WMMAF8Flops",
+            "WMMAI8Ops",
             "HBMBw",
             "L2Bw",
             "L1Bw",
+            "L0Bw",
             "LDSBw",
-            "MFMAF6F4Flops",
         ]
         # initialize peaks to NaN
         for peak_name in peak_names:
@@ -60,41 +70,50 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
 def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
     """Create variables from sys.info."""
     sys_vars_collection = {}
+    sys_info_dict = sys_info.to_dict()
 
-    sys_vars_config = [
-        ("se_per_gpu", int, "se_per_gpu"),
-        ("pipes_per_gpu", int, "pipes_per_gpu"),
-        ("cu_per_gpu", int, "cu_per_gpu"),
-        ("simd_per_cu", int, "simd_per_cu"),
-        ("sqc_per_gpu", int, "sqc_per_gpu"),
-        ("lds_banks_per_cu", int, "lds_banks_per_cu"),
-        ("cur_sclk", float, "cur_sclk"),
-        ("cur_mclk", float, "cur_mclk"),
-        ("max_mclk", float, "max_mclk"),
-        ("max_sclk", float, "max_sclk"),
-        ("max_waves_per_cu", int, "max_waves_per_cu"),
-        ("num_hbm_channels", float, "num_hbm_channels"),
-        ("num_xcd", int, "num_xcd"),
-        ("wave_size", int, "wave_size"),
+    # Present for every arch; warn when missing or zero.
+    required_sys_vars = [
+        ("se_per_gpu", int),
+        ("pipes_per_gpu", int),
+        ("cu_per_gpu", int),
+        ("simd_per_cu", int),
+        ("sqc_per_gpu", int),
+        ("lds_banks_per_cu", int),
+        ("cur_sclk", float),
+        ("cur_mclk", float),
+        ("max_mclk", float),
+        ("max_sclk", float),
+        ("max_waves_per_cu", int),
+        ("wave_size", int),
+        ("total_l2_chan", int),
+    ]
+    # Arch-specific; silently skipped when the column is absent.
+    optional_sys_vars = [
+        ("num_memory_channels", float),
+        ("num_gl1c", int),
     ]
 
-    for var_name, var_type, attr_name in sys_vars_config:
-        variable_value = var_type(getattr(sys_info, attr_name))
-        if np.isnan(variable_value) or variable_value == 0:
+    for var_name, var_type in required_sys_vars:
+        raw_value = sys_info_dict.get(var_name)
+        if pd.isna(raw_value) or var_type(raw_value) == 0:
             console_warning(
-                f"{attr_name} is not available in sysinfo.csv, please provide the "
+                f"{var_name} is not available in sysinfo.csv, please provide the "
                 "correct value using --specs-correction"
             )
-        sys_vars_collection[f"ammolite__{var_name}"] = variable_value
+            raw_value = 0
+        sys_vars_collection[f"ammolite__{var_name}"] = var_type(raw_value)
 
-    # Special case for total_l2_chan
-    total_l2_channel_count = calc_builtin_var("$total_l2_chan", sys_info.to_dict())
-    if np.isnan(total_l2_channel_count) or total_l2_channel_count == 0:
-        console_warning(
-            "total_l2_chan is not available in sysinfo.csv, please provide the correct "
-            "value using --specs-correction"
-        )
-    sys_vars_collection["ammolite__total_l2_chan"] = total_l2_channel_count
+    for var_name, var_type in optional_sys_vars:
+        raw_value = sys_info_dict.get(var_name)
+        if not pd.isna(raw_value):
+            sys_vars_collection[f"ammolite__{var_name}"] = var_type(raw_value)
+
+    # num_xcd is a CDNA-only concept; RDNA is single-die, so default to 1.
+    raw_num_xcd = sys_info_dict.get("num_xcd")
+    sys_vars_collection["ammolite__num_xcd"] = (
+        1 if pd.isna(raw_num_xcd) else int(raw_num_xcd)
+    )
 
     return sys_vars_collection
 
@@ -103,12 +122,20 @@ def calc_builtin_vars(
     raw_pmc_df: pd.DataFrame,
     sys_vars: dict[str, int | float],
     gpu_arch: str,
+    expressions: list[str],
 ) -> dict[str, Optional[str | float | int]]:
-    """Calculate built-in variables."""
+    """Evaluate built-in variables referenced by expressions."""
     # TODO: fix all $normUnit in Unit column or title
-    # build and eval all derived build-in global variables
     builtin_vars_collection = {}
-    build_in_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(gpu_arch))
+    gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
+    _, expression_builtin_vars = extract_counters_and_variables(
+        "\n".join(expressions), gpu_series
+    )
+    build_in_vars = {
+        k: v
+        for k, v in get_build_in_vars(gpu_series).items()
+        if k in expression_builtin_vars
+    }
 
     # First pass: calculate per-XCD values
     for variable_key, variable_value in build_in_vars.items():
@@ -153,6 +180,7 @@ def calc_builtin_vars(
 def eval_metric(
     dfs: dict,
     dfs_type: dict,
+    dfs_expressions: dict[int, list[str]],
     sys_info: pd.Series,
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
@@ -171,7 +199,15 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(raw_pmc_df, sys_vars, sys_info["gpu_arch"])
+    expressions = [
+        expr
+        for df_id in dfs
+        if dfs_type.get(df_id) == "metric_table"
+        for expr in dfs_expressions.get(df_id, [])
+    ]
+    builtin_vars = calc_builtin_vars(
+        raw_pmc_df, sys_vars, sys_info["gpu_arch"], expressions
+    )
     sys_vars.update(builtin_vars)
 
     # Clear any previous noise clamp warnings before this analysis
@@ -193,7 +229,10 @@ def eval_metric(
         if dfs_type[df_id] == "metric_table":
             for row_id, row in df.iterrows():
                 for expr in df.columns:
-                    if expr in SUPPORTED_FIELD and expr.lower() != "alias":
+                    if expr in SUPPORTED_FIELD and expr.lower() not in {
+                        "alias",
+                        "percent of peak",
+                    }:
                         if row[expr]:
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
@@ -230,8 +269,37 @@ def eval_metric(
     # Print aggregated summary of any noise clamping warnings
     print_noise_clamp_summary()
 
+    # Derive Percent of Peak from evaluated Value and Peak columns
+    compute_pct_of_peak(dfs, dfs_type)
+
     # Check for metrics exceeding theoretical peak due to dual-issue
     validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
+
+
+def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
+    """Compute and store 100 * value / peak for each row where pct_of_peak is True."""
+    pct_of_peak_col = "Percent of Peak"
+    for df_id, df in dfs.items():
+        if dfs_type[df_id] != "metric_table":
+            continue
+        if pct_of_peak_col not in df.columns:
+            continue
+
+        # Detect value and peak columns using canonical preference order
+        value_col = next(
+            (col for col in VALUE_COL_PREFERENCE if col in df.columns), None
+        )
+        peak_col = next((col for col in PEAK_COL_PREFERENCE if col in df.columns), None)
+        if not value_col or not peak_col:
+            continue
+
+        # astype(bool) handles both Python bool and numpy.bool_ from pandas dtypes
+        mask = df[pct_of_peak_col].astype(bool)
+        df[pct_of_peak_col] = ""
+        df.loc[mask, pct_of_peak_col] = [
+            pct if (pct := calc_pct_of_peak(v, p)) is not None else ""
+            for v, p in zip(df.loc[mask, value_col], df.loc[mask, peak_col])
+        ]
 
 
 def validate_dual_issue_metrics(

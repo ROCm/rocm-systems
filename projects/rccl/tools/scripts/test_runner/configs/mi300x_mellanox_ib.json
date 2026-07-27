@@ -1,7 +1,7 @@
 {
   "system_configurations": {
     "name": "RCCL-Tests-MI300X-Mellanox-IB",
-    "description": "Comprehensive RCCL Test Configuration - All Tests"
+    "description": "Comprehensive RCCL Test Configuration - All gtest unit/MPI tests plus rccl-tests perf binaries sweeping RCCL environment variables."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
@@ -19,14 +19,54 @@
     "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942",
     "parallel_jobs": 64
   },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
+    "install_script": "install.sh",
+    "install_flags": [
+      "--mpi",
+      "--enable-device-api",
+      "--gpu_targets",
+      "gfx942"
+    ],
+    "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/debug}",
+    "env_variables": {}
+  },
   "test_configurations": {
     "default": {
       "env_variables": {
-        "NCCL_LAUNCH_MODE": "GROUP"
       },
       "rerun_env_variables": {
         "NCCL_DEBUG": "INFO"
       }
+    },
+    "net_device_count_mismatch": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "description": "AICOMRCCL-1213: per-rank Net device-count mismatch handling (localNetDeviceCount AllGather + NCCL_IGNORE_NET_MISMATCH abort). The test forces the socket net and a different NCCL_SOCKET_IFNAME per rank so ncclNet->devices() differs across ranks; rank 0 gates the verdict. Each mode runs in its own process (NCCL_PARAM is cached per process).",
+      "tests": [
+        {
+          "name": "NetDeviceCountMismatch_Ignore",
+          "description": "NCCL_IGNORE_NET_MISMATCH=1 (default): mismatch detected and tolerated, init succeeds on all ranks",
+          "test_filter": "CommNetMismatchMPITest.NetDeviceCountMismatch",
+          "env_variables": {
+            "NCCL_IGNORE_NET_MISMATCH": "1"
+          }
+        },
+        {
+          "name": "NetDeviceCountMismatch_Abort",
+          "description": "NCCL_IGNORE_NET_MISMATCH=0: mismatch detected, rank 0 fails init with ncclSystemError",
+          "test_filter": "CommNetMismatchMPITest.NetDeviceCountMismatch",
+          "env_variables": {
+            "NCCL_IGNORE_NET_MISMATCH": "0"
+          }
+        }
+      ]
     },
     "shm_comprehensive": {
       "extends": "default",
@@ -126,6 +166,80 @@
           "name": "P2P_AllTests",
           "description": "All peer-to-peer transport tests",
           "test_filter": "P2pMPITest.*"
+        }
+      ]
+    },
+    "ubr_multisegment_comprehensive": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic",
+          "description": "Out-of-place AllReduce on a buffer spanning multiple VMM segments (multi-segment registration branch on Ring AllReduce)",
+          "test_filter": "UBR_MultiSegment.Generic"
+        },
+        {
+          "name": "UBR_MultiSegment_Generic_Reuse",
+          "description": "Register once, AllReduce twice - exercises the multi-segment registration reuse fast path (IPC or NET reuse)",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse"
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Lsa",
+          "description": "Multi-segment registration on the symmetric-window LSA path (ncclCommWindowRegister, NCCL_WIN_COLL_SYMMETRIC)",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
+          "description": "LSA-only elastic buffer: symmetric window with a host-backed trailing segment (NCCL_ELASTIC_BUFFER_REGISTER=1)",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Elastic_Gating",
+          "description": "Elastic buffer gating: host-backed symmetric window must be rejected when NCCL_ELASTIC_BUFFER_REGISTER=0",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Gating",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        }
+      ]
+    },
+    "ubr_multisegment_lsagin_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Symmetric_LsaGin",
+          "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
         }
       ]
     },
@@ -243,6 +357,7 @@
     },
     "net_ib_transfer": {
       "extends": "net_ib_base",
+      "timeout": 300,
       "env_variables": {
         "NCCL_DEBUG": "TRACE",
         "NCCL_DEBUG_SUBSYS": "NET,INIT"
@@ -272,24 +387,27 @@
         {
           "name": "NetIB_Xfer_DifferentMemoryTypes",
           "description": "Send/recv with mixed host and GPU memory buffers",
-          "test_filter": "NetIbMPITest.SendRecvDifferentMemoryTypes"
+          "test_filter": "NetIbMPITest.SendRecvDifferentMemoryTypes",
+          "timeout": 300
         },
         {
           "name": "NetIB_Xfer_MultipleSizesFusion",
           "description": "Send/recv multiple buffer sizes through fused vNIC",
-          "test_filter": "NetIbMPITest.SendRecvMultipleSizesFusion"
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizesFusion",
+          "timeout": 300
         },
         {
           "name": "NetIB_Xfer_MultipleOutstanding",
           "description": "Multiple outstanding send/recv requests in flight simultaneously",
-          "test_filter": "NetIbMPITest.MultipleOutstandingSendRecv"
+          "test_filter": "NetIbMPITest.MultipleOutstandingSendRecv",
+          "timeout": 300
         }
       ]
     },
     "net_ib_coverage_env": {
       "extends": "net_ib_base",
       "timeout": 300,
-      "_comment": "Coverage-oriented re-run of core transfer tests under alternate IB env. GID_INDEX=-1 forces RoCE GID auto-select (the auto-select path is skipped when a fixed index is pinned); PCI_RELAXED_ORDERING=0 exercises the relaxed-ordering-disabled registration/connect paths; ADAPTIVE_ROUTING=1 reaches the adaptive-routing threshold path. Env knobs are NIC-agnostic.",
+      "description": "Coverage-oriented re-run of core transfer tests under alternate IB env. GID_INDEX=-1 forces RoCE GID auto-select (the auto-select path is skipped when a fixed index is pinned); PCI_RELAXED_ORDERING=0 exercises the relaxed-ordering-disabled registration/connect paths; ADAPTIVE_ROUTING=1 reaches the adaptive-routing threshold path. Env knobs are NIC-agnostic.",
       "env_variables": {
         "NCCL_IB_GID_INDEX": "-1",
         "NCCL_IB_PCI_RELAXED_ORDERING": "0",
@@ -325,7 +443,7 @@
     "net_ib_merge_disabled": {
       "extends": "net_ib_base",
       "timeout": 60,
-      "_comment": "Exercises the makeVDevice merge-disabled guard, which only runs with NCCL_IB_MERGE_NICS=0 (the rest of the suite uses 1). Without this entry MakeVirtualDeviceMergeDisabled always GTEST_SKIPs in CI.",
+      "description": "Exercises the makeVDevice merge-disabled guard, which only runs with NCCL_IB_MERGE_NICS=0 (the rest of the suite uses 1). Without this entry MakeVirtualDeviceMergeDisabled always GTEST_SKIPs in CI.",
       "env_variables": {
         "NCCL_IB_MERGE_NICS": "0"
       },
@@ -340,7 +458,7 @@
     "net_ib_vnic_validation": {
       "extends": "net_ib_base",
       "timeout": 120,
-      "_comment": "makeVDevice / CheckVProps validation and topology error paths. WARN_RAIL_LOCAL=1 so the rail-local mismatch arm in DisjointMergeRailLocal_VNic is reachable. Topology-dependent cases (cross-NUMA, disjoint >=5-NIC merge) GTEST_SKIP when the hardware doesn't provide them.",
+      "description": "makeVDevice / CheckVProps validation and topology error paths. WARN_RAIL_LOCAL=1 so the rail-local mismatch arm in DisjointMergeRailLocal_VNic is reachable. Topology-dependent cases (cross-NUMA, disjoint >=5-NIC merge) GTEST_SKIP when the hardware doesn't provide them.",
       "env_variables": {
         "NCCL_IB_WARN_RAIL_LOCAL": "1"
       },
@@ -457,6 +575,11 @@
           "test_filter": "PackRoundtripTest.LoadStorePack_*:PackRoundtripTest.L2_StorePackBoundary:PackRoundtripTest.Store16Load16Global_Direct"
         },
         {
+          "name": "DeviceApi",
+          "description": "Verify RCCL Device API: symmetric window registration and ncclDevCommCreate gating",
+          "test_filter": "DeviceApi.*"
+        },
+        {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
         }
@@ -479,6 +602,11 @@
           "name": "ParamTests",
           "description": "Parameter handling tests",
           "test_filter": "ParamTests.*"
+        },
+        {
+          "name": "ParameterApiTests",
+          "description": "Public ncclParam C API tests",
+          "test_filter": "ParameterApiTests.*"
         },
         {
           "name": "ArgCheck",
@@ -507,7 +635,7 @@
         },
         {
           "name": "Rcclwrap",
-          "description": "RCCL wrapper API unit tests",
+          "description": "RCCL wrapper API unit tests (includes WarpSpeed helper tests when built with ENABLE_WARP_SPEED)",
           "test_filter": "Rcclwrap.*"
         },
         {
@@ -521,12 +649,95 @@
           "test_filter": "XmlTest.*"
         },
         {
+          "name": "MemManager_FixturesDebug_CuMem0",
+          "description": "MemManager pure-state, real-HIP, stats and allocator-wiring tests with NCCL_CUMEM_ENABLE=0 (CUMEM-gated subtests self-skip via GTEST_SKIP)",
+          "test_filter": "MemManagerTest.*:MemManagerRealMem.*:MemManagerStatsTest.*:MemManagerAllocator.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "0"
+          }
+        },
+        {
+          "name": "MemManager_FixturesDebug_CuMem1",
+          "description": "MemManager pure-state, real-HIP, stats and allocator-wiring tests with NCCL_CUMEM_ENABLE=1 (exercises CUMEM/VMM allocator-dispatch paths where the runtime supports CUMEM)",
+          "test_filter": "MemManagerTest.*:MemManagerRealMem.*:MemManagerStatsTest.*:MemManagerAllocator.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
+          "name": "TopoTest",
+          "description": "Topology construction tests",
+          "test_filter": "TopoTest.*"
+        },
+        {
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "DdaAlltoAllThresholdTest",
+          "description": "DDA AlltoAll 4 MiB threshold and host staging-byte unit tests for gfx942/gfx950",
+          "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
+        },
+        {
+          "name": "DdaFabricEligibilityTest",
+          "description": "Dda Fabric eligibility tests",
+          "test_filter": "DdaFabricEligibilityTest.*"
+        },
+        {
+          "name": "TimeoutTests",
+          "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
+          "test_filter": "TimeoutTests.*"
         }
       ]
     },
+    "host_api_tests_base": {
+      "extends": "net_ib_base",
+      "env_variables": {
+        "RCCL_RMA_USE_DMABUF": "1"
+      },
+      "tests": [
+        {"name": "HostApi_WindowRegisterDeregister", "description": "Host API: window register/deregister", "test_filter": "HostApiTest.WindowRegisterDeregister"},
+        {"name": "HostApi_SinglePutRank0ToRank1", "description": "Host API: single put rank0 to rank1", "test_filter": "HostApiTest.SinglePutRank0ToRank1"},
+        {"name": "HostApi_PutSignalEnqueueIsAsync", "description": "Host API: putSignal enqueue is async", "test_filter": "HostApiTest.PutSignalEnqueueIsAsync"},
+        {"name": "HostApi_PutWithNonZeroOffset", "description": "Host API: put with non-zero offset", "test_filter": "HostApiTest.PutWithNonZeroOffset"},
+        {"name": "HostApi_PutMultipleDataTypes", "description": "Host API: put multiple data types", "test_filter": "HostApiTest.PutMultipleDataTypes"},
+        {"name": "HostApi_SignalOnlyNoData", "description": "Host API: signal only, no data", "test_filter": "HostApiTest.SignalOnlyNoData"},
+        {"name": "HostApi_WaitSignalFenceSemantics", "description": "Host API: wait signal fence semantics", "test_filter": "HostApiTest.WaitSignalFenceSemantics"},
+        {"name": "HostApi_DataVisibilityAfterSync", "description": "Host API: data visibility after sync", "test_filter": "HostApiTest.DataVisibilityAfterSync"},
+        {"name": "HostApi_PutSignalNullLocalbuff", "description": "Host API: put signal null localbuff", "test_filter": "HostApiTest.PutSignalNullLocalbuff"},
+        {"name": "HostApi_PutSignalNullWindow", "description": "Host API: put signal null window", "test_filter": "HostApiTest.PutSignalNullWindow"},
+        {"name": "HostApi_PutSignalOffsetOutOfBounds", "description": "Host API: put signal offset out of bounds", "test_filter": "HostApiTest.PutSignalOffsetOutOfBounds"},
+        {"name": "HostApi_PutSignalInvalidSigIdx", "description": "Host API: put signal invalid sig idx", "test_filter": "HostApiTest.PutSignalInvalidSigIdx"},
+        {"name": "HostApi_SignalCumulativeFence", "description": "Host API: signal cumulative fence", "test_filter": "HostApiTest.SignalCumulativeFence"},
+        {"name": "HostApi_MultipleSendersOneReceiver", "description": "Host API: multiple senders one receiver", "test_filter": "HostApiTest.MultipleSendersOneReceiver"},
+        {"name": "HostApi_WaitSignalMultipleDescriptors", "description": "Host API: wait signal multiple descriptors", "test_filter": "HostApiTest.WaitSignalMultipleDescriptors"},
+        {"name": "HostApi_LargePut", "description": "Host API: large put", "test_filter": "HostApiTest.LargePut"},
+        {"name": "HostApi_AllToAllPut", "description": "Host API: all-to-all put", "test_filter": "HostApiTest.AllToAllPut"},
+        {"name": "HostApi_SignalImpliesPriorPutsDelivered", "description": "Host API: signal implies prior puts delivered", "test_filter": "HostApiTest.SignalImpliesPriorPutsDelivered"},
+        {"name": "HostApi_PutSignalInvalidCtx", "description": "Host API: put signal invalid ctx", "test_filter": "HostApiTest.PutSignalInvalidCtx"},
+        {"name": "HostApi_WaitSignalNullDescs", "description": "Host API: wait signal null descs", "test_filter": "HostApiTest.WaitSignalNullDescs"},
+        {"name": "HostApi_WaitSignalZeroDesc", "description": "Host API: wait signal zero desc", "test_filter": "HostApiTest.WaitSignalZeroDesc"},
+        {"name": "HostApi_TwoCommunicatorsIndependentWindows", "description": "Host API: two communicators independent windows", "test_filter": "HostApiTest.TwoCommunicatorsIndependentWindows"},
+        {"name": "HostApi_StressManySmallPuts", "description": "Host API: stress many small puts", "test_filter": "HostApiTest.StressManySmallPuts"},
+        {"name": "HostApi_PutToSelf", "description": "Host API: put to self", "test_filter": "HostApiTest.PutToSelf"},
+        {"name": "HostApi_DoubleDeregister", "description": "Host API: double deregister", "test_filter": "HostApiTest.DoubleDeregister"},
+        {"name": "HostApi_DestroyCommWithoutDeregister", "description": "Host API: destroy comm without deregister", "test_filter": "HostApiTest.DestroyCommWithoutDeregister"}
+      ]
+    },
+    "host_api_tests_symmem": {
+      "extends": "host_api_tests_base",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      }
+    },
+    "host_api_tests_default": {
+      "extends": "host_api_tests_base",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "0"
+      }
+    },
+
     "unit_tests_standard": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -552,6 +763,40 @@
         {"name": "AllReduce.PreMultScalar", "description": "AllReduce pre-mult scalar", "test_filter": "AllReduce.PreMultScalar"},
         {"name": "AllReduce.UserBufferRegistration", "description": "AllReduce user buffer registration", "test_filter": "AllReduce.UserBufferRegistration"},
         {"name": "AllReduce.ManagedMemUserBufferRegistration", "description": "AllReduce managed mem user buffer", "test_filter": "AllReduce.ManagedMemUserBufferRegistration"},
+        {"name": "AllReduce.ROCTX", "description": "AllReduce with ROCTX markers", "test_filter": "AllReduce.ROCTX"},
+        {"name": "AllReduce.BiasInt8_Sum", "description": "AllReduce BiasInt8_Sum", "test_filter": "AllReduce.BiasInt8_Sum"},
+        {"name": "AllReduce.BiasInt8_Max", "description": "AllReduce BiasInt8_Max", "test_filter": "AllReduce.BiasInt8_Max"},
+        {"name": "AllReduce.BiasInt8_Min", "description": "AllReduce BiasInt8_Min", "test_filter": "AllReduce.BiasInt8_Min"},
+        {"name": "AllReduce.BiasInt8_Prod", "description": "AllReduce BiasInt8_Prod", "test_filter": "AllReduce.BiasInt8_Prod"},
+        {"name": "AllReduce.BiasUint8_Sum", "description": "AllReduce BiasUint8_Sum", "test_filter": "AllReduce.BiasUint8_Sum"},
+        {"name": "AllReduce.BiasUint8_Max", "description": "AllReduce BiasUint8_Max", "test_filter": "AllReduce.BiasUint8_Max"},
+        {"name": "AllReduce.BiasUint8_Min", "description": "AllReduce BiasUint8_Min", "test_filter": "AllReduce.BiasUint8_Min"},
+        {"name": "AllReduce.BiasUint8_Prod", "description": "AllReduce BiasUint8_Prod", "test_filter": "AllReduce.BiasUint8_Prod"},
+        {"name": "AllReduce.BiasInt32_Sum", "description": "AllReduce BiasInt32_Sum", "test_filter": "AllReduce.BiasInt32_Sum"},
+        {"name": "AllReduce.BiasInt32_Max", "description": "AllReduce BiasInt32_Max", "test_filter": "AllReduce.BiasInt32_Max"},
+        {"name": "AllReduce.BiasInt32_Min", "description": "AllReduce BiasInt32_Min", "test_filter": "AllReduce.BiasInt32_Min"},
+        {"name": "AllReduce.BiasInt32_Prod", "description": "AllReduce BiasInt32_Prod", "test_filter": "AllReduce.BiasInt32_Prod"},
+        {"name": "AllReduce.BiasUint32_Sum", "description": "AllReduce BiasUint32_Sum", "test_filter": "AllReduce.BiasUint32_Sum"},
+        {"name": "AllReduce.BiasUint32_Max", "description": "AllReduce BiasUint32_Max", "test_filter": "AllReduce.BiasUint32_Max"},
+        {"name": "AllReduce.BiasUint32_Min", "description": "AllReduce BiasUint32_Min", "test_filter": "AllReduce.BiasUint32_Min"},
+        {"name": "AllReduce.BiasUint32_Prod", "description": "AllReduce BiasUint32_Prod", "test_filter": "AllReduce.BiasUint32_Prod"},
+        {"name": "AllReduce.BiasInt64_Sum", "description": "AllReduce BiasInt64_Sum", "test_filter": "AllReduce.BiasInt64_Sum"},
+        {"name": "AllReduce.BiasInt64_Max", "description": "AllReduce BiasInt64_Max", "test_filter": "AllReduce.BiasInt64_Max"},
+        {"name": "AllReduce.BiasInt64_Min", "description": "AllReduce BiasInt64_Min", "test_filter": "AllReduce.BiasInt64_Min"},
+        {"name": "AllReduce.BiasInt64_Prod", "description": "AllReduce BiasInt64_Prod", "test_filter": "AllReduce.BiasInt64_Prod"},
+        {"name": "AllReduce.BiasUint64_Sum", "description": "AllReduce BiasUint64_Sum", "test_filter": "AllReduce.BiasUint64_Sum"},
+        {"name": "AllReduce.BiasUint64_Max", "description": "AllReduce BiasUint64_Max", "test_filter": "AllReduce.BiasUint64_Max"},
+        {"name": "AllReduce.BiasUint64_Min", "description": "AllReduce BiasUint64_Min", "test_filter": "AllReduce.BiasUint64_Min"},
+        {"name": "AllReduce.BiasUint64_Prod", "description": "AllReduce BiasUint64_Prod", "test_filter": "AllReduce.BiasUint64_Prod"},
+        {"name": "AllReduce.BiasFloat32_Sum", "description": "AllReduce BiasFloat32_Sum", "test_filter": "AllReduce.BiasFloat32_Sum"},
+        {"name": "AllReduce.BiasFloat32_Max", "description": "AllReduce BiasFloat32_Max", "test_filter": "AllReduce.BiasFloat32_Max"},
+        {"name": "AllReduce.BiasFloat32_Min", "description": "AllReduce BiasFloat32_Min", "test_filter": "AllReduce.BiasFloat32_Min"},
+        {"name": "AllReduce.BiasFloat32_Prod", "description": "AllReduce BiasFloat32_Prod", "test_filter": "AllReduce.BiasFloat32_Prod"},
+        {"name": "AllReduce.BiasFloat64_Sum", "description": "AllReduce BiasFloat64_Sum", "test_filter": "AllReduce.BiasFloat64_Sum"},
+        {"name": "AllReduce.BiasFloat64_Max", "description": "AllReduce BiasFloat64_Max", "test_filter": "AllReduce.BiasFloat64_Max"},
+        {"name": "AllReduce.BiasFloat64_Min", "description": "AllReduce BiasFloat64_Min", "test_filter": "AllReduce.BiasFloat64_Min"},
+        {"name": "AllReduce.BiasFloat64_Prod", "description": "AllReduce BiasFloat64_Prod", "test_filter": "AllReduce.BiasFloat64_Prod"},
+        {"name": "AllReduce.BiasNotAvailable", "description": "AllReduce BiasNotAvailable", "test_filter": "AllReduce.BiasNotAvailable"},
         {"name": "AllGather.OutOfPlace", "description": "AllGather out-of-place", "test_filter": "AllGather.OutOfPlace"},
         {"name": "AllGather.OutOfPlaceGraph", "description": "AllGather out-of-place graph", "test_filter": "AllGather.OutOfPlaceGraph"},
         {"name": "AllGather.InPlace", "description": "AllGather in-place", "test_filter": "AllGather.InPlace"},
@@ -560,12 +805,13 @@
         {"name": "AllGather.ManagedMemGraph", "description": "AllGather managed memory graph", "test_filter": "AllGather.ManagedMemGraph"},
         {"name": "AllGather.UserBufferRegistration", "description": "AllGather user buffer registration", "test_filter": "AllGather.UserBufferRegistration"},
         {"name": "AllGather.ManagedMemUserBufferRegistration", "description": "AllGather managed mem user buffer", "test_filter": "AllGather.ManagedMemUserBufferRegistration"},
-        {"name": "AllToAll.OutOfPlace", "description": "AllToAll out-of-place", "test_filter": "AllToAll.OutOfPlace"},
-        {"name": "AllToAll.OutOfPlaceGraph", "description": "AllToAll out-of-place graph", "test_filter": "AllToAll.OutOfPlaceGraph"},
-        {"name": "AllToAll.ManagedMem", "description": "AllToAll managed memory", "test_filter": "AllToAll.ManagedMem"},
-        {"name": "AllToAll.ManagedMemGraph", "description": "AllToAll managed memory graph", "test_filter": "AllToAll.ManagedMemGraph"},
-        {"name": "AllToAllv.OutOfPlace", "description": "AllToAllv out-of-place", "test_filter": "AllToAllv.OutOfPlace"},
-        {"name": "AllToAllv.OutOfPlaceGraph", "description": "AllToAllv out-of-place graph", "test_filter": "AllToAllv.OutOfPlaceGraph"},
+        {"name": "AlltoAll.OutOfPlace", "description": "AlltoAll out-of-place", "test_filter": "AlltoAll.OutOfPlace"},
+        {"name": "AlltoAll.OutOfPlaceGraph", "description": "AlltoAll out-of-place graph", "test_filter": "AlltoAll.OutOfPlaceGraph"},
+        {"name": "AlltoAll.ManagedMem", "description": "AlltoAll managed memory", "test_filter": "AlltoAll.ManagedMem"},
+        {"name": "AlltoAll.ManagedMemGraph", "description": "AlltoAll managed memory graph", "test_filter": "AlltoAll.ManagedMemGraph"},
+        {"name": "AlltoAll.Channels", "description": "AlltoAll channels", "test_filter": "AlltoAll.Channels"},
+        {"name": "AlltoAllv.OutOfPlace", "description": "AlltoAllv out-of-place", "test_filter": "AlltoAllv.OutOfPlace"},
+        {"name": "AlltoAllv.OutOfPlaceGraph", "description": "AlltoAllv out-of-place graph", "test_filter": "AlltoAllv.OutOfPlaceGraph"},
         {"name": "Broadcast.OutOfPlace", "description": "Broadcast out-of-place", "test_filter": "Broadcast.OutOfPlace"},
         {"name": "Broadcast.OutOfPlaceGraph", "description": "Broadcast out-of-place graph", "test_filter": "Broadcast.OutOfPlaceGraph"},
         {"name": "Broadcast.InPlace", "description": "Broadcast in-place", "test_filter": "Broadcast.InPlace"},
@@ -611,7 +857,51 @@
         {"name": "Standalone.RegressionTiming", "description": "Verify no timing regression for protocols (LL, LL128, Simple)", "test_filter": "Standalone.RegressionTiming"},
         {"name": "Standalone.StackSize", "description": "Verify RCCL kernel stack size for each gfx architecture", "test_filter": "Standalone.StackSize"},
         {"name": "Standalone.CommCuDevice_Check", "description": "Verify device associated with communicator in single/multi-device scenarios", "test_filter": "Standalone.CommCuDevice_Check"},
-        {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"}
+        {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"},
+        {"name": "Recorder.ParseBinary", "description": "Recorder parse binary trace", "test_filter": "Recorder.ParseBinary"},
+        {"name": "Recorder.ParseJson", "description": "Recorder parse JSON trace", "test_filter": "Recorder.ParseJson"},
+        {"name": "Recorder.VerifyMultithread", "description": "Recorder multithreaded verification", "test_filter": "Recorder.VerifyMultithread"},
+        {"name": "ProxyTrace.nonEmptySingleton", "description": "Proxy trace non-empty singleton", "test_filter": "ProxyTraceTestFixture.nonEmptySingleton"},
+        {"name": "ProxyTrace.addTraceOp", "description": "Proxy trace add op", "test_filter": "ProxyTraceTestFixture.addTraceOp"},
+        {"name": "ProxyTrace.getMapSizeMB", "description": "Proxy trace map size", "test_filter": "ProxyTraceTestFixture.getMapSizeMB"},
+        {"name": "ProxyTrace.updateTraceOp", "description": "Proxy trace update op", "test_filter": "ProxyTraceTestFixture.updateTraceOp"},
+        {"name": "ProxyTrace.updateTraceOp2", "description": "Proxy trace update op 2", "test_filter": "ProxyTraceTestFixture.updateTraceOp2"},
+        {"name": "CollTraceUtils.aggregateResults", "description": "CollTrace utils aggregate results", "test_filter": "CollTraceUtilsTest.aggregateResultsTest"},
+        {"name": "CollTraceUtils.EventQueueOperation", "description": "CollTrace utils event queue operation", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest"},
+        {"name": "CollTraceUtils.EventQueueMultiThread", "description": "CollTrace utils event queue multithread", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest"},
+        {"name": "CollTraceUtils.getSizeMb", "description": "CollTrace utils get size MB", "test_filter": "CollTraceUtilsTest.getSizeMbTest"}
+      ]
+    },
+    "asymmetric_visibility": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 3,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "AsymmetricVisibility.CommInitRankAllReduce", "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES", "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"}
+      ]
+    },
+    "plugin_compat_v11": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "PluginCompatV11.NetLazyInitialization", "description": "AICOMRCCL-1532: v11 net plugin compat layer initializes lazily (only ncclNet.init set until init() runs)", "test_filter": "PluginCompatV11.NetLazyInitialization"},
+        {"name": "PluginCompatV11.CollNetLazyInitialization", "description": "AICOMRCCL-1532: v11 collnet plugin compat layer initializes lazily", "test_filter": "PluginCompatV11.CollNetLazyInitialization"}
       ]
     },
     "debug_tests": {
@@ -628,8 +918,8 @@
       "tests": [
         {
           "name": "Debug_ThreadName",
-          "description": "Test thread naming functionality with AllToAll operation",
-          "test_filter": "AllToAll.OutOfPlaceGraph*",
+          "description": "Test thread naming functionality with AlltoAll operation",
+          "test_filter": "AlltoAll.OutOfPlaceGraph*",
           "env_variables": {
             "NCCL_SET_THREAD_NAME": "1"
           }
@@ -637,7 +927,7 @@
         {
           "name": "Debug_AllSubsystems",
           "description": "Test debug logging for all RCCL subsystems with trace-level output",
-          "test_filter": "AllToAll.OutOfPlaceGraph*",
+          "test_filter": "AlltoAll.OutOfPlaceGraph*",
           "env_variables": {
             "NCCL_DEBUG": "TRACE",
             "NCCL_DEBUG_FILE": "cdcvg.dbg",
@@ -700,6 +990,34 @@
           "name": "CommMPITests_TrafficClass",
           "description": "CommMPITests traffic class (ncclCommInitRankConfig)",
           "test_filter": "TrafficClassMPITest.*"
+        },
+        {
+          "name": "CommMPITests_CtaConfigOverride",
+          "description": "ncclConfig_t minCTAs/maxCTAs override accepted and honored end-to-end",
+          "test_filter": "CtaConfigMPITest.ConfigOverrideAppliesMinMaxCTAs"
+        },
+        {
+          "name": "CommMPITests_CtaDefaultNoClamp",
+          "description": "Default config (no min/maxCTAs): the maxCTAs cap in connect.cc is a no-op and does not reduce nChannels",
+          "test_filter": "CtaConfigMPITest.DefaultConfigDoesNotClampChannels"
+        },
+        {
+          "name": "CommMPITests_CtaEnvKnobs",
+          "description": "NCCL_MIN_CTAS/NCCL_MAX_CTAS env knobs override config and honored end-to-end",
+          "test_filter": "CtaConfigMPITest.EnvKnobsApplyMinMaxCTAs",
+          "env_variables": {
+            "NCCL_MIN_CTAS": "2",
+            "NCCL_MAX_CTAS": "4"
+          }
+        },
+        {
+          "name": "CommMPITests_CtaEnvKnobsNegative",
+          "description": "Non-positive NCCL_MIN_CTAS/NCCL_MAX_CTAS are rejected and left at default",
+          "test_filter": "CtaConfigMPITest.EnvKnobsIgnoreNonPositiveCTAs",
+          "env_variables": {
+            "NCCL_MIN_CTAS": "0",
+            "NCCL_MAX_CTAS": "0"
+          }
         }
       ]
     },
@@ -740,9 +1058,9 @@
           "test_filter": "UBR_Broadcast.NonZeroRoot_MultiNode"
         },
         {
-          "name": "UBR_AllToAll_OutOfPlace_MultiNode",
-          "description": "AllToAll out-of-place with UBR on multi-node",
-          "test_filter": "UBR_AllToAll.OutOfPlace_MultiNode"
+          "name": "UBR_AlltoAll_OutOfPlace_MultiNode",
+          "description": "AlltoAll out-of-place with UBR on multi-node",
+          "test_filter": "UBR_AlltoAll.OutOfPlace_MultiNode"
         },
         {
           "name": "UBR_SendRecv_RingPattern_MultiNode",
@@ -750,21 +1068,21 @@
           "test_filter": "UBR_SendRecv.RingPattern_MultiNode"
         },
         {
-          "name": "UBR_AllToAllStress_InterleavedMultiSize",
-          "description": "Stress test with interleaved AllToAll/AllToAllv across small/medium/large sizes",
-          "test_filter": "UBR_AllToAllStress.InterleavedMultiSize_MultiNode",
+          "name": "UBR_AlltoAllStress_InterleavedMultiSize",
+          "description": "Stress test with interleaved AlltoAll/AlltoAllv across small/medium/large sizes",
+          "test_filter": "UBR_AlltoAllStress.InterleavedMultiSize_MultiNode",
           "timeout": 300
         },
         {
-          "name": "UBR_AllToAllStress_SplitComm",
-          "description": "Stress test with interleaved AllToAll/AllToAllv using split communicators",
-          "test_filter": "UBR_AllToAllStress.InterleavedWithSplitComm_MultiNode",
+          "name": "UBR_AlltoAllStress_SplitComm",
+          "description": "Stress test with interleaved AlltoAll/AlltoAllv using split communicators",
+          "test_filter": "UBR_AlltoAllStress.InterleavedWithSplitComm_MultiNode",
           "timeout": 300
         },
         {
-          "name": "UBR_AllToAllStress_ConcurrentMultiComm",
-          "description": "Concurrent AllToAll on multiple communicators with separate streams",
-          "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
+          "name": "UBR_AlltoAllStress_ConcurrentMultiComm",
+          "description": "Concurrent AlltoAll on multiple communicators with separate streams",
+          "test_filter": "UBR_AlltoAllStress.ConcurrentMultiComm_MultiNode",
           "timeout": 300
         },
         {
@@ -773,14 +1091,14 @@
           "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
         },
         {
-          "name": "UBR_ConcurrentRegHang_AllToAll_Contiguous",
-          "description": "ncclAllToAll with contiguous registered buffers (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
+          "name": "UBR_ConcurrentRegHang_AlltoAll_Contiguous",
+          "description": "ncclAlltoAll with contiguous registered buffers (should pass)",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_SHOULD_WORK"
         },
         {
-          "name": "UBR_ConcurrentRegHang_AllToAll_Stress",
-          "description": "Stress test: 50 iterations of ncclAllToAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "name": "UBR_ConcurrentRegHang_AlltoAll_Stress",
+          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_Stress_SHOULD_WORK",
           "timeout": 300
         },
         {
@@ -823,14 +1141,14 @@
           "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
         },
         {
-          "name": "UBR_AllToAll_Contiguous_Success",
-          "description": "ncclAllToAll with contiguous registered buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
+          "name": "UBR_AlltoAll_Contiguous_Success",
+          "description": "ncclAlltoAll with contiguous registered buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_SHOULD_WORK"
         },
         {
-          "name": "UBR_AllToAll_Stress_Success",
-          "description": "Stress test: 50 iterations of ncclAllToAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "name": "UBR_AlltoAll_Stress_Success",
+          "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_Stress_SHOULD_WORK",
           "timeout": 300
         },
         {
@@ -1032,7 +1350,8 @@
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL":   "100",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL":    "1000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN":    "2000",
-        "NCCL_IB_RETURN_ASYNC_EVENTS":         "1"
+        "NCCL_IB_RETURN_ASYNC_EVENTS":         "1",
+        "RCCL_IB_FAULT_INJECTION":             "1"
       },
       "tests": [
         {
@@ -1059,6 +1378,56 @@
           "name": "FaultInj_Cast_QpErrorClearRecovers",
           "description": "CAST path: after FaultClear on a faulted connection, a fresh connection completes 20 sends with no corruption and fatalCount==0",
           "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPostSendErrno",
+          "description": "CAST ops-overload: real ibv_post_send forced to return EAGAIN via shimmed ops table; isend fails or fatalCount > 0",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPostSendErrno"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqFlushNonFatal",
+          "description": "CAST ops-overload: poll_cq shim rewrites QP 0 completion status to WR_FLUSH_ERR; failover completes via surviving device, fatalCount==0",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqFlushNonFatal",
+          "env_variables": {
+            "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+            "NCCL_IB_MERGE_NICS": "1"
+          }
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqSynthFatal",
+          "description": "CAST ops-overload: poll_cq shim synthesizes a non-whitelisted REM_ACCESS_ERR completion; fatal/non-recoverable",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqSynthFatal"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPostRecvErrno",
+          "description": "CAST ops-overload: real ibv_post_recv forced to return EAGAIN via shimmed ops table on all receiver QPs; recv errors or never completes",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPostRecvErrno"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqInjectCountFinite",
+          "description": "CAST ops-overload: poll_cq rewrite with finite injectCount=1 per QP (WR_FLUSH_ERR); fault fires then stops, post-budget transfer is clean",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqInjectCountFinite"
+        },
+        {
+          "name": "FaultInj_Cast_OpsApiInvalidArgs",
+          "description": "CAST ops-overload: API guard branches - NULL comm returns ncclInvalidArgument; arm/clear on a registered context succeeds",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsApiInvalidArgs"
+        }
+      ]
+    },
+
+    "fault_inject_ops_unit": {
+      "extends": "net_ib_base",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "description": "Pure-unit coverage of the ops-overload fault mechanism: a fake ibv_context drives the inner ncclIbOpsFault* guards and shim error paths directly. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware).",
+      "tests": [
+        {
+          "name": "FaultInj_OpsUnit_All",
+          "description": "Fake-ibv_context unit tests for net_ib_ops_fault.cc: install/remove lifecycle, NULL/unregistered guards, post_send/post_recv errno shims, poll_cq rewrite/synthesize, lost-real-op defensive guard",
+          "test_filter": "OpsFaultUnit.*"
         }
       ]
     },
@@ -1168,9 +1537,9 @@
       },
       "tests": [
         {
-          "name": "GraphCapture_AllToAll_MultiNode",
-          "description": "AllToAll graph capture with IPC registration on multi-node",
-          "test_filter": "GraphCapture_AllToAll.MultiNode"
+          "name": "GraphCapture_AlltoAll_MultiNode",
+          "description": "AlltoAll graph capture with IPC registration on multi-node",
+          "test_filter": "GraphCapture_AlltoAll.MultiNode"
         },
         {
           "name": "GraphCapture_AllReduce_MultiNode",
@@ -1180,6 +1549,91 @@
       ]
     },
 
+    "symmetric_window_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "SymWin_AllReduce_BothWindows_OutOfPlace",
+          "description": "AllReduce with both send and recv windows registered (symmetric baseline)",
+          "test_filter": "SymWin_AllReduce.BothWindows_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_OnlySendWindow",
+          "description": "AllReduce with only send buffer registered (relaxed one-buffer path)",
+          "test_filter": "SymWin_AllReduce.OnlySendWindow_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_OnlyRecvWindow",
+          "description": "AllReduce with only recv buffer registered (relaxed one-buffer path)",
+          "test_filter": "SymWin_AllReduce.OnlyRecvWindow_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_NoWindows",
+          "description": "AllReduce without window registration (non-symmetric fallback)",
+          "test_filter": "SymWin_AllReduce.NoWindows_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AllReduce_SingleWindow_InPlace",
+          "description": "AllReduce in-place with single window (primary one-buffer use case)",
+          "test_filter": "SymWin_AllReduce.SingleWindow_InPlace"
+        },
+        {
+          "name": "SymWin_ReduceScatter_BothWindows",
+          "description": "ReduceScatter with both windows registered",
+          "test_filter": "SymWin_ReduceScatter.BothWindows"
+        },
+        {
+          "name": "SymWin_ReduceScatter_OnlySendWindow",
+          "description": "ReduceScatter with only send window (relaxed path)",
+          "test_filter": "SymWin_ReduceScatter.OnlySendWindow"
+        },
+        {
+          "name": "SymWin_ReduceScatter_NoWindows",
+          "description": "ReduceScatter without windows (fallback)",
+          "test_filter": "SymWin_ReduceScatter.NoWindows"
+        },
+        {
+          "name": "SymWin_AllGather_BothWindows",
+          "description": "AllGather with both windows registered",
+          "test_filter": "SymWin_AllGather.BothWindows"
+        },
+        {
+          "name": "SymWin_AllGather_OnlyRecvWindow",
+          "description": "AllGather with only recv window (relaxed path)",
+          "test_filter": "SymWin_AllGather.OnlyRecvWindow"
+        },
+        {
+          "name": "SymWin_AllGather_NoWindows",
+          "description": "AllGather without windows (fallback)",
+          "test_filter": "SymWin_AllGather.NoWindows"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_Basic",
+          "description": "Basic window register/deregister lifecycle",
+          "test_filter": "SymWin_WindowLifecycle.RegisterDeregister_Basic"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_Multiple",
+          "description": "Multiple independent window registrations",
+          "test_filter": "SymWin_WindowLifecycle.MultipleWindows"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_Repeated",
+          "description": "Repeated register/deregister cycles",
+          "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister"
+        }
+      ]
+    },
     "net_ib_branch_coverage": {
       "extends": "net_ib_base",
       "timeout": 60,
@@ -1218,7 +1672,7 @@
       "tests": [
         { "name": "NetIB_Stress_FanIn",                 "description": "Fan-in 3->1, 100 iterations",            "test_filter": "NetIbMPITest.FanInStress" },
         { "name": "NetIB_Stress_FanOut",                "description": "Fan-out 1->3, 100 iterations",           "test_filter": "NetIbMPITest.FanOutStress" },
-        { "name": "NetIB_Stress_AllToAll",              "description": "Full mesh, 50 iterations",               "test_filter": "NetIbMPITest.AllToAllStress" },
+        { "name": "NetIB_Stress_AlltoAll",              "description": "Full mesh, 50 iterations",               "test_filter": "NetIbMPITest.AlltoAllStress" },
         { "name": "NetIB_Stress_BidirectionalMultiRank","description": "All pairs bidirectional, 50 iterations",  "test_filter": "NetIbMPITest.BidirectionalMultiRank" },
         { "name": "NetIB_Stress_LongRunningMultiRank",  "description": "Fan-in 3->1, 1000 iterations",           "test_filter": "NetIbMPITest.LongRunningMultiRank" }
       ]
@@ -1463,6 +1917,104 @@
           "description": "Revoke parent then shrink then collective then revoke child then destroy across multiple generations; verifies no leaked resources",
           "test_filter": "RevokeMPITest.RepeatedRevokeShrinkCycles_ResourceCleanup"
         }
+      ]
+    },
+
+    "mem_manager_mpi_cumem0": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "MemManager_AnyRanks_CuMem0",
+          "description": "Bootstrap-coupled internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=0",
+          "test_filter": "MemManagerAnyRanks.*"
+        },
+        {
+          "name": "MemManager_TwoRank_CuMem0",
+          "description": "Two-rank peer export/import internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=0",
+          "test_filter": "MemManagerTwoRank.*"
+        }
+      ]
+    },
+
+    "mem_manager_mpi_cumem1": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "MemManager_AnyRanks_CuMem1",
+          "description": "Bootstrap-coupled internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=1",
+          "test_filter": "MemManagerAnyRanks.*"
+        },
+        {
+          "name": "MemManager_TwoRank_CuMem1",
+          "description": "Two-rank peer export/import internal Suspend/Resume tests on raw VMM, NCCL_CUMEM_ENABLE=1",
+          "test_filter": "MemManagerTwoRank.*"
+        }
+      ]
+    },
+
+    "suspend_resume_public_api_cumem0": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "0"
+      },
+      "tests": [
+        { "name": "SuspendResume_Basic_CuMem0",                "description": "Basic public ncclCommSuspend/Resume cycle, multi-cycle, barrier sync (NCCL_CUMEM_ENABLE=0)",      "test_filter": "SuspendResumeBasic.*" },
+        { "name": "SuspendResume_MemStats_CuMem0",             "description": "ncclCommMemStats before/after Suspend; Total = Persist + Suspend conservation (NCCL_CUMEM_ENABLE=0)", "test_filter": "SuspendResumeMemStats.*" },
+        { "name": "SuspendResume_CollectiveIntegrity_CuMem0",  "description": "AllReduce/P2p auto-mark and rebuild after Suspend/Resume (NCCL_CUMEM_ENABLE=0; CUMEM-only subtests skip via GTEST_SKIP)", "test_filter": "SuspendResumeCollectiveIntegrity.*" },
+        { "name": "SuspendResume_Lifecycle_CuMem0",            "description": "ncclCommDestroy on suspended communicator (NCCL_CUMEM_ENABLE=0)",                                  "test_filter": "SuspendResumeLifecycle.*" },
+        { "name": "SuspendResume_Group_CuMem0",                "description": "Atomic Suspend/Resume inside ncclGroupStart/End (NCCL_CUMEM_ENABLE=0)",                            "test_filter": "SuspendResumeGroup.*" },
+        { "name": "SuspendResume_ArgValidation_CuMem0",        "description": "Argument validation: zero/unknown flags, double-Suspend/Resume (NCCL_CUMEM_ENABLE=0)",            "test_filter": "SuspendResumeArgValidation.*" },
+        { "name": "SuspendResume_MemStatsValidation_CuMem0",   "description": "ncclCommMemStats argument validation (NCCL_CUMEM_ENABLE=0)",                                       "test_filter": "SuspendResumeMemStatsValidation.*" }
+      ]
+    },
+
+    "suspend_resume_public_api_cumem1": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        { "name": "SuspendResume_Basic_CuMem1",                "description": "Basic public ncclCommSuspend/Resume cycle, multi-cycle, barrier sync (NCCL_CUMEM_ENABLE=1)",      "test_filter": "SuspendResumeBasic.*" },
+        { "name": "SuspendResume_MemStats_CuMem1",             "description": "ncclCommMemStats before/after Suspend; Total = Persist + Suspend conservation (NCCL_CUMEM_ENABLE=1)", "test_filter": "SuspendResumeMemStats.*" },
+        { "name": "SuspendResume_CollectiveIntegrity_CuMem1",  "description": "AllReduce/P2p auto-mark and rebuild after Suspend/Resume (NCCL_CUMEM_ENABLE=1; exercises CUMEM path where supported)", "test_filter": "SuspendResumeCollectiveIntegrity.*" },
+        { "name": "SuspendResume_Lifecycle_CuMem1",            "description": "ncclCommDestroy on suspended communicator (NCCL_CUMEM_ENABLE=1)",                                  "test_filter": "SuspendResumeLifecycle.*" },
+        { "name": "SuspendResume_Group_CuMem1",                "description": "Atomic Suspend/Resume inside ncclGroupStart/End (NCCL_CUMEM_ENABLE=1)",                            "test_filter": "SuspendResumeGroup.*" },
+        { "name": "SuspendResume_ArgValidation_CuMem1",        "description": "Argument validation: zero/unknown flags, double-Suspend/Resume (NCCL_CUMEM_ENABLE=1)",            "test_filter": "SuspendResumeArgValidation.*" },
+        { "name": "SuspendResume_MemStatsValidation_CuMem1",   "description": "ncclCommMemStats argument validation (NCCL_CUMEM_ENABLE=1)",                                       "test_filter": "SuspendResumeMemStatsValidation.*" }
       ]
     },
 
@@ -1889,6 +2441,119 @@
         }
       ]
     },
+    "gin_nccl_timeout_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_FORCE_FINE_GRAIN_PCIE": "1"
+      },
+      "tests": [
+        {
+          "name": "AsyncErrorRoundTrip",
+          "description": "ncclTimeout async-error round-trip on a live comm; AllReduce healthy after clear",
+          "test_filter": "TimeoutMPITest.AsyncErrorRoundTrip"
+        },
+        {
+          "name": "AsyncErrorWithInFlightOp",
+          "description": "ncclTimeout injected during AllReduce is advisory and does not corrupt data",
+          "test_filter": "TimeoutMPITest.AsyncErrorWithInFlightOp"
+        },
+        {
+          "name": "ErrorStringConsistentAcrossRanks",
+          "description": "ncclGetErrorString(ncclTimeout) is identical on all ranks",
+          "test_filter": "TimeoutMPITest.ErrorStringConsistentAcrossRanks"
+        },
+        {
+          "name": "Lsa_HealthyBarrierReturnsSuccess",
+          "description": "LSA device barrier: all peers arrive -> ncclSuccess",
+          "test_filter": "LsaBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess"
+        },
+        {
+          "name": "Lsa_AbsentPeerProducesTimeout",
+          "description": "LSA device barrier: absent peer -> ncclTimeout (2-rank LSA team)",
+          "test_filter": "LsaBarrierTimeoutMPITest.AbsentPeerProducesTimeout"
+        },
+        {
+          "name": "Lsa_ZeroBudgetAbsentPeerTimesOut",
+          "description": "LSA device barrier: zero budget + absent peer -> immediate ncclTimeout",
+          "test_filter": "LsaBarrierTimeoutMPITest.ZeroBudgetAbsentPeerTimesOut"
+        },
+        {
+          "name": "Lsa_RepeatedHealthyBarriersSucceed",
+          "description": "LSA device barrier: 64 sequential healthy barriers, no drift",
+          "test_filter": "LsaBarrierTimeoutMPITest.RepeatedHealthyBarriersSucceed"
+        },
+        {
+          "name": "Lsa_RecoversAfterTimeout",
+          "description": "LSA device barrier: fresh comm healthy after a timeout",
+          "test_filter": "LsaBarrierTimeoutMPITest.RecoversAfterTimeout"
+        },
+        {
+          "name": "Lsa_BackToBackTimeouts",
+          "description": "LSA device barrier: 4 sequential stuck barriers each yield ncclTimeout",
+          "test_filter": "LsaBarrierTimeoutMPITest.BackToBackTimeouts"
+        }
+      ]
+    },
+    "gin_nccl_timeout_tests_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "HSA_NO_SCRATCH_RECLAIM": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "Gin_HealthyBarrierReturnsSuccess",
+          "description": "GIN rail device barrier over IB: all peers arrive -> ncclSuccess",
+          "test_filter": "GinBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess"
+        },
+        {
+          "name": "Gin_AbsentPeerProducesTimeout",
+          "description": "GIN rail device barrier over IB: absent rail peer -> ncclTimeout",
+          "test_filter": "GinBarrierTimeoutMPITest.AbsentPeerProducesTimeout"
+        },
+        {
+          "name": "Gin_ZeroBudgetAbsentPeerTimesOut",
+          "description": "GIN rail device barrier over IB: zero budget + absent peer -> immediate ncclTimeout",
+          "test_filter": "GinBarrierTimeoutMPITest.ZeroBudgetAbsentPeerTimesOut"
+        },
+        {
+          "name": "Gin_RepeatedHealthyBarriersSucceed",
+          "description": "GIN rail device barrier over IB: 32 sequential healthy barriers",
+          "test_filter": "GinBarrierTimeoutMPITest.RepeatedHealthyBarriersSucceed"
+        },
+        {
+          "name": "Gin_RecoversAfterTimeout",
+          "description": "GIN rail device barrier over IB: fresh comm healthy after a timeout",
+          "test_filter": "GinBarrierTimeoutMPITest.RecoversAfterTimeout"
+        },
+        {
+          "name": "Gin_BackToBackTimeouts",
+          "description": "GIN rail device barrier over IB: 4 sequential stuck barriers each yield ncclTimeout",
+          "test_filter": "GinBarrierTimeoutMPITest.BackToBackTimeouts"
+        }
+      ]
+    },
 
     "net_ib_initialization_cast": {
       "extends": "net_ib_initialization",
@@ -1973,9 +2638,663 @@
           "test_filter": "ALL"
         }
       ]
+    },
+    "perf_base": {
+      "is_gtest": false,
+      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_reduce_perf",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -n 3 -w 2 -c 1 -d all -o all",
+      "env_variables": {}
+    },
+    "perf_bf16_base": {
+      "extends": "perf_base",
+      "timeout": 300,
+      "command_args": "-b 1K -e 1G -f 1024 -g 1 -n 5 -w 2 -c 1 -d bfloat16"
+    },
+    "default_collectives": {
+      "extends": "perf_base",
+      "command_args": "-g 1 -n 5 -w 2 -c 1 -d all",
+      "tests": [
+        { "name": "AllReduce_1KiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_reduce_perf",     "command_args": "-b 1K -e 1K -o all" },
+        { "name": "AllReduce_64MiB",     "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_reduce_perf",     "command_args": "-b 64M -e 64M -o all" },
+        { "name": "AllReduce_1GiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_reduce_perf",     "command_args": "-b 1G -e 1G -o all" },
+        { "name": "Reduce_1KiB",         "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/reduce_perf",         "command_args": "-b 1K -e 1K -o all" },
+        { "name": "Reduce_64MiB",        "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/reduce_perf",         "command_args": "-b 64M -e 64M -o all" },
+        { "name": "Reduce_1GiB",         "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/reduce_perf",         "command_args": "-b 1G -e 1G -o all" },
+        { "name": "ReduceScatter_1KiB",  "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/reduce_scatter_perf", "command_args": "-b 1K -e 1K -o all" },
+        { "name": "ReduceScatter_64MiB", "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/reduce_scatter_perf", "command_args": "-b 64M -e 64M -o all" },
+        { "name": "ReduceScatter_1GiB",  "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/reduce_scatter_perf", "command_args": "-b 1G -e 1G -o all" },
+        { "name": "AllGather_1KiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_gather_perf",     "command_args": "-b 1K -e 1K" },
+        { "name": "AllGather_64MiB",     "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_gather_perf",     "command_args": "-b 64M -e 64M" },
+        { "name": "AllGather_1GiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_gather_perf",     "command_args": "-b 1G -e 1G" },
+        { "name": "Broadcast_1KiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/broadcast_perf",      "command_args": "-b 1K -e 1K" },
+        { "name": "Broadcast_64MiB",     "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/broadcast_perf",      "command_args": "-b 64M -e 64M" },
+        { "name": "Broadcast_1GiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/broadcast_perf",      "command_args": "-b 1G -e 1G" },
+        { "name": "AlltoAll_1KiB",       "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",       "command_args": "-b 1K -e 1K" },
+        { "name": "AlltoAll_64MiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",       "command_args": "-b 64M -e 64M" },
+        { "name": "AlltoAll_1GiB",       "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",       "command_args": "-b 1G -e 1G" },
+        { "name": "Scatter_1KiB",        "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/scatter_perf",        "command_args": "-b 1K -e 1K" },
+        { "name": "Scatter_64MiB",       "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/scatter_perf",        "command_args": "-b 64M -e 64M" },
+        { "name": "Scatter_1GiB",        "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/scatter_perf",        "command_args": "-b 1G -e 1G" },
+        { "name": "Gather_1KiB",         "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/gather_perf",         "command_args": "-b 1K -e 1K" },
+        { "name": "Gather_64MiB",        "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/gather_perf",         "command_args": "-b 64M -e 64M" },
+        { "name": "Gather_1GiB",         "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/gather_perf",         "command_args": "-b 1G -e 1G" },
+        { "name": "SendRecv_1KiB",       "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/sendrecv_perf",       "command_args": "-b 1K -e 1K" },
+        { "name": "SendRecv_64MiB",      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/sendrecv_perf",       "command_args": "-b 64M -e 64M" },
+        { "name": "SendRecv_1GiB",       "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/sendrecv_perf",       "command_args": "-b 1G -e 1G" }
+      ]
+    },
+    "tuning_algo_proto": {
+      "extends": "perf_bf16_base",
+      "command_args": "-b 1K -e 1G -f 1024 -g 1 -n 5 -w 2 -c 1 -d all",
+      "tests": [
+        {
+          "name": "Tuning_Ring_Simple",
+          "description": "Ring algo + SIMPLE proto, combined with NCCL_THREAD_THRESHOLDS / NCCL_NTHREADS / NCCL_PAT_ENABLE / NCCL_NET_OVERHEAD tuning knobs",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_ALGO": "Ring",
+            "NCCL_PROTO": "Simple",
+            "NCCL_THREAD_THRESHOLDS": "8192,8192,8192",
+            "NCCL_NTHREADS": "256",
+            "NCCL_PAT_ENABLE": "1",
+            "NCCL_NET_OVERHEAD": "1000"
+          }
+        },
+        {
+          "name": "Tuning_Tree_LL",
+          "description": "Tree algo + LL proto path (NCCL_ALGO/NCCL_PROTO are single-valued, so kept separate from Ring/Simple)",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_ALGO": "Tree",
+            "NCCL_PROTO": "LL"
+          }
+        },
+        {
+          "name": "Tuning_Proto_LL128",
+          "description": "LL128 proto + LL128 thread count override",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_PROTO": "LL128",
+            "NCCL_LL128_NTHREADS": "640"
+          }
+        }
+      ]
+    },
+    "enqueue_thresholds": {
+      "extends": "perf_bf16_base",
+      "tests": [
+        {
+          "name": "Enqueue_GraphRegister_On",
+          "description": "NCCL_GRAPH_REGISTER on + L1 carveout, combined with RCCL_INTRANET_THRESHOLD / RCCL_ENABLE_INTRANET",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_GRAPH_REGISTER": "1",
+            "NCCL_L1_SHARED_MEMORY_CARVEOUT": "0",
+            "RCCL_INTRANET_THRESHOLD": "4194304",
+            "RCCL_ENABLE_INTRANET": "1"
+          }
+        },
+        {
+          "name": "Enqueue_GraphRegister_Off",
+          "description": "NCCL_GRAPH_REGISTER off (conflicts with the on value, kept separate)",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_GRAPH_REGISTER": "0"
+          }
+        },
+        {
+          "name": "Enqueue_P2P_Thresholds",
+          "description": "NCCL_P2P_LL_THRESHOLD + RCCL_P2P_NET_THRESHOLD + NCCL_CHUNK_SIZE (sendrecv binary, kept separate)",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/sendrecv_perf",
+          "env_variables": {
+            "NCCL_P2P_LL_THRESHOLD": "16384",
+            "RCCL_P2P_NET_THRESHOLD": "65536",
+            "NCCL_CHUNK_SIZE": "262144"
+          }
+        }
+      ]
+    },
+    "channels_rings": {
+      "extends": "perf_bf16_base",
+      "tests": [
+        {
+          "name": "Channels_Rings_Combined",
+          "description": "Combined NCCL_MIN/MAX_NRINGS, NCCL_MIN/MAX_NCHANNELS, NCCL_UNPACK_DOUBLE_NCHANNELS (all independent knobs)",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_MIN_NRINGS": "4",
+            "NCCL_MAX_NRINGS": "8",
+            "NCCL_MIN_NCHANNELS": "2",
+            "NCCL_MAX_NCHANNELS": "16",
+            "NCCL_UNPACK_DOUBLE_NCHANNELS": "0"
+          }
+        },
+        {
+          "name": "Channels_P2P_NChannels",
+          "description": "NCCL_MIN_P2P_NCHANNELS / NCCL_MAX_P2P_NCHANNELS (alltoall binary, kept separate)",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",
+          "env_variables": {
+            "NCCL_MIN_P2P_NCHANNELS": "2",
+            "NCCL_MAX_P2P_NCHANNELS": "8"
+          }
+        }
+      ]
+    },
+    "paths_topo": {
+      "extends": "perf_bf16_base",
+      "tests": [
+        {
+          "name": "Paths_Topo_Combined",
+          "description": "Combined NCCL_NET_GDR_LEVEL, NCCL_PXN_DISABLE, NCCL_NET_DISABLE_INTRA, NCCL_NET_GDR_READ, NCCL_NVB_DISABLE, NCCL_IGNORE_DISABLED_P2P, NCCL_CROSS_NIC, NCCL_P2P_PXN_LEVEL (all independent path/topology knobs)",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_NET_GDR_LEVEL": "SYS",
+            "NCCL_PXN_DISABLE": "0",
+            "NCCL_NET_DISABLE_INTRA": "0",
+            "NCCL_NET_GDR_READ": "1",
+            "NCCL_NVB_DISABLE": "1",
+            "NCCL_IGNORE_DISABLED_P2P": "1",
+            "NCCL_CROSS_NIC": "1",
+            "NCCL_P2P_PXN_LEVEL": "0"
+          }
+        }
+      ]
+    },
+    "model_matching": {
+      "extends": "perf_bf16_base",
+      "tests": [
+        {
+          "name": "Rome_Dump_Reversal",
+          "description": "Combined RCCL_DISABLE_RAIL_TREES, RCCL_MODEL_REVERSAL_DISABLE, RCCL_DUMP_ROME_MODEL_FILE, NCCL_GRAPH_DUMP_FILE (model active so the dumps are populated)",
+          "command_args": "-o all",
+          "env_variables": {
+            "RCCL_DISABLE_RAIL_TREES": "1",
+            "RCCL_MODEL_REVERSAL_DISABLE": "1",
+            "RCCL_DUMP_ROME_MODEL_FILE": "rccl_rome_model.xml",
+            "NCCL_GRAPH_DUMP_FILE": "rccl_graph.xml"
+          }
+        },
+        {
+          "name": "Rome_ModelMatchingDisable",
+          "description": "RCCL_MODEL_MATCHING_DISABLE (kept separate: it suppresses the Rome model so it must not run with the dump test)",
+          "command_args": "-o all",
+          "env_variables": {
+            "RCCL_MODEL_MATCHING_DISABLE": "1"
+          }
+        }
+      ]
+    },
+    "ib_transport": {
+      "extends": "perf_bf16_base",
+      "env_variables": {
+        "NCCL_IB_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "IB_Combined",
+          "description": "Combined IB knobs: PKEY, MERGE_VFS, WARN_RAIL_LOCAL, PCI_RELAXED_ORDERING, RETURN_ASYNC_EVENTS, TC, SL, SPLIT_DATA_ON_QPS, QPS_PER_CONNECTION, GID_INDEX, TIMEOUT, RETRY_CNT, GDR_FLUSH_DISABLE, FORCE_ENABLE_GDRDMA (all independent)",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_IB_PKEY": "0",
+            "NCCL_IB_MERGE_VFS": "0",
+            "NCCL_IB_WARN_RAIL_LOCAL": "1",
+            "NCCL_IB_PCI_RELAXED_ORDERING": "1",
+            "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
+            "NCCL_IB_TC": "96",
+            "NCCL_IB_SL": "0",
+            "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+            "NCCL_IB_QPS_PER_CONNECTION": "2",
+            "NCCL_IB_GID_INDEX": "3",
+            "NCCL_IB_TIMEOUT": "22",
+            "NCCL_IB_RETRY_CNT": "7",
+            "NCCL_GDR_FLUSH_DISABLE": "1",
+            "RCCL_FORCE_ENABLE_GDRDMA": "1"
+          }
+        }
+      ]
+    },
+    "ibvwrap_retry": {
+      "extends": "perf_bf16_base",
+      "env_variables": {
+        "NCCL_IB_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "IBV_MQP_Retry",
+          "description": "Combined NCCL_IB_MQP_RETRY_ALL + NCCL_IB_MQP_RETRY_SLEEP_MSEC + NCCL_IB_MQP_RETRY_CNT",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_IB_MQP_RETRY_ALL": "1",
+            "NCCL_IB_MQP_RETRY_SLEEP_MSEC": "200",
+            "NCCL_IB_MQP_RETRY_CNT": "20"
+          }
+        }
+      ]
+    },
+    "socket_transport": {
+      "extends": "perf_bf16_base",
+      "env_variables": {
+        "NCCL_IB_DISABLE": "1",
+        "NCCL_NET": "Socket"
+      },
+      "tests": [
+        {
+          "name": "Socket_Combined",
+          "description": "Combined NCCL_SOCKET_RETRY_CNT + NCCL_SOCKET_RETRY_SLEEP_MSEC + NCCL_NSOCKS_PERTHREAD + NCCL_SOCKET_NTHREADS",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_SOCKET_RETRY_CNT": "50",
+            "NCCL_SOCKET_RETRY_SLEEP_MSEC": "200",
+            "NCCL_NSOCKS_PERTHREAD": "4",
+            "NCCL_SOCKET_NTHREADS": "2"
+          }
+        }
+      ]
+    },
+    "shm_transport": {
+      "extends": "perf_bf16_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/sendrecv_perf",
+      "tests": [
+        {
+          "name": "SHM_CudaMemcpy_SendSide",
+          "description": "SHM enabled + NCCL_SHM_USE_CUDA_MEMCPY send-side locality/mode",
+          "env_variables": {
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_SHM_USE_CUDA_MEMCPY": "1",
+            "NCCL_SHM_MEMCPY_MODE": "1",
+            "NCCL_SHM_LOCALITY": "1"
+          }
+        },
+        {
+          "name": "SHM_CudaMemcpy_RecvSide",
+          "description": "receive-side memcpy mode/locality (MEMCPY_MODE single-valued, kept separate from send-side)",
+          "env_variables": {
+            "NCCL_SHM_USE_CUDA_MEMCPY": "1",
+            "NCCL_SHM_MEMCPY_MODE": "2",
+            "NCCL_SHM_LOCALITY": "2"
+          }
+        },
+        {
+          "name": "SHM_Disable",
+          "description": "NCCL_SHM_DISABLE forces alternate transport selection (conflicts with SHM-enabled tests)",
+          "env_variables": {
+            "NCCL_SHM_DISABLE": "1"
+          }
+        }
+      ]
+    },
+    "p2p_transport": {
+      "extends": "perf_bf16_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/sendrecv_perf",
+      "tests": [
+        {
+          "name": "P2P_Combined",
+          "description": "Combined NCCL_P2P_DIRECT_DISABLE + NCCL_P2P_USE_CUDA_MEMCPY + NCCL_P2P_LEVEL",
+          "env_variables": {
+            "NCCL_P2P_DIRECT_DISABLE": "1",
+            "NCCL_P2P_USE_CUDA_MEMCPY": "0",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        }
+      ]
+    },
+    "gdr_copy": {
+      "extends": "perf_bf16_base",
+      "tests": [
+        {
+          "name": "GdrCopy_Combined",
+          "description": "Combined NCCL_GDRCOPY_ENABLE/FIFO/SYNC/FLUSH + RCCL_NET_HDP_FLUSH",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_GDRCOPY_ENABLE": "1",
+            "NCCL_GDRCOPY_FIFO_ENABLE": "1",
+            "NCCL_GDRCOPY_SYNC_ENABLE": "1",
+            "NCCL_GDRCOPY_FLUSH_ENABLE": "1",
+            "RCCL_NET_HDP_FLUSH": "1"
+          }
+        }
+      ]
+    },
+    "bootstrap_oob": {
+      "extends": "perf_bf16_base",
+      "tests": [
+        {
+          "name": "Bootstrap_Combined",
+          "description": "Combined NCCL_OOB_NET_ENABLE + NCCL_OOB_NET_IFNAME + NCCL_UID_STAGGER_RATE + NCCL_UID_STAGGER_THRESHOLD. With OOB net enabled the OOB device is selected from the NET plugin (IB) device list, so NCCL_OOB_NET_IFNAME must name an HCA (mlx5_*), not an ethernet interface.",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_OOB_NET_ENABLE": "1",
+            "NCCL_OOB_NET_IFNAME": "mlx5_0",
+            "NCCL_UID_STAGGER_RATE": "5000",
+            "NCCL_UID_STAGGER_THRESHOLD": "128"
+          }
+        }
+      ]
+    },
+    "debug_observability": {
+      "extends": "perf_bf16_base",
+      "tests": [
+        {
+          "name": "Debug_Combined",
+          "description": "Combined NCCL_DEBUG=INFO + NCCL_DEBUG_SUBSYS + NCCL_DEBUG_FILE + NCCL_SET_THREAD_NAME + RCCL_LOG_ROCTX + NCCL_GRAPH_MIXING_SUPPORT + RCCL_ENABLE_SIGNALHANDLER",
+          "command_args": "-o all",
+          "env_variables": {
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_SUBSYS": "INIT,COLL,NET,TUNING",
+            "NCCL_DEBUG_FILE": "rccl_debug.%h.%p.log",
+            "NCCL_SET_THREAD_NAME": "1",
+            "RCCL_LOG_ROCTX": "1",
+            "NCCL_GRAPH_MIXING_SUPPORT": "1",
+            "RCCL_ENABLE_SIGNALHANDLER": "1"
+          }
+        }
+      ]
+    },
+    "init_runtime": {
+      "extends": "perf_bf16_base",
+      "tests": [
+        {
+          "name": "Init_Combined",
+          "description": "Combined RCCL_KERNEL_COLL_TRACE_ENABLE/THREAD + NCCL_MIN/MAX_CTAS + HSA_FORCE_FINE_GRAIN_PCIE + NCCL_BUFFSIZE + NCCL_NCHANNELS_PER_NET_PEER + NCCL_LAUNCH_MODE",
+          "command_args": "-o all",
+          "env_variables": {
+            "RCCL_KERNEL_COLL_TRACE_ENABLE": "1",
+            "RCCL_KERNEL_COLL_TRACE_THREAD_ENABLE": "1",
+            "NCCL_MIN_CTAS": "1",
+            "NCCL_MAX_CTAS": "16",
+            "HSA_FORCE_FINE_GRAIN_PCIE": "1",
+            "NCCL_BUFFSIZE": "8388608",
+            "NCCL_NCHANNELS_PER_NET_PEER": "2",
+            "NCCL_LAUNCH_MODE": "GROUP"
+          }
+        }
+      ]
+    },
+    "collective_variants": {
+      "extends": "perf_bf16_base",
+      "tests": [
+        {
+          "name": "Coll_PivotAlltoall",
+          "description": "RCCL_ALL_TO_ALL_PIVOT_ENABLE + RCCL_PIVOT_ALLTOALL_ENABLE off",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",
+          "env_variables": {
+            "RCCL_ALL_TO_ALL_PIVOT_ENABLE": "1",
+            "RCCL_PIVOT_ALLTOALL_ENABLE": "0"
+          }
+        },
+        {
+          "name": "Coll_LL128_Force",
+          "description": "RCCL_LL128_FORCE_ENABLE forces LL128 proto",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_gather_perf",
+          "env_variables": {
+            "RCCL_LL128_FORCE_ENABLE": "1"
+          }
+        },
+        {
+          "name": "Coll_P2pNetDisable",
+          "description": "RCCL_P2P_NET_DISABLE toggled off (default 1)",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/reduce_scatter_perf",
+          "command_args": "-o all",
+          "env_variables": {
+            "RCCL_P2P_NET_DISABLE": "0"
+          }
+        },
+        {
+          "name": "Coll_Broadcast_Output_Trees",
+          "description": "RCCL_OUTPUT_TREES diagnostic dump on broadcast path",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/broadcast_perf",
+          "env_variables": {
+            "RCCL_OUTPUT_TREES": "1"
+          }
+        }
+      ]
+    },
+    "registration_matrix": {
+      "extends": "perf_bf16_base",
+      "env_variables": {
+        "NCCL_DMABUF_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "Reg_Local_Legacy_DMABUF",
+          "description": "Local registration + legacy CUDA register, no graph (-R 1), DMABUF enabled",
+          "command_args": "-R 1 -o all",
+          "env_variables": {
+            "NCCL_LEGACY_CUDA_REGISTER": "1",
+            "NCCL_LOCAL_REGISTER": "1",
+            "NCCL_GRAPH_REGISTER": "0",
+            "NCCL_CUMEM_ENABLE": "0"
+          }
+        },
+        {
+          "name": "Reg_Local_Cumem_DMABUF",
+          "description": "Local registration + CUMEM, no graph (-R 1), DMABUF enabled",
+          "command_args": "-R 1 -o all",
+          "env_variables": {
+            "NCCL_LEGACY_CUDA_REGISTER": "0",
+            "NCCL_LOCAL_REGISTER": "1",
+            "NCCL_GRAPH_REGISTER": "0",
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
+          "name": "Reg_Graph_Local_Legacy_DMABUF",
+          "description": "Graph + local registration + legacy CUDA register (-R 1 -G 2), DMABUF enabled",
+          "command_args": "-R 1 -G 2 -o all",
+          "env_variables": {
+            "NCCL_LEGACY_CUDA_REGISTER": "1",
+            "NCCL_LOCAL_REGISTER": "1",
+            "NCCL_GRAPH_REGISTER": "1",
+            "NCCL_CUMEM_ENABLE": "0"
+          }
+        },
+        {
+          "name": "Reg_Graph_Local_Cumem_DMABUF",
+          "description": "Graph + local registration + CUMEM (-R 1 -G 2), DMABUF enabled",
+          "command_args": "-R 1 -G 2 -o all",
+          "env_variables": {
+            "NCCL_LEGACY_CUDA_REGISTER": "0",
+            "NCCL_LOCAL_REGISTER": "1",
+            "NCCL_GRAPH_REGISTER": "1",
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        }
+      ]
+    },
+    "device_api_symmetric": {
+      "extends": "perf_base",
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1 -R 2",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_FORCE_FINE_GRAIN_PCIE": "1"
+      },
+      "tests": [
+        { "name": "DeviceAPI_Symmetric_Broadcast", "description": "Symmetric-memory window (-R 2) device-API path on broadcast", "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/broadcast_perf" },
+        { "name": "DeviceAPI_Symmetric_Reduce",    "description": "Symmetric-memory window (-R 2) device-API path on reduce",    "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/reduce_perf" },
+        { "name": "DeviceAPI_Symmetric_SendRecv",  "description": "Symmetric-memory window (-R 2) device-API path on sendrecv",  "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/sendrecv_perf" },
+        { "name": "DeviceAPI_Symmetric_Scatter",   "description": "Symmetric-memory window (-R 2) device-API path on scatter",   "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/scatter_perf" },
+        { "name": "DeviceAPI_Symmetric_Gather",    "description": "Symmetric-memory window (-R 2) device-API path on gather",    "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/gather_perf" }
+      ]
+    },
+    "device_api_lsa": {
+      "extends": "perf_base",
+      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_reduce_perf",
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_FORCE_FINE_GRAIN_PCIE": "1"
+      },
+      "tests": [
+        { "name": "DeviceAPI_LSA_D1", "description": "LSA device-API all_reduce, symmetric window + multimem depth 1 (-R 2 -D 1)", "command_args": "-R 2 -D 1" },
+        { "name": "DeviceAPI_LSA_D2", "description": "LSA device-API all_reduce, symmetric window + multimem depth 2 (-R 2 -D 2)", "command_args": "-R 2 -D 2" }
+      ]
+    },
+    "device_api_gin": {
+      "extends": "perf_base",
+      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_FORCE_FINE_GRAIN_PCIE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "HSA_NO_SCRATCH_RECLAIM": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "RCCL_ENABLE_INTRANET": "1"
+      },
+      "tests": [
+        { "name": "DeviceAPI_GIN_D3", "description": "GIN device-API alltoall, symmetric window + multimem depth 3 (-R 2 -D 3), DMABUF enabled", "command_args": "-R 2 -D 3", "env_variables": { "NCCL_DMABUF_ENABLE": "1" } },
+        { "name": "DeviceAPI_GIN_D4", "description": "GIN device-API alltoall, symmetric window + multimem depth 4 (-R 2 -D 4), DMABUF enabled", "command_args": "-R 2 -D 4", "env_variables": { "NCCL_DMABUF_ENABLE": "1" } },
+        { "name": "DeviceAPI_GIN_D3_NoDmabuf", "description": "GIN device-API alltoall, symmetric window + multimem depth 3 (-R 2 -D 3), NCCL_DMABUF_ENABLE NOT set", "command_args": "-R 2 -D 3" },
+        { "name": "DeviceAPI_GIN_D4_NoDmabuf", "description": "GIN device-API alltoall, symmetric window + multimem depth 4 (-R 2 -D 4), NCCL_DMABUF_ENABLE NOT set", "command_args": "-R 2 -D 4" }
+      ]
+    },
+    "gin_device_mpi": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_DeviceMPI_AllTests",
+          "description": "GIN proxy device-side MPI tests over IB across two nodes",
+          "test_filter": "GinMPIDeviceTests.*",
+          "timeout": 600
+        },
+        {
+          "name": "GIN_MultiContext_NonPowerOf2",
+          "description": "Multi-context GIN with a non-power-of-2 context count (NCCL_GIN_NCONTEXTS=3)",
+          "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
+          "env_variables": {
+            "NCCL_GIN_NCONTEXTS": "3"
+          }
+        },
+        {
+          "name": "GIN_RailConnection_Create",
+          "description": "RAIL GIN connection type; requires rail-only mode (NCCL_CROSS_NIC=0)",
+          "test_filter": "GinMPIDeviceTests.RailConnection_Create",
+          "env_variables": {
+            "NCCL_CROSS_NIC": "0"
+          }
+        }
+      ]
+    },
+    "gin_barrier_session": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_BarrierSession_LsaOnly",
+          "description": "ncclBarrierSession LSA-only: intra-node symmetric-memory barrier (no GIN), with 2 ranks/node so the LSA team is non-trivial",
+          "test_filter": "GinMPIDeviceTests.BarrierSession_LsaOnly"
+        },
+        {
+          "name": "GIN_BarrierSession_Hybrid",
+          "description": "ncclBarrierSession hybrid: inner LSA composed with outer rail-GIN barrier; the rail arm crosses nodes",
+          "test_filter": "GinMPIDeviceTests.BarrierSession_Hybrid",
+          "env_variables": {
+            "NCCL_GIN_TYPE": "2",
+            "NCCL_GIN_ENABLE": "1"
+          }
+        }
+      ]
+    },
+    "gin_reducescatter_sym": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_ReduceScatter_Symmetric",
+          "description": "Symmetric-memory ReduceScatter (RailA2A_LsaLD) sum + avg; requires >=2 ranks/node across >=2 nodes",
+          "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric*"
+        }
+      ]
+    },
+    "gin_negative": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_Disable_Error",
+          "description": "Negative path: ncclDevCommCreate must reject GIN bring-up when NCCL_GIN_ENABLE=0",
+          "test_filter": "GinMPIDeviceTests.Disable_Error",
+          "env_variables": {
+            "NCCL_GIN_ENABLE": "0"
+          }
+        },
+        {
+          "name": "GIN_Invalid_SignalPool",
+          "description": "Oversized GIN signal pool is silently clamped; basic put round-trip still works",
+          "test_filter": "GinMPIDeviceTests.Invalid_SignalPool",
+          "env_variables": {
+            "NCCL_GIN_SIGNAL_POOL_SIZE": "0x40000000"
+          }
+        },
+        {
+          "name": "GIN_Invalid_CounterPool",
+          "description": "Oversized GIN counter pool is silently clamped; basic put round-trip still works",
+          "test_filter": "GinMPIDeviceTests.Invalid_CounterPool",
+          "env_variables": {
+            "NCCL_GIN_COUNTER_POOL_SIZE": "0x40000000"
+          }
+        }
+      ]
     }
   },
   "test_suites": [
+    {
+      "name": "NET - Device Count Mismatch (AICOMRCCL-1213)",
+      "description": "Per-rank Net device-count mismatch detection and NCCL_IGNORE_NET_MISMATCH abort (single node, 2 ranks)",
+      "config": "net_device_count_mismatch",
+      "enabled": true
+    },
     {
       "name": "SHM Tests - Complete Suite",
       "description": "All shared memory transport tests (single node)",
@@ -2064,6 +3383,18 @@
       "name": "Unit Tests - Fixtures (Debug)",
       "description": "Non-MPI unit tests accessing internal symbols (Debug only)",
       "config": "unit_tests_fixtures_debug",
+      "enabled": true
+    },
+    {
+      "name": "Plugin Compat v11 - Lazy Init",
+      "description": "AICOMRCCL-1532: v11 net/collnet plugin compat layer lazy initialization (Debug only)",
+      "config": "plugin_compat_v11",
+      "enabled": true
+    },
+    {
+      "name": "Asymmetric Visibility",
+      "description": "Comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
+      "config": "asymmetric_visibility",
       "enabled": true
     },
     {
@@ -2157,6 +3488,12 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Fault Injection Ops Unit (fake ibv_context)",
+      "description": "Pure-unit coverage of the ops-overload mechanism via a fabricated ibv_context: inner guard branches and shim error paths. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware)",
+      "config": "fault_inject_ops_unit",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Resiliency Port Failover",
       "description": "Port failover tests: error classification, CQE recovery, multi-device failover, data integrity under failure",
       "config": "resiliency_failover",
@@ -2235,6 +3572,30 @@
       "enabled": true
     },
     {
+      "name": "MemManager - MPI (Internal API, CUMEM=0)",
+      "description": "Internal ncclCommMemSuspend/Resume on raw VMM, np=2 (MemManagerAnyRanks + MemManagerTwoRank), NCCL_CUMEM_ENABLE=0",
+      "config": "mem_manager_mpi_cumem0",
+      "enabled": true
+    },
+    {
+      "name": "MemManager - MPI (Internal API, CUMEM=1)",
+      "description": "Internal ncclCommMemSuspend/Resume on raw VMM, np=2 (MemManagerAnyRanks + MemManagerTwoRank), NCCL_CUMEM_ENABLE=1",
+      "config": "mem_manager_mpi_cumem1",
+      "enabled": true
+    },
+    {
+      "name": "Suspend/Resume - Public API (CUMEM=0)",
+      "description": "Public ncclCommSuspend/Resume/MemStats end-to-end, NCCL_CUMEM_ENABLE=0 (CUMEM-only subtests skip via GTEST_SKIP)",
+      "config": "suspend_resume_public_api_cumem0",
+      "enabled": true
+    },
+    {
+      "name": "Suspend/Resume - Public API (CUMEM=1)",
+      "description": "Public ncclCommSuspend/Resume/MemStats end-to-end, NCCL_CUMEM_ENABLE=1 (exercises CUMEM path where supported)",
+      "config": "suspend_resume_public_api_cumem1",
+      "enabled": true
+    },
+    {
       "name": "CE Tests - 2-Rank (AllGather, AlltoAll, Fallback, Stress)",
       "description": "CE collective tests on 2 GPUs/ranks: correctness, log-marker verification, SM fallback, and stress. Skips automatically on unsupported driver version.",
       "config": "ce_2rank",
@@ -2286,6 +3647,18 @@
       "name": "Grow MPI Tests - Multi-Node (4-rank, 2-node)",
       "description": "ncclCommGrow multi-node scenarios over IB transport: grow with SendRecv/AllReduce over network, parent destroy with IB teardown, elastic grow/shrink cycles over IB, and non-blocking grow with IB connection setup",
       "config": "grow_mpi_tests_multinode",
+      "enabled": true
+    },
+    {
+      "name": "ncclTimeout MPI Tests (2-rank)",
+      "description": "ncclTimeout coverage at 2 ranks: host async-error API on a live comm and the LSA device-barrier timeout (healthy/absent-peer/zero-budget/repeated/recover/back-to-back) with a 2-rank LSA team",
+      "config": "gin_nccl_timeout_tests",
+      "enabled": true
+    },
+    {
+      "name": "ncclTimeout GIN Barrier Tests - Multi-Node (4-rank, 2-node)",
+      "description": "ncclTimeout GIN rail device-barrier timeout over IB transport: healthy/absent-peer/zero-budget/repeated/recover/back-to-back across nodes",
+      "config": "gin_nccl_timeout_tests_multinode",
       "enabled": true
     },
     {
@@ -2388,6 +3761,168 @@
       "name": "IR Device Tests",
       "description": "librccl_device.bc (IR) device-API tests via pytest harness; builds artifacts on demand and self-skips when prerequisites are missing",
       "config": "ir_device",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Default Collectives",
+      "description": "All collectives (all_reduce, reduce, reduce_scatter, all_gather, broadcast, alltoall, scatter, gather, sendrecv) at three message sizes (1 KiB, 64 MiB, 1 GiB), all datatypes (-d all), and all operations (-o all) for reduction collectives",
+      "config": "default_collectives",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Tuning / Algo / Proto",
+      "description": "rccl-tests perf sweep of NCCL_ALGO, NCCL_PROTO, NCCL_THREAD_THRESHOLDS, NCCL_LL128_NTHREADS, NCCL_PAT_ENABLE, NCCL_NET_OVERHEAD, NCCL_NTHREADS",
+      "config": "tuning_algo_proto",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Enqueue Thresholds",
+      "description": "rccl-tests perf sweep of NCCL_GRAPH_REGISTER, NCCL_P2P_LL_THRESHOLD, RCCL_P2P_NET_THRESHOLD, NCCL_CHUNK_SIZE, NCCL_L1_SHARED_MEMORY_CARVEOUT, RCCL_INTRANET_THRESHOLD",
+      "config": "enqueue_thresholds",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Channels / Rings",
+      "description": "rccl-tests perf sweep of NCCL_MIN/MAX_NRINGS, NCCL_MIN/MAX_NCHANNELS, NCCL_UNPACK_DOUBLE_NCHANNELS, NCCL_MIN/MAX_P2P_NCHANNELS",
+      "config": "channels_rings",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Paths / Topology",
+      "description": "rccl-tests perf sweep of NCCL_NET_GDR_LEVEL, NCCL_PXN_DISABLE, NCCL_NET_DISABLE_INTRA, NCCL_NET_GDR_READ, NCCL_NVB_DISABLE, NCCL_IGNORE_DISABLED_P2P, NCCL_CROSS_NIC, NCCL_P2P_PXN_LEVEL",
+      "config": "paths_topo",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Rome Model Matching",
+      "description": "rccl-tests perf sweep of RCCL_MODEL_MATCHING_DISABLE, RCCL_DISABLE_RAIL_TREES, RCCL_MODEL_REVERSAL_DISABLE, RCCL_DUMP_ROME_MODEL_FILE, NCCL_GRAPH_DUMP_FILE",
+      "config": "model_matching",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - IB Transport",
+      "description": "rccl-tests perf sweep of NCCL_IB_PKEY, NCCL_IB_MERGE_VFS, NCCL_IB_WARN_RAIL_LOCAL, NCCL_IB_PCI_RELAXED_ORDERING, NCCL_IB_RETURN_ASYNC_EVENTS, NCCL_IB_TC, NCCL_IB_SL, NCCL_IB_SPLIT_DATA_ON_QPS, NCCL_IB_QPS_PER_CONNECTION, NCCL_IB_GID_INDEX, NCCL_IB_TIMEOUT, NCCL_IB_RETRY_CNT, NCCL_GDR_FLUSH_DISABLE, RCCL_FORCE_ENABLE_GDRDMA - requires IB hardware",
+      "config": "ib_transport",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - IB MQP Retry (ibvwrap)",
+      "description": "rccl-tests perf sweep of NCCL_IB_MQP_RETRY_ALL, NCCL_IB_MQP_RETRY_CNT, NCCL_IB_MQP_RETRY_SLEEP_MSEC - requires IB hardware",
+      "config": "ibvwrap_retry",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Socket Transport",
+      "description": "rccl-tests perf sweep of NCCL_SOCKET_RETRY_CNT, NCCL_SOCKET_RETRY_SLEEP_MSEC, NCCL_NSOCKS_PERTHREAD, NCCL_SOCKET_NTHREADS",
+      "config": "socket_transport",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - SHM Transport",
+      "description": "rccl-tests perf sweep of NCCL_SHM_DISABLE, NCCL_SHM_USE_CUDA_MEMCPY, NCCL_SHM_MEMCPY_MODE, NCCL_SHM_LOCALITY",
+      "config": "shm_transport",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - P2P Transport",
+      "description": "rccl-tests perf sweep of NCCL_P2P_DIRECT_DISABLE, NCCL_P2P_USE_CUDA_MEMCPY, NCCL_P2P_LEVEL",
+      "config": "p2p_transport",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - GDR Copy / HDP Flush",
+      "description": "rccl-tests perf sweep of NCCL_GDRCOPY_ENABLE, NCCL_GDRCOPY_FIFO_ENABLE, NCCL_GDRCOPY_SYNC_ENABLE, NCCL_GDRCOPY_FLUSH_ENABLE, RCCL_NET_HDP_FLUSH",
+      "config": "gdr_copy",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Bootstrap / OOB Net",
+      "description": "rccl-tests perf sweep of NCCL_OOB_NET_ENABLE, NCCL_OOB_NET_IFNAME, NCCL_UID_STAGGER_RATE, NCCL_UID_STAGGER_THRESHOLD",
+      "config": "bootstrap_oob",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Debug / Observability",
+      "description": "rccl-tests perf sweep of NCCL_DEBUG, NCCL_DEBUG_SUBSYS, NCCL_DEBUG_FILE, NCCL_SET_THREAD_NAME, RCCL_LOG_ROCTX, NCCL_GRAPH_MIXING_SUPPORT, RCCL_ENABLE_SIGNALHANDLER",
+      "config": "debug_observability",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Init / Runtime",
+      "description": "rccl-tests perf sweep of RCCL_KERNEL_COLL_TRACE_ENABLE, RCCL_KERNEL_COLL_TRACE_THREAD_ENABLE, NCCL_MIN_CTAS, NCCL_MAX_CTAS, HSA_FORCE_FINE_GRAIN_PCIE, NCCL_BUFFSIZE, NCCL_NCHANNELS_PER_NET_PEER, NCCL_LAUNCH_MODE",
+      "config": "init_runtime",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Collective Variants",
+      "description": "rccl-tests perf sweep across alltoall/allgather/reducescatter/broadcast (RCCL_ALL_TO_ALL_PIVOT_ENABLE, RCCL_PIVOT_ALLTOALL_ENABLE, RCCL_LL128_FORCE_ENABLE, RCCL_P2P_NET_DISABLE, RCCL_OUTPUT_TREES)",
+      "config": "collective_variants",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Registration Matrix (DMABUF enabled)",
+      "description": "rccl-tests buffer registration matrix with DMABUF on (NCCL_DMABUF_ENABLE=1): local+legacy, local+cumem, graph+local+legacy, graph+local+cumem (NCCL_LOCAL_REGISTER, NCCL_GRAPH_REGISTER, NCCL_LEGACY_CUDA_REGISTER, NCCL_CUMEM_ENABLE; rccl-tests -R 1 and -G 2 flags)",
+      "config": "registration_matrix",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Device API - Symmetric Memory",
+      "description": "Symmetric-memory window device-API path (rccl-tests -R 2) across broadcast/reduce/sendrecv/scatter/gather (NCCL_CUMEM_ENABLE, HSA_FORCE_FINE_GRAIN_PCIE). Requires rccl-tests built with --enable-device-api.",
+      "config": "device_api_symmetric",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Device API - LSA",
+      "description": "LSA device-API all_reduce sweeping multimem depth (rccl-tests -R 2 -D 1 / -D 2). Requires rccl-tests built with --enable-device-api.",
+      "config": "device_api_lsa",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Device API - GIN",
+      "description": "GIN device-API alltoall sweeping multimem depth (rccl-tests -R 2 -D 3 / -D 4) with GIN env (NCCL_DMABUF_ENABLE, NCCL_GIN_TYPE=2, HSA_NO_SCRATCH_RECLAIM, NCCL_ENV_PLUGIN=none, RCCL_ENABLE_INTRANET). Requires rccl-tests built with --enable-device-api.",
+      "config": "device_api_gin",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Proxy Tests",
+      "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall) over IB across two nodes",
+      "config": "gin_device_mpi",
+      "enabled": true
+    },
+    {
+      "name": "GIN BarrierSession - LSA + Hybrid",
+      "description": "ncclBarrierSession LSA-only and hybrid LSA+GIN barrier with 2 ranks/node",
+      "config": "gin_barrier_session",
+      "enabled": true
+    },
+    {
+      "name": "GIN ReduceScatter - Symmetric",
+      "description": "Symmetric-memory ReduceScatter (RailA2A_LsaLD) sum + avg with 2 ranks/node across 2 nodes",
+      "config": "gin_reducescatter_sym",
+      "enabled": true
+    },
+    {
+      "name": "GIN Negative / Pool Limits",
+      "description": "GIN disabled-path rejection and oversized signal/counter pool clamp opt-in tests",
+      "config": "gin_negative",
+      "enabled": true
+    },
+    {
+      "name": "Host API Tests - SymmMem",
+      "description": "Host API tests with symmetric memory support",
+      "config": "host_api_tests_symmem",
+      "enabled": true
+    },
+    {
+      "name": "Host API Tests - Default",
+      "description": "Host API tests with default memory support",
+      "config": "host_api_tests_default",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Window Tests - Single Node",
+      "description": "Symmetric window registration tests for relaxed one-buffer path validation",
+      "config": "symmetric_window_tests",
       "enabled": true
     }
   ]

@@ -466,7 +466,7 @@ static bool test_hipMallocFromPoolAsync_MThread(enum eTestValue testtype) {
 }
 
 static void thread_Test2(hipMemPool_t mempool, hipStream_t stream, int N, int threadNum) {
-  streamMemAllocTest testObj(N);
+  streamMemAllocTest testObj(N, true);
   // Create host buffer with test data
   testObj.createHostBufferWithData();
   // Use the common mempool
@@ -480,8 +480,8 @@ static void thread_Test2(hipMemPool_t mempool, hipStream_t stream, int N, int th
     testObj.transferFromMempool(stream);
     testObj.freeDevBuf(stream);
     // verify and validate
-    HIP_CHECK(hipStreamSynchronize(stream));
-    results = testObj.validateResult();
+    HIP_CHECK_THREAD(hipStreamSynchronize(stream));
+    results = testObj.validateResultThreadSafe();
     if (!results) {
       break;
     }
@@ -534,6 +534,8 @@ static bool test_hipMallocFromPoolAsync_MThread_CommonMpool(enum eTestValue test
   if (!bUseDefault) {
     HIP_CHECK(hipMemPoolDestroy(mem_pool_common));
   }
+
+  HIP_CHECK_THREAD_FINALIZE();
   return status;
 }
 

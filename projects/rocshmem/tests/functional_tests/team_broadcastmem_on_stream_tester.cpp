@@ -203,19 +203,10 @@ void TeamBroadcastmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize
 }
 
 void TeamBroadcastmemOnStreamTester::verifyResults(size_t size) {
-  // Verify correctness: after broadcast, non-root PEs receive the broadcast
-  // data Root PE's dest buffer is NOT modified (per OpenSHMEM/rocSHMEM spec)
+  // Verify correctness: after broadcast, all PEs receive the broadcast data
   for (int wg_id = 0; wg_id < num_teams; wg_id++) {
     int idx = wg_id * size;
-    int expected_value;
-
-    if (my_pe == pe_root) {
-      // Root PE's dest buffer should remain unchanged (0xAA)
-      expected_value = 0xAA;
-    } else {
-      // Non-root PEs should have received the broadcast value
-      expected_value = (pe_root + 1) * 100 + wg_id;
-    }
+    int expected_value = (pe_root + 1) * 100 + wg_id;
 
     for (size_t k = 0; k < size; k++) {
       if (static_cast<unsigned char>(dest_buf[idx + k]) !=

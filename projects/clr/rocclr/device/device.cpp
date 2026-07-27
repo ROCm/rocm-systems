@@ -336,7 +336,7 @@ Context* Device::glb_ctx_ = nullptr;
 std::recursive_mutex Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
-cl_int Device::gpu_error_ = CL_SUCCESS;
+std::atomic<cl_int> Device::gpu_error_{CL_SUCCESS};
 
 std::shared_mutex MemObjMap::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
 std::map<uintptr_t, amd::Memory*> MemObjMap::MemObjMap_ ROCCLR_INIT_PRIORITY(101);
@@ -393,6 +393,29 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
     *offset = result.offset;
   }
   return result.memory;
+}
+
+amd::Memory* MemObjMap::FindOverlap(const void* ptr, size_t size) {
+  if (size == 0) {
+    return nullptr;
+  }
+  std::shared_lock lock(AllocatedLock_);
+
+  uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
+  uintptr_t end = start + size;  // exclusive
+
+  auto it = MemObjMap_.upper_bound(end - 1);
+  if (it != MemObjMap_.begin()) {
+    --it;
+    amd::Memory* mem = it->second;
+    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                          ? sizeof(mem->getUserData().hsa_handle)
+                          : mem->getSize();
+    if ((it->first + mem_size) > start) {
+      return mem;
+    }
+  }
+  return nullptr;
 }
 
 amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
@@ -668,6 +691,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
 
     if (!ValidateVirtualAddressRange(vaddr_base_obj, vaddr_sub_obj)) {
       LogError("Validation failed on address range, returning nullptr");
+      vaddr_sub_obj->release();
       return nullptr;
     }
   }
@@ -700,6 +724,50 @@ bool Device::DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj) {
   }
 
   return true;
+}
+
+//==================================================================================================
+amd::Memory* Device::MapMemObjBookkeeping(amd::Memory* phys, void* va_ptr, size_t va_size) const {
+  if (phys == nullptr) {
+    LogError("MapMemObjBookkeeping: phys is nullptr");
+    return nullptr;
+  }
+  constexpr bool kParent = false;
+  return phys->getContext().devices()[0]->CreateVirtualBuffer(
+      phys->getContext(), va_ptr, va_size, phys->getUserData().deviceId,
+      phys->getUserData().locationType, kParent);
+}
+
+//==================================================================================================
+void Device::FinalizeMapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, amd::Memory* phys,
+                                          void* va_ptr, bool import_vmm_for_interprocess) const {
+  assert(vaddr_sub_obj != nullptr);
+  assert(phys != nullptr);
+  assert(amd::MemObjMap::FindMemObj(va_ptr) == nullptr);
+  amd::MemObjMap::AddMemObj(va_ptr, vaddr_sub_obj);
+  vaddr_sub_obj->getUserData().phys_mem_obj = phys;
+  phys->getUserData().vaddr_mem_obj = vaddr_sub_obj;
+  if (import_vmm_for_interprocess && (phys->getMemFlags() & ROCCLR_MEM_INTERPROCESS)) {
+    vaddr_sub_obj->setVmmImported(true);
+  }
+}
+
+//==================================================================================================
+void Device::UnmapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, void* va_ptr,
+                                    bool destroy_virtual_buffer, bool release_sub_obj) const {
+  assert(vaddr_sub_obj != nullptr);
+  if (destroy_virtual_buffer) {
+    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+  }
+  amd::MemObjMap::RemoveMemObj(va_ptr);
+  if (vaddr_sub_obj->getUserData().phys_mem_obj != nullptr) {
+    vaddr_sub_obj->getUserData().phys_mem_obj->getUserData().vaddr_mem_obj = nullptr;
+    vaddr_sub_obj->getUserData().phys_mem_obj = nullptr;
+  }
+  if (release_sub_obj) {
+    // ~Memory releases parent va_ via parent_->release().
+    vaddr_sub_obj->release();
+  }
 }
 
 Device::BlitProgram::~BlitProgram() {
@@ -769,7 +837,20 @@ bool Device::init() {
   devices_ = nullptr;
   appProfile_.init();
 
-  if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+  // Check if GPU_ENABLE_PAL env var is empty string, consider it as default
+  const char* gpu_enable_pal_env = getenv("GPU_ENABLE_PAL");
+  bool gpu_enable_pal_is_empty_string = (gpu_enable_pal_env != nullptr && gpu_enable_pal_env[0] == '\0');
+
+  // Bug fix: atoi("") returns 0, but empty string should mean "use platform default"
+  if (gpu_enable_pal_is_empty_string) {
+    if (IS_WINDOWS) {
+      // Windows default: PAL path
+      GPU_ENABLE_PAL = 1;
+    } else {
+      // Linux default: ROCr path
+      GPU_ENABLE_PAL = 0;
+    }
+  } else if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
     // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
     // Without this, roc::Device::init() returns true & disables PAL path in below code
     GPU_ENABLE_PAL = 1;
@@ -805,6 +886,7 @@ bool Device::init() {
     if (!amd::IS_HIP) {
       ret |= roc::NullDevice::init();
     }
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "ROCr backend initialized");
   }
 #endif  // WITH_HSA_DEVICE
 #if defined(WITH_PAL_DEVICE)
@@ -816,6 +898,7 @@ bool Device::init() {
       }
     }
     ret |= PalDeviceLoad();
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "PAL backend initialized");
   }
 #endif  // WITH_PAL_DEVICE
   return ret;
@@ -823,6 +906,12 @@ bool Device::init() {
 
 // ================================================================================================
 void Device::tearDown() {
+#if defined(__linux__) && defined(__clang__)
+#if __has_feature(address_sanitizer)
+  // Scan for device-side leaks before ~Device frees the heap slabs.
+  reportAllDeviceMemoryLeaks();
+#endif
+#endif
   if (devices_ != nullptr) {
     for (uint i = 0; i < devices_->size(); ++i) {
       delete devices_->at(i);
@@ -1312,6 +1401,200 @@ void Device::RemoveHostcallMemory(amd::Memory* memory) {
 }
 
 void Device::ClearHostcallMemories() { hostcall_allocated_memories_.clear(); }
+
+// ================================================================================================
+#if defined(__linux__) && defined(__clang__)
+#if __has_feature(address_sanitizer)
+
+extern "C" void __asan_report_nonself_leak(uint64_t alloc_pc, uint64_t alloc_size,
+                                           int device_id, const char* device_name,
+                                           int64_t vma_adjust, int fd,
+                                           uint64_t file_extent_size,
+                                           uint64_t file_extent_start);
+
+// Helper structures and functions for leak detection.
+//
+// Symbolization is best-effort: the header records only the allocating PC, resolved via
+// the URI recorded when its code object loaded. An unloaded memory:// object resolves to
+// "<unavailable>", and a reused address range may resolve to the wrong module. The leak
+// itself (size, count, device, PC) is reported regardless.
+namespace {
+  struct CachedUri {
+    amd::Os::FileDesc fd;
+    uint64_t offset;
+    uint64_t size;
+  };
+
+  constexpr uint64_t kAllocMagic = 0xfedcba1ee1abcdefULL;
+  constexpr uint32_t kAllocHeaderBytes = 32;
+  constexpr size_t   kSlabBytes = 2u * Mi;
+  constexpr uint32_t kSlabHeaderBytes = 32;
+  constexpr uint32_t kSlabAlign = 4096;
+  constexpr uint32_t kMinAlign = 16;
+  constexpr uint32_t kAsanShadow = 3;
+  constexpr uint8_t  kHeapFreeMagic = 0xfd;
+  constexpr uint8_t  kHeapLeftRedzoneMagic = 0xfa;
+  constexpr uint64_t kShadowOffset = 0x7FFFFFFF & (~0xFFFULL << kAsanShadow);
+
+  inline uint8_t* memToShadow(uint64_t addr) {
+    return reinterpret_cast<uint8_t*>((addr >> kAsanShadow) + kShadowOffset);
+  }
+
+  __attribute__((no_sanitize("address")))
+  bool scanSlabForLeaks(uint64_t va, device::UriLocator* uriLocator, int devIdx,
+                        std::map<std::string, CachedUri>& uriCache) {
+    auto base = reinterpret_cast<uint8_t*>(va);
+    auto usable = base + kSlabHeaderBytes;
+    auto end = base + kSlabBytes;
+    bool foundLeak = false;
+
+    for (auto p = usable; p + kAllocHeaderBytes <= end; p += kMinAlign) {
+      auto words = reinterpret_cast<uint64_t*>(p);
+      if (words[0] != kAllocMagic || words[1] != va)
+        continue;
+
+      uint64_t pc  = words[2];
+      uint32_t usz = reinterpret_cast<uint32_t*>(p)[7];
+
+      uint64_t ret_addr = reinterpret_cast<uint64_t>(p) + kAllocHeaderBytes;
+      uint8_t shadow = *memToShadow(ret_addr);
+      if (shadow == kHeapFreeMagic || shadow == kHeapLeftRedzoneMagic)
+        continue;
+
+      foundLeak = true;
+      auto uri_fd = amd::Os::FDescInit();
+      uint64_t offset = 0, size = 0;
+      int64_t loadAddrAdjust = 0;
+      std::string uriPath;
+      if (uriLocator) {
+        device::UriLocator::UriInfo uri_info = uriLocator->lookUpUri(pc);
+        uriPath = uri_info.uriPath;
+        loadAddrAdjust = uri_info.loadAddressDiff;
+
+        auto it = uriCache.find(uriPath);
+        if (it != uriCache.end()) {
+          uri_fd = it->second.fd;
+          offset = it->second.offset;
+          size = it->second.size;
+        } else {
+          auto extent = uriLocator->decodeUriAndGetFd(uri_info, &uri_fd);
+          offset = extent.first;
+          size = extent.second;
+          if (uri_fd != amd::Os::FDescInit()) {
+            uriCache[uriPath] = {uri_fd, offset, size};
+          }
+        }
+      }
+      __asan_report_nonself_leak(pc, usz, devIdx, "amdgpu",
+                                 loadAddrAdjust, uri_fd, size, offset);
+    }
+    return foundLeak;
+  }
+
+  __attribute__((no_sanitize("address")))
+  bool scanLargeAllocationForLeaks(uint64_t va, device::UriLocator* uriLocator, int devIdx,
+                                    std::map<std::string, CachedUri>& uriCache) {
+    auto header = reinterpret_cast<uint64_t*>(va + kSlabAlign - kAllocHeaderBytes);
+    if (header[0] != kAllocMagic || header[1] != 0)
+      return false;
+
+    uint64_t pc  = header[2];
+    uint32_t usz = reinterpret_cast<uint32_t*>(header)[7];
+    auto uri_fd = amd::Os::FDescInit();
+    uint64_t offset = 0, size = 0;
+    int64_t loadAddrAdjust = 0;
+    std::string uriPath;
+    if (uriLocator) {
+      device::UriLocator::UriInfo uri_info = uriLocator->lookUpUri(pc);
+      uriPath = uri_info.uriPath;
+      loadAddrAdjust = uri_info.loadAddressDiff;
+
+      auto it = uriCache.find(uriPath);
+      if (it != uriCache.end()) {
+        uri_fd = it->second.fd;
+        offset = it->second.offset;
+        size = it->second.size;
+      } else {
+        auto extent = uriLocator->decodeUriAndGetFd(uri_info, &uri_fd);
+        offset = extent.first;
+        size = extent.second;
+        if (uri_fd != amd::Os::FDescInit()) {
+          uriCache[uriPath] = {uri_fd, offset, size};
+        }
+      }
+    }
+    __asan_report_nonself_leak(pc, usz, devIdx, "amdgpu",
+                               loadAddrAdjust, uri_fd, size, offset);
+    return true;
+  }
+}  // anonymous namespace
+
+void Device::reportDeviceMemoryLeaks() {
+  if (hostcall_allocated_memories_.empty() && initial_heap_buffer_ == nullptr) {
+    return;
+  }
+
+  device::UriLocator* uriLocator = createUriLocator();
+  int devIdx = static_cast<int>(index());
+  bool hasLeaks = false;
+  std::map<std::string, CachedUri> uriCache;
+
+  // Scan initial heap buffer if present
+  if (initial_heap_buffer_ != nullptr) {
+    uint64_t va = initial_heap_buffer_->virtualAddress();
+    if (va != 0 && initial_heap_size_ > 0) {
+      size_t numSlabs = initial_heap_size_ / kSlabBytes;
+      for (size_t i = 0; i < numSlabs; ++i) {
+        hasLeaks |= scanSlabForLeaks(va + i * kSlabBytes, uriLocator, devIdx, uriCache);
+      }
+    }
+  }
+
+  // Scan hostcall-allocated memories
+  for (auto memory : hostcall_allocated_memories_) {
+    if (memory == nullptr) continue;
+
+    device::Memory* dm = memory->getDeviceMemory(*this, false);
+    if (dm == nullptr) continue;
+
+    uint64_t va = dm->virtualAddress();
+    if (va == 0) continue;
+
+    size_t bufSize = memory->getSize();
+
+    if (bufSize == kSlabBytes) {
+      hasLeaks |= scanSlabForLeaks(va, uriLocator, devIdx, uriCache);
+    } else {
+      hasLeaks |= scanLargeAllocationForLeaks(va, uriLocator, devIdx, uriCache);
+    }
+  }
+
+  if (hasLeaks) {
+    __asan_report_nonself_leak(0, 0, -1, "amdgpu", 0, -1, 0, 0);
+  }
+
+  for (const auto& pair : uriCache) {
+    amd::Os::CloseFileHandle(pair.second.fd);
+  }
+
+  delete uriLocator;
+}
+
+void Device::reportAllDeviceMemoryLeaks() {
+  if (devices_ == nullptr) {
+    return;
+  }
+
+  for (uint i = 0; i < devices_->size(); ++i) {
+    Device* device = devices_->at(i);
+    if (device != nullptr) {
+      device->reportDeviceMemoryLeaks();
+    }
+  }
+}
+
+#endif
+#endif
 
 // ================================================================================================
 void Device::AddDevMemObj(const void* k, amd::Memory* memObj) {

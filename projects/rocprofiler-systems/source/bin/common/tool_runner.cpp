@@ -8,16 +8,16 @@
 #include "common/defines.h"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include "common/json_config.hpp"
 #include "common/path.hpp"
 #include "core/argparse.hpp"
 #include "core/mproc.hpp"
 #include "core/timemory.hpp"
 
+#include <spdlog/fmt/ranges.h>
+
 #include <timemory/log/macros.hpp>
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/utility/argparse.hpp>
-#include <timemory/utility/join.hpp>
 
 #include <algorithm>
 #include <array>
@@ -39,11 +39,10 @@
 namespace argparse  = ::tim::argparse;
 namespace signals   = ::tim::signals;
 namespace path      = rocprofsys::common::path;
-namespace env       = rocprofsys::env_vars;
+namespace env_vars  = rocprofsys::env_vars;
 namespace utils     = rocprofsys::common_utils;
 using settings      = ::rocprofsys::settings;
 using parser_data_t = rocprofsys::argparse::parser_data;
-using namespace ::timemory::join;
 
 namespace
 {
@@ -308,8 +307,8 @@ tool_runner::print_usage() const
 void
 tool_runner::update_verbose_from_env()
 {
-    const auto* log_level = std::getenv(env::LOG_LEVEL.data());
-    if(log_level != nullptr) data.out.verbose = env::log_level_to_verbose(log_level);
+    const auto* log_level = std::getenv(env_vars::LOG_LEVEL);
+    if(log_level != nullptr) data.out.verbose = env_vars::log_level_to_verbose(log_level);
 }
 
 void
@@ -327,7 +326,7 @@ tool_runner::get_initial_environment()
     }
 
     auto libexec_path = path::realpath(path::get_internal_script_path());
-    if(!libexec_path.empty()) data.env.set(env::SCRIPT_PATH, libexec_path);
+    if(!libexec_path.empty()) data.env.set(env_vars::SCRIPT_PATH, libexec_path);
 
     update_verbose_from_env();
     if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt();
@@ -345,10 +344,10 @@ tool_runner::get_initial_environment()
 
     if(config.force_sampling)
     {
-        auto mode = getenv_string(env::MODE, "sampling");
+        auto mode = getenv_string(env_vars::MODE, "sampling");
         // Bool value flows through update_env's to_env_string(bool) overload,
         // becoming "true"/"false" in the env string.
-        data.env.set(env::USE_SAMPLING, (mode != "causal"));
+        data.env.set(env_vars::USE_SAMPLING, (mode != "causal"));
     }
 }
 
@@ -374,10 +373,9 @@ tool_runner::prepare_command(const char* exe)
 
     if(!injected)
     {
-        throw std::runtime_error(
-            join("", "Unable to match launcher \"", data.out.launcher,
-                 "\" to any arguments on the command line: \"",
-                 join(array_config{ " ", "", "" }, data.out.command), "\""));
+        throw std::runtime_error(fmt::format(
+            R"(Unable to match launcher "{}" to any arguments on the command line: "{}")",
+            data.out.launcher, fmt::join(data.out.command, " ")));
     }
 
     data.out.command = std::move(new_argv);
@@ -466,7 +464,7 @@ tool_runner::apply_post_parse(parser_t& parser)
     if(config.disable_cputime_on_realtime_only)
     {
         if(parser.exists("sample-realtime") && !parser.exists("sample-cputime"))
-            data.env.set(env::SAMPLING_CPUTIME, false);
+            data.env.set(env_vars::SAMPLING_CPUTIME, false);
     }
 
     if(parser.exists("profile") && parser.exists("flat-profile"))

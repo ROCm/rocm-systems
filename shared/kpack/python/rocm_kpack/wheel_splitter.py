@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import time
 import zipfile
 from collections import defaultdict
@@ -406,6 +407,32 @@ def zip_wheel(source_dir: Path, output_path: Path) -> None:
                 zf.write(file_path, arcname)
 
 
+def _extract_wheel_preserving_permissions(
+    wheel_path: Path, destination_dir: Path
+) -> None:
+    """Extract a wheel while restoring Unix mode bits from zip metadata.
+
+    Python's zipfile extraction intentionally does not apply the Unix mode bits
+    stored in ZipInfo.external_attr. Wheels can contain executables, so restore
+    those bits before later copy/repack steps preserve the extracted tree.
+    """
+    deferred_directory_modes: list[tuple[Path, int]] = []
+    with zipfile.ZipFile(wheel_path, "r") as zf:
+        for member in zf.infolist():
+            extracted_path = Path(zf.extract(member, destination_dir))
+            mode = stat.S_IMODE(member.external_attr >> 16)
+            if mode == 0:
+                continue
+            if member.is_dir():
+                deferred_directory_modes.append((extracted_path, mode))
+            else:
+                extracted_path.chmod(mode)
+
+    for directory_path, mode in deferred_directory_modes:
+        if directory_path.exists():
+            directory_path.chmod(mode)
+
+
 def _extract_single_binary(
     fat_binary_path: Path,
     overlay_relative_path: str,
@@ -685,8 +712,7 @@ class WheelSplitter:
             temp_dir.mkdir()
             if self.verbose:
                 print(f"Extracting {input_path} to {temp_dir}")
-            with zipfile.ZipFile(input_path, "r") as zf:
-                zf.extractall(temp_dir)
+            _extract_wheel_preserving_permissions(input_path, temp_dir)
             return temp_dir, True
         else:
             raise InvalidWheelError(

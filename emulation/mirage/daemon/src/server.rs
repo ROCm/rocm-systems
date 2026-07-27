@@ -8,14 +8,19 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::api;
-use crate::spa;
 use crate::state::AppState;
 
-/// Construct the full router (API + SPA fallback).
+/// Construct the full router (API, plus the SPA fallback when the
+/// `webui` feature is enabled).
 pub fn build_router(state: Arc<AppState>) -> Router {
-    Router::new()
-        .nest("/api", api::router(state.clone()))
-        .fallback(spa::handle)
+    let router = Router::new().nest("/api", api::router(state.clone()));
+
+    // Serve the embedded dashboard SPA at `/` with client-side routing
+    // fallback. Only present when the web UI is compiled in.
+    #[cfg(feature = "webui")]
+    let router = router.fallback(crate::spa::handle);
+
+    router
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
 }

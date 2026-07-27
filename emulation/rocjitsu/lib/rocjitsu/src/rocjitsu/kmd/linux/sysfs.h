@@ -7,6 +7,8 @@
 #ifndef ROCJITSU_KMD_LINUX_SYSFS_H_
 #define ROCJITSU_KMD_LINUX_SYSFS_H_
 
+#include "rocjitsu/config/kfd_device_config.h"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -36,12 +38,14 @@ public:
     uint32_t domain = 0;
     uint64_t hive_id = 0;
     uint32_t drm_render_minor = 128;
-    const char *marketing_name = "";
+    uint32_t revision_id = 0;
+    uint32_t pci_revision_id = 0;
+    std::string marketing_name;
 
     // Compute unit organization
     uint32_t simd_count = 0;
     uint32_t max_waves_per_simd = 10;
-    uint32_t num_shader_engines = 0;
+    uint32_t num_shader_engines = 0; ///< KFD array_count: total shader arrays.
     uint32_t num_shader_arrays_per_engine = 1;
     uint32_t num_cu_per_sh = 0;
     uint32_t simd_per_cu = 4;
@@ -51,6 +55,7 @@ public:
 
     // Memory
     uint64_t local_mem_size = 0;
+    uint32_t vram_type = 6;
     uint32_t lds_size_kb = 64;
     uint32_t mem_width = 4096;   // HBM interface width in bits
     uint32_t mem_clk_max = 1200; // MHz
@@ -111,6 +116,9 @@ public:
   /// @brief Remove the generated directories.
   void cleanup();
 
+  /// @brief Drop ownership of inherited paths without removing them.
+  void release_after_fork();
+
 private:
   std::string topology_dir_;
   std::string drm_dir_;
@@ -125,6 +133,9 @@ private:
                       uint32_t total_gpus);
   void write_drm_tree(const std::vector<GpuInfo> &gpus);
 };
+
+/// @brief Convert a parsed KFD device config into generated sysfs GPU metadata.
+Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
 
 } // namespace rocjitsu
 

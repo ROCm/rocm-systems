@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -148,7 +148,10 @@ constexpr auto creation_notifier_library_seq = library_sequence_t<ROCPROFILER_LI
                                                                   ROCPROFILER_MARKER_LIBRARY,
                                                                   ROCPROFILER_RCCL_LIBRARY,
                                                                   ROCPROFILER_ROCDECODE_LIBRARY,
-                                                                  ROCPROFILER_ROCJPEG_LIBRARY>{};
+                                                                  ROCPROFILER_ROCJPEG_LIBRARY,
+                                                                  ROCPROFILER_OMPT_LIBRARY,
+                                                                  ROCPROFILER_ROCSHMEM_LIBRARY,
+                                                                  ROCPROFILER_HIPFILE_LIBRARY>{};
 
 // check that creation_notifier_library_seq is up to date
 static_assert((1 << (creation_notifier_library_seq.size() - 1)) == ROCPROFILER_LIBRARY_LAST,
@@ -349,7 +352,7 @@ create_task_group(size_t pool_size)
 task_group_t*
 create_task_group(void* addr, size_t pool_size)
 {
-    // notify that rocprofiler library is about to create an inernal thread
+    // notify that rocprofiler library is about to create an internal thread
     notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
 
     // placement new to construct task group at provided address

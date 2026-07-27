@@ -204,7 +204,7 @@ int main() {
   }
 
   // if no HMAC key exists, generate and store it
-  int fd = open(daemon_hmac.key_file_path.c_str(), O_RDONLY);
+  int fd = open(daemon_hmac.get_key_file_path().c_str(), O_RDONLY);
   if (fd < 0) {
     uint8_t key[32];
     amdcuid_status_t key_status = amdcuid_generate_hash_key(key);
@@ -236,7 +236,10 @@ int main() {
 
   // read config file first get logging options and whether to run as a daemon
   // or only on boot
-  std::ifstream config_file("/opt/amdcuid/etc/amdcuid_daemon.conf");
+#ifndef AMDCUID_CONFIG_DIR
+#error "AMDCUID_CONFIG_DIR must be defined via CMake"
+#endif
+  std::ifstream config_file(AMDCUID_CONFIG_DIR "/amdcuid_daemon.conf");
   std::vector<std::string> config_lines;
 
   if (config_file.is_open()) {

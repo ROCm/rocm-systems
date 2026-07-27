@@ -147,7 +147,7 @@ public:
     virtual size_t GetWritePtrMask() const = 0;
     // Returns size of block in bytes per increment in WPTR
     virtual size_t GetWritePtrBlk() const = 0;
-    // Returns number of bits used for TTrace buffer alignement (e.g. 12 for 4KB alignment)
+    // Returns number of bits used for TTrace buffer alignment (e.g. 12 for 4KB alignment)
     virtual size_t BufferAlignment() const = 0;
 };
 
@@ -183,7 +183,7 @@ public:
     virtual size_t GetWritePtrMask() const override { return Primitives::TT_WRITE_PTR_MASK; };
     // Returns size of block in bytes per increment in WPTR
     virtual size_t GetWritePtrBlk() const override { return 32; };
-    // Returns number of bits used for TTrace buffer alignement (e.g. 12 for 4KB alignment)
+    // Returns number of bits used for TTrace buffer alignment (e.g. 12 for 4KB alignment)
     virtual size_t BufferAlignment() const override { return Primitives::TT_BUFF_ALIGN_SHIFT; }
 
     void SetGRBMToBroadcast(CmdBuffer* cmd_buffer)
@@ -463,7 +463,7 @@ public:
                     uint32_t token_mask =
                         (config->occupancy_mode)
                             ? Primitives::sqtt_token_mask_occupancy_value()
-                            : Primitives::sqtt_token_mask_on_value(xcc_number_ > 1);
+                            : Primitives::sqtt_token_mask_on_value(xcc_number_ <= 1);
                     if(((1 << global_se) & config->se_mask) == 0)
                         token_mask = Primitives::sqtt_token_mask_off_value();
 

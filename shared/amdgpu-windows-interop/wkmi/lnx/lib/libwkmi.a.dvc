@@ -1,5 +1,5 @@
 outs:
-- md5: 3cfd159fed350b67783617548dc98b1c
-  size: 337136
+- md5: 5225b3dec772f4ac67937a422fafdaf1
+  size: 332558
   hash: md5
   path: libwkmi.a

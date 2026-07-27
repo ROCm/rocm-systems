@@ -157,7 +157,7 @@ void printDeviceMem(const char* label) {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -215,7 +215,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -277,7 +277,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -326,7 +326,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemoryTrim") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemoryTrim) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -373,7 +373,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemoryTrim") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -463,7 +463,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -564,7 +564,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes"
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -681,7 +681,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -742,7 +742,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -836,7 +836,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
  * ------------------------
  *  - HIP_VERSION >= 7.14
  */
-TEST_CASE("Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch") {
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch) {
   const int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -932,6 +932,87 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch") {
   }
 
   HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Regression test for a use-after-free of a graph allocation that escapes the
+ *    graph: an allocation captured via hipMallocAsync with no matching free node.
+ *  - Destroying the executable graph and the graph must NOT free such memory. Per
+ *    the stream-ordered allocation contract it stays valid until the application
+ *    frees it with hipFreeAsync/hipFree or trims the pool. The graph is built by
+ *    STREAM CAPTURE (the path that regressed): after both the graph-exec and graph
+ *    are destroyed the pointer is written, read back, then freed, and the test
+ *    verifies the pool returns to zero so the fix does not leak.
+ * Test source
+ * ------------------------
+ *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy) {
+  const int device = 0;
+  HIP_CHECK(hipSetDevice(device));
+
+  // Consume any sticky last-error left by a previous test (some tests
+  // deliberately provoke hipErrorInvalidValue), so our hipGetLastError()
+  // checks reflect only this test's launches.
+  (void)hipGetLastError();
+
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t stream = stream_guard.stream();
+
+  constexpr int64_t n = (16ULL * 1024 * 1024) / sizeof(float);  // 16 MB
+  constexpr size_t bytes = n * sizeof(float);
+  const int gridSize = static_cast<int>((n + kBlockSize - 1) / kBlockSize);
+
+  // Delta-based accounting against a trimmed baseline keeps this test
+  // independent of pool residue left by other tests (order-independent).
+  HIP_CHECK(hipDeviceGraphMemTrim(device));
+  const uint64_t baseline = queryGraphMem(device).usedCurrent;
+
+  // Capture an allocation node with NO matching free node -> escaped allocation.
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  float* dPtr = nullptr;
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dPtr), bytes, stream));
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+  hipGraphExec_t graphExec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  // While the allocation is alive it is usable.
+  fillKernel<<<gridSize, kBlockSize, 0, stream>>>(dPtr, 42.0f, n);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipStreamSynchronize(stream));
+  float host = 0.0f;
+  HIP_CHECK(hipMemcpy(&host, dPtr, sizeof(float), hipMemcpyDeviceToHost));
+  REQUIRE(host == 42.0f);
+
+  // Destroy the executable graph and the graph. This must NOT free dPtr.
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+
+  // The escaped allocation is still owned by the pool after destruction.
+  REQUIRE(queryGraphMem(device).usedCurrent >= baseline + bytes);
+
+  // Use-after-destroy must still succeed (this faulted before the fix).
+  fillKernel<<<gridSize, kBlockSize, 0, stream>>>(dPtr, 1337.0f, n);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipStreamSynchronize(stream));
+  host = 0.0f;
+  HIP_CHECK(hipMemcpy(&host, dPtr, sizeof(float), hipMemcpyDeviceToHost));
+  REQUIRE(host == 1337.0f);
+
+  // The application frees it explicitly; the pool reclaims it back to baseline.
+  HIP_CHECK(hipFreeAsync(dPtr, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipDeviceGraphMemTrim(device));
+  REQUIRE(queryGraphMem(device).usedCurrent == baseline);
 }
 
 /**

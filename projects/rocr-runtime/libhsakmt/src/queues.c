@@ -112,15 +112,16 @@ static uint32_t get_hwreg_size_per_cu(const HsaNodeProperties *node, uint32_t gf
 	HSAuint32 num_waves_per_simd = node->MaxWavesPerSIMD;
 	HSAuint32 bytes_per_wave = 128;
 
+	if (gfxv < GFX_VERSION_GFX1250) {
+		return 0x1000;
+	}
+
 	if (gfxv == GFX_VERSION_GFX1250) {
 		bytes_per_wave = 512;  // per HW design; GFX_SHARED__HWREG_SPACE_USED
 	}
 
 	hwreg_size_bytes = num_waves_per_simd * simd_per_cu * bytes_per_wave;
 
-	assert(hwreg_size_bytes == (
-		gfxv == GFX_VERSION_GFX1250 ?	0x8000 :
-										0x1000));
 	return hwreg_size_bytes;
 }
 
@@ -805,8 +806,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2Ctx(
 	err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_CREATE_QUEUE, &args);
 
 	if (err == -1) {
+		int saved_errno = errno;
 		free_queue(ctx, q);
-		return HSAKMT_STATUS_ERROR;
+      	
+		/* Return specific error code based on errno */
+      	if (saved_errno == ENOMEM)
+			return HSAKMT_STATUS_NO_MEMORY;
+      	else if (saved_errno == EINVAL)
+			return HSAKMT_STATUS_INVALID_PARAMETER;
+      	else
+			return HSAKMT_STATUS_ERROR;
 	}
 
 	q->queue_id = args.queue_id;
@@ -993,6 +1002,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfoCtx(HsaKFDContext *ctx,
 	QueueInfo->QueueDetailError = 0;
 	QueueInfo->QueueTypeExtended = 0;
 	QueueInfo->SaveAreaHeader = q->ctx_save_restore;
+	QueueInfo->SaveAreaAllocSize = q->ctx_save_restore_size;
 
 	return HSAKMT_STATUS_SUCCESS;
 }
@@ -1157,6 +1167,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(
 						 HsaQueueInfo *QueueInfo)
 {
 	return hsaKmtGetQueueInfoCtx(&hsakmt_primary_kfd_ctx, QueueId, QueueInfo);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetKernelQueueId(
+						 HSA_QUEUEID QueueId,
+						 HSAuint32 *KernelInternalQueueId)
+{
+	struct queue *q = PORT_UINT64_TO_VPTR(QueueId);
+
+	if (!q || !KernelInternalQueueId)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	*KernelInternalQueueId = q->queue_id;
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,

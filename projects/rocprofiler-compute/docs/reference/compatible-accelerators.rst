@@ -7,7 +7,7 @@ Compatible GPUs/APUs
 ***********************
 
 The following table lists SoCs (System on Chip) tested for compatibility with
-ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD GPUs and APUs specifications.
+ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Instinct™ GPUs and AMD Ryzen™ APUs specifications.
 
 .. _def-soc:
 
@@ -26,16 +26,16 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD GPU
       * - Platform
         - Status
 
-      * - AMD Instinct™ MI350
+      * - AMD Instinct MI350 Series
         - Supported ✅
 
-      * - AMD Instinct™ MI300
+      * - AMD Instinct MI300 Series
         - Supported ✅
 
-      * - AMD Instinct MI200
+      * - AMD Instinct MI200 Series
         - Supported ✅
 
-      * - AMD Instinct MI100
+      * - AMD Instinct MI100 Series
         - Supported ✅
 
       * - AMD Instinct MI50, MI60 (Vega 20)
@@ -51,5 +51,5 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD GPU
       * - Platform
         - Status
 
-      * - AMD Ryzen™ AI Max / Ryzen™ AI Max+ 300 Series integrated graphics (Strix/Halo, Gorgon/Halo)
+      * - AMD Ryzen AI Max / Ryzen™ AI Max+ 300 and 400 Series integrated graphics (Strix/Halo, Gorgon/Halo)
         - Supported ✅ (see :doc:`/conceptual/rdna/rdna-performance-model`)

@@ -84,6 +84,26 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  // Regression test for AICOMRCCL-1539: non-zero root with large messages
+  // must not deadlock when nChannelsMax != nChannelsMin.
+  TEST(Gather, OutOfPlaceNonZeroRootLargeMsg)
+  {
+    TestBed testBed;
+
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat32};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {1};
+    std::vector<int>            const numElements     = {16 * 1024 * 1024};
+    std::vector<bool>           const inPlaceList     = {false};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
   TEST(Gather, ManagedMem)
   {
     TestBed testBed;

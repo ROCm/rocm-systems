@@ -18,3 +18,4 @@ pytest-cov>=4.0.0
 perfetto>=0.7.0
 typing-extensions>=4.0.0
 numpy>=1.22
+PyYAML>=5.1

@@ -204,9 +204,13 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       min_msg_size = 4;
       break;
     case TeamFCollectTestType:
+    case FcollectWaveTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamBroadcastTestType:
+    case BroadcastWaveTestType:
+    case AllToAllWaveTestType:
+    case ReduceWaveTestType:
       min_msg_size = 8;
       break;
     case TeamCtxInfraTestType:
@@ -214,6 +218,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case TeamCtxInfraBlockTestType:
     case TeamCtxInfraOddEvenTestType:
     case TeamCtxSubsetParentInfraTestType:
+    case HostTeamSyncBarrierTestType:
       max_msg_size = min_msg_size;
       break;
     case FenceOrderPutWaveNbiChunksTestType:
@@ -282,8 +287,13 @@ void TesterArguments::get_arguments() {
     case TeamWGSyncTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
+    case AllToAllWaveTestType:
     case TeamFCollectTestType:
+    case FcollectWaveTestType:
     case TeamReductionTestType:
+    case TeamReduceScatterTestType:
+    case ReduceWaveTestType:
+    case TeamReduceScatterWaveTestType:
     case TeamBroadcastTestType:
     case PingAllTestType:
     case TeamBarrierTestType:
@@ -315,6 +325,16 @@ void TesterArguments::get_arguments() {
     case TeamCtxSharedInfraTestType:
     case FenceOrderFanoutTestType:
     case TeamSplit2DTestType:
+    case HostTeamSyncBarrierTestType:
+    case HostAmoAllPesTestType:
+    case HostAmoSelfTestType:
+    // Tile collective tests - support any number of PEs
+    case TileBroadcastTestType:
+    case TileBroadcastWaveTestType:
+    case TileBroadcastWGTestType:
+    case TileAllgatherTestType:
+    case TileAllgatherWaveTestType:
+    case TileAllgatherWGTestType:
       requires_two_pes = false;
       break;
     default:
