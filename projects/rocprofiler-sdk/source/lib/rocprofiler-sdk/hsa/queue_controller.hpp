@@ -93,9 +93,12 @@ public:
 
     common::Synchronized<hsa::profiler_serializer>& serializer(const Queue*);
 
-    // Balanced ownership: the first user enables serialization and the last disables it.
+    // Reference-counted ownership: the first user enables serialization and the
+    // last user disables it.
     void enable_serialization();
     void disable_serialization();
+
+    // Exposed for unit-test verification of serialization lifetime.
     bool serialization_enabled() const { return _serialized_enabled.load(); }
 
     // Prints current state of signals for queues, used for debugging. Only prints
