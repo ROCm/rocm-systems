@@ -139,7 +139,12 @@ constexpr int    HOT_LOOP_UNROLL     = 4;
 //
 // Alignment is peeled against the global-memory pointer; the LDS staging buffer is assumed to share the same
 // alignment (RCCL allocates it 128-byte aligned), so applying the same offset keeps the LDS side aligned too.
-template<AsyncDir DIR, CachePolicy cp>
+//
+// `Aligned` fast path: when the caller has already proven that both `global` and `lds` start on a 128-byte
+// boundary, the phase-1 peel is provably a no-op.  Compiling it out removes the peel branches and lets the
+// hot loop start at offset 0 with folded, compile-time-known strides.  Callers must only pass Aligned=true
+// after checking the runtime pointers (see async::detail::issue).
+template<AsyncDir DIR, CachePolicy cp, bool Aligned = false>
 __device__ inline void warpAsyncCopy(const uint8_t* global, uint8_t* lds, size_t sizeInBytes){
   const unsigned lane      = __lane_id();
   const size_t   laneCount = (size_t)__builtin_amdgcn_wavefrontsize();
@@ -147,22 +152,22 @@ __device__ inline void warpAsyncCopy(const uint8_t* global, uint8_t* lds, size_t
 
   size_t offset = 0;
 
-  // Phase 1a: peel leading bytes until `global` is 16-byte aligned, one byte per lane.
-  const size_t misalign = (uintptr_t)global & (BYTES_PER_LANE_B128 - 1);
-  if (misalign != 0) {
-    const size_t head = (BYTES_PER_LANE_B128 - misalign) < sizeInBytes
-                            ? (BYTES_PER_LANE_B128 - misalign)
-                            : sizeInBytes;
-    if (lane < head) {
-      asyncCopyB8<DIR, cp>(global + lane, lds + lane);
+  if constexpr (!Aligned) {
+    // Phase 1a: peel leading bytes until `global` is 16-byte aligned, one byte per lane.
+    const size_t misalign = (uintptr_t)global & (BYTES_PER_LANE_B128 - 1);
+    if (misalign != 0) {
+      const size_t head = (BYTES_PER_LANE_B128 - misalign) < sizeInBytes
+                              ? (BYTES_PER_LANE_B128 - misalign)
+                              : sizeInBytes;
+      if (lane < head) {
+        asyncCopyB8<DIR, cp>(global + lane, lds + lane);
+      }
+      offset += head;
     }
-    offset += head;
-  }
 
-  // Phase 1b: peel whole 16-byte chunks until `global + offset` reaches 128-byte alignment, one b128 per
-  // leading lane.  `global + offset` is already 16-byte aligned, so the number of bytes left to the next
-  // 128-byte boundary is a multiple of 16 (at most 112 -> 7 chunks, well within a warp).
-  {
+    // Phase 1b: peel whole 16-byte chunks until `global + offset` reaches 128-byte alignment, one b128 per
+    // leading lane.  `global + offset` is already 16-byte aligned, so the number of bytes left to the next
+    // 128-byte boundary is a multiple of 16 (at most 112 -> 7 chunks, well within a warp).
     const size_t align128    = ((uintptr_t)global + offset) & (NATURAL_ALIGNMENT_BYTES - 1);
     const size_t bytesToLine = (NATURAL_ALIGNMENT_BYTES - align128) & (NATURAL_ALIGNMENT_BYTES - 1);
     size_t       peelChunks  = bytesToLine / BYTES_PER_LANE_B128;
@@ -196,6 +201,8 @@ __device__ inline void warpAsyncCopy(const uint8_t* global, uint8_t* lds, size_t
   offset    += full128 * BYTES_PER_LANE_B128;
   remaining -= full128 * BYTES_PER_LANE_B128;  // now < 16 bytes
 
+  if (remaining == 0) return;   // common case after a 16B-multiple chunk: nothing left to drain
+
   // Phase 3b: 0..15 trailing bytes.  `offset` and `remaining` are uniform across the warp here, so the
   // descending cascade below is taken identically by every lane.  Because `offset` is 16-byte aligned, the
   // b64 (8-byte) and b32 (4-byte) accesses are naturally aligned.
@@ -222,24 +229,28 @@ __device__ inline void warpAsyncCopy(const uint8_t* global, uint8_t* lds, size_t
 } // namespace async_detail
 
 // Warp-level async copy from global memory into LDS.  The entire warp calls this with the same arguments.
-template<SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY>
+// Set Aligned=true only when globalSrc and ldsDst are known to be 128-byte aligned (skips the peel).
+template<SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
 __device__ void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes){
-  async_detail::warpAsyncCopy<async_detail::AsyncDir::Load, cp>(globalSrc, ldsDst, sizeInBytes);
+  async_detail::warpAsyncCopy<async_detail::AsyncDir::Load, cp, Aligned>(globalSrc, ldsDst, sizeInBytes);
   if constexpr (sp == SyncPolicy::Sync) {
     asyncWait<0>();
   }
 }
 
 // Warp-level async copy from LDS into global memory.  The entire warp calls this with the same arguments.
-template<SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY>
+// Set Aligned=true only when globalDst and ldsSrc are known to be 128-byte aligned (skips the peel).
+template<SyncPolicy sp = SyncPolicy::Async, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
 __device__ void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes){
   // warpAsyncCopy shares one non-const `lds` parameter across load and store; the store path only reads from
   // it, so dropping const here is safe.
-  async_detail::warpAsyncCopy<async_detail::AsyncDir::Store, cp>(globalDst, const_cast<uint8_t*>(ldsSrc), sizeInBytes);
+  async_detail::warpAsyncCopy<async_detail::AsyncDir::Store, cp, Aligned>(globalDst, const_cast<uint8_t*>(ldsSrc), sizeInBytes);
   if constexpr (sp == SyncPolicy::Sync) {
     asyncWait<0>();
   }
 }
+
+
 
 
 /* TDM APIs */
@@ -315,7 +326,7 @@ struct TileMover{
 
 
 // ============================================================================
-//  DROP-IN PARITY API (mirrors tdm/tdmCopy.h)
+//  DROP-IN PARITY API (mirrors tdmCopy.h)
 // ----------------------------------------------------------------------------
 // The entry points below expose the EXACT same public surface as tdm/tdmCopy.h
 // -- same names, signatures, defaults, and memcpy-style semantics -- so the two
@@ -388,6 +399,22 @@ __device__ inline void warpGlobalCopy(const uint8_t* s, uint8_t* d, size_t n,
     for (size_t i = warpThread; i < n; i += warpThreads) d[i] = s[i];
 }
 
+// Stage [myStart, myStart+myBytes) HBM->LDS->HBM through this warp's single `window`-byte LDS buffer.
+// LoadAligned/StoreAligned pick the peel-free warpAsyncCopy fast path for the src/dst side respectively;
+// they are loop-invariant (myStart and window are both 128B multiples), so the choice is made once by the
+// caller and templated in here rather than branched per iteration. The Sync policy waits after the load
+// (RAW: the store must see the filled LDS) and after the store (WAR: the next load must not overwrite LDS
+// that is still draining).
+template<CachePolicy cp, bool LoadAligned, bool StoreAligned>
+__device__ inline void stageLoop(const uint8_t* s, uint8_t* d, uint8_t* myLds,
+                                 size_t myStart, size_t myBytes, uint32_t window) {
+    for (size_t o = 0; o < myBytes; o += window) {
+        const size_t chunk = (myBytes - o < window) ? (myBytes - o) : window;
+        asyncLoadToLDS  <SyncPolicy::Sync, cp, LoadAligned >(s + myStart + o, myLds, chunk);
+        asyncStoreFromLDS<SyncPolicy::Sync, cp, StoreAligned>(myLds, d + myStart + o, chunk);
+    }
+}
+
 // core: partition + issue the whole copy for the team [start, stop). Work + LDS
 // partition by rank within the team (warpId - start), so each team indexes its
 // own ldsBuffer from zero. Safe to call collectively (warps outside the range
@@ -437,23 +464,42 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes,
     uint32_t window     = (ldsBytes / issuers) & ~(WINDOW_GRAIN - 1);  // per-warp 128B-multiple
     if (rank >= issuers) return;                        // this warp doesn't issue
 
-    // distribute the byte range across issuers by team rank (contiguous blocks)
-    size_t base    = sizeBytes / issuers;
-    size_t extra   = sizeBytes % issuers;
-    size_t myBytes = base + (rank < extra ? 1u : 0u);
-    size_t myStart = rank * base + (rank < extra ? rank : extra);
+    // Distribute the byte range across issuers in contiguous, 128B-aligned blocks. Splitting on whole
+    // WINDOW_GRAIN (128B) grains -- rather than raw sizeBytes/issuers -- keeps every issuing warp's start a
+    // multiple of 128B, so `s + myStart` and `d + myStart` inherit the base pointers' alignment and stay
+    // aligned across chunks (the stride `window` is a 128B multiple). The sub-128B remainder is appended to
+    // the last issuing warp so coverage remains contiguous and gap-free.
+    const size_t grain   = WINDOW_GRAIN;
+    const size_t nGrains = sizeBytes / grain;
+    const size_t tail    = sizeBytes - nGrains * grain;         // 0..127 trailing bytes
+
+    const size_t baseG  = nGrains / issuers;
+    const size_t extraG = nGrains % issuers;
+    const size_t myG    = baseG + (rank < extraG ? 1u : 0u);
+    const size_t startG = rank * baseG + (rank < extraG ? rank : extraG);
+
+    size_t myStart = startG * grain;                            // 128B-aligned
+    size_t myBytes = myG * grain;
+    if (rank == issuers - 1) myBytes += tail;                   // last warp mops up the < 128B tail
     if (myBytes == 0) return;
 
     uint8_t* myLds = lds + static_cast<size_t>(rank) * window;
 
-    // Stage each chunk HBM->LDS->HBM through this warp's single window. The Sync
-    // policy waits after the load (RAW: store must see the filled LDS) and after
-    // the store (WAR: the next load must not overwrite LDS still being drained).
-    for (size_t o = 0; o < myBytes; o += window) {
-        const size_t chunk = (myBytes - o < window) ? (myBytes - o) : window;
-        asyncLoadToLDS<SyncPolicy::Sync, cp>(s + myStart + o, myLds, chunk);
-        asyncStoreFromLDS<SyncPolicy::Sync, cp>(myLds, d + myStart + o, chunk);
-    }
+    // Pick the peel-free fast path per direction (load reads src, store writes dst). myStart and window are
+    // both 128B multiples, so each side's alignment is loop-invariant and computed once here.
+    const uintptr_t mask    = WINDOW_GRAIN - 1;
+    const bool ldsAligned   = ((uintptr_t)myLds & mask) == 0;
+    const bool loadAligned  = ldsAligned && (((uintptr_t)(s + myStart) & mask) == 0);
+    const bool storeAligned = ldsAligned && (((uintptr_t)(d + myStart) & mask) == 0);
+
+    if (loadAligned && storeAligned)
+        stageLoop<cp, true,  true >(s, d, myLds, myStart, myBytes, window);
+    else if (loadAligned)
+        stageLoop<cp, true,  false>(s, d, myLds, myStart, myBytes, window);
+    else if (storeAligned)
+        stageLoop<cp, false, true >(s, d, myLds, myStart, myBytes, window);
+    else
+        stageLoop<cp, false, false>(s, d, myLds, myStart, myBytes, window);
 }
 
 } // namespace detail
