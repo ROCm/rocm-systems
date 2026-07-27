@@ -529,13 +529,13 @@ Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 Interactive Roofline HTML:
 
-* HTML plots have the ability to select/deselect specific rooflines and cache-level-specific kernels. In the right-hand legend of the plot, click on individual items in the legend once to display or remove the item from the plot. Double-click on an item to make it the only displayed item in the plot; double-click on any item in the legend to reset the plot to display all items.
-* Hovering your mouse on the plot displays a menu in the top right-hand corner of the page which has tools for the following:
-   * Saving the plot as a .png
-   * Zoom, pan, reset scale
-* Zooming in a specific area of the plot can also be done with click-and-drag box selection with your mouse to isolate the area you would like to see closer. Resetting the view can be done through the hover menu in the top right-hand corner of the page (described in the above bullet point)
+* **Memory peak dropdown:** Use the *Memory peak* selector at the top of the page to view kernel points against a single memory level at a time, or against *All peaks* at once. Each kernel is drawn in its own color. Isolating a single kernel shows it across every memory level, colored by level.
+* **Kernels panel:** The *Kernels* panel on the right lists every kernel, heaviest first. Click a kernel row -- or click one of its dots in the plot -- to isolate just that kernel; click it again to show all. Ctrl-click (Cmd-click on macOS) to add or remove kernels from the selection, and use *Show all kernels* to reset. The *Runtime shown* slider filters to the heaviest kernels whose combined percentage of GPU resident time reaches the chosen threshold.
+* **Bandwidth rooflines panel:** The *Bandwidth rooflines* panel lists the memory-bandwidth ceilings. Click a roofline to isolate it (dimming the others); click it again, or use *Show all rooflines*, to reset. The flat compute peaks (VALU and matrix) always cap the diagonals; their values appear in each roofline's hover. The diagonals and ceilings are drawn as extrapolated lines, so they continue as you pan.
+* **Hover details:** Hover over a kernel dot to see its arithmetic intensity, achieved and peak throughput, percent of roofline achieved, performance limiter, dispatch count, and runtime. Hover over a roofline for its bandwidth and the compute peak it caps at.
+* **Navigation:** Drag to pan and scroll to zoom. Use the *Export PNG* and *Reset zoom* buttons in the toolbar at the top of the page to save the plot as a ``.png`` or reframe to the full view; double-clicking the chart also resets the view.
 
-Below is an example of HTML plot interactivity, with L2 kernel points, L2-FP32 empirical bandwidth, and Peak VALU-FP32 empirical roofline toggled on:
+Below is an example of the interactive HTML plot:
 
 .. image:: ../../data/analyze/cli/roofline_html_interact.png
    :align: center

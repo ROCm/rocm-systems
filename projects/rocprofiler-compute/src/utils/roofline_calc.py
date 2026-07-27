@@ -16,17 +16,13 @@ from utils.metrics.evaluation_pipeline import eval_metric
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 
-################################################
-# Global vars
-################################################
+# Log-axis extent used by the ceiling math.
 XMIN = 0.01
-XMAX = 1000
+XMAX_DEFAULT = 1000.0
 
-TOP_N = 10
-
-FONT_SIZE = 16
-FONT_COLOR = "black"
-FONT_WEIGHT = "bold"
+# Memory (arithmetic-intensity) levels, ordered from closest to the ALU out.
+# Canonical definition; imported by roofline_main and analysis_db.
+CACHE_LEVELS = ["ai_l0", "ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
 
 
 # Enum class representing support of VALU and Matrix Operations
@@ -121,43 +117,26 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
     },  # Unsupported: F4, F6, F8
 }
 
-CACHE_LEVELS = ["ai_l0", "ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
+
+# Map from the roofline table-402 metric label to its PlotPoints AI field.
+_METRIC_TO_AI_FIELD = {
+    "AI HBM": "ai_hbm",
+    "AI L2": "ai_l2",
+    "AI L1": "ai_l1",
+    "AI L0": "ai_l0",
+    "AI LDS": "ai_lds",
+}
+_PERFORMANCE_METRIC = "Performance (GFLOPs)"
+
+# Table ids in the roofline arch config: 401 holds AI, 402 the plotted points.
+_ROOFLINE_AI_TABLE_ID = 401
+_ROOFLINE_POINTS_TABLE_ID = 402
+_KERNEL_TOP_TABLE_ID = 1
 
 
 ################################################
 # Helper funcs
 ################################################
-@dataclass
-class AI_Data:
-    KernelName: str
-    numCalls: float
-
-    total_flops: float
-    valu_flops: float
-    mfma_flops_f6f4: float
-    mfma_flops_f8: float
-    mfma_flops_f16: float
-    mfma_flops_bf16: float
-    mfma_flops_f32: float
-    mfma_flops_f64: float
-    mfma_iops_i8: float
-    wmma_flops_f6f4: float
-    wmma_flops_f8: float
-    wmma_flops_f16: float
-    wmma_flops_bf16: float
-    wmma_flops_f32: float
-    wmma_flops_f64: float
-    wmma_iops_i8: float
-    lds_data: float
-    L0cache_data: float
-    L1cache_data: float
-    L2cache_data: float
-    hbm_data: float
-
-    totalDuration: float
-    avgDuration: float
-
-
 @dataclass
 class PlotPoints:
     """Data structure for storing roofline plot points."""
@@ -168,6 +147,10 @@ class PlotPoints:
     ai_hbm: list[list[float]]
     ai_lds: list[list[float]]
     kernelNames: list[str]
+    counts: list[Optional[float]]
+    totalTime: list[Optional[float]]
+    pctRuntime: list[Optional[float]]
+    timeUnit: str
 
     @classmethod
     def empty(cls) -> "PlotPoints":
@@ -179,6 +162,10 @@ class PlotPoints:
             ai_hbm=[[], []],
             ai_lds=[[], []],
             kernelNames=[],
+            counts=[],
+            totalTime=[],
+            pctRuntime=[],
+            timeUnit="",
         )
 
 
@@ -211,18 +198,27 @@ class GraphPoints:
 ################################################
 # Helper functions
 ################################################
-def get_font() -> dict[str, Union[int, str]]:
-    return {
-        "size": FONT_SIZE,
-        "color": FONT_COLOR,
-        "weight": FONT_WEIGHT,
-        "family": "serif",
-    }
-
-
 def sanitize_ai_value(value: float) -> float:
+    """Coerce a raw AI/performance cell to a usable number."""
     excluded_values = ("", "N/A", np.inf, -np.inf, None)
-    return value if value and value not in excluded_values else 0
+    if not value or value in excluded_values:
+        return 0
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0
+    if not np.isfinite(numeric):
+        return 0
+    return value
+
+
+def _stat_or_none(row: pd.Series, column: Optional[str]) -> Optional[float]:
+    """Read a numeric stat from a top-kernels row as a float, or None when
+    the column is missing or the value is NaN."""
+    if column is None or column not in row.index:
+        return None
+    value = row[column]
+    return float(value) if pd.notna(value) else None
 
 
 def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list[str]:
@@ -278,9 +274,9 @@ def calc_ceilings(
                 cache_max = max(ai_data[cache_level][0])
                 max_ai = max(max_ai, cache_max)
 
-        dynamic_xmax = max_ai * 1.2 if max_ai > 0 else 1000
+        dynamic_xmax = max_ai * 1.2 if max_ai > 0 else XMAX_DEFAULT
     else:
-        dynamic_xmax = 1000
+        dynamic_xmax = XMAX_DEFAULT
 
     # TODO: This is where filtering by memory level will need to occur for standalone
     graph_points: dict[str, list[Union[list[float], float, None]]] = {
@@ -422,7 +418,87 @@ def calc_ceilings(
 # -------------------------------------------------------------------------------------
 #                              Overlay application performance
 # -------------------------------------------------------------------------------------
-# Calculate relevant metrics for ai calculation
+def _extract_ai_metrics(calc_table: Optional[pd.DataFrame]) -> dict[str, float]:
+    """Read per-level AI and performance from a kernel's evaluated table 402.
+
+    Returns a mapping with one entry per ``_METRIC_TO_AI_FIELD`` value plus a
+    ``performance`` key, defaulting to 0.0 when the table or a row is absent.
+    """
+    metrics = dict.fromkeys(_METRIC_TO_AI_FIELD.values(), 0.0)
+    metrics["performance"] = 0.0
+    if calc_table is None:
+        return metrics
+    for _, row in calc_table.iterrows():
+        metric = row.get("Metric", "")
+        value = row.get("Value", 0)
+        if metric in _METRIC_TO_AI_FIELD:
+            metrics[_METRIC_TO_AI_FIELD[metric]] = sanitize_ai_value(value)
+        elif metric == _PERFORMANCE_METRIC:
+            metrics["performance"] = sanitize_ai_value(value)
+    return metrics
+
+
+def _resolve_kernel_ids(workload: schema.Workload) -> list[int]:
+    """Kernel row ids to plot: an explicit int filter, else every top kernel.
+
+    WebUI passes string kernel names as filters and pre-narrows pmc_df, so in
+    that case every id is processed and the caller's filtering is relied upon.
+    """
+    top_ids: list[int] = []
+    if _KERNEL_TOP_TABLE_ID in workload.dfs:
+        top_ids = workload.dfs[_KERNEL_TOP_TABLE_ID].index.tolist()
+
+    if workload.filter_kernel_ids:
+        if all(isinstance(k, int) for k in workload.filter_kernel_ids):
+            return workload.filter_kernel_ids
+        return top_ids
+    return top_ids
+
+
+def _evaluate_kernel_tables(
+    arch_config: schema.ArchConfig,
+    workload: schema.Workload,
+    kernel_pmc_df: pd.DataFrame,
+) -> dict[int, pd.DataFrame]:
+    """Evaluate the roofline arch-config tables (401/402) for one kernel."""
+    kernel_dfs: dict[int, pd.DataFrame] = {}
+    kernel_dfs_type: dict[int, str] = {}
+    for table_id in (_ROOFLINE_AI_TABLE_ID, _ROOFLINE_POINTS_TABLE_ID):
+        if table_id in arch_config.dfs:
+            kernel_dfs[table_id] = arch_config.dfs[table_id].copy()
+            kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
+    # eval_metric keys off kernel_dfs; extra dfs_expressions entries are ignored.
+    eval_metric(
+        kernel_dfs,
+        kernel_dfs_type,
+        arch_config.dfs_expressions,
+        workload.sys_info.iloc[0],
+        workload.roofline_peaks,
+        kernel_pmc_df,
+        debug=False,
+    )
+    return kernel_dfs
+
+
+def _append_kernel_point(
+    plot_points: PlotPoints,
+    metrics: dict[str, float],
+    performance: float,
+    kernel_name: str,
+    stat_row: pd.Series,
+    sum_column: Optional[str],
+) -> None:
+    """Append one kernel's AI points plus its joined top-kernel stats."""
+    for field in _METRIC_TO_AI_FIELD.values():
+        ai_value = metrics[field]
+        getattr(plot_points, field)[0].append(ai_value if ai_value > 0 else 0.0)
+        getattr(plot_points, field)[1].append(performance)
+    plot_points.kernelNames.append(kernel_name)
+    plot_points.counts.append(_stat_or_none(stat_row, "Count"))
+    plot_points.totalTime.append(_stat_or_none(stat_row, sum_column))
+    plot_points.pctRuntime.append(_stat_or_none(stat_row, "Percent"))
+
+
 def calc_ai_analyze(
     workload: schema.Workload,
     pmc_df: pd.DataFrame,
@@ -439,37 +515,28 @@ def calc_ai_analyze(
 
     workload.roofline_metrics = {}
 
-    kernel_ids_to_process: list[int] = []
-    kernel_top_table_id = 1
-
-    if workload.filter_kernel_ids:
-        if all(isinstance(k, int) for k in workload.filter_kernel_ids):
-            kernel_ids_to_process = workload.filter_kernel_ids
-        elif kernel_top_table_id in workload.dfs:
-            # WebUI sets filter_kernel_ids as strings (kernel names), not
-            # int row indices. Process all IDs here; caller provides
-            # pmc_df already narrowed to the selected kernel(s).
-            kernel_ids_to_process = workload.dfs[kernel_top_table_id].index.tolist()
-    elif kernel_top_table_id in workload.dfs:
-        kernel_top_df = workload.dfs[kernel_top_table_id]
-        kernel_ids_to_process = kernel_top_df.index.tolist()
-        console_debug(
-            "roofline", f"Found {len(kernel_ids_to_process)} kernels to process"
+    # The top-kernels table carries per-kernel dispatch count, aggregate time
+    sum_column: Optional[str] = None
+    top_df = workload.dfs.get(_KERNEL_TOP_TABLE_ID)
+    if top_df is not None:
+        sum_column = next(
+            (c for c in top_df.columns if c.startswith("Sum(") and c.endswith(")")),
+            None,
         )
+        if sum_column:
+            plot_points.timeUnit = sum_column[len("Sum(") : -1]
+
+    kernel_ids_to_process = _resolve_kernel_ids(workload)
+    console_debug("roofline", f"Found {len(kernel_ids_to_process)} kernels to process")
 
     if not kernel_ids_to_process:
         console_warning("No kernels found to process for roofline")
         return plot_points.__dict__
 
     for kernel_id in kernel_ids_to_process:
-        kernel_name = ""
-        if kernel_top_table_id in workload.dfs:
-            kernel_top_df = workload.dfs[kernel_top_table_id]
-            if kernel_id not in kernel_top_df.index:
-                continue
-            kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
-        else:
+        if top_df is None or kernel_id not in top_df.index:
             continue
+        kernel_name = top_df.loc[kernel_id, "Kernel_Name"]
 
         console_debug("roofline", f"Processing kernel {kernel_id}: {kernel_name[:50]}")
 
@@ -480,74 +547,29 @@ def calc_ai_analyze(
             console_debug("roofline", f"No PMC data for kernel {kernel_id}")
             continue
 
-        kernel_dfs: dict[int, pd.DataFrame] = {}
-        kernel_dfs_type: dict[int, str] = {}
+        kernel_dfs = _evaluate_kernel_tables(arch_config, workload, kernel_pmc_df)
 
-        for table_id in [401, 402]:
-            if table_id in arch_config.dfs:
-                kernel_dfs[table_id] = arch_config.dfs[table_id].copy()
-                kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
-
-        # eval_metric keys off kernel_dfs; extra dfs_expressions entries are ignored.
-        eval_metric(
-            kernel_dfs,
-            kernel_dfs_type,
-            arch_config.dfs_expressions,
-            workload.sys_info.iloc[0],
-            workload.roofline_peaks,
-            kernel_pmc_df,
-            debug=False,
-        )
-
-        ai_hbm = ai_l2 = ai_l1 = ai_l0 = ai_lds = performance = 0
-
-        if 402 in kernel_dfs:
-            for _, row in kernel_dfs[402].iterrows():
-                metric = row.get("Metric", "")
-                value = row.get("Value", 0)
-                if metric == "AI HBM":
-                    ai_hbm = sanitize_ai_value(value)
-                elif metric == "AI L2":
-                    ai_l2 = sanitize_ai_value(value)
-                elif metric == "AI L1":
-                    ai_l1 = sanitize_ai_value(value)
-                elif metric == "AI L0":
-                    ai_l0 = sanitize_ai_value(value)
-                elif metric == "AI LDS":
-                    ai_lds = sanitize_ai_value(value)
-                elif metric == "Performance (GFLOPs)":
-                    performance = sanitize_ai_value(value)
-
+        metrics = _extract_ai_metrics(kernel_dfs.get(_ROOFLINE_POINTS_TABLE_ID))
+        performance = metrics["performance"]
         console_debug(
             "roofline",
             f"Kernel {kernel_id}: "
-            f"AI_HBM={ai_hbm:.2f}, "
-            f"AI_L2={ai_l2:.2f}, "
-            f"AI_L1={ai_l1:.2f}, "
-            f"AI_L0={ai_l0:.2f}, "
-            f"AI_LDS={ai_lds:.2f}, "
-            f"Performance={performance:.2e} GFLOP/s",
+            + ", ".join(
+                f"{field}={metrics[field]:.2f}"
+                for field in _METRIC_TO_AI_FIELD.values()
+            )
+            + f", Performance={performance:.2e} GFLOP/s",
         )
 
-        # add to plot points if we have valid data
         if performance > 0:
-            if ai_hbm >= 0:
-                plot_points.ai_hbm[0].append(ai_hbm)
-                plot_points.ai_hbm[1].append(performance)
-            if ai_l2 >= 0:
-                plot_points.ai_l2[0].append(ai_l2)
-                plot_points.ai_l2[1].append(performance)
-            if ai_l1 >= 0:
-                plot_points.ai_l1[0].append(ai_l1)
-                plot_points.ai_l1[1].append(performance)
-            if ai_l0 >= 0:
-                plot_points.ai_l0[0].append(ai_l0)
-                plot_points.ai_l0[1].append(performance)
-            if ai_lds >= 0:
-                plot_points.ai_lds[0].append(ai_lds)
-                plot_points.ai_lds[1].append(performance)
-
-            plot_points.kernelNames.append(kernel_name)
+            _append_kernel_point(
+                plot_points,
+                metrics,
+                performance,
+                kernel_name,
+                top_df.loc[kernel_id],
+                sum_column,
+            )
             console_debug(
                 "roofline",
                 f"Added kernel {kernel_id}: {kernel_name[:50]} to plot points",
@@ -555,19 +577,68 @@ def calc_ai_analyze(
         else:
             console_debug(
                 "roofline",
-                f"Skipping kernel {kernel_id}: {kernel_name[:50]}"
-                f" - no performance data",
+                f"Skipping kernel {kernel_id}: {kernel_name[:50]} - no performance",
             )
 
         # store metrics for display
         workload.roofline_metrics[kernel_id] = {
             "name": kernel_name,
-            "ai_table": kernel_dfs.get(401, pd.DataFrame()),
-            "calc_table": kernel_dfs.get(402, pd.DataFrame()),
+            "ai_table": kernel_dfs.get(_ROOFLINE_AI_TABLE_ID, pd.DataFrame()),
+            "calc_table": kernel_dfs.get(_ROOFLINE_POINTS_TABLE_ID, pd.DataFrame()),
         }
 
     console_debug("roofline", f"Generated {len(plot_points.kernelNames)} plot points")
     return plot_points.__dict__
+
+
+def _workload_base_dir(workload_dir: Union[str, list, None]) -> Optional[str]:
+    """Extract the base workload directory from the (possibly nested) value."""
+    if isinstance(workload_dir, list):
+        return (
+            workload_dir[0][0]
+            if isinstance(workload_dir[0], (list, tuple))
+            else workload_dir[0]
+        )
+    return workload_dir
+
+
+def _read_benchmark_csv(benchmark_results: Path) -> dict[str, list[str]]:
+    """Read roofline.csv into {column: [values]}, dropping the device-id column."""
+    benchmark_data: dict[str, list[str]] = {}
+    headers: list[str] = []
+    with open(benchmark_results, newline="", encoding="utf-8") as csvfile:
+        for row_count, row in enumerate(csv.reader(csvfile, delimiter=",")):
+            row.pop(0)  # Remove first column (Device ID)
+            if row_count == 0:
+                headers = row
+                benchmark_data = {header: [] for header in headers}
+            else:
+                for i, key in enumerate(headers):
+                    benchmark_data[key].append(row[i])
+    return benchmark_data
+
+
+def _expected_benchmark_columns(
+    roofline_parameters: dict[str, Any], dtype: str, mspec: MachineSpecs
+) -> list[str]:
+    """Benchmark columns the roofline needs for this datatype and mem levels."""
+    ops_flops = "Ops" if dtype.startswith("I") else "Flops"
+    columns: list[str] = []
+
+    if OpsSupport.VALU in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
+        columns.append(f"{dtype}{ops_flops}")
+
+    cache_hierarchy = sanitize_mem_level(
+        roofline_parameters["mem_level"], mspec.gpu_model
+    )
+    columns.extend(f"{cache_level}Bw" for cache_level in cache_hierarchy)
+
+    if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
+        target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
+        columns.append(
+            f"{roofline_parameters['matrix_ops_type']}{target_precision}{ops_flops}"
+        )
+    return columns
 
 
 def construct_roof(
@@ -576,40 +647,13 @@ def construct_roof(
     mspec: MachineSpecs,
     ai_data: Optional[dict] = None,
 ) -> dict[str, list[Union[list[float], float, None]]]:
-    workload_dir = roofline_parameters.get("workload_dir")
-
-    # Normalize workload_dir to extract base directory
-    if isinstance(workload_dir, list):
-        base_dir = (
-            workload_dir[0][0]
-            if isinstance(workload_dir[0], (list, tuple))
-            else workload_dir[0]
-        )
-    else:
-        base_dir = workload_dir
-
+    """Load benchmark results from disk and compute the empirical roofline."""
+    base_dir = _workload_base_dir(roofline_parameters.get("workload_dir"))
     benchmark_results = Path(base_dir) / "roofline.csv"
 
-    # Initialize benchmark data dictionary from roofline.csv
-    benchmark_data: dict[str, list[str]] = {}
-    headers: list[str] = []
-
     try:
-        with open(benchmark_results, newline="", encoding="utf-8") as csvfile:
-            csv_reader = csv.reader(csvfile, delimiter=",")
-            row_count = 0
-
-            for row in csv_reader:
-                row.pop(0)  # Remove first column (Device ID)
-                if row_count == 0:
-                    headers = row
-                    for header in headers:
-                        benchmark_data[header] = []
-                else:
-                    for i, key in enumerate(headers):
-                        benchmark_data[key].append(row[i])
-                row_count += 1
-    except Exception as e:
+        benchmark_data = _read_benchmark_csv(benchmark_results)
+    except Exception as e:  # noqa: BLE001 - any read/parse failure -> empty roof
         console_error(
             "roofline",
             f"Failed to read benchmark results from {base_dir}: {e}",
@@ -617,29 +661,7 @@ def construct_roof(
         )
         return GraphPoints.empty().__dict__
 
-    # ------------------
-    #  Validate benchmark data completeness
-    # ------------------
-    ops_flops = "Ops" if dtype.startswith("I") else "Flops"
-    expected_columns = []
-
-    if OpsSupport.VALU in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
-        expected_columns.append(f"{dtype}{ops_flops}")
-
-    cache_hierarchy = sanitize_mem_level(
-        roofline_parameters["mem_level"], mspec.gpu_model
-    )
-
-    for cache_level in cache_hierarchy:
-        expected_columns.append(f"{cache_level}Bw")
-
-    if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
-        target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
-        expected_columns.append(
-            f"{roofline_parameters['matrix_ops_type']}{target_precision}{ops_flops}"
-        )
-
-    # Check for missing expected columns
+    expected_columns = _expected_benchmark_columns(roofline_parameters, dtype, mspec)
     missing_columns = [col for col in expected_columns if col not in benchmark_data]
     if missing_columns:
         console_warning(
@@ -649,7 +671,4 @@ def construct_roof(
             "benchmark data or cleaning the directory and re-running the analysis."
         )
 
-    # ------------------
-    #  Generate Roofline
-    # ------------------
     return calc_ceilings(roofline_parameters, dtype, benchmark_data, mspec, ai_data)

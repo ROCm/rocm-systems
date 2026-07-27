@@ -62,11 +62,11 @@ def make_roofline(
 
 def write_mfma_roofline_csv(workload_dir: str) -> None:
     """Write a roofline.csv with CDNA BW + VALU + MFMA matrix columns."""
-    # gfx90a memory levels resolve to LDS/L1/L2/MALL.
+    # MI210 (gfx90a) memory levels resolve to LDS/L1/L2/HBM.
     header = [
         "device",
         "LDSBw",
-        "MALL",
+        "HBMBw",
         "L1Bw",
         "L2Bw",
         "FP64Flops",
@@ -120,7 +120,7 @@ def test_roofline_invalid_datatype_cli() -> None:
 
 
 def test_generate_plot_mfma_bf16_legend() -> None:
-    """BF16 on CDNA2 emits a Peak MFMA-BF16 roof and no VALU roof."""
+    """BF16 on CDNA2 emits a Peak MFMA roof and no VALU roof."""
     with tempfile.TemporaryDirectory() as workload_dir:
         write_mfma_roofline_csv(workload_dir)
         roofline_instance = mfma_roofline_instance(workload_dir)
@@ -130,13 +130,13 @@ def test_generate_plot_mfma_bf16_legend() -> None:
         fig = roofline_instance.generate_plot("BF16", fig=go.Figure())
 
         names = " ".join(n for n in legend_names(fig) if n)
-        assert "Peak MFMA-BF16" in names, "BF16 should emit a Peak MFMA-BF16 roof"
-        assert "Peak WMMA-BF16" not in names, "CDNA2 path must not label roofs WMMA"
-        assert "Peak VALU-BF16" not in names, "BF16 is matrix-only; no VALU roof"
+        assert "Peak MFMA" in names, "BF16 should emit a Peak MFMA roof"
+        assert "Peak WMMA" not in names, "CDNA2 path must not label roofs WMMA"
+        assert "Peak VALU" not in names, "BF16 is matrix-only; no VALU roof"
 
 
 def test_generate_plot_mfma_fp64_dual_legend() -> None:
-    """FP64 on CDNA2 emits both a Peak VALU-FP64 and a Peak MFMA-FP64 roof."""
+    """FP64 on CDNA2 emits both a Peak VALU and a Peak MFMA roof."""
     with tempfile.TemporaryDirectory() as workload_dir:
         write_mfma_roofline_csv(workload_dir)
         roofline_instance = mfma_roofline_instance(workload_dir)
@@ -144,6 +144,6 @@ def test_generate_plot_mfma_fp64_dual_legend() -> None:
         fig = roofline_instance.generate_plot("FP64", fig=go.Figure())
 
         names = " ".join(n for n in legend_names(fig) if n)
-        assert "Peak VALU-FP64" in names, "FP64 is dual-path; expected a VALU roof"
-        assert "Peak MFMA-FP64" in names, "FP64 should emit a Peak MFMA-FP64 roof"
-        assert "Peak WMMA-FP64" not in names, "CDNA2 path must not label roofs WMMA"
+        assert "Peak VALU" in names, "FP64 is dual-path; expected a VALU roof"
+        assert "Peak MFMA" in names, "FP64 should emit a Peak MFMA roof"
+        assert "Peak WMMA" not in names, "CDNA2 path must not label roofs WMMA"
