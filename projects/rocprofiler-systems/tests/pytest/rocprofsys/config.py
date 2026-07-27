@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from functools import cached_property
-import getpass
 import os
 from pathlib import Path
 import shutil
@@ -13,6 +11,7 @@ import tempfile
 from typing import Optional
 import re
 
+from .cache import persistent_cache, persistent_cached_property, resolve_username
 from .capabilities import SystemCapabilities
 
 
@@ -77,7 +76,7 @@ class RocprofsysConfig:
             self._capabilities = SystemCapabilities.from_config(self)
         return self._capabilities
 
-    @cached_property
+    @persistent_cached_property
     def llvm_lib_paths(self) -> list[Path]:
         """Get list of found ROCm LLVM lib paths.
 
@@ -388,19 +387,16 @@ def _merge_python_root_dirs(
     return result or None
 
 
+@persistent_cache("config.discover_install_config")
 def discover_install_config(
-    install_dir: Optional[Path] = None,
-    output_dir: Optional[Path] = None,
     python_versions: Optional[list[str]] = None,
     python_root_dirs: Optional[list[Path]] = None,
     rocm_optional: bool = False,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems installation configuration.
 
-    Creates configuration for testing against installed binaries.
-
-    Args:
-        install_dir: Installation prefix (e.g., /opt/rocm or /usr/local)
+    Creates configuration for testing against installed binaries. The install
+    prefix is resolved from ROCPROFSYS_INSTALL_DIR or common locations.
 
     Returns:
         RocprofsysConfig configured for installed binaries
@@ -409,31 +405,27 @@ def discover_install_config(
         FileNotFoundError: If build/installation dirs and executables are not found
     """
 
-    if install_dir is None:
-        env_install = os.environ.get("ROCPROFSYS_INSTALL_DIR")
-        if env_install:
-            install_dir = Path(env_install).resolve()
-        else:
-            _rocm_candidate = _find_rocm_path(optional=True)
-            _install_candidates = [
-                Path("/usr/local"),
-                Path("/usr"),
-                Path(
-                    "/opt/rocprofiler-systems"
-                ),  # Standard install location from README.md
-            ]
-            if _rocm_candidate is not None:
-                _install_candidates.insert(0, _rocm_candidate)
-            for candidate in _install_candidates:
-                if (
-                    candidate
-                    and (candidate / "share" / "rocprofiler-systems" / "tests").is_dir()
-                    and (
-                        candidate / "share" / "rocprofiler-systems" / "examples"
-                    ).is_dir()
-                ):
-                    install_dir = candidate
-                    break
+    install_dir: Optional[Path] = None
+    env_install = os.environ.get("ROCPROFSYS_INSTALL_DIR")
+    if env_install:
+        install_dir = Path(env_install).resolve()
+    else:
+        _rocm_candidate = _find_rocm_path(optional=True)
+        _install_candidates = [
+            Path("/usr/local"),
+            Path("/usr"),
+            Path("/opt/rocprofiler-systems"),  # Standard install location from README.md
+        ]
+        if _rocm_candidate is not None:
+            _install_candidates.insert(0, _rocm_candidate)
+        for candidate in _install_candidates:
+            if (
+                candidate
+                and (candidate / "share" / "rocprofiler-systems" / "tests").is_dir()
+                and (candidate / "share" / "rocprofiler-systems" / "examples").is_dir()
+            ):
+                install_dir = candidate
+                break
 
     if install_dir is None:
         raise FileNotFoundError(
@@ -458,16 +450,8 @@ def discover_install_config(
     rocpd_validation_rules = tests_dir / "rocpd-validation-rules"
 
     # Create a temporary directory for test outputs
-    try:
-        username = getpass.getuser()
-    except Exception:
-        username = str(os.getuid())
-
-    if output_dir is None:
-        output_dir = Path(tempfile.gettempdir()) / username / "rocprof-sys-pytest-output"
-    else:
-        output_dir = Path(output_dir)
-
+    username = resolve_username()
+    output_dir = Path(tempfile.gettempdir()) / username / "rocprof-sys-pytest-output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     rocm_path = _find_rocm_path(optional=rocm_optional)
@@ -501,23 +485,17 @@ def discover_install_config(
     )
 
 
+@persistent_cache("config.discover_build_config")
 def discover_build_config(
-    build_dir: Optional[Path] = None,
-    output_dir: Optional[Path] = None,
     python_versions: Optional[list[str]] = None,
     python_root_dirs: Optional[list[Path]] = None,
     rocm_optional: bool = False,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems build configuration.
 
-    Attempts to find the build directory and source directory automatically
-    if not provided, checking common locations and environment variables.
-
-    If no build directory is found but an installation is available,
-    falls back to discover_install_config().
-
-    Args:
-        build_dir: Explicit build directory path
+    Finds the build directory automatically (from ROCPROFSYS_BUILD_DIR or by
+    walking up from this file). If no build directory is found but an
+    installation is available, falls back to discover_install_config().
 
     Returns:
         RocprofsysConfig with discovered paths
@@ -529,7 +507,6 @@ def discover_build_config(
     # Explicit install directory check
     if os.environ.get("ROCPROFSYS_INSTALL_DIR"):
         return discover_install_config(
-            output_dir=output_dir,
             python_versions=python_versions,
             python_root_dirs=python_root_dirs,
             rocm_optional=rocm_optional,
@@ -546,14 +523,13 @@ def discover_build_config(
         )
 
     # All files should be in the build directory
-    if build_dir is None:
-        env_build = os.environ.get("ROCPROFSYS_BUILD_DIR")
-        if env_build:
-            build_dir = Path(env_build).resolve()
-        else:
-            build_dir = Path(__file__).resolve().parent.parent.parent.parent.parent.parent
+    env_build = os.environ.get("ROCPROFSYS_BUILD_DIR")
+    if env_build:
+        build_dir = Path(env_build).resolve()
+    else:
+        build_dir = Path(__file__).resolve().parent.parent.parent.parent.parent.parent
 
-    if build_dir is None or not build_dir.exists():
+    if not build_dir.exists():
         raise FileNotFoundError(
             "Could not find build directory or installation. Set one of:\n"
             "  - ROCPROFSYS_BUILD_DIR: Path to build directory\n"
@@ -573,10 +549,7 @@ def discover_build_config(
 
     share_path = build_dir / "share" / "rocprofiler-systems"
 
-    if output_dir is None:
-        output_dir = build_dir / "rocprof-sys-pytest-output"
-    else:
-        output_dir = Path(output_dir)
+    output_dir = build_dir / "rocprof-sys-pytest-output"
 
     tests_dir = share_path / "tests"
 
