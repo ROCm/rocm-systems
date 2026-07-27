@@ -44,10 +44,12 @@ jobs:
         id: detect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           python .github/scripts/pr_detect_changed_subtrees.py \
-            --repo "${{ github.repository }}" \
-            --pr "${{ github.event.pull_request.number }}" \
+            --repo "$REPO" \
+            --pr "$PR_NUMBER" \
             --config ".github/repos-config.json"
 
       - name: Checkout full repo with changed subtrees
@@ -68,7 +70,7 @@ jobs:
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          git fetch origin "$BASE_REF" --depth=1
+          git fetch --depth=1 origin -- "$BASE_REF"
           changed=$(git diff --name-only FETCH_HEAD HEAD)
           files=$(echo "$changed" | tr '\n' ' ' | sed 's/ *$//')
           echo "all_modified_files=$files" >> $GITHUB_OUTPUT
@@ -101,8 +103,8 @@ jobs:
           pre-commit run --files "${files[@]}" --show-diff-on-failure
           set -e
           git add "${files[@]}"
-          git fetch origin "$HEAD_REF"
+          git fetch origin -- "$HEAD_REF"
           if ! git diff --cached --quiet; then
             git commit -m "ci: apply pre-commit fixes"
-            git push --force-with-lease origin "HEAD:$HEAD_REF"
+            git push --force-with-lease origin -- "HEAD:$HEAD_REF"
           fi

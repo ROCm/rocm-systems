@@ -41,18 +41,24 @@ jobs:
 
       - name: Fetch base branch for PR
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          echo "Fetching base branch: ${{ github.base_ref }}"
-          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+          echo "Fetching base branch: $BASE_REF"
+          git fetch origin -- "$BASE_REF:$BASE_REF"
           git branch -a
 
       - name: Determine Base Ref
         id: base_ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "ref=${{ github.base_ref }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "push" && "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
-            echo "ref=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            echo "ref=$BASE_REF" >> $GITHUB_OUTPUT
+          elif [[ "$EVENT_NAME" == "push" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            echo "ref=$EVENT_BEFORE" >> $GITHUB_OUTPUT
           else
             echo "ref=" >> $GITHUB_OUTPUT
           fi
@@ -96,10 +102,12 @@ jobs:
 
       - name: Report Major ABI Check Results
         if: always()
+        env:
+          RUN_MAJOR_OUTCOME: ${{ steps.run_major.outcome }}
         run: |
-          if [[ "${{ steps.run_major.outcome }}" == "failure" ]]; then
+          if [[ "$RUN_MAJOR_OUTCOME" == "failure" ]]; then
             echo "::warning::MAJOR ABI BREAKAGE FOUND. Check Run Major ABI Compliance Check logs or the major-abi-report artifact."
-          elif [[ "${{ steps.run_major.outcome }}" == "success" ]]; then
+          elif [[ "$RUN_MAJOR_OUTCOME" == "success" ]]; then
             echo "Major ABI check succeeded."
           else
             echo "Major ABI check was skipped (no baseline ref available)."
@@ -129,18 +137,24 @@ jobs:
 
       - name: Fetch base branch for PR
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          echo "Fetching base branch: ${{ github.base_ref }}"
-          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+          echo "Fetching base branch: $BASE_REF"
+          git fetch origin -- "$BASE_REF:$BASE_REF"
           git branch -a
 
       - name: Determine Base Ref
         id: base_ref_minor
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "ref=${{ github.base_ref }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "push" && "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
-            echo "ref=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            echo "ref=$BASE_REF" >> $GITHUB_OUTPUT
+          elif [[ "$EVENT_NAME" == "push" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            echo "ref=$EVENT_BEFORE" >> $GITHUB_OUTPUT
           else
             echo "ref=" >> $GITHUB_OUTPUT
           fi
@@ -184,10 +198,12 @@ jobs:
 
       - name: Report Minor ABI Check Results
         if: always()
+        env:
+          RUN_MINOR_OUTCOME: ${{ steps.run_minor.outcome }}
         run: |
-          if [[ "${{ steps.run_minor.outcome }}" == "failure" ]]; then
+          if [[ "$RUN_MINOR_OUTCOME" == "failure" ]]; then
             echo "::warning::MINOR ABI CHANGES FOUND (STRICT CHECK). Check Run Minor ABI Compliance Check logs or the minor-abi-report artifact."
-          elif [[ "${{ steps.run_minor.outcome }}" == "success" ]]; then
+          elif [[ "$RUN_MINOR_OUTCOME" == "success" ]]; then
             echo "Minor ABI check (Strict) succeeded."
           else
             echo "Minor ABI check was skipped (no baseline ref available)."

@@ -36,13 +36,15 @@ jobs:
         id: rtd
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           # Extract project identifier from the bot's comment.
           # The JSON output for a valid commit will have "assistant-librarian[bot]"
           # for key `user.login` and contain "rocm.docs.amd.com/projects/" for key `body`
           # and we need to parse "rocm.docs.amd.com/projects/project_slug/xyz..." to "project_slug"
 
-          comment=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+          comment=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
             --jq '[.[] | select(.user.login == "systems-assistant[bot]" and (.body | contains("rocm.docs.amd.com/projects/")))] | last | .body')
 
           if [ -z "$comment" ] || [ "$comment" = "null" ]; then
