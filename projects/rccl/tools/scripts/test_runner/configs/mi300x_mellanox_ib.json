@@ -936,6 +936,7 @@
       "timeout": 120,
       "env_variables": {
         "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL,NET,TUNING,ENV",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
       "tests": [
