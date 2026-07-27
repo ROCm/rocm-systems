@@ -749,12 +749,13 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
 
   bo_guard.Dismiss();
 
-  // The handle word is the driver-native BO id. vaddr is set only when the driver
-  // owns the mapping (share BOs), so FreeMemory unmaps exactly those; dev-SVM
-  // allocations share the device-heap mapping and leave vaddr null. Export-only
-  // fields stay at defaults.
+  // The handle word is the driver-native BO id. vaddr is always the allocation's
+  // real VA (the dev-heap VA for dev-SVM BOs, the mmap'd VA for share BOs), so it
+  // resolves at submit time and can be written at load time. FreeMemory decides
+  // whether to unmap by the VA itself (dev-heap range vs. an owned mmap), so no
+  // ownership flag is carried. Export-only fields stay at defaults.
   handle->handle = bo_handle.handle;
-  handle->vaddr = bo_handle.unmap_vaddr ? bo_handle.vaddr : nullptr;
+  handle->vaddr = bo_handle.vaddr;
   handle->size = size;
 
   return HSA_STATUS_SUCCESS;
@@ -768,10 +769,12 @@ hsa_status_t XdnaDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
   BOHandle bo_handle;
   bo_handle.handle = static_cast<uint32_t>(handle.handle);
   bo_handle.size = handle.size;
-  // vaddr is set only when the driver owns the mapping; DestroyBOHandle unmaps
-  // exactly those.
+  // Unmap only share BOs, which own an independent mmap. Dev-SVM allocations carve
+  // their VA out of the shared device heap and must leave that mapping intact; they
+  // are recognized by the VA falling inside the device-heap range. A null vaddr
+  // (AllocateMemoryOnly share BOs) has nothing to unmap.
   bo_handle.vaddr = handle.vaddr;
-  bo_handle.unmap_vaddr = handle.vaddr != nullptr;
+  bo_handle.unmap_vaddr = (handle.vaddr != nullptr) && !IsDevHeapVA(handle.vaddr);
 
   return DestroyBOHandle(bo_handle);
 }
@@ -1098,6 +1101,12 @@ hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) con
   cmd_bo_handle = tmp_cmd_bo_handle;
 
   return HSA_STATUS_SUCCESS;
+}
+
+bool XdnaDriver::IsDevHeapVA(const void* vaddr) const {
+  const auto addr = reinterpret_cast<uintptr_t>(vaddr);
+  const auto base = reinterpret_cast<uintptr_t>(dev_heap_aligned);
+  return (addr >= base) && (addr < base + dev_heap_size);
 }
 
 hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
