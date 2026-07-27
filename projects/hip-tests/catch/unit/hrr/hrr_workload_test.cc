@@ -884,12 +884,21 @@ TEST_CASE("Unit_HRR_StressApis_Direct", "[.][hrr-direct]") {
 // Workload B: hipMemsetD8/16/32 variants + hipMemset2D/2DAsync
 //
 // Exercises typed-memset driver APIs and 2-D pitched memset.
-// Final blob: h[i] == 2 (set by hipMemsetD32 at the end).
+// Final blob: h[i] == 0x44444444 (set by hipMemsetD32 at the end).
 // ===========================================================================
 TEST_CASE("Unit_HRR_MemsetVariants_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipSetDevice(0));
   constexpr int    N  = 1024;
   constexpr size_t SZ = N * sizeof(int);  // 4096 bytes
+
+  // Final validation pattern.  Replay zero-initialises its allocations and the
+  // playback D2H validator falls back to a float tolerance (atol=rtol=1e-3 over
+  // f32/bf16/f16/f64, accepting the first encoding that fits), so a small
+  // integer canary cannot detect a no-op replay: 2 decodes to f32 2.8e-45, well
+  // inside atol, and would validate against an all-zero buffer.  0x44444444 is
+  // far from zero in every candidate encoding (f32 785.07, bf16 784, f16 4.27,
+  // f64 7.5e20).
+  constexpr int VAL = 0x44444444;
 
   hipStream_t s;
   HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
@@ -920,16 +929,16 @@ TEST_CASE("Unit_HRR_MemsetVariants_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipMemset2DAsync(d, PITCH, 0, PITCH, ROWS, s));
   HIP_CHECK(hipStreamSynchronize(s));
 
-  // Restore final value == 2 for blob validation
+  // Restore the final validation pattern
   HIP_CHECK(hipDeviceSynchronize());  // ensure all async ops complete first
-  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), 2, N));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), VAL, N));
   HIP_CHECK(hipDeviceSynchronize());
 
-  // D2H blob — playback validates all values == 2
+  // D2H blob — playback validates all values == VAL
   int* h = new int[N]();
   HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
   HIP_CHECK(hipStreamSynchronize(s));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 2);
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
 
   HIP_CHECK(hipFree(d));
   HIP_CHECK(hipStreamDestroy(s));
