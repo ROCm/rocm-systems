@@ -1353,11 +1353,9 @@ TEST(CfgAnalysis, Gfx1250CarriesLaneStashAcrossProvenBlockBoundary) {
 }
 
 TEST(CfgAnalysis, Gfx1250UnreachablePostRocrAbortBlockDoesNotPoisonLaneStash) {
-  constexpr auto live_branch =
-      gfx1250::build_sopp(gfx1250::kSCbranchScc0Sopp, {.simm16 = 3});
+  constexpr auto live_branch = gfx1250::build_sopp(gfx1250::kSCbranchScc0Sopp, {.simm16 = 3});
   constexpr auto dead_branch = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 1});
-  constexpr auto call =
-      gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = 0, .sdst = 30});
+  constexpr auto call = gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = 0, .sdst = 30});
 
   // Mirror the scalar post-trap regression with a gfx1250 PC stashed in v44:
   //
@@ -1376,18 +1374,18 @@ TEST(CfgAnalysis, Gfx1250UnreachablePostRocrAbortBlockDoesNotPoisonLaneStash) {
       0xD761002Cu,
       0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
       0xD761002Cu,
-      0x02010201u,                                        // 0x18: lane 1 <- s1.
-      live_branch[0],                                     // 0x20: -> join at 0x30.
-      build_s_trap(ROCJITSU_CODE_ARCH_GFX1250, 2),        // 0x24: abort terminator.
-      dead_branch[0],                                     // 0x28: dead edge -> 0x30.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),         // 0x2c: dead padding.
+      0x02010201u,                                 // 0x18: lane 1 <- s1.
+      live_branch[0],                              // 0x20: -> join at 0x30.
+      build_s_trap(ROCJITSU_CODE_ARCH_GFX1250, 2), // 0x24: abort terminator.
+      dead_branch[0],                              // 0x28: dead edge -> 0x30.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),  // 0x2c: dead padding.
       0xD7600000u,
       0x0201012Cu, // 0x30: v_readlane_b32 s0, v44, 0.
       0xD7600001u,
-      0x0201032Cu,                                        // 0x38: lane 1 -> s1.
-      call[0],                                            // 0x40: s_swap_pc_i64.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),         // 0x44: continuation.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),         // 0x48: target.
+      0x0201032Cu,                                // 0x38: lane 1 -> s1.
+      call[0],                                    // 0x40: s_swap_pc_i64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x44: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x48: target.
   };
 
   TestCodeObject co(std::move(words));

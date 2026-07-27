@@ -148,9 +148,10 @@ void BasicBlock::add_static_indirect_call_fixup(IndirectCallFixup fixup) {
   static_indirect_call_fixups_.push_back(fixup);
 }
 
-std::vector<std::unique_ptr<BasicBlock>>
-BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-                  std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
+std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co, Decoder &decoder,
+                                                           rj_code_arch_t arch,
+                                                           std::span<const uint64_t> extra_leaders,
+                                                           ExternalEntryPolicy entry_policy) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {

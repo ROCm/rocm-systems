@@ -1187,10 +1187,9 @@ explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
   return entries;
 }
 
-[[nodiscard]] bool
-is_analysis_root(size_t block_index, std::span<const uint8_t> external_entries,
-                 const std::vector<std::vector<size_t>> &predecessors,
-                 ExternalEntryPolicy entry_policy) {
+[[nodiscard]] bool is_analysis_root(size_t block_index, std::span<const uint8_t> external_entries,
+                                    const std::vector<std::vector<size_t>> &predecessors,
+                                    ExternalEntryPolicy entry_policy) {
   if (external_entries[block_index] != 0)
     return true;
   return entry_policy == ExternalEntryPolicy::InferPredecessorless &&
@@ -1540,8 +1539,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
 [[nodiscard]] std::vector<LatticeFacts>
 run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
                    std::span<const PendingConsumer> pending_consumers,
-                   std::span<const uint64_t> extra_leaders,
-                   ExternalEntryPolicy entry_policy) {
+                   std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
   // Phase 3: compute block-entry facts to a fixed point.
   //
   // entry[B] = JOIN(exit[P]) for every predecessor P of B.
@@ -2219,11 +2217,9 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
   return static_cast<uint16_t>((word >> 16) & 0x7fu);
 }
 
-[[nodiscard]] std::vector<IndirectCallFixup>
-discover_indirect_branch_edges_unfiltered(std::span<const Instruction *const> insts,
-                                          std::span<const uint8_t> text, rj_code_arch_t arch,
-                                          std::span<const uint64_t> extra_leaders,
-                                          ExternalEntryPolicy entry_policy) {
+[[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges_unfiltered(
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
   std::vector<IndirectCallFixup> recovered;
   AnalysisContext ctx = build_context(insts, text, arch);
   recover_vector_lane_stashed_pcs(ctx, recovered, extra_leaders, entry_policy);
@@ -2262,11 +2258,9 @@ discover_indirect_branch_edges_unfiltered(std::span<const Instruction *const> in
 
 } // namespace
 
-std::vector<IndirectCallFixup>
-discover_indirect_branch_edges(std::span<const Instruction *const> insts,
-                               std::span<const uint8_t> text, rj_code_arch_t arch,
-                               std::span<const uint64_t> extra_leaders,
-                               ExternalEntryPolicy entry_policy) {
+std::vector<IndirectCallFixup> discover_indirect_branch_edges(
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
   if (insts.empty())
     return {};
 
@@ -2279,8 +2273,8 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
 #ifndef NDEBUG
     // Keep the cheap predicate coupled to every fixup producer. A future
     // recovery path for another consumer kind must extend the predicate above.
-    const auto unfiltered = discover_indirect_branch_edges_unfiltered(
-        insts, text, arch, extra_leaders, entry_policy);
+    const auto unfiltered =
+        discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
