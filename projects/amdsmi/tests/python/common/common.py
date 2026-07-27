@@ -121,33 +121,46 @@ if not os.path.exists(amdsmi_path):
         f'amdsmi path "{amdsmi_path}" does not exist. '
         "Set ROCM_HOME, ROCM_PATH, or AMDSMI_PATH to the correct install location."
     )
-sys.path.insert(0, amdsmi_path)
+# The amdsmi Python module installs into the active interpreter's site-packages
+# (the system DEB/RPM and the wheel both land there), so a plain "import amdsmi"
+# resolves it.  Older / in-tree layouts instead stage the package directly under
+# amdsmi_path; when that staged copy is present, put it first on sys.path so the
+# tests exercise that build rather than a system-installed copy.
+_staged_amdsmi = os.path.isfile(os.path.join(amdsmi_path, "amdsmi", "__init__.py"))
+if _staged_amdsmi:
+    sys.path.insert(0, amdsmi_path)
 try:
     import amdsmi
 except ImportError as e:
-    raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"') from e
+    raise ImportError(
+        'Could not import the "amdsmi" module.  Install amd-smi-lib (or the '
+        "amdsmi wheel), or set AMDSMI_PATH to a build tree that contains it."
+    ) from e
 
-# Verify the imported amdsmi package came from amdsmi_path, not a system-installed
-# package in dist-packages. A stale system install wins over sys.path.append() because
-# dist-packages is already on sys.path at interpreter startup; insert(0,...) above
-# prevents this, but error explicitly in case amdsmi was already cached in sys.modules.
+# When a staged copy was expected under amdsmi_path, fail loudly if a
+# system-installed package in dist-packages shadowed it instead.  A stale system
+# install wins over sys.path.append() because dist-packages is already on
+# sys.path at interpreter startup; the insert(0, ...) above prevents this when a
+# staged copy exists, but error explicitly in case amdsmi was already cached in
+# sys.modules.
 #
 # Example of how to trigger this error output (for test purposes):
 # sudo AMDSMI_PATH=/tmp /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
-_amdsmi_file = getattr(amdsmi, "__file__", None) or ""
-if not os.path.realpath(_amdsmi_file).startswith(os.path.realpath(amdsmi_path) + os.sep):
-    _script = os.path.basename(sys.argv[0]) or "unit_tests.py"
-    print_shadow_error(_script, _amdsmi_file, amdsmi_path)
-    # For direct test-script invocations use sys.exit so no Python traceback
-    # clutters the remediation output.  For anything else (pytest, IDE runners,
-    # ad-hoc imports) raise so the caller gets a clear error with location.
-    _known_scripts = ("unit_tests.py", "integration_test.py", "cli_unit_test.py")
-    _main_file = getattr(sys.modules.get("__main__"), "__file__", "") or ""
-    if os.path.basename(_main_file) in _known_scripts:
-        sys.exit(1)
-    raise RuntimeError(
-        f"amdsmi loaded from wrong path: '{_amdsmi_file}' (expected under '{amdsmi_path}')"
-    )
+if _staged_amdsmi:
+    _amdsmi_file = getattr(amdsmi, "__file__", None) or ""
+    if not os.path.realpath(_amdsmi_file).startswith(os.path.realpath(amdsmi_path) + os.sep):
+        _script = os.path.basename(sys.argv[0]) or "unit_tests.py"
+        print_shadow_error(_script, _amdsmi_file, amdsmi_path)
+        # For direct test-script invocations use sys.exit so no Python traceback
+        # clutters the remediation output.  For anything else (pytest, IDE runners,
+        # ad-hoc imports) raise so the caller gets a clear error with location.
+        _known_scripts = ("unit_tests.py", "integration_test.py", "cli_unit_test.py")
+        _main_file = getattr(sys.modules.get("__main__"), "__file__", "") or ""
+        if os.path.basename(_main_file) in _known_scripts:
+            sys.exit(1)
+        raise RuntimeError(
+            f"amdsmi loaded from wrong path: '{_amdsmi_file}' (expected under '{amdsmi_path}')"
+        )
 
 #################################################
 # Module level functions, not part of the class #

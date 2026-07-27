@@ -89,32 +89,6 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return {raw, raw + inst.size() / sizeof(uint32_t)};
 }
 
-/// @brief Recognize clang's gfx1250 body for an unreachable kernel specialization.
-///
-/// @details rocPRIM emits one trampoline specialization per supported target.
-/// Specializations which cannot be selected for the compiled device end in
-/// `__builtin_unreachable()`. Current clang lowers those empty gfx1250 bodies to
-/// one 64-bit `s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1`
-/// instruction, followed by zero alignment padding. WAVE_MODE[25] is
-/// REPLAY_MODE; the instruction is ordinary prologue state rather than a CFG
-/// terminator, but the source function has no defined fallthrough execution.
-///
-/// Keep the match deliberately exact. Other reachable fallthrough into opaque
-/// text remains a hard error, including a longer block which merely ends with
-/// this instruction.
-[[nodiscard]] bool is_gfx1250_compiler_unreachable_stub(const BasicBlock &block,
-                                                        rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || !block.falls_through_to_undecodable_text() ||
-      block.num_instructions() != 1 || block.size() != 2 * sizeof(uint32_t))
-    return false;
-
-  const Instruction *inst = block.terminator();
-  if (inst == nullptr || inst->mnemonic() != "s_setreg_imm32_b32" || inst->size() != 8)
-    return false;
-  const uint32_t *words = inst->raw_encoding();
-  return words != nullptr && words[0] == 0xb9800641u && words[1] == 1u;
-}
-
 [[nodiscard]] uint32_t text_word_at(std::span<const uint8_t> text, uint64_t offset) {
   uint32_t word = 0;
   if (offset + sizeof(word) <= text.size())
@@ -855,9 +829,9 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
 const InstructionLegalization *
 BinaryTranslator::lookup_legalization(const Instruction &inst) const {
   // gfx1250 B0 and A0 have the same structural ISA, so the generated cross-ISA
-  // tables cannot express their revision-specific behavior. Affected decoded
-  // instructions are classified by the handwritten errata policy; everything
-  // else intentionally has no entry and follows the raw same-ISA copy path.
+  // tables cannot express their revision-specific behavior. Instructions in
+  // the B0-to-A0 profile use handwritten legalization; everything else follows
+  // the raw same-ISA copy path.
   if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
       options_.input_revision == ProcessorRevision::Gfx1250B0 &&
       options_.output_revision == ProcessorRevision::Gfx1250A0)
@@ -882,10 +856,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   };
 
   // A same-architecture gfx1250 translation is direction-specific: A0 and B0
-  // share an ELF machine ID, so both revisions must be given and must select a
-  // supported direction. Enforce this here as well as in the C API so a direct or
-  // future internal caller cannot bypass the check and get a silent identity copy
-  // that skips every required workaround.
+  // share an ELF machine ID, so both revisions must be given. Enforce this here
+  // as well as in the C API.
   if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250) {
     if (options_.input_revision == ProcessorRevision::Unspecified ||
         options_.output_revision == ProcessorRevision::Unspecified) {
@@ -894,9 +866,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                    "revisions");
       return leave_unchanged();
     }
-    // The implemented errata are deliberately one-way. Treating A0 input as B0
-    // output would silently preserve A0 workaround sequences while claiming the
-    // opposite direction, so fail before modifying the code object.
+    // Only the B0-to-A0 direction is implemented.
     if (options_.input_revision == ProcessorRevision::Gfx1250A0 &&
         options_.output_revision == ProcessorRevision::Gfx1250B0) {
       append_error(result.diagnostics, DiagnosticKind::Legalization,
@@ -1308,8 +1278,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
     const auto opaque_fallthrough =
         std::ranges::find_if(scope.blocks, [&](const BasicBlock *block) {
-          return block != nullptr && block->falls_through_to_undecodable_text() &&
-                 !is_gfx1250_compiler_unreachable_stub(*block, guest_arch_);
+          return block != nullptr && block->falls_through_to_undecodable_text();
         });
     if (opaque_fallthrough != scope.blocks.end()) {
       auto failure =
@@ -1415,25 +1384,32 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     if (options_.debug_min_free_vgpr)
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
     std::vector<const Instruction *> live_before_instructions;
+    bool scope_requires_liveness = false;
     if (semantic_translator_ && semantic_translator_->has_rules()) {
-      // Semantic expansion rules are the only DBT users of instruction-level
-      // live-before data. The block dataflow still covers the full kernel, but
-      // filtering the stored snapshots avoids retaining one RegisterSet per
-      // decoded instruction in very large ML kernels.
+      // Semantic expansion rules are the only BinaryTranslator path that queries
+      // LivenessAnalysis. Other rewrites use separate resource strategies: virtual
+      // LDS grows descriptor-backed registers or explicitly saves/restores borrowed
+      // registers. Collect live-before snapshots only for rules that can query them,
+      // and skip the kernel dataflow entirely when no such rule is present.
       for (BasicBlock *block : scope.blocks) {
         if (block == nullptr)
           continue;
         for (const Instruction &inst : block->instructions()) {
-          if (semantic_translator_->has_expand_rule(inst.encoding_id(), inst.opcode()))
+          if (semantic_translator_->expand_rule_requires_liveness(inst)) {
+            scope_requires_liveness = true;
             live_before_instructions.push_back(&inst);
+          }
         }
       }
       liveness_options.restrict_live_before_to_instructions = true;
       liveness_options.live_before_instructions = std::span<const Instruction *const>(
           live_before_instructions.data(), live_before_instructions.size());
     }
-    const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
-    LivenessAnalysis liveness(KernelBlockScope(scope.blocks), liveness_options, liveness_edges);
+    LivenessAnalysis liveness = LivenessAnalysis::unavailable();
+    if (scope_requires_liveness) {
+      const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
+      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_options, liveness_edges);
+    }
 
     // Phase 4: translate each relocated body instruction at the current cursor.
     // Return-like s_setpc_b64 instructions are accepted only when they are the
@@ -1782,7 +1758,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // and modifier suffix words, instead of reconstructing bytes from the
         // decoder's base-format raw encoding. Direct branches and recovered
         // indirect transfers have already taken their relocation paths above;
-        // explicit errata expansions have already continued or failed closed.
+        // explicit profile expansions have already continued or failed closed.
         if (guest_arch_ == host_arch_ && leg == nullptr) {
           copy_original_instruction(inst, offset, kernel_text, pending_traces);
           continue;

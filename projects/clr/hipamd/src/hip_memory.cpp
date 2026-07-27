@@ -645,9 +645,13 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
   hip::MemcpyType type = ihipGetMemcpyType(srcMemory, dstMemory, kind);
   switch (type) {
     case hipCopyBufferP2P:
+      if (kind == hipMemcpyDeviceToDeviceNoCU) {
+        helper.copyMetadata().copyEnginePreference_ =
+            amd::CopyMetadata::CopyEnginePreference::SDMA;
+      }
       command = new amd::CopyMemoryP2PCommand(
           stream, CL_COMMAND_COPY_BUFFER, helper.waitList(), *srcMemory->asBuffer(),
-          *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes);
+          *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes, helper.copyMetadata());
       {
         hipError_t status = MemcpyCommandHelper::checkCommand(command);
         if (status != hipSuccess) {

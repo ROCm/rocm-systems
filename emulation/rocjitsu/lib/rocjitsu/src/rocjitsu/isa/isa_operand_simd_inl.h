@@ -191,6 +191,27 @@ void AmdgpuIsaOperand<Isa>::simd_notify_read64_mut_impl(amdgpu::Wavefront &wf, u
 }
 
 template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_write_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                                       uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t physical_reg = wf.vgpr_alloc().base + voff;
+    wf.cu().raw_cu().notify_vgpr_write(&wf, physical_reg, lane_mask, byte_mask);
+  }
+}
+
+template <typename Isa>
+void AmdgpuIsaOperand<Isa>::simd_notify_write64_mut_impl(amdgpu::Wavefront &wf, uint64_t lane_mask,
+                                                         uint8_t byte_mask) const {
+  if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
+    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
+    uint32_t physical_reg = wf.vgpr_alloc().base + voff;
+    wf.cu().raw_cu().notify_vgpr_write(&wf, physical_reg, lane_mask, byte_mask);
+    wf.cu().raw_cu().notify_vgpr_write(&wf, physical_reg + 1, lane_mask, byte_mask);
+  }
+}
+
+template <typename Isa>
 amdgpu::ConstVgprStoragePair64
 AmdgpuIsaOperand<Isa>::simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const {
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
