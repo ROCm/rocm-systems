@@ -276,6 +276,73 @@ struct PairTransfer {
   PcValue value;
 };
 
+/// @brief One PC-relative address producer while a discovery round is running.
+///
+/// @details `poisoned` is sticky. Once a producer is observed in a way that no
+/// single delta rewrite can repair, no later observation may resurrect it.
+struct PcAddressBuilderEntry {
+  PcAddressBuilder record;
+  bool poisoned = false;
+};
+
+/// @brief Accumulator for every PC-relative address producer seen in one round.
+///
+/// @details Keyed by the producer's `s_getpc_b64` source offset so a getpc that
+/// is observed several times (at its consumer, at a call that clobbers it, and
+/// again at block exit) collapses to one record. Two observations that disagree
+/// cannot both be satisfied by one delta rewrite, so a disagreement poisons the
+/// record instead of picking one.
+using PcAddressBuilderMap = std::unordered_map<uint64_t, PcAddressBuilderEntry>;
+
+void seed_pc_builder(PcAddressBuilderMap &builders, uint64_t getpc_offset, uint16_t pair_lo) {
+  // Every s_getpc_b64 is recorded even when nothing can be proven about it. A
+  // whole-scope "no stale PC values" claim must account for the producers the
+  // pass failed to follow, not silently omit them.
+  builders.try_emplace(getpc_offset,
+                       PcAddressBuilderEntry{.record = {.source_getpc_offset = getpc_offset,
+                                                        .source_sreg = pair_lo,
+                                                        .resolved = false}});
+}
+
+void poison_pc_builder(PcAddressBuilderMap &builders, uint64_t getpc_offset) {
+  auto it = builders.find(getpc_offset);
+  if (it == builders.end())
+    return;
+  it->second.poisoned = true;
+  it->second.record.resolved = false;
+}
+
+/// @brief Record the value a builder leaves in its pair at a stable program point.
+///
+/// @details A stable point is one where the pair stops being tracked: the block
+/// exit, a call that clobbers it, or the consumer that reads it. The recorded
+/// value is exactly what the original builder range produces there, which is the
+/// precondition for rewriting that range to produce the relocated address.
+void note_pc_builder(PcAddressBuilderMap &builders, uint16_t pair_lo, const PcValue &value) {
+  const PcAddressBuilder record{
+      .source_getpc_offset = value.source_getpc_offset,
+      .source_recovery_begin_offset = value.source_recovery_begin_offset,
+      .source_recovery_end_offset = value.source_recovery_end_offset,
+      .source_target_offset = value.offset,
+      .source_sreg = pair_lo,
+      .resolved = true,
+  };
+
+  auto it = builders.find(value.source_getpc_offset);
+  if (it == builders.end()) {
+    builders.emplace(value.source_getpc_offset, PcAddressBuilderEntry{.record = record});
+    return;
+  }
+  if (it->second.poisoned)
+    return;
+  if (it->second.record.resolved && it->second.record != record) {
+    it->second.poisoned = true;
+    it->second.record.resolved = false;
+    return;
+  }
+  it->second.record = record;
+}
+
 struct AnalysisBlock {
   /// Byte offset of the first instruction in this temporary analysis block.
   uint64_t offset = 0;
@@ -1442,7 +1509,7 @@ void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint1
 
 void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBlock> &blocks,
                 std::vector<PendingConsumer> &pending_consumers,
-                std::vector<IndirectCallFixup> &recovered) {
+                std::vector<IndirectCallFixup> &recovered, PcAddressBuilderMap &pc_builders) {
   // Phase 2: run local transfer semantics for one straight-line block.
   //
   // This scan has no incoming lattice facts by design. A pair either becomes
@@ -1453,6 +1520,16 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   AnalysisBlock &block = blocks[block_index];
   BlockState state;
 
+  // Publish every still-live builder's current value. Called only where the
+  // tracked pairs are about to stop being tracked, so the published value is
+  // the one the original builder range really produces at that point.
+  const auto note_live_pc_builders = [&] {
+    for (uint16_t pair_lo : state.active_pairs()) {
+      if (const PcValue *value = state.builder(pair_lo))
+        note_pc_builder(pc_builders, pair_lo, *value);
+    }
+  };
+
   for (size_t index = block.first_index; index <= block.last_index; ++index) {
     const Instruction &inst = *ctx.insts[index];
     const InstructionFacts &facts = ctx.facts[index];
@@ -1462,16 +1539,32 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // s_getpc_b64 writes the address of the following instruction. The
       // low/high add sequence edits this base to the eventual branch target.
       const uint16_t pair_lo = *facts.getpc_sdst;
+      // A second builder overwriting the same pair abandons the first one at an
+      // unknown point in its chain. No single delta rewrite is provably correct
+      // for an abandoned chain, so poison it rather than publish a partial value.
+      if (const PcValue *replaced = state.builder(pair_lo))
+        poison_pc_builder(pc_builders, replaced->source_getpc_offset);
+      seed_pc_builder(pc_builders, inst.src_loc(), pair_lo);
       state.set_builder(pair_lo, PcValue{.offset = static_cast<int64_t>(next_offset),
                                          .source_getpc_offset = inst.src_loc(),
                                          .source_recovery_begin_offset = next_offset,
                                          .source_recovery_end_offset = next_offset});
       continue;
     }
+    // A getpc the pass declines to track still produces a PC-derived value.
+    // Record it as an unresolvable producer so it cannot be silently omitted
+    // from a whole-scope claim.
+    if (facts.getpc_sdst) {
+      seed_pc_builder(pc_builders, inst.src_loc(), *facts.getpc_sdst);
+      poison_pc_builder(pc_builders, inst.src_loc());
+    }
 
     const std::optional<uint16_t> consumer_pair =
         facts.setpc_ssrc ? facts.setpc_ssrc : facts.swappc_ssrc;
     if (consumer_pair) {
+      // The consumer terminates this block, and its destination pair write can
+      // clobber a tracked builder. Publish the pre-consumer values first.
+      note_live_pc_builders();
       // A consumer resolved from local state is the strongest case: the builder
       // and the branch/call through that builder are in the same straight-line
       // block. Emit now so BasicBlock can split at the consumer and target.
@@ -1507,6 +1600,9 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // context-sensitive return edge, so allowing existing builders to PASS
       // through this block would incorrectly preserve values that the callee may
       // clobber. Fail closed by killing every carried builder at the call site.
+      // The values are still exactly what the builder ranges produced up to
+      // here, so publish them before dropping them.
+      note_live_pc_builders();
       const std::vector<uint16_t> active_pairs = state.active_pairs();
       for (uint16_t pair_lo : active_pairs)
         state.invalidate_pair(pair_lo);
@@ -1533,6 +1629,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
     invalidate_written_sgprs(ctx, index, state);
   }
 
+  note_live_pc_builders();
   finalize_block_transfers(block, state);
 }
 
@@ -2218,11 +2315,13 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges_unfiltered(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
-    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
+    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
+    std::vector<PcAddressBuilder> *pc_builders) {
   std::vector<IndirectCallFixup> recovered;
   AnalysisContext ctx = build_context(insts, text, arch);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
 
+  PcAddressBuilderMap round_builders;
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
     add_recovered_leaders(leaders, recovered);
 
@@ -2236,8 +2335,12 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     // recovered targets become reachable through those edges, not by being
     // promoted to external roots.
     recover_vector_lane_stashed_pcs(ctx, blocks, iteration_recovered, extra_leaders, entry_policy);
+    // Recovered leaders can split a block between rounds, which changes where a
+    // builder's block-exit value is observed. Keep only the final round's view
+    // so the published records are internally consistent with one CFG.
+    round_builders.clear();
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
-      scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered);
+      scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered, round_builders);
     recover_signed_delta_templates(ctx, blocks, iteration_recovered);
 
     if (!pending_consumers.empty()) {
@@ -2254,6 +2357,14 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
       break;
   }
 
+  if (pc_builders != nullptr) {
+    pc_builders->clear();
+    pc_builders->reserve(round_builders.size());
+    for (const auto &[getpc_offset, entry] : round_builders)
+      pc_builders->push_back(entry.record);
+    std::ranges::sort(*pc_builders, {}, &PcAddressBuilder::source_getpc_offset);
+  }
+
   std::ranges::sort(recovered, {}, &IndirectCallFixup::source_call_offset);
   return recovered;
 }
@@ -2262,27 +2373,34 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 
 std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
-    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
+    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
+    std::vector<PcAddressBuilder> *pc_builders) {
+  if (pc_builders != nullptr)
+    pc_builders->clear();
   if (insts.empty())
     return {};
 
   // Every recoverable edge ends at an indirect branch/call consumer. Most
   // generated kernels have none, so avoid building the auxiliary CFG and
-  // running its dataflow passes when no fixup can possibly be produced.
+  // running its dataflow passes when no fixup can possibly be produced. A
+  // section with no dynamic transfer also has no consumer whose target could be
+  // a stale PC, so leaving pc_builders empty here withholds a claim rather than
+  // making a false one.
   const bool has_indirect_consumer = std::ranges::any_of(
       insts, [](const Instruction *inst) { return is_recoverable_indirect_consumer(*inst); });
   if (!has_indirect_consumer) {
 #ifndef NDEBUG
     // Keep the cheap predicate coupled to every fixup producer. A future
     // recovery path for another consumer kind must extend the predicate above.
-    const auto unfiltered =
-        discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy);
+    const auto unfiltered = discover_indirect_branch_edges_unfiltered(
+        insts, text, arch, extra_leaders, entry_policy, nullptr);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
   }
 
-  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy);
+  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy,
+                                                   pc_builders);
 }
 
 } // namespace rocjitsu

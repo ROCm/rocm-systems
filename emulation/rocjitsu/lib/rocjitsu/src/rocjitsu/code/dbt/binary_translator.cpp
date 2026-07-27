@@ -321,6 +321,101 @@ build_block_position_index(const std::vector<std::unique_ptr<BasicBlock>> &block
   return block;
 }
 
+/// @brief Prove that no stale PC-derived value can exist in one kernel scope.
+///
+/// @details The translator's usual model is "prove the target of every dynamic
+/// transfer, or refuse". This helper establishes the complementary — and
+/// strictly stronger — property: every value in this scope that was derived from
+/// an `s_getpc_b64` is rewritten to hold its RELOCATED address. A consumer whose
+/// dataflow fact is incomplete is then still safe, because whatever the
+/// unconstrained path delivers can only be one of:
+///   * a value this scope built from a getpc, which is now relocation-correct;
+///   * an architectural return PC from s_call/s_swap_pc, which hardware writes
+///     from the already-relocated program counter;
+///   * a code address loaded from data, whose ELF relocation the code-object
+///     patcher rewrites through the same final offset map (and refuses to
+///     translate when it cannot).
+/// No path can therefore carry an original, unrelocated `.text` address.
+///
+/// The proof obligation is discharged per producer and fails closed:
+///   * a producer the analysis could not follow leaves an unknown value;
+///   * a producer whose value is not a block start emitted by this scope cannot
+///     be rewritten to a relocated address (it points at data, into the middle
+///     of an instruction, or outside the emitted scope);
+///   * a bare producer that is the last instruction of its block is the shape
+///     whose delta add lives in a successor, so its chain is not proven closed.
+/// Any of those returns nullopt, which keeps the caller's existing refusal.
+///
+/// The recorded value is the one the pair holds at its block's exit, so a later
+/// unmodeled write inside the SAME block already leaves the producer unresolved.
+/// The residual modeling assumption is that a closed chain is not extended by
+/// unmodeled PC arithmetic in a SUCCESSOR block. Within one function that case
+/// is refused elsewhere: the extension is a KILL transfer, a killed lattice fact
+/// yields no fixup at all, and an indirect consumer with no fixup fails closed
+/// as unrecovered. Escaping it would need an interprocedural chain (partial
+/// build in a caller, completion after a call boundary) whose intermediate value
+/// also lands exactly on an emitted block start. AMDGPU materializes a function
+/// address with one indivisible getpc+add expansion, so no such chain exists.
+///
+/// @returns Builder rewrites that must all be applied, or nullopt when the
+///          scope cannot be made free of stale PC-derived values.
+[[nodiscard]] std::optional<std::vector<IndirectCallFixup>>
+scope_relocatable_pc_builders(std::span<BasicBlock *const> blocks) {
+  std::unordered_set<uint64_t> block_starts;
+  std::unordered_set<uint64_t> instruction_starts;
+  block_starts.reserve(blocks.size());
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      return std::nullopt;
+    block_starts.insert(block->start_offset());
+    instruction_starts.insert(block->end_offset());
+    for (const Instruction &inst : block->instructions())
+      instruction_starts.insert(inst.src_loc());
+  }
+
+  std::vector<IndirectCallFixup> builder_fixups;
+  for (const BasicBlock *block : blocks) {
+    for (const PcAddressBuilder &builder : block->static_pc_address_builders()) {
+      if (!builder.resolved)
+        return std::nullopt;
+      if (builder.source_target_offset < 0)
+        return std::nullopt;
+      const auto target = static_cast<uint64_t>(builder.source_target_offset);
+      // patch_recovered_builder_fixups resolves the relocated target through
+      // block placements, so only a block start has a defined new address.
+      if (!block_starts.contains(target))
+        return std::nullopt;
+      if (!instruction_starts.contains(builder.source_getpc_offset) ||
+          !instruction_starts.contains(builder.source_recovery_begin_offset) ||
+          !instruction_starts.contains(builder.source_recovery_end_offset)) {
+        return std::nullopt;
+      }
+      if (builder.source_recovery_begin_offset == builder.source_recovery_end_offset) {
+        // A bare getpc has no delta to rewrite: hardware already supplies the
+        // relocated PC. Accept it only when its recorded value really is "the
+        // instruction after the getpc" and at least one more instruction of the
+        // same block follows without consuming it into a delta. A getpc that is
+        // the last instruction of its block is the shape whose add lives in a
+        // successor, where an unmodeled write would leave the original delta.
+        if (target != builder.source_recovery_begin_offset)
+          return std::nullopt;
+        if (builder.source_recovery_end_offset >= block->end_offset())
+          return std::nullopt;
+        continue;
+      }
+
+      builder_fixups.push_back(
+          IndirectCallFixup{.source_getpc_offset = builder.source_getpc_offset,
+                            .source_recovery_begin_offset = builder.source_recovery_begin_offset,
+                            .source_recovery_end_offset = builder.source_recovery_end_offset,
+                            .source_call_offset = builder.source_getpc_offset,
+                            .source_target_offset = target,
+                            .source_call_sreg = builder.source_sreg});
+    }
+  }
+  return builder_fixups;
+}
+
 [[nodiscard]] std::unordered_set<uint64_t>
 attach_relocation_table_call_edges(const BlockOffsetIndex &block_index,
                                    std::span<const RelocationFunctionTable> tables,
@@ -1459,6 +1554,21 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       }
     }
 
+    // An incomplete consumer is only translatable when this scope can be proven
+    // free of stale PC-derived values (see scope_relocatable_pc_builders). That
+    // proof is expensive and only ever needed when such a consumer exists, so
+    // establish it lazily; scopes without one keep byte-identical output.
+    const bool has_incomplete_consumer =
+        std::ranges::any_of(recovered_indirect_by_call, [](const auto &entry) {
+          return std::ranges::any_of(entry.second.fixups, [](const IndirectCallFixup &fixup) {
+            return fixup.source_incomplete;
+          });
+        });
+    std::optional<std::vector<IndirectCallFixup>> whole_scope_builder_fixups;
+    if (has_incomplete_consumer)
+      whole_scope_builder_fixups = scope_relocatable_pc_builders(scope.blocks);
+    const bool no_stale_pc_values_in_scope = whole_scope_builder_fixups.has_value();
+
     std::vector<IndirectCallFixup> pending_builder_fixups;
     for (auto &[source_call_offset, consumer] : recovered_indirect_by_call) {
       if (consumer.fixups.empty())
@@ -1492,12 +1602,12 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       // yet its runtime SGPR pair may hold an original .text address; after DBT
       // relocates .text, the retained dynamic transfer would jump to stale or moved
       // bytes, and the unknown target block may be absent from the emitted scope.
-      // We cannot prove the unconstrained path is free of a relocatable text
-      // address, so fail closed for the whole consumer rather than relocate only
-      // the known builders.
+      // Unless this scope was proven to contain no stale PC-derived value at all,
+      // we cannot rule that out, so fail closed for the whole consumer rather
+      // than relocate only the known builders.
       const bool any_incomplete = std::ranges::any_of(
           consumer.fixups, [](const IndirectCallFixup &fixup) { return fixup.source_incomplete; });
-      if (any_incomplete) {
+      if (any_incomplete && !no_stale_pc_values_in_scope) {
         auto failure = make_kernel_failure(
             DiagnosticKind::Legalization,
             "recovered indirect branch has an unconstrained predecessor path that cannot be "
@@ -1509,6 +1619,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           break;
         }
         return leave_unchanged();
+      }
+
+      if (any_incomplete) {
+        // The unconstrained path can still deliver a value this consumer never
+        // reaches through a recovered builder, so a direct transfer window would
+        // redirect it. Keep the dynamic transfer; every PC value it can observe
+        // is relocation-correct under the whole-scope proof.
+        continue;
       }
 
       // A complete consumer with one effective target can become a direct window.
@@ -1524,6 +1642,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
     if (skip_scope)
       continue;
+
+    // Discharging the proof requires actually performing every rewrite it
+    // assumes. Append it after the consumer-driven fixups so a builder that both
+    // paths cover keeps the bytes the consumer path already produced today;
+    // patch_recovered_builder_fixups collapses the duplicate range.
+    if (no_stale_pc_values_in_scope) {
+      pending_builder_fixups.insert(pending_builder_fixups.end(),
+                                    whole_scope_builder_fixups->begin(),
+                                    whole_scope_builder_fixups->end());
+    }
 
     std::vector<uint8_t> kernel_text;
     std::vector<PendingTrace> pending_traces;

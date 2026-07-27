@@ -57,6 +57,38 @@ struct IndirectCallFixup {
   uint64_t target_recovery_end_offset = 0;   ///< Relocated one-past-end byte of builder code.
 };
 
+/// @brief One statically discovered `s_getpc_b64`-rooted PC-relative address producer.
+///
+/// @details A recovered indirect branch is only one consumer of a getpc builder.
+/// The same construct materializes function pointers that are copied, spilled,
+/// or passed as arguments before they reach a dynamic transfer. DBT relocates
+/// `.text`, so every such builder that is copied verbatim keeps its original
+/// delta and therefore computes `new_pc + old_delta` — a stale address. Reporting
+/// every builder lets the translator prove the complementary property: that no
+/// stale PC-derived value can exist in a kernel scope at all.
+///
+/// One record is produced per `s_getpc_b64` instruction, whether or not the pass
+/// could follow it. @ref resolved distinguishes the two cases.
+struct PcAddressBuilder {
+  uint64_t source_getpc_offset = 0;          ///< Source offset of the s_getpc_b64 producer.
+  uint64_t source_recovery_begin_offset = 0; ///< First source byte of replaceable builder code.
+  uint64_t source_recovery_end_offset = 0;   ///< One-past-end source byte of builder code.
+  /// Text-relative byte offset the builder leaves in its SGPR pair at
+  /// @ref source_recovery_end_offset. Signed because an unrelocatable data
+  /// reference can compute an address below the section.
+  int64_t source_target_offset = 0;
+  uint16_t source_sreg = 0; ///< Low SGPR of the pair the builder writes.
+  /// @brief True when the pass followed this getpc to a single concrete offset.
+  ///
+  /// False means an unmodeled write reached the pair before any stable point,
+  /// or two incompatible values were observed for the same producer. Such a
+  /// producer cannot be made relocation-correct and must clear any whole-scope
+  /// relocation invariant that depends on it.
+  bool resolved = false;
+
+  friend bool operator==(const PcAddressBuilder &, const PcAddressBuilder &) = default;
+};
+
 /// @brief Discover concrete targets for statically-built setpc/swappc consumers.
 ///
 /// @details This pass runs before BasicBlock storage is finalized because any
@@ -83,10 +115,16 @@ struct IndirectCallFixup {
 /// @param arch ISA architecture used for scalar instruction matching.
 /// @param extra_leaders Additional known block starts, usually kernel entries.
 /// @param entry_policy Whether predecessorless blocks are inferred to be external entries.
+/// @param pc_builders Optional sink for every discovered PC-relative address
+///        producer, sorted by `source_getpc_offset`. Populated only when the
+///        section actually contains a recoverable indirect consumer, because a
+///        section with no dynamic transfer has no stale-PC branch hazard to
+///        prove anything about.
 /// @returns Recovered indirect branch/call metadata.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders = {},
-    ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless);
+    ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
+    std::vector<PcAddressBuilder> *pc_builders = nullptr);
 
 } // namespace rocjitsu
