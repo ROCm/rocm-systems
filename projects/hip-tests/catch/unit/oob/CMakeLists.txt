@@ -1,5 +1,6 @@
 set(TEST_SRC
-    oob_module.cc)
+    oob_module.cc
+    hipFatBinaryBounds.cc)
 
 # Only the valid code object is compiled and installed. The malformed variants
 # that exercise getElfSize's rejection paths are synthesized in-process by the
@@ -18,8 +19,25 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
 
 add_custom_target(gen_oob_kernel DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/oob_kernel.code)
 
+# Valid compressed bundle used by hipFatBinaryBounds.cc's false-positive guard.
+# Shares copyKernel.cc with unit/module; a distinct target name avoids colliding
+# with module's copyKernelCompressed_code.
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
+                COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -mcode-object-version=5 --offload-compress --cuda-device-only
+                -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../module/copyKernel.cc
+                -o ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
+                -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../module/copyKernel.cc
+                COMMENT "Compiling copyKernelCompressed.code (oob)")
+add_custom_target(oob_copyKernelCompressed_code
+                  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code)
+
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+    ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code)
+
 hip_add_exe_to_target(NAME oob_module
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS hiprtc::hiprtc)
-add_dependencies(oob_module gen_oob_kernel)
+add_dependencies(oob_module gen_oob_kernel oob_copyKernelCompressed_code)

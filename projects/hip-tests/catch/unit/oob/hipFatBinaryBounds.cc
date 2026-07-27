@@ -11,6 +11,10 @@
 // Malformed pointer inputs are tail-mapped before a no-access guard page so
 // over-reads fault instead of silently succeeding, while correct parsing
 // returns hipErrorInvalidImage.
+//
+// This suite is Linux-only (built under unit/oob, which is gated to UNIX); the
+// bundle-header/magic and ELF-header-size bounds it exercises complement the
+// getElfSize ELF-internal cases in oob_module.cc.
 
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
@@ -18,14 +22,10 @@
 
 #if HT_AMD
 
-#if defined(_WIN32)
-#include <windows.h>
-#else
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#endif
 
 #include <cstdint>
 #include <cstdlib>
@@ -43,7 +43,7 @@ constexpr char kCompressedBundleMagic[] = "CCOB";
 constexpr char kUncompressedBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
 
 // AMDGPU ELF identity values the runtime checks. Defined locally so this test
-// stays portable (Windows has no <elf.h>) and independent of runtime headers.
+// stays independent of runtime headers.
 constexpr unsigned char kElfOsabiAmdgpuHsa = 64;  // ELFOSABI_AMDGPU_HSA
 constexpr unsigned char kEmAmdgpuLowByte = 224;   // EM_AMDGPU (0x00E0), low byte
 
@@ -79,22 +79,6 @@ std::vector<unsigned char> MakeAmdgpuElf64Image(size_t size) {
 class FileBackedMapping {
  public:
   explicit FileBackedMapping(const char* path) {
-#if defined(_WIN32)
-    file_ = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                        FILE_ATTRIBUTE_NORMAL, nullptr);
-    REQUIRE(file_ != INVALID_HANDLE_VALUE);
-
-    LARGE_INTEGER file_size{};
-    REQUIRE(GetFileSizeEx(file_, &file_size));
-    REQUIRE(file_size.QuadPart > 0);
-    size_ = static_cast<size_t>(file_size.QuadPart);
-
-    mapping_ = CreateFileMappingA(file_, nullptr, PAGE_READONLY, 0, 0, nullptr);
-    REQUIRE(mapping_ != nullptr);
-
-    data_ = MapViewOfFile(mapping_, FILE_MAP_READ, 0, 0, 0);
-    REQUIRE(data_ != nullptr);
-#else
     fd_ = open(path, O_RDONLY);
     REQUIRE(fd_ >= 0);
 
@@ -105,28 +89,15 @@ class FileBackedMapping {
 
     data_ = mmap(nullptr, size_, PROT_READ, MAP_PRIVATE, fd_, 0);
     REQUIRE(data_ != MAP_FAILED);
-#endif
   }
 
   ~FileBackedMapping() {
-#if defined(_WIN32)
-    if (data_ != nullptr) {
-      UnmapViewOfFile(data_);
-    }
-    if (mapping_ != nullptr) {
-      CloseHandle(mapping_);
-    }
-    if (file_ != INVALID_HANDLE_VALUE) {
-      CloseHandle(file_);
-    }
-#else
     if (data_ != nullptr && data_ != MAP_FAILED) {
       munmap(data_, size_);
     }
     if (fd_ >= 0) {
       close(fd_);
     }
-#endif
   }
 
   FileBackedMapping(const FileBackedMapping&) = delete;
@@ -136,12 +107,7 @@ class FileBackedMapping {
   size_t size() const { return size_; }
 
  private:
-#if defined(_WIN32)
-  HANDLE file_ = INVALID_HANDLE_VALUE;
-  HANDLE mapping_ = nullptr;
-#else
   int fd_ = -1;
-#endif
   void* data_ = nullptr;
   size_t size_ = 0;
 };
@@ -178,83 +144,6 @@ class TempFile {
 // Places `payload` at the end of a file-backed page immediately followed by a
 // no-access guard page. The runtime then sees exactly payload.size() readable
 // bytes, and any read past the payload faults instead of succeeding silently.
-#if defined(_WIN32)
-
-class TailMappedImage {
- public:
-  explicit TailMappedImage(const std::vector<unsigned char>& payload) {
-    SYSTEM_INFO si{};
-    GetSystemInfo(&si);
-    page_size_ = si.dwPageSize;
-    REQUIRE(!payload.empty());
-    REQUIRE(payload.size() <= page_size_);
-
-    char dir[MAX_PATH] = {0};
-    const DWORD dir_len = GetTempPathA(static_cast<DWORD>(sizeof(dir)), dir);
-    REQUIRE(dir_len > 0);
-    REQUIRE(dir_len < sizeof(dir));
-    char path[MAX_PATH] = {0};
-    REQUIRE(GetTempFileNameA(dir, "hip", 0, path) != 0);
-    path_ = path;
-
-    // Back the image with a one-page file holding the payload at its very end
-    // (leading bytes zero-padded), so the payload's last byte sits flush against
-    // the page boundary once mapped.
-    std::vector<unsigned char> file_bytes(page_size_, 0);
-    std::memcpy(file_bytes.data() + (page_size_ - payload.size()), payload.data(),
-                payload.size());
-
-    file_ = CreateFileA(path_.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                        FILE_ATTRIBUTE_NORMAL, nullptr);
-    REQUIRE(file_ != INVALID_HANDLE_VALUE);
-    DWORD written = 0;
-    REQUIRE(WriteFile(file_, file_bytes.data(), static_cast<DWORD>(file_bytes.size()), &written,
-                      nullptr));
-    REQUIRE(written == file_bytes.size());
-
-    // Only this one page is backed; the pages after it stay unmapped and act as
-    // the guard, so any read past the page faults.
-    mapping_ = CreateFileMappingA(file_, nullptr, PAGE_READONLY, 0, 0, nullptr);
-    REQUIRE(mapping_ != nullptr);
-    base_ = MapViewOfFile(mapping_, FILE_MAP_READ, 0, 0, 0);
-    REQUIRE(base_ != nullptr);
-
-    // Point at the payload's start; image_ + payload.size() lands exactly on the
-    // guard page, so reads past the payload fault.
-    image_ = static_cast<unsigned char*>(base_) + (page_size_ - payload.size());
-  }
-
-  ~TailMappedImage() {
-    if (base_ != nullptr) {
-      UnmapViewOfFile(base_);
-    }
-    if (mapping_ != nullptr) {
-      CloseHandle(mapping_);
-    }
-    if (file_ != INVALID_HANDLE_VALUE) {
-      CloseHandle(file_);
-    }
-    if (!path_.empty()) {
-      DeleteFileA(path_.c_str());
-    }
-  }
-
-  TailMappedImage(const TailMappedImage&) = delete;
-  TailMappedImage& operator=(const TailMappedImage&) = delete;
-
-  const void* image() const { return image_; }
-
- private:
-  size_t page_size_ = 0;
-  std::string path_;
-  HANDLE file_ = INVALID_HANDLE_VALUE;
-  HANDLE mapping_ = nullptr;
-  void* base_ = nullptr;
-  unsigned char* image_ = nullptr;
-};
-
-#else
-
 class TailMappedImage {
  public:
   explicit TailMappedImage(const std::vector<unsigned char>& payload) {
@@ -317,8 +206,6 @@ class TailMappedImage {
   size_t region_len_ = 0;
   unsigned char* image_ = nullptr;
 };
-
-#endif  // defined(_WIN32)
 
 }  // namespace
 

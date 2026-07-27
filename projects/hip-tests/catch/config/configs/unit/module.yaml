@@ -149,21 +149,6 @@ module:
   Unit_hipModuleLoadData_Functional:
     <<: *level_2
     tags: [load]
-  Unit_hipModuleLoadData_Negative_TruncatedImages:
-    <<: *level_2
-    # AMD-only test (HT_AMD); not built on nvidia.
-    disabled: [nvidia_windows, nvidia_linux]
-    tags: [load]
-  Unit_hipModuleLoadData_Positive_ValidFileBackedImage:
-    <<: *level_2
-    # AMD-only test (HT_AMD); not built on nvidia.
-    disabled: [nvidia_windows, nvidia_linux]
-    tags: [load]
-  Unit_hipModuleLoad_Negative_OutOfBoundsTotalSize:
-    <<: *level_2
-    # AMD-only test (HT_AMD); not built on nvidia.
-    disabled: [nvidia_windows, nvidia_linux]
-    tags: [load]
   Unit_hipModuleLoad_Positive_Basic:
     <<: *level_2
     # Below tests tests fail in PSDB
