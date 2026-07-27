@@ -22,21 +22,85 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import csv
+import json
+
 import pytest
 
 
 def pytest_addoption(parser):
-    parser.addoption("--rocprofv3", action="store")
-    parser.addoption("--vector-ops", action="store")
-    parser.addoption("--reproducible-dispatch-count", action="store", default=None)
-    parser.addoption("--openmp-target", action="store", default=None)
+    parser.addoption("--reference-input", action="store")
+    parser.addoption("--truncated-input", action="store")
+    parser.addoption("--mangled-input", action="store")
+    parser.addoption("--counter-input", action="store")
+    parser.addoption("--json-input", action="store")
+    parser.addoption("--agent-index", action="store")
+    parser.addoption("--context-input", action="store")
+    parser.addoption("--context-json", action="store")
+    parser.addoption("--context-pftrace", action="store")
+    parser.addoption("--post-input", action="store")
+    parser.addoption("--openmp-input", action="store")
 
 
-@pytest.fixture(scope="session")
-def workloads(request):
-    return {
-        "rocprofv3": request.config.getoption("--rocprofv3"),
-        "vector_ops": request.config.getoption("--vector-ops"),
-        "reproducible": request.config.getoption("--reproducible-dispatch-count"),
-        "openmp": request.config.getoption("--openmp-target"),
-    }
+def _read_csv(request, option):
+    with open(
+        request.config.getoption(option), newline="", encoding="utf-8"
+    ) as input_file:
+        return list(csv.DictReader(input_file))
+
+
+@pytest.fixture
+def reference_rows(request):
+    return _read_csv(request, "--reference-input")
+
+
+@pytest.fixture
+def truncated_rows(request):
+    return _read_csv(request, "--truncated-input")
+
+
+@pytest.fixture
+def mangled_rows(request):
+    return _read_csv(request, "--mangled-input")
+
+
+@pytest.fixture
+def counter_rows(request):
+    return _read_csv(request, "--counter-input")
+
+
+@pytest.fixture
+def json_data(request):
+    with open(request.config.getoption("--json-input"), encoding="utf-8") as input_file:
+        return json.load(input_file)
+
+
+@pytest.fixture
+def agent_index(request):
+    return request.config.getoption("--agent-index")
+
+
+@pytest.fixture
+def context_rows(request):
+    return _read_csv(request, "--context-input")
+
+
+@pytest.fixture
+def context_json(request):
+    with open(request.config.getoption("--context-json"), encoding="utf-8") as input_file:
+        return json.load(input_file)
+
+
+@pytest.fixture
+def context_pftrace(request):
+    return request.config.getoption("--context-pftrace")
+
+
+@pytest.fixture
+def post_rows(request):
+    return _read_csv(request, "--post-input")
+
+
+@pytest.fixture
+def openmp_rows(request):
+    return _read_csv(request, "--openmp-input")
