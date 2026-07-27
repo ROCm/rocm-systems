@@ -189,7 +189,7 @@ from pathlib import Path
 
 
 # Versioned SONAME the system package ships; matches src/CMakeLists.txt SOVERSION.
-_AMDSMI_LIB_SONAME = "libamd_smi.so.26"
+_AMDSMI_LIB_SONAME = "libamd_smi.so.27"
 
 # Whether the loader may fall back to the system SONAME after the bundled
 # wheel-library check. The committed wrapper and the system rpm/deb keep this
