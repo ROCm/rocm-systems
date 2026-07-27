@@ -1539,7 +1539,6 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_hand
     return AMDSMI_STATUS_INVAL;
   }
 
-
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (status != AMDSMI_STATUS_SUCCESS) return status;
@@ -5445,6 +5444,27 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
              : AMDSMI_STATUS_OUT_OF_RESOURCES;
 }
 
+static void merge_proc_into_pid_map(std::map<uint32_t, amdsmi_proc_info_by_pid_t>& pid_map,
+                                    uint32_t gpu_index, const amdsmi_proc_info_t& proc_info) {
+  auto& entry = pid_map[proc_info.pid];
+  if (entry.num_gpus == 0) {
+    entry.pid = proc_info.pid;
+    std::strncpy(entry.name, proc_info.name, AMDSMI_MAX_STRING_LENGTH - 1);
+    entry.name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+    std::strncpy(entry.container_name, proc_info.container_name, AMDSMI_MAX_STRING_LENGTH - 1);
+    entry.container_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+  }
+  if (entry.num_gpus >= AMDSMI_MAX_DEVICES) return;
+  auto& gpu_entry = entry.gpus[entry.num_gpus++];
+  gpu_entry.gpu_index = gpu_index;
+  gpu_entry.mem = proc_info.mem;
+  gpu_entry.engine_usage = proc_info.engine_usage;
+  gpu_entry.memory_usage = proc_info.memory_usage;
+  gpu_entry.cu_occupancy = proc_info.cu_occupancy;
+  gpu_entry.evicted_time = proc_info.evicted_time;
+  gpu_entry.sdma_usage = proc_info.sdma_usage;
+}
+
 amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
                                                    uint32_t num_processors,
                                                    amdsmi_proc_info_by_pid_t* procs,
@@ -5467,64 +5487,15 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
 #ifdef ENABLE_WSL_BACKEND
     if (auto* b = gpu_device->backend()) {
       std::vector<amdsmi_proc_info_t> processes;
-      if (b->GetProcessList(&processes) != AMDSMI_STATUS_SUCCESS) continue;
-      for (auto& proc_info : processes) {
-        auto& entry = pid_map[proc_info.pid];
-        if (entry.num_gpus == 0) {
-          entry.pid = proc_info.pid;
-          std::strncpy(entry.name, proc_info.name, AMDSMI_MAX_STRING_LENGTH - 1);
-          entry.name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-          std::strncpy(entry.container_name, proc_info.container_name,
-                       AMDSMI_MAX_STRING_LENGTH - 1);
-          entry.container_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-        }
-
-        if (entry.num_gpus >= AMDSMI_MAX_DEVICES) continue;
-        auto& gpu_entry = entry.gpus[entry.num_gpus];
-        gpu_entry.gpu_index = gpu_index;
-        gpu_entry.mem = proc_info.mem;
-        gpu_entry.engine_usage.gfx = proc_info.engine_usage.gfx;
-        gpu_entry.engine_usage.enc = proc_info.engine_usage.enc;
-        gpu_entry.memory_usage.gtt_mem = proc_info.memory_usage.gtt_mem;
-        gpu_entry.memory_usage.cpu_mem = proc_info.memory_usage.cpu_mem;
-        gpu_entry.memory_usage.vram_mem = proc_info.memory_usage.vram_mem;
-        gpu_entry.cu_occupancy = proc_info.cu_occupancy;
-        gpu_entry.evicted_time = proc_info.evicted_time;
-        gpu_entry.sdma_usage = proc_info.sdma_usage;
-        entry.num_gpus++;
-      }
+      amdsmi_status_t proc_r = b->GetProcessList(&processes);
+      if (proc_r != AMDSMI_STATUS_SUCCESS) return proc_r;
+      for (auto& proc_info : processes) merge_proc_into_pid_map(pid_map, gpu_index, proc_info);
       continue;
     }
 #endif
     auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
-
-    for (auto& [pid, proc_info] : compute_process_list) {
-      auto& entry = pid_map[proc_info.pid];
-
-      // This is the first time seeing this PID so populate top-level fields
-      if (entry.num_gpus == 0) {
-        entry.pid = proc_info.pid;
-        std::strncpy(entry.name, proc_info.name, AMDSMI_MAX_STRING_LENGTH - 1);
-        entry.name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-        std::strncpy(entry.container_name, proc_info.container_name, AMDSMI_MAX_STRING_LENGTH - 1);
-        entry.container_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-      }
-
-      if (entry.num_gpus >= AMDSMI_MAX_DEVICES) continue;
-
-      auto& gpu_entry = entry.gpus[entry.num_gpus];
-      gpu_entry.gpu_index = gpu_index;
-      gpu_entry.mem = proc_info.mem;
-      gpu_entry.engine_usage.gfx = proc_info.engine_usage.gfx;
-      gpu_entry.engine_usage.enc = proc_info.engine_usage.enc;
-      gpu_entry.memory_usage.gtt_mem = proc_info.memory_usage.gtt_mem;
-      gpu_entry.memory_usage.cpu_mem = proc_info.memory_usage.cpu_mem;
-      gpu_entry.memory_usage.vram_mem = proc_info.memory_usage.vram_mem;
-      gpu_entry.cu_occupancy = proc_info.cu_occupancy;
-      gpu_entry.evicted_time = proc_info.evicted_time;
-      gpu_entry.sdma_usage = proc_info.sdma_usage;
-      entry.num_gpus++;
-    }
+    for (auto& [pid, proc_info] : compute_process_list)
+      merge_proc_into_pid_map(pid_map, gpu_index, proc_info);
   }
 
   uint32_t num_pids = static_cast<uint32_t>(pid_map.size());

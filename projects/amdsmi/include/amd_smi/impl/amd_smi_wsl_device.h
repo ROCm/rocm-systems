@@ -18,6 +18,7 @@
 
 #ifdef ENABLE_WSL_BACKEND
 
+#include <mutex>
 #include <set>
 #include <string>
 #include <vector>
@@ -59,8 +60,7 @@ class WSLGPUBackend : public IGPUBackend {
   amdsmi_status_t GetMemoryUsage(amdsmi_memory_type_t, uint64_t*) override;
   amdsmi_status_t GetTempMetric(amdsmi_temperature_type_t, amdsmi_temperature_metric_t,
                                 int64_t*) override;
-  amdsmi_status_t GetVoltMetric(amdsmi_voltage_type_t, amdsmi_voltage_metric_t,
-                                int64_t*) override;
+  amdsmi_status_t GetVoltMetric(amdsmi_voltage_type_t, amdsmi_voltage_metric_t, int64_t*) override;
   amdsmi_status_t GetPowerInfo(amdsmi_power_info_t*) override;
   amdsmi_status_t GetGpuActivity(amdsmi_engine_usage_t*) override;
   amdsmi_status_t GetBusyPercent(uint32_t*) override;
@@ -99,7 +99,8 @@ class WSLGPUBackend : public IGPUBackend {
 
   // Lazily-loaded aggregate static device info from rocdxg_smi_get_device_info().
   mutable rocdxg_smi_device_info_t device_info_ = {};
-  mutable bool device_info_loaded_ = false;
+  mutable std::once_flag device_info_once_;
+  mutable amdsmi_status_t device_info_status_ = AMDSMI_STATUS_NOT_INIT;
 
   amdsmi_status_t load_device_info() const;
 };
