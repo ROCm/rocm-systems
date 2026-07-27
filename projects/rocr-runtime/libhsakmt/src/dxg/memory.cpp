@@ -872,12 +872,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
     }
 
     // Reuse the user-pointer mapping already registered for this address.
-    auto map_it = allocation_map_->find(MemoryAddress);
-    if (map_it != allocation_map_->end() && map_it->second.userptr &&
-        map_it->second.size >= aligned_size) {
-      wsl::thunk::GpuMemory::Convert(map_it->second.handle)->IncMappingCount();
-      *AlternateVAGPU = (uintptr_t)map_it->second.gpu_addr +
-          ((uintptr_t)MemoryAddress - (uintptr_t)map_it->second.cpu_addr);
+    auto *allocation = FindAllocation(MemoryAddress, aligned_size);
+    if (allocation != nullptr && allocation->userptr) {
+      wsl::thunk::GpuMemory::Convert(allocation->handle)->IncMappingCount();
+      *AlternateVAGPU = (uintptr_t)allocation->gpu_addr +
+          ((uintptr_t)MemoryAddress - (uintptr_t)allocation->cpu_addr);
       return HSAKMT_STATUS_SUCCESS;
     }
   }
