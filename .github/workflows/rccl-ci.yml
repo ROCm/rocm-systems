@@ -137,7 +137,7 @@ jobs:
       RCCL_DEVICE_API_CACHE: /apps/rccl-ci
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Sparse-checkout: only the CI helper scripts are needed here.
           sparse-checkout: projects/rccl/tools/ci
@@ -161,7 +161,7 @@ jobs:
       RCCL_DEVICE_API_CACHE: /it-share/rccl-ci
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: projects/rccl/tools/ci
 

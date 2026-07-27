@@ -55,7 +55,7 @@ jobs:
             test_wrap: 'setarch $(uname -m) -R'
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             profilers/profiler-hub

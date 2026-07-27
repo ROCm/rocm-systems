@@ -160,7 +160,7 @@ jobs:
       CI_SUBDIR: _ci/${{ inputs.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: ${{ env.CI_SUBDIR }}
           # Sources built by the compute-node script (rocSHMEM only used by gin).

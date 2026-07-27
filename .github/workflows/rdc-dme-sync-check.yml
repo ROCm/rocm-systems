@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout rocm-systems
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           sparse-checkout: |
             projects/rdc/include/rdc/rdc.h
@@ -23,7 +23,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Checkout device-metrics-exporter
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ROCm/device-metrics-exporter
           path: dme-upstream
@@ -33,7 +33,7 @@ jobs:
             cmd/
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -48,14 +48,14 @@ jobs:
 
       - name: Upload report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dme-rdc-sync-report
           path: sync-report.json
 
       - name: Create issue on failure
         if: failure() && github.event_name == 'schedule'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');

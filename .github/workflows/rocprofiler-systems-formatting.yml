@@ -26,12 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: projects/rocprofiler-systems
 
       - name: Use markdownlint-cli2
-        uses: DavidAnson/markdownlint-cli2-action@6b51ade7a9e4a75a7ad929842dd298a3804ebe8b # v23.1.0
+        uses: DavidAnson/markdownlint-cli2-action@6bf21b07787794f89a243495939cd651942aeabe # v24.1.0
         with:
           globs: "projects/rocprofiler-systems/**/*.md"
 
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: projects/rocprofiler-systems
 
@@ -55,7 +55,7 @@ jobs:
           sed -i "s|docs/\*\*/\*.md|projects/rocprofiler-systems/docs/**/*.md|g" .spellcheck.yaml
 
       - name: Run spellcheck
-        uses: rojopolis/spellcheck-github-actions@e3cd8e9aec4587ec73bc0e60745aafd45c37aa2e # 0.60.0
+        uses: rojopolis/spellcheck-github-actions@e619e00ca22f01ade9d73048dcd6518bedc552f2 # 0.63.0
 
       - name: On fail
         if: failure()
@@ -69,12 +69,12 @@ jobs:
         python-version: ['3.10']
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: projects/rocprofiler-systems
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -93,7 +93,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: projects/rocprofiler-systems
 
@@ -120,7 +120,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: projects/rocprofiler-systems
 
@@ -147,7 +147,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: projects/rocprofiler-systems
     - name: check-includes
@@ -168,7 +168,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         sparse-checkout: projects/rocprofiler-systems
     - name: check-fixedwidth-types
