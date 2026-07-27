@@ -74,13 +74,14 @@ jobs:
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
           - name: tsan
-            allow_failure: true
+            allow_failure: false
+            run_static_asan_launch: true
             test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 1
-            enable_expensive_checks: 1
+            enable_expensive_checks: 0
             sanitizer_runtime: SHARED
           - name: asan-ubsan-gcc
             allow_failure: true
@@ -93,18 +94,6 @@ jobs:
             sanitizer_runtime: SHARED
             c_compiler: gcc
             cxx_compiler: g++
-          - name: tsan-sparse-memory
-            allow_failure: false
-            run_static_asan_launch: true
-            # The simulator-wide stress tests exceed TSan's fixed 128-lock
-            # deadlock-tracker capacity; keep the race gate focused on the
-            # concurrent memory surfaces hardened by this change.
-            test_regex: '^(SparseMemory(Threading)?Test|GpuMemoryThreadingTest|L2CacheThreadingTest)\.'
-            build_type: RelWithDebInfo
-            enable_asan: 0
-            enable_ubsan: 0
-            enable_tsan: 1
-            sanitizer_runtime: STATIC
 
     steps:
       - name: Install base dependencies
@@ -180,17 +169,14 @@ jobs:
             "CvtNarrow\.AllTests"
             "RaceTest\..*"
           )
-          # https://github.com/ROCm/rocm-systems/issues/8922
           TSAN_EXCLUDED_TESTS=(
             "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
-            "MatmulStressTest\.TiledAllCU"
-            "MatmulStressTest\.MfmaAllCUs"
-            "VectorAddStressTest\.AllCUsGoldenReference"
-            "Gfx1250SimulationTest\.*"
-            "Gfx1250ExecutionTest\.*"
-            "InterposerDupTest.SerializedReopenUnderContentionStaysRoutable"
+            # This test has a five-second wall-clock assertion that becomes
+            # load-sensitive at the TSan job's CI-level parallelism.
+            "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"
           )
 
+          TEST_REGEX="${{ matrix.test_regex }}"
           CMAKE_CONFIG_FLAGS=()
           if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
@@ -230,8 +216,8 @@ jobs:
           cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
           CTEST_SELECTION=()
-          if [[ -n "${{ matrix.test_regex }}" ]]; then
-            CTEST_SELECTION=(-R "${{ matrix.test_regex }}")
+          if [[ -n "${TEST_REGEX}" ]]; then
+            CTEST_SELECTION=(-R "${TEST_REGEX}")
           fi
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             "${CTEST_SELECTION[@]}" \
