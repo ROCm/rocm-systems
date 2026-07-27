@@ -2024,6 +2024,13 @@ void VMinNumF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMinNumF16Vop2::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop2::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMaxNumF16Vop2::VMaxNumF16Vop2(const MachineInst *inst)
     : Vop2("v_max_num_f16_e32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(607)),
       vdst(16, OperandType::OPR_VGPR,
@@ -2076,6 +2083,13 @@ void VMaxNumF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VMaxNumF16Vop2::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop2::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
@@ -2132,6 +2146,12 @@ void VAddF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VAddF16Vop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop2::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
     : Vop2("v_sub_f16_e32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(609)),
       vdst(16, OperandType::OPR_VGPR,
@@ -2184,6 +2204,12 @@ void VSubF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VSubF16Vop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop2::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
@@ -2240,6 +2266,13 @@ void VSubrevF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VSubrevF16Vop2::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop2::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
     : Vop2("v_mul_f16_e32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(611)),
       vdst(16, OperandType::OPR_VGPR,
@@ -2292,6 +2325,12 @@ void VMulF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VMulF16Vop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop2::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VFmacF16Vop2::VFmacF16Vop2(const MachineInst *inst)
@@ -2347,6 +2386,12 @@ void VFmacF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VFmacF16Vop2::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop2::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VFmamkF16Vop2::VFmamkF16Vop2(const MachineInst *inst)
@@ -2409,6 +2454,13 @@ void VFmamkF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VFmamkF16Vop2::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop2::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VFmaakF16Vop2::VFmaakF16Vop2(const MachineInst *inst)
     : Vop2("v_fmaak_f16_e32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(614)),
       vdst(16, OperandType::OPR_VGPR,
@@ -2469,6 +2521,13 @@ void VFmaakF16Vop2::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VFmaakF16Vop2::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop2::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
     : Vop2("v_ldexp_f16_e32", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(615)),
       vdst(16, OperandType::OPR_VGPR,
@@ -2521,6 +2580,13 @@ void VLdexpF16Vop2::implicit_uses(RegisterSet &uses) const {
   Vop2::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VLdexpF16Vop2::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop2::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)

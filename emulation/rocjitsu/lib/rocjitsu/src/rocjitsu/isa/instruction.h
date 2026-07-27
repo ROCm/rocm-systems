@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -218,6 +219,19 @@ public:
   /// @details Used for encoded fields that affect execution but are not part of
   /// the printed operand list, such as FLAT/GLOBAL `saddr` addressing fields.
   virtual void implicit_uses(RegisterSet & /*uses*/) const {}
+
+  /// @brief Report operands that are implicitly read, preserving their identity.
+  ///
+  /// @details Complements implicit_uses(): where that flattens hidden reads into
+  /// a RegisterSet (losing operand role and width), this appends the source
+  /// Operand pointers so a caller can resolve each with its own VGPR-MSB role and
+  /// width — needed on gfx1250, where a partial-write/RMW op preserve-reads its
+  /// destination and a swap preserve-reads both operands, each in its own bank.
+  /// Only register-bearing implicit reads that originate from a decoded operand
+  /// are reported here; encoded-field reads with no Operand (e.g. FLAT `saddr`)
+  /// remain exclusive to implicit_uses(). The pointed-to Operands share this
+  /// instruction's lifetime.
+  virtual void implicit_use_operands(std::vector<const Operand *> & /*operands*/) const {}
 
   /// @brief Add registers implicitly written by this instruction.
   virtual void implicit_defs(RegisterSet & /*defs*/) const {}
