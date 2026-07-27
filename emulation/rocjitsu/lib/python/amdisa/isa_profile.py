@@ -310,31 +310,6 @@ class IsaProfile(ABC):
         return False
 
     @property
-    def use_hwreg_helpers(self) -> bool:
-        """True when generated SOPK getreg/setreg should use target hwreg helpers."""
-        return False
-
-    @property
-    def hwreg_mode_id(self) -> int | None:
-        """Hardware-register ID for MODE, when modeled by generated setreg code."""
-        return None
-
-    @property
-    def hwreg_status_id(self) -> int:
-        """Hardware-register ID for STATUS in generated getreg/setreg code."""
-        return 1
-
-    @property
-    def hwreg_ib_sts2_id(self) -> int | None:
-        """Hardware-register ID for IB_STS2, when exposed by the target."""
-        return None
-
-    @property
-    def hwreg_wave_sched_mode_id(self) -> int | None:
-        """Hardware-register ID for WAVE_SCHED_MODE, when exposed by the target."""
-        return None
-
-    @property
     def generate_scaled_wmma_vop3px2(self) -> bool:
         """True when generator should synthesize scaled-WMMA VOP3PX2 support."""
         return False
@@ -1698,26 +1673,6 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
         return True
-
-    @property
-    def use_hwreg_helpers(self) -> bool:
-        return True
-
-    @property
-    def hwreg_mode_id(self) -> int | None:
-        return 1
-
-    @property
-    def hwreg_status_id(self) -> int:
-        return 2
-
-    @property
-    def hwreg_ib_sts2_id(self) -> int | None:
-        return 28
-
-    @property
-    def hwreg_wave_sched_mode_id(self) -> int | None:
-        return 26
 
     @property
     def generate_scaled_wmma_vop3px2(self) -> bool:

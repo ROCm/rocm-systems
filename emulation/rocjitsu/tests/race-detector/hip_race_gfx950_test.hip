@@ -4,7 +4,7 @@
 // HIP race detection end-to-end tests.
 //
 // Each test launches one or more kernels through the rocjitsu emulator
-// with race detection enabled (RJ_RACE=1). After hipDeviceSynchronize(),
+// with the race detector selected in the test config. After hipDeviceSynchronize(),
 // the test parses the structured race log to verify that races were
 // (or were not) detected.
 //
