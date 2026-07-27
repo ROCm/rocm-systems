@@ -3,10 +3,10 @@ namespace rocjitsu {
 /// Maximum additional ELF storage one ConSan transformation may materialize,
 /// including alignment padding. CodeObjectPatcher deliberately leaves this
 /// resource policy to each caller.
-// Dense production code objects can require slightly more than 64 MiB when
-// every admitted access gets an out-of-line probe. Keep the transaction
-// bounded while admitting the measured 75.8 MB sort instrumentation plan.
-inline constexpr size_t kConSanMaxPatchedFileGrowth = size_t{96} * 1024 * 1024;
+// Dense production code objects can require one out-of-line body per admitted
+// access. Keep the transaction bounded independently of the input object while
+// leaving room for complete instrumentation of large generated libraries.
+inline constexpr size_t kConSanMaxPatchedFileGrowth = size_t{192} * 1024 * 1024;
 
 enum class ConSanFlavor : uint8_t {
   None,

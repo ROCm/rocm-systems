@@ -405,14 +405,10 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) {
     // These are the translated RDNA command-processor ABI TTMPs, not the
     // descriptor-selected entry SGPRs copied from them by the kernel prologue.
-    // They remain dispatch inputs for the lifetime of the wave and are outside
-    // both guest SGPR allocation and ConSan's ordinary SGPR scratch planner.
-    // The GFX12 launch ABI writes the complete grid tuple regardless of which
-    // ordinary WORKGROUP_ID SGPR copies a descriptor requests. This is the same
-    // TTMP payload materialized by command_processor.cpp and consumed by
-    // append_rdna4_workgroup_grid_prologue in kernel_descriptor_translator.cpp.
-    // Always use that complete tuple so one shared physical instruction has
-    // identical inputs under owners with different descriptor enable bits.
+    // MOI finalization enables the complete command-processor grid payload on
+    // every patched owner descriptor. Preserve that full identity: an x-only
+    // guest kernel can still be dispatched over a multidimensional grid, and
+    // each workgroup owns a distinct LDS instance.
     return ConSanMoiWorkgroupSources{
         ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridX), false},
         ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridYz),
@@ -1213,6 +1209,38 @@ struct MoiOwnerScalarReferenceSummary {
   return 0;
 }
 
+[[nodiscard]] bool moi_context_references_sgpr_ranges(const MoiKernelResourceContext &context,
+                                                      std::span<const MoiSgprRange> ranges) {
+  const auto intersects = [&](const RegisterSet &set) {
+    return std::ranges::any_of(ranges, [&](const MoiSgprRange &range) {
+      for (uint16_t index = 0; index < range.width; ++index) {
+        if (set.contains({RegClass::SGPR, static_cast<uint16_t>(range.base + index), 1u})) {
+          return true;
+        }
+      }
+      return false;
+    });
+  };
+  for (BasicBlock *block : context.scope.blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &instruction : block->instructions()) {
+      if (instruction.mnemonic().starts_with("s_movrel"))
+        return true;
+      const InstDefUse def_use(instruction);
+      if (intersects(def_use.defs | def_use.uses))
+        return true;
+    }
+  }
+  return false;
+}
+
+struct MoiDenseOwnerLivenessProof {
+  bool complete = false;
+  std::vector<const MoiKernelResourceContext *> contexts;
+  std::unordered_set<const MoiKernelResourceContext *> reference_free_contexts;
+};
+
 struct MoiResourcePlanningState {
   std::span<const uint8_t> bytes;
   rj_code_arch_t arch;
@@ -1383,33 +1411,33 @@ struct MoiResourcePlanningState {
     valid = true;
   }
 
-  void materialize_dense_liveness_for_transient_assignments(const ConSanOptions &options,
-                                                             const ConSanResult &result) {
-    if (options.moi_transient_sgpr_assignments.empty())
-      return;
-
-    std::unordered_set<uint64_t> dense_owner_descriptors;
-    for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-      const bool has_transient_owner =
-          std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t owner) {
-            return find_moi_transient_sgpr_assignment(options, owner) != nullptr;
-          });
-      if (has_transient_owner) {
-        dense_owner_descriptors.insert(plan.owner_descriptor_file_offsets.begin(),
-                                       plan.owner_descriptor_file_offsets.end());
-      }
-    }
-
-    for (MoiKernelResourceContext &context : contexts) {
-      if (!context.liveness_is_restricted || context.kernel == nullptr ||
-          !dense_owner_descriptors.contains(context.kernel->descriptor_file_offset)) {
+  [[nodiscard]] MoiDenseOwnerLivenessProof
+  prepare_dense_liveness_for_owners(std::span<const uint64_t> owners,
+                                    std::span<const MoiSgprRange> bootstrap_ranges) {
+    MoiDenseOwnerLivenessProof proof;
+    proof.complete = !owners.empty() && !bootstrap_ranges.empty();
+    proof.contexts.reserve(owners.size());
+    proof.reference_free_contexts.reserve(owners.size());
+    for (uint64_t owner : owners) {
+      const auto found = context_by_descriptor.find(owner);
+      if (found == context_by_descriptor.end() || found->second == nullptr) {
+        proof.complete = false;
         continue;
       }
+      MoiKernelResourceContext &context = *found->second;
+      proof.contexts.push_back(&context);
+      if (!moi_context_references_sgpr_ranges(context, bootstrap_ranges)) {
+        proof.reference_free_contexts.insert(&context);
+        continue;
+      }
+      if (!context.liveness_is_restricted)
+        continue;
       context.liveness = std::make_unique<LivenessAnalysis>(
           KernelBlockScope(context.scope.blocks), LivenessAnalysisOptions{},
           context.scope.liveness_edges);
       context.liveness_is_restricted = false;
     }
+    return proof;
   }
 };
 
@@ -1544,18 +1572,130 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
   return assignments;
 }
 
+enum class MoiRelocatableHostScalarState : uint8_t {
+  AccessRouter,
+  BarrierRouter,
+};
+
+struct MoiIndirectJumpSgprs {
+  uint16_t pc_sgpr = 0;
+  uint16_t scc_save_sgpr = 0;
+};
+
+[[nodiscard]] std::optional<MoiIndirectJumpSgprs>
+moi_indirect_jump_sgprs(const ConSanOptions &options);
+
+struct MoiInlineDenseRouterScalarAbi {
+  MoiIndirectJumpSgprs indirect_jump;
+  uint16_t dispatch_key_sgpr = 0;
+  std::optional<uint16_t> call_return_sgpr;
+};
+
+[[nodiscard]] std::optional<MoiInlineDenseRouterScalarAbi>
+moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t arch) {
+  if (options.moi_engine != ConSanMoiEngine::InlineShadow ||
+      (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
+    return std::nullopt;
+  }
+  const auto indirect_jump = moi_indirect_jump_sgprs(options);
+  if (!indirect_jump)
+    return std::nullopt;
+
+  if (options.automatic_moi_inline_sgpr_spill) {
+    if (!options.moi_inline_dispatch_key_sgpr)
+      return std::nullopt;
+    if (arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.moi_inline_call_return_sgpr)
+      return std::nullopt;
+    return MoiInlineDenseRouterScalarAbi{
+        .indirect_jump = *indirect_jump,
+        .dispatch_key_sgpr = *options.moi_inline_dispatch_key_sgpr,
+        .call_return_sgpr =
+            arch == ROCJITSU_CODE_ARCH_GFX1250 ? options.moi_inline_call_return_sgpr : std::nullopt,
+    };
+  }
+
+  if (!options.moi_exec_save_sgpr)
+    return std::nullopt;
+  const uint16_t base = *options.moi_exec_save_sgpr;
+  return MoiInlineDenseRouterScalarAbi{
+      .indirect_jump = *indirect_jump,
+      // GFX1250 derives its key from the scalar-call return PC. RDNA4 has no
+      // scalar call and keeps an explicit key in the otherwise-unused return
+      // pair's low half.
+      .dispatch_key_sgpr = arch == ROCJITSU_CODE_ARCH_GFX1250 ? indirect_jump->pc_sgpr
+                                                              : static_cast<uint16_t>(base + 28u),
+      .call_return_sgpr = arch == ROCJITSU_CODE_ARCH_GFX1250
+                              ? std::optional<uint16_t>(static_cast<uint16_t>(base + 28u))
+                              : std::nullopt,
+  };
+}
+
+[[nodiscard]] std::vector<MoiSgprRange> moi_relocatable_host_scalar_ranges(
+    const ConSanOptions &options, MoiRelocatableHostScalarState scalar_state, rj_code_arch_t arch) {
+  // These are the ConSan-owned scalar values that remain live across the
+  // emitted router, not a guest register window assumed to be preserved.
+  // Spill-backed layouts carry their allocated registers explicitly. The
+  // fixed-layout offsets below are the matching emission ABI fields.
+  if (options.automatic_moi_record_replay_sgpr_spill) {
+    if (!options.moi_inline_indirect_pc_sgpr || !options.moi_inline_indirect_scc_sgpr ||
+        !options.moi_record_replay_dispatch_key_sgpr ||
+        !options.moi_record_replay_call_return_sgpr) {
+      return {};
+    }
+    return {{*options.moi_inline_indirect_pc_sgpr, 2u},
+            {*options.moi_inline_indirect_scc_sgpr, 1u},
+            {*options.moi_record_replay_dispatch_key_sgpr, 1u},
+            {*options.moi_record_replay_call_return_sgpr, 2u}};
+  }
+  if (options.automatic_moi_inline_sgpr_spill) {
+    if (scalar_state == MoiRelocatableHostScalarState::BarrierRouter) {
+      if (!options.moi_inline_indirect_pc_sgpr || !options.moi_inline_indirect_scc_sgpr)
+        return {};
+      std::vector<MoiSgprRange> ranges{{*options.moi_inline_indirect_pc_sgpr, 2u},
+                                       {*options.moi_inline_indirect_scc_sgpr, 1u}};
+      if (options.moi_inline_visible_evidence_sgpr)
+        ranges.push_back({*options.moi_inline_visible_evidence_sgpr, 1u});
+      return ranges;
+    }
+    const auto abi = moi_inline_dense_router_scalar_abi(options, arch);
+    if (!abi)
+      return {};
+    std::vector<MoiSgprRange> ranges{{abi->indirect_jump.pc_sgpr, 2u},
+                                     {abi->indirect_jump.scc_save_sgpr, 1u},
+                                     {abi->dispatch_key_sgpr, 1u}};
+    if (abi->call_return_sgpr)
+      ranges.push_back({*abi->call_return_sgpr, 2u});
+    return ranges;
+  }
+  if (!options.moi_exec_save_sgpr)
+    return {};
+  const uint16_t base = *options.moi_exec_save_sgpr;
+  if (options.moi_engine == ConSanMoiEngine::InlineShadow &&
+      scalar_state == MoiRelocatableHostScalarState::AccessRouter) {
+    const auto abi = moi_inline_dense_router_scalar_abi(options, arch);
+    if (!abi)
+      return {};
+    std::vector<MoiSgprRange> ranges{{abi->indirect_jump.pc_sgpr, 2u},
+                                     {abi->indirect_jump.scc_save_sgpr, 1u},
+                                     {abi->dispatch_key_sgpr, 1u}};
+    if (abi->call_return_sgpr)
+      ranges.push_back({*abi->call_return_sgpr, 2u});
+    return ranges;
+  }
+  const uint16_t scc_offset = options.moi_engine == ConSanMoiEngine::InlineShadow ? 10u : 4u;
+  return {{base, 2u},
+          {static_cast<uint16_t>(base + scc_offset), 1u},
+          {static_cast<uint16_t>(base + 5u), 1u},
+          {static_cast<uint16_t>(base + 6u), 2u}};
+}
+
 [[nodiscard]] bool moi_relocatable_host_preserves_transient_sgprs(
-    const MoiResourcePlanningState &state, const ConSanOptions &options,
-    const ConSanCandidateResourcePlan &resource_plan,
-    std::span<const MoiKernelResourceContext *const> owner_contexts, BasicBlock &block,
-    const Instruction &host_instruction, uint64_t host_bytes) {
-  const bool has_owner_override = std::ranges::any_of(
-      resource_plan.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-        return find_moi_transient_sgpr_assignment(options, descriptor_offset) != nullptr;
-      });
-  if (!has_owner_override)
-    return true;
-  if (!state.valid || !options.moi_exec_save_sgpr)
+    const MoiDenseOwnerLivenessProof &owner_proof, BasicBlock &block,
+    const Instruction &host_instruction, const RegisterSet &relocated_references,
+    std::span<const MoiSgprRange> bootstrap_ranges) {
+  // Every declared owner must contribute either complete liveness or a
+  // complete proof that it never references the router ABI registers.
+  if (!owner_proof.complete || owner_proof.contexts.empty() || bootstrap_ranges.empty())
     return false;
 
   const auto overlaps_range = [](const RegisterSet &set, uint16_t base, uint16_t count) {
@@ -1566,52 +1706,36 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
     return false;
   };
   const auto overlaps_window = [&](const RegisterSet &set) {
-    if (options.automatic_moi_record_replay_sgpr_spill) {
-      if (!options.moi_inline_indirect_pc_sgpr || !options.moi_inline_indirect_scc_sgpr ||
-          !options.moi_record_replay_dispatch_key_sgpr ||
-          !options.moi_record_replay_call_return_sgpr)
-        return true;
-      return overlaps_range(set, *options.moi_inline_indirect_pc_sgpr, 2u) ||
-             overlaps_range(set, *options.moi_inline_indirect_scc_sgpr, 1u) ||
-             overlaps_range(set, *options.moi_record_replay_dispatch_key_sgpr, 1u) ||
-             overlaps_range(set, *options.moi_record_replay_call_return_sgpr, 2u);
-    }
-    if (options.automatic_moi_inline_sgpr_spill) {
-      if (!options.moi_inline_indirect_pc_sgpr || !options.moi_inline_indirect_scc_sgpr)
-        return true;
-      return overlaps_range(set, *options.moi_inline_indirect_pc_sgpr, 2u) ||
-             overlaps_range(set, *options.moi_inline_indirect_scc_sgpr, 1u) ||
-             (options.moi_inline_visible_evidence_sgpr &&
-              overlaps_range(set, *options.moi_inline_visible_evidence_sgpr, 1u));
-    }
-    return overlaps_range(set, *options.moi_exec_save_sgpr,
-                          moi_exec_save_sgpr_count(options, state.arch));
+    return std::ranges::any_of(bootstrap_ranges, [&](const MoiSgprRange &range) {
+      return overlaps_range(set, range.base, range.width);
+    });
   };
 
-  bool found_owner_context = false;
-  for (const MoiKernelResourceContext *context : owner_contexts) {
-    if (context == nullptr || !context->block_set.contains(&block))
+  for (const MoiKernelResourceContext *context : owner_proof.contexts) {
+    if (context == nullptr)
+      return false;
+    const bool reference_free = owner_proof.reference_free_contexts.contains(context);
+    // A declared kernel range can contain an intentionally unreachable block
+    // used as a relocation host. Such a block has no owner-local live-before
+    // state. Admit it only when the complete reachable owner does not
+    // reference the instrumentation scalar ranges; the relocated instructions
+    // themselves are checked below.
+    if (!context->block_set.contains(&block)) {
+      if (!reference_free)
+        return false;
       continue;
-    // A missing filtered snapshot is represented by an empty RegisterSet.
-    // Never interpret that as proof that a transient scalar window is dead at
-    // an arbitrary relay host.
-    if (context->liveness_is_restricted)
-      return false;
-    if (overlaps_window(context->liveness->live_before(host_instruction)))
-      return false;
-    found_owner_context = true;
-  }
-  if (!found_owner_context)
-    return false;
-  for (const Instruction &instruction : block.instructions()) {
-    if (instruction.src_loc() < host_instruction.src_loc() ||
-        instruction.src_loc() >= host_instruction.src_loc() + host_bytes)
+    }
+    if (reference_free)
       continue;
-    const InstDefUse def_use(instruction);
-    if (overlaps_window(def_use.defs | def_use.uses))
+    // Any owner that references the router ABI has complete liveness
+    // materialized before the host scan. A filtered snapshot must never be
+    // interpreted as proof that the scalar state is dead.
+    if (context->liveness_is_restricted ||
+        overlaps_window(context->liveness->live_before(host_instruction))) {
       return false;
+    }
   }
-  return true;
+  return !overlaps_window(relocated_references);
 }
 
 [[nodiscard]] RegisterSet
@@ -2162,11 +2286,6 @@ struct MoiSpecialStateSgprs {
   uint16_t scc_save_sgpr = 0;
 };
 
-struct MoiIndirectJumpSgprs {
-  uint16_t pc_sgpr = 0;
-  uint16_t scc_save_sgpr = 0;
-};
-
 [[nodiscard]] std::optional<MoiSpecialStateSgprs>
 moi_special_state_sgprs(const ConSanOptions &options) {
   if (!options.moi_exec_save_sgpr)
@@ -2298,25 +2417,43 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     }
   }
 
+  std::unordered_map<BasicBlock *, std::vector<const MoiKernelResourceContext *>> contexts_by_block;
+  for (const MoiKernelResourceContext &context : state.contexts) {
+    if (context.kernel == nullptr)
+      continue;
+    for (BasicBlock *block : context.scope.blocks) {
+      if (block != nullptr)
+        contexts_by_block[block].push_back(&context);
+    }
+  }
+
   std::unordered_map<uint64_t, RegisterSet> unavailable_by_owner;
+  std::unordered_set<uint64_t> included_site_offsets;
+  included_site_offsets.reserve(result.moi_candidates.size() + result.resource_plans.size() +
+                                result.site_dispositions.size() + result.kernels.size());
   const auto include_site = [&](uint64_t text_offset) {
+    // Site dispositions describe logical cells, so one physical instruction can
+    // appear many times.  Liveness and def/use are set unions and need only be
+    // incorporated once per instruction.
+    if (!included_site_offsets.insert(text_offset).second)
+      return;
     BasicBlock *block = block_for_offset(state.block_index, text_offset);
     const Instruction *instruction = instruction_at(block, text_offset);
     if (block == nullptr || instruction == nullptr)
       return;
-    for (const MoiKernelResourceContext &context : state.contexts) {
-      if (context.kernel == nullptr ||
-          std::ranges::find(context.scope.blocks, block) == context.scope.blocks.end())
-        continue;
-      RegisterSet &unavailable = unavailable_by_owner[context.kernel->descriptor_file_offset];
-      unavailable |= context.liveness->live_before(*instruction);
+    const auto owners = contexts_by_block.find(block);
+    if (owners == contexts_by_block.end())
+      return;
+    for (const MoiKernelResourceContext *context : owners->second) {
+      RegisterSet &unavailable = unavailable_by_owner[context->kernel->descriptor_file_offset];
+      unavailable |= context->liveness->live_before(*instruction);
       const InstDefUse def_use(*instruction);
       unavailable |= def_use.defs | def_use.uses;
       // Dynamic-stack helpers save their caller's frame base before establishing
       // a callee frame.  Recovered CFGs do not always connect a helper return to
       // its entry, so ordinary liveness can miss that long-lived scalar.  A
       // transient instrumentation window must never overwrite it.
-      if (context.kernel->uses_dynamic_stack.value_or(false))
+      if (context->kernel->uses_dynamic_stack.value_or(false))
         unavailable |= dynamic_frame_save_registers_for_site(state, text_offset);
     }
   };
@@ -2346,10 +2483,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   const uint16_t count = moi_exec_save_sgpr_count(options, arch);
   const uint16_t limit = moi_ordinary_sgpr_limit(arch);
   const auto context_for_owner = [&](uint64_t owner) -> const MoiKernelResourceContext * {
-    const auto it = std::ranges::find_if(state.contexts, [&](const auto &context) {
-      return context.kernel != nullptr && context.kernel->descriptor_file_offset == owner;
-    });
-    return it == state.contexts.end() ? nullptr : &*it;
+    const auto it = state.context_by_descriptor.find(owner);
+    return it == state.context_by_descriptor.end() ? nullptr : it->second;
   };
   const auto intersects = [](const RegisterSet &set, uint16_t base, uint16_t width) {
     for (uint16_t i = 0; i < width; ++i)
@@ -3440,13 +3575,11 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
           return false;
         if (plan.site_kind == ConSanResourceSiteKind::Atomic)
           return true;
-        // CDNA3/4 expose workgroup IDs through ordinary entry SGPRs that guest
-        // code may reuse before any DS or group-FLAT access. Preserve the key
-        // at kernel entry for every Inline access instead of limiting the
-        // lifetime fix to shared helper/group-FLAT candidates.
-        return (result.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                result.arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-               plan.site_kind == ConSanResourceSiteKind::Access;
+        // Capture the full workgroup identity at kernel entry for every Inline
+        // access. CDNA ordinary entry SGPRs and RDNA-family TTMP launch inputs
+        // are both entry ABI values; probes must not rely on either remaining
+        // available after arbitrary guest code.
+        return plan.site_kind == ConSanResourceSiteKind::Access;
       });
   const bool needs_record_replay_workgroup_key =
       (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&

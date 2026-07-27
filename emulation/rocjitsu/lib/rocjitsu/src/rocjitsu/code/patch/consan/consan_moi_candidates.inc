@@ -1142,7 +1142,14 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
   return append_atomic_fetch_add_one_u32(words, counter_address, result_vgpr, scratch_vgpr, arch);
 }
 
-enum class DynamicRecordStride : uint8_t { Bytes40, Bytes56, Bytes64, Bytes72, Bytes80 };
+enum class DynamicRecordStride : uint8_t {
+  Bytes40 = 40,
+  Bytes56 = 56,
+  Bytes64 = 64,
+  Bytes72 = 72,
+  Bytes80 = 80,
+  Bytes88 = 88,
+};
 
 struct DynamicRecordLayout {
   DynamicRecordStride stride;
@@ -1158,10 +1165,18 @@ inline constexpr DynamicRecordLayout kDynamicAtomicRecordLayout = {DynamicRecord
                                                                    true};
 inline constexpr DynamicRecordLayout kDynamicFenceRecordLayout = {DynamicRecordStride::Bytes56, 5,
                                                                   false};
-inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {DynamicRecordStride::Bytes80,
+inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {DynamicRecordStride::Bytes88,
                                                                        4, true};
-static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
-static_assert(sizeof(ConSanMoiAccessRecord) == 80);
+static_assert(static_cast<size_t>(kDynamicBarrierRecordLayout.stride) ==
+              sizeof(ConSanMoiBarrierRecord));
+static_assert(static_cast<size_t>(kDynamicAccessRecordLayout.stride) ==
+              sizeof(ConSanMoiAccessRecord));
+static_assert(static_cast<size_t>(kDynamicAtomicRecordLayout.stride) ==
+              sizeof(ConSanMoiAtomicRecord));
+static_assert(static_cast<size_t>(kDynamicFenceRecordLayout.stride) ==
+              sizeof(ConSanMoiFenceRecord));
+static_assert(static_cast<size_t>(kDynamicDiagnosticRecordLayout.stride) ==
+              sizeof(ConSanMoiDiagnosticRecord));
 
 [[nodiscard]] bool append_dynamic_record_address(std::vector<uint32_t> &words,
                                                  const DynamicRecordLayout &layout,
@@ -1169,7 +1184,9 @@ static_assert(sizeof(ConSanMoiAccessRecord) == 80);
                                                  uint16_t scratch_vgpr, rj_code_arch_t arch) {
   const uint16_t address_lo_vgpr = scratch_vgpr;
   const uint16_t address_hi_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
-  const uint16_t scaled_slot_vgpr = layout.stride == DynamicRecordStride::Bytes80
+  const bool composite_stride_uses_address_pair = layout.stride == DynamicRecordStride::Bytes80 ||
+                                                  layout.stride == DynamicRecordStride::Bytes88;
+  const uint16_t scaled_slot_vgpr = composite_stride_uses_address_pair
                                         ? address_hi_vgpr
                                         : static_cast<uint16_t>(scratch_vgpr + 3u);
 
@@ -1183,6 +1200,21 @@ static_assert(sizeof(ConSanMoiAccessRecord) == 80);
     InstructionSequence sequence(words);
     if (!sequence.emit_all(slot_times_16, slot_times_64, slot_times_80))
       return false;
+  } else if (layout.stride == DynamicRecordStride::Bytes88) {
+    const auto slot_times_8 = instrumentation::build_v_lshlrev_b32(
+        scaled_slot_vgpr, scalar_positive_inline_u32(3), slot_vgpr, arch);
+    const auto slot_times_16 = instrumentation::build_v_lshlrev_b32(
+        address_lo_vgpr, scalar_positive_inline_u32(4), slot_vgpr, arch);
+    const auto slot_times_24 = instrumentation::build_v_add_u32(
+        scaled_slot_vgpr, vector_source_vgpr(address_lo_vgpr), scaled_slot_vgpr, arch);
+    const auto slot_times_64 = instrumentation::build_v_lshlrev_b32(
+        address_lo_vgpr, scalar_positive_inline_u32(6), slot_vgpr, arch);
+    const auto slot_times_88 = instrumentation::build_v_add_u32(
+        scaled_slot_vgpr, vector_source_vgpr(address_lo_vgpr), scaled_slot_vgpr, arch);
+    InstructionSequence sequence(words);
+    if (!sequence.emit_all(slot_times_8, slot_times_16, slot_times_24, slot_times_64,
+                           slot_times_88))
+      return false;
   }
 
   const auto mov_address_lo = instrumentation::build_v_mov_b32_literal(
@@ -1192,7 +1224,7 @@ static_assert(sizeof(ConSanMoiAccessRecord) == 80);
   InstructionSequence sequence(words);
   if (!sequence.emit(mov_address_lo))
     return false;
-  if (layout.stride != DynamicRecordStride::Bytes80 && !sequence.emit(mov_address_hi))
+  if (!composite_stride_uses_address_pair && !sequence.emit(mov_address_hi))
     return false;
 
   if (layout.stride == DynamicRecordStride::Bytes40 ||
@@ -1235,7 +1267,7 @@ static_assert(sizeof(ConSanMoiAccessRecord) == 80);
       address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), scaled_slot_vgpr, arch);
   if (!sequence.emit(address_with_slot))
     return false;
-  if (layout.stride == DynamicRecordStride::Bytes80 && !sequence.emit(mov_address_hi))
+  if (composite_stride_uses_address_pair && !sequence.emit(mov_address_hi))
     return false;
   return true;
 }

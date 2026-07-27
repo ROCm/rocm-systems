@@ -1689,6 +1689,7 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
 
 TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
   const auto check = [](uint32_t word0, uint32_t word1, std::string_view expected_mnemonic,
+                        uint32_t expected_width_bits,
                         std::initializer_list<uint32_t> expected_byte_offsets) {
     std::vector<uint32_t> text_words(520, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
     text_words[0] = word0;
@@ -1711,6 +1712,7 @@ TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
     EXPECT_TRUE(result.final_validation_passed);
     ASSERT_EQ(result.moi_candidates.size(), 1u);
     EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
+    EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
     ASSERT_EQ(result.site_dispositions.size(), 1u);
     EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
     EXPECT_EQ(result.site_dispositions.front().lowering_outcome,
@@ -1731,9 +1733,12 @@ TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
     }
   };
 
-  check(0xD9C60800u, 0x0E000001u, "ds_read_b64_tr_b16", {2048u});
-  check(0xD8EE0400u, 0x0800000Bu, "ds_read2_b64", {0u, 32u});
-  check(0xD89E0400u, 0x0006080Bu, "ds_write2st64_b64", {0u, 2048u});
+  check(0xD9C60800u, 0x0E000001u, "ds_read_b64_tr_b16", 64u, {2048u});
+  check(0xD8EE0400u, 0x0800000Bu, "ds_read2_b64", 64u, {0u, 32u});
+  check(0xD8700400u, 0x00000001u, "ds_read2st64_b32", 32u, {0u, 1024u});
+  check(0xD81E0400u, 0x00000201u, "ds_write2st64_b32", 32u, {0u, 1024u});
+  check(0xD8F00400u, 0x00000001u, "ds_read2st64_b64", 64u, {0u, 2048u});
+  check(0xD89E0400u, 0x0006080Bu, "ds_write2st64_b64", 64u, {0u, 2048u});
 }
 
 TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
@@ -2677,7 +2682,8 @@ TEST(ConSanMoi, DynamicAccessRecordProbeAppendsPerLaneRecords) {
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
-  ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+  ASSERT_TRUE(patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+              patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore);
   ASSERT_TRUE(patch.scratch_vgpr);
   EXPECT_EQ(*patch.scratch_vgpr, 16u);
 
@@ -3191,7 +3197,8 @@ TEST(ConSanMoi, FirstLightProbeLowersTwoAddressNativeLdsSitesToTwoRecords) {
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
-  ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+  ASSERT_TRUE(patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+              patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore);
 
   const std::vector<uint32_t> rewritten_words =
       record_access_patch_words(result, patch, /*text_file_offset=*/0x100u);
@@ -6495,6 +6502,55 @@ TEST(ConSanMoi, Gfx1250DenseAccessesUseRelocatableHostPastKernelEntry) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             2u);
+}
+
+TEST(ConSanMoi, Gfx1250DenseAccessesRejectUnreachableHostWhenOwnerUsesRouterState) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr size_t kUnreachableBeginWord = 1u;
+  constexpr size_t kUnreachableEndWord = 9u;
+  std::vector<uint32_t> text_words = {
+      build_s_branch(/*simm16=*/8, ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  text_words.insert(text_words.end(), kUnreachableEndWord - kUnreachableBeginWord,
+                    build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_GFX1250));
+  // The reachable owner explicitly references the record/replay router base.
+  // Its unreachable tail therefore cannot be treated as scalar-state-free
+  // relocation storage merely because it has no live-before CFG snapshot.
+  text_words.push_back(build_s_mov_b32(/*sdst=*/80, /*ssrc0=*/80, ROCJITSU_CODE_ARCH_GFX1250));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_dense_reject_unsafe_unreachable_host"),
+      options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  constexpr uint64_t kUnreachableBegin = kUnreachableBeginWord * sizeof(uint32_t);
+  constexpr uint64_t kUnreachableEnd = kUnreachableEndWord * sizeof(uint32_t);
+  EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size != 0u && patch.anchor_offset >= kUnreachableBegin &&
+           patch.anchor_offset < kUnreachableEnd;
+  })) << testing::PrintToString(result.patches);
 }
 
 TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {

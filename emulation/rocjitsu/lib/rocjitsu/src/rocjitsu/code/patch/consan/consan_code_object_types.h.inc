@@ -479,6 +479,10 @@ struct ConSanPatchInfo {
   std::optional<uint16_t> indirect_return_pc_sgpr;
   std::optional<uint16_t> indirect_return_saved_vcc_sgpr;
   uint16_t indirect_required_sgpr_count = 0;
+  /// Entry island paired with this MOI dense dispatcher. This explicit
+  /// relation lets later synchronization composition reuse an access router
+  /// without depending on incidental result.patches ordering.
+  std::optional<uint64_t> moi_dense_entry_island_offset;
   /// Shared SuperCollider dense-call dispatcher selected by this access body.
   /// A call-return pair is distinct from the absolute-jump scratch pair. A
   /// bounded explicit-key fallback instead reuses the body's dead VCC-save

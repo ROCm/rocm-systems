@@ -5,7 +5,7 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index,
 
 void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                const ConSanOptions &options, rj_code_arch_t arch,
-                                               const MoiResourcePlanningState &resource_state,
+                                               MoiResourcePlanningState &resource_state,
                                                ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
@@ -252,15 +252,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (group_resource != nullptr)
         (void)apply_moi_transient_sgpr_assignment(group_options,
                                                   group_resource->owner_descriptor_file_offsets);
-      std::vector<const MoiKernelResourceContext *> group_owner_contexts;
-      if (group_resource != nullptr) {
-        group_owner_contexts.reserve(group_resource->owner_descriptor_file_offsets.size());
-        for (uint64_t descriptor_offset : group_resource->owner_descriptor_file_offsets) {
-          const auto context = resource_state.context_by_descriptor.find(descriptor_offset);
-          if (context != resource_state.context_by_descriptor.end())
-            group_owner_contexts.push_back(context->second);
-        }
-      }
       const uint32_t group_entry_island_words = group_options.automatic_moi_record_replay_sgpr_spill
                                                     ? kIndirectIslandWords + 1u
                                                     : kIndirectIslandWords;
@@ -301,7 +292,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           access_island_begin + group.first_candidate_index * access_relay_words * sizeof(uint32_t);
       auto island =
           local_entry_islands->claim_reachable_from_all(anchors, group_entry_island_words);
+      std::vector<MoiSgprRange> host_bootstrap_ranges;
+      MoiDenseOwnerLivenessProof host_owner_proof;
       if (!island) {
+        if (group_resource != nullptr) {
+          host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
+              group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
+          host_owner_proof = resource_state.prepare_dense_liveness_for_owners(
+              group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
+        }
         const auto kernel =
             key.first ? std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name)
                       : result.kernels.end();
@@ -360,15 +359,30 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             if ((*block)->start_offset() < owner_begin || (*block)->end_offset() > owner_end ||
                 (*block)->size() < host_bytes)
               continue;
-            for (const Instruction &instruction : (*block)->instructions()) {
+            const auto block_end = (*block)->instructions().end();
+            for (auto instruction_it = (*block)->instructions().begin();
+                 instruction_it != block_end; ++instruction_it) {
+              const Instruction &instruction = *instruction_it;
               const uint64_t host_offset = instruction.src_loc();
               if (host_offset + host_bytes > (*block)->end_offset() ||
                   overlaps_instrumented_site(host_offset, host_offset + host_bytes) ||
-                  group_resource == nullptr ||
-                  !moi_relocatable_host_preserves_transient_sgprs(
-                      resource_state, group_options, *group_resource, group_owner_contexts, **block,
-                      instruction, host_bytes))
+                  group_resource == nullptr)
                 continue;
+              RegisterSet relocated_references;
+              bool has_indirect_scalar_reference = false;
+              for (auto relocated = instruction_it;
+                   relocated != block_end && (*relocated).src_loc() < host_offset + host_bytes;
+                   ++relocated) {
+                has_indirect_scalar_reference |= (*relocated).mnemonic().starts_with("s_movrel");
+                const InstDefUse def_use(*relocated);
+                relocated_references |= def_use.defs | def_use.uses;
+              }
+              if (has_indirect_scalar_reference ||
+                  !moi_relocatable_host_preserves_transient_sgprs(host_owner_proof, **block,
+                                                                  instruction, relocated_references,
+                                                                  host_bootstrap_ranges)) {
+                continue;
+              }
               const uint64_t relay_offset = host_offset + sizeof(uint32_t);
               uint64_t max_distance = 0;
               const bool relay_reachable = std::ranges::all_of(anchors, [&](uint64_t anchor) {

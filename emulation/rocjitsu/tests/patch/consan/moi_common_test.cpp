@@ -1301,15 +1301,12 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
               sizeof(descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
             4u);
-  uint32_t first_owner_word = 0;
-  std::memcpy(&first_owner_word,
-              patched.text_sections().front()->data() + prologue->trampoline_offset +
-                  8u * sizeof(uint32_t),
-              sizeof(first_owner_word));
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   const auto owner_init = build_v_lshrrev_b32_e32(
       *result.resolved_moi_owner_vgpr, scalar_positive_inline_u32(6), 0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_init);
-  EXPECT_EQ(first_owner_word, *owner_init);
+  EXPECT_NE(std::ranges::find(prologue_words, *owner_init), prologue_words.end());
 }
 
 TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentPair) {

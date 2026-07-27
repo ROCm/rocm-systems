@@ -332,6 +332,20 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
     return subword->memory_width_bits;
   if (const auto subword = consan_flat_store_subword_semantics(mnemonic))
     return subword->memory_width_bits;
+  // In the two-address stride-64 family, "stride64"/"st64" describes address
+  // spacing and the trailing suffix is the transferred element width. Keep
+  // this family check explicit: suffixes in other families can describe an
+  // element format while an earlier token carries the aggregate transfer
+  // width (for example, ds_read_b64_tr_b16).
+  if (mnemonic == "ds_load_2addr_stride64_b32" || mnemonic == "ds_store_2addr_stride64_b32" ||
+      mnemonic == "ds_load_2addr_stride64_b64" || mnemonic == "ds_store_2addr_stride64_b64" ||
+      mnemonic == "ds_read2st64_b32" || mnemonic == "ds_write2st64_b32" ||
+      mnemonic == "ds_read2st64_b64" || mnemonic == "ds_write2st64_b64") {
+    if (mnemonic.ends_with("_b64"))
+      return 64;
+    if (mnemonic.ends_with("_b32"))
+      return 32;
+  }
   if (mnemonic.find("128") != std::string_view::npos ||
       mnemonic.find("x4") != std::string_view::npos)
     return 128;

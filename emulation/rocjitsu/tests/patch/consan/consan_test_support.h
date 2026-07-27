@@ -30,6 +30,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -614,6 +615,155 @@ std::vector<uint8_t> make_rdna4_lds_code_object(
   sections[5].sh_addralign = 1;
   std::memcpy(image.data() + shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
 
+  return image;
+}
+
+std::vector<uint8_t> make_rdna4_many_kernel_lds_code_object(uint32_t kernel_count,
+                                                            uint32_t accesses_per_kernel) {
+  if (kernel_count == 0u || accesses_per_kernel == 0u) {
+    ADD_FAILURE() << "many-kernel fixture requires nonzero kernels and accesses";
+    return {};
+  }
+
+  constexpr uint64_t text_offset = 0x100u;
+  constexpr uint64_t text_vaddr = 0x1100u;
+  constexpr uint64_t descriptor_size = sizeof(KD);
+  const uint64_t words_per_kernel = 2u * accesses_per_kernel + 1u;
+  const uint64_t text_words_count = static_cast<uint64_t>(kernel_count) * words_per_kernel;
+  if (text_words_count > std::numeric_limits<size_t>::max()) {
+    ADD_FAILURE() << "many-kernel fixture text exceeds host size";
+    return {};
+  }
+
+  std::vector<uint32_t> text_words(static_cast<size_t>(text_words_count));
+  std::vector<uint64_t> kernel_entries;
+  kernel_entries.reserve(kernel_count);
+  for (uint32_t kernel_index = 0; kernel_index < kernel_count; ++kernel_index) {
+    const size_t begin = static_cast<size_t>(kernel_index * words_per_kernel);
+    kernel_entries.push_back(begin * sizeof(uint32_t));
+    for (uint32_t access_index = 0; access_index < accesses_per_kernel; ++access_index) {
+      text_words[begin + 2u * access_index] = 0xD8340000u | (access_index * sizeof(uint32_t));
+      text_words[begin + 2u * access_index + 1u] = 0x00000000u;
+    }
+    text_words[begin + words_per_kernel - 1u] = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  }
+  const uint64_t text_size = text_words.size() * sizeof(uint32_t);
+  const uint64_t rodata_vaddr = align_up(text_vaddr + text_size, 0x1000u);
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t rodata_name = add_elf_name(shstrtab, ".rodata");
+  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
+  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+
+  std::vector<uint8_t> strtab{'\0'};
+  std::vector<uint32_t> kernel_symbol_names;
+  std::vector<uint32_t> descriptor_symbol_names;
+  kernel_symbol_names.reserve(kernel_count);
+  descriptor_symbol_names.reserve(kernel_count);
+  for (uint32_t kernel_index = 0; kernel_index < kernel_count; ++kernel_index) {
+    const std::string name = "many_lds_" + std::to_string(kernel_index);
+    kernel_symbol_names.push_back(add_elf_name(strtab, name));
+    descriptor_symbol_names.push_back(add_elf_name(strtab, name + ".kd"));
+  }
+
+  const uint64_t rodata_offset = text_offset + text_size;
+  const uint64_t rodata_size = static_cast<uint64_t>(kernel_count) * descriptor_size;
+  const uint64_t strtab_offset = rodata_offset + rodata_size;
+  const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8u);
+  const size_t symbol_count = 1u + 2u * static_cast<size_t>(kernel_count);
+  const uint64_t shstrtab_offset = symtab_offset + symbol_count * sizeof(Elf64_Sym);
+  const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8u);
+  constexpr uint16_t section_count = 6u;
+  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0u);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_DATA] = 1;
+  ehdr.e_ident[EI_VERSION] = 1;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_shoff = shoff;
+  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_shentsize = sizeof(Elf64_Shdr);
+  ehdr.e_shnum = section_count;
+  ehdr.e_shstrndx = 5u;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+
+  std::vector<Elf64_Sym> symbols(symbol_count);
+  for (uint32_t kernel_index = 0; kernel_index < kernel_count; ++kernel_index) {
+    const uint64_t entry = kernel_entries[kernel_index];
+    const uint64_t descriptor_offset =
+        rodata_offset + static_cast<uint64_t>(kernel_index) * descriptor_size;
+    const uint64_t descriptor_vaddr =
+        rodata_vaddr + static_cast<uint64_t>(kernel_index) * descriptor_size;
+    KD descriptor{};
+    descriptor.kernel_code_entry_byte_offset =
+        static_cast<int64_t>(text_vaddr + entry) - static_cast<int64_t>(descriptor_vaddr);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                    kRdna4Wave64AllVgprsGranulated);
+    std::memcpy(image.data() + descriptor_offset, &descriptor, sizeof(descriptor));
+
+    Elf64_Sym &kernel_symbol = symbols[1u + kernel_index];
+    kernel_symbol.st_name = kernel_symbol_names[kernel_index];
+    kernel_symbol.st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+    kernel_symbol.st_shndx = 1u;
+    kernel_symbol.st_value = text_vaddr + entry;
+    kernel_symbol.st_size = words_per_kernel * sizeof(uint32_t);
+
+    Elf64_Sym &descriptor_symbol = symbols[1u + kernel_count + kernel_index];
+    descriptor_symbol.st_name = descriptor_symbol_names[kernel_index];
+    descriptor_symbol.st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+    descriptor_symbol.st_shndx = 2u;
+    descriptor_symbol.st_value = descriptor_vaddr;
+    descriptor_symbol.st_size = descriptor_size;
+  }
+  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
+  std::memcpy(image.data() + symtab_offset, symbols.data(), symbols.size() * sizeof(Elf64_Sym));
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<Elf64_Shdr, section_count> sections{};
+  sections[1].sh_name = text_name;
+  sections[1].sh_type = SHT_PROGBITS;
+  sections[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  sections[1].sh_addr = text_vaddr;
+  sections[1].sh_offset = text_offset;
+  sections[1].sh_size = text_size;
+  sections[1].sh_addralign = sizeof(uint32_t);
+  sections[2].sh_name = rodata_name;
+  sections[2].sh_type = SHT_PROGBITS;
+  sections[2].sh_flags = SHF_ALLOC;
+  sections[2].sh_addr = rodata_vaddr;
+  sections[2].sh_offset = rodata_offset;
+  sections[2].sh_size = rodata_size;
+  sections[2].sh_addralign = descriptor_size;
+  sections[3].sh_name = symtab_name;
+  sections[3].sh_type = SHT_SYMTAB;
+  sections[3].sh_offset = symtab_offset;
+  sections[3].sh_size = symbols.size() * sizeof(Elf64_Sym);
+  sections[3].sh_link = 4u;
+  sections[3].sh_info = 1u;
+  sections[3].sh_addralign = 8u;
+  sections[3].sh_entsize = sizeof(Elf64_Sym);
+  sections[4].sh_name = strtab_name;
+  sections[4].sh_type = SHT_STRTAB;
+  sections[4].sh_offset = strtab_offset;
+  sections[4].sh_size = strtab.size();
+  sections[4].sh_addralign = 1u;
+  sections[5].sh_name = shstrtab_name;
+  sections[5].sh_type = SHT_STRTAB;
+  sections[5].sh_offset = shstrtab_offset;
+  sections[5].sh_size = shstrtab.size();
+  sections[5].sh_addralign = 1u;
+  std::memcpy(image.data() + shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
   return image;
 }
 

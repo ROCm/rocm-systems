@@ -992,19 +992,98 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   return kernel_contains_patch_anchor(kernel, patch);
 }
 
+[[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch,
+                                                        ConSanResult &result) {
+  result.moi_full_workgroup_id_descriptor_offsets.clear();
+  if (result.elf_bytes.empty() ||
+      (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
+    return true;
+  }
+
+  std::unordered_set<uint64_t> owner_descriptor_offsets;
+  std::unordered_set<std::string_view> owner_names;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    for (uint64_t descriptor_offset : patch.owner_descriptor_file_offsets) {
+      owner_descriptor_offsets.insert(descriptor_offset);
+      const auto owner =
+          std::ranges::find(result.kernels, descriptor_offset,
+                            &ConSanKernelInfo::descriptor_file_offset);
+      if (owner == result.kernels.end()) {
+        result.errors.emplace_back(
+            "ConSan MOI could not resolve an owner before enabling workgroup IDs");
+        return false;
+      }
+      owner_names.insert(owner->name);
+    }
+  }
+  if (owner_names.empty())
+    return true;
+
+  AmdGpuCodeObject code_object(result.elf_bytes.data(), result.elf_bytes.size());
+  if (!code_object.is_valid()) {
+    result.errors.emplace_back(
+        "ConSan MOI could not parse its replacement before enabling workgroup IDs");
+    return false;
+  }
+  CodeObjectPatcher patcher(code_object);
+  std::unordered_set<std::string_view> patched_owner_names;
+  for (const AmdGpuKernelInfo &kernel : code_object.kernels()) {
+    if (!owner_names.contains(kernel.name))
+      continue;
+    if (!patched_owner_names.insert(kernel.name).second) {
+      result.errors.emplace_back(
+          "ConSan MOI found duplicate owner names while enabling workgroup IDs");
+      return false;
+    }
+    const uint64_t descriptor_offset = kernel.descriptor_file_offset;
+    const std::span<const uint8_t> current_image = patcher.image_bytes();
+    if (descriptor_offset > current_image.size() ||
+        sizeof(KD) > current_image.size() - descriptor_offset) {
+      result.errors.emplace_back("ConSan MOI workgroup-ID descriptor exceeds replacement bytes");
+      return false;
+    }
+    KD descriptor{};
+    std::memcpy(&descriptor, current_image.data() + descriptor_offset, sizeof(descriptor));
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
+                    kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
+                    kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
+                    kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1u);
+    if (!patcher.patch_kernel_descriptor(
+            descriptor_offset,
+            std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&descriptor),
+                                     sizeof(descriptor)))) {
+      result.errors.emplace_back("ConSan MOI could not enable its full workgroup-ID payload");
+      return false;
+    }
+  }
+  if (patched_owner_names.size() != owner_names.size()) {
+    result.errors.emplace_back(
+        "ConSan MOI could not resolve every replacement owner while enabling workgroup IDs");
+    return false;
+  }
+  result.elf_bytes = patcher.emit();
+  result.moi_full_workgroup_id_descriptor_offsets.assign(owner_descriptor_offsets.begin(),
+                                                         owner_descriptor_offsets.end());
+  std::ranges::sort(result.moi_full_workgroup_id_descriptor_offsets);
+  return true;
+}
+
 [[nodiscard]] bool
-grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, std::span<const uint8_t> image,
-                                     const ConSanKernelInfo &kernel, uint32_t required_vgpr_count,
-                                     uint32_t required_sgpr_count, rj_code_arch_t arch,
+grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKernelInfo &kernel,
+                                     uint32_t required_vgpr_count, uint32_t required_sgpr_count,
+                                     rj_code_arch_t arch,
                                      std::vector<std::string> &errors) {
-  if (kernel.descriptor_file_offset > image.size() ||
-      sizeof(KD) > image.size() - kernel.descriptor_file_offset) {
+  const std::span<const uint8_t> current_image = patcher.image_bytes();
+  if (kernel.descriptor_file_offset > current_image.size() ||
+      sizeof(KD) > current_image.size() - kernel.descriptor_file_offset) {
     errors.emplace_back("ConSan MOI descriptor register growth exceeds ELF bytes");
     return false;
   }
 
   KD desc{};
-  std::memcpy(&desc, image.data() + kernel.descriptor_file_offset, sizeof(desc));
+  std::memcpy(&desc, current_image.data() + kernel.descriptor_file_offset, sizeof(desc));
   if (!grow_moi_descriptor_vgpr_allocation(desc, required_vgpr_count, arch)) {
     errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation");
     return false;
@@ -1691,15 +1770,14 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       required_sgpr_count = std::max<uint32_t>(
           required_sgpr_count,
           static_cast<uint32_t>(*options.moi_persistent_workgroup_key_sgpr) + 1u);
-    if (!grow_moi_kernel_descriptor_registers(patcher, active_bytes, item.kernel,
-                                              required_vgpr_count, required_sgpr_count, arch,
-                                              result.errors)) {
-      return;
-    }
     if (item.dispatch_plan && kernel_options.moi_dispatch_id_sgpr &&
         !apply_moi_dispatch_id_descriptor(patcher, item.kernel.descriptor_file_offset,
                                           *item.dispatch_plan, *kernel_options.moi_dispatch_id_sgpr,
                                           arch, result.errors)) {
+      return;
+    }
+    if (!grow_moi_kernel_descriptor_registers(
+            patcher, item.kernel, required_vgpr_count, required_sgpr_count, arch, result.errors)) {
       return;
     }
   }

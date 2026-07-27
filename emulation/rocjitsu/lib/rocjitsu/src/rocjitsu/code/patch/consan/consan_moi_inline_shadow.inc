@@ -102,7 +102,8 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanResult &result,
 }
 
 void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
-                                   rj_code_arch_t arch, ConSanResult &result) {
+                                   rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                   ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
   if (!instrumentation::is_admitted_arch(arch)) {
@@ -277,44 +278,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     uint64_t body_offset = 0;
   };
   std::map<uint64_t, DenseEntryHost> dense_entry_hosts;
-  std::vector<std::unique_ptr<BasicBlock>> dense_host_blocks;
-  // Dense explicit-key routing is execution-qualified through the 135-site
-  // RDNA4 histogram object. Larger multi-owner compositions retain the
-  // ordinary per-site placement path until their shared relocation layout is
-  // proven compositional; silently emitting the unqualified layout can alter
-  // an otherwise-correct kernel even when every individual owner is sound.
-  constexpr size_t kMaxQualifiedRdna4DenseCandidateCount = 135u;
-  const bool dense_routing_admitted = arch == ROCJITSU_CODE_ARCH_GFX1250 ||
-                                      candidates.size() <= kMaxQualifiedRdna4DenseCandidateCount;
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 && !dense_routing_admitted)
-    result.warnings.emplace_back(
-        "ConSan MOI inline-shadow retained conservative per-site RDNA4 placement outside the "
-        "qualified dense-routing composition envelope");
-  if (is_rdna4_family_arch(arch) && dense_routing_admitted && use_indirect_appended &&
-      !original_text.empty()) {
-    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-    if (decoder) {
-      std::vector<uint64_t> leaders;
-      std::vector<BasicBlock::CodeRange> code_ranges;
-      leaders.reserve(result.kernels.size() + result.functions.size());
-      code_ranges.reserve(result.kernels.size() + result.functions.size());
-      const auto append_owner = [&](uint64_t entry, uint64_t size) {
-        leaders.push_back(entry);
-        if (size != 0u)
-          code_ranges.push_back({.start_offset = entry, .size = size});
-      };
-      for (const ConSanKernelInfo &kernel : result.kernels)
-        if (kernel.has_text_range)
-          append_owner(kernel.entry_text_offset, kernel.code_size);
-      for (const ConSanFunctionInfo &function : result.functions)
-        append_owner(function.entry_text_offset, function.code_size);
-      std::ranges::sort(leaders);
-      leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
-      dense_host_blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
-    }
-  }
-  if (is_rdna4_family_arch(arch) && dense_routing_admitted && use_indirect_appended &&
-      local_entry_islands) {
+  // Dense routing is partitioned by owning container, SOPP reach, and a
+  // bounded number of candidates per dispatcher below. Its safety therefore
+  // depends on the local group shape, not the total number of sites in an
+  // unrelated code object. Retain the planning state's pristine CFG and
+  // liveness facts so a relocated relay host cannot clobber transient state.
+  const auto &dense_host_blocks = resource_state.blocks;
+  if (is_rdna4_family_arch(arch) && use_indirect_appended && local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
       size_t first_candidate_index = 0;
@@ -342,6 +312,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
     }
     for (const auto &[key, group] : groups) {
+      const ConSanCandidateResourcePlan *group_resource =
+          group.candidates.empty() ? nullptr
+                                   : resource_plan_for_candidate(result, *group.candidates.front());
+      ConSanOptions group_options = options;
+      if (group_resource != nullptr)
+        (void)apply_moi_transient_sgpr_assignment(group_options,
+                                                  group_resource->owner_descriptor_file_offsets);
       bool has_dense_neighbors = false;
       for (size_t index = 1; index < group.candidates.size(); ++index) {
         has_dense_neighbors |=
@@ -377,22 +354,35 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       const uint64_t dispatcher =
           access_island_begin + group.first_candidate_index * access_relay_words * sizeof(uint32_t);
       auto island = local_entry_islands->claim_reachable_from_all(anchors);
+      std::vector<MoiSgprRange> host_bootstrap_ranges;
+      MoiDenseOwnerLivenessProof host_owner_proof;
       if (!island && key.first) {
+        if (group_resource != nullptr) {
+          host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
+              group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
+          host_owner_proof = resource_state.prepare_dense_liveness_for_owners(
+              group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
+        }
         const auto kernel = std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name);
         if (kernel != result.kernels.end()) {
           constexpr size_t kHostWords = kIndirectIslandWords + 1u;
           constexpr uint64_t kHostBytes = kHostWords * sizeof(uint32_t);
           const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
           std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
-          occupied_ranges.reserve(group.candidates.size() + kernel->barrier_sites.size() +
+          occupied_ranges.reserve(candidates.size() + kernel->barrier_sites.size() +
                                   kernel->fence_sites.size() + kernel->atomic_sites.size() +
                                   options.preapplied_reserved_ranges.size());
           const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
             if (size != 0u)
               occupied_ranges.emplace_back(begin, begin + size);
           };
-          for (const ConSanMoiCandidate *candidate : group.candidates)
-            append_occupied_range(candidate->text_offset, candidate->size);
+          // A kernel can be split into several relay groups. A host for one
+          // group must not consume an access anchor owned by another group.
+          const auto owner_candidates = owner_groups.find(key);
+          if (owner_candidates != owner_groups.end()) {
+            for (const ConSanMoiCandidate *candidate : owner_candidates->second)
+              append_occupied_range(candidate->text_offset, candidate->size);
+          }
           for (const ConSanBarrierSite &site : kernel->barrier_sites)
             append_occupied_range(site.text_offset, site.size);
           for (const ConSanFenceSite &site : kernel->fence_sites)
@@ -431,11 +421,30 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             if ((*block)->start_offset() < kernel->entry_text_offset ||
                 (*block)->end_offset() > kernel_end || (*block)->size() < kHostBytes)
               continue;
-            for (const Instruction &instruction : (*block)->instructions()) {
+            const auto block_end = (*block)->instructions().end();
+            for (auto instruction_it = (*block)->instructions().begin();
+                 instruction_it != block_end; ++instruction_it) {
+              const Instruction &instruction = *instruction_it;
               const uint64_t host_offset = instruction.src_loc();
               if (host_offset + kHostBytes > (*block)->end_offset() ||
-                  overlaps_instrumented_site(host_offset, host_offset + kHostBytes))
+                  overlaps_instrumented_site(host_offset, host_offset + kHostBytes) ||
+                  group_resource == nullptr)
                 continue;
+              RegisterSet relocated_references;
+              bool has_indirect_scalar_reference = false;
+              for (auto relocated = instruction_it;
+                   relocated != block_end && (*relocated).src_loc() < host_offset + kHostBytes;
+                   ++relocated) {
+                has_indirect_scalar_reference |= (*relocated).mnemonic().starts_with("s_movrel");
+                const InstDefUse def_use(*relocated);
+                relocated_references |= def_use.defs | def_use.uses;
+              }
+              if (has_indirect_scalar_reference ||
+                  !moi_relocatable_host_preserves_transient_sgprs(host_owner_proof, **block,
+                                                                  instruction, relocated_references,
+                                                                  host_bootstrap_ranges)) {
+                continue;
+              }
               const uint64_t relay_offset = host_offset + sizeof(uint32_t);
               uint64_t max_distance = 0;
               const bool relay_reachable = std::ranges::all_of(anchors, [&](uint64_t anchor) {
@@ -593,23 +602,25 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (options.automatic_moi_private_epoch) {
       const bool persist_workitem_owner =
           options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;
+      // Every supported target exposes workgroup identity as an entry ABI
+      // value. Preserve the complete key before arbitrary guest code can reuse
+      // the ordinary SGPR or TTMP inputs.
+      const bool persist_workgroup_key = true;
       if (direct_descriptor) {
         auto [cached, inserted] =
             direct_private_layout_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
         if (inserted) {
           cached->second = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
                                                           /*include_owner=*/persist_workitem_owner,
-                                                          /*include_workgroup_key=*/arch ==
-                                                                  ROCJITSU_CODE_ARCH_CDNA3 ||
-                                                              arch == ROCJITSU_CODE_ARCH_CDNA4);
+                                                          /*include_workgroup_key=*/
+                                                          persist_workgroup_key);
         }
         private_layout = cached->second;
       } else {
         private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
                                                         /*include_owner=*/persist_workitem_owner,
-                                                        /*include_workgroup_key=*/arch ==
-                                                                ROCJITSU_CODE_ARCH_CDNA3 ||
-                                                            arch == ROCJITSU_CODE_ARCH_CDNA4);
+                                                        /*include_workgroup_key=*/
+                                                        persist_workgroup_key);
       }
       if (!private_layout)
         continue;
@@ -629,26 +640,47 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
     }
 
-    std::optional<uint64_t> workgroup_descriptor = direct_descriptor;
-    if (!workgroup_descriptor) {
-      workgroup_descriptor =
-          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
-    }
-    if (!workgroup_descriptor)
+    if (!persistent_assignment_applied &&
+        !candidate_options.moi_persistent_vgpr_assignments.empty() &&
+        !apply_moi_persistent_vgpr_assignment(candidate_options,
+                                              resources->owner_descriptor_file_offsets)) {
+      result.warnings.emplace_back(
+          "ConSan MOI inline-shadow access has no common persistent VGPR assignment");
       continue;
+    }
+
     std::vector<std::string> workgroup_errors;
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
-    if (direct_descriptor) {
-      auto [cached, inserted] =
-          direct_workgroup_sources_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
-      if (inserted) {
-        cached->second =
-            moi_descriptor_workgroup_sources(bytes, *direct_descriptor, arch, workgroup_errors);
-      }
-      workgroup_sources = cached->second;
+    const bool has_persistent_workgroup_key =
+        (private_layout && private_layout->workgroup_key_offset) ||
+        candidate_options.moi_workgroup_key_vgpr ||
+        candidate_options.moi_persistent_workgroup_key_sgpr;
+    if (has_persistent_workgroup_key) {
+      // The owner-specific entry prologue captured the descriptor-valid
+      // coordinates. Shared physical text can therefore consume one stable
+      // key even when its owning descriptors request different coordinate
+      // subsets.
+      workgroup_sources = ConSanMoiWorkgroupSources{};
     } else {
-      workgroup_sources =
-          moi_descriptor_workgroup_sources(bytes, *workgroup_descriptor, arch, workgroup_errors);
+      std::optional<uint64_t> workgroup_descriptor = direct_descriptor;
+      if (!workgroup_descriptor) {
+        workgroup_descriptor =
+            common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
+      }
+      if (!workgroup_descriptor)
+        continue;
+      if (direct_descriptor) {
+        auto [cached, inserted] =
+            direct_workgroup_sources_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
+        if (inserted) {
+          cached->second =
+              moi_descriptor_workgroup_sources(bytes, *direct_descriptor, arch, workgroup_errors);
+        }
+        workgroup_sources = cached->second;
+      } else {
+        workgroup_sources =
+            moi_descriptor_workgroup_sources(bytes, *workgroup_descriptor, arch, workgroup_errors);
+      }
     }
     if (!workgroup_sources) {
       result.warnings.insert(result.warnings.end(), workgroup_errors.begin(),
@@ -675,14 +707,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
     }
 
-    if (!persistent_assignment_applied &&
-        !candidate_options.moi_persistent_vgpr_assignments.empty() &&
-        !apply_moi_persistent_vgpr_assignment(candidate_options,
-                                              resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI inline-shadow access has no common persistent VGPR assignment");
-      continue;
-    }
     candidate_options.moi_inline_workgroup_shadow = workgroup_shadow.has_value();
     candidate_options.scratch_vgpr = resources->base;
     candidate_options.moi_spill_overlaps_guest_operands = spill.has_value();
@@ -794,7 +818,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         // restore, a scalar-destination dependency wait, and setpc. The fixed
         // reservation keeps later body addresses stable while their
         // instruction words are regenerated during emission.
-        const uint64_t return_bytes = (use_dense_call ? 1u : 7u) * sizeof(uint32_t);
+        const uint64_t return_bytes =
+            (use_dense_call && arch == ROCJITSU_CODE_ARCH_GFX1250 ? 1u : 7u) * sizeof(uint32_t);
         std::string placement_error;
         const auto reservation =
             placement_planner.plan_indirect_appended(candidate.text_offset, displaced_original_size,
@@ -941,19 +966,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         continue;
       ConSanOptions group_options = options;
       if (!apply_moi_transient_sgpr_assignment(
-              group_options, group.front()->resources.owner_descriptor_file_offsets) ||
-          !group_options.moi_exec_save_sgpr)
+              group_options, group.front()->resources.owner_descriptor_file_offsets))
         continue;
-      const uint16_t base = *group_options.moi_exec_save_sgpr;
-      const uint16_t key_sgpr = group_options.automatic_moi_inline_sgpr_spill
-                                    ? *group_options.moi_inline_dispatch_key_sgpr
-                                    : static_cast<uint16_t>(base + 12u);
-      const uint16_t call_return_sgpr = group_options.automatic_moi_inline_sgpr_spill
-                                            ? *group_options.moi_inline_call_return_sgpr
-                                            : static_cast<uint16_t>(base + 28u);
-      const bool explicit_dense_key = arch != ROCJITSU_CODE_ARCH_GFX1250;
+      const auto scalar_abi = moi_inline_dense_router_scalar_abi(group_options, arch);
+      if (!scalar_abi)
+        continue;
+      const bool explicit_dense_key = !scalar_abi->call_return_sgpr.has_value();
+      const uint16_t key_sgpr = scalar_abi->dispatch_key_sgpr;
+      const std::optional<uint16_t> call_return_sgpr = scalar_abi->call_return_sgpr;
       const uint64_t island_offset = *group.front()->entry_island_offset;
-      const MoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(group_options);
+      const MoiIndirectJumpSgprs jump_sgprs = scalar_abi->indirect_jump;
 
       std::vector<uint32_t> island_words;
       if (!append_moi_scc_preserving_indirect_jump(island_words, island_offset, dispatcher_offset,
@@ -1006,7 +1028,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       std::vector<uint32_t> dispatcher_words;
       if (!explicit_dense_key) {
         const auto subtract_pc =
-            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_sgprs.pc_sgpr, arch);
+            instrumentation::build_s_sub_u32(key_sgpr, *call_return_sgpr, jump_sgprs.pc_sgpr, arch);
         if (!subtract_pc) {
           result.errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode its dense dispatch key");
@@ -1076,11 +1098,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         std::vector<uint32_t> matched_words;
         if (!explicit_dense_key && candidate.size > sizeof(uint32_t)) {
           const uint32_t adjustment = candidate.size - sizeof(uint32_t);
-          matched_words.push_back(
-              build_s_add_u32(call_return_sgpr, call_return_sgpr, /*literal=*/255u, arch));
+          matched_words.push_back(build_s_add_u32(*call_return_sgpr, *call_return_sgpr,
+                                                  /*literal=*/255u, arch));
           matched_words.push_back(adjustment);
-          matched_words.push_back(build_s_addc_u32(static_cast<uint16_t>(call_return_sgpr + 1u),
-                                                   static_cast<uint16_t>(call_return_sgpr + 1u),
+          matched_words.push_back(build_s_addc_u32(static_cast<uint16_t>(*call_return_sgpr + 1u),
+                                                   static_cast<uint16_t>(*call_return_sgpr + 1u),
                                                    scalar_positive_inline_u32(0), arch));
         }
         const uint64_t matched_offset =
@@ -1130,16 +1152,17 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       dispatcher_info.trampoline_offset = dispatcher_offset;
       dispatcher_info.trampoline_size =
           static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
+      dispatcher_info.moi_dense_entry_island_offset = island_offset;
       dispatcher_info.owner_descriptor_file_offsets =
           group.front()->resources.owner_descriptor_file_offsets;
       patches.push_back(std::move(dispatcher_info));
 
       if (entry_host != dense_entry_hosts.end()) {
         const std::optional<uint32_t> host_entry =
-            explicit_dense_key
-                ? std::optional<uint32_t>(
-                      build_s_mov_b32(key_sgpr, scalar_positive_inline_u32(0), arch))
-                : instrumentation::build_s_call_i64(call_return_sgpr, /*next instruction=*/0, arch);
+            explicit_dense_key ? std::optional<uint32_t>(
+                                     build_s_mov_b32(key_sgpr, scalar_positive_inline_u32(0), arch))
+                               : instrumentation::build_s_call_i64(*call_return_sgpr,
+                                                                   /*next instruction=*/0, arch);
         if (!host_entry || entry_host->second.host_offset > new_text.size() ||
             sizeof(uint32_t) > new_text.size() - entry_host->second.host_offset) {
           result.errors.emplace_back(
@@ -1158,7 +1181,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         const auto call_delta = compute_sopp_branch_simm16(branch_offset, island_offset);
         const std::optional<uint32_t> call =
             !call_delta ? std::nullopt
-                        : instrumentation::build_s_call_i64(call_return_sgpr, *call_delta, arch);
+                        : instrumentation::build_s_call_i64(*call_return_sgpr, *call_delta, arch);
         if ((!explicit_dense_key && !call) ||
             candidate.size < (explicit_dense_key ? 2u : 1u) * sizeof(uint32_t) ||
             candidate.text_offset > new_text.size() ||
@@ -1349,15 +1372,41 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           cave_words->erase(displaced_begin, cave_words->end());
         }
         if (planned_patch.dense_call_anchor) {
-          cave_words->insert(cave_words->end(), deferred_guest_words.begin(),
-                             deferred_guest_words.end());
-          cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
-                             displaced_tail_words.end());
-          const uint16_t call_return_sgpr =
-              candidate_options.automatic_moi_inline_sgpr_spill
-                  ? *candidate_options.moi_inline_call_return_sgpr
-                  : static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 28u);
-          cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
+          if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+            cave_words->insert(cave_words->end(), deferred_guest_words.begin(),
+                               deferred_guest_words.end());
+            cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
+                               displaced_tail_words.end());
+            const uint16_t call_return_sgpr =
+                candidate_options.automatic_moi_inline_sgpr_spill
+                    ? *candidate_options.moi_inline_call_return_sgpr
+                    : static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 28u);
+            cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
+          } else {
+            const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
+            if (!jump_sgprs ||
+                !append_moi_scc_preserving_indirect_jump(
+                    *cave_words, cave_text_offset, planned_patch.placement.return_target,
+                    jump_sgprs->pc_sgpr, jump_sgprs->scc_save_sgpr,
+                    /*capture_scc=*/false, arch)) {
+              result.errors.emplace_back(
+                  "ConSan MOI inline-shadow dense explicit-key probe could not encode its long "
+                  "return");
+              return;
+            }
+            const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
+            if (!wait_pc) {
+              result.errors.emplace_back(
+                  "ConSan MOI inline-shadow dense explicit-key probe could not encode its return "
+                  "dependency wait");
+              return;
+            }
+            cave_words->insert(cave_words->end() - 1, *wait_pc);
+            cave_words->insert(cave_words->end() - 1, deferred_guest_words.begin(),
+                               deferred_guest_words.end());
+            cave_words->insert(cave_words->end() - 1, displaced_tail_words.begin(),
+                               displaced_tail_words.end());
+          }
         } else if (planned_patch.entry_island_offset) {
           const auto jump_sgprs = moi_indirect_jump_sgprs(candidate_options);
           if (!jump_sgprs) {
@@ -1474,7 +1523,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
 
     if (!patcher.replace_text(new_text, kConSanMaxPatchedFileGrowth)) {
-      result.errors.emplace_back("ConSan MOI inline-shadow probe could not grow .text");
+      result.errors.emplace_back("ConSan MOI inline-shadow probe could not grow .text from " +
+                                 std::to_string(old_text.size()) + " to " +
+                                 std::to_string(new_text.size()) + " bytes (maximum file growth " +
+                                 std::to_string(kConSanMaxPatchedFileGrowth) + ")");
       return;
     }
     result.elf_bytes = patcher.emit();

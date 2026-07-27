@@ -2485,6 +2485,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
 struct DescriptorRequirement {
   bool allow_resource_delta = false;
   bool allow_entry_delta = false;
+  bool require_full_workgroup_id = false;
   bool has_dispatch_id_capture = false;
   bool dispatch_id_preload_inserted = false;
   uint16_t dispatch_id_original_user_sgpr_count = 0;
@@ -3263,6 +3264,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     for (uint64_t owner : patch.owner_descriptor_file_offsets) {
       apply_to_owner(owner, [&](DescriptorRequirement &requirement) {
         requirement.allow_resource_delta = true;
+        requirement.require_full_workgroup_id |=
+            std::ranges::binary_search(result.moi_full_workgroup_id_descriptor_offsets, owner);
         requirement.required_private_bytes =
             std::max(requirement.required_private_bytes, patch.required_private_segment_size);
         requirement.required_group_bytes =
@@ -3290,9 +3293,12 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
                 requirement.required_vgpr_count, static_cast<uint16_t>(*epoch_vgpr + 1u));
           }
           if (workgroup_key_vgpr) {
+            requirement.require_full_workgroup_id = true;
             requirement.required_vgpr_count = std::max<uint16_t>(
                 requirement.required_vgpr_count, static_cast<uint16_t>(*workgroup_key_vgpr + 1u));
           }
+          if (result.resolved_moi_persistent_workgroup_key_sgpr)
+            requirement.require_full_workgroup_id = true;
           if (result.resolved_moi_persistent_owner_sgpr) {
             requirement.required_sgpr_count = std::max<uint16_t>(
                 requirement.required_sgpr_count,
@@ -3386,6 +3392,39 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           return patch.owner_descriptor_file_offsets.empty() && patch.scratch_vgpr.has_value();
         });
     KernelDescriptor normalized = replacement_descriptor;
+    const bool requires_full_workgroup_id =
+        requirement.require_full_workgroup_id &&
+        (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250);
+    const auto normalize_workgroup_id_payload = [&](uint32_t &rsrc2) {
+      AMDHSA_BITS_SET(
+          rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+          AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X));
+      AMDHSA_BITS_SET(
+          rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+          AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y));
+      AMDHSA_BITS_SET(
+          rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+          AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z));
+    };
+    if (requires_full_workgroup_id) {
+      const bool full_workgroup_id =
+          AMDHSA_BITS_GET(replacement_descriptor.compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) != 0 &&
+          AMDHSA_BITS_GET(replacement_descriptor.compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y) != 0 &&
+          AMDHSA_BITS_GET(replacement_descriptor.compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z) != 0;
+      if (!full_workgroup_id) {
+        errors.emplace_back(
+            "ConSan final validation found an incomplete workgroup-ID launch payload for "
+            "kernel '" +
+            original_kernel.name + "'");
+      }
+      normalize_workgroup_id_payload(normalized.compute_pgm_rsrc2);
+    }
     if (requirement.has_dispatch_id_capture) {
       const uint32_t original_user_count = AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,
                                                            kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
@@ -3421,6 +3460,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
 
       uint32_t normalized_rsrc2 = replacement_descriptor.compute_pgm_rsrc2;
       AMDHSA_BITS_SET(normalized_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, original_user_count);
+      if (requires_full_workgroup_id)
+        normalize_workgroup_id_payload(normalized_rsrc2);
       if (requirement.required_private_bytes != 0) {
         AMDHSA_BITS_SET(normalized_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
                         AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc2,

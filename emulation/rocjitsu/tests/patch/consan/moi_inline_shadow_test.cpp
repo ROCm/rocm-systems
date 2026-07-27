@@ -163,10 +163,16 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   ASSERT_TRUE(version_cas);
   ASSERT_TRUE(dispatch_store_low);
   ASSERT_TRUE(dispatch_store_high);
+  const auto wait_load = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(wait_load);
   EXPECT_EQ(count_subsequence(text_words, *version_load), 2u)
       << "both transaction paths must bracket their prior snapshot with version reads";
   EXPECT_EQ(count_subsequence(text_words, *version_cas), 4u)
       << "both transaction paths must claim odd and commit even";
+  std::vector<uint32_t> drained_version_cas(version_cas->begin(), version_cas->end());
+  drained_version_cas.push_back(*wait_load);
+  EXPECT_EQ(count_subsequence(text_words, drained_version_cas), 4u)
+      << "every gfx12 version claim and commit must wait for its returned value";
   EXPECT_EQ(count_subsequence(text_words, *dispatch_store_low), 2u);
   EXPECT_EQ(count_subsequence(text_words, *dispatch_store_high), 2u);
   EXPECT_TRUE(contains_subsequence(
@@ -1057,14 +1063,18 @@ TEST(ConSanMoi, InlineShadowUsesExternalMirrorForDynamicLdsKernel) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.kernels.size(), 1u);
   EXPECT_TRUE(result.kernels.front().has_dynamic_lds);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
-  EXPECT_FALSE(result.resolved_moi_owner_vgpr);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+  EXPECT_TRUE(result.resolved_moi_owner_vgpr);
+  EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
+  EXPECT_TRUE(result.resolved_moi_workgroup_key_vgpr);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
   ASSERT_NE(access, result.patches.end());
-  EXPECT_TRUE(access->persistent_epoch_private_offset);
-  EXPECT_TRUE(access->persistent_owner_private_offset);
+  EXPECT_FALSE(access->persistent_epoch_private_offset);
+  EXPECT_FALSE(access->persistent_owner_private_offset);
+  EXPECT_FALSE(access->persistent_workgroup_key_private_offset);
   EXPECT_EQ(access->workgroup_shadow_size, 0u);
   EXPECT_EQ(access->required_group_segment_size, 0u);
   EXPECT_NE(std::ranges::find(
@@ -1746,6 +1756,7 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_EQ(result.resolved_moi_owner_vgpr, 1);
   EXPECT_EQ(result.resolved_moi_epoch_vgpr, 2);
+  EXPECT_EQ(result.resolved_moi_workgroup_key_vgpr, 3);
   ASSERT_EQ(result.patches.size(), 2u);
   const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
@@ -1769,6 +1780,15 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
   EXPECT_GE(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                             kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
             4u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z),
+            1u);
 
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
@@ -1789,13 +1809,14 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
             build_s_addc_u32(static_cast<uint16_t>(*prologue->dispatch_id_capture_sgpr + 1u),
                              static_cast<uint16_t>(*prologue->dispatch_id_capture_sgpr + 1u),
                              scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(prologue_words[8], *owner_init);
   const auto owner_bias =
       build_v_add_nc_u32_e32(1, scalar_positive_inline_u32(1), 1, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_bias);
-  EXPECT_EQ(prologue_words[9], *owner_bias);
-  EXPECT_EQ(prologue_words[10],
-            build_v_mov_b32_e32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_NE(std::ranges::find(prologue_words, *owner_init), prologue_words.end());
+  EXPECT_NE(std::ranges::find(prologue_words, *owner_bias), prologue_words.end());
+  EXPECT_NE(std::ranges::find(prologue_words, build_v_mov_b32_e32(2, scalar_positive_inline_u32(0),
+                                                                  ROCJITSU_CODE_ARCH_RDNA4)),
+            prologue_words.end());
 }
 
 TEST(ConSanMoi, InlineShadowEntryPrologueRelocatesCompleteScalarClause) {
@@ -1861,11 +1882,12 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesScratchAndPersistentVgprs) {
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_EQ(result.resolved_moi_owner_vgpr, 1);
   EXPECT_EQ(result.resolved_moi_epoch_vgpr, 2);
+  EXPECT_EQ(result.resolved_moi_workgroup_key_vgpr, 3);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
   ASSERT_NE(access, result.patches.end());
-  EXPECT_EQ(access->scratch_vgpr, 3);
+  EXPECT_EQ(access->scratch_vgpr, 4);
   EXPECT_EQ(access->spilled_vgpr_count, 0u);
 }
 
@@ -2305,11 +2327,11 @@ TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesGenerationTaggedLocalMirror) {
   ASSERT_NE(access, result.patches.end());
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->scratch_vgpr);
-  EXPECT_FALSE(access->persistent_workgroup_key_private_offset);
-  EXPECT_FALSE(prologue->persistent_workgroup_key_private_offset);
-  EXPECT_EQ(access->persistent_private_state_end, 8u);
-  EXPECT_EQ(prologue->persistent_private_state_end, 8u);
-  EXPECT_EQ(prologue->spilled_vgpr_count, 2u);
+  EXPECT_EQ(access->persistent_workgroup_key_private_offset, 8u);
+  EXPECT_EQ(prologue->persistent_workgroup_key_private_offset, 8u);
+  EXPECT_EQ(access->persistent_private_state_end, 12u);
+  EXPECT_EQ(prologue->persistent_private_state_end, 12u);
+  EXPECT_EQ(prologue->spilled_vgpr_count, 3u);
   EXPECT_EQ(access->workgroup_shadow_base, 4352u);
   EXPECT_EQ(access->workgroup_shadow_size, 8704u);
   EXPECT_EQ(access->required_group_segment_size, 13056u);
@@ -2394,7 +2416,7 @@ TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {
   EXPECT_EQ(barrier->persistent_epoch_private_offset, 0u);
   EXPECT_EQ(barrier->required_private_segment_size, 80u);
   EXPECT_EQ(prologue->scratch_vgpr, access->scratch_vgpr);
-  EXPECT_EQ(prologue->spilled_vgpr_count, 1u);
+  EXPECT_EQ(prologue->spilled_vgpr_count, 3u);
   EXPECT_EQ(prologue->persistent_epoch_private_offset, 0u);
   EXPECT_EQ(prologue->required_private_segment_size, 80u);
 
@@ -2512,6 +2534,7 @@ TEST(ConSanMoi, InlineShadowProbePublishesMultiCellNativeLdsStore) {
 TEST(ConSanMoi, InlineShadowProbeCoversNativeWidthAndTwoAddressFamilies) {
   const auto expect_cell_publications = [](uint32_t word0, uint32_t word1,
                                            std::string_view expected_mnemonic,
+                                           uint32_t expected_width_bits,
                                            uint32_t expected_static_publication_sites) {
     const std::array<uint32_t, 3> input_words = {
         word0,
@@ -2532,6 +2555,7 @@ TEST(ConSanMoi, InlineShadowProbeCoversNativeWidthAndTwoAddressFamilies) {
     ASSERT_TRUE(result.modified);
     ASSERT_EQ(result.moi_candidates.size(), 1u);
     EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
+    EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(patched.is_valid());
@@ -2548,10 +2572,28 @@ TEST(ConSanMoi, InlineShadowProbeCoversNativeWidthAndTwoAddressFamilies) {
     EXPECT_EQ(count_subsequence(text_words, *version_cas), 4u * expected_static_publication_sites);
   };
 
-  expect_cell_publications(0xD9D80000u, 0x01000009u, "ds_load_b64", 1u);
-  expect_cell_publications(0xDA980000u, 0x01000002u, "ds_load_u16_d16", 1u);
-  expect_cell_publications(0xD8380201u, 0x00000000u, "ds_store_2addr_b32", 2u);
-  expect_cell_publications(0xD9DC0201u, 0x01000009u, "ds_load_2addr_b64", 2u);
+  expect_cell_publications(0xD9D80000u, 0x01000009u, "ds_load_b64", 64u, 1u);
+  expect_cell_publications(0xDA980000u, 0x01000002u, "ds_load_u16_d16", 16u, 1u);
+  expect_cell_publications(0xD8380201u, 0x00000000u, "ds_store_2addr_b32", 32u, 2u);
+  expect_cell_publications(0xD9DC0201u, 0x01000009u, "ds_load_2addr_b64", 64u, 2u);
+  constexpr auto load_stride64_b32 = rdna4::build_vds(
+      rdna4::kDsLoad2addrStride64B32Vds, {.offset0 = 0, .offset1 = 1, .addr = 0, .vdst = 1});
+  constexpr auto store_stride64_b32 =
+      rdna4::build_vds(rdna4::kDsStore2addrStride64B32Vds,
+                       {.offset0 = 0, .offset1 = 1, .addr = 0, .data0 = 1, .data1 = 2});
+  constexpr auto load_stride64_b64 = rdna4::build_vds(
+      rdna4::kDsLoad2addrStride64B64Vds, {.offset0 = 0, .offset1 = 1, .addr = 0, .vdst = 1});
+  constexpr auto store_stride64_b64 =
+      rdna4::build_vds(rdna4::kDsStore2addrStride64B64Vds,
+                       {.offset0 = 0, .offset1 = 1, .addr = 0, .data0 = 1, .data1 = 3});
+  expect_cell_publications(load_stride64_b32[0], load_stride64_b32[1], "ds_load_2addr_stride64_b32",
+                           32u, 2u);
+  expect_cell_publications(store_stride64_b32[0], store_stride64_b32[1],
+                           "ds_store_2addr_stride64_b32", 32u, 2u);
+  expect_cell_publications(load_stride64_b64[0], load_stride64_b64[1], "ds_load_2addr_stride64_b64",
+                           64u, 2u);
+  expect_cell_publications(store_stride64_b64[0], store_stride64_b64[1],
+                           "ds_store_2addr_stride64_b64", 64u, 2u);
 }
 
 TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
@@ -2953,19 +2995,20 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
                                              expected_slot_reservation.end());
   EXPECT_TRUE(contains_subsequence(text_words, expected_wave_coalesced_reservation));
 
+  const auto slot_times_8 = build_v_lshlrev_b32_e32(
+      /*vdst=*/9, scalar_positive_inline_u32(3), /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
   const auto slot_times_16 = build_v_lshlrev_b32_e32(
-      /*vdst=*/9, scalar_positive_inline_u32(4), /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/8, scalar_positive_inline_u32(4), /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto slot_times_sum = build_v_add_nc_u32_e32(
+      /*vdst=*/9, vector_source_vgpr(8), /*vsrc1=*/9, ROCJITSU_CODE_ARCH_RDNA4);
   const auto slot_times_64 = build_v_lshlrev_b32_e32(
       /*vdst=*/8, scalar_positive_inline_u32(6), /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto slot_times_80 = build_v_add_nc_u32_e32(
-      /*vdst=*/9, vector_source_vgpr(8), /*vsrc1=*/9, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(slot_times_8);
   ASSERT_TRUE(slot_times_16);
+  ASSERT_TRUE(slot_times_sum);
   ASSERT_TRUE(slot_times_64);
-  ASSERT_TRUE(slot_times_80);
-  const std::array<uint32_t, 3> expected_slot_stride = {
-      *slot_times_16,
-      *slot_times_64,
-      *slot_times_80,
+  const std::array<uint32_t, 5> expected_slot_stride = {
+      *slot_times_8, *slot_times_16, *slot_times_sum, *slot_times_64, *slot_times_sum,
   };
   EXPECT_TRUE(contains_subsequence(text_words, expected_slot_stride));
 
@@ -3318,9 +3361,44 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesShareExplicitKeyRelay) {
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("inside a relocated prefix") != std::string::npos;
   }));
+
+  constexpr uint16_t kExecSaveBase = 60u;
+  constexpr uint16_t kExplicitKeySgpr = kExecSaveBase + 28u;
+  constexpr uint16_t kIndirectPcSgpr = kExecSaveBase + 12u;
+  constexpr uint64_t kFirstAccessOffset = 8u * sizeof(uint32_t);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> anchor_words =
+      text_words_at_offset(patched, kFirstAccessOffset, 2u * sizeof(uint32_t));
+  ASSERT_EQ(anchor_words.size(), 2u);
+  EXPECT_EQ(anchor_words.front(), build_s_mov_b32(kExplicitKeySgpr, scalar_positive_inline_u32(1u),
+                                                  ROCJITSU_CODE_ARCH_RDNA4));
+
+  const auto first_access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
+           patch.anchor_offset == kFirstAccessOffset;
+  });
+  ASSERT_NE(first_access, result.patches.end());
+  const std::vector<uint32_t> body_words =
+      text_words_at_offset(patched, first_access->trampoline_offset, first_access->trampoline_size);
+  ASSERT_FALSE(body_words.empty());
+  EXPECT_EQ(body_words.back(), build_s_setpc_b64(kIndirectPcSgpr, ROCJITSU_CODE_ARCH_RDNA4));
+
+  const auto compare_key = ib::build_s_cmp_eq_u32(kExplicitKeySgpr, scalar_positive_inline_u32(1u),
+                                                  ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(compare_key);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland ||
+        patch.trampoline_size == 0u) {
+      return false;
+    }
+    const std::vector<uint32_t> words =
+        text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+    return std::ranges::find(words, *compare_key) != words.end();
+  }));
 }
 
-TEST(ConSanMoi, Rdna4LargeInlineShadowCompositionRetainsPerSitePlacement) {
+TEST(ConSanMoi, Rdna4LargeInlineShadowCompositionUsesGeneralDenseRouting) {
   constexpr uint32_t kAccessCount = 136u;
   std::vector<uint32_t> text_words(
       8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
@@ -3339,7 +3417,7 @@ TEST(ConSanMoi, Rdna4LargeInlineShadowCompositionRetainsPerSitePlacement) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
-  options.max_patches = 1u;
+  options.max_patches = kAccessCount;
 
   const ConSanResult result = try_patch_consan(
       make_rdna4_lds_code_object(text_words, "rdna4_large_inline_shadow"), options);
@@ -3347,18 +3425,88 @@ TEST(ConSanMoi, Rdna4LargeInlineShadowCompositionRetainsPerSitePlacement) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("outside the qualified dense-routing composition envelope") !=
-           std::string::npos;
-  }));
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("skipped access site") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
 }
 
-TEST(ConSanMoi, Rdna4FarAccessRelayDoesNotConsumeAdjacentBarrier) {
-  // More than 135 access sites selects the conservative per-site RDNA4
-  // placement path. Keep the first site farther than direct SOPP reach from
-  // the appended relay and put a full barrier immediately after it, matching
-  // the shape of large generated kernels. The access relay must not relocate
-  // the barrier as uninstrumented guest tail instructions.
+TEST(ConSanMoi, AutomaticTransientPlanningScalesAcrossIndependentKernels) {
+  constexpr uint32_t kKernelCount = 2048u;
+  constexpr uint32_t kAccessesPerKernel = 8u;
+  constexpr size_t kAccessCount =
+      static_cast<size_t>(kKernelCount) * static_cast<size_t>(kAccessesPerKernel);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_owner_vgpr = 80u;
+  options.moi_epoch_vgpr = 81u;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  // Planning still has to classify every site and owner. Keeping emission to
+  // one probe makes this a focused scaling regression instead of a file-growth
+  // stress test.
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(
+      make_rdna4_many_kernel_lds_code_object(kKernelCount, kAccessesPerKernel), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.kernels.size(), kKernelCount);
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Access,
+                               &ConSanSiteDispositionRecord::site_kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteDisposition::Supported,
+                               &ConSanSiteDispositionRecord::disposition),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            1u);
+}
+
+TEST(ConSanMoi, AutomaticTransientEmissionScalesAcrossLargeKernel) {
+  constexpr uint32_t kAccessCount = 512u;
+  std::vector<uint32_t> text_words(
+      8u, build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, ROCJITSU_CODE_ARCH_RDNA4));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | (index % 64u) * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_owner_vgpr = 80u;
+  options.moi_epoch_vgpr = 81u;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_rdna4_lds_code_object(text_words, "rdna4_large_automatic_inline_shadow"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
+    return warning.find("skipped access site") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
+TEST(ConSanMoi, Rdna4FarAccessAndAdjacentBarrierUseIndependentDenseRoutes) {
+  // Keep the first of many sites farther than direct SOPP reach from the
+  // appended body and put a full barrier immediately after it, matching the
+  // shape of large generated kernels. Access and barrier calls must share only
+  // the relay, retaining separate anchors and bodies.
   constexpr uint32_t kAccessCount = 136u;
   constexpr size_t kLargeTextWords = 33'000u;
   constexpr size_t kFirstAccessWord = 32u;
@@ -3393,8 +3541,9 @@ TEST(ConSanMoi, Rdna4FarAccessRelayDoesNotConsumeAdjacentBarrier) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   const uint64_t first_access_offset = kFirstAccessWord * sizeof(uint32_t);
-  const uint64_t barrier_offset = (kFirstAccessWord + 2u) * sizeof(uint32_t);
-  EXPECT_TRUE(std::ranges::none_of(result.patches, [&](const ConSanPatchInfo &patch) {
+  const uint64_t barrier_signal_offset = (kFirstAccessWord + 2u) * sizeof(uint32_t);
+  const uint64_t barrier_wait_offset = (kFirstAccessWord + 3u) * sizeof(uint32_t);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
     return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
             patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore) &&
            patch.anchor_offset == first_access_offset;
@@ -3402,11 +3551,12 @@ TEST(ConSanMoi, Rdna4FarAccessRelayDoesNotConsumeAdjacentBarrier) {
   EXPECT_TRUE(std::ranges::none_of(result.patches, [&](const ConSanPatchInfo &patch) {
     return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
             patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore) &&
-           patch.anchor_offset < barrier_offset &&
-           patch.anchor_offset + patch.original_size > barrier_offset;
+           patch.anchor_offset < barrier_signal_offset &&
+           patch.anchor_offset + patch.original_size > barrier_signal_offset;
   }));
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("did not relocate a synchronization site") != std::string::npos;
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier &&
+           patch.anchor_offset == barrier_wait_offset;
   }));
 }
 
@@ -3456,6 +3606,12 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
                                &ConSanPatchInfo::kind),
             kAccessCount) // One epoch advance after each signal/wait pair completes.
       << testing::PrintToString(result.warnings);
+  const auto access_dispatcher =
+      std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+               patch.moi_dense_entry_island_offset.has_value();
+      });
+  ASSERT_NE(access_dispatcher, result.patches.end());
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -3469,6 +3625,68 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
     EXPECT_NE(std::ranges::find(cave, external_return), cave.end());
     EXPECT_EQ(std::ranges::find(cave, spill_window_return), cave.end());
   }
+}
+
+TEST(ConSanMoi, Gfx1250DenseInlineShadowBarrierReusesAccessDispatcherWhenItFits) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr size_t kLargeTextWords = 33'000u;
+  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250);
+  std::vector<uint32_t> text_words(kLargeTextWords, filler);
+  size_t cursor = 32u;
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
+    text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
+  }
+  text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 82;
+  options.moi_owner_vgpr = 80;
+  options.moi_epoch_vgpr = 81;
+  options.moi_exec_save_sgpr = 60;
+  options.automatic_moi_exec_save_sgprs = true;
+  options.automatic_moi_inline_sgpr_spill = true;
+  options.moi_inline_visible_evidence_sgpr = 28;
+  options.moi_inline_indirect_pc_sgpr = 30;
+  options.moi_inline_call_return_sgpr = 26;
+  options.moi_inline_dispatch_key_sgpr = 25;
+  options.moi_inline_indirect_scc_sgpr = 29;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount + 1u;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_dense_barrier_reuses_access_dispatcher"),
+      options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto access_dispatcher =
+      std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+               patch.moi_dense_entry_island_offset.has_value();
+      });
+  const auto barrier = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
+  ASSERT_NE(access_dispatcher, result.patches.end());
+  ASSERT_NE(barrier, result.patches.end());
+  const auto call_delta = compute_sopp_branch_simm16(
+      barrier->anchor_offset, *access_dispatcher->moi_dense_entry_island_offset);
+  ASSERT_TRUE(call_delta);
+  const auto reused_call =
+      instrumentation::build_s_call_i64(/*sdst=*/26u, *call_delta, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(reused_call);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> anchor =
+      text_words_at_offset(patched, barrier->anchor_offset, sizeof(uint32_t));
+  ASSERT_EQ(anchor.size(), 1u);
+  EXPECT_EQ(anchor.front(), *reused_call);
 }
 
 TEST(ConSanMoi, Rdna4DenseInlineShadowBarriersUseRelocatedRouter) {
@@ -3508,6 +3726,104 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowBarriersUseRelocatedRouter) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                                &ConSanPatchInfo::kind),
             kAccessCount);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                               ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+                                           patch.moi_dense_entry_island_offset.has_value();
+                                  }),
+            1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            4u); // Access and barrier routing remain structurally independent on RDNA4.
+}
+
+TEST(ConSanMoi, Gfx1250DenseBarrierFallsBackWhenAccessDispatcherReservationIsFull) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr uint32_t kBarrierCount = 64u;
+  constexpr size_t kLargeTextWords = 33'000u;
+  const uint32_t filler = build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250);
+  std::vector<uint32_t> text_words(kLargeTextWords, filler);
+  size_t cursor = 32u;
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words[cursor++] = 0xD8340000u | index * sizeof(uint32_t);
+    text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
+  }
+  for (uint32_t index = 0; index < kBarrierCount; ++index) {
+    text_words[cursor++] = *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_GFX1250);
+    text_words[cursor++] = *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_GFX1250);
+  }
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 82;
+  options.moi_owner_vgpr = 80;
+  options.moi_epoch_vgpr = 81;
+  options.moi_exec_save_sgpr = 60;
+  options.automatic_moi_exec_save_sgprs = true;
+  options.automatic_moi_inline_sgpr_spill = true;
+  options.moi_inline_visible_evidence_sgpr = 28;
+  options.moi_inline_indirect_pc_sgpr = 30;
+  options.moi_inline_call_return_sgpr = 26;
+  options.moi_inline_dispatch_key_sgpr = 25;
+  options.moi_inline_indirect_scc_sgpr = 29;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount + kBarrierCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_dense_barrier_reuse_fallback"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
+                               &ConSanPatchInfo::kind),
+            kBarrierCount);
+  const auto first_barrier = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
+  ASSERT_NE(first_barrier, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> anchor =
+      text_words_at_offset(patched, first_barrier->anchor_offset, sizeof(uint32_t));
+  ASSERT_EQ(anchor.size(), 1u);
+  EXPECT_EQ((anchor.front() >> 16u) & 0x7Fu,
+            30u); // The independent spill-backed barrier router uses the indirect PC pair.
+}
+
+TEST(ConSanMoi, Rdna4SharedHelperBarrierUsesCommonPrivateEpochState) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.helper_has_barrier = true;
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 8u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+  const auto barrier = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_NE(barrier, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(barrier->owner_descriptor_file_offsets, access->owner_descriptor_file_offsets);
+  EXPECT_EQ(barrier->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
 }
 
 TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLargeKernel) {
@@ -4167,6 +4483,82 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePersistentPairForEveryOwner) {
   EXPECT_EQ(prologue_anchors, (std::vector<uint64_t>{0u, 8u}));
 }
 
+TEST(ConSanMoi, SharedInlineShadowCapturesFullKeyAcrossDescriptorCoordinateViews) {
+  std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object();
+  mutate_kernel_descriptor(bytes, "shared_owner_0", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+  });
+  mutate_kernel_descriptor(bytes, "shared_owner_1", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    1u);
+  });
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_workgroup_key_vgpr);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
+                               &ConSanPatchInfo::kind),
+            2);
+  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("incompatible descriptor ABI inputs") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+}
+
+TEST(ConSanMoi, SharedPrivateEpochCapturesFullKeyAcrossDescriptorCoordinateViews) {
+  std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object();
+  mutate_kernel_descriptor(bytes, "shared_owner_0", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+  });
+  mutate_kernel_descriptor(bytes, "shared_owner_1", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    1u);
+  });
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_private_epoch = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
+  ASSERT_TRUE(access->persistent_workgroup_key_private_offset);
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue)
+      continue;
+    EXPECT_EQ(patch.persistent_workgroup_key_private_offset,
+              access->persistent_workgroup_key_private_offset);
+  }
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
+                               &ConSanPatchInfo::kind),
+            2);
+}
+
 TEST(ConSanMoi, InlineShadowPlanningExcludesUnselectedResourcePlans) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.first_vgpr_granulated = 0;
@@ -4213,6 +4605,8 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
   });
   ASSERT_NE(access, result.patches.end());
   EXPECT_EQ(access->persistent_epoch_private_offset, 32u);
+  EXPECT_EQ(access->persistent_owner_private_offset, 36u);
+  EXPECT_EQ(access->persistent_workgroup_key_private_offset, 40u);
   EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
   EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
                           [](const ConSanPatchInfo &patch) {
@@ -4225,7 +4619,9 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
     if (patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue) {
       prologue_anchors.push_back(patch.anchor_offset);
       EXPECT_EQ(patch.persistent_epoch_private_offset, 32u);
-      EXPECT_EQ(patch.required_private_segment_size, 52u);
+      EXPECT_EQ(patch.persistent_owner_private_offset, 36u);
+      EXPECT_EQ(patch.persistent_workgroup_key_private_offset, 40u);
+      EXPECT_EQ(patch.required_private_segment_size, 60u);
     }
   }
   std::ranges::sort(prologue_anchors);
@@ -4238,7 +4634,7 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
     std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
     if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
-      EXPECT_EQ(descriptor.private_segment_fixed_size, 52u);
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 60u);
     } else if (kernel.name == "unrelated_kernel") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
     }

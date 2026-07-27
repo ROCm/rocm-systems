@@ -2592,6 +2592,26 @@ TEST(ConSanMoi, DirectSampledProbeSpillsFiveVgprsInAppendedCave) {
   EXPECT_EQ(
       AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
       1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z),
+            1u);
+
+  ConSanResult incomplete_payload = result;
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                  0u);
+  std::memcpy(incomplete_payload.elf_bytes.data() + descriptor_offset, &descriptor,
+              sizeof(descriptor));
+  const std::vector<std::string> validation_errors =
+      validate_consan_modified_elf(bytes, incomplete_payload);
+  EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
+    return error.find("incomplete workgroup-ID launch payload") != std::string::npos;
+  })) << testing::PrintToString(validation_errors);
 }
 
 TEST(ConSanMoi, Gfx1250DynamicStackSampledStoreSpillsAcrossGuestOperands) {
@@ -4317,7 +4337,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierRelayKeepsManyFarPairsReachable) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, Rdna4SampledPatchesDenseAliasedOwnersWithFullHardwareGridIdentity) {
+TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareGridIdentity) {
   // Exceed the 16-site local-island reservoir so the regression covers the
   // dense shared relay path used by the large torch.mode object.
   constexpr uint32_t kSiteCount = 17u;
@@ -4350,11 +4370,11 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseAliasedOwnersWithFullHardwareGridIdentit
     descriptor.kernel_code_entry_byte_offset =
         static_cast<int64_t>(target_entry_address) - static_cast<int64_t>(alias_descriptor_address);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
-                    0u);
+                    1u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
-                    0u);
+                    1u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
-                    0u);
+                    1u);
   });
   mutate_elf_symbol_by_name(bytes, alias->name, [&](Elf64_Sym &symbol) {
     symbol.st_value = target_entry_address;

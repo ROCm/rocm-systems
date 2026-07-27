@@ -548,8 +548,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
       effective_options.moi_report_buffer_size < sizeof(ConSanMoiReportHeader)) {
     result.warnings.emplace_back("ConSan MOI report buffer is smaller than the report ABI header");
   }
-  resource_planning_state.materialize_dense_liveness_for_transient_assignments(effective_options,
-                                                                               result);
   bool owner_epoch_prologue_applied_early = false;
   const bool has_usable_atomic_plan =
       std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
@@ -576,7 +574,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
     try_apply_sampled_barrier_sync_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::InlineShadow)
-    try_apply_inline_shadow_patch(code_object_bytes, effective_options, arch, result);
+    try_apply_inline_shadow_patch(code_object_bytes, effective_options, arch,
+                                  resource_planning_state, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay)
     try_apply_first_light_access_record_patch(code_object_bytes, effective_options, arch,
                                               resource_planning_state, result);
@@ -619,6 +618,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
       (!prologue_needs_consumer || result.modified))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, arch, result);
+  if (result.errors.empty())
+    (void)enable_moi_full_workgroup_id_payload(arch, result);
   finalize_moi_site_lowering_outcomes(result);
   summarize_moi_resource_plans(result);
   if (result.modified) {
