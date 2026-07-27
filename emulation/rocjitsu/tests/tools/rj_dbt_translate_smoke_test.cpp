@@ -20,6 +20,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -55,12 +56,13 @@ template <typename T> void write_value(std::vector<uint8_t> &image, uint64_t off
   write_bytes(image, offset, &value, sizeof(value));
 }
 
-std::vector<uint8_t> make_smoke_code_object() {
+std::vector<uint8_t> make_smoke_code_object(uint32_t elf_mach,
+                                            std::span<const uint32_t> text_words) {
   using namespace rocjitsu;
 
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
-  constexpr uint64_t text_size = 8;
+  const uint64_t text_size = text_words.size_bytes();
   constexpr uint64_t load_align = 0x1000;
   constexpr uint64_t kernel_descriptor_size = 64;
 
@@ -97,7 +99,7 @@ std::vector<uint8_t> make_smoke_code_object() {
   write_value<uint32_t>(image, offsetof(Elf64_Ehdr, e_version), 1);
   write_value<uint64_t>(image, offsetof(Elf64_Ehdr, e_phoff), sizeof(Elf64_Ehdr));
   write_value<uint64_t>(image, offsetof(Elf64_Ehdr, e_shoff), shoff);
-  write_value<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags), EF_AMDGPU_MACH_AMDGCN_GFX950);
+  write_value<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags), elf_mach);
   write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_ehsize), sizeof(Elf64_Ehdr));
   write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_phentsize), sizeof(Elf64_Phdr));
   write_value<uint16_t>(image, offsetof(Elf64_Ehdr, e_phnum), phdr_count);
@@ -125,9 +127,6 @@ std::vector<uint8_t> make_smoke_code_object() {
   write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_memsz), kernel_descriptor_size);
   write_value<uint64_t>(image, phdr1 + offsetof(Elf64_Phdr, p_align), load_align);
 
-  // Use a CDNA4 waitcnt that lowers to split RDNA4 wait instructions so the
-  // diff report is guaranteed to contain a shown source/target pair.
-  const std::array<uint32_t, 2> text_words = {0xbf8cc07fu, 0xbf810000u};
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
   // The DBT pipeline translates kernel entry offsets through AMDHSA kernel
@@ -176,6 +175,24 @@ std::vector<uint8_t> make_smoke_code_object() {
   write_shdr(4, strtab_name, SHT_STRTAB, 0, 0, strtab_offset, strtab.size(), 0, 0, 1, 0);
   write_shdr(5, shstrtab_name, SHT_STRTAB, 0, 0, shstrtab_offset, shstrtab.size(), 0, 0, 1, 0);
   return image;
+}
+
+std::vector<uint8_t> make_smoke_code_object() {
+  // Use a CDNA4 waitcnt that lowers to split RDNA4 wait instructions so the
+  // diff report is guaranteed to contain a shown source/target pair.
+  constexpr std::array<uint32_t, 2> text_words = {0xbf8cc07fu, 0xbf810000u};
+  return make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950, text_words);
+}
+
+std::vector<uint8_t> make_gfx1250_smoke_code_object(std::span<const uint32_t> text_words) {
+  return make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250, text_words);
+}
+
+std::vector<uint8_t> make_gfx1250_smoke_code_object() {
+  // B0-to-A0 replaces s_clause with s_nop, giving the first pass real work while
+  // leaving the translated instruction stable on the verification pass.
+  constexpr std::array<uint32_t, 2> text_words = {0xbf850004u, 0xbfb00000u};
+  return make_gfx1250_smoke_code_object(text_words);
 }
 
 std::string shell_quote(std::string_view text) {
@@ -307,6 +324,76 @@ TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
   status = std::system(reverse_revision_command.c_str());
   EXPECT_TRUE(command_exited_with(status, 1));
   EXPECT_TRUE(contains(read_text_file(error), "gfx1250 A0-to-B0 translation is not supported"));
+}
+
+TEST(RjDbtTranslate, VerifiesGfx1250B0ToA0Idempotence) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_idempotence_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "smoke_gfx1250.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  {
+    const std::vector<uint8_t> image = make_gfx1250_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+                              "--output-revision a0 --verify-idempotence --output-mode diff > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "changed=1")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "source: s_clause 4")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "target: s_nop 0")) << stdout_text;
+}
+
+TEST(RjDbtTranslate, ReportsGfx1250ClusterLoadRewrapAsNonIdempotent) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_non_idempotent_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "cluster_load_gfx1250.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  // The cluster load is followed by s_endpgm. Its expansion preserves the load
+  // inside an M0 save/restore wrapper, so each pass wraps it again.
+  constexpr std::array<uint32_t, 4> text_words = {0xee19c07cu, 0x00000001u, 0x00000002u,
+                                                  0xbfb00000u};
+  {
+    const std::vector<uint8_t> image = make_gfx1250_smoke_code_object(text_words);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+                              "--output-revision a0 --verify-idempotence --output-mode diff > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  EXPECT_TRUE(command_exited_with(status, 5)) << "stderr:\n"
+                                              << stderr_text << "\nstdout:\n"
+                                              << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence: not-verified")) << stdout_text;
+  EXPECT_TRUE(contains(stderr_text, "translation output is not byte-idempotent")) << stderr_text;
+  EXPECT_TRUE(contains(stderr_text, "section '.text'")) << stderr_text;
 }
 
 int main(int argc, char **argv) {

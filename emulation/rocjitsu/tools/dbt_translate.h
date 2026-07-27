@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu::tools {
@@ -79,6 +80,8 @@ struct TranslateOptions {
   std::optional<uint16_t> debug_min_free_vgpr;
   bool debug_continue_after_failure = false;
   bool skip_failed_kernels = false;
+  /// @brief Rerun a same-architecture translation and require identical ELF bytes.
+  bool verify_idempotence = false;
   DisassemblyMode disassembly = DisassemblyMode::None;
 };
 
@@ -93,6 +96,10 @@ struct TranslateOutput {
   std::vector<InstructionTranslationReport> instruction_translations;
   std::vector<TranslationDiagnostic> diagnostics;
   std::string disassembly;
+  /// @brief True when the requested second translation was attempted.
+  bool idempotence_checked = false;
+  /// @brief True when the requested second translation matched the first output.
+  bool idempotence_verified = false;
 
   /// @brief True if translation produced no error diagnostics.
   [[nodiscard]] bool ok() const { return !has_error_diagnostic(diagnostics); }
@@ -105,6 +112,11 @@ struct TranslateOutput {
   /// gate on this, not just ok() -- a KernelSkipped diagnostic is only a warning.
   [[nodiscard]] bool dispatchable() const { return ok() && !has_skipped_kernel(diagnostics); }
 };
+
+/// @brief Validate option combinations required by idempotence verification.
+/// @returns An error message when the request is invalid, or nullopt otherwise.
+[[nodiscard]] std::optional<std::string_view>
+idempotence_request_error(const TranslateOptions &options);
 
 /// @brief Translate one AMDGPU code object using the DBT pipeline.
 ///

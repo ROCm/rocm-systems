@@ -93,6 +93,8 @@ void print_help() {
       << "  --debug-conservative-liveness N Only allocate free VGPR scratch at or above N\n"
       << "  --debug-continue-after-failure Continue collecting diagnostics after failures\n"
       << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
+      << "  --verify-idempotence           Require a same-architecture second pass to be "
+         "unchanged\n"
       << "  --show-all-translations         Include unchanged identity mappings in diff output\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
@@ -193,6 +195,10 @@ void print_help() {
     }
     if (arg == "--skip-failed-kernels") {
       options.translate.skip_failed_kernels = true;
+      continue;
+    }
+    if (arg == "--verify-idempotence") {
+      options.translate.verify_idempotence = true;
       continue;
     }
 
@@ -511,6 +517,8 @@ void print_text_report(std::ostream &os, const CliOptions &options,
   if (options.saw_output_revision)
     os << "output_revision: " << revision_name(output.output_revision) << "\n";
   os << "output_elf_bytes: " << output.elf_bytes.size() << "\n";
+  if (options.translate.verify_idempotence && output.idempotence_checked)
+    os << "idempotence: " << (output.idempotence_verified ? "verified" : "not-verified") << "\n";
 
   print_code_object_report(os, "source", output.source_report);
   print_code_object_report(os, "translated", output.translated_report);
@@ -601,6 +609,11 @@ int main(int argc, char **argv) {
       options.translate.input_revision == ProcessorRevision::Gfx1250A0 &&
       options.translate.output_revision == ProcessorRevision::Gfx1250B0) {
     std::cerr << "gfx1250 A0-to-B0 translation is not supported\n";
+    return kUsageError;
+  }
+  if (const std::optional<std::string_view> request_error =
+          idempotence_request_error(options.translate)) {
+    std::cerr << *request_error << "\n";
     return kUsageError;
   }
 

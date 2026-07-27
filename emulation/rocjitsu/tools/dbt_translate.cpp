@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include <algorithm>
 #include <exception>
 #include <iomanip>
 #include <memory>
@@ -170,6 +171,76 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
   return true;
 }
 
+[[nodiscard]] BinaryTranslatorOptions
+make_binary_translator_options(const TranslateOptions &options) {
+  BinaryTranslatorOptions translator_options;
+  translator_options.debug_min_free_vgpr = options.debug_min_free_vgpr;
+  translator_options.debug_continue_after_failure = options.debug_continue_after_failure;
+  translator_options.skip_failed_kernels = options.skip_failed_kernels;
+  translator_options.input_revision = options.input_revision;
+  translator_options.output_revision = options.output_revision;
+  return translator_options;
+}
+
+[[nodiscard]] std::string describe_byte_difference(std::span<const uint8_t> first,
+                                                   std::span<const uint8_t> second,
+                                                   std::string_view location) {
+  const size_t common_size = std::min(first.size(), second.size());
+  size_t offset = 0;
+  while (offset < common_size && first[offset] == second[offset])
+    ++offset;
+
+  if (offset < common_size) {
+    std::ostringstream os;
+    os << location << " first differs at " << format_offset(offset) << " (first=0x" << std::hex
+       << std::setw(2) << std::setfill('0') << static_cast<unsigned>(first[offset]) << ", second=0x"
+       << std::setw(2) << static_cast<unsigned>(second[offset]) << ")" << std::dec;
+    if (first.size() != second.size())
+      os << "; size " << first.size() << " -> " << second.size() << " bytes";
+    return os.str();
+  }
+
+  return std::string(location) + " size changed from " + std::to_string(first.size()) + " to " +
+         std::to_string(second.size()) + " bytes";
+}
+
+[[nodiscard]] std::vector<const Section *>
+collect_executable_sections(const AmdGpuCodeObject &object) {
+  std::vector<const Section *> sections;
+  for (const std::unique_ptr<Section> &section : object.all_sections()) {
+    if ((section->flags() & SHF_EXECINSTR) != 0)
+      sections.push_back(section.get());
+  }
+  return sections;
+}
+
+[[nodiscard]] std::string find_idempotence_difference(const AmdGpuCodeObject &first_obj,
+                                                      const AmdGpuCodeObject &second_obj,
+                                                      std::span<const uint8_t> first_elf,
+                                                      std::span<const uint8_t> second_elf) {
+  const std::vector<const Section *> first_code = collect_executable_sections(first_obj);
+  const std::vector<const Section *> second_code = collect_executable_sections(second_obj);
+  if (first_code.size() == second_code.size()) {
+    for (size_t index = 0; index < first_code.size(); ++index) {
+      const Section &first_section = *first_code[index];
+      const Section &second_section = *second_code[index];
+      if (first_section.name() != second_section.name())
+        break;
+
+      const std::span<const uint8_t> first_bytes(
+          reinterpret_cast<const uint8_t *>(first_section.data()), first_section.size());
+      const std::span<const uint8_t> second_bytes(
+          reinterpret_cast<const uint8_t *>(second_section.data()), second_section.size());
+      if (!std::ranges::equal(first_bytes, second_bytes)) {
+        return describe_byte_difference(first_bytes, second_bytes,
+                                        "section '" + first_section.name() + "'");
+      }
+    }
+  }
+
+  return describe_byte_difference(first_elf, second_elf, "ELF image");
+}
+
 [[nodiscard]] std::string disassemble_source_instruction(const AmdGpuCodeObject &obj,
                                                          uint64_t offset, rj_code_arch_t arch) {
   auto decoder = Decoder::create(arch);
@@ -296,6 +367,16 @@ struct SelectedInput {
 
 } // namespace
 
+std::optional<std::string_view> idempotence_request_error(const TranslateOptions &options) {
+  if (!options.verify_idempotence)
+    return std::nullopt;
+  if (options.guest_arch != options.host_arch)
+    return "--verify-idempotence requires matching input and output architectures";
+  if (options.skip_failed_kernels)
+    return "--verify-idempotence cannot be combined with --skip-failed-kernels";
+  return std::nullopt;
+}
+
 ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &options) {
   ToolResult<TranslateOutput> output;
   output.value.host_arch = options.host_arch;
@@ -333,6 +414,10 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     add_error(output, kInputError, "gfx1250 A0-to-B0 translation is not supported");
     return output;
   }
+  if (const std::optional<std::string_view> request_error = idempotence_request_error(options)) {
+    add_error(output, kInputError, std::string(*request_error));
+    return output;
+  }
 
   if (options.input_path.empty()) {
     add_error(output, kInputError, "input path is required");
@@ -360,14 +445,8 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
   }
 
   try {
-    BinaryTranslatorOptions translator_options;
-    translator_options.debug_min_free_vgpr = options.debug_min_free_vgpr;
-    translator_options.debug_continue_after_failure = options.debug_continue_after_failure;
-    translator_options.skip_failed_kernels = options.skip_failed_kernels;
-    translator_options.input_revision = options.input_revision;
-    translator_options.output_revision = options.output_revision;
     BinaryTranslator translator(options.guest_arch, options.host_arch, options.target_mach,
-                                translator_options);
+                                make_binary_translator_options(options));
     if (need_report) {
       output.value.instruction_translations.clear();
       translator.set_trace_callback([&](const TranslationTraceEvent &trace) {
@@ -412,6 +491,42 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
   if (!validate_host_decode(output.value.translated_report, error)) {
     add_error(output, kValidationError, error);
     return output;
+  }
+
+  if (options.verify_idempotence) {
+    output.value.idempotence_checked = true;
+    try {
+      BinaryTranslator verifier(options.guest_arch, options.host_arch, options.target_mach,
+                                make_binary_translator_options(options));
+      TranslatedCodeObject second = verifier.translate(translated_obj);
+      if (!second.ok()) {
+        for (TranslationDiagnostic &diagnostic : second.diagnostics) {
+          diagnostic.message = "idempotence verification: " + diagnostic.message;
+          output.value.diagnostics.push_back(std::move(diagnostic));
+        }
+        add_error(output, kValidationError, "idempotence verification second translation failed");
+        return output;
+      }
+      if (second.elf_bytes != output.value.elf_bytes) {
+        AmdGpuCodeObject second_obj(second.elf_bytes.data(), second.elf_bytes.size());
+        if (!second_obj.is_valid()) {
+          add_error(output, kValidationError,
+                    "idempotence verification produced an invalid AMDGPU code object");
+          return output;
+        }
+        add_error(output, kValidationError,
+                  "translation output is not byte-idempotent: " +
+                      find_idempotence_difference(translated_obj, second_obj,
+                                                  output.value.elf_bytes, second.elf_bytes));
+        return output;
+      }
+      output.value.idempotence_verified = true;
+    } catch (const std::exception &e) {
+      add_error(output, kValidationError,
+                std::string("idempotence verification second translation threw exception: ") +
+                    e.what());
+      return output;
+    }
   }
 
   return output;
