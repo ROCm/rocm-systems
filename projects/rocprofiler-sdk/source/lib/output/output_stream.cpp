@@ -105,7 +105,7 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
     // process's pid (%pid%/{pid}/%p/%nid%); detection is delegated to format_path
     // so a coincidental digit (e.g. in %hostname%) can never suppress the suffix.
     auto _pid           = std::to_string(getpid());
-    auto _root_pid      = common::get_env_optional("ROCPROF_OUTPUT_ROOT_PID");
+    auto _root_pid      = common::get_env_optional("ROCPROF_INTERNAL_OUTPUT_ROOT_PID");
     bool _is_descendant = _root_pid.has_value() && *_root_pid != _pid;
     if(_is_descendant && !output_name_encodes_pid(cfg.output_file))
     {

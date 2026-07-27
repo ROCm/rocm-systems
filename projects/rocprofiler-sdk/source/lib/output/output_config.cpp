@@ -71,7 +71,7 @@ output_config::parse_env()
     // descendants don't clobber it). get_output_filename() uses it to PID-suffix a
     // descendant's output so it doesn't overwrite the root's. Relies on the final
     // filename being built lazily, after any fork.
-    common::set_env("ROCPROF_OUTPUT_ROOT_PID", std::to_string(getpid()), 0);
+    common::set_env("ROCPROF_INTERNAL_OUTPUT_ROOT_PID", std::to_string(getpid()), 0);
 
     auto to_upper = [](std::string val) {
         for(auto& vitr : val)
