@@ -29,8 +29,8 @@
 /// v_writelane/v_readlane. Read v3 back: it must equal K.
 
 #include "../aql_queue.h"
+#include "../dbi_test_util.h"
 #include "../halt_snapshot_plugin.h"
-#include "../patch/dbi_test_fixtures.h"
 #include "embedded_schema.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -58,10 +58,12 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 

@@ -16,7 +16,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
 
-#include "dbi_test_fixtures.h"
+#include "../dbi_test_util.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -410,7 +410,7 @@ TEST(MakeTrampolinePlan, FillsCanonicalBodyAndCopiesSiteFields) {
 // add_elf_name, align_up_for_test, make_gfx950_kernel_elf, make_gfx950_probe_elf,
 // make_gfx1200_kernel_elf, make_gfx1200_probe_elf, section_words,
 // patched_private_segment_size, and the kMov*/kProbe* opcode constants are shared
-// via dbi_test_fixtures.h (namespace rocjitsu::test). The make_gfx950_elf_with_*
+// via dbi_test_util.h (namespace rocjitsu::test). The make_gfx950_elf_with_*
 // builders below are unique to this integration slice.
 
 // gfx950 ELF with a single .text of `text_size` bytes filled with `s_nop 0`
