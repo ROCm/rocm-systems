@@ -32,12 +32,15 @@ SLoadB32Smem::SLoadB32Smem(const MachineInst *inst)
     : Smem("s_load_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadB32Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -58,12 +61,15 @@ SLoadB64Smem::SLoadB64Smem(const MachineInst *inst)
     : Smem("s_load_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadB64Smem>()),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -85,12 +91,15 @@ SLoadB128Smem::SLoadB128Smem(const MachineInst *inst)
            make_exec_fn<SLoadB128Smem>()),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -112,12 +121,15 @@ SLoadB256Smem::SLoadB256Smem(const MachineInst *inst)
            make_exec_fn<SLoadB256Smem>()),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(256, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -139,12 +151,15 @@ SLoadB512Smem::SLoadB512Smem(const MachineInst *inst)
            make_exec_fn<SLoadB512Smem>()),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(512, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -165,12 +180,15 @@ SLoadB96Smem::SLoadB96Smem(const MachineInst *inst)
     : Smem("s_load_b96", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadB96Smem>()),
       sdata(96, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -191,12 +209,15 @@ SLoadI8Smem::SLoadI8Smem(const MachineInst *inst)
     : Smem("s_load_i8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadI8Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -217,12 +238,15 @@ SLoadU8Smem::SLoadU8Smem(const MachineInst *inst)
     : Smem("s_load_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadU8Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -243,12 +267,15 @@ SLoadI16Smem::SLoadI16Smem(const MachineInst *inst)
     : Smem("s_load_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadI16Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -269,12 +296,15 @@ SLoadU16Smem::SLoadU16Smem(const MachineInst *inst)
     : Smem("s_load_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLoadU16Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -296,12 +326,15 @@ SBufferLoadB32Smem::SBufferLoadB32Smem(const MachineInst *inst)
            make_exec_fn<SBufferLoadB32Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -323,12 +356,15 @@ SBufferLoadB64Smem::SBufferLoadB64Smem(const MachineInst *inst)
            make_exec_fn<SBufferLoadB64Smem>()),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -350,12 +386,15 @@ SBufferLoadB128Smem::SBufferLoadB128Smem(const MachineInst *inst)
            make_exec_fn<SBufferLoadB128Smem>()),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -377,12 +416,15 @@ SBufferLoadB256Smem::SBufferLoadB256Smem(const MachineInst *inst)
            make_exec_fn<SBufferLoadB256Smem>()),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(256, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -404,12 +446,15 @@ SBufferLoadB512Smem::SBufferLoadB512Smem(const MachineInst *inst)
            make_exec_fn<SBufferLoadB512Smem>()),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(512, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -431,12 +476,15 @@ SBufferLoadB96Smem::SBufferLoadB96Smem(const MachineInst *inst)
            make_exec_fn<SBufferLoadB96Smem>()),
       sdata(96, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(96, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -458,12 +506,15 @@ SBufferLoadI8Smem::SBufferLoadI8Smem(const MachineInst *inst)
            make_exec_fn<SBufferLoadI8Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -485,12 +536,15 @@ SBufferLoadU8Smem::SBufferLoadU8Smem(const MachineInst *inst)
            make_exec_fn<SBufferLoadU8Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(8, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -512,12 +566,15 @@ SBufferLoadI16Smem::SBufferLoadI16Smem(const MachineInst *inst)
            make_exec_fn<SBufferLoadI16Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -539,12 +596,15 @@ SBufferLoadU16Smem::SBufferLoadU16Smem(const MachineInst *inst)
            make_exec_fn<SBufferLoadU16Smem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(16, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 

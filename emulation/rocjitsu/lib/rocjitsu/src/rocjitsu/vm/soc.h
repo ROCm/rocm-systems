@@ -160,8 +160,6 @@ public:
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
-  void run_to_idle();
-
   const std::vector<amdgpu::ComputeUnitCore *> &all_cus();
 
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }

@@ -788,6 +788,12 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
 }
 
+void VFmaMixloF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VFmaMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_fma_mixlo_f16_vop3p(*this, wf);
 }
@@ -818,6 +824,12 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+}
+
+void VFmaMixhiF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VFmaMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {

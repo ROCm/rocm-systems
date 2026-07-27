@@ -84,7 +84,7 @@ option(BUILD_BFD                               "Enable custom backtrace (if bfd.
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
-option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} example plugins" OFF)
+option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
@@ -106,7 +106,9 @@ option(QP_TRACKING                             "Enable per-device QP tracking"  
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
-option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
+option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
+option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
+option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
 # Default GPU architectures to build
@@ -137,7 +139,7 @@ include(GNUInstallDirs)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
 # Include rocSHMEM build module only if enabled
-if(ENABLE_ROCSHMEM)
+if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   include(cmake/ROCSHMEM.cmake)
 endif()
 
@@ -748,7 +750,7 @@ if(BUILD_TESTS)
   enable_testing()
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
-  if(BUILD_EXT_EXAMPLES)
+  if(BUILD_PLUGIN_EXAMPLES)
     add_subdirectory(plugins/net/example)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)

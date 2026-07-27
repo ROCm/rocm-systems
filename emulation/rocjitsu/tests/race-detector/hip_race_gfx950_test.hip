@@ -4,7 +4,7 @@
 // HIP race detection end-to-end tests.
 //
 // Each test launches one or more kernels through the rocjitsu emulator
-// with race detection enabled (RJ_RACE=1). After hipDeviceSynchronize(),
+// with the race detector selected in the test config. After hipDeviceSynchronize(),
 // the test parses the structured race log to verify that races were
 // (or were not) detected.
 //
@@ -33,6 +33,9 @@
 // ============================================================
 
 struct RaceRecord {
+  std::string kernel;   // compact readable kernel name, or "?" if unresolved
+  std::string symbol;   // exact ELF symbol name, or "?" if unresolved
+  int dispatch = -1;    // rocjitsu dispatch id
   std::string type;     // "VGPR", "SGPR", "LDS"
   int reg = -1;         // register index (VGPR/SGPR) or byte address (LDS)
   int wave = -1;
@@ -47,7 +50,8 @@ struct RaceRecord {
 ///
 /// Example log file content:
 ///
-///   RACE type=VGPR reg=2 wave=0 lane=0 wg=0,0,0 conflict=global_load_dword
+///   RACE kernel=vgpr_race_kernel symbol=_Z16vgpr_race_kernelPKfPf dispatch=1
+///       type=VGPR reg=2 wave=0 lane=0 wg=0,0,0 conflict=global_load_dword
 ///   Race on VGPR v2 [workgroup (0, 0, 0), wave 0, lane 0]
 ///    ==>  0x5400021940  global_load_dword v2, v[2:3], off
 ///         0x5400021948  s_nop 0
@@ -80,7 +84,10 @@ static std::vector<RaceRecord> parse_race_log() {
       if (sp == std::string::npos) sp = rest.size();
       std::string key = rest.substr(pos, eq - pos);
       std::string val = rest.substr(eq + 1, sp - eq - 1);
-      if (key == "type")          r.type = val;
+      if (key == "kernel")        r.kernel = val;
+      else if (key == "symbol")   r.symbol = val;
+      else if (key == "dispatch") r.dispatch = std::stoi(val);
+      else if (key == "type")     r.type = val;
       else if (key == "reg")      r.reg = std::stoi(val);
       else if (key == "wave")     r.wave = val.empty() ? -1 : std::stoi(val);
       else if (key == "lane")     r.lane = val.empty() ? -1 : std::stoi(val);
@@ -188,9 +195,9 @@ protected:
     auto r = records();
     if (!r.empty()) {
       for (auto &rec : r)
-        fprintf(stderr, "  [%s reg=%d wg=%s] %s\n",
-                rec.type.c_str(), rec.reg, rec.wg.c_str(),
-                rec.message.c_str());
+        fprintf(stderr, "  [%s symbol=%s dispatch=%d %s reg=%d wg=%s] %s\n",
+                rec.kernel.c_str(), rec.symbol.c_str(), rec.dispatch, rec.type.c_str(),
+                rec.reg, rec.wg.c_str(), rec.message.c_str());
     }
     EXPECT_TRUE(r.empty()) << "Expected no races, got " << r.size();
   }
@@ -204,6 +211,26 @@ protected:
     auto r = records();
     EXPECT_EQ(static_cast<int>(r.size()), n)
         << "Expected " << n << " race(s), got " << r.size();
+  }
+
+  void ExpectDispatchContext(const RaceRecord &r, const std::string &kernel_name_substring) {
+    // Race reports should carry resolved dispatch context, not just the
+    // instruction trace. "?" would mean kernel-symbol resolution failed.
+    EXPECT_FALSE(r.kernel.empty());
+    EXPECT_NE(r.kernel, "?");
+    EXPECT_FALSE(r.symbol.empty());
+    EXPECT_NE(r.symbol, "?");
+
+    // The dispatch id ties the race back to the AQL dispatch that produced it.
+    // This catches regressions where the plugin logs a default-constructed
+    // context instead of the dispatch packet metadata.
+    EXPECT_GE(r.dispatch, 1);
+
+    // Match on the source kernel name rather than the whole demangled spelling:
+    // the exact symbol can include ABI/compiler-specific type detail, while the
+    // kernel name substring is the user-facing identity the report must preserve.
+    EXPECT_NE(r.kernel.find(kernel_name_substring), npos) << "kernel: " << r.kernel;
+    EXPECT_NE(r.symbol.find(kernel_name_substring), npos) << "symbol: " << r.symbol;
   }
 };
 
@@ -249,6 +276,7 @@ TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
   sync();
   auto r = records();
   ASSERT_EQ(r.size(), 1u);
+  ExpectDispatchContext(r[0], "vgpr_race_kernel");
   auto t = parseTrace(r[0]);
   EXPECT_NE(t.header.find("VGPR"), npos);
   EXPECT_NE(t.header.find("wave 0"), npos);
@@ -483,6 +511,7 @@ TEST_F(Gfx950RaceTest, partial_vmcnt_race) {
   sync();
   auto r = records();
   ASSERT_EQ(r.size(), 1u);
+  ExpectDispatchContext(r[0], "partial_vmcnt_kernel");
   auto t = parseTrace(r[0]);
   EXPECT_NE(t.header.find("VGPR"), npos);
   EXPECT_NE(t.header.find("wave 0"), npos);
@@ -562,6 +591,7 @@ TEST_F(Gfx950RaceTest, multi_kernel_race) {
   sync();
   auto r = records();
   ASSERT_EQ(r.size(), 1u);
+  ExpectDispatchContext(r[0], "racy_kernel");
   auto t = parseTrace(r[0]);
   EXPECT_NE(t.header.find("VGPR"), npos);
   EXPECT_NE(t.header.find("wave 0"), npos);
