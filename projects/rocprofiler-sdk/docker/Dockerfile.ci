@@ -105,5 +105,6 @@ RUN set -euo pipefail; \
     mkdir -p /opt/rocm && \
     tar -xf /tmp/rocm-${GPU_TYPE}.tar.gz -C /opt/rocm && \
     rm -f /tmp/rocm-${GPU_TYPE}.tar.gz && \
-    printf '/opt/rocm/lib\n/opt/rocm/lib/llvm/lib\n/opt/rocm/lib/rocm_sysdeps/lib\n' > /etc/ld.so.conf.d/rocm.conf && \
-    ldconfig;
+    printf '/opt/rocm/lib\n/opt/rocm/lib/llvm/lib\n/opt/rocm/lib/llvm/lib/%s\n/opt/rocm/lib/rocm_sysdeps/lib\n' \
+       "$(/opt/rocm/lib/llvm/bin/amdclang --print-target-triple)" > /etc/ld.so.conf.d/rocm.conf && \
+    ldconfig
