@@ -26,9 +26,8 @@
 
 namespace amd::smi {
 
-// Internal helper under test. It decides whether the KFD topology total should
-// be preferred over the sysfs mem_info_vram_total value for VRAM (see
-// rsmi_dev_memory_total_get in rocm_smi.cc).
+// Internal helper under test: decides whether the KFD topology total is
+// preferred over sysfs mem_info_vram_total for VRAM (see rocm_smi.cc).
 bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
                            const std::string& compute_partition, uint64_t kfd_total);
 
@@ -44,9 +43,8 @@ constexpr uint64_t kMi300xSpxTotal = 206141652992ULL;  // ~192 GiB
 
 }  // namespace
 
-// When the sysfs read failed, the KFD total is always preferred, regardless of
-// the reported partition mode. This is the MI300A path, where the sysfs
-// mem_info_vram_total node is absent.
+// Failed sysfs read (the MI300A path, where mem_info_vram_total is absent)
+// always prefers KFD, regardless of partition mode.
 TEST(AmdSmiVramTotalPreferKfdTest, UnusableSysfsAlwaysPrefersKfd) {
   for (const char* mode : {"", "SPX", "CPX", "DPX", "TPX", "QPX"}) {
     EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(false, kSampleVramTotal, mode, kSampleVramTotal))
@@ -62,16 +60,15 @@ TEST(AmdSmiVramTotalPreferKfdTest, ZeroSysfsTotalPrefersKfd) {
   }
 }
 
-// With a usable sysfs value on a non-partitioned GPU (SPX or no partition
-// string), the sysfs value is trusted and the KFD total is not preferred.
+// Usable sysfs on a non-partitioned GPU (SPX or empty) is trusted; KFD is not
+// preferred.
 TEST(AmdSmiVramTotalPreferKfdTest, UsableSysfsNonPartitionedKeepsSysfs) {
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "SPX", kSampleVramTotal));
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "", kSampleVramTotal));
 }
 
-// With a usable sysfs value in a multi-partition compute mode, the sysfs value
-// reports the whole device split evenly across partitions and is misleading, so
-// the per-partition KFD total must be preferred.
+// In a multi-partition mode, sysfs reports the whole device split evenly and is
+// misleading, so the per-partition KFD total must be preferred.
 TEST(AmdSmiVramTotalPreferKfdTest, UsableSysfsPartitionedPrefersKfd) {
   for (const char* mode : {"CPX", "DPX", "TPX", "QPX"}) {
     EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, mode, kSampleVramTotal / 6))

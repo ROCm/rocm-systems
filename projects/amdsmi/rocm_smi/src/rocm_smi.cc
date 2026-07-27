@@ -4186,20 +4186,16 @@ rsmi_status_t rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t* sensor
 
 namespace amd {
 namespace smi {
-// Decide whether the KFD topology (mem_banks) total should be preferred over
-// the sysfs mem_info_vram_total value for VRAM. KFD wins in three cases: the
-// sysfs read is unusable (0 or failure, as on MI300A where the node is absent);
-// a multi-partition compute mode (CPX/DPX/TPX/QPX), where sysfs reports the
-// whole device split evenly across partitions and ignores reserved memory; and
-// APUs (e.g. gfx1151 / Strix Halo), where sysfs exposes only the small BIOS VRAM
-// carveout while the GPU addresses the larger unified pool KFD reports.
+// Prefer the KFD topology (mem_banks) total over sysfs mem_info_vram_total in
+// three cases: sysfs is unusable (0 or failure, e.g. MI300A where the node is
+// absent); a multi-partition mode (CPX/DPX/TPX/QPX), where sysfs splits the
+// whole device evenly and ignores reserved memory; and APUs (e.g. gfx1151),
+// where sysfs shows only the small BIOS carveout instead of the unified pool.
 //
-// The APU case is detected by size (kfd_total > sysfs_total) rather than a
-// device flag because the driver does not yet expose an APU/integrated marker
-// to user space, so processor_type reports AMD_GPU for both APUs and discrete
-// GPUs. On discrete and SPX GPUs sysfs already reports the real VRAM size,
-// which is not smaller than the KFD FB_PUBLIC bank, so kfd_total > sysfs_total
-// stays false and the sysfs value is kept.
+// APUs are detected by size (kfd_total > sysfs_total), not a flag, because the
+// driver exposes no APU marker (processor_type is AMD_GPU for APU and discrete
+// alike). On discrete and SPX GPUs sysfs is not smaller than the KFD FB_PUBLIC
+// bank, so the comparison stays false and the sysfs value is kept.
 bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
                            const std::string& compute_partition, uint64_t kfd_total) {
   if (!sysfs_read_ok || sysfs_total == 0) {
@@ -4246,20 +4242,19 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
   // This is needed to avoid returning garbage value in case of failure
   ret = get_dev_value_int(mem_type_file, dv_ind, total);
 
-  // Prefer the KFD topology (mem_banks) VRAM total when the sysfs value is
-  // unusable, misleading in a multi-partition compute mode, or an APU carveout.
-  // See vram_total_prefer_kfd for the full rationale.
+  // Prefer the KFD (mem_banks) total when sysfs is unusable, in a multi-partition
+  // mode, or an APU carveout. See vram_total_prefer_kfd for the rationale.
   if (mem_type == RSMI_MEM_TYPE_VRAM) {
     bool sysfs_read_ok = (ret == RSMI_STATUS_SUCCESS);
     std::string compute_partition_str;
-    // The compute partition mode only matters when the sysfs value itself is
-    // usable; otherwise we already fall back to the KFD total.
+    // The partition mode only matters when the sysfs value is usable; otherwise
+    // we already fall back to the KFD total.
     if (sysfs_read_ok && *total != 0) {
       get_dev_value_str(amd::smi::kDevComputePartition, dv_ind, &compute_partition_str);
     }
-    // Look up the KFD per-partition total non-fatally. A missing KFD node must
-    // not discard an otherwise valid sysfs value, so unlike
-    // GET_DEV_AND_KFDNODE_FROM_INDX this does not early-return on absence.
+    // Look up the KFD per-partition total non-fatally: unlike
+    // GET_DEV_AND_KFDNODE_FROM_INDX, a missing node must not discard a valid
+    // sysfs value, so this does not early-return on absence.
     uint64_t kfd_total = 0;
     auto& kfd_nodes = smi.kfd_node_map();
     auto kfd_it = kfd_nodes.find(dev->kfd_gpu_id());
