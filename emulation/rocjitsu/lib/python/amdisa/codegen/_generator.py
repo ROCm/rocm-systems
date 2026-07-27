@@ -902,6 +902,57 @@ class CodeGenerator:
             for ie in self.isa_spec.inst_encodings
         )
 
+    def _instruction_supports_modifier_encoding(
+        self, inst: Instruction, parent_enc_name: str, modifier: str
+    ) -> bool:
+        """Whether the MR ISA lists an alternate modifier encoding.
+
+        Alternate instruction entries are not emitted as independent classes,
+        but their presence is still the instruction-level legality fact. Keep
+        that fact separate from architecture-wide machine-inst availability.
+        """
+        if inst.available_encodings is None:
+            raise ValueError(
+                f'{inst.name}: cannot determine {modifier.upper()} support '
+                'without instruction encoding provenance'
+            )
+
+        parent_upper = parent_enc_name.upper()
+        for enc_name in inst.available_encodings:
+            enc_upper = enc_name.upper()
+            if modifier == 'dpp':
+                matches = '_VOP_DPP' in enc_upper and '_VOP_DPP8' not in enc_upper
+            elif modifier == 'dpp8':
+                matches = '_VOP_DPP8' in enc_upper
+            elif modifier == 'sdwa':
+                matches = '_VOP_SDWA' in enc_upper
+            else:
+                raise ValueError(f'unknown VOP modifier encoding: {modifier}')
+            if (
+                matches
+                and self.isa_spec.profile.is_alt_encoding(enc_name)
+                and self.isa_spec.profile.derive_parent_enc_name(enc_name).upper()
+                == parent_upper
+            ):
+                return True
+        return False
+
+    def _instruction_supports_dpp(self, inst: Instruction, enc_name: str) -> bool:
+        return self._supports_dpp_for_encoding(
+            enc_name
+        ) and self._instruction_supports_modifier_encoding(inst, enc_name, 'dpp')
+
+    def _instruction_supports_dpp8(self, inst: Instruction, enc_name: str) -> bool:
+        return self._instruction_supports_modifier_encoding(inst, enc_name, 'dpp8')
+
+    def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
+        return self._instruction_supports_modifier_encoding(inst, enc_name, 'sdwa')
+
+    def _instruction_base_encoding_name(self, inst: Instruction) -> str:
+        if inst.is_implied_literal_enc:
+            return self.isa_spec.profile.derive_parent_enc_name(inst.enc_name)
+        return inst.enc_name
+
     def _uses_full_dpp_write_mask(self, enc_name: str) -> bool:
         return self._supports_dpp_for_encoding(enc_name)
 
@@ -7179,11 +7230,22 @@ class CodeGenerator:
                         'ENC_VOP3P': 'Vop3p',
                         'VOP3_SDST_ENC': 'Vop3SdstEnc',
                     }
-                    _enc_base = _DPP_ENC_BASES.get(enc.enc_name.upper())
-                    _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(enc.enc_name)
+                    _modifier_enc_name = self._instruction_base_encoding_name(inst)
+                    _enc_base = _DPP_ENC_BASES.get(_modifier_enc_name.upper())
+                    _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(
+                        _modifier_enc_name
+                    )
                     _supports_dpp_encoding = (
                         _dpp_struct is not None
-                        and self._supports_dpp_for_encoding(enc.enc_name)
+                        and self._instruction_supports_dpp(inst, _modifier_enc_name)
+                    )
+                    _supports_dpp8_encoding = (
+                        _dpp8_struct is not None
+                        and self._instruction_supports_dpp8(inst, _modifier_enc_name)
+                    )
+                    _recognizes_dpp8_marker = _dpp8_struct is not None or (
+                        enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC')
+                        and self._supports_vop_dpp8()
                     )
                     _dpp_struct_has_fi = self._machine_inst_struct_has_field(
                         _dpp_struct, 'fi'
@@ -7194,7 +7256,7 @@ class CodeGenerator:
                     if _enc_base:
                         for opnd in inst.operands:
                             if opnd.name == 'src0' and opnd.name in enc_field_names:
-                                if _dpp8_struct:
+                                if _supports_dpp8_encoding:
                                     ctor_body_parts.append(
                                         f'if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) {{'
                                         f' auto *dp8 = reinterpret_cast<const {_dpp8_struct}*>(inst);'
@@ -7222,28 +7284,52 @@ class CodeGenerator:
                                         f'{_dpp_fi_ctor_stmt}'
                                         f'}}'
                                     )
-                                elif _dpp_struct:
+                                unsupported_dpp_markers = []
+                                if _dpp_struct and not _supports_dpp_encoding:
+                                    unsupported_dpp_markers.append(
+                                        'reinterpret_cast<const OpEncoding*>(inst)->src0 == '
+                                        'amdgpu::SRC_DPP'
+                                    )
+                                if (
+                                    _recognizes_dpp8_marker
+                                    and not _supports_dpp8_encoding
+                                ):
+                                    unsupported_dpp_markers.append(
+                                        'amdgpu::dpp::is_src_dpp8('
+                                        'reinterpret_cast<const OpEncoding*>(inst)->src0)'
+                                    )
+                                if unsupported_dpp_markers:
                                     ctor_body_parts.append(
-                                        'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP || '
-                                        'amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) '
-                                        'throw util::UnimplementedInst("VOPC DPP");'
+                                        f'if ({" || ".join(unsupported_dpp_markers)}) '
+                                        f'throw util::InvalidInst("{inst.name} does not support DPP", "");'
                                     )
                                 # SDWA (src0 == amdgpu::SRC_SDWA): CDNA and RDNA1/2 only.
                                 _has_sdwa = any(
                                     'SDWA' in ie.enc_name
                                     for ie in self.isa_spec.inst_encodings
                                 )
-                                if _has_sdwa and enc.enc_name.upper() in (
-                                    'ENC_VOP1',
-                                    'ENC_VOP2',
-                                    'ENC_VOPC',
-                                ):
+                                _supports_sdwa_encoding = (
+                                    _has_sdwa
+                                    and enc.enc_name.upper()
+                                    in (
+                                        'ENC_VOP1',
+                                        'ENC_VOP2',
+                                        'ENC_VOPC',
+                                    )
+                                    and self._instruction_supports_sdwa(
+                                        inst, _modifier_enc_name
+                                    )
+                                )
+                                if _supports_sdwa_encoding:
                                     if enc.enc_name.upper() == 'ENC_VOPC':
                                         _sdwa_struct = 'VopcVopSdwaSdstEncMachineInst'
                                     else:
                                         _sdwa_struct = f'{_enc_base}VopSdwaMachineInst'
                                     _sdwa_s1_code = ''
-                                    if enc.enc_name.upper() in ('ENC_VOP2', 'ENC_VOPC'):
+                                    if enc.enc_name.upper() in (
+                                        'ENC_VOP2',
+                                        'ENC_VOPC',
+                                    ):
                                         _sdwa_s1_code = (
                                             f' if (sw->s1)'
                                             f'   vsrc1 = Operand({opnd.size}, OperandType::OPR_SRC,'
@@ -7270,6 +7356,16 @@ class CodeGenerator:
                                             f' sdwa_clamp_ = sw->clamp;'
                                         )
                                         + f'{_sdwa_s1_code}}}'
+                                    )
+                                elif _has_sdwa and enc.enc_name.upper() in (
+                                    'ENC_VOP1',
+                                    'ENC_VOP2',
+                                    'ENC_VOPC',
+                                ):
+                                    ctor_body_parts.append(
+                                        'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == '
+                                        'amdgpu::SRC_SDWA) '
+                                        f'throw util::InvalidInst("{inst.name} does not support SDWA", "");'
                                     )
 
                     # Apply the fieldless-operand capability policy once, after
@@ -7437,24 +7533,31 @@ class CodeGenerator:
                         # base's apply_dpp() runs before the ALU logic.
                         _dpp_preamble = ''
                         _enc_upper = enc.enc_name.upper()
+                        _modifier_enc_name = self._instruction_base_encoding_name(inst)
                         _has_sdwa_encoding = _enc_upper in (
                             'ENC_VOP1',
                             'ENC_VOP2',
                             'ENC_VOPC',
-                        )
+                        ) and self._instruction_supports_sdwa(inst, _modifier_enc_name)
                         _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(
-                            _enc_upper
+                            _modifier_enc_name
                         )
                         _supports_dpp_encoding = (
                             _dpp_struct is not None
-                            and self._supports_dpp_for_encoding(_enc_upper)
+                            and self._instruction_supports_dpp(inst, _modifier_enc_name)
+                        )
+                        _supports_dpp8_encoding = (
+                            _dpp8_struct is not None
+                            and self._instruction_supports_dpp8(
+                                inst, _modifier_enc_name
+                            )
                         )
                         _uses_full_dpp_write_mask = self._uses_full_dpp_write_mask(
                             _enc_upper
                         )
                         _has_dpp_encoding = (
                             _supports_dpp_encoding
-                            or _dpp8_struct is not None
+                            or _supports_dpp8_encoding
                             or _has_sdwa_encoding
                         )
                         if _has_dpp_encoding:
@@ -7658,7 +7761,7 @@ class CodeGenerator:
                                     '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_, dpp_fi_,\n'
                                     '        dpp_src0_, wf);\n'
                                 )
-                            if not _reads_all_outputs and _dpp8_struct:
+                            if not _reads_all_outputs and _supports_dpp8_encoding:
                                 _dpp_preamble += (
                                     '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
                                     '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_,\n'
@@ -7726,7 +7829,10 @@ class CodeGenerator:
                             )
                         # SDWA postamble: apply dst_sel merge and float clamp after ALU.
                         _sdwa_postamble = ''
-                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2'):
+                        if _has_sdwa_encoding and enc.enc_name.upper() in (
+                            'ENC_VOP1',
+                            'ENC_VOP2',
+                        ):
                             is_float_op = sem and sem.data_type in ('f16', 'f32', 'f64')
                             _sdwa_postamble = (
                                 '  if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {\n'

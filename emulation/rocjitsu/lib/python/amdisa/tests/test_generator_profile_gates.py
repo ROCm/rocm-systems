@@ -2048,7 +2048,7 @@ def test_gfx1250_generated_dpp_cleanup_resolves_high_destination_bank(
         _generated_method_body(vop1, 'VMovB32Vop1', 'VReadfirstlaneB32Vop1'),
         _generated_method_body(vop2, 'VAddNcU32Vop2', 'VSubNcU32Vop2'),
         _generated_method_body(vop3, 'VAddF32Vop3', 'VSubF32Vop3'),
-        _generated_method_body(vop3p, 'VPkMadI16Vop3p', 'VPkMulLoU16Vop3p'),
+        _generated_method_body(vop3p, 'VFmaMixF32Vop3p', 'VFmaMixloF16Vop3p'),
     )
 
     for body in bodies:
@@ -2071,17 +2071,7 @@ def test_gfx1250_generated_dpp_cleanup_resolves_high_destination_bank(
 def test_generated_64bit_dpp_cleanup_preserves_both_physical_dwords(
     amdgpu_generated_root: Path,
 ):
-    for arch in (
-        'cdna1',
-        'cdna2',
-        'cdna3',
-        'cdna4',
-        'rdna1',
-        'rdna2',
-        'rdna3',
-        'rdna3_5',
-        'rdna4',
-    ):
+    for arch in ('cdna2', 'cdna3', 'cdna4'):
         vop1 = _execution_source_path(
             amdgpu_generated_root / arch / 'vop1.cpp'
         ).read_text()
@@ -2091,6 +2081,22 @@ def test_generated_64bit_dpp_cleanup_preserves_both_physical_dwords(
         assert 'read_vgpr_storage64(vb + inst_.vdst, ln)' in cvt_f64, arch
         assert 'write_vgpr_storage64(vb + inst_.vdst, ln,' in cvt_f64, arch
         assert 'read_operand_storage64(vdst, ln)' not in cvt_f64, arch
+
+
+def test_cdna4_generated_vop1_sdwa_availability_is_instruction_specific(
+    amdgpu_generated_root: Path,
+):
+    vop1 = (amdgpu_generated_root / 'cdna4' / 'vop1.cpp').read_text()
+
+    supported = _generated_constructor_body(vop1, 'VMovB32Vop1')
+    unsupported = _generated_constructor_body(vop1, 'VCvtF64I32Vop1')
+
+    assert 'reinterpret_cast<const Vop1VopSdwaMachineInst *>' in supported
+    assert 'V_MOV_B32 does not support SDWA' not in supported
+    assert (
+        'throw util::InvalidInst("V_CVT_F64_I32 does not support SDWA", "");'
+        in unsupported
+    )
 
 
 def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16(
@@ -2109,10 +2115,6 @@ def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16(
         'gfx1250',
     )
     vopc_names = {
-        'cdna1': 'vopc.cpp',
-        'cdna2': 'vopc.cpp',
-        'cdna3': 'vopc.cpp',
-        'cdna4': 'vopc.cpp',
         'rdna3': 'vopc.cpp',
         'rdna3_5': 'vopc.cpp',
         'rdna4': 'vopc.cpp',
@@ -2149,7 +2151,9 @@ def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
         start = vopc.index('VCmpEqU32Vopc::VCmpEqU32Vopc')
         end = vopc.index('void VCmpEqU32Vopc::execute_impl', start)
         ctor = vopc[start:end]
-        assert 'throw util::UnimplementedInst("VOPC DPP");' in ctor, arch
+        assert (
+            'throw util::InvalidInst("V_CMP_EQ_U32 does not support DPP", "");' in ctor
+        ), arch
         assert (
             'amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)'
             in ctor
@@ -2165,10 +2169,6 @@ def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
 
 def test_generated_cmpx_dpp_cleanup_preserves_exec(amdgpu_generated_root: Path):
     vopc_paths = {
-        'cdna1': amdgpu_generated_root / 'cdna1' / 'vopc.cpp',
-        'cdna2': amdgpu_generated_root / 'cdna2' / 'vopc.cpp',
-        'cdna3': amdgpu_generated_root / 'cdna3' / 'vopc.cpp',
-        'cdna4': amdgpu_generated_root / 'cdna4' / 'vopc.cpp',
         'rdna3': amdgpu_generated_root / 'rdna3' / 'vopc.cpp',
         'rdna3_5': amdgpu_generated_root / 'rdna3_5' / 'vopc.cpp',
         'rdna4': amdgpu_generated_root / 'rdna4' / 'vopc.cpp',

@@ -2167,9 +2167,12 @@ struct Cdna1DppTraits {
 struct Cdna2DppTraits {
   static constexpr const char *name = "cdna2";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2;
+  static constexpr uint32_t wf_size = 64;
   using MachineInst = cdna2::MachineInst;
   using Vop1VopDppMachineInst = cdna2::Vop1VopDppMachineInst;
+  using Vop1F64DppMachineInst = cdna2::Vop1VopDppMachineInst;
   using VMovB32Vop1 = cdna2::VMovB32Vop1;
+  using VCvtF64I32Vop1 = cdna2::VCvtF64I32Vop1;
   using VCmpEqU32Vopc = cdna2::VCmpEqU32Vopc;
   using VCmpxEqU32Vopc = cdna2::VCmpxEqU32Vopc;
 };
@@ -2177,9 +2180,12 @@ struct Cdna2DppTraits {
 struct Cdna3DppTraits {
   static constexpr const char *name = "cdna3";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA3;
+  static constexpr uint32_t wf_size = 64;
   using MachineInst = cdna3::MachineInst;
   using Vop1VopDppMachineInst = cdna3::Vop1VopDppMachineInst;
+  using Vop1F64DppMachineInst = cdna3::Vop1VopDppMachineInst;
   using VMovB32Vop1 = cdna3::VMovB32Vop1;
+  using VCvtF64I32Vop1 = cdna3::VCvtF64I32Vop1;
   using VCmpEqU32Vopc = cdna3::VCmpEqU32Vopc;
   using VCmpxEqU32Vopc = cdna3::VCmpxEqU32Vopc;
 };
@@ -2224,7 +2230,6 @@ struct Rdna2DppTraits {
 struct Rdna4DppTraits {
   static constexpr const char *name = "rdna4";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
-  static constexpr uint32_t wf_size = 32;
   using MachineInst = rdna4::MachineInst;
   using VopcMachineInst = rdna4::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna4::Vop1VopDpp16MachineInst;
@@ -2390,120 +2395,6 @@ template <typename Traits> void cdna_generated_vop1_dpp_write_mask_honors_bound_
   EXPECT_EQ(cu->read_vgpr(vbase + kDst, 63), 0x102Fu);
 }
 
-template <typename Traits> void cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl() {
-  SCOPED_TRACE(Traits::name);
-  amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vopc_write_mask_mem");
-  amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vopc_write_mask_l2");
-
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = Traits::arch;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 104;
-  cfg.vgprs_per_wf = 32;
-  cfg.lds_size_kb = 64;
-
-  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_dpp_vopc_write_mask_cu",
-                                            cfg, &mem, &l2);
-  ASSERT_NE(cu, nullptr);
-
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), 64u);
-  wf->set_exec(~0ULL);
-  wf->set_vcc(0);
-
-  constexpr uint32_t kSrc0 = 4;
-  constexpr uint32_t kSrc1 = 8;
-  uint32_t vbase = wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    uint32_t src = 0x1000u + lane;
-    uint32_t cmp = src;
-    if (lane >= 16 && lane < 32)
-      cmp = 0x100Fu;
-    else if (lane >= 32 && lane < 48)
-      cmp = 0x101Fu;
-    else if (lane >= 48)
-      cmp = 0x102Fu;
-    cu->write_vgpr(vbase + kSrc0, lane, src);
-    cu->write_vgpr(vbase + kSrc1, lane, cmp);
-  }
-
-  typename Traits::Vop1VopDppMachineInst raw{};
-  raw.src0 = amdgpu::SRC_DPP;
-  raw.vsrc0 = kSrc0;
-  // VOPC reads bits [16:9] as vsrc1; those overlap the VOP_DPP op field.
-  raw.op = kSrc1;
-  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
-  raw.bound_ctrl = 0;
-  raw.bank_mask = 0xF;
-  raw.row_mask = 0xF;
-
-  typename Traits::VCmpEqU32Vopc inst(reinterpret_cast<const typename Traits::MachineInst *>(&raw));
-  inst.execute_impl(*wf);
-
-  EXPECT_EQ(wf->vcc(), 0xFFFFFFFFFFFF0000ULL);
-}
-
-template <typename Traits> void cdna_generated_vcmpx_dpp_write_mask_preserves_exec() {
-  SCOPED_TRACE(Traits::name);
-  amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vcmpx_exec_mask_mem");
-  amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vcmpx_exec_mask_l2");
-
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = Traits::arch;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 104;
-  cfg.vgprs_per_wf = 32;
-  cfg.lds_size_kb = 64;
-
-  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_dpp_vcmpx_exec_mask_cu",
-                                            cfg, &mem, &l2);
-  ASSERT_NE(cu, nullptr);
-
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), 64u);
-
-  constexpr uint64_t kOldExec = 0xFFFFFFFFFFFF005AULL;
-  constexpr uint64_t kOldVcc = 0x00000000000000A5ULL;
-  wf->set_exec(kOldExec);
-  wf->set_vcc(kOldVcc);
-
-  constexpr uint32_t kSrc0 = 4;
-  constexpr uint32_t kSrc1 = 8;
-  uint32_t vbase = wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    uint32_t src = 0x1000u + lane;
-    uint32_t cmp = 0xDEAD0000u + lane;
-    if (lane >= 16 && lane < 32)
-      cmp = 0x100Fu;
-    else if (lane >= 32 && lane < 48)
-      cmp = 0x101Fu;
-    else if (lane >= 48)
-      cmp = 0x102Fu;
-    if (lane == 20)
-      cmp = 0xDEAD0020u;
-    cu->write_vgpr(vbase + kSrc0, lane, src);
-    cu->write_vgpr(vbase + kSrc1, lane, cmp);
-  }
-
-  typename Traits::Vop1VopDppMachineInst raw{};
-  raw.src0 = amdgpu::SRC_DPP;
-  raw.vsrc0 = kSrc0;
-  raw.op = kSrc1;
-  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
-  raw.bound_ctrl = 0;
-  raw.bank_mask = 0xF;
-  raw.row_mask = 0xF;
-
-  typename Traits::VCmpxEqU32Vopc inst(
-      reinterpret_cast<const typename Traits::MachineInst *>(&raw));
-  inst.execute_impl(*wf);
-
-  EXPECT_EQ(wf->vcc(), 0xFFFFFFFFFFEF00A5ULL);
-  EXPECT_EQ(wf->exec(), 0xFFFFFFFFFFEF005AULL);
-}
-
 template <typename Traits> void wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl() {
   SCOPED_TRACE(Traits::name);
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vop1_wave32_write_mask_mem");
@@ -2599,8 +2490,9 @@ template <typename Traits> void generated_vop1_dpp64_preserves_masked_destinatio
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     const uint64_t actual = static_cast<uint64_t>(cu->read_vgpr(vbase + kDst, lane)) |
                             (static_cast<uint64_t>(cu->read_vgpr(vbase + kDst + 1, lane)) << 32);
+    const uint32_t source_lane = lane ^ 1u;
     const uint64_t expected = lane < 16
-                                  ? std::bit_cast<uint64_t>(static_cast<double>(100u + (lane ^ 1u)))
+                                  ? std::bit_cast<uint64_t>(static_cast<double>(100u + source_lane))
                                   : kOldDstBase + lane;
     EXPECT_EQ(actual, expected) << "lane " << lane;
   }
@@ -3040,19 +2932,42 @@ template <typename Traits> void unsupported_rdna_vopc_dpp_throws() {
   SCOPED_TRACE(Traits::name);
 
   auto expect_throws = [](uint32_t src0) {
-    typename Traits::VopcMachineInst raw{};
+    typename Traits::Vop1VopDpp16MachineInst raw{};
     raw.src0 = src0;
-    raw.vsrc1 = 8;
-    raw.op = 8;
 
     EXPECT_THROW(typename Traits::VCmpEqU32Vopc(
                      reinterpret_cast<const typename Traits::MachineInst *>(&raw)),
-                 util::UnimplementedInst);
+                 util::InvalidInst);
   };
 
   expect_throws(amdgpu::SRC_DPP);
   expect_throws(amdgpu::SRC_DPP8_FI_0);
   expect_throws(amdgpu::SRC_DPP8_FI_1);
+}
+
+template <typename Traits> void unsupported_cdna_vopc_dpp_throws() {
+  SCOPED_TRACE(Traits::name);
+
+  typename Traits::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+
+  EXPECT_THROW(
+      typename Traits::VCmpEqU32Vopc(reinterpret_cast<const typename Traits::MachineInst *>(&raw)),
+      util::InvalidInst);
+}
+
+void cdna4_vop1_sdwa_availability_is_instruction_specific() {
+  cdna4::Vop1VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc0 = 4;
+  raw.vdst = 8;
+  raw.src0_sel = amdgpu::sdwa::DWORD;
+  raw.dst_sel = amdgpu::sdwa::DWORD;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+
+  EXPECT_NO_THROW(cdna4::VMovB32Vop1(reinterpret_cast<const cdna4::MachineInst *>(&raw)));
+  EXPECT_THROW(cdna4::VCvtF64I32Vop1(reinterpret_cast<const cdna4::MachineInst *>(&raw)),
+               util::InvalidInst);
 }
 
 TEST(DppPermuteTest, CdnaGeneratedVop1UsesSharedRowBroadcast) {
@@ -3069,18 +2984,15 @@ TEST(DppPermuteTest, CdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
   cdna_generated_vop1_dpp_write_mask_honors_bound_ctrl<Cdna4DppTraits>();
 }
 
-TEST(DppPermuteTest, CdnaGeneratedVopcDppWriteMaskHonorsBoundCtrl) {
-  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna1DppTraits>();
-  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna2DppTraits>();
-  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna3DppTraits>();
-  cdna_generated_vopc_dpp_write_mask_honors_bound_ctrl<Cdna4DppTraits>();
+TEST(DppPermuteTest, CdnaVopcDppThrowsUnsupported) {
+  unsupported_cdna_vopc_dpp_throws<Cdna1DppTraits>();
+  unsupported_cdna_vopc_dpp_throws<Cdna2DppTraits>();
+  unsupported_cdna_vopc_dpp_throws<Cdna3DppTraits>();
+  unsupported_cdna_vopc_dpp_throws<Cdna4DppTraits>();
 }
 
-TEST(DppPermuteTest, CdnaGeneratedVcmpxDppWriteMaskPreservesExec) {
-  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna1DppTraits>();
-  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna2DppTraits>();
-  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna3DppTraits>();
-  cdna_generated_vcmpx_dpp_write_mask_preserves_exec<Cdna4DppTraits>();
+TEST(DppPermuteTest, Cdna4Vop1SdwaAvailabilityIsInstructionSpecific) {
+  cdna4_vop1_sdwa_availability_is_instruction_specific();
 }
 
 TEST(DppPermuteTest, RdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
@@ -3091,11 +3003,9 @@ TEST(DppPermuteTest, RdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
   wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Rdna4DppTraits>();
 }
 
-TEST(DppPermuteTest, Rdna4GeneratedVop1Dpp64PreservesMaskedDestination) {
-  generated_vop1_dpp64_preserves_masked_destination<Rdna4DppTraits>();
-}
-
-TEST(DppPermuteTest, Cdna4GeneratedVop1Dpp64PreservesMaskedDestination) {
+TEST(DppPermuteTest, CdnaGeneratedVop1Dpp64PreservesMaskedDestination) {
+  generated_vop1_dpp64_preserves_masked_destination<Cdna2DppTraits>();
+  generated_vop1_dpp64_preserves_masked_destination<Cdna3DppTraits>();
   generated_vop1_dpp64_preserves_masked_destination<Cdna4DppTraits>();
 }
 
