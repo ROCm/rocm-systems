@@ -5,7 +5,7 @@
  */
 
 // Source for oob_copyKernelCompressed.code: a valid compressed offload bundle
-// loaded by hipFatBinaryBounds.cc's false-positive guard.
+// loaded by oob_module.cc's false-positive guard.
 
 #include <hip/hip_runtime.h>
 

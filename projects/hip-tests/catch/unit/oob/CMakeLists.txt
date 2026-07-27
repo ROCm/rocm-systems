@@ -1,6 +1,5 @@
 set(TEST_SRC
-    oob_module.cc
-    hipFatBinaryBounds.cc)
+    oob_module.cc)
 
 # Only the valid code object is compiled and installed. The malformed variants
 # that exercise getElfSize's rejection paths are synthesized in-process by the
@@ -19,7 +18,7 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
 
 add_custom_target(gen_oob_kernel DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/oob_kernel.code)
 
-# Valid compressed bundle used by hipFatBinaryBounds.cc's false-positive guard.
+# Valid compressed bundle used by oob_module.cc's false-positive guard.
 # Built from a local copyKernel.cc (self-contained, no reach into unit/module).
 # All fixtures install flat into one directory (see packaging/CMakeLists.txt), so
 # the oob-prefixed name avoids colliding with module's copyKernelCompressed.code.
