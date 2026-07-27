@@ -20,9 +20,9 @@
  * THE SOFTWARE.
  */
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdlib>
-#include <unistd.h>
 
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "functional/gpu/clock/frequencies_read.h"

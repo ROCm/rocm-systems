@@ -36,18 +36,10 @@ class IGPUBackend {
  public:
   virtual ~IGPUBackend() = default;
 
-  virtual amdsmi_status_t GetAsicInfo(amdsmi_asic_info_t*) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-  virtual amdsmi_status_t GetBoardInfo(amdsmi_board_info_t*) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-  virtual amdsmi_status_t GetKfdInfo(amdsmi_kfd_info_t*) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-  virtual amdsmi_status_t GetVramInfo(amdsmi_vram_info_t*) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
+  virtual amdsmi_status_t GetAsicInfo(amdsmi_asic_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t GetBoardInfo(amdsmi_board_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t GetKfdInfo(amdsmi_kfd_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
+  virtual amdsmi_status_t GetVramInfo(amdsmi_vram_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
   virtual amdsmi_status_t GetMemoryTotal(amdsmi_memory_type_t, uint64_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
@@ -71,15 +63,11 @@ class IGPUBackend {
   virtual amdsmi_status_t GetClockInfo(amdsmi_clk_type_t, amdsmi_clk_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetPcieInfo(amdsmi_pcie_info_t*) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
+  virtual amdsmi_status_t GetPcieInfo(amdsmi_pcie_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
   virtual amdsmi_status_t GetDriverInfo(amdsmi_driver_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetVbiosInfo(amdsmi_vbios_info_t*) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
+  virtual amdsmi_status_t GetVbiosInfo(amdsmi_vbios_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
   virtual amdsmi_status_t GetProcessList(std::vector<amdsmi_proc_info_t>*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
@@ -87,9 +75,7 @@ class IGPUBackend {
   virtual amdsmi_status_t GetGpuCacheInfo(amdsmi_gpu_cache_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t GetFwInfo(amdsmi_fw_info_t*) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
+  virtual amdsmi_status_t GetFwInfo(amdsmi_fw_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
   virtual amdsmi_status_t GetGpuMetricsInfo(amdsmi_gpu_metrics_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }

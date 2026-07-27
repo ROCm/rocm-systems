@@ -150,11 +150,7 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
 
     if(ENABLE_WSL_BACKEND)
         target_compile_definitions(${_TARGET} PRIVATE ENABLE_WSL_BACKEND AMDSMI_ENABLE_WSL_BACKEND)
-        target_include_directories(
-            ${_TARGET}
-            PRIVATE
-                ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include
-        )
+        target_include_directories(${_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
     endif()
 
     target_include_directories(

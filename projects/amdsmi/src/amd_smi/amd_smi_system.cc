@@ -51,8 +51,7 @@
 #include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd::smi {
-namespace {
-}  // namespace
+namespace {}  // namespace
 
 AMDSmiSystem& AMDSmiSystem::getInstance() {
   static AMDSmiSystem instance;
@@ -415,7 +414,6 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   return AMDSMI_STATUS_SUCCESS;
 }
 
-
 static amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf_int,
                                                  AMDSmiAINICDevice::AINICInfo& ai_nic_info) {
   static_assert(sizeof(smi_nic_bus_info_t) == sizeof(ai_nic_info.bus));
@@ -716,10 +714,10 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
     if (wsl_ret != AMDSMI_STATUS_SUCCESS) return wsl_ret;
     if (!used_wsl) {
 #endif
-        rsmi_status_t ret = rsmi_shut_down();
-        if (ret != RSMI_STATUS_SUCCESS) {
-          return amd::smi::rsmi_to_amdsmi_status(ret);
-        }
+      rsmi_status_t ret = rsmi_shut_down();
+      if (ret != RSMI_STATUS_SUCCESS) {
+        return amd::smi::rsmi_to_amdsmi_status(ret);
+      }
 #ifdef ENABLE_WSL_BACKEND
     }
 #endif

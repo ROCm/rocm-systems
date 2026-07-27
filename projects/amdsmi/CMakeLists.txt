@@ -202,7 +202,6 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
-
 # Netlink libraries for network interface functionality (required)
 # TheRock RUNTIME_DEPS automatically configure PKG_CONFIG_PATH for bundled sysdeps
 
