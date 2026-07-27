@@ -18,6 +18,7 @@ from rocprof_compute_tui.utils.tui_utils import (
 from utils import file_io, parser, schema
 from utils.logger import console_error, console_log, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
+from utils.utils_common import validate_profiling_format
 
 
 class tui_analysis(OmniAnalyze_Base):
@@ -31,6 +32,7 @@ class tui_analysis(OmniAnalyze_Base):
     @demarcate
     def pre_processing(self) -> None:
         self._profiling_config = file_io.load_profiling_config(self.path)
+        validate_profiling_format(self._profiling_config)
         self._runs = self.initalize_runs()
 
         if self.args.random_port:
