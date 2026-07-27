@@ -399,7 +399,7 @@ class TailMappedImage {
 }  // namespace
 
 /**
- * Feeds guard-page-backed malformed images to the pointer load APIs and
+ * Feeds guard-page-backed malformed images to hipModuleLoadData and
  * expects hipErrorInvalidImage instead of an out-of-bounds read.
  */
 HIP_TEST_CASE(OOB_hipModuleLoadData_Negative_TruncatedImages) {
