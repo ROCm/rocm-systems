@@ -10,7 +10,7 @@ The ``ais-check`` tool reports whether the kernel, driver, runtime, and mounted 
 meet hipFile fastpath requirements. If any component is missing or if no volume qualifies, hipFile uses the fallback path
 instead.
 
-``ais-check`` located under the ``hipfile/tools`` directory and is installed in the ``bin`` directory of your ROCm installation unless hipFile was built with ``AIS_INSTALL_TOOLS=OFF``. 
+``ais-check`` is located under ``tools/ais-check`` in the hipFile source tree and is installed in the ``bin`` directory of your ROCm installation unless hipFile was built with ``AIS_INSTALL_TOOLS=OFF``.
 
 ``ais-check`` must be run as root to produce accurate information. 
 
