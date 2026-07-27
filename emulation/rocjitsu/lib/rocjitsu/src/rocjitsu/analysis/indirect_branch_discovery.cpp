@@ -177,6 +177,12 @@ struct PcValue {
   uint64_t source_getpc_offset = 0;
   uint64_t source_recovery_begin_offset = 0;
   uint64_t source_recovery_end_offset = 0;
+  /// @brief False once a non-chain instruction was observed inside the recovery
+  /// range. patch_recovered_builder_fixups NOPs the whole
+  /// [begin, end) interval as one contiguous run, so a gap instruction between
+  /// two builder steps would be erased. A value that stops being contiguous can
+  /// never regain the property, so any later delta step keeps it false.
+  bool contiguous = true;
 
   friend bool operator==(const PcValue &, const PcValue &) = default;
 };
@@ -326,6 +332,7 @@ void note_pc_builder(PcAddressBuilderMap &builders, uint16_t pair_lo, const PcVa
       .source_target_offset = value.offset,
       .source_sreg = pair_lo,
       .resolved = true,
+      .contiguous = value.contiguous,
   };
 
   auto it = builders.find(value.source_getpc_offset);
@@ -1316,10 +1323,16 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     const PcValue *value = state.builder(pair_lo);
     if (value == nullptr)
       continue;
+    // The matched idiom's first instruction must start where the recorded range
+    // ends, or an unmodeled instruction sits inside the range that the patcher
+    // would NOP-erase along with the builder. Mark the value non-contiguous so
+    // the whole-scope proof declines to rewrite that range.
+    const bool adjacent = ctx.insts[index]->src_loc() == value->source_recovery_end_offset;
     if (auto pattern = match_temp_add_pattern(ctx, index, block.last_index, pair_lo)) {
       PcValue updated = *value;
       updated.offset += pattern->delta;
       updated.source_recovery_end_offset = pattern->end_offset;
+      updated.contiguous = updated.contiguous && adjacent;
 
       for (size_t i = 0; i < pattern->instruction_count; ++i)
         invalidate_written_sgprs(ctx, index + i, state, pair_lo);
@@ -1330,6 +1343,7 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
       PcValue updated = *value;
       updated.offset += pattern->delta;
       updated.source_recovery_end_offset = pattern->end_offset;
+      updated.contiguous = updated.contiguous && adjacent;
 
       for (size_t i = 0; i < pattern->instruction_count; ++i)
         invalidate_written_sgprs(ctx, index + i, state, pair_lo);
@@ -1478,10 +1492,17 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     PcValue updated = *value;
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
+    // A builder step must start exactly where the recorded range ends. If the
+    // pair survived an instruction between the previous step and this one, that
+    // instruction sits inside [begin, end) and would be NOP-erased by
+    // patch_recovered_builder_fixups. Mark the value non-contiguous so the
+    // whole-scope proof declines to rewrite the range.
+    const bool adjacent = inst.src_loc() == updated.source_recovery_end_offset;
     if (!apply_gfx1250_add_nc_u64_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
       continue;
+    updated.contiguous = updated.contiguous && adjacent;
 
     invalidate_written_sgprs(ctx, index, state, pair_lo);
     state.set_builder(pair_lo, updated);

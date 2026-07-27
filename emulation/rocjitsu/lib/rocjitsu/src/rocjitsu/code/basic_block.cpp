@@ -230,9 +230,8 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
     const auto decoded_span =
         std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size());
     std::vector<PcAddressBuilder> pc_address_builders;
-    std::vector<IndirectCallFixup> recovered_indirect_targets =
-        discover_indirect_branch_edges(decoded_span, text, arch, extra_leaders, entry_policy,
-                                       &pc_address_builders);
+    std::vector<IndirectCallFixup> recovered_indirect_targets = discover_indirect_branch_edges(
+        decoded_span, text, arch, extra_leaders, entry_policy, &pc_address_builders);
 
     std::set<uint64_t> leaders;
     leaders.insert(decoded.front()->src_loc());

@@ -85,6 +85,13 @@ struct PcAddressBuilder {
   /// producer cannot be made relocation-correct and must clear any whole-scope
   /// relocation invariant that depends on it.
   bool resolved = false;
+  /// @brief True when [source_recovery_begin_offset, source_recovery_end_offset)
+  /// holds only the builder's own arithmetic, with no unrelated instruction
+  /// between steps. The relocation patcher rewrites that interval as one
+  /// contiguous run and NOPs the remainder, so a non-contiguous range would
+  /// erase an intervening instruction. A non-contiguous producer cannot back a
+  /// whole-scope relocation invariant even though its final value is known.
+  bool contiguous = true;
 
   friend bool operator==(const PcAddressBuilder &, const PcAddressBuilder &) = default;
 };

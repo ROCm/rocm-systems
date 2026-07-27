@@ -2352,10 +2352,10 @@ std::vector<uint32_t> make_incomplete_indirect_consumer_body(uint32_t bypass_bui
   constexpr uint32_t kInlineInt0 = 128;
 
   return {
-      pack_sopp(5, 5),                                 // 0x00: cbranch scc0 -> bypass at 0x18.
-      pack_sop1(0x1c, kPcSreg, 0),                     // 0x04: s_getpc_b64.
-      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x08: s_add_u32.
-      40,                                              // 0x0c: target delta -> 0x30.
+      pack_sopp(5, 5),                                     // 0x00: cbranch scc0 -> bypass at 0x18.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
+      40,                                                  // 0x0c: target delta -> 0x30.
       pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
       build_s_branch(5, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x2c.
       pack_sop1(0x1c, kBypassSreg, 0),                     // 0x18: bypass-path s_getpc_b64.
@@ -2402,10 +2402,10 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnOpenPcBuilderCh
   // original delta in place. The scope therefore cannot be proven free of stale
   // PC values and the incomplete consumer must keep failing closed.
   std::vector<uint32_t> words = {
-      pack_sopp(5, 5),                                 // 0x00: cbranch scc0 -> bypass at 0x18.
-      pack_sop1(0x1c, kPcSreg, 0),                     // 0x04: s_getpc_b64.
-      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x08: s_add_u32.
-      36,                                              // 0x0c: target delta -> 0x2c.
+      pack_sopp(5, 5),                                     // 0x00: cbranch scc0 -> bypass at 0x18.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
+      36,                                                  // 0x0c: target delta -> 0x2c.
       pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32 (chain closed).
       pack_sop1(0x1c, kOpenSreg, 0),                       // 0x14: bare s_getpc_b64 at block end.
       pack_sop2(0, kOpenSreg, kOpenSreg, kLiteralOperand), // 0x18: its s_add_u32, next block.
@@ -2466,8 +2466,7 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
       const uint64_t target = (i + 1) * sizeof(uint32_t) + target_words[i + 2];
       ASSERT_EQ(target % sizeof(uint32_t), 0u);
       ASSERT_LT(target / sizeof(uint32_t), word_count);
-      EXPECT_EQ(target_words[target / sizeof(uint32_t)],
-                build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3))
+      EXPECT_EQ(target_words[target / sizeof(uint32_t)], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3))
           << "builder for s[" << pc_sreg << ":" << pc_sreg + 1
           << "] was not rewritten to its relocated target";
     }
@@ -2482,6 +2481,104 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
             target_words + word_count)
       << "an incomplete consumer must keep its dynamic transfer, not become a direct window";
 }
+
+TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnNonContiguousBuilderRange) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kBypassSreg = 10;
+  constexpr uint16_t kUnrelatedSreg = 20;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // The bypass builder in s[10:11] targets the relocatable block start at 0x34,
+  // so on its own it would satisfy the whole-scope proof. But an unrelated
+  // s_mov_b32 sits between its s_add_u32 and s_addc_u32: the pair survives that
+  // move (it writes s20, not the pair), so the recovered builder range spans it.
+  // patch_recovered_builder_fixups NOPs the whole range, which would erase the
+  // move. The proof must fail closed on the non-contiguous range, keeping the
+  // incomplete consumer's original refusal and leaving the object unchanged.
+  std::vector<uint32_t> words = {
+      pack_sopp(5, 6),                                     // 0x00: cbranch scc0 -> bypass at 0x1c.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
+      44,                                                  // 0x0c: target delta -> 0x34.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      build_s_branch(6, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x30.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: padding before bypass.
+      pack_sop1(0x1c, kBypassSreg, 0),                     // 0x1c: bypass s_getpc_b64.
+      pack_sop2(0, kBypassSreg, kBypassSreg, kLiteralOperand), // 0x20: s_add_u32.
+      20,                                                      // 0x24: -> 0x20 + 20 = 0x34.
+      build_s_mov_b32(kUnrelatedSreg, 0,
+                      ROCJITSU_CODE_ARCH_CDNA4), // 0x28: unrelated write, in range.
+      pack_sop2(4, kBypassSreg + 1, kBypassSreg + 1, kInlineInt0), // 0x2c: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                                 // 0x30: joined consumer setpc.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                    // 0x34: builder target.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  ASSERT_FALSE(result.diagnostics.empty());
+  EXPECT_NE(result.diagnostics.front().message.find("unconstrained predecessor path"),
+            std::string::npos)
+      << result.diagnostics.front().message;
+  EXPECT_EQ(result.elf_bytes, image)
+      << "a non-contiguous builder range must fail closed, preserving the unrelated instruction";
+}
+
+TEST(BinaryTranslatorE2E, IncompleteConsumerFailsClosedAtKernargPreloadFirmwareEntry) {
+  // The same incomplete-consumer body that translates when rooted at the ordinary
+  // kernel entry (IncompleteIndirectConsumerTranslatesWhenScopeHasNoStalePcValues)
+  // must instead fail closed when its scope root is the kernarg-preload firmware
+  // entry (descriptor entry + 256). Before that entry runs, the command processor
+  // copies caller-controlled kernarg words into user SGPRs, so the pair the
+  // consumer reads on its unconstrained path can hold an original .text pointer
+  // that no in-scope builder or relocation rewrites. The entry-state gate must not
+  // treat the +256 entry as a safe root.
+  constexpr size_t kPreloadEntryWord = kKernargPreloadSkipBytes / sizeof(uint32_t);
+
+  // Descriptor entry (word 0) is a trivial ordinary path. The incomplete-consumer
+  // body is placed at the +256 preload firmware entry, so it is reachable only
+  // from that root.
+  std::vector<uint32_t> words(kPreloadEntryWord, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  words[0] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto body = make_incomplete_indirect_consumer_body(0x14);
+  words.insert(words.end(), body.begin(), body.end());
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  enable_workgroup_id_x_sgpr(image);
+
+  rocjitsu::AmdGpuCodeObject source_layout(image.data(), image.size());
+  ASSERT_TRUE(source_layout.is_valid());
+  const auto *source_rodata = find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+  auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  ASSERT_FALSE(result.diagnostics.empty());
+  EXPECT_NE(result.diagnostics.front().message.find("unconstrained predecessor path"),
+            std::string::npos)
+      << result.diagnostics.front().message;
+  EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
+}
+
+// The external-entry soundness gate (rejecting relocation-table-dispatched
+// callees as unconstrained roots) is unit-tested directly in
+// analysis/liveness_test.cpp (BinaryTranslatorInternal.ScopeRootsReject
+// RelocationTableCallee): reaching its rejecting branch end-to-end would require
+// a descriptor-bearing relocation-table dispatch fixture, whereas the pure gate
+// exercises both the accept and reject paths precisely. The entry-state ACCEPT
+// path is already covered end-to-end by
+// IncompleteIndirectConsumerTranslatesWhenScopeHasNoStalePcValues above.
 
 } // namespace
 } // namespace rocjitsu
