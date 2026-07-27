@@ -142,10 +142,14 @@ def test_execution_contexts(context_rows, context_json, context_pftrace):
     assert len({row["Thread_Id"] for row in application_rows}) >= 2
     assert "iteration" in {row["Kernel_Name"] for row in application_rows}
 
-    gpu_agents = [
-        agent for agent in _tool_data(context_json)["agents"] if int(agent["type"]) == 2
+    visible_gpu_agents = [
+        agent
+        for agent in _tool_data(context_json)["agents"]
+        if int(agent["type"]) == 2
+        and agent["runtime_visibility"]["hsa"]
+        and agent["runtime_visibility"]["hip"]
     ]
-    if len(gpu_agents) >= 2:
+    if len(visible_gpu_agents) >= 2:
         assert len({row["Agent_Id"] for row in application_rows}) >= 2
 
     pftrace = Path(context_pftrace)
