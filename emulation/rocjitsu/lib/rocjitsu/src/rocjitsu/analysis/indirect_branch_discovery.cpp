@@ -1829,7 +1829,7 @@ struct VectorLaneFlowState {
   return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
 }
 
-void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
+void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
                                      std::vector<IndirectCallFixup> &recovered,
                                      std::span<const uint64_t> extra_leaders,
                                      ExternalEntryPolicy entry_policy) {
@@ -1858,7 +1858,6 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
     return;
 
-  const std::vector<AnalysisBlock> blocks = build_analysis_blocks(ctx, extra_leaders);
   if (blocks.empty())
     return;
   const std::vector<uint8_t> external_entries = explicit_external_entries(blocks, extra_leaders);
@@ -2222,7 +2221,6 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
   std::vector<IndirectCallFixup> recovered;
   AnalysisContext ctx = build_context(insts, text, arch);
-  recover_vector_lane_stashed_pcs(ctx, recovered, extra_leaders, entry_policy);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
 
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
@@ -2233,22 +2231,26 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 
     std::vector<PendingConsumer> pending_consumers;
     std::vector<IndirectCallFixup> iteration_recovered;
+    // Lane-stash recovery consumes the same graph as scalar recovery, including
+    // edges proven in earlier rounds. Keep extra_leaders separate from leaders:
+    // recovered targets become reachable through those edges, not by being
+    // promoted to external roots.
+    recover_vector_lane_stashed_pcs(ctx, blocks, iteration_recovered, extra_leaders, entry_policy);
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
       scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered);
     recover_signed_delta_templates(ctx, blocks, iteration_recovered);
 
-    size_t unresolved_consumers = 0;
     if (!pending_consumers.empty()) {
       const auto entry_facts =
           run_block_dataflow(blocks, pending_consumers, extra_leaders, entry_policy);
-      unresolved_consumers = classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
-                                                        iteration_recovered);
+      (void)classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
+                                       iteration_recovered);
     }
 
     bool changed = false;
     for (const IndirectCallFixup &fixup : iteration_recovered)
       changed |= append_unique(recovered, fixup);
-    if (!changed || unresolved_consumers == 0)
+    if (!changed)
       break;
   }
 

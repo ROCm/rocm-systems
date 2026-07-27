@@ -1400,6 +1400,54 @@ TEST(CfgAnalysis, Gfx1250UnreachablePostRocrAbortBlockDoesNotPoisonLaneStash) {
   EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 72u);
 }
 
+TEST(CfgAnalysis, Gfx1250ExplicitOnlyRecoversLaneStashInRecoveredCallee) {
+  // The kernel root first makes a scalar-recoverable call to the helper at
+  // 0x18. The helper is not an explicit entry and has no direct predecessor;
+  // it becomes reachable only after the outer call edge is recovered. Once
+  // reachable, its lane-stashed call to 0x58 must participate in the next
+  // discovery iteration.
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      20u,
+      0u,          // 0x04: s_add_nc_u64 ..., lit64(20) -> helper 0x18.
+      0xBE9E4900u, // 0x10: outer s_swap_pc_i64 -> 0x18.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x14: outer continuation.
+      0xBE804700u,                                // 0x18: helper s_get_pc_i64.
+      0xA980FE00u,
+      60u,
+      0u, // 0x1c: s_add_nc_u64 ..., lit64(60) -> target 0x58.
+      0xD761002Cu,
+      0x02010000u, // 0x28: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x30: v_writelane_b32 v44, s1, 1.
+      0xD7600000u,
+      0x0201012Cu, // 0x38: v_readlane_b32 s0, v44, 0.
+      0xD7600001u,
+      0x0201032Cu,                                // 0x40: lane 1 -> s1.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x48: padding.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x4c: padding.
+      0xBE9E4900u,                                // 0x50: inner call -> 0x58.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x54: inner continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x58: inner target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, {},
+                                  ExternalEntryPolicy::ExplicitOnly);
+
+  auto *outer_consumer = block_starting_at(blocks, 16);
+  auto *inner_consumer = block_starting_at(blocks, 80);
+  ASSERT_NE(outer_consumer, nullptr);
+  ASSERT_NE(inner_consumer, nullptr);
+  ASSERT_EQ(outer_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(outer_consumer->static_indirect_call_fixups()[0].source_target_offset, 24u);
+  ASSERT_EQ(inner_consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(inner_consumer->static_indirect_call_fixups()[0].source_target_offset, 88u);
+}
+
 TEST(CfgAnalysis, Gfx1250DirectCallKillsCarriedLaneStash) {
   // The stash lives in v48, a CALLER-saved VGPR under CSR_AMDGPU_VGPRs, so a
   // call is not proven to preserve it and the continuation must not recover a
