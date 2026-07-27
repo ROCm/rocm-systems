@@ -175,12 +175,6 @@ jobs:
             # load-sensitive at the TSan job's CI-level parallelism.
             "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"
           )
-          TSAN_SHARED_EXCLUDED_TESTS=(
-            # With the shared TSan runtime, the nested HIP process repeatedly
-            # returns EPERM from process_vm_readv and the test times out. A
-            # local static TSan configuration runs this test successfully.
-            "RocjitsuCliDaemon\.LaunchesApplicationAfterDaemonIsReady"
-          )
 
           TEST_REGEX="${{ matrix.test_regex }}"
           CMAKE_CONFIG_FLAGS=()
@@ -193,9 +187,6 @@ jobs:
           fi
           if [[ "${{ matrix.enable_tsan }}" == "1" ]]; then
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_EXCLUDED_TESTS[*]}")"
-            if [[ "${{ matrix.sanitizer_runtime }}" == "SHARED" ]]; then
-              EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_SHARED_EXCLUDED_TESTS[*]}")"
-            fi
           fi
           if [[ -n "${{ matrix.c_compiler }}" ]]; then
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
