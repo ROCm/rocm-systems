@@ -353,7 +353,7 @@ reader_t::impl::get_tracks()
             }
 
             auto track_info_ptr     = std::make_shared<reader_types::track_info_t>();
-            track_info_ptr->id      = track_info.id;
+            track_info_ptr->id      = reader_types::track_id_t{ track_info.id };
             track_info_ptr->name    = track_name != nullptr ? track_name : "";
             track_info_ptr->extdata = track_info.extdata;
             track_info_ptr->type    = reader_types::track_type_t::counter;
@@ -449,7 +449,7 @@ reader_t::impl::synthesize_derived_tracks()
     for(const auto& g : m_read_statements->distinct_gpu_queue_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id   = next_id++;
+        track_info_ptr->id   = reader_types::track_id_t{ next_id++ };
         track_info_ptr->type = reader_types::track_type_t::gpu_queue;
 
         auto node_it = m_node_info_utility.find(g.nid);
@@ -480,7 +480,7 @@ reader_t::impl::synthesize_derived_tracks()
         }
 
         m_track_info_list.push_back(track_info_ptr);
-        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id.value, track_info_ptr);
 
         track_query_info_t qi;
         qi.type     = reader_types::track_type_t::gpu_queue;
@@ -488,7 +488,7 @@ reader_t::impl::synthesize_derived_tracks()
         qi.pid      = g.pid;
         qi.agent_id = g.agent_id;
         qi.queue_id = g.queue_id;
-        m_track_query_info.emplace(track_info_ptr->id, qi);
+        m_track_query_info.emplace(track_info_ptr->id.value, qi);
     }
 
     // dma: one track per distinct (nid, pid, queue_id, dst_agent_id); NULL is a distinct
@@ -499,7 +499,7 @@ reader_t::impl::synthesize_derived_tracks()
     for(const auto& d : m_read_statements->distinct_dma_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id   = next_id++;
+        track_info_ptr->id   = reader_types::track_id_t{ next_id++ };
         track_info_ptr->type = reader_types::track_type_t::dma;
 
         auto node_it = m_node_info_utility.find(d.nid);
@@ -525,7 +525,7 @@ reader_t::impl::synthesize_derived_tracks()
         track_info_ptr->name = "Memory copy";
 
         m_track_info_list.push_back(track_info_ptr);
-        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id.value, track_info_ptr);
 
         track_query_info_t qi;
         qi.type     = reader_types::track_type_t::dma;
@@ -533,7 +533,7 @@ reader_t::impl::synthesize_derived_tracks()
         qi.pid      = d.pid;
         qi.queue_id = d.queue_id;
         qi.agent_id = d.dst_agent_id;
-        m_track_query_info.emplace(track_info_ptr->id, qi);
+        m_track_query_info.emplace(track_info_ptr->id.value, qi);
     }
 
     // memory: one track per distinct (nid, agent_id, queue_id, pid) in
@@ -543,7 +543,7 @@ reader_t::impl::synthesize_derived_tracks()
     for(const auto& m : m_read_statements->distinct_memory_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id   = next_id++;
+        track_info_ptr->id   = reader_types::track_id_t{ next_id++ };
         track_info_ptr->type = reader_types::track_type_t::memory;
 
         auto node_it = m_node_info_utility.find(m.nid);
@@ -577,7 +577,7 @@ reader_t::impl::synthesize_derived_tracks()
         track_info_ptr->name = "Memory allocation";
 
         m_track_info_list.push_back(track_info_ptr);
-        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id.value, track_info_ptr);
 
         track_query_info_t qi;
         qi.type     = reader_types::track_type_t::memory;
@@ -585,7 +585,7 @@ reader_t::impl::synthesize_derived_tracks()
         qi.pid      = m.pid;
         qi.agent_id = m.agent_id;
         qi.queue_id = m.queue_id;
-        m_track_query_info.emplace(track_info_ptr->id, qi);
+        m_track_query_info.emplace(track_info_ptr->id.value, qi);
     }
 
     // kernel_dispatch_pmc: one track per distinct (nid, agent_id, pmc_id, pid) from
@@ -595,7 +595,7 @@ reader_t::impl::synthesize_derived_tracks()
     for(const auto& k : m_read_statements->distinct_kd_pmc_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id   = next_id++;
+        track_info_ptr->id   = reader_types::track_id_t{ next_id++ };
         track_info_ptr->type = reader_types::track_type_t::kernel_dispatch_pmc;
 
         auto node_it = m_node_info_utility.find(k.nid);
@@ -624,7 +624,7 @@ reader_t::impl::synthesize_derived_tracks()
         track_info_ptr->name = "Kernel dispatch PMC";
 
         m_track_info_list.push_back(track_info_ptr);
-        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id.value, track_info_ptr);
 
         track_query_info_t qi;
         qi.type     = reader_types::track_type_t::kernel_dispatch_pmc;
@@ -632,7 +632,7 @@ reader_t::impl::synthesize_derived_tracks()
         qi.pid      = k.pid;
         qi.agent_id = k.agent_id;
         qi.pmc_id   = k.pmc_id;
-        m_track_query_info.emplace(track_info_ptr->id, qi);
+        m_track_query_info.emplace(track_info_ptr->id.value, qi);
     }
 
     // memory_activity: one scalar track per distinct (nid, pid, agent_id) from
@@ -645,7 +645,7 @@ reader_t::impl::synthesize_derived_tracks()
         if(!ma.agent_id.has_value()) continue;
 
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id   = next_id++;
+        track_info_ptr->id   = reader_types::track_id_t{ next_id++ };
         track_info_ptr->type = reader_types::track_type_t::memory_activity;
 
         auto node_it = m_node_info_utility.find(ma.nid);
@@ -670,14 +670,14 @@ reader_t::impl::synthesize_derived_tracks()
         track_info_ptr->name = "Memory activity";
 
         m_track_info_list.push_back(track_info_ptr);
-        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id.value, track_info_ptr);
 
         track_query_info_t qi;
         qi.type     = reader_types::track_type_t::memory_activity;
         qi.nid      = ma.nid;
         qi.pid      = ma.pid;
         qi.agent_id = ma.agent_id;
-        m_track_query_info.emplace(track_info_ptr->id, qi);
+        m_track_query_info.emplace(track_info_ptr->id.value, qi);
     }
 
     // stream: one track per distinct (nid, pid, stream_id), aggregating kernel_dispatch +
@@ -687,7 +687,7 @@ reader_t::impl::synthesize_derived_tracks()
     for(const auto& s : m_read_statements->distinct_stream_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id   = next_id++;
+        track_info_ptr->id   = reader_types::track_id_t{ next_id++ };
         track_info_ptr->type = reader_types::track_type_t::stream;
 
         auto node_it = m_node_info_utility.find(s.nid);
@@ -717,14 +717,14 @@ reader_t::impl::synthesize_derived_tracks()
         }
 
         m_track_info_list.push_back(track_info_ptr);
-        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id.value, track_info_ptr);
 
         track_query_info_t qi;
         qi.type      = reader_types::track_type_t::stream;
         qi.nid       = s.nid;
         qi.pid       = s.pid;
         qi.stream_id = s.stream_id;
-        m_track_query_info.emplace(track_info_ptr->id, qi);
+        m_track_query_info.emplace(track_info_ptr->id.value, qi);
     }
 
     // cpu_thread: one track per distinct (nid, pid, tid, is_sample) in rocpd_region.
@@ -735,7 +735,7 @@ reader_t::impl::synthesize_derived_tracks()
         const bool is_sample = r.is_sample != 0;
 
         auto track_info_ptr         = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id          = next_id++;
+        track_info_ptr->id          = reader_types::track_id_t{ next_id++ };
         track_info_ptr->type        = reader_types::track_type_t::cpu_thread;
         track_info_ptr->region_kind = is_sample
                                           ? reader_types::region_track_kind_t::sample
@@ -775,7 +775,7 @@ reader_t::impl::synthesize_derived_tracks()
         track_info_ptr->name = is_sample ? base_name + " (samples)" : base_name;
 
         m_track_info_list.push_back(track_info_ptr);
-        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id.value, track_info_ptr);
 
         // Topology registration so get_events_for_track() resolves this thread's
         // timeline events by (nid, pid, tid). db_id is the synthetic id: it can never
@@ -784,7 +784,7 @@ reader_t::impl::synthesize_derived_tracks()
         topology_key_t topo{ r.nid, r.pid, r.tid };
         m_track_ptr_to_topology.emplace(track_info_ptr, topo);
         m_topology_to_track_ptr.emplace(topo, track_info_ptr);
-        m_track_ptr_to_db_id.emplace(track_info_ptr, track_info_ptr->id);
+        m_track_ptr_to_db_id.emplace(track_info_ptr, track_info_ptr->id.value);
 
         track_query_info_t qi;
         qi.type             = reader_types::track_type_t::cpu_thread;
@@ -792,7 +792,7 @@ reader_t::impl::synthesize_derived_tracks()
         qi.pid              = r.pid;
         qi.tid              = r.tid;
         qi.region_is_sample = is_sample;
-        m_track_query_info.emplace(track_info_ptr->id, qi);
+        m_track_query_info.emplace(track_info_ptr->id.value, qi);
     }
 }
 
@@ -854,7 +854,7 @@ reader_t::impl::build_v4_tracks()
     for(const auto& track_info : track_info_list)
     {
         auto track_info_ptr     = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id      = track_info.id;
+        track_info_ptr->id      = reader_types::track_id_t{ track_info.id };
         track_info_ptr->extdata = track_info.extdata;
 
         // Resolve the rocpd_track name_id to a display name up front.
@@ -1024,7 +1024,7 @@ reader_t::impl::build_v4_tracks()
     for(const auto& s : m_read_statements->distinct_stream_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id   = next_id++;
+        track_info_ptr->id   = reader_types::track_id_t{ next_id++ };
         track_info_ptr->type = reader_types::track_type_t::stream;
 
         auto node_it = m_node_info_utility.find(s.nid);
@@ -1054,14 +1054,14 @@ reader_t::impl::build_v4_tracks()
         }
 
         m_track_info_list.push_back(track_info_ptr);
-        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id.value, track_info_ptr);
 
         track_query_info_t qi;
         qi.type      = reader_types::track_type_t::stream;
         qi.nid       = s.nid;
         qi.pid       = s.pid;
         qi.stream_id = s.stream_id;
-        m_track_query_info.emplace(track_info_ptr->id, qi);
+        m_track_query_info.emplace(track_info_ptr->id.value, qi);
     }
 
     // kernel_dispatch_pmc: one track per distinct (nid, agent_id, pmc_id, pid) from
@@ -1073,7 +1073,7 @@ reader_t::impl::build_v4_tracks()
     for(const auto& k : m_read_statements->distinct_kd_pmc_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id   = next_id++;
+        track_info_ptr->id   = reader_types::track_id_t{ next_id++ };
         track_info_ptr->type = reader_types::track_type_t::kernel_dispatch_pmc;
 
         auto node_it = m_node_info_utility.find(k.nid);
@@ -1100,7 +1100,7 @@ reader_t::impl::build_v4_tracks()
         track_info_ptr->name = "Kernel dispatch PMC";
 
         m_track_info_list.push_back(track_info_ptr);
-        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id.value, track_info_ptr);
 
         track_query_info_t qi;
         qi.type     = reader_types::track_type_t::kernel_dispatch_pmc;
@@ -1108,7 +1108,7 @@ reader_t::impl::build_v4_tracks()
         qi.pid      = k.pid;
         qi.agent_id = k.agent_id;
         qi.pmc_id   = k.pmc_id;
-        m_track_query_info.emplace(track_info_ptr->id, qi);
+        m_track_query_info.emplace(track_info_ptr->id.value, qi);
     }
 
     // memory_activity: one scalar track per distinct (nid, pid, agent_id) from
@@ -1118,7 +1118,7 @@ reader_t::impl::build_v4_tracks()
         if(!ma.agent_id.has_value()) continue;
 
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id   = next_id++;
+        track_info_ptr->id   = reader_types::track_id_t{ next_id++ };
         track_info_ptr->type = reader_types::track_type_t::memory_activity;
 
         auto node_it = m_node_info_utility.find(ma.nid);
@@ -1143,14 +1143,14 @@ reader_t::impl::build_v4_tracks()
         track_info_ptr->name = "Memory activity";
 
         m_track_info_list.push_back(track_info_ptr);
-        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id.value, track_info_ptr);
 
         track_query_info_t qi;
         qi.type     = reader_types::track_type_t::memory_activity;
         qi.nid      = ma.nid;
         qi.pid      = ma.pid;
         qi.agent_id = ma.agent_id;
-        m_track_query_info.emplace(track_info_ptr->id, qi);
+        m_track_query_info.emplace(track_info_ptr->id.value, qi);
     }
 }
 
@@ -3033,7 +3033,7 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
             case reader_types::track_type_t::memory_activity: continue;  // scalar-only
             default: break;
         }
-        for(const auto& ev : get_interval_track(t->id, {}))
+        for(const auto& ev : get_interval_track(t->id.value, {}))
         {
             auto& g = geom[ev.id];
             if(!g.seen)
@@ -3043,7 +3043,7 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
                 g.seen  = true;
             }
             on_tracks[ev.id].push_back(
-                t->id);  // multi-track: kd is on gpu_queue + pmc + stream
+                t->id.value);  // multi-track: kd is on gpu_queue + pmc + stream
         }
     }
 

@@ -22,6 +22,23 @@ namespace profiler_hub::reader_types
 
 using timestamp_t = size_t;
 
+/// Opaque track identifier. Treat as opaque: the only portable operations are equality,
+/// ordering, hashing (so it can key a map), and reading value() — i.e. the public `value`
+/// member — to serialize/reconstruct it. The integer is a ProfilerHub-private DB identity;
+/// do not synthesize or do arithmetic on it. (Spec §3: struct track_id_t{value}.)
+/// DESIGN DECISION (deviation, 2026-07-27): the underlying integer is size_t, not the
+/// spec's uint32_t, so real DB ids cannot truncate and the consumer's SIZE_MAX invalid
+/// sentinel survives round-trips. Deliberately UNLIKE event_id_t/flow_id_t (which fully
+/// hide their value): a track id is a stable DB identity the consumer must serialize, so
+/// the integer stays publicly reachable.
+struct track_id_t
+{
+    size_t value{};
+    bool operator==(const track_id_t& o) const noexcept { return value == o.value; }
+    bool operator!=(const track_id_t& o) const noexcept { return value != o.value; }
+    bool operator<(const track_id_t& o) const noexcept { return value < o.value; }
+};
+
 enum class event_kind_t
 {
     region,  ///< Has start and end, displayed as bar/span
@@ -384,7 +401,7 @@ enum class nesting_model_t
 
 struct track_info_t
 {
-    size_t
+    track_id_t
         id{};  ///< Track identifier. Pass to get_interval_track()/get_scalar_track().
                ///< Opaque and stable for the reader's lifetime; never a topology tuple.
     track_type_t type{};  ///< Determines which identity fields below are populated and
@@ -912,6 +929,15 @@ struct hash<profiler_hub::reader_types::flow_id_t>
     {
         namespace rt = profiler_hub::reader_types;
         return std::hash<uint64_t>{}(rt::detail::flow_id_access::value(h));
+    }
+};
+
+template <>
+struct hash<profiler_hub::reader_types::track_id_t>
+{
+    size_t operator()(const profiler_hub::reader_types::track_id_t& h) const noexcept
+    {
+        return std::hash<size_t>{}(h.value);
     }
 };
 }  // namespace std

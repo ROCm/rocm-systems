@@ -97,23 +97,23 @@ reader_t::get_event_count(const reader_types::event_filter_t& filter) const
 }
 
 reader_types::interval_entry_list_t
-reader_t::get_interval_track(size_t                              track_id,
+reader_t::get_interval_track(reader_types::track_id_t            track_id,
                              const reader_types::event_filter_t& filter) const
 {
-    return m_impl->get_interval_track(track_id, filter);
+    return m_impl->get_interval_track(track_id.value, filter);
 }
 
 reader_types::scalar_sample_list_t
-reader_t::get_scalar_track(size_t                              track_id,
+reader_t::get_scalar_track(reader_types::track_id_t            track_id,
                            const reader_types::event_filter_t& filter) const
 {
-    return m_impl->get_scalar_track(track_id, filter);
+    return m_impl->get_scalar_track(track_id.value, filter);
 }
 
 reader_types::track_stats_t
-reader_t::get_track_stats(size_t track_id) const
+reader_t::get_track_stats(reader_types::track_id_t track_id) const
 {
-    return m_impl->get_track_stats(track_id);
+    return m_impl->get_track_stats(track_id.value);
 }
 
 reader_types::flow_list_t

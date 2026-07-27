@@ -220,7 +220,7 @@ struct reader_t
      *         scalar-only.
      */
     [[nodiscard]] reader_types::interval_entry_list_t get_interval_track(
-        size_t                              track_id,
+        reader_types::track_id_t            track_id,
         const reader_types::event_filter_t& filter = {}) const;
 
     /**
@@ -234,7 +234,7 @@ struct reader_t
      *         error) if track_id is unknown or interval-only.
      */
     [[nodiscard]] reader_types::scalar_sample_list_t get_scalar_track(
-        size_t                              track_id,
+        reader_types::track_id_t            track_id,
         const reader_types::event_filter_t& filter = {}) const;
 
     /**
@@ -246,7 +246,8 @@ struct reader_t
      *         track has no events.
      * @note Cheap enough to call per-track at discovery; does not materialize event rows.
      */
-    [[nodiscard]] reader_types::track_stats_t get_track_stats(size_t track_id) const;
+    [[nodiscard]] reader_types::track_stats_t get_track_stats(
+        reader_types::track_id_t track_id) const;
 
     /**
      * @brief Get all causal links between events across all tracks (post-hoc pass)
