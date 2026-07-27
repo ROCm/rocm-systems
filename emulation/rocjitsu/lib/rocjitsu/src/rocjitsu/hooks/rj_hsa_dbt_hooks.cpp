@@ -3937,9 +3937,19 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
-                              translator_options);
-  rocjitsu::TranslatedCodeObject translated = translator.translate(source_object);
+  rocjitsu::TranslatedCodeObject translated;
+  try {
+    BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
+                                translator_options);
+    translated = translator.translate(source_object);
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "[rocjitsu-hooks] code-object translation threw an exception: %s\n",
+                 error.what());
+    return HSA_STATUS_ERROR;
+  } catch (...) {
+    std::fprintf(stderr, "[rocjitsu-hooks] code-object translation threw an unknown exception\n");
+    return HSA_STATUS_ERROR;
+  }
 
   print_diagnostics(stderr, translated.diagnostics, config->log_level > kLogDisabled);
   if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {

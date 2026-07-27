@@ -6,6 +6,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 7.15.0
 
+### Changed
+
+- **Restructured AMD SMI C++ tests into unit and functional suites**.  
+  - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
+  - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
+  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
+  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
+
 ### Fixed
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.
@@ -102,6 +110,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Reworked Python package install layout for system packages and pip wheels**.
+  - System `.deb` / `.rpm` packages no longer run `pip install` during postinst; the `amdsmi` Python package is installed directly into the default system Python's `site-packages`/`dist-packages` (detected from the distro-default interpreter) as part of the package payload, so plain `import amdsmi` works after `apt install` / `dnf install`. Removing the package removes those files. `pip list` will no longer show `amdsmi` for the system package.
+  - The module is additionally staged under `share/amd_smi` (its historical location) for consumers that resolve it via `ROCM_PATH/share/amd_smi` rather than `site-packages` (e.g. rocprofiler-compute, omnistat) and for the TheRock artifact layout, whose manifest captures `share/amd_smi` but not the interpreter's `site-packages`. `site-packages` remains the primary importable location.
+  - Added new CMake option `-DBUILD_PYTHON_WHEEL=ON` (default `OFF`) which builds the standalone Python wheel and an isolated `libamd_smi_python.so` (distinct SONAME) bundled inside it, so the wheel-shipped library can coexist in-process with the system `libamd_smi.so` without symbol collisions. With `-DBUILD_PYTHON_WHEEL=OFF` (the default used by ROCm CI) only the system-package layout is built; no wheel artifact is produced.
+  - `py-interface/amdsmi_wrapper.py` now loads the shared library in this order: the `AMDSMI_LIB_OVERRIDE` env var (development / ABI-test escape hatch), a `libamd_smi_python.so` bundled next to the wrapper (pip wheel), then the system `libamd_smi.so` via the dynamic linker. A `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable, so import-time tooling (docs, lint) still works without a runtime library.
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
   - Human-readable output is unchanged, since it uppercases all keys.
