@@ -641,6 +641,16 @@ TEST(ConfigLoaderTest, RoundTripsRuntimeConfigHandoff) {
   EXPECT_EQ(*parsed->resolved_gpu_id, "28851");
 }
 
+TEST(ConfigLoaderTest, RejectsUnresolvedAutomaticDbtHandoffWrite) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-unresolved-");
+  ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  config::DbtGuestConfig dbt;
+  dbt.enabled = true;
+
+  EXPECT_FALSE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+  EXPECT_FALSE(std::filesystem::exists(rocjitsu::rpc_invocation_config_file_path(getpid())));
+}
+
 TEST(ConfigLoaderTest, RuntimeConfigHandoffReportsDirectoryCreationFailure) {
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-write-failure-");
   const std::filesystem::path blocked_root = std::filesystem::path(runtime.path()) / "blocked";

@@ -97,7 +97,8 @@ std::optional<std::string> read_active_config_json() {
 }
 
 bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
-                               uint32_t lds_size_kb, std::string_view external_host_config = {}) {
+                               uint32_t lds_size_kb, std::string_view external_host_config = {},
+                               bool include_resolved_gpu_id = true) {
   const auto dir = config_handoff_dir();
   if (!dir)
     return false;
@@ -151,6 +152,8 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
     if (!active_config)
       return false;
     active_config << config_path.string() << '\n';
+    if (include_resolved_gpu_id)
+      active_config << "50148\n";
     return active_config.good();
   } catch (const std::filesystem::filesystem_error &) {
     return false;
@@ -454,6 +457,19 @@ TEST(GuestKfdFailureTest, SimulatorOversizedLdsFailsCleanly) {
   const auto simulator_json = read_active_config_json();
   ASSERT_TRUE(simulator_json.has_value());
   ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx942", 65));
+
+  errno = 0;
+  const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  EXPECT_EQ(fd, -1);
+  EXPECT_EQ(errno, ENODEV);
+  if (fd >= 0)
+    close(fd);
+}
+
+TEST(GuestKfdFailureTest, PathOnlyAutomaticDbtHandoffFailsClosed) {
+  const auto simulator_json = read_active_config_json();
+  ASSERT_TRUE(simulator_json.has_value());
+  ASSERT_TRUE(install_inline_dbt_config(*simulator_json, "gfx942", 64, {}, false));
 
   errno = 0;
   const int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);

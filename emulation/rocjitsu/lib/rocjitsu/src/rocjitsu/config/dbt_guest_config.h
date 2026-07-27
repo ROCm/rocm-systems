@@ -113,13 +113,17 @@ void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view val
                                     std::string_view source);
 
 /// @brief Atomically write the per-invocation runtime config handoff.
-/// @returns false when the handoff cannot be written or published.
+/// @returns false when enabled DBT lacks a resolved host GPU or the handoff cannot be published.
 bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
                                       pid_t pid);
 
 /// @brief Parse the config path and optional resolved GPU ID from a runtime handoff.
 /// @returns std::nullopt when the first line does not contain a config path.
 std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::string_view contents);
+
+/// @brief Load and validate the DBT guest config referenced by a runtime handoff.
+/// @throws std::runtime_error when automatic DBT host selection lacks a resolved GPU ID.
+DbtGuestConfig load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff);
 
 /// @brief Load only dbt_guest from the rocjitsu child-process runtime config file.
 ///

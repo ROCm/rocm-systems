@@ -1199,10 +1199,7 @@ public:
       }
 
       try {
-        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(handoff->config_path);
-        if (handoff->resolved_gpu_id)
-          rocjitsu::config::apply_resolved_dbt_host_gpu_id(dbt_guest, *handoff->resolved_gpu_id,
-                                                           "runtime config handoff");
+        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff);
         if (dbt_guest.enabled) {
           LinuxKfd *execution_driver = nullptr;
           const bool simulator_backend =

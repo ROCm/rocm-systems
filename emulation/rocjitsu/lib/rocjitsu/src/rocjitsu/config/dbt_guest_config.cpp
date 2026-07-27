@@ -167,6 +167,9 @@ void apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_view val
 
 bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
                                       pid_t pid) {
+  if (config.enabled && config.host.gpu_id == 0)
+    return false;
+
   const std::string handoff_file = rpc_invocation_config_file_path(pid);
   std::error_code directory_error;
   std::filesystem::create_directories(std::filesystem::path(handoff_file).parent_path(),
@@ -212,6 +215,17 @@ std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::str
   return DbtRuntimeConfigHandoff{std::string(config_path), std::move(resolved_gpu_id)};
 }
 
+DbtGuestConfig load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff) {
+  DbtGuestConfig config = load_dbt_guest_config_from_file(handoff.config_path);
+  if (handoff.resolved_gpu_id) {
+    apply_resolved_dbt_host_gpu_id(config, *handoff.resolved_gpu_id, "runtime config handoff");
+  } else if (config.enabled && config.host.gpu_id == 0) {
+    throw std::runtime_error("runtime config handoff must contain a resolved KFD gpu_id for "
+                             "automatic DBT host selection");
+  }
+  return config;
+}
+
 std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
   // Try the handoff tiers in priority order, opening the first that exists:
   //   1. $ROCJITSU_INVOCATION_DIR/config_path — the launcher exports this dir before
@@ -243,14 +257,7 @@ std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
   std::optional<DbtRuntimeConfigHandoff> handoff = parse_dbt_runtime_config_handoff(contents);
   if (!handoff)
     return std::nullopt;
-  DbtGuestConfig config = load_dbt_guest_config_from_file(handoff->config_path);
-  if (handoff->resolved_gpu_id) {
-    apply_resolved_dbt_host_gpu_id(config, *handoff->resolved_gpu_id, "runtime config handoff");
-  } else if (config.enabled && config.host.gpu_id == 0) {
-    throw std::runtime_error("runtime config handoff must contain a resolved KFD gpu_id for "
-                             "automatic DBT host selection");
-  }
-  return config;
+  return load_dbt_guest_config_from_handoff(*handoff);
 }
 
 } // namespace config

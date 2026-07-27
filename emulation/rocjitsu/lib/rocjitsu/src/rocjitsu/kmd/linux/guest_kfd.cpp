@@ -206,6 +206,31 @@ std::optional<uint32_t> first_real_gpu_id_matching_isa(std::string_view host_isa
   return std::nullopt;
 }
 
+bool gpu_id_matches_isa_in_topology(const fs::path &topology_root, uint32_t gpu_id,
+                                    std::string_view host_isa) {
+  std::optional<uint32_t> target_version = kmd::gfx_target_version_from_name(host_isa);
+  if (!target_version)
+    return false;
+
+  fs::path nodes_dir = topology_root / "nodes";
+  const uint32_t max_node = max_numeric_dir(nodes_dir);
+  for (uint32_t node_id = 1; node_id <= max_node; ++node_id) {
+    fs::path node_dir = nodes_dir / std::to_string(node_id);
+    if (read_u32_file(node_dir / "gpu_id") != gpu_id)
+      continue;
+    return read_u32_property(node_dir / "properties", "gfx_target_version", 0) == *target_version;
+  }
+  return false;
+}
+
+bool real_gpu_id_matches_isa(uint32_t gpu_id, std::string_view host_isa) {
+  for (std::string_view topology_path : kRealTopologyPaths) {
+    if (gpu_id_matches_isa_in_topology(fs::path(topology_path), gpu_id, host_isa))
+      return true;
+  }
+  return false;
+}
+
 std::string io_link_to_cpu(uint32_t node_from) {
   std::ostringstream link;
   link << "type 2\n"
@@ -632,6 +657,15 @@ bool GuestKfd::ensure_ready_locked() {
       return false;
     }
     host_gpu_id_ = *host_gpu_id;
+  } else {
+    const bool host_matches =
+        execution_driver_ ? gpu_id_matches_isa_in_topology(execution_driver_->topology_path(),
+                                                           host_gpu_id_, config_.host.isa)
+                          : real_gpu_id_matches_isa(host_gpu_id_, config_.host.isa);
+    if (!host_matches) {
+      errno = ENODEV;
+      return false;
+    }
   }
   const std::string host_topology = execution_driver_ ? execution_driver_->topology_path() : "";
   if (!overlay_->generate(guest_, host_topology)) {
