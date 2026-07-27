@@ -166,17 +166,29 @@ echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM)"
 rccl_tests_src="${workdir}/projects/rccl-tests"
 rccl_tests_build="${workdir}/.ci-out/rccl-tests-build"
 
-# --whole-archive rocSHMEM into alltoall_perf so -rdynamic exports its host symbols
-# (e.g. rocshmem::envvar::log_flags) for librccl.so, which is built ENABLE_ROCSHMEM_GIN
-# and leaves them undefined. CI-time patch to avoid editing tracked rccl-tests files.
+# librccl.so (ENABLE_ROCSHMEM_GIN) leaves rocSHMEM host symbols undefined, so
+# rccl-tests must supply them: whole-archive librocshmem.a (+ -rdynamic) and link
+# rocprofiler-register (rocSHMEM api-trace). CI-time patches, no tracked-file edits.
 tlib="${rccl_tests_src}/src/CMakeLists.txt"
+# alltoall_perf: already links rocSHMEM; whole-archive it + add rocprofiler-register.
 if grep -q 'target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY}' "${tlib}" 2>/dev/null; then
   sed -i \
-    's|target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY}|target_link_libraries(alltoall_perf PRIVATE -Wl,--whole-archive ${ROCSHMEM_LIBRARY} -Wl,--no-whole-archive|' \
+    's|target_link_libraries(alltoall_perf PRIVATE ${ROCSHMEM_LIBRARY}|target_link_libraries(alltoall_perf PRIVATE -Wl,--whole-archive ${ROCSHMEM_LIBRARY} -Wl,--no-whole-archive rocprofiler-register|' \
     "${tlib}"
-  echo "    patched alltoall_perf link: --whole-archive rocSHMEM"
+  echo "    patched alltoall_perf link: whole-archive rocSHMEM + rocprofiler-register"
 else
   echo "    (alltoall_perf whole-archive pattern not found; skipping)"
+fi
+
+# gin factory test: links rocSHMEM plainly; whole-archive it + add rocprofiler-register
+# to resolve sdma_anvil::* and rocprofiler_register_* symbols.
+if grep -q 'roc::rccl ${ROCSHMEM_LIBRARY}' "${tlib}" 2>/dev/null; then
+  sed -i \
+    's|roc::rccl ${ROCSHMEM_LIBRARY}|roc::rccl -Wl,--whole-archive ${ROCSHMEM_LIBRARY} -Wl,--no-whole-archive rocprofiler-register|' \
+    "${tlib}"
+  echo "    patched gin factory test link: whole-archive rocSHMEM + rocprofiler-register"
+else
+  echo "    (gin factory test rocSHMEM link pattern not found; skipping)"
 fi
 
 # Drop the hard-coded ${ROCM_PATH}/include from the GIN factory test's include
@@ -190,12 +202,25 @@ else
   echo "    (gin factory test ROCM_PATH/include pattern not found; skipping)"
 fi
 
+# Pin ROCSHMEM_LIBRARY to the in-tree librocshmem.a we just built. find_library
+# searches CMAKE_PREFIX_PATH (nightly ${ROCM_PATH}) before its HINTS, so it would
+# otherwise resolve rocSHMEM to the nightly bundled librocshmem.a (stale
+# sdma_anvil::* / rocprofiler_register_*). Presetting the cache var skips the search.
+rocshmem_lib="${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a"
+if [[ ! -f "${rocshmem_lib}" ]]; then
+  echo "ERROR: in-tree librocshmem.a not found at ${rocshmem_lib}" >&2
+  ls -la "${ROCSHMEM_INSTALL_DIR}/lib" 2>/dev/null >&2 || true
+  exit 1
+fi
+echo "    in-tree rocSHMEM library: ${rocshmem_lib}"
+
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
 (
   cd "${rccl_tests_build}"
   cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON \
     -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}" \
+    -DROCSHMEM_LIBRARY="${rocshmem_lib}" \
     -DRCCL_DIR="${rccl_cmake_dir}" \
     -DCMAKE_PREFIX_PATH="${rccl_prefix};${MPI_HOME}" \
     -DGPU_TARGETS="${gpu_targets}" \
