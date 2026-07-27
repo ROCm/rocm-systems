@@ -1611,9 +1611,8 @@ TEST(CfgAnalysis, Gfx1250ExplicitKernelEntryClearsIncomingLaneStash) {
   EXPECT_EQ(total_fixups, 0u);
 }
 
-TEST(CfgAnalysis, Gfx1250A0UsesLowByteOfWorkaroundAnnotatedVgprMsb) {
-  // The gfx1250 A0 trap workaround stores the previous VGPR-MSB state in
-  // SIMM16[15:8].
+TEST(CfgAnalysis, Gfx1250A0UsesLowByteOfVgprMsb) {
+  // The gfx1250 A0 profile stores the previous VGPR-MSB state in SIMM16[15:8].
   // Only SIMM16[7:0] updates the current operand banks. Thus 0x4400 establishes
   // bank zero (and records previous state 0x44); it must not redirect this stash
   // to physical v300 or invalidate the already-stashed physical-v44 lanes.
@@ -2035,8 +2034,8 @@ TEST(LivenessAnalysis, Gfx1250ImmediateModeWriteRecoversBanksOutsideRequestedSli
   constexpr uint16_t kModeSrc0Hwreg = 1u | (14u << 6) | (1u << 11);
   constexpr auto dynamic_setreg =
       gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeSrc0Hwreg, .sdst = 0});
-  // Request a write to MODE bit zero. The gfx1250 erratum nevertheless updates
-  // all VGPR-MSB fields from literal bits [19:12].
+  // Request a write to MODE bit zero. gfx1250 updates all VGPR-MSB fields from
+  // literal bits [19:12].
   constexpr uint16_t kModeBitZeroHwreg = 1u;
   constexpr auto literal_setreg =
       gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
