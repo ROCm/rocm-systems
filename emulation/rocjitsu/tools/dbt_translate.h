@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -95,6 +96,11 @@ struct TranslateOutput {
   CodeObjectReport translated_report;
   std::vector<InstructionTranslationReport> instruction_translations;
   std::vector<TranslationDiagnostic> diagnostics;
+  /// @brief Diagnostics produced by the verification translation only.
+  ///
+  /// @details These do not affect ok() or dispatchable(): elf_bytes is the
+  /// already-validated first-pass output.
+  std::vector<TranslationDiagnostic> idempotence_diagnostics;
   std::string disassembly;
   /// @brief True when the requested second translation was attempted.
   bool idempotence_checked = false;
@@ -113,10 +119,30 @@ struct TranslateOutput {
   [[nodiscard]] bool dispatchable() const { return ok() && !has_skipped_kernel(diagnostics); }
 };
 
-/// @brief Validate option combinations required by idempotence verification.
+/// @brief Validate translation option combinations.
 /// @returns An error message when the request is invalid, or nullopt otherwise.
 [[nodiscard]] std::optional<std::string_view>
-idempotence_request_error(const TranslateOptions &options);
+translation_request_error(const TranslateOptions &options);
+
+namespace detail {
+
+/// @brief Non-owning executable-section data used by idempotence comparison.
+struct ExecutableSectionBytes {
+  std::string_view name;
+  std::span<const uint8_t> bytes;
+};
+
+[[nodiscard]] std::string describe_byte_difference(std::span<const uint8_t> first,
+                                                   std::span<const uint8_t> second,
+                                                   std::string_view location);
+
+[[nodiscard]] std::string
+find_idempotence_difference(std::span<const ExecutableSectionBytes> first_sections,
+                            std::span<const ExecutableSectionBytes> second_sections,
+                            std::span<const uint8_t> first_elf,
+                            std::span<const uint8_t> second_elf);
+
+} // namespace detail
 
 /// @brief Translate one AMDGPU code object using the DBT pipeline.
 ///

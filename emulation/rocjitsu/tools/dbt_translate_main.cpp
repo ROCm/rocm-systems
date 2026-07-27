@@ -344,7 +344,10 @@ struct ReportTotals {
   return "unknown";
 }
 
-void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic) {
+void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
+                      std::string_view prefix = {}) {
+  if (!prefix.empty())
+    os << prefix << ' ';
   os << diagnostic_severity_name(diagnostic.severity) << ": "
      << diagnostic_kind_name(diagnostic.kind);
   if (diagnostic.guest_offset)
@@ -352,8 +355,12 @@ void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic)
   if (!diagnostic.mnemonic.empty())
     os << " " << diagnostic.mnemonic;
   os << ": " << diagnostic.message << "\n";
-  for (const auto &item : diagnostic.required_work)
-    os << "  required: " << item << "\n";
+  for (const auto &item : diagnostic.required_work) {
+    os << "  ";
+    if (!prefix.empty())
+      os << prefix << ' ';
+    os << "required: " << item << "\n";
+  }
 }
 
 [[nodiscard]] const char *legalization_action_name(Action action) {
@@ -517,14 +524,19 @@ void print_text_report(std::ostream &os, const CliOptions &options,
   if (options.saw_output_revision)
     os << "output_revision: " << revision_name(output.output_revision) << "\n";
   os << "output_elf_bytes: " << output.elf_bytes.size() << "\n";
-  if (options.translate.verify_idempotence && output.idempotence_checked)
-    os << "idempotence: " << (output.idempotence_verified ? "verified" : "not-verified") << "\n";
+  if (options.translate.verify_idempotence) {
+    const std::string_view status = !output.idempotence_checked   ? "not-checked"
+                                    : output.idempotence_verified ? "verified"
+                                                                  : "not-verified";
+    os << "idempotence: " << status << "\n";
+  }
 
   print_code_object_report(os, "source", output.source_report);
   print_code_object_report(os, "translated", output.translated_report);
   print_instruction_translation_report(os, output, options.show_all_translations);
 
   os << "\ndiagnostics: " << output.diagnostics.size() << "\n";
+  os << "idempotence_diagnostics: " << output.idempotence_diagnostics.size() << "\n";
   os << "errors: " << result.errors.size() << "\n";
 }
 
@@ -579,6 +591,11 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  if (options.list_code_objects && options.translate.verify_idempotence) {
+    std::cerr << "--verify-idempotence cannot be combined with --list-code-objects\n";
+    return kUsageError;
+  }
+
   if (options.list_code_objects)
     return list_code_objects(options);
 
@@ -588,31 +605,8 @@ int main(int argc, char **argv) {
     return kUsageError;
   }
 
-  if (options.translate.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.saw_input_revision) {
-    std::cerr << "--input-revision is required when --input-target is gfx1250\n";
-    return kUsageError;
-  }
-  if (options.translate.guest_arch != ROCJITSU_CODE_ARCH_GFX1250 && options.saw_input_revision) {
-    std::cerr << "--input-revision is only valid when --input-target is gfx1250\n";
-    return kUsageError;
-  }
-  if (options.translate.host_arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.saw_output_revision) {
-    std::cerr << "--output-revision is required when --output-target is gfx1250\n";
-    return kUsageError;
-  }
-  if (options.translate.host_arch != ROCJITSU_CODE_ARCH_GFX1250 && options.saw_output_revision) {
-    std::cerr << "--output-revision is only valid when --output-target is gfx1250\n";
-    return kUsageError;
-  }
-  if (options.translate.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.translate.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.translate.input_revision == ProcessorRevision::Gfx1250A0 &&
-      options.translate.output_revision == ProcessorRevision::Gfx1250B0) {
-    std::cerr << "gfx1250 A0-to-B0 translation is not supported\n";
-    return kUsageError;
-  }
   if (const std::optional<std::string_view> request_error =
-          idempotence_request_error(options.translate)) {
+          translation_request_error(options.translate)) {
     std::cerr << *request_error << "\n";
     return kUsageError;
   }
@@ -626,6 +620,8 @@ int main(int argc, char **argv) {
 
   for (const auto &diagnostic : result.value.diagnostics)
     print_diagnostic(std::cerr, diagnostic);
+  for (const auto &diagnostic : result.value.idempotence_diagnostics)
+    print_diagnostic(std::cerr, diagnostic, "idempotence");
 
   if (options.output_mode == OutputMode::Diff)
     print_text_report(std::cout, options, result);

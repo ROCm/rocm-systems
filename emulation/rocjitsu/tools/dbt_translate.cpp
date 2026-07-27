@@ -11,7 +11,9 @@
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
+#include <cassert>
 #include <exception>
+#include <format>
 #include <iomanip>
 #include <memory>
 #include <span>
@@ -182,34 +184,97 @@ make_binary_translator_options(const TranslateOptions &options) {
   return translator_options;
 }
 
-[[nodiscard]] std::string describe_byte_difference(std::span<const uint8_t> first,
-                                                   std::span<const uint8_t> second,
-                                                   std::string_view location) {
+} // namespace
+
+namespace detail {
+
+std::string describe_byte_difference(std::span<const uint8_t> first,
+                                     std::span<const uint8_t> second, std::string_view location) {
+  assert(!std::ranges::equal(first, second));
+
   const size_t common_size = std::min(first.size(), second.size());
   size_t offset = 0;
   while (offset < common_size && first[offset] == second[offset])
     ++offset;
 
   if (offset < common_size) {
-    std::ostringstream os;
-    os << location << " first differs at " << format_offset(offset) << " (first=0x" << std::hex
-       << std::setw(2) << std::setfill('0') << static_cast<unsigned>(first[offset]) << ", second=0x"
-       << std::setw(2) << static_cast<unsigned>(second[offset]) << ")" << std::dec;
-    if (first.size() != second.size())
-      os << "; size " << first.size() << " -> " << second.size() << " bytes";
-    return os.str();
+    const std::string size_change =
+        first.size() == second.size()
+            ? ""
+            : std::format("; size {} -> {} bytes", first.size(), second.size());
+    return std::format("{} first differs at 0x{:x} (first=0x{:02x}, second=0x{:02x}){}", location,
+                       offset, static_cast<unsigned>(first[offset]),
+                       static_cast<unsigned>(second[offset]), size_change);
   }
 
-  return std::string(location) + " size changed from " + std::to_string(first.size()) + " to " +
-         std::to_string(second.size()) + " bytes";
+  return std::format("{} size changed from {} to {} bytes", location, first.size(), second.size());
 }
 
-[[nodiscard]] std::vector<const Section *>
+std::string find_idempotence_difference(std::span<const ExecutableSectionBytes> first_sections,
+                                        std::span<const ExecutableSectionBytes> second_sections,
+                                        std::span<const uint8_t> first_elf,
+                                        std::span<const uint8_t> second_elf) {
+  const auto count_named = [](std::span<const ExecutableSectionBytes> sections,
+                              std::string_view name) {
+    return std::ranges::count_if(
+        sections, [name](const ExecutableSectionBytes &section) { return section.name == name; });
+  };
+
+  std::optional<std::string_view> removed;
+  for (const ExecutableSectionBytes &section : first_sections) {
+    if (count_named(first_sections, section.name) > count_named(second_sections, section.name)) {
+      removed = section.name;
+      break;
+    }
+  }
+
+  std::optional<std::string_view> added;
+  for (const ExecutableSectionBytes &section : second_sections) {
+    if (count_named(second_sections, section.name) > count_named(first_sections, section.name)) {
+      added = section.name;
+      break;
+    }
+  }
+
+  if (removed && added) {
+    return std::format("executable sections changed: removed '{}', added '{}'", *removed, *added);
+  }
+  if (removed)
+    return std::format("executable section '{}' was removed", *removed);
+  if (added)
+    return std::format("executable section '{}' was added", *added);
+
+  for (size_t index = 0; index < first_sections.size(); ++index) {
+    if (first_sections[index].name != second_sections[index].name) {
+      return std::format("executable sections were reordered at index {}: first='{}', second='{}'",
+                         index, first_sections[index].name, second_sections[index].name);
+    }
+  }
+
+  for (size_t index = 0; index < first_sections.size(); ++index) {
+    const ExecutableSectionBytes &first_section = first_sections[index];
+    const ExecutableSectionBytes &second_section = second_sections[index];
+    if (!std::ranges::equal(first_section.bytes, second_section.bytes)) {
+      return describe_byte_difference(first_section.bytes, second_section.bytes,
+                                      std::format("section '{}'", first_section.name));
+    }
+  }
+
+  return describe_byte_difference(first_elf, second_elf, "ELF image");
+}
+
+} // namespace detail
+
+namespace {
+
+[[nodiscard]] std::vector<detail::ExecutableSectionBytes>
 collect_executable_sections(const AmdGpuCodeObject &object) {
-  std::vector<const Section *> sections;
+  std::vector<detail::ExecutableSectionBytes> sections;
   for (const std::unique_ptr<Section> &section : object.all_sections()) {
-    if ((section->flags() & SHF_EXECINSTR) != 0)
-      sections.push_back(section.get());
+    if ((section->flags() & SHF_EXECINSTR) == 0)
+      continue;
+    sections.push_back(
+        {section->name(), {reinterpret_cast<const uint8_t *>(section->data()), section->size()}});
   }
   return sections;
 }
@@ -218,27 +283,9 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
                                                       const AmdGpuCodeObject &second_obj,
                                                       std::span<const uint8_t> first_elf,
                                                       std::span<const uint8_t> second_elf) {
-  const std::vector<const Section *> first_code = collect_executable_sections(first_obj);
-  const std::vector<const Section *> second_code = collect_executable_sections(second_obj);
-  if (first_code.size() == second_code.size()) {
-    for (size_t index = 0; index < first_code.size(); ++index) {
-      const Section &first_section = *first_code[index];
-      const Section &second_section = *second_code[index];
-      if (first_section.name() != second_section.name())
-        break;
-
-      const std::span<const uint8_t> first_bytes(
-          reinterpret_cast<const uint8_t *>(first_section.data()), first_section.size());
-      const std::span<const uint8_t> second_bytes(
-          reinterpret_cast<const uint8_t *>(second_section.data()), second_section.size());
-      if (!std::ranges::equal(first_bytes, second_bytes)) {
-        return describe_byte_difference(first_bytes, second_bytes,
-                                        "section '" + first_section.name() + "'");
-      }
-    }
-  }
-
-  return describe_byte_difference(first_elf, second_elf, "ELF image");
+  return detail::find_idempotence_difference(collect_executable_sections(first_obj),
+                                             collect_executable_sections(second_obj), first_elf,
+                                             second_elf);
 }
 
 [[nodiscard]] std::string disassemble_source_instruction(const AmdGpuCodeObject &obj,
@@ -367,12 +414,32 @@ struct SelectedInput {
 
 } // namespace
 
-std::optional<std::string_view> idempotence_request_error(const TranslateOptions &options) {
-  if (!options.verify_idempotence)
-    return std::nullopt;
-  if (options.guest_arch != options.host_arch)
+std::optional<std::string_view> translation_request_error(const TranslateOptions &options) {
+  if (options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.input_revision == ProcessorRevision::Unspecified) {
+    return "--input-revision is required when --input-target is gfx1250";
+  }
+  if (options.guest_arch != ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.input_revision != ProcessorRevision::Unspecified) {
+    return "--input-revision is only valid when --input-target is gfx1250";
+  }
+  if (options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.output_revision == ProcessorRevision::Unspecified) {
+    return "--output-revision is required when --output-target is gfx1250";
+  }
+  if (options.host_arch != ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.output_revision != ProcessorRevision::Unspecified) {
+    return "--output-revision is only valid when --output-target is gfx1250";
+  }
+  if (options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      options.input_revision == ProcessorRevision::Gfx1250A0 &&
+      options.output_revision == ProcessorRevision::Gfx1250B0) {
+    return "gfx1250 A0-to-B0 translation is not supported";
+  }
+  if (options.verify_idempotence && options.guest_arch != options.host_arch)
     return "--verify-idempotence requires matching input and output architectures";
-  if (options.skip_failed_kernels)
+  if (options.verify_idempotence && options.skip_failed_kernels)
     return "--verify-idempotence cannot be combined with --skip-failed-kernels";
   return std::nullopt;
 }
@@ -385,36 +452,7 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
   output.value.input_revision = options.input_revision;
   output.value.output_revision = options.output_revision;
 
-  // A0 and B0 share gfx1250's ELF machine ID, so the tool API requires the
-  // separate input and output revisions before it can choose a direction.
-  if (options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.input_revision == ProcessorRevision::Unspecified) {
-    add_error(output, kInputError, "input revision is required for gfx1250");
-    return output;
-  }
-  if (options.guest_arch != ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.input_revision != ProcessorRevision::Unspecified) {
-    add_error(output, kInputError, "input revision is only supported for gfx1250");
-    return output;
-  }
-  if (options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.output_revision == ProcessorRevision::Unspecified) {
-    add_error(output, kInputError, "output revision is required for gfx1250");
-    return output;
-  }
-  if (options.host_arch != ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.output_revision != ProcessorRevision::Unspecified) {
-    add_error(output, kInputError, "output revision is only supported for gfx1250");
-    return output;
-  }
-  if (options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.input_revision == ProcessorRevision::Gfx1250A0 &&
-      options.output_revision == ProcessorRevision::Gfx1250B0) {
-    add_error(output, kInputError, "gfx1250 A0-to-B0 translation is not supported");
-    return output;
-  }
-  if (const std::optional<std::string_view> request_error = idempotence_request_error(options)) {
+  if (const std::optional<std::string_view> request_error = translation_request_error(options)) {
     add_error(output, kInputError, std::string(*request_error));
     return output;
   }
@@ -499,11 +537,9 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
       BinaryTranslator verifier(options.guest_arch, options.host_arch, options.target_mach,
                                 make_binary_translator_options(options));
       TranslatedCodeObject second = verifier.translate(translated_obj);
-      if (!second.ok()) {
-        for (TranslationDiagnostic &diagnostic : second.diagnostics) {
-          diagnostic.message = "idempotence verification: " + diagnostic.message;
-          output.value.diagnostics.push_back(std::move(diagnostic));
-        }
+      const bool second_ok = second.ok();
+      output.value.idempotence_diagnostics = std::move(second.diagnostics);
+      if (!second_ok) {
         add_error(output, kValidationError, "idempotence verification second translation failed");
         return output;
       }
@@ -522,7 +558,7 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
       }
       output.value.idempotence_verified = true;
     } catch (const std::exception &e) {
-      add_error(output, kValidationError,
+      add_error(output, kTranslationError,
                 std::string("idempotence verification second translation threw exception: ") +
                     e.what());
       return output;

@@ -4,6 +4,7 @@
 /// @file rj_dbt_translate_smoke_test.cpp
 /// @brief End-to-end smoke test for the rj_dbt_translate command-line tool.
 
+#include "dbt_translate.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "scoped_temp.h"
@@ -226,6 +227,96 @@ bool command_exited_with(int status, int exit_code) {
 
 } // namespace
 
+TEST(RjDbtTranslateIdempotence, DescribesChangedByteAndSize) {
+  constexpr std::array<uint8_t, 2> first = {0x10, 0x20};
+  constexpr std::array<uint8_t, 3> second = {0x10, 0x21, 0x22};
+
+  EXPECT_EQ(rocjitsu::tools::detail::describe_byte_difference(first, second, "section '.text'"),
+            "section '.text' first differs at 0x1 (first=0x20, second=0x21); size 2 -> 3 bytes");
+}
+
+TEST(RjDbtTranslateIdempotence, DescribesPureSizeChange) {
+  constexpr std::array<uint8_t, 2> first = {0x10, 0x20};
+  constexpr std::array<uint8_t, 3> second = {0x10, 0x20, 0x30};
+
+  EXPECT_EQ(rocjitsu::tools::detail::describe_byte_difference(first, second, "ELF image"),
+            "ELF image size changed from 2 to 3 bytes");
+}
+
+TEST(RjDbtTranslateIdempotence, LocalizesExecutableSectionDifference) {
+  using rocjitsu::tools::detail::ExecutableSectionBytes;
+
+  constexpr std::array<uint8_t, 2> first_text = {0x10, 0x20};
+  constexpr std::array<uint8_t, 2> second_text = {0x10, 0x21};
+  constexpr std::array<uint8_t, 2> first_elf = {0x01, 0x02};
+  constexpr std::array<uint8_t, 2> second_elf = {0x01, 0x03};
+  const std::array first_sections = {ExecutableSectionBytes{".text", first_text}};
+  const std::array second_sections = {ExecutableSectionBytes{".text", second_text}};
+
+  EXPECT_EQ(rocjitsu::tools::detail::find_idempotence_difference(first_sections, second_sections,
+                                                                 first_elf, second_elf),
+            "section '.text' first differs at 0x1 (first=0x20, second=0x21)");
+}
+
+TEST(RjDbtTranslateIdempotence, FallsBackToWholeElfDifference) {
+  using rocjitsu::tools::detail::ExecutableSectionBytes;
+
+  constexpr std::array<uint8_t, 2> text = {0x10, 0x20};
+  constexpr std::array<uint8_t, 2> first_elf = {0x01, 0x02};
+  constexpr std::array<uint8_t, 2> second_elf = {0x01, 0x03};
+  const std::array first_sections = {ExecutableSectionBytes{".text", text}};
+  const std::array second_sections = {ExecutableSectionBytes{".text", text}};
+
+  EXPECT_EQ(rocjitsu::tools::detail::find_idempotence_difference(first_sections, second_sections,
+                                                                 first_elf, second_elf),
+            "ELF image first differs at 0x1 (first=0x02, second=0x03)");
+}
+
+TEST(RjDbtTranslateIdempotence, ReportsExecutableSectionSetAndOrderChanges) {
+  using rocjitsu::tools::detail::ExecutableSectionBytes;
+
+  constexpr std::array<uint8_t, 1> bytes = {0x10};
+  constexpr std::array<uint8_t, 1> first_elf = {0x01};
+  constexpr std::array<uint8_t, 1> second_elf = {0x02};
+  const std::array first_sections = {
+      ExecutableSectionBytes{".text", bytes},
+      ExecutableSectionBytes{".init", bytes},
+  };
+  const std::array renamed_sections = {
+      ExecutableSectionBytes{".text", bytes},
+      ExecutableSectionBytes{".fini", bytes},
+  };
+  const std::array reordered_sections = {
+      ExecutableSectionBytes{".init", bytes},
+      ExecutableSectionBytes{".text", bytes},
+  };
+  const std::array added_sections = {
+      ExecutableSectionBytes{".text", bytes},
+      ExecutableSectionBytes{".init", bytes},
+      ExecutableSectionBytes{".fini", bytes},
+  };
+
+  EXPECT_EQ(rocjitsu::tools::detail::find_idempotence_difference(first_sections, renamed_sections,
+                                                                 first_elf, second_elf),
+            "executable sections changed: removed '.init', added '.fini'");
+  EXPECT_EQ(rocjitsu::tools::detail::find_idempotence_difference(first_sections, reordered_sections,
+                                                                 first_elf, second_elf),
+            "executable sections were reordered at index 0: first='.text', second='.init'");
+  EXPECT_EQ(rocjitsu::tools::detail::find_idempotence_difference(first_sections, added_sections,
+                                                                 first_elf, second_elf),
+            "executable section '.fini' was added");
+}
+
+TEST(RjDbtTranslateIdempotence, VerificationDiagnosticsDoNotInvalidateFirstPassOutput) {
+  rocjitsu::tools::TranslateOutput output;
+  rocjitsu::TranslationDiagnostic diagnostic;
+  diagnostic.severity = rocjitsu::DiagnosticSeverity::Error;
+  output.idempotence_diagnostics.push_back(std::move(diagnostic));
+
+  EXPECT_TRUE(output.ok());
+  EXPECT_TRUE(output.dispatchable());
+}
+
 TEST(RjDbtTranslate, Smoke) {
   const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_smoke_");
   const std::filesystem::path temp_path(temp_dir.path());
@@ -355,18 +446,95 @@ TEST(RjDbtTranslate, VerifiesGfx1250B0ToA0Idempotence) {
                                          << stdout_text;
   EXPECT_TRUE(stderr_text.empty()) << stderr_text;
   EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence_diagnostics: 0")) << stdout_text;
   EXPECT_TRUE(contains(stdout_text, "changed=1")) << stdout_text;
   EXPECT_TRUE(contains(stdout_text, "source: s_clause 4")) << stdout_text;
   EXPECT_TRUE(contains(stdout_text, "target: s_nop 0")) << stdout_text;
 }
 
-TEST(RjDbtTranslate, ReportsGfx1250ClusterLoadRewrapAsNonIdempotent) {
+TEST(RjDbtTranslate, VerifiesNonGfx1250SameArchitectureTranslation) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_non_gfx_idempotence_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "smoke_gfx950.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  {
+    const std::vector<uint8_t> image = make_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --output-target gfx950 --verify-idempotence --output-mode diff > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
+}
+
+TEST(RjDbtTranslate, RejectsInvalidIdempotenceOptionCombinations) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_idempotence_options_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "smoke_gfx950.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  {
+    const std::vector<uint8_t> image = make_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string different_arch_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --output-target gfx1200 --verify-idempotence > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  int status = std::system(different_arch_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--verify-idempotence requires matching input and output architectures"));
+
+  const std::string skip_failed_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --input-target gfx950 --output-target gfx950 --verify-idempotence "
+      "--skip-failed-kernels > " +
+      shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  status = std::system(skip_failed_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--verify-idempotence cannot be combined with --skip-failed-kernels"));
+
+  const std::string list_command =
+      shell_quote(g_translate_tool.string()) + " " + shell_quote(input.string()) +
+      " --list-code-objects --verify-idempotence > " + shell_quote(output.string()) + " 2> " +
+      shell_quote(error.string());
+  status = std::system(list_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 1));
+  EXPECT_TRUE(contains(read_text_file(error),
+                       "--verify-idempotence cannot be combined with --list-code-objects"));
+}
+
+TEST(RjDbtTranslate, CharacterizesGfx1250ClusterLoadRewrapAsNonIdempotent) {
   const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_non_idempotent_");
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "cluster_load_gfx1250.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
   const std::filesystem::path error = temp_path / "stderr.txt";
 
+  // TODO(PR #9272 follow-up): Remove this characterization once cluster-load
+  // expansion recognizes its own M0 save/restore wrapper. The permanent
+  // mismatch-reporting coverage lives in the RjDbtTranslateIdempotence tests.
   // The cluster load is followed by s_endpgm. Its expansion preserves the load
   // inside an M0 save/restore wrapper, so each pass wraps it again.
   constexpr std::array<uint32_t, 4> text_words = {0xee19c07cu, 0x00000001u, 0x00000002u,
@@ -392,6 +560,7 @@ TEST(RjDbtTranslate, ReportsGfx1250ClusterLoadRewrapAsNonIdempotent) {
                                               << stderr_text << "\nstdout:\n"
                                               << stdout_text;
   EXPECT_TRUE(contains(stdout_text, "idempotence: not-verified")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence_diagnostics: 0")) << stdout_text;
   EXPECT_TRUE(contains(stderr_text, "translation output is not byte-idempotent")) << stderr_text;
   EXPECT_TRUE(contains(stderr_text, "section '.text'")) << stderr_text;
 }
