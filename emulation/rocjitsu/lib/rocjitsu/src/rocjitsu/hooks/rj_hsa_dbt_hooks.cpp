@@ -1399,6 +1399,22 @@ RjHsaLayer &layer() {
   return result;
 }
 
+std::mutex g_topology_nodes_root_mutex;
+std::optional<std::string> g_topology_nodes_root_for_test;
+
+/// @brief Set or clear the synthetic KFD topology root used by unit tests.
+void set_topology_nodes_root_for_test(const char *root) {
+  std::lock_guard lock(g_topology_nodes_root_mutex);
+  g_topology_nodes_root_for_test =
+      root != nullptr && *root != '\0' ? std::optional<std::string>(root) : std::nullopt;
+}
+
+/// @brief Return a snapshot of the synthetic KFD topology root used by unit tests.
+[[nodiscard]] std::optional<std::string> topology_nodes_root_for_test() {
+  std::lock_guard lock(g_topology_nodes_root_mutex);
+  return g_topology_nodes_root_for_test;
+}
+
 /// @brief Translate a configured KFD gpu_id to ROCR's HSA driver node id.
 ///
 /// @details The config uses the KFD topology `gpu_id` because it is stable
@@ -1406,9 +1422,8 @@ RjHsaLayer &layer() {
 /// not expose that value directly, so the hook reads the redirected topology
 /// tree and later compares agents by `HSA_AMD_AGENT_INFO_DRIVER_NODE_ID`.
 [[nodiscard]] std::optional<uint32_t> node_id_for_kfd_gpu_id(uint32_t gpu_id) {
-  // Unit tests provide fake HSA node IDs and a matching synthetic topology tree.
-  if (const char *root = std::getenv("ROCJITSU_HSA_HOOK_TOPOLOGY_NODES_ROOT"); root && *root)
-    return node_id_for_kfd_gpu_id_in_root(root, gpu_id);
+  if (std::optional<std::string> root = topology_nodes_root_for_test())
+    return node_id_for_kfd_gpu_id_in_root(root->c_str(), gpu_id);
 
   constexpr std::array<const char *, 2> kTopologyNodeRoots = {
       "/sys/devices/virtual/kfd/kfd/topology/nodes", "/sys/class/kfd/kfd/topology/nodes"};
@@ -4020,6 +4035,11 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
 #else
 #define RJ_HOOK_EXPORT
 #endif
+
+/// @brief Set or clear the synthetic KFD topology root used by hook unit tests.
+extern "C" RJ_HOOK_EXPORT void rj_hsa_dbt_set_topology_nodes_root_for_test(const char *root) {
+  set_topology_nodes_root_for_test(root);
+}
 
 /// @brief ROCR HSA tools entry point.
 ///

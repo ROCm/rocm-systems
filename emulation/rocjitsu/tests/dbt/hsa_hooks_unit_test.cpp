@@ -37,6 +37,7 @@ RJ_DIAGNOSTIC_POP
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
 extern "C" void OnUnload();
+extern "C" void rj_hsa_dbt_set_topology_nodes_root_for_test(const char *root);
 
 namespace {
 
@@ -624,15 +625,18 @@ struct FakeApiTable {
   }
 };
 
-void write_runtime_config_path(const std::string &runtime_dir) {
+void write_runtime_config_path(const std::string &runtime_dir, bool include_resolved_host = true) {
   setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
 
   const std::filesystem::path topology_root =
       std::filesystem::path(runtime_dir) / "topology" / "nodes";
-  const std::filesystem::path host_node = topology_root / std::to_string(kHostNodeId);
-  std::filesystem::create_directories(host_node);
-  std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
-  setenv("ROCJITSU_HSA_HOOK_TOPOLOGY_NODES_ROOT", topology_root.c_str(), 1);
+  std::filesystem::create_directories(topology_root);
+  if (include_resolved_host) {
+    const std::filesystem::path host_node = topology_root / std::to_string(kHostNodeId);
+    std::filesystem::create_directories(host_node);
+    std::ofstream(host_node / "gpu_id") << kResolvedHostGpuId << '\n';
+  }
+  rj_hsa_dbt_set_topology_nodes_root_for_test(topology_root.c_str());
 
   std::ofstream config_path(rocjitsu::rpc_default_config_file_path());
   config_path << RJ_HOOK_UNIT_CONFIG_PATH << '\n' << kResolvedHostGpuId << '\n';
@@ -640,12 +644,16 @@ void write_runtime_config_path(const std::string &runtime_dir) {
 
 class InstalledHook {
 public:
-  explicit InstalledHook(FakeApiTable &api) : runtime_dir_("rocjitsu-hsa-hooks-unit-") {
+  explicit InstalledHook(FakeApiTable &api, bool include_resolved_host = true)
+      : runtime_dir_("rocjitsu-hsa-hooks-unit-") {
     OnUnload();
-    write_runtime_config_path(runtime_dir_.path());
+    write_runtime_config_path(runtime_dir_.path(), include_resolved_host);
     installed_ = OnLoad(&api.table, 0, 0, nullptr);
   }
-  ~InstalledHook() { OnUnload(); }
+  ~InstalledHook() {
+    OnUnload();
+    rj_hsa_dbt_set_topology_nodes_root_for_test(nullptr);
+  }
 
   [[nodiscard]] bool installed() const { return installed_; }
 
@@ -998,6 +1006,25 @@ TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenHostAppearsFirst) {
 
   EXPECT_EQ(status, HSA_STATUS_SUCCESS);
   EXPECT_EQ(seen, std::vector<uint64_t>{kGuestAgent.handle});
+}
+
+TEST(HsaHooksUnitTest, MissingResolvedHostKeepsPhysicalAgentOrder) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api, false);
+  ASSERT_TRUE(hook.installed());
+
+  std::vector<uint64_t> seen;
+  hsa_status_t status = api.core.hsa_iterate_agents_fn(
+      [](hsa_agent_t agent, void *data) -> hsa_status_t {
+        static_cast<std::vector<uint64_t> *>(data)->push_back(agent.handle);
+        return HSA_STATUS_SUCCESS;
+      },
+      &seen);
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(seen, (std::vector<uint64_t>{kGuestAgent.handle, kHostAgent.handle}));
 }
 
 TEST(HsaHooksUnitTest, BatchCopyMapsScalarSourceAndDestinationAgents) {
