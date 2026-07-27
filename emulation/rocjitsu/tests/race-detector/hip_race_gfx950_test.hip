@@ -1141,6 +1141,19 @@ __global__ void waw_global_load_then_alu_kernel(const float *src, float *dst) {
   dst[tid] = val;
 }
 
+__global__ void waw_global_load_then_alu_safe_kernel(const float *src, float *dst) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  float val;
+  float tmp = static_cast<float>(tid);
+  asm volatile(
+      "global_load_dword %0, %1, off\n"
+      "s_waitcnt vmcnt(0)\n"
+      "v_add_f32 %0, %2, %2\n"
+      : "=&v"(val) : "v"(&src[tid]), "v"(tmp)
+  );
+  dst[tid] = val;
+}
+
 __global__ void waw_global_load_then_mfma_kernel(const int *src, int *out) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   asm volatile(
@@ -1163,6 +1176,16 @@ TEST_F(Gfx950RaceTest, waw_global_load_then_alu) {
   ASSERT_GE(r.size(), 1u);
   EXPECT_EQ(r[0].type, "VGPR");
   EXPECT_EQ(r[0].access, "write");
+  auto t = parseTrace(r[0]);
+  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
+  EXPECT_NE(t.mark1.find("v_add_f32"), npos) << "mark1: " << t.mark1;
+}
+
+TEST_F(Gfx950RaceTest, waw_global_load_then_alu_safe) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  waw_global_load_then_alu_safe_kernel<<<1, 64>>>(src, dst);
+  sync();
+  ExpectNoRace();
 }
 
 TEST_F(Gfx950RaceTest, waw_global_load_then_mfma) {
@@ -1249,6 +1272,9 @@ TEST_F(Gfx950RaceTest, f64_vgpr_waw) {
   ASSERT_GE(r.size(), 1u);
   EXPECT_EQ(r[0].type, "VGPR");
   EXPECT_EQ(r[0].access, "write");
+  auto t = parseTrace(r[0]);
+  EXPECT_NE(t.mark0.find("global_load_dwordx2"), npos) << "mark0: " << t.mark0;
+  EXPECT_NE(t.mark1.find("v_fma_f64"), npos) << "mark1: " << t.mark1;
 }
 
 int main(int argc, char **argv) {
