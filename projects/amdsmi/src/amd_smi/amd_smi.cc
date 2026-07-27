@@ -307,10 +307,16 @@ amdsmi_status_t amdsmi_init(uint64_t flags) {
   return status;
 }
 
+// Defined with the partition-redirect cache further below; clears the memoized
+// sub-partition -> primary handle mappings before the processor objects backing
+// those handles are destroyed.
+static void clear_primary_partition_cache();
+
 amdsmi_status_t amdsmi_shut_down() {
   if (!amd::smi::amdsmi_library_init_ref_release()) {
     return AMDSMI_STATUS_SUCCESS;
   }
+  clear_primary_partition_cache();
   return amd::smi::AMDSmiSystem::getInstance().cleanup();
 }
 
@@ -3131,6 +3137,21 @@ int primary_partition_redirect_index(const std::vector<uint32_t>& partition_ids,
 }  // namespace smi
 }  // namespace amd
 
+namespace {
+
+// Memoizes each sub-partition handle to its owning device's primary-partition
+// handle. Resolving a redirect walks the owning socket and reads one partition-id
+// sysfs node per logical partition (up to 8 for an MI300X in CPX), so the result
+// is cached to keep repeated partition queries cheap. Partition topology is fixed
+// for an amdsmi_init()/amdsmi_shut_down() lifetime (mode changes require a driver
+// reload and device re-enumeration), so a cached entry cannot go stale; it is
+// cleared by clear_primary_partition_cache() on shutdown, before the processor
+// objects backing these handles are destroyed.
+std::mutex primary_partition_cache_mutex;
+std::map<amdsmi_processor_handle, amdsmi_processor_handle> primary_partition_cache;
+
+}  // namespace
+
 // On MI300-class accelerators split into multiple logical partitions (for
 // example CPX + NPS4), the compute-/memory-partition sysfs nodes only respond on
 // each physical device's primary partition (partition_id == 0); queries against a
@@ -3139,7 +3160,7 @@ int primary_partition_redirect_index(const std::vector<uint32_t>& partition_ids,
 // portion of the BDF), so this walks the owning socket and returns the primary
 // partition's handle. Returns nullptr when the handle is already primary, the
 // device is not multi-partitioned, or no primary sibling exists.
-static amdsmi_processor_handle get_primary_partition_handle(
+static amdsmi_processor_handle resolve_primary_partition_handle_uncached(
     amdsmi_processor_handle processor_handle) {
   amd::smi::AMDSmiProcessor* processor = nullptr;
   amdsmi_status_t status =
@@ -3204,6 +3225,40 @@ static amdsmi_processor_handle get_primary_partition_handle(
   return reinterpret_cast<amdsmi_processor_handle>(siblings[primary_index]);
 }
 
+// Cached wrapper around resolve_primary_partition_handle_uncached(). Returns the
+// owning device's primary-partition handle for a sub-partition, or nullptr when no
+// redirect is needed (primary, single-GPU, or unpartitioned device).
+static amdsmi_processor_handle get_primary_partition_handle(
+    amdsmi_processor_handle processor_handle) {
+  {
+    std::lock_guard<std::mutex> lock(primary_partition_cache_mutex);
+    auto it = primary_partition_cache.find(processor_handle);
+    if (it != primary_partition_cache.end()) {
+      return it->second;
+    }
+  }
+  amdsmi_processor_handle primary_handle =
+      resolve_primary_partition_handle_uncached(processor_handle);
+  std::lock_guard<std::mutex> lock(primary_partition_cache_mutex);
+  primary_partition_cache[processor_handle] = primary_handle;
+  return primary_handle;
+}
+
+// Resolves the handle that partition-config sysfs queries should target: the
+// owning device's primary partition when processor_handle is a sub-partition,
+// otherwise processor_handle itself. Every partition getter routes through this
+// one strategy so a sub-partition never queries its own empty partition nodes.
+static amdsmi_processor_handle resolve_partition_query_handle(
+    amdsmi_processor_handle processor_handle) {
+  amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
+  return primary_handle != nullptr ? primary_handle : processor_handle;
+}
+
+static void clear_primary_partition_cache() {
+  std::lock_guard<std::mutex> lock(primary_partition_cache_mutex);
+  primary_partition_cache.clear();
+}
+
 // Compute Partition functions
 // This API is deprecated, use amdsmi_get_gpu_accelerator_partition_profile() instead
 amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
@@ -3211,18 +3266,12 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
   AMDSMI_CHECK_INIT();
   std::ostringstream ss;
 
+  // The compute-partition sysfs node only responds on the primary partition, so a
+  // sub-partition handle is redirected to its owning device's primary partition
+  // (all partitions share one compute-partition mode).
+  amdsmi_processor_handle query_handle = resolve_partition_query_handle(processor_handle);
   auto status =
-      rsmi_wrapper(rsmi_dev_compute_partition_get, processor_handle, 0, compute_partition, len);
-  // The compute-partition sysfs node only responds on the primary partition, so
-  // for a sub-partition handle the query above fails; retry against the owning
-  // device's primary handle (all partitions share one compute-partition mode).
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
-    if (primary_handle != nullptr) {
-      status =
-          rsmi_wrapper(rsmi_dev_compute_partition_get, primary_handle, 0, compute_partition, len);
-    }
-  }
+      rsmi_wrapper(rsmi_dev_compute_partition_get, query_handle, 0, compute_partition, len);
   ss << __PRETTY_FUNCTION__ << " |  rsmi_dev_compute_partition_get() returned: "
      << smi_amdgpu_get_status_string(status, false);
   LOG_INFO(ss);
@@ -3288,17 +3337,12 @@ amdsmi_status_t amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
 amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                                 char* memory_partition, uint32_t len) {
   AMDSMI_CHECK_INIT();
+  // The memory-partition sysfs node only responds on the primary partition, so a
+  // sub-partition handle is redirected to its owning device's primary partition
+  // (all partitions share one memory-partition/NPS mode).
+  amdsmi_processor_handle query_handle = resolve_partition_query_handle(processor_handle);
   amdsmi_status_t ret =
-      rsmi_wrapper(rsmi_dev_memory_partition_get, processor_handle, 0, memory_partition, len);
-  // The memory-partition sysfs node only responds on the primary partition, so
-  // for a sub-partition handle the query above fails; retry against the owning
-  // device's primary handle (all partitions share one memory-partition/NPS mode).
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
-    if (primary_handle != nullptr) {
-      ret = rsmi_wrapper(rsmi_dev_memory_partition_get, primary_handle, 0, memory_partition, len);
-    }
-  }
+      rsmi_wrapper(rsmi_dev_memory_partition_get, query_handle, 0, memory_partition, len);
   return ret;
 }
 
@@ -3330,11 +3374,7 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
 
   // A sub-partition handle's capability sysfs nodes only respond on the owning
   // device's primary partition, so redirect capability queries there.
-  amdsmi_processor_handle query_handle = processor_handle;
-  amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
-  if (primary_handle != nullptr) {
-    query_handle = primary_handle;
-  }
+  amdsmi_processor_handle query_handle = resolve_partition_query_handle(processor_handle);
 
   // current memory partition
   constexpr uint32_t kCurrentPartitionSize = 5;
@@ -3876,11 +3916,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   // on the owning device's primary partition, so redirect the capability/profile
   // queries there (otherwise sub-partitions report "N/A"). The reported partition_id
   // below intentionally keeps the original handle so each partition keeps its identity.
-  amdsmi_processor_handle query_handle = processor_handle;
-  amdsmi_processor_handle primary_handle = get_primary_partition_handle(processor_handle);
-  if (primary_handle != nullptr) {
-    query_handle = primary_handle;
-  }
+  amdsmi_processor_handle query_handle = resolve_partition_query_handle(processor_handle);
 
   // TODO(amdsmi_team): should we do fallback?
   // Info doesn't populate properly if missing other files - CLI FIX?
