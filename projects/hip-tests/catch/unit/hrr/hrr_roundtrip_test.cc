@@ -1024,14 +1024,58 @@ HIP_TEST_CASE(Unit_HRR_MiscAPIsRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_MiscAPIs_Direct", cap.path);
 }
 
+// ---------------------------------------------------------------------------
+// Driver-memcpy roundtrips (hipDrvMemcpy3D / 3DAsync / 2DUnaligned).
+//
+// These workloads are pure copy chains (hipMemsetD32 -> driver copy -> D2H) with
+// no floating-point arithmetic, so the captured output is bit-reproducible and
+// byte-exact comparison is the correct oracle.  HIP_HRR_D2H_EXACT=1 disables the
+// validator's float-tolerance fallback: without it a canary that decodes near
+// 0.0 in any of the candidate f32/bf16/f16/f64 encodings passes against replay's
+// zero-initialised allocations, which would make the roundtrip pass even with
+// the driver-memcpy playback handlers removed.
+//
+// Windows (gfx1151 iGPU) is exempted from D2H fidelity for the same reason as
+// hrr_run_playback: replay there is not guaranteed to reproduce device output
+// bit-for-bit.  A crash still fails the test.
+// ---------------------------------------------------------------------------
+static void hrr_run_exact_roundtrip(const std::string& direct_case,
+                                    const fs::path& cap_path) {
+  hrr_capture_direct(direct_case, cap_path);
+
+  auto [ret, out] = hrr_playback_env(cap_path, {{"HIP_HRR_D2H_EXACT", "1"}});
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+#ifdef _WIN32
+  REQUIRE(ret < 128);        // best-effort D2H, but never a crash
+  if (ret != 0) return;
+#else
+  // hrr-playback exits non-zero when any D2H check failed and when every
+  // attempted check was skipped, so this covers d2h_fail == 0 on its own.
+  REQUIRE(ret == 0);
+#endif
+
+  // Guard against a vacuous pass: the archive must contain at least one
+  // validated D2H blob.  Parse only the pass count; the summary reads
+  // "N pass (X exact, Y within tol), M fail, K skipped".
+  size_t pos = out.find("D2H checks");
+  REQUIRE(pos != std::string::npos);
+  size_t colon = out.find(':', pos);
+  REQUIRE(colon != std::string::npos);
+  int d2h_pass = 0;
+  sscanf(out.c_str() + colon + 1, " %d pass", &d2h_pass);
+  INFO("D2H pass=" << d2h_pass);
+  CHECK(d2h_pass >= 1);
+}
+
 HIP_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy3d"};
-  hrr_run_roundtrip("Unit_HRR_DrvMemcpy3D_Direct", cap.path);
+  hrr_run_exact_roundtrip("Unit_HRR_DrvMemcpy3D_Direct", cap.path);
 }
 
 HIP_TEST_CASE(Unit_HRR_DrvMemcpy2DUnalignedRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy2dunaligned"};
-  hrr_run_roundtrip("Unit_HRR_DrvMemcpy2DUnaligned_Direct", cap.path);
+  hrr_run_exact_roundtrip("Unit_HRR_DrvMemcpy2DUnaligned_Direct", cap.path);
 }
 
 HIP_TEST_CASE(Unit_HRR_TextureRoundtrip) {

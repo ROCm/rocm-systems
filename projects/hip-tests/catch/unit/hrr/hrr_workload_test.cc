@@ -2690,7 +2690,27 @@ TEST_CASE("Unit_HRR_MiscAPIs_Direct", "[.][hrr][direct]") {
 
 // ---------------------------------------------------------------------------
 // Workload V — Driver-style 3D/2D memcpy variants
+//
+// Canary choice matters here.  Replay zero-initialises allocations, and the D2H
+// validator falls back from memcmp to a float tolerance (atol=rtol=1e-3) over
+// candidate f32/bf16/f16/f64 decodings, accepting the first encoding with no
+// out-of-tolerance element.  A canary that decodes near 0.0 in any candidate
+// encoding therefore passes against an all-zero replay buffer, which makes the
+// whole roundtrip vacuous.  Both values below decode far from zero in all four:
+//   0x5C5C5C5C -> f32 2.48e17, bf16 2.48e17, f16 279, f64 8.25e136
+//   0x4B4B4B4B -> f32 1.33e7,  bf16 1.33e7,  f16 14.6, f64 5.23e54
+// (0x2D2D2D2D, for contrast, is 9.84e-12 as f32, i.e. inside atol.)
 // ---------------------------------------------------------------------------
+static constexpr int kDrvPayload  = 0x5C5C5C5C;  // bytes the copy must move
+static constexpr int kDrvPad      = 0x4B4B4B4B;  // device padding that must survive
+static constexpr int kDrvHostFill = 0x3A3A3A3A;  // host padding that must NOT be copied
+
+// Pitched-rect geometry: pitch > width and height > 1, so the host source
+// footprint is pitch*(height-1)+width rather than the width*height volume.
+static constexpr size_t kDrvPitch = 256;  // bytes per row
+static constexpr size_t kDrvWidth = 64;   // bytes actually copied per row
+static constexpr size_t kDrvRows  = 4;    // rows per slice
+
 TEST_CASE("Unit_HRR_DrvMemcpy3D_Direct", "[.][hrr][direct]") {
   // Driver 3D struct-pointer copies, validated end to end by D2H.
   // Chain: host(hsrc=VAL) --hipDrvMemcpy3D H2D--> A --hipDrvMemcpy3DAsync D2D--> B
@@ -2699,7 +2719,7 @@ TEST_CASE("Unit_HRR_DrvMemcpy3D_Direct", "[.][hrr][direct]") {
   HIP_CHECK(hipSetDevice(0));
   constexpr int    N   = 256;
   constexpr size_t SZ  = N * sizeof(int);
-  constexpr int    VAL = 0x5C5C5C5C;
+  constexpr int    VAL = kDrvPayload;
 
   int *A = nullptr, *B = nullptr, *C = nullptr;
   HIP_CHECK(hipMalloc(&A, SZ));
@@ -2744,6 +2764,69 @@ TEST_CASE("Unit_HRR_DrvMemcpy3D_Direct", "[.][hrr][direct]") {
   HIP_CHECK(hipStreamSynchronize(s));
   for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
 
+  // (4) Pitched 3D H2D: kDrvRows rows of kDrvWidth bytes per slice, rows spaced
+  // kDrvPitch apart, over two slices.  The host source rect therefore spans
+  // srcPitch*srcHeight*(Depth-1) + srcPitch*(Height-1) + WidthInBytes
+  // = 1024 + 768 + 64 = 1856 bytes, not the 64*4*2 = 512-byte volume, so a blob
+  // sized by the volume makes the runtime stride 1344 bytes past its end on
+  // replay.  Seeding the destination with kDrvPad and requiring the inter-row
+  // padding to survive also proves the copy wrote only the row regions.
+  constexpr size_t DEPTH  = 2;
+  constexpr size_t PSZ    = kDrvPitch * kDrvRows * DEPTH;   // 2048 bytes
+  constexpr size_t PWORDS = PSZ / sizeof(int);
+  int* P = nullptr;
+  HIP_CHECK(hipMalloc(&P, PSZ));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(P), kDrvPad, PWORDS));
+
+  std::vector<int> hp(PWORDS, kDrvHostFill);
+  for (size_t z = 0; z < DEPTH; ++z)
+    for (size_t y = 0; y < kDrvRows; ++y) {
+      size_t off = (z * kDrvRows + y) * kDrvPitch / sizeof(int);
+      for (size_t w = 0; w < kDrvWidth / sizeof(int); ++w) hp[off + w] = kDrvPayload;
+    }
+
+  { HIP_MEMCPY3D p{};
+    p.srcMemoryType = hipMemoryTypeHost;   p.srcHost   = hp.data();
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(P);
+    p.WidthInBytes  = kDrvWidth; p.Height = kDrvRows; p.Depth = DEPTH;
+    p.srcPitch = kDrvPitch; p.srcHeight = kDrvRows;
+    p.dstPitch = kDrvPitch; p.dstHeight = kDrvRows;
+    HIP_CHECK(hipDrvMemcpy3D(&p)); }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  std::vector<int> back(PWORDS, 0);
+  HIP_CHECK(hipMemcpy(back.data(), P, PSZ, hipMemcpyDeviceToHost));
+  for (size_t z = 0; z < DEPTH; ++z)
+    for (size_t y = 0; y < kDrvRows; ++y) {
+      size_t row = (z * kDrvRows + y) * kDrvPitch / sizeof(int);
+      for (size_t w = 0; w < kDrvPitch / sizeof(int); ++w)
+        REQUIRE(back[row + w] == (w < kDrvWidth / sizeof(int) ? kDrvPayload : kDrvPad));
+    }
+
+  // (5) hipMemcpy3DPeer / hipMemcpy3DPeerAsync: device 0 -> device 0 self-copy
+  // on a scratch buffer, purely to keep these two APIs exercised at capture.
+  // Both are NOOP on playback, so they must not touch a buffer that feeds a D2H
+  // check; a same-pointer copy is also a no-op at capture time, so capture and
+  // replay agree either way.
+  int* scratch = nullptr;
+  HIP_CHECK(hipMalloc(&scratch, SZ));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(scratch), kDrvPad, N));
+  { hipMemcpy3DPeerParms pp{};
+    pp.srcDevice = 0; pp.dstDevice = 0;
+    pp.srcPtr    = make_hipPitchedPtr(scratch, sizeof(int), 1, 1);
+    pp.dstPtr    = make_hipPitchedPtr(scratch, sizeof(int), 1, 1);
+    pp.extent    = make_hipExtent(sizeof(int), 1, 1);
+    (void)hipMemcpy3DPeer(&pp); }
+  { hipMemcpy3DPeerParms pp{};
+    pp.srcDevice = 0; pp.dstDevice = 0;
+    pp.srcPtr    = make_hipPitchedPtr(scratch, sizeof(int), 1, 1);
+    pp.dstPtr    = make_hipPitchedPtr(scratch, sizeof(int), 1, 1);
+    pp.extent    = make_hipExtent(sizeof(int), 1, 1);
+    (void)hipMemcpy3DPeerAsync(&pp, s); }
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  HIP_CHECK(hipFree(scratch));
+  HIP_CHECK(hipFree(P));
   HIP_CHECK(hipFree(A));
   HIP_CHECK(hipFree(B));
   HIP_CHECK(hipFree(C));
@@ -2754,13 +2837,14 @@ TEST_CASE("Unit_HRR_DrvMemcpy3D_Direct", "[.][hrr][direct]") {
 
 // ===========================================================================
 // hipDrvMemcpy2DUnaligned — driver 2D struct-pointer copy (hip_Memcpy2D).
-// host(hsrc=VAL) --H2D--> A --D2D--> B, validated by D2H on B.
+// host(hsrc=VAL) --H2D--> A --D2D--> B, validated by D2H on B, then a pitched
+// H2D rect whose inter-row padding must survive.
 // ===========================================================================
 TEST_CASE("Unit_HRR_DrvMemcpy2DUnaligned_Direct", "[.][hrr][direct]") {
   HIP_CHECK(hipSetDevice(0));
   constexpr int    N   = 256;
   constexpr size_t SZ  = N * sizeof(int);
-  constexpr int    VAL = 0x2D2D2D2D;
+  constexpr int    VAL = kDrvPayload;
 
   int *A = nullptr, *B = nullptr;
   HIP_CHECK(hipMalloc(&A, SZ));
@@ -2790,6 +2874,39 @@ TEST_CASE("Unit_HRR_DrvMemcpy2DUnaligned_Direct", "[.][hrr][direct]") {
   HIP_CHECK(hipStreamSynchronize(s));
   for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
 
+  // (3) Pitched 2D H2D: kDrvRows rows of kDrvWidth bytes spaced kDrvPitch apart.
+  // The host source rect spans srcPitch*(Height-1) + WidthInBytes
+  // = 768 + 64 = 832 bytes, not the 64*4 = 256-byte volume, so a blob sized by
+  // the volume makes the runtime stride 576 bytes past its end on replay.  The
+  // destination is pre-seeded with kDrvPad, so the inter-row padding also has to
+  // survive untouched.
+  constexpr size_t PSZ    = kDrvPitch * kDrvRows;  // 1024 bytes
+  constexpr size_t PWORDS = PSZ / sizeof(int);
+  int* P = nullptr;
+  HIP_CHECK(hipMalloc(&P, PSZ));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(P), kDrvPad, PWORDS));
+
+  std::vector<int> hp(PWORDS, kDrvHostFill);
+  for (size_t y = 0; y < kDrvRows; ++y)
+    for (size_t w = 0; w < kDrvWidth / sizeof(int); ++w)
+      hp[y * kDrvPitch / sizeof(int) + w] = kDrvPayload;
+
+  { hip_Memcpy2D p{};
+    p.srcMemoryType = hipMemoryTypeHost;   p.srcHost   = hp.data();
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(P);
+    p.srcPitch = kDrvPitch; p.dstPitch = kDrvPitch;
+    p.WidthInBytes  = kDrvWidth; p.Height = kDrvRows;
+    HIP_CHECK(hipDrvMemcpy2DUnaligned(&p)); }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  std::vector<int> back(PWORDS, 0);
+  HIP_CHECK(hipMemcpy(back.data(), P, PSZ, hipMemcpyDeviceToHost));
+  for (size_t y = 0; y < kDrvRows; ++y)
+    for (size_t w = 0; w < kDrvPitch / sizeof(int); ++w)
+      REQUIRE(back[y * kDrvPitch / sizeof(int) + w] ==
+              (w < kDrvWidth / sizeof(int) ? kDrvPayload : kDrvPad));
+
+  HIP_CHECK(hipFree(P));
   HIP_CHECK(hipFree(A));
   HIP_CHECK(hipFree(B));
   HIP_CHECK(hipStreamDestroy(s));
