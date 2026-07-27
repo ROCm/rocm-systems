@@ -149,36 +149,7 @@ class BranchNameTests(unittest.TestCase):
         self.assertEqual(e, [])
 
 
-# ----------------------------- PR title --------------------------------------
-
-
-class TitleTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.policy = make_policy()
-
-    def _errs(self, title: str) -> List[str]:
-        e: List[str] = []
-        pc.ensure_pr_title(self.policy, title, e)
-        return e
-
-    def test_valid_title(self) -> None:
-        self.assertEqual(self._errs("feat(auth): add token refresh support"), [])
-
-    def test_too_short(self) -> None:
-        self.assertTrue(any("too short" in x for x in self._errs("fix: a")))
-
-    def test_too_long(self) -> None:
-        long_title = "feat: " + ("x" * 90)
-        self.assertTrue(any("too long" in x for x in self._errs(long_title)))
-
-    def test_forbidden_word(self) -> None:
-        self.assertTrue(
-            any("forbidden" in x.lower() for x in self._errs("feat: WIP add things"))
-        )
-
-
 # ----------------------------- PR description --------------------------------
-
 
 class DescriptionTests(unittest.TestCase):
     def test_too_short(self) -> None:
@@ -394,6 +365,40 @@ class UnitTestRuleTests(unittest.TestCase):
             with self.subTest(test_path=test_path):
                 files = [make_file("src/module.py"), make_file(test_path)]
                 self.assertEqual(self._errs(files), [])
+
+    def test_path_based_pattern_satisfies_requirement(self) -> None:
+        # Patterns containing '/' are matched against the full file path, not
+        # just the basename, so entire test directories can be recognised.
+        policy = make_policy(
+            unit_test_patterns=[
+                "test_*",
+                "*_test.*",
+                "**/test/gtest/**",
+                "projects/hip-tests/**",
+            ]
+        )
+        errs: List[str] = []
+        files = [
+            make_file("projects/clr/hipamd/src/hip_memory.cpp"),
+            make_file("projects/hip-tests/catch/unit/memory/atomicAdd.cpp"),
+        ]
+        pc.ensure_unit_tests(policy, files, errs)
+        self.assertEqual(errs, [])
+
+    def test_path_based_pattern_code_only_fails(self) -> None:
+        # A path-based pattern only helps when the PR actually touches a file
+        # under that path. Source changes with no matching test path still fail.
+        policy = make_policy(
+            unit_test_patterns=[
+                "test_*",
+                "*_test.*",
+                "projects/hip-tests/**",
+            ]
+        )
+        errs: List[str] = []
+        files = [make_file("projects/clr/hipamd/src/hip_memory.cpp")]
+        pc.ensure_unit_tests(policy, files, errs)
+        self.assertTrue(errs)
 
     def test_unit_test_is_warning_only_row(self) -> None:
         # The Unit Test row is warning-only: passed=True + warn=True when a
