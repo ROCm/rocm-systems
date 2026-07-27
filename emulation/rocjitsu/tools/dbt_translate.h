@@ -81,6 +81,8 @@ struct TranslateOptions {
   bool debug_continue_after_failure = false;
   bool skip_failed_kernels = false;
   /// @brief Rerun a same-architecture translation and require identical ELF bytes.
+  // TODO: Enable this by default for offline tools when RJ_ENABLE_EXPENSIVE_CHECKS
+  // is enabled, once the known corpus idempotence gaps are closed.
   bool verify_idempotence = false;
   DisassemblyMode disassembly = DisassemblyMode::None;
 };
