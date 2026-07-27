@@ -27,7 +27,7 @@
 --   this file are piped through the sqlite3 CLI. The db has NO rocpd_timestamp
 --   table, so the reader selects the v3 backend.
 --
--- TRACK MATRIX (what get_all_tracks() returns):
+-- TRACK MATRIX (what get_tracks() returns):
 --   dma (from rocpd_memory_copy, distinct nid,pid,queue_id,dst_agent_id):
 --     * qa      queue_id=1, dst_agent_id=1  -> starts {1000,1200} end 1300  count 2
 --     * q_only  queue_id=2, dst_agent_id=NULL -> starts {2000,2200} end 2300 count 2

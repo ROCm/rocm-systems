@@ -66,7 +66,7 @@ struct reader_t::impl
     [[nodiscard]] reader_types::process_info_list_t       get_all_processes();
     [[nodiscard]] reader_types::thread_info_list_t        get_all_threads();
     [[nodiscard]] reader_types::agent_info_list_t         get_all_agents();
-    [[nodiscard]] reader_types::track_info_list_t         get_all_tracks();
+    [[nodiscard]] reader_types::track_info_list_t         get_tracks();
     [[nodiscard]] reader_types::kernel_symbol_info_list_t get_all_kernel_symbols();
     [[nodiscard]] reader_types::code_object_info_list_t   get_all_code_objects();
     [[nodiscard]] reader_types::stream_info_list_t        get_all_streams();
@@ -84,11 +84,11 @@ struct reader_t::impl
     [[nodiscard]] size_t get_event_count(const reader_types::event_filter_t& filter);
 
     // Track-scoped event queries
-    [[nodiscard]] reader_types::interval_event_list_t get_interval_track(
+    [[nodiscard]] reader_types::interval_entry_list_t get_interval_track(
         size_t                              track_id,
         const reader_types::event_filter_t& filter);
 
-    [[nodiscard]] reader_types::scalar_event_list_t get_scalar_track(
+    [[nodiscard]] reader_types::scalar_sample_list_t get_scalar_track(
         size_t                              track_id,
         const reader_types::event_filter_t& filter);
 
@@ -167,7 +167,7 @@ struct reader_t::impl
         const reader_types::timeline_event_t& event);
 
     // Database metadata
-    [[nodiscard]] reader_types::time_window_t  get_data_time_range();
+    [[nodiscard]] reader_types::time_window_t  get_time_range();
     [[nodiscard]] reader_types::event_counts_t get_event_counts(
         const reader_types::time_window_t& window);
 
@@ -245,7 +245,7 @@ private:
     std::unordered_map<size_t, reader_types::queue_info_ptr_t>  m_queue_info_utility;
     std::unordered_map<size_t, reader_types::pmc_info_ptr_t>    m_pmc_info_utility;
 
-    // Track lookup maps (populated during get_all_tracks)
+    // Track lookup maps (populated during get_tracks)
     std::
         unordered_map<topology_key_t, reader_types::track_info_ptr_t, topology_key_hash_t>
             m_topology_to_track_ptr;

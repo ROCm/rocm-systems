@@ -21,7 +21,7 @@ Every track carries an explicit type, via a `track_type_t` enum:
 - `kernel_dispatch_pmc` — per-kernel-dispatch PMC samples (`rocpd_pmc_event` joined to `rocpd_kernel_dispatch`), keyed `(nid, agent_id, pmc_id, pid)` with `agent_info` populated. Distinct from `counter`: `counter` tracks are periodic device/process samples, `kernel_dispatch_pmc` tracks are PMC values attached to individual kernel dispatches.
 - `memory_activity` — a per-agent cumulative running-total byte count synthesized from allocations/frees, mirroring your own memory-activity view. Has no `pmc_info`, avoiding collision with the real counter/PMC id space.
 
-`track_info_t` (returned by `get_all_tracks()`) carries an explicit `id` and `type`, plus optional context objects (agent/queue/stream/thread/pmc info, populated depending on track type), so a track is fully self-describing without side queries. `agent_info` carries a numeric `id`, giving direct access to the raw agent id (e.g. for topology nesting or table-cell naming) without a lookup.
+`track_info_t` (returned by `get_tracks()`) carries an explicit `id` and `type`, plus optional context objects (agent/queue/stream/thread/pmc info, populated depending on track type), so a track is fully self-describing without side queries. `agent_info` carries a numeric `id`, giving direct access to the raw agent id (e.g. for topology nesting or table-cell naming) without a lookup.
 
 `pmc_info_t` also carries an `ambiguous` flag (default `false`), set when a `pmc_id` has more than one `rocpd_pmc_event` row per `event_id` in the source data — a known producer bug on some databases. This is read-only telemetry, not a query-behavior change; it lets you flag or filter suspect PMCs instead of getting silently-wrong values.
 
@@ -36,7 +36,7 @@ Covers the sample/PMC event path for `counter` and `memory_activity` tracks. Ret
 **`get_flows(filter = {})`**
 A whole-database (by default) API returning causal links between events — e.g., a CPU-side API call and the GPU kernel dispatch it triggered — as flow edges keyed on `stack_id`, so you don't need to derive these relationships yourselves from `correlation_id`/`stack_id` joins. This is a batch/post-hoc query rather than something attachable to individual events, since the destination event is typically discovered on a different track processed later in the stream. An optional time-window filter is supported; other filter fields are reserved but not yet honored.
 
-Each returned `flow_t` carries **typed endpoints**: `source_opaque_id`/`dest_opaque_id` plus a `source_type`/`dest_type` (an `event_type_t`) on each side. This matters because opaque ids are only unique *within* an event table — a region event and a kernel-dispatch event can share the same raw id — so the type tag lets you safely disambiguate which table an id belongs to.
+Each returned `flow_edge_t` carries **typed endpoints**: `source_opaque_id`/`dest_opaque_id` plus a `source_type`/`dest_type` (an `event_type_t`) on each side. This matters because opaque ids are only unique *within* an event table — a region event and a kernel-dispatch event can share the same raw id — so the type tag lets you safely disambiguate which table an id belongs to.
 
 `get_flows()` emits the **full stack-clique** for each causal group: region↔region edges, same-type sibling edges (kernel-dispatch↔kernel-dispatch, memory-copy↔memory-copy, memory-allocate↔memory-allocate), and region-to-leaf edges (region↔kernel-dispatch, region↔memory-copy, region↔memory-allocate) — 7 statement sets in total, each with its own base and time-windowed variant. This gives you the same causal relationships you'd otherwise compute with separate per-event-type queries, in one call.
 
@@ -45,7 +45,7 @@ Returns a cheap `{min_ts, max_ts, count}` for any track without materializing it
 
 ## Event payload additions
 
-Interval events (`interval_event_t`) also carry:
+Interval events (`interval_entry_t`) also carry:
 
 - `category` — a display string such as `"rocm_hip_api"` or `"timer_sampling"` (empty when an event has no category)
 - `op_kind` — for `stream` tracks only, indicates which underlying event table (kernel dispatch, memory copy, memory allocate) a given event's `opaque_id` came from, so the right detail method can be called. Unset for single-source track types, where the track's own type already disambiguates.
@@ -58,7 +58,7 @@ The existing `get_*_details()` methods (keyed on `timeline_event_t`) are not bei
 
 - GPU queue dispatch tracks return correctly scoped data instead of all-process dispatch events.
 - Nesting/level computation can be dropped from your SQL and read directly off `get_interval_track()` results.
-- The `stream` track type gives you a unified per-stream interval view from `get_all_tracks()`.
+- The `stream` track type gives you a unified per-stream interval view from `get_tracks()`.
 - `get_flows()` — with typed endpoints and full stack-clique edges — gives you causal-link relationships without deriving them from `correlation_id`/`stack_id` joins yourselves.
 - The `memory` track type surfaces standalone memory-allocation tracks (grouped by agent/queue), so your standalone Memory Allocation view no longer needs its own SQL.
 - `kernel_dispatch_pmc` and `memory_activity` cover per-kernel-dispatch PMC values and cumulative memory-activity totals, both retrievable through the same `get_interval_track`/`get_scalar_track` methods used everywhere else.

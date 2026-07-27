@@ -72,9 +72,9 @@ reader_t::get_all_kernel_symbols() const
 }
 
 reader_types::track_info_list_t
-reader_t::get_all_tracks() const
+reader_t::get_tracks() const
 {
-    return m_impl->get_all_tracks();
+    return m_impl->get_tracks();
 }
 
 reader_types::timeline_event_list_t
@@ -96,14 +96,14 @@ reader_t::get_event_count(const reader_types::event_filter_t& filter) const
     return m_impl->get_event_count(filter);
 }
 
-reader_types::interval_event_list_t
+reader_types::interval_entry_list_t
 reader_t::get_interval_track(size_t                              track_id,
                              const reader_types::event_filter_t& filter) const
 {
     return m_impl->get_interval_track(track_id, filter);
 }
 
-reader_types::scalar_event_list_t
+reader_types::scalar_sample_list_t
 reader_t::get_scalar_track(size_t                              track_id,
                            const reader_types::event_filter_t& filter) const
 {
@@ -203,9 +203,9 @@ reader_t::get_region_summary(const reader_types::time_window_t& window) const
 }
 
 reader_types::time_window_t
-reader_t::get_data_time_range() const
+reader_t::get_time_range() const
 {
-    return m_impl->get_data_time_range();
+    return m_impl->get_time_range();
 }
 
 reader_types::event_counts_t

@@ -119,7 +119,7 @@ reader_t::impl::initialize_all_info_lists()
     m_stream_info_list        = get_all_streams();
     m_queue_info_list         = get_all_queues();
     m_pmc_info_list           = get_all_pmc_infos();
-    m_track_info_list         = get_all_tracks();
+    m_track_info_list         = get_tracks();
 
     // Stamp each track's nesting_model from its type once the full list is built (covers
     // both v3 synthesis and v4 build_v4_tracks). max_lane is filled lazily on first
@@ -288,7 +288,7 @@ reader_t::impl::get_all_agents()
 }
 
 reader_types::track_info_list_t
-reader_t::impl::get_all_tracks()
+reader_t::impl::get_tracks()
 {
     if(m_track_info_list.empty())
     {
@@ -2080,7 +2080,7 @@ reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& even
 // ============================================================================
 
 reader_types::time_window_t
-reader_t::impl::get_data_time_range()
+reader_t::impl::get_time_range()
 {
     size_t global_min = std::numeric_limits<size_t>::max();
     size_t global_max = 0;
@@ -2287,7 +2287,7 @@ paginate(std::vector<T>& v, const reader_types::pagination_t& pagination)
 }
 }  // namespace
 
-reader_types::interval_event_list_t
+reader_types::interval_entry_list_t
 reader_t::impl::get_interval_track(size_t                              track_id,
                                    const reader_types::event_filter_t& filter)
 {
@@ -2463,11 +2463,11 @@ reader_t::impl::get_interval_track(size_t                              track_id,
         }
     }
 
-    reader_types::interval_event_list_t events;
+    reader_types::interval_entry_list_t events;
     events.reserve(rows.size());
     for(const auto& r : rows)
     {
-        reader_types::interval_event_t ev;
+        reader_types::interval_entry_t ev;
         ev.start = r.start;
         ev.end   = r.end;
 
@@ -2516,7 +2516,7 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     // Rows arrive ORDER BY start ascending. Compute lane packing (all tracks) +
     // containment (stack tracks only) over the full track so lanes/levels are stable
     // regardless of any time-window filter applied afterwards. Cache peak concurrency on
-    // the track so height consumers can read it via get_all_tracks() (Optiq
+    // the track so height consumers can read it via get_tracks() (Optiq
     // level->max_lane migration target).
     // DESIGN DECISION (deviation, 2026-07-23): computing layout over the FULL track
     // before any window filter is deliberate — it keeps lanes/levels stable across pans
@@ -2543,7 +2543,7 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     {
         const auto&                         lo = filter.time_window.start;
         const auto&                         hi = filter.time_window.end;
-        reader_types::interval_event_list_t filtered;
+        reader_types::interval_entry_list_t filtered;
         filtered.reserve(events.size());
         for(auto& ev : events)
         {
@@ -2559,7 +2559,7 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     return events;
 }
 
-reader_types::scalar_event_list_t
+reader_types::scalar_sample_list_t
 reader_t::impl::get_scalar_track(size_t                              track_id,
                                  const reader_types::event_filter_t& filter)
 {
@@ -2588,7 +2588,7 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
         };
         const size_t target_key = agent_key(qi.agent_id);
 
-        reader_types::scalar_event_list_t events;
+        reader_types::scalar_sample_list_t events;
 
         for(const auto& r : raw_rows)
         {
@@ -2606,7 +2606,7 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
                     if(filter.time_window.end.has_value() &&
                        r.start > filter.time_window.end.value())
                         continue;
-                    reader_types::scalar_event_t ev;
+                    reader_types::scalar_sample_t ev;
                     ev.id = reader_types::detail::event_id_access::make(
                         reader_types::event_type_t::memory_allocate, r.id);
                     ev.timestamp = r.start;
@@ -2639,7 +2639,7 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
                     if(filter.time_window.end.has_value() &&
                        r.start > filter.time_window.end.value())
                         continue;
-                    reader_types::scalar_event_t ev;
+                    reader_types::scalar_sample_t ev;
                     ev.id = reader_types::detail::event_id_access::make(
                         reader_types::event_type_t::memory_allocate, r.id);
                     ev.timestamp = r.start;
@@ -2658,7 +2658,7 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
 
     auto rows = m_read_statements->scalar_track()(qi.real_track_id).to_vector();
 
-    reader_types::scalar_event_list_t events;
+    reader_types::scalar_sample_list_t events;
     events.reserve(rows.size());
     for(const auto& r : rows)
     {
@@ -2669,7 +2669,7 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
            r.timestamp > filter.time_window.end.value())
             continue;
 
-        reader_types::scalar_event_t ev;
+        reader_types::scalar_sample_t ev;
         ev.id = reader_types::detail::event_id_access::make(
             reader_types::event_type_t::sample, r.id);
         ev.timestamp = r.timestamp;
@@ -2935,7 +2935,7 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
             // lineage is recoverable by grouping on flow_id and sorting by src start.
             // Reversible. Open for Anthony review — design/draft_api §5-6,
             // design/gap_analysis_current_vs_design_2026-07-23.md.
-            flows.push_back(reader_types::flow_t{
+            flows.push_back(reader_types::flow_edge_t{
                 src, dst, reader_types::detail::flow_id_access::make(r.stack_id), kind });
         }
     };
@@ -3010,7 +3010,7 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
     auto edges = get_flows({});
     if(edges.empty()) return edges;
 
-    // A flow_t carries no timestamps and no track_id, so this selector cannot post-filter
+    // A flow_edge_t carries no timestamps and no track_id, so this selector cannot post-filter
     // get_flows({}) the way the adjacency/chain selectors do. Flow endpoints are always
     // interval events (region/kd/mc/ma), so resolve each endpoint's (start, end) and its
     // track membership by sweeping the interval tracks once. This goes through
@@ -3018,13 +3018,13 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
     // difference, so both backends yield identical selector semantics.
     struct endpoint_geom
     {
-        reader_types::timestamp_ns_t start{};
-        reader_types::timestamp_ns_t end{};
+        reader_types::timestamp_t start{};
+        reader_types::timestamp_t end{};
         bool                         seen{ false };
     };
     std::unordered_map<reader_types::event_id_t, endpoint_geom>       geom;
     std::unordered_map<reader_types::event_id_t, std::vector<size_t>> on_tracks;
-    for(const auto& t : get_all_tracks())
+    for(const auto& t : get_tracks())
     {
         if(!t) continue;
         switch(t->type)
@@ -3051,7 +3051,7 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
     const bool has_window = window.start.has_value() || window.end.has_value();
     const auto wlo        = window.start.value_or(0);
     const auto whi =
-        window.end.value_or(std::numeric_limits<reader_types::timestamp_ns_t>::max());
+        window.end.value_or(std::numeric_limits<reader_types::timestamp_t>::max());
 
     reader_types::flow_list_t filtered;
     for(const auto& e : edges)
@@ -3106,14 +3106,14 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
     // design/gap_analysis_current_vs_design_2026-07-23.md.
     if(max_edges == 0 || filtered.size() <= max_edges) return filtered;
 
-    auto latency = [&](const reader_types::flow_t& e) -> reader_types::timestamp_ns_t {
+    auto latency = [&](const reader_types::flow_edge_t& e) -> reader_types::timestamp_t {
         const auto& gs = geom[e.source];
         const auto& gd = geom[e.dest];
         return gd.start > gs.end ? gd.start - gs.end : 0;  // clamp: size_t is unsigned
     };
     std::sort(filtered.begin(),
               filtered.end(),
-              [&](const reader_types::flow_t& a, const reader_types::flow_t& b) {
+              [&](const reader_types::flow_edge_t& a, const reader_types::flow_edge_t& b) {
                   const auto la = latency(a);
                   const auto lb = latency(b);
                   if(la != lb) return la > lb;

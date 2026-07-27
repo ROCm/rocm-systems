@@ -20,7 +20,7 @@
 namespace profiler_hub::reader_types
 {
 
-using timestamp_ns_t = size_t;
+using timestamp_t = size_t;
 
 enum class event_kind_t
 {
@@ -44,10 +44,10 @@ enum class event_type_t
 /// [start, end]. An unset bound is open-ended; an empty {} window applies no filter.
 struct time_window_t
 {
-    std::optional<timestamp_ns_t> start{
+    std::optional<timestamp_t> start{
         std::nullopt
     };  ///< Window lower bound (ns); unset = open
-    std::optional<timestamp_ns_t> end{
+    std::optional<timestamp_t> end{
         std::nullopt
     };  ///< Window upper bound (ns); unset = open
 };
@@ -104,10 +104,10 @@ struct event_summary_t
 {
     std::string    name;
     size_t         count{};
-    timestamp_ns_t total_duration{};
-    timestamp_ns_t avg_duration{};
-    timestamp_ns_t min_duration{};
-    timestamp_ns_t max_duration{};
+    timestamp_t total_duration{};
+    timestamp_t avg_duration{};
+    timestamp_t min_duration{};
+    timestamp_t max_duration{};
 };
 
 using event_summary_list_t = std::vector<event_summary_t>;
@@ -318,7 +318,7 @@ enum class track_type_t
              ///< tables — kernel_dispatch + memory_copy + memory_allocate — that share a
              ///< stream, keyed (nid, pid, stream_id). Unlike dma (memory-copy only), a
              ///< stream track's events span multiple per-type tables; each returned
-             ///< interval_event_t::id encodes its event type so the reader routes it to
+             ///< interval_entry_t::id encodes its event type so the reader routes it to
              ///< the correct get_*_details() overload with no companion tag.
     memory,  ///< agent_info + queue_info populated. Interval track of memory-allocate
              ///< events (rocpd_memory_allocate), keyed (nid, agent_id, queue_id, pid) to
@@ -373,12 +373,12 @@ enum class nesting_model_t
     // are true synchronous containment (region = HIP->HSA API call nesting); every
     // concurrency track (gpu_queue/dma/memory/stream/kernel_dispatch_pmc) is `lane`,
     // where overlap means concurrency, not a parent/child edge. Only `stack` tracks
-    // populate interval_event_t::parent. Per draft principle #4/#6 + §5.
+    // populate interval_entry_t::parent. Per draft principle #4/#6 + §5.
     // Open for Anthony review — see design/draft_api_2026-06-22.md §4-6,
     // design/gap_analysis_current_vs_design_2026-07-23.md.
-    stack,  ///< Overlaps are true containment: interval_event_t::parent is populated and
+    stack,  ///< Overlaps are true containment: interval_entry_t::parent is populated and
             ///< `lane` coincides with call depth on real (non-overlapping-sibling) data.
-    lane,   ///< Overlaps are concurrency: interval_event_t::parent is always no-parent;
+    lane,   ///< Overlaps are concurrency: interval_entry_t::parent is always no-parent;
             ///< only `lane` (the packing row) is meaningful.
 };
 
@@ -414,9 +414,9 @@ struct track_info_t
     std::shared_ptr<pmc_info_t>    pmc_info;     ///< counter, kernel_dispatch_pmc.
 
     // DESIGN DECISION (gap #2, 2026-07-20): nesting_model gates whether
-    // interval_event_t::parent is populated for this track's events (stack only);
+    // interval_entry_t::parent is populated for this track's events (stack only);
     // max_lane exposes the track's peak concurrency so height consumers can migrate off
-    // the deprecated interval_event_t::level. Open for Anthony review — see
+    // the deprecated interval_entry_t::level. Open for Anthony review — see
     // design/draft_api_2026-06-22.md §4-6,
     // design/gap_analysis_current_vs_design_2026-07-23.md.
     nesting_model_t nesting{
@@ -532,8 +532,8 @@ struct region_data_t
 {
     std::shared_ptr<event_data_t> event;  ///< Common event metadata
 
-    timestamp_ns_t start_timestamp;  ///< Region start time (nanoseconds)
-    timestamp_ns_t end_timestamp;    ///< Region end time (nanoseconds)
+    timestamp_t start_timestamp;  ///< Region start time (nanoseconds)
+    timestamp_t end_timestamp;    ///< Region end time (nanoseconds)
     std::string    name;             ///< Region name (e.g., function name, annotation)
     std::string    extdata;
 
@@ -545,7 +545,7 @@ using region_data_list_t = std::vector<region_data_ptr_t>;
 
 struct sample_data_t
 {
-    timestamp_ns_t                timestamp{};  ///< Sample time (nanoseconds)
+    timestamp_t                timestamp{};  ///< Sample time (nanoseconds)
     std::shared_ptr<track_info_t> track;
     std::string                   extdata;
 };
@@ -567,8 +567,8 @@ using pmc_event_data_list_t = std::vector<pmc_event_data_ptr_t>;
 struct kernel_dispatch_data_t
 {
     size_t         dispatch_id{};      ///< Unique dispatch identifier
-    timestamp_ns_t start_timestamp{};  ///< Kernel start time (nanoseconds)
-    timestamp_ns_t end_timestamp{};    ///< Kernel end time (nanoseconds)
+    timestamp_t start_timestamp{};  ///< Kernel start time (nanoseconds)
+    timestamp_t end_timestamp{};    ///< Kernel end time (nanoseconds)
 
     std::optional<size_t>
         private_segment_size{};                  ///< Private memory per work-item (bytes)
@@ -598,8 +598,8 @@ using kernel_dispatch_data_list_t = std::vector<kernel_dispatch_data_ptr_t>;
 
 struct memory_copy_data_t
 {
-    timestamp_ns_t        start_timestamp{};  ///< Copy start time (nanoseconds)
-    timestamp_ns_t        end_timestamp{};    ///< Copy end time (nanoseconds)
+    timestamp_t        start_timestamp{};  ///< Copy start time (nanoseconds)
+    timestamp_t        end_timestamp{};    ///< Copy end time (nanoseconds)
     std::optional<size_t> dst_address;        ///< Destination memory address
     std::optional<size_t> src_address;        ///< Source memory address
     size_t                size;               ///< Transfer size (bytes)
@@ -626,8 +626,8 @@ struct memory_alloc_data_t
 {
     std::string           type;  ///< Allocation type (e.g., "hipMalloc", "hipHostMalloc")
     std::string           level;  ///< Memory level (e.g., "device", "host", "managed")
-    timestamp_ns_t        start_timestamp{};  ///< Allocation start time (nanoseconds)
-    timestamp_ns_t        end_timestamp{};    ///< Allocation end time (nanoseconds)
+    timestamp_t        start_timestamp{};  ///< Allocation start time (nanoseconds)
+    timestamp_t        end_timestamp{};    ///< Allocation end time (nanoseconds)
     std::optional<size_t> address;            ///< Allocated memory address
     size_t                size;               ///< Allocation size (bytes)
     std::string           extdata;
@@ -655,8 +655,8 @@ struct timeline_event_t
 {
     unique_timeline_event_id_t unique_identifier;
 
-    timestamp_ns_t start_timestamp;
-    timestamp_ns_t end_timestamp;
+    timestamp_t start_timestamp;
+    timestamp_t end_timestamp;
 
     std::string display_name;
     std::string category;
@@ -670,7 +670,7 @@ struct counter_timeline_event_t
 {
     unique_timeline_event_id_t unique_identifier;
 
-    timestamp_ns_t timestamp;
+    timestamp_t timestamp;
     size_t         value;
 
     track_info_ptr_t track;
@@ -762,19 +762,19 @@ struct event_info_t
     event_id_t                    id;        ///< Opaque handle this detail describes.
     std::string                   name;      ///< Type's name field; empty if none.
     std::string                   category;  ///< Event category display string.
-    timestamp_ns_t                ts{};      ///< Start / only timestamp (nanoseconds).
-    std::optional<timestamp_ns_t> te;        ///< End timestamp; nullopt for point events.
+    timestamp_t                ts{};      ///< Start / only timestamp (nanoseconds).
+    std::optional<timestamp_t> te;        ///< End timestamp; nullopt for point events.
     std::vector<arg_t>            properties;  ///< All non-header fields, typed.
 };
 
 // --------------------- Track event types (track-scoped queries) ----------
 
-struct interval_event_t
+struct interval_entry_t
 {
     event_id_t id{};  ///< Opaque handle for this event. Pass to the get_*_details()
                       ///< accessor of interest; a mismatched accessor returns nullopt.
-    timestamp_ns_t start{};       ///< Event start (nanoseconds).
-    timestamp_ns_t end{};         ///< Event end (nanoseconds).
+    timestamp_t start{};       ///< Event start (nanoseconds).
+    timestamp_t end{};         ///< Event end (nanoseconds).
     std::string    display_name;  ///< Human-readable label for the bar.
     std::string    category;      ///< Event category display string (e.g. "rocm_hip_api",
                            ///< "timer_sampling"); empty when the event carries none.
@@ -797,16 +797,16 @@ struct interval_event_t
                       ///< lane tracks and for top-level events.
 };
 
-using interval_event_list_t = std::vector<interval_event_t>;
+using interval_entry_list_t = std::vector<interval_entry_t>;
 
-struct scalar_event_t
+struct scalar_sample_t
 {
     event_id_t     id{};         ///< Opaque handle; pass to get_event_info().
-    timestamp_ns_t timestamp{};  ///< Sample time (nanoseconds).
+    timestamp_t timestamp{};  ///< Sample time (nanoseconds).
     double         value{};      ///< Counter value (REAL).
 };
 
-using scalar_event_list_t = std::vector<scalar_event_t>;
+using scalar_sample_list_t = std::vector<scalar_sample_t>;
 
 // DESIGN DECISION (gap #3, 2026-07-20): the flow-edge kind, tagged from the endpoint-type
 // pairing. Reversible mapping (see get_flows). Open for Anthony review — see
@@ -866,7 +866,7 @@ struct flow_id_access
 // names are kept (over the draft's src/dst) for backward compatibility. Open for Anthony
 // review -- see design/draft_api_2026-06-22.md §5-6,
 // design/gap_analysis_current_vs_design_2026-07-23.md.
-struct flow_t
+struct flow_edge_t
 {
     event_id_t  source{};   ///< Opaque handle of the source event (arrow tail).
     event_id_t  dest{};     ///< Opaque handle of the destination event (arrow head).
@@ -874,14 +874,13 @@ struct flow_t
     flow_kind_t kind{ flow_kind_t::generic };  ///< Semantic class of the edge.
 };
 
-using flow_edge_t = flow_t;  ///< Draft §6 spelling; same 4-field semantics.
-using flow_list_t = std::vector<flow_t>;
+using flow_list_t = std::vector<flow_edge_t>;
 
 struct track_stats_t
 {
-    std::optional<timestamp_ns_t>
+    std::optional<timestamp_t>
         min_ts;  ///< Earliest start on the track; nullopt if empty.
-    std::optional<timestamp_ns_t> max_ts;  ///< Latest end (samples: latest timestamp) on
+    std::optional<timestamp_t> max_ts;  ///< Latest end (samples: latest timestamp) on
                                            ///< the track; nullopt if empty.
     size_t count{};  ///< Number of events (or samples) on the track.
 };

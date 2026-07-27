@@ -69,7 +69,7 @@ backends map their query results into the common output types in `reader_types`.
 ## The Track Type System
 
 The core addition on the API surface is `track_type_t`, an enum that classifies every track
-returned by `get_all_tracks()`. It determines which identity fields in `track_info_t` are
+returned by `get_tracks()`. It determines which identity fields in `track_info_t` are
 populated, which query method applies (`get_interval_track` or `get_scalar_track`), and
 which `get_*_details()` overload applies to `opaque_id` values drawn from that track.
 
@@ -83,7 +83,7 @@ track_type_t
 │                       rocpd_sample rows. pmc_info carries the full PMC metadata panel.
 ├── stream              stream_info populated. Interval. Aggregates kernel_dispatch +
 │                       memory_copy + memory_allocate sharing a stream_id (3-way UNION).
-│                       Each interval_event_t carries op_kind to select get_*_details().
+│                       Each interval_entry_t carries op_kind to select get_*_details().
 ├── memory              agent_info + queue_info. Interval. memory_allocate events.
 │                       Keyed (nid, agent_id, queue_id, pid). Both nullable; NULL is a
 │                       distinct group, not dropped.
@@ -194,7 +194,7 @@ tuple to callers — `track_info_t::id` is the stable opaque handle.
 
 ## Interval Event Fields
 
-`interval_event_t` (returned by `get_interval_track()`) carries:
+`interval_entry_t` (returned by `get_interval_track()`) carries:
 
 - `opaque_id` — the SQLite row id in the event's per-type table (e.g., `rocpd_region.id`
   for cpu_thread tracks, `rocpd_kernel_dispatch.id` for gpu_queue). Pass to the
@@ -217,10 +217,10 @@ tuple to callers — `track_info_t::id` is the stable opaque handle.
 
 ## Flow Events
 
-`flow_t` (returned by `get_flows()`) represents a causal link between events:
+`flow_edge_t` (returned by `get_flows()`) represents a causal link between events:
 
 ```cpp
-struct flow_t {
+struct flow_edge_t {
     size_t       source_opaque_id{};
     event_type_t source_type{};   // disambiguates source_opaque_id across event tables
     size_t       dest_opaque_id{};

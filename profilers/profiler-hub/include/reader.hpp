@@ -29,7 +29,7 @@ namespace profiler_hub
 //    track; the interval window keep-rule is OVERLAP, not containment. Draft principle
 //    #4/§5.
 //  - Directed, typed, chain-grouped flows (tasks 032/033):
-//  flow_t{source,dest,flow_id,kind}
+//  flow_edge_t{source,dest,flow_id,kind}
 //    + flow_kind_t + three selectors (get_flows_for_event / get_flows_for_chain /
 //    get_flows_in_window). Draft §6.
 //  - Unified per-event detail (tasks 034/041): get_event_info(event_id_t) ->
@@ -159,7 +159,7 @@ struct reader_t
      * @brief Get all track info from cache
      * @return List of all track info objects
      */
-    [[nodiscard]] reader_types::track_info_list_t get_all_tracks() const;
+    [[nodiscard]] reader_types::track_info_list_t get_tracks() const;
 
     /**
      *@section Timeline Event Queries (On-Demand, Not Stored)
@@ -219,7 +219,7 @@ struct reader_t
      *         category resolved. Empty (not an error) if track_id is unknown or
      *         scalar-only.
      */
-    [[nodiscard]] reader_types::interval_event_list_t get_interval_track(
+    [[nodiscard]] reader_types::interval_entry_list_t get_interval_track(
         size_t                              track_id,
         const reader_types::event_filter_t& filter = {}) const;
 
@@ -233,7 +233,7 @@ struct reader_t
      * @return Scalar events ordered by timestamp ascending. Empty (not an
      *         error) if track_id is unknown or interval-only.
      */
-    [[nodiscard]] reader_types::scalar_event_list_t get_scalar_track(
+    [[nodiscard]] reader_types::scalar_sample_list_t get_scalar_track(
         size_t                              track_id,
         const reader_types::event_filter_t& filter = {}) const;
 
@@ -297,7 +297,7 @@ struct reader_t
      * arrow-span-latency (dst.start - src.end, clamped at 0) edges, tie-broken by
      * (source, dest) handle order so the kept set is STABLE across pans. 0 = no cap.
      * @return The kept edges. A returned edge still carries NO timestamps — endpoint
-     *         geometry is used internally only to filter and rank; the emitted flow_t
+     *         geometry is used internally only to filter and rank; the emitted flow_edge_t
      * shape (source, dest, flow_id, kind) is unchanged. Every returned edge is a member
      *         of get_flows({}).
      */
@@ -433,7 +433,7 @@ struct reader_t
      * @brief Get time range of all data in the database
      * @return Time window spanning all events
      */
-    [[nodiscard]] reader_types::time_window_t get_data_time_range() const;
+    [[nodiscard]] reader_types::time_window_t get_time_range() const;
 
     /**
      * @brief Get total counts of each event type

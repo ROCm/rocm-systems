@@ -29,7 +29,7 @@ namespace profiler_hub::detail
 // consumers should migrate to track_info_t::max_lane. Open for Anthony review — see
 // design/draft_api_2026-06-22.md §4-5.
 inline uint32_t
-compute_interval_layout(reader_types::interval_event_list_t& events,
+compute_interval_layout(reader_types::interval_entry_list_t& events,
                         reader_types::nesting_model_t        nesting)
 {
     std::stable_sort(events.begin(), events.end(), [](const auto& a, const auto& b) {
@@ -41,7 +41,7 @@ compute_interval_layout(reader_types::interval_event_list_t& events,
     // whose last event ends at or before this event's start; else a new lane. Because
     // events are processed in start order, the lane count equals the track's peak
     // concurrency.
-    std::vector<reader_types::timestamp_ns_t> lane_end;  // last end time per lane
+    std::vector<reader_types::timestamp_t> lane_end;  // last end time per lane
     for(auto& ev : events)
     {
         auto assigned = static_cast<uint32_t>(lane_end.size());

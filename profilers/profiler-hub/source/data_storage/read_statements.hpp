@@ -1920,7 +1920,7 @@ private:
     {
         const auto& u = m_uuid;
 
-        // Keyed on rocpd_sample.id (scalar_event_t::opaque_id). resolved_pmc_join keeps
+        // Keyed on rocpd_sample.id (scalar_sample_t::opaque_id). resolved_pmc_join keeps
         // only the sample's own pmc value; without it one sample joins to all co-sampled
         // pmcs sharing its event_id and could report another metric's value.
         m_scalar_detail = m_backend->create_read_statement_executor<scalar_detail_result,

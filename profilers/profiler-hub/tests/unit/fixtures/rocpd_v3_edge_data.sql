@@ -24,7 +24,7 @@
 --   names, and because there is NO rocpd_timestamp table it selects the v3
 --   backend (reader_impl.cpp version dispatch).
 --
--- TRACK MATRIX (what get_all_tracks() must return):
+-- TRACK MATRIX (what get_tracks() must return):
 --   COUNTER tracks come from rocpd_track (a track is a counter iff a PMC-backed
 --   rocpd_sample references it -- i.e. a sample row whose event_id joins
 --   rocpd_pmc_event; reader_impl.cpp v3 classification). Non-counter rocpd_track

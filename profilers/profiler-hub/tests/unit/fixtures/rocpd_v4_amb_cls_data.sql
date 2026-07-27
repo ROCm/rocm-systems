@@ -18,7 +18,7 @@
 --   * 1 rocpd_pmc_event row for the sample's event_id  (→ track 1 enters counter set)
 --   * 1 rocpd_memory_allocate row referencing track_id=1  (→ track 1 enters memory set)
 --   * 1 rocpd_info_pmc row (id=1, "COUNTER_X") so counter_track_names resolves it
---   Expected: get_all_tracks() returns exactly 1 track, type=counter
+--   Expected: get_tracks() returns exactly 1 track, type=counter
 --             (counter takes precedence), ambiguous_classification=true.
 -- =============================================================================
 

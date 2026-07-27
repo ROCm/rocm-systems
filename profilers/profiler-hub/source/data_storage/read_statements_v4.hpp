@@ -1086,7 +1086,7 @@ private:
     {
         const auto& u = m_uuid;
 
-        // Keyed on rocpd_sample.id (scalar_event_t::opaque_id).
+        // Keyed on rocpd_sample.id (scalar_sample_t::opaque_id).
         m_scalar_detail = m_backend->create_read_statement_executor<scalar_detail_result,
                                                                     bind_types<size_t>>(
             fmt::format("SELECT s.id, s.track_id, ts.value, p.value, s.event_id "
