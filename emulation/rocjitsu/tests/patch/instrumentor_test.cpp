@@ -1586,9 +1586,9 @@ TEST(InstrumentorSpill, PlanVgprSpillsReservesAscendingOffsets) {
   ASSERT_TRUE(plan_vgpr_spills(make_vgpr_set({5, 3}), spills, ROCJITSU_CODE_ARCH_CDNA4, out, &err))
       << err;
   ASSERT_EQ(out.size(), 2u);
-  EXPECT_EQ(out[0].vgpr, 3u);
+  EXPECT_EQ(out[0].reg, 3u);
   EXPECT_EQ(out[0].byte_offset, 64u);
-  EXPECT_EQ(out[1].vgpr, 5u);
+  EXPECT_EQ(out[1].reg, 5u);
   EXPECT_EQ(out[1].byte_offset, 68u);
   EXPECT_EQ(spills.total_private_bytes(), 72u);
 }
@@ -1652,7 +1652,7 @@ TEST(InstrumentorSpill, PlanVgprSpillsRdna4) {
   ASSERT_TRUE(plan_vgpr_spills(make_vgpr_set({0}), spills, ROCJITSU_CODE_ARCH_RDNA4, out, &err))
       << err;
   ASSERT_EQ(out.size(), 1u);
-  EXPECT_EQ(out[0].vgpr, 0u);
+  EXPECT_EQ(out[0].reg, 0u);
   EXPECT_EQ(out[0].byte_offset, 0u);
 }
 
@@ -1660,17 +1660,17 @@ TEST(InstrumentorSpill, PlanVgprSpillsRdna4) {
 // neither live nor already spilled as the bridge.
 TEST(InstrumentorSpill, PlanSgprSpillsPicksLowestDeadBridge) {
   SpillManager spills(/*original_private_bytes=*/64, /*per_lane_scratch_limit=*/4096);
-  std::vector<SgprSpillSlot> out;
+  std::vector<SpillSlot> out;
   uint16_t bridge = 0xFFFF;
   std::string err;
   // v0,v1 live; v2 already a VGPR spill -> bridge must be v3.
   const RegisterSet live = make_vgpr_set({0, 1});
-  const std::vector<SpillSlot> vgpr_spills{SpillSlot{2, 0}};
+  const std::vector<SpillSlot> vgpr_spills{SpillSlot{RegClass::VGPR, 2, 0}};
   ASSERT_TRUE(plan_sgpr_spills(make_sgpr_set({7}), live, vgpr_spills, /*kernel_vgpr_count=*/8,
                                spills, ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err))
       << err;
   ASSERT_EQ(out.size(), 1u);
-  EXPECT_EQ(out[0].sgpr, 7u);
+  EXPECT_EQ(out[0].reg, 7u);
   EXPECT_EQ(out[0].byte_offset, 64u);
   EXPECT_EQ(bridge, 3u);
 }
@@ -1679,7 +1679,7 @@ TEST(InstrumentorSpill, PlanSgprSpillsPicksLowestDeadBridge) {
 // VGPR in [0, count) is live, no bridge exists and the spill fails closed.
 TEST(InstrumentorSpill, PlanSgprSpillsFailsWhenNoBridgeWithinVgprCount) {
   SpillManager spills(0, 4096);
-  std::vector<SgprSpillSlot> out;
+  std::vector<SpillSlot> out;
   uint16_t bridge = 0xFFFF;
   std::string err;
   const RegisterSet live = make_vgpr_set({0, 1}); // both allocated VGPRs live.
@@ -1692,7 +1692,7 @@ TEST(InstrumentorSpill, PlanSgprSpillsFailsWhenNoBridgeWithinVgprCount) {
 // A non-SGPR register in the spill set fails closed and is named.
 TEST(InstrumentorSpill, PlanSgprSpillsRejectsNonSgpr) {
   SpillManager spills(0, 4096);
-  std::vector<SgprSpillSlot> out;
+  std::vector<SpillSlot> out;
   uint16_t bridge = 0xFFFF;
   std::string err;
   ASSERT_FALSE(plan_sgpr_spills(make_vgpr_set({2}), RegisterSet{}, {}, /*kernel_vgpr_count=*/8,

@@ -92,24 +92,24 @@ struct SpillBracket {
 };
 
 [[nodiscard]] SpillBracket build_spill_bracket(const std::vector<SpillSlot> &vgpr_spills,
-                                               const std::vector<SgprSpillSlot> &sgpr_spills,
+                                               const std::vector<SpillSlot> &sgpr_spills,
                                                uint16_t bridge_vgpr, rj_code_arch_t arch) {
   constexpr uint16_t kUniformLane = 0; // An SGPR is uniform; one lane suffices.
   SpillBracket bracket;
 
   // VGPRs: batch stores, then batch loads + a single wait before the readlanes.
   for (const SpillSlot &slot : vgpr_spills) {
-    const auto store = build_scratch_store_dword(slot.vgpr, slot.byte_offset, arch);
+    const auto store = build_scratch_store_dword(slot.reg, slot.byte_offset, arch);
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
-    const auto load = build_scratch_load_dword(slot.vgpr, slot.byte_offset, arch);
+    const auto load = build_scratch_load_dword(slot.reg, slot.byte_offset, arch);
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
   }
   if (!vgpr_spills.empty())
     bracket.epilogue.push_back(build_wait_loads_complete(arch));
 
   // SGPRs: writelane into the bridge then store; restore is load/wait/readlane.
-  for (const SgprSpillSlot &slot : sgpr_spills) {
-    const auto wl = build_v_writelane_b32(bridge_vgpr, slot.sgpr, kUniformLane, arch);
+  for (const SpillSlot &slot : sgpr_spills) {
+    const auto wl = build_v_writelane_b32(bridge_vgpr, slot.reg, kUniformLane, arch);
     bracket.prologue.insert(bracket.prologue.end(), wl.begin(), wl.end());
     const auto store = build_scratch_store_dword(bridge_vgpr, slot.byte_offset, arch);
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
@@ -117,7 +117,7 @@ struct SpillBracket {
     const auto load = build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch);
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
     bracket.epilogue.push_back(build_wait_loads_complete(arch));
-    const auto rl = build_v_readlane_b32(slot.sgpr, bridge_vgpr, kUniformLane, arch);
+    const auto rl = build_v_readlane_b32(slot.reg, bridge_vgpr, kUniformLane, arch);
     bracket.epilogue.insert(bracket.epilogue.end(), rl.begin(), rl.end());
   }
 
