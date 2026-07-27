@@ -2262,8 +2262,8 @@ ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow*
   return ncclSuccess;
 }
 
-// Get the RMA device window handle for a specific context
-ncclGinWindow_t ncclDevrGetRmaDevWin(struct ncclDevrWindow* winHost, int ctx) {
+// Get the RMA window handle for a specific context
+void* ncclDevrGetRmaWin(struct ncclDevrWindow* winHost, int ctx) {
   if (winHost == nullptr) {
     return nullptr;
   }
