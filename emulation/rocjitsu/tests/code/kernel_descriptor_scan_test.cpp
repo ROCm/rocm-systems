@@ -12,7 +12,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/code_object.h"
 
-#include "../patch/dbi_test_fixtures.h"
+#include "../dbi_test_util.h"
 
 #include <gtest/gtest.h>
 

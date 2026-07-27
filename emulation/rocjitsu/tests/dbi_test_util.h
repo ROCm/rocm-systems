@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file dbi_test_fixtures.h
+/// @file dbi_test_util.h
 /// @brief Self-contained, header-only builders for minimal AMDGPU ELFs used by DBI
 ///        probe/spill tests: a single-kernel target ELF (with a discoverable `.kd`
 ///        descriptor) and a probe ELF exporting one function symbol, plus small
@@ -9,11 +9,10 @@
 ///        flag; `make_gfx942_*` (CDNA3), `make_gfx950_*` (CDNA4), and
 ///        `make_gfx1200_*` (RDNA4) are thin wrappers over them.
 ///
-/// These mirror the in-file helpers in tests/patch/instrumentor_test.cpp (which
-/// documents that duplicating self-contained ELF builders across test slices is
-/// the accepted pattern here). They live in namespace rocjitsu::test so a test
-/// TU that needs to both patch (Instrumentor) and execute (simulator) a code
-/// object can share one copy without disturbing the large existing test files.
+/// Lives at the tests/ root (not a test slice) because it is shared across
+/// tests/patch, tests/dbi, and tests/code. Everything is in namespace
+/// rocjitsu::test so a TU that needs to both patch (Instrumentor) and execute
+/// (simulator) a code object can share one copy.
 
 #pragma once
 
