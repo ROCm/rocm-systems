@@ -276,9 +276,9 @@ TEST(RocmVisibilityTest, SelectsFirstVisibleIsaMatch) {
 
 TEST(RocmVisibilityTest, SelectsExplicitGpuWithMatchingIsa) {
   const rocjitsu::cli::HostSelection selection =
-      rocjitsu::cli::select_host_gpu(test_gpus(), 100, 90402);
+      rocjitsu::cli::select_host_gpu(test_gpus(), 101, 90402);
   EXPECT_EQ(rocjitsu::cli::HostSelectionStatus::Selected, selection.status);
-  EXPECT_EQ(100u, selection.gpu_id);
+  EXPECT_EQ(101u, selection.gpu_id);
 }
 
 TEST(RocmVisibilityTest, RejectsHiddenExplicitGpu) {
