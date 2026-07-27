@@ -226,6 +226,7 @@ public:
 
   static void init() {
     new (storage_) InterposerContext();
+    ctx.owner_pid_ = getpid();
     // Resolve the per-invocation runtime directory once here, in the library
     // constructor: this runs single-threaded before any app code (and thus before
     // any app fork). Writing it once here keeps invocation_runtime_dir() an
@@ -259,9 +260,9 @@ public:
     // remote_ aliasing the parent's daemon connection — the next interposed
     // open()/ioctl()/close() in that child would then deadlock or corrupt the
     // parent's connection. pthread_atfork's child handler runs inside libc fork,
-    // covering every fork that goes through glibc. (vfork/posix_spawn children run
-    // no atfork handlers by design, but they may only exec/_exit, so there is no
-    // interposer state for them to corrupt.) reset_after_fork() is idempotent. It is
+    // covering every fork that goes through glibc. vfork/posix_spawn children run
+    // no atfork handlers; interposed close() detects that window by owner PID and
+    // avoids mutating the parent-shared context. reset_after_fork() is idempotent. It is
     // NOT strictly async-signal-safe — container clear()/destructors call free() and it
     // closes the child's dmabuf-dup fds — so it relies on the standard fork-then-exec /
     // single-threaded-fork assumption (the same one the remote_ handling documents
@@ -279,6 +280,7 @@ public:
   /// be locked by threads that no longer exist. We reinitialize everything so
   /// the next open("/dev/kfd") creates a fresh connection.
   void reset_after_fork() {
+    owner_pid_ = getpid();
     active_driver_.store(nullptr, std::memory_order_release);
     rj_vm_ = nullptr;
     if (guest_driver_)
@@ -370,6 +372,8 @@ public:
   /// (reset_after_fork() intentionally does not clear it) and thus reconnects to
   /// the same daemon rather than recomputing a dir under its own PID.
   const std::string &invocation_runtime_dir() const { return invocation_runtime_dir_; }
+
+  bool owned_by_current_process() const { return owner_pid_ == getpid(); }
 
   // No lock needed: the snapshot keeps the RemoteDriver alive, and its handshake
   // metadata (topology/drm paths, gpu_info) is immutable after open() — close()
@@ -1282,6 +1286,7 @@ public:
   }
 
 private:
+  pid_t owner_pid_ = 0;
   rj_vm_t *rj_vm_ = nullptr;
   std::unique_ptr<GuestKfd> guest_driver_;
   std::atomic<LinuxKfd *> active_driver_{nullptr};
@@ -1645,6 +1650,11 @@ RJ_INTERPOSER_EXPORT int openat64(int dirfd, const char *path, int flags, ...) {
 
 RJ_INTERPOSER_EXPORT int close(int fd) {
   assert(InterposerContext::real().ready());
+  // A vfork child shares the parent's address space until exec/_exit but has a
+  // separate descriptor table. Descriptor cleanup in that window must close the
+  // child's fd without clearing the parent's KFD/DRM bookkeeping.
+  if (!InterposerContext::ctx.owned_by_current_process())
+    return static_cast<int>(InterposerContext::real().close(fd));
   if (InterposerContext::ctx.remote_lookup(fd)) {
     // Closing the primary remote KFD fd drops one open reference; the synthetic
     // fd and RPC connection are torn down only when the last reference is

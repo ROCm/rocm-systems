@@ -160,6 +160,26 @@ TEST(InterposerDupTest, Dup3RoutesKfdAndRejectsSameFd) {
   EXPECT_EQ(close(pipefd[1]), 0);
 }
 
+TEST(InterposerDupTest, VforkChildCloseKeepsParentKfdRoutable) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  pid_t child = vfork();
+  ASSERT_NE(child, -1);
+  if (child == 0) {
+    close(kfd);
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  ASSERT_EQ(WEXITSTATUS(status), 0);
+  EXPECT_TRUE(kfd_version_ok(kfd));
+  EXPECT_EQ(close(kfd), 0);
+}
+
 // Overwriting the primary KFD fd number via dup2 while a dup keeps the backend
 // alive must (a) leave the dup routing, and (b) let a fresh open("/dev/kfd")
 // return a valid, routable KFD fd. This is the reopen-after-overwrite path that
