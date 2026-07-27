@@ -178,6 +178,14 @@ public:
   /// @returns Encoding size in bytes.
   int size() const { return size_; }
 
+  /// @brief Previous decoded instruction in the same basic block.
+  /// @returns The preceding instruction, or nullptr at the block boundary.
+  [[nodiscard]] const Instruction *previous_instruction() const {
+    if (this->parent_ == nullptr || this->prev_ == nullptr || this->prev_->parent_ != this->parent_)
+      return nullptr;
+    return static_cast<const Instruction *>(this->prev_);
+  }
+
   /// @brief Source byte offset of this instruction in the decoded text section.
   ///
   /// @details Most decoder users only care about the instruction encoding and

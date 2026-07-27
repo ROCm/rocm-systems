@@ -411,6 +411,33 @@ TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
   EXPECT_TRUE(has_predecessor(*blocks[0], blocks[0].get()));
 }
 
+TEST(CfgAnalysis, PreviousInstructionReturnsPrecedingInstructionInBlock) {
+  auto blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  ASSERT_EQ(blocks.size(), 1u);
+  auto instruction = blocks[0]->instructions().begin();
+  ASSERT_NE(instruction, blocks[0]->instructions().end());
+  const Instruction *first = &*instruction;
+  ++instruction;
+  ASSERT_NE(instruction, blocks[0]->instructions().end());
+  const Instruction *second = &*instruction;
+
+  EXPECT_EQ(first->previous_instruction(), nullptr);
+  EXPECT_EQ(second->previous_instruction(), first);
+  EXPECT_EQ(second->src_loc(), first->src_loc() + static_cast<uint64_t>(first->size()));
+}
+
+TEST(CfgAnalysis, PreviousInstructionIsNullAtBranchTargetBlockEntry) {
+  auto blocks = build_test_blocks(
+      {TestOpcode::CBranchToElse, TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  BasicBlock *target = block_starting_at(blocks, 8);
+  ASSERT_NE(target, nullptr);
+  ASSERT_NE(target->instructions().begin(), target->instructions().end());
+  const Instruction &entry = *target->instructions().begin();
+  EXPECT_EQ(entry.previous_instruction(), nullptr);
+}
+
 TEST(CfgAnalysis, IfElseSuccessorsAndPredecessorsAreInverse) {
   auto blocks = build_test_blocks(
       {TestOpcode::CBranchToElse, TestOpcode::BranchToJoin, TestOpcode::Nop, TestOpcode::End});
