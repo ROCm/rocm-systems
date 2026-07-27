@@ -25,15 +25,16 @@ public:
     , m_clock{ clk }
     , m_delay{ delay }
     , m_duration{ duration }
+    , m_scope{ event_scope }
     {
         m_session->register_trigger(trigger_name, initial_action(delay, duration),
-                                    event_scope);
+                                    m_scope);
     }
 
     ~time_window()
     {
         stop();
-        m_session->unregister_trigger(trigger_name);
+        m_session->unregister_trigger(trigger_name, m_scope);
     }
 
     time_window(const time_window&)            = delete;
@@ -79,6 +80,7 @@ private:
     Clock&                   m_clock;
     const clock_duration     m_delay;
     const clock_duration     m_duration;
+    const scope              m_scope;
     std::thread              m_thread;
     std::mutex               m_lifecycle_mutex;
 
@@ -115,7 +117,7 @@ private:
             {
                 return;  // interrupted
             }
-            m_session->set_action(trigger_name, action::trace);
+            m_session->set_action(trigger_name, action::trace, m_scope);
         }
 
         if(has_duration)
@@ -125,7 +127,7 @@ private:
             {
                 return;  // interrupted
             }
-            m_session->set_action(trigger_name, action::pause);  // terminal
+            m_session->set_action(trigger_name, action::pause, m_scope);  // terminal
         }
     }
 };

@@ -31,7 +31,8 @@ session::shutdown()
     }
     {
         const std::scoped_lock action_lock{ m_actions_mutex };
-        m_actions.clear();
+        for(auto& scoped : m_actions)
+            scoped.clear();
         for(auto& a : m_active)
             a.store(true, std::memory_order_relaxed);
     }
@@ -49,51 +50,36 @@ void
 session::register_trigger(std::string_view name, action initial, scope event_scope)
 {
     apply_locked_transition(
-        [&]() -> std::optional<scope> {
-            m_actions[std::string{ name }] = entry{ initial, event_scope };
-            return event_scope;
+        [&] {
+            m_actions[static_cast<std::size_t>(event_scope)][std::string{ name }] =
+                initial;
         },
-        name);
+        name, event_scope);
 }
 
 void
-session::unregister_trigger(std::string_view name)
+session::unregister_trigger(std::string_view name, scope event_scope)
 {
     apply_locked_transition(
-        [&]() -> std::optional<scope> {
-            const auto it = m_actions.find(std::string{ name });
-            if(it == m_actions.end())
-            {
-                return std::nullopt;
-            }
-
-            const auto found_scope = it->second.event_scope;
-            m_actions.erase(it);
-            return found_scope;
+        [&] {
+            m_actions[static_cast<std::size_t>(event_scope)].erase(std::string{ name });
         },
-        name);
+        name, event_scope);
 }
 
 void
-session::set_action(std::string_view name, action act)
+session::set_action(std::string_view name, action act, scope event_scope)
 {
     apply_locked_transition(
-        [&]() -> std::optional<scope> {
-            const auto it = m_actions.find(std::string{ name });
-            if(it == m_actions.end())
-            {
-                return std::nullopt;
-            }
-
-            it->second.act = act;
-            return it->second.event_scope;
+        [&] {
+            m_actions[static_cast<std::size_t>(event_scope)][std::string{ name }] = act;
         },
-        name);
+        name, event_scope);
 }
 
 void
-session::apply_locked_transition(const std::function<std::optional<scope>()>& mutate,
-                                 std::string_view                             name)
+session::apply_locked_transition(const std::function<void()>& mutate,
+                                 std::string_view name, scope event_scope)
 {
     const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
     // Serializes compute-then-notify across concurrent callers so subscribers
@@ -103,22 +89,14 @@ session::apply_locked_transition(const std::function<std::optional<scope>()>& mu
     // re-enters is_active()/is_active_without() cannot deadlock.
     const std::scoped_lock notify_lk{ m_notify_mutex };
 
-    scope event_scope = scope::global;
-    bool  was_active  = false;
-    bool  now_active  = false;
+    const auto scope_idx  = static_cast<std::size_t>(event_scope);
+    bool       was_active = false;
+    bool       now_active = false;
     {
         const std::scoped_lock action_lk{ m_actions_mutex };
 
-        const auto scope_opt = mutate();
-        if(!scope_opt)
-        {
-            return;
-        }
-
-        event_scope           = *scope_opt;
-        const auto scope_idx = static_cast<std::size_t>(event_scope);
-
         was_active = m_active[scope_idx].load(std::memory_order_relaxed);
+        mutate();
         now_active = resolve_locked(event_scope);
         m_active[scope_idx].store(now_active, std::memory_order_relaxed);
     }
@@ -146,21 +124,19 @@ session::apply_locked_transition(const std::function<std::optional<scope>()>& mu
 bool
 session::resolve_locked(scope event_scope) const noexcept
 {
-    return std::none_of(
-        m_actions.begin(), m_actions.end(), [event_scope](const auto& kv) {
-            return kv.second.event_scope == event_scope && kv.second.act == action::pause;
-        });
+    const auto& scoped = m_actions[static_cast<std::size_t>(event_scope)];
+    return std::none_of(scoped.begin(), scoped.end(),
+                        [](const auto& kv) { return kv.second == action::pause; });
 }
 
 bool
 session::is_active_without(std::string_view name, scope event_scope) const noexcept
 {
     const std::scoped_lock lk{ m_actions_mutex };
-    return std::none_of(m_actions.begin(), m_actions.end(),
-                        [name, event_scope](const auto& kv) {
-                            return kv.second.event_scope == event_scope &&
-                                   kv.first != name && kv.second.act == action::pause;
-                        });
+    const auto&            scoped = m_actions[static_cast<std::size_t>(event_scope)];
+    return std::none_of(scoped.begin(), scoped.end(), [name](const auto& kv) {
+        return kv.first != name && kv.second == action::pause;
+    });
 }
 
 namespace
