@@ -829,9 +829,9 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
 const InstructionLegalization *
 BinaryTranslator::lookup_legalization(const Instruction &inst) const {
   // gfx1250 B0 and A0 have the same structural ISA, so the generated cross-ISA
-  // tables cannot express their revision-specific behavior. Affected decoded
-  // instructions are classified by the handwritten errata policy; everything
-  // else intentionally has no entry and follows the raw same-ISA copy path.
+  // tables cannot express their revision-specific behavior. Instructions in
+  // the B0-to-A0 profile use handwritten legalization; everything else follows
+  // the raw same-ISA copy path.
   if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
       options_.input_revision == ProcessorRevision::Gfx1250B0 &&
       options_.output_revision == ProcessorRevision::Gfx1250A0)
@@ -856,10 +856,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   };
 
   // A same-architecture gfx1250 translation is direction-specific: A0 and B0
-  // share an ELF machine ID, so both revisions must be given and must select a
-  // supported direction. Enforce this here as well as in the C API so a direct or
-  // future internal caller cannot bypass the check and get a silent identity copy
-  // that skips every required workaround.
+  // share an ELF machine ID, so both revisions must be given. Enforce this here
+  // as well as in the C API.
   if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250) {
     if (options_.input_revision == ProcessorRevision::Unspecified ||
         options_.output_revision == ProcessorRevision::Unspecified) {
@@ -868,9 +866,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                    "revisions");
       return leave_unchanged();
     }
-    // The implemented errata are deliberately one-way. Treating A0 input as B0
-    // output would silently preserve A0 workaround sequences while claiming the
-    // opposite direction, so fail before modifying the code object.
+    // Only the B0-to-A0 direction is implemented.
     if (options_.input_revision == ProcessorRevision::Gfx1250A0 &&
         options_.output_revision == ProcessorRevision::Gfx1250B0) {
       append_error(result.diagnostics, DiagnosticKind::Legalization,
@@ -1762,7 +1758,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // and modifier suffix words, instead of reconstructing bytes from the
         // decoder's base-format raw encoding. Direct branches and recovered
         // indirect transfers have already taken their relocation paths above;
-        // explicit errata expansions have already continued or failed closed.
+        // explicit profile expansions have already continued or failed closed.
         if (guest_arch_ == host_arch_ && leg == nullptr) {
           copy_original_instruction(inst, offset, kernel_text, pending_traces);
           continue;
