@@ -138,7 +138,8 @@ class NullDevice : public amd::Device {
   virtual cl_int virtualUnmap(void* va, size_t size) override { return CL_INVALID_OPERATION; }
 
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice) {
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1) {
     return true;
   }
 
@@ -583,7 +584,8 @@ class Device : public NullDevice {
 
   //! Set/Get memory access set by the app
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice);
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1);
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const;
 

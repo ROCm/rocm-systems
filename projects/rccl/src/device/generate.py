@@ -398,24 +398,26 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
   print("-- Generating %s" % os.path.join(gensrc, "device_table.h"))
   out = f.write
 
-  if is_ifc: func_declaration = "__device__ void"
-  else: func_declaration = "__device__ __attribute__((noinline)) void"
-
+  # Plain forward declarations; noinline (device-linker only) is controlled
+  # solely by DEFINE_ncclDevFunc in common.h.
   for fn in primary_funcs:
     sym = paste("_", "ncclDevFunc", *fn)
     guard = get_arch_guard(fn)
     if guard:
-      out("#if %s\n%s %s();\n#endif\n" % (guard, func_declaration, sym))
+      out("#if %s\n__device__ void %s();\n#endif\n" % (guard, sym))
     else:
-      out("%s %s();\n" % (func_declaration, sym))
+      out("__device__ void %s();\n" % sym)
   out("\n")
 
   index = {val: None for val in all_unrolls}
-  out("#ifndef RCCL_DEVICE_TABLE_OMIT\n")
+
+  # Function-pointer table. Only the builds that dispatch through it at RUNTIME
+  # emit it: the device-linker build and the legacy indirect-function-call build.
+  out("#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)\n")
   out("typedef void(*ncclDevFuncPtr_t)();\n\n")
   for unroll in all_unrolls:
     index[unroll] = 0
-    out("__device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
+    out("static __device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
     for fn in primary_funcs:
       if fn.unroll != unroll: continue
       sym = paste("_", "ncclDevFunc", *fn)
@@ -427,12 +429,17 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       index[unroll] += 1
     out("nullptr};\n")
     out("\n")
+  out("#endif // USE_INDIRECT_FUNCTION_CALL || RCCL_DEVICE_LINKER\n\n")
 
   if not is_ifc:
+    # Pure-RDC dispatch: a compile-time binary search whose leaves call each
+    # ncclDevFunc_* DIRECTLY BY NAME -- no function-pointer table is referenced,
+    # so nothing is address-taken.
+    out("#if !defined(USE_INDIRECT_FUNCTION_CALL) && !defined(RCCL_DEVICE_LINKER)\n")
     for unroll in all_unrolls:
       out(f"template<unsigned short f, unsigned short l>\n"
           f"struct Caller{unroll} {{\n"
-          "  static __forceinline__ __device__ __host__\n"
+          "  static __forceinline__ __device__\n"
           f"  void call{unroll}(unsigned short funcIndex) noexcept {{\n"
           "    constexpr unsigned short m = f + (l - f) / 2;\n"
           f"    return (funcIndex < m)\n"
@@ -440,21 +447,27 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
           f"      : Caller{unroll}<m, l>::call{unroll}(funcIndex);\n"
           "  }\n"
           "};\n\n")
-
-      out(f"template<unsigned short f>\n"
-          f"struct Caller{unroll}<f, f + 1> {{\n"
-          "  static __forceinline__ __device__ __host__\n"
-          f"  void call{unroll}(unsigned short funcIndex) noexcept {{\n"
-          f"    ncclDevFuncTable_{unroll}[f]();\n"
-          "  }\n"
-          "};\n\n")
-
-      # emit NCCL_CALL_FUNCTIONS_<unroll> wrapper using last index value
+      unroll_fns = [fn for fn in primary_funcs if fn.unroll == unroll]
+      for i, fn in enumerate(unroll_fns):
+        sym = paste("_", "ncclDevFunc", *fn)
+        guard = get_arch_guard(fn)
+        spec = f"template<> struct Caller{unroll}<{i}, {i+1}> {{ static __forceinline__ __device__ void call{unroll}(unsigned short) noexcept"
+        if guard:
+          out(f"#if {guard}\n")
+          out(f"{spec} {{ {sym}(); }} }};\n")
+          out("#else\n")
+          # Arch-guarded-out slot: the function does not exist for this arch.
+          # Trap instead of a silent no-op so an out-of-range/inconsistent funcId
+          # fails fast, matching the nullptr entries of the function-pointer table.
+          out(f"{spec} {{ __builtin_trap(); }} }};\n")
+          out("#endif\n")
+        else:
+          out(f"{spec} {{ {sym}(); }} }};\n")
+      out("\n")
       out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex) noexcept {{\n")
-      out(f"  Caller{unroll}<0, {index[unroll]}>::call{unroll}(funcIndex);\n")
+      out(f"  Caller{unroll}<0, {len(unroll_fns)}>::call{unroll}(funcIndex);\n")
       out("}\n\n")
-
-  out("#endif // RCCL_DEVICE_TABLE_OMIT\n")
+    out("#endif // !USE_INDIRECT_FUNCTION_CALL && !RCCL_DEVICE_LINKER\n")
 
 # Generate <gensrc>/host_table.cpp
 with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
@@ -619,7 +632,6 @@ for fn in primary_funcs:
 
   with open(filepath, "w") as f:
     out = f.write
-    out('#define RCCL_DEVICE_TABLE_OMIT\n')
     out('#include "common.h"\n')
     out('#include "%s.h"\n\n' % lower_coll)
     if guard:

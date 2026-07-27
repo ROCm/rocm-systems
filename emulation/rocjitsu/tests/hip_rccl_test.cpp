@@ -9,7 +9,7 @@
 /// ncclCommInitRank. Each test validates the RCCL result against a
 /// single-threaded host-computed golden reference using random fuzz inputs.
 ///
-/// Compiled with hipcc, linked with -lrccl. Requires LD_PRELOAD=librocjitsu_kmd.so.
+/// Compiled with hipcc, linked with -lrccl. Requires LD_PRELOAD=librocjitsu.so.
 /// Arguments: --rank=N --world-size=M --shared-dir=DIR [--seed=S]
 
 #include <hip/hip_runtime.h>

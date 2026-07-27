@@ -1,7 +1,26 @@
 name: TheRock CI for rccl
 
 on:
+  schedule:
+    - cron: '17 6 * * 0'  # Weekly, Sunday 06:17 UTC
   workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: 'Reuse artifacts from a previous run ID (skips build)'
+        type: string
+        default: ''
+      test_scope:
+        description: 'smoke (22 curated tests, ~3min) or all'
+        type: string
+        default: 'smoke'
+      notify_email:
+        description: 'Email address to send test summary report'
+        type: string
+        default: 'collectives-ci@amd.com'
+      notify_webhook:
+        description: 'Teams webhook URL for test summary notifications'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -17,12 +36,7 @@ concurrency:
 jobs:
   setup:
     runs-on: ubuntu-24.04
-    env:
-      # The commit being checked out is the merge commit for a PR. Its first
-      # parent will be the tip of the base branch.
-      BASE_REF: HEAD^
     outputs:
-      enable_therock_ci: ${{ steps.configure.outputs.enable_therock_ci }}
       run_linux_ci: ${{ steps.rccl_check.outputs.run_linux_ci }}
 
     steps:
@@ -32,10 +46,6 @@ jobs:
           # We need the parent commit to do a diff
           fetch-depth: 2
 
-      - name: "Configuring CI options"
-        id: configure
-        run: python .github/scripts/therock_configure_ci.py
-
       - name: "Detect RCCL file changes"
         id: rccl_check
         shell: bash
@@ -43,7 +53,13 @@ jobs:
           echo "Changed files:"
           git diff --name-only HEAD^
 
-          if git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
+          # Scheduled and manual runs always execute the full CI pipeline.
+          # PR/push runs only trigger CI when files under projects/rccl/
+          # have changed, to avoid burning GPU runner time on unrelated commits.
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_linux_ci=true" >> "$GITHUB_OUTPUT"
+            echo "Scheduled/manual run — always run CI"
+          elif git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
             echo "run_linux_ci=true" >> "$GITHUB_OUTPUT"
             echo "RCCL changes detected"
           else
@@ -67,6 +83,12 @@ jobs:
     with:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
+      event_name: ${{ github.event_name }}
+      package_version: ADHOCBUILD
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      test_scope: ${{ inputs.test_scope || 'smoke' }}
+      notify_email: ${{ inputs.notify_email || 'collectives-ci@amd.com' }}
+      notify_webhook: ${{ inputs.notify_webhook }}
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON

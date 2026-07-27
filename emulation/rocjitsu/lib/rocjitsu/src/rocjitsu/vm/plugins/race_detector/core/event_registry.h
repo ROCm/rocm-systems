@@ -70,6 +70,7 @@ public:
 
   MemoryEventType type(EventId id) const { return entries_[index(id)].type; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
+  bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
   uint64_t pc(EventId id) const { return entries_[index(id)].pc; }
   uint8_t byteMask(EventId id) const { return entries_[index(id)].byteMask; }
   uint64_t execMask(EventId id) const { return entries_[index(id)].execMask; }
@@ -99,7 +100,7 @@ public:
 private:
   int index(EventId id) const { return id.value - base_offset_; }
 
-  static bool isTrimmable(const EventInfo &e) {
+  static bool isEntryTrimmable(const EventInfo &e) {
     if (e.status == EventStatus::RETIRED)
       return true;
     return e.status == EventStatus::WAVE_COMPLETE && isWaveLocal(e.type);
@@ -108,7 +109,7 @@ private:
   void tryTrimEvents() {
     int trimCount = 0;
     int size = static_cast<int>(entries_.size());
-    while (trimCount < size && isTrimmable(entries_[trimCount]))
+    while (trimCount < size && isEntryTrimmable(entries_[trimCount]))
       trimCount++;
 
     if (trimCount < size / 2)

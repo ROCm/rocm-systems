@@ -10,7 +10,9 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
+#include <system_error>
 
 namespace {
 
@@ -18,6 +20,51 @@ struct ProcessResult {
   std::string output;
   int exit_code;
 };
+
+struct TestPaths {
+  std::string rocjitsu_bin = ROCJITSU_BIN;
+  std::string config_path = RJ_CONFIG_PATH;
+};
+
+std::filesystem::path resolve_relative_to_exe(const std::filesystem::path &exe_dir,
+                                              const char *path) {
+  std::filesystem::path candidate(path);
+  if (!candidate.is_absolute())
+    candidate = exe_dir / candidate;
+  return candidate.lexically_normal();
+}
+
+std::filesystem::path current_exe_dir() {
+  std::error_code ec;
+  std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+  if (ec)
+    return {};
+  return exe.parent_path();
+}
+
+bool installed_paths_exist(const TestPaths &paths) {
+  return std::filesystem::exists(paths.rocjitsu_bin) && std::filesystem::exists(paths.config_path);
+}
+
+TestPaths installed_paths(const std::filesystem::path &exe_dir) {
+  return {
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_ROCJITSU_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_CONFIG_PATH).string(),
+  };
+}
+
+const TestPaths &test_paths() {
+  static TestPaths paths = [] {
+    std::filesystem::path exe_dir = current_exe_dir();
+    if (!exe_dir.empty()) {
+      TestPaths installed = installed_paths(exe_dir);
+      if (installed_paths_exist(installed))
+        return installed;
+    }
+    return TestPaths{};
+  }();
+  return paths;
+}
 
 ProcessResult run_command(const std::string &cmd) {
   ProcessResult result;
@@ -39,8 +86,11 @@ ProcessResult run_command(const std::string &cmd) {
 }
 
 const ProcessResult &rocminfo_output() {
-  static const ProcessResult result = run_command(std::string(ROCJITSU_BIN) + " --config " +
-                                                  RJ_CONFIG_PATH + " -- " + ROCMINFO_PATH);
+  const TestPaths &paths = test_paths();
+  const char *rocminfo_path = std::getenv("ROCMINFO_PATH");
+  static const ProcessResult result =
+      run_command(paths.rocjitsu_bin + " --config " + paths.config_path + " -- " +
+                  (rocminfo_path ? rocminfo_path : ROCMINFO_PATH));
   return result;
 }
 

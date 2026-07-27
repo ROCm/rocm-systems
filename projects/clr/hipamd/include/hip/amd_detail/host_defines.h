@@ -309,6 +309,50 @@ template <size_t... Ints>
 constexpr index_sequence<Ints...> make_index_sequence_value(index_sequence<Ints...>) {
   return {};
 }
+
+// An equivalent of std::numeric_limits<T>::max() and lowest(). Note that the
+// class name and methods have been changed intentionally to reflect the fact that is not
+// a one-to-one replacement of std::numeric_limits and also to avoid a name collision with
+// the Win32 max() macro
+template <typename T>
+struct NumericLimits;
+
+template <>
+struct NumericLimits<int> {
+    static constexpr int maximum() { return 0x7FFFFFFF; }
+    static constexpr int minimum() { return ~0x7FFFFFFF; }
+};
+
+template <>
+struct NumericLimits<unsigned int> {
+    static constexpr unsigned int maximum()    { return 0xFFFFFFFFu; }
+    static constexpr unsigned int minimum() { return 0u; }
+};
+
+template <>
+struct NumericLimits<long long> {
+    static constexpr long long maximum() { return 0x7FFFFFFFFFFFFFFFLL; }
+    static constexpr long long minimum() { return ~0x7FFFFFFFFFFFFFFFLL; }
+};
+
+template <>
+struct NumericLimits<unsigned long long> {
+    static constexpr unsigned long long maximum()    { return 0xFFFFFFFFFFFFFFFFull; }
+    static constexpr unsigned long long minimum() { return 0ull; }
+};
+
+template <>
+struct NumericLimits<float> {
+  static constexpr float maximum()    { return __builtin_bit_cast(float, 0x7f800000); }
+  static constexpr float minimum()    { return -maximum(); }
+};
+
+template <>
+struct NumericLimits<double> {
+  static constexpr double maximum()    { return __builtin_bit_cast(double, 0x7FF0000000000000LL); }
+  static constexpr double minimum()    { return -maximum(); }
+};
+
 }  // namespace __hip_internal
 typedef __hip_internal::uint8_t __hip_uint8_t;
 typedef __hip_internal::uint16_t __hip_uint16_t;

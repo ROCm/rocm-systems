@@ -57,7 +57,8 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_compile_options(metrohash PRIVATE
         /EHsc # Catches only C++ exceptions and assumes
               # functions declared as extern "C" never throw a C++ exception.
-        /GR-) # Disables run-time type information.
+        /GR-  # Disables run-time type information.
+        /GS-) # Disables detection of buffer overruns.
 
     # [MSVC] Warning Level
     target_compile_options(metrohash PRIVATE

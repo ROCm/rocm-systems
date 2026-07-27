@@ -44,17 +44,12 @@
  */
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
-#include <errno.h>
-
-#ifndef _WIN32
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
 #include <grp.h>
 #include <unistd.h>
 #include <pwd.h>
-#endif
 
 #include <fstream>
 #include <vector>
@@ -238,34 +233,12 @@ std::string int_to_string(uint32_t i,
   return sd.str();
 }
 
-std::string int_to_string(uint64_t i,
-                   uint32_t fmt = ROCMI_INT_FORMAT_DEC|ROCMI_INT_FORMAT_HEX) {
-  std::stringstream sd;
-  bool need_parens = false;
-
-  if (fmt & ROCMI_INT_FORMAT_DEC) {
-    sd << std::dec << i << " ";
-    need_parens = true;
-  }
-
-  if (fmt & ROCMI_INT_FORMAT_HEX) {
-    if (need_parens) {
-      sd << "(0x";
-    }
-    sd << std::hex << i;
-    if (need_parens) {
-      sd << ") ";
-    }
-  }
-
-  return sd.str();
-}
-
 static void DetectWSLEnvironment() {
   const char *filePath = "/dev/dxg";
-  std::ifstream file(filePath);
+  FILE *file = fopen(filePath, "r");
   if (file) {
     printf("WSL environment detected.\n");
+    fclose(file);
     wsl_env = true;
   }
 }
@@ -280,24 +253,14 @@ static void DetectModelEnvironment() {
 }
 
 static void DetectDTIFEnvironment() {
-#if defined(_WIN32) && defined(_MSC_VER)
-  char *var = nullptr;
-  size_t var_size = 0;
-  if (_dupenv_s(&var, &var_size, "HSA_ENABLE_DTIF") != 0 || var == nullptr)
-    return;
-#else
-  const char *var = getenv("HSA_ENABLE_DTIF");
+  char *var = getenv("HSA_ENABLE_DTIF");
   if (var == NULL)
     return;
-#endif
 
   if (0 == strncmp(var, "1", 1)) {
     printf("HSA-DTIF environment detected.\n");
     dtif_env = true;
   }
-#if defined(_WIN32) && defined(_MSC_VER)
-  free(var);
-#endif
 }
 
 static void printLabelInt(char const *l, int d, uint32_t indent_lvl = 0) {
@@ -404,9 +367,8 @@ static void DisplaySystemInfo(system_info_t const *sys_info) {
   printLabel("System Timestamp Freq.:");
   printf("%fMHz\n", sys_info->timestamp_frequency / 1e6);
   printLabel("Sig. Max Wait Duration:");
-  printf("%llu (0x%llX) (timestamp count)\n",
-         static_cast<unsigned long long>(sys_info->max_wait),
-         static_cast<unsigned long long>(sys_info->max_wait));
+  printf("%lu (0x%lX) (timestamp count)\n", sys_info->max_wait,
+                                                           sys_info->max_wait);
 
   printLabel("Machine Model:");
   if (HSA_MACHINE_MODEL_SMALL == sys_info->machine_model) {
@@ -920,7 +882,7 @@ static void DumpSegment(pool_info_t *pool_i, uint32_t ind_lvl) {
 static void DisplayPoolInfo(pool_info_t *pool_i, uint32_t indent) {
   DumpSegment(pool_i, indent);
 
-  uint64_t sz = pool_i->pool_size/1024;
+  size_t sz = pool_i->pool_size/1024;
   printLabelStr("Size:", int_to_string(sz) + "KB", indent);
   printLabelStr("Allocatable:", (pool_i->alloc_allowed ? "TRUE" : "FALSE"),
                                                                       indent);
@@ -1236,9 +1198,6 @@ AcquireAndDisplayAgentInfo(hsa_agent_t agent, void* data) {
 }
 
 int CheckInitialState(void) {
-#ifdef _WIN32
-  return 0;
-#else
   // Check kernel module for ROCk is loaded
 
   std::ifstream amdgpu_initstate("/sys/module/amdgpu/initstate");
@@ -1363,7 +1322,6 @@ int CheckInitialState(void) {
 
   delete []groups;
   return -1;
-#endif
 }
 
 // Print out all static information known to HSA about the target system.

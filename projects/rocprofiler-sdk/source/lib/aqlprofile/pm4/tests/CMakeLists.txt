@@ -11,7 +11,16 @@ target_compile_options(aqlprofile-pm4-tests-flags
 
 set(AQLPROFILE_PM4_TEST_SOURCES
     cmd_builder_tests.cpp gfx9_cmd_builder_tests.cpp pmc_builder_tests.cpp
+    pmc_builder_harvest_tests.cpp pmc_builder_harvest_gfx12_tests.cpp
     spm_builder_test.cpp sqtt_builder_tests.cpp trace_config_test.cpp)
+
+# The harvest tests include the real gfx11/gfx12 block tables, whose GpuBlockInfo
+# aggregates predate the spm_block_id field and leave it default-initialized (harmless;
+# matches how the library compiles them). Scope the suppression to just these two TUs so
+# the other test files keep -Wmissing-field-initializers.
+set_source_files_properties(
+    pmc_builder_harvest_tests.cpp pmc_builder_harvest_gfx12_tests.cpp
+    PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)
 
 add_executable(aqlprofile-pm4-tests)
 

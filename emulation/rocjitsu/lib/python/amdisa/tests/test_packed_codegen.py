@@ -89,7 +89,7 @@ def test_gfx1250_mad_mixlo_f16_uses_helper_and_fma():
 
     assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
     assert 'std::fma(a, b, c)' in cpp
-    assert 'util::f32_to_f16(result)' in cpp
+    assert 'util::f32_to_f16_mode(result, wf.fp16_ovfl())' in cpp
 
 
 def test_mad_mixhi_f16_uses_true16_high_write():

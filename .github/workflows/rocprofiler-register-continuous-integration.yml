@@ -14,6 +14,7 @@ on:
       - '!**/.readthedocs.yaml'
       - '!**/.spellcheck.local.yaml'
       - '!**/.wordlist.txt'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
   pull_request:
     paths:
       - 'projects/rocprofiler-register/**'
@@ -25,55 +26,77 @@ on:
       - '!**/.readthedocs.yaml'
       - '!**/.spellcheck.local.yaml'
       - '!**/.wordlist.txt'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  ci_config:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
   ci:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
     strategy:
       fail-fast: false
       matrix:
         compiler: ['clang-14', 'clang-15', 'gcc-11', 'gcc-12']
         ci-args: ['']
         ci-tag: ['']
-        runner: ['linux-gfx942-1gpu-core42-ossci-rocm']
+        runner_type: ['gfx94x']
         include:
           - compiler: 'gcc-12'
             ci-args: '--coverage'
             ci-tag: '-codecov'
-            runner: 'linux-gfx942-1gpu-core42-ossci-rocm'
+            runner_type: 'gfx94x'
           - compiler: 'clang-15'
             ci-args: '--linter clang-tidy'
             ci-tag: '-clang-tidy'
-            runner: 'linux-gfx942-1gpu-core42-ossci-rocm'
+            runner_type: 'gfx94x'
           - compiler: 'clang-13'
             ci-args: ''
             ci-tag: ''
-            runner: 'linux-gfx942-1gpu-core42-ossci-rocm'
+            runner_type: 'gfx94x'
           - compiler: 'gcc-12'
             ci-args: '--memcheck ThreadSanitizer'
             ci-tag: '-thread-sanitizer'
             # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
-            runner: 'linux-mi325-gpu-rocm-cpu-sandbox'
+            runner_type: 'sandbox'
           - compiler: 'gcc-12'
             ci-args: '--memcheck AddressSanitizer'
             ci-tag: '-address-sanitizer'
             # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
-            runner: 'linux-mi325-gpu-rocm-cpu-sandbox'
+            runner_type: 'sandbox'
           - compiler: 'gcc-12'
             ci-args: '--memcheck LeakSanitizer'
             ci-tag: '-leak-sanitizer'
             # DO NOT UPDATE: sanitizer builds and tests cause issue on prod machines
-            runner: 'linux-mi325-gpu-rocm-cpu-sandbox'
+            runner_type: 'sandbox'
         #   - compiler: 'gcc-12'
         #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
         #     ci-tag: '-undefined-behavior-sanitizer'
-        #     runner: 'linux-mi325-8gpu-ossci-rocm-sandbox'
+        #     runner_type: 'sandbox'
 
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner_type == 'sandbox' && needs.ci_config.outputs.gfx94x_sandbox_runner || needs.ci_config.outputs.gfx94x_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:

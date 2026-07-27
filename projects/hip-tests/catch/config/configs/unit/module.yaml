@@ -306,6 +306,9 @@ module:
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
     disabled: [amd_windows, amd_wsl]
     tags: [launch]
+  Unit_hipExtModuleLaunchKernel_AnyOrder:
+    <<: *level_2
+    tags: [launch]
   Unit_hipFuncGetAttributes_basic:
     <<: *level_2
     tags: [function]

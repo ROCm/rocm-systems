@@ -2,9 +2,20 @@
 FROM amdsmi-image
 
 # Sync ROCm repositories
-RUN apt-get update && apt-get install -y wget gnupg2 && \
-    wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \
-    echo 'deb [arch=amd64] http://repo.radeon.com/rocm/apt/debian/ jammy main' | tee /etc/apt/sources.list.d/rocm.list
+# Fetch the ROCm signing key over HTTPS, verify it against a pinned SHA-256
+# checksum, and install it as a dedicated signed-by keyring instead of the
+# deprecated "apt-key add" (which would trust the key for every repository).
+# Update the checksum if AMD rotates the key
+# (fingerprint CA8B B472 7A47 B4D0 9B4E  E896 9386 B48A 1A69 3C5C).
+RUN apt-get update && apt-get install -y wget gnupg2 ca-certificates && \
+    install -d -m 0755 /etc/apt/keyrings && \
+    wget -qO /tmp/rocm.gpg.key https://repo.radeon.com/rocm/rocm.gpg.key && \
+    echo '2de99e2354646a90d9903e2a669fc4e36b02c1bbff7075c481e12d7edab2c88b  /tmp/rocm.gpg.key' | sha256sum -c - && \
+    gpg --dearmor < /tmp/rocm.gpg.key > /etc/apt/keyrings/rocm.gpg && \
+    chmod 0644 /etc/apt/keyrings/rocm.gpg && \
+    rm -f /tmp/rocm.gpg.key && \
+    echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian/ jammy main' > /etc/apt/sources.list.d/rocm.list && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install ROCm runtime and dependencies
 RUN apt-get update && \

@@ -1,0 +1,11 @@
+# Do `git blame --ignore-revs-file .git-blame-ignore-revs` to filter out formatting commits.
+# You can create git command alias for it as
+#   `git config --global alias.bli 'blame --ignore-revs-file .git-blame-ignore-revs'`
+# Then use `git bli` to do git blame with the ignore file.
+#
+# You can also set a per-repo config for blame to use the ignore file
+#   `git config blame.ignoreRevsFile .git-blame-ignore-revs`
+# This will make `git blame` always use the ignore file if run in the repo or its worktree.
+
+# [AICOMRCCL-1472] [rccl] Reformat src/ with clang-format
+7492b01972feec2dcfc9159622724d77fc6ed403

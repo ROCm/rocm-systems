@@ -75,7 +75,7 @@ wave_t::dispatch () const
   return m_workgroup.dispatch ();
 }
 
-compute_queue_t &
+queue_t &
 wave_t::queue () const
 {
   return dispatch ().queue ();
@@ -283,7 +283,7 @@ wave_t::displaced_stepping_start (const void *saved_instruction_bytes)
       instruction_t original_instruction (
         architecture (), std::move (original_instruction_bytes));
 
-      std::optional<compute_queue_t::displaced_instruction_ptr_t>
+      std::optional<queue_t::displaced_instruction_ptr_t>
         displaced_instruction_ptr;
 
       if (architecture ().can_simulate (*this, original_instruction))
@@ -479,7 +479,7 @@ wave_t::set_state (amd_dbgapi_wave_state_t state,
               : "",
             to_cstring (pc ()));
 
-  architecture.wave_set_state (*this, state);
+  architecture.wave_set_state (*this, state, exceptions);
   m_state = state;
   queue ().wave_state_changed (*this);
 
@@ -588,12 +588,11 @@ wave_t::set_state (amd_dbgapi_wave_state_t state,
       /* Convert an amd_dbgapi_exception_t into an os_exception_mask_t.  */
       os_exception_mask_t os_exceptions = os_exception_mask_t::none;
 
-      while (exceptions)
+      utils::for_each_flag (exceptions,
+                            [&] (amd_dbgapi_exceptions_t one_exception)
         {
-          auto one_exception = exceptions ^ (exceptions & (exceptions - 1));
           os_exceptions |= convert_one_exception (one_exception);
-          exceptions ^= one_exception;
-        }
+        });
 
       /* A wave should only send queue exceptions, sometimes combined with a
          device_memory_exception.  */

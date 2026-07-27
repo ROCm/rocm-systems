@@ -44,7 +44,6 @@ union timestamp_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -52,7 +51,6 @@ union timestamp_type
         return ss;
     }
     const char* typestr() const { return "TIMESTAMP"; };
-#endif
 };
 
 union inst_type
@@ -69,7 +67,6 @@ union inst_type
 
     inst_type_common get() const { return inst_type_common{.tm = tm, .w64h = w64h, .wid = wid, .inst = inst}; }
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -77,7 +74,6 @@ union inst_type
         return ss;
     }
     const char* typestr() const { return "INST"; };
-#endif
 };
 
 union wend_type
@@ -95,7 +91,6 @@ union wend_type
 
     wend_type_common get() const { return wend_type_common{.tm = tm, .sa = sa, .simd = simd, .wgp = wgp, .wid = wid}; }
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -103,7 +98,6 @@ union wend_type
         return ss;
     }
     const char* typestr() const { return "WAVE_END"; };
-#endif
 };
 
 union wstart_type
@@ -147,7 +141,6 @@ union wstart_type
             .dynvgpr = wgext ? static_cast<uint64_t>(dvg) : 0};
     }
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -156,7 +149,6 @@ union wstart_type
         return ss;
     }
     const char* typestr() const { return "WAVE_START"; };
-#endif
 };
 
 union new_pc_type
@@ -170,7 +162,6 @@ union new_pc_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -178,7 +169,6 @@ union new_pc_type
         return ss;
     }
     const char* typestr() const { return "NEW_PC"; };
-#endif
 };
 
 union shader_data_type
@@ -203,7 +193,6 @@ union shader_data_type
         return common;
     }
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -211,7 +200,6 @@ union shader_data_type
         return ss;
     }
     const char* typestr() const { return "SHADER_DATA"; };
-#endif
 };
 
 union shader_data_short_type
@@ -237,7 +225,6 @@ union shader_data_short_type
         return common;
     }
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -245,7 +232,6 @@ union shader_data_short_type
         return ss;
     }
     const char* typestr() const { return "SHADER_DATA_SHORT"; };
-#endif
 };
 
 class Token : public gfx11::Token

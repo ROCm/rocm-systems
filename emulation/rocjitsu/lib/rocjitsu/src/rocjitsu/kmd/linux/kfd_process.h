@@ -6,7 +6,7 @@
 ///
 /// @details Each process that opens /dev/kfd gets a KfdProcess instance holding
 /// its allocations, queues, events, doorbells, and memory policies. The
-/// SimulatedDriver owns a process table mapping fds to KfdProcess instances,
+/// SimulatedKfd owns a process table mapping fds to KfdProcess instances,
 /// and delegates per-process ioctl operations through here.
 
 #ifndef ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
@@ -14,6 +14,7 @@
 
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/unique_handle.h"
 
 #include <atomic>
 #include <cassert>
@@ -24,13 +25,15 @@
 #include <unordered_set>
 #include <vector>
 
+#include <sys/types.h> // pid_t
+
 namespace rocjitsu {
 
 /// @brief Per-process KFD state.
 ///
 /// @details Mirrors the kernel's kfd_process + kfd_process_device for a
 /// single-GPU simulator. Each daemon client connection or local-mode session
-/// gets one KfdProcess. The SimulatedDriver maintains a process table and
+/// gets one KfdProcess. The SimulatedKfd maintains a process table and
 /// routes ioctls to the correct KfdProcess.
 class KfdProcess {
 public:
@@ -84,6 +87,11 @@ public:
     bool user_va = false;
     bool imported = false;
     int dmabuf_fd = -1;
+    // True when the driver created host_ptr (mmap it itself) and must munmap it
+    // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
+    // from the thunk) that the driver must never unmap, since unmapping them
+    // races with the owning process still accessing the memory.
+    bool host_ptr_owned = false;
   };
 
   /// @brief Memory policy descriptor.
@@ -118,6 +126,53 @@ public:
     uint64_t r_debug = 0;
   };
 
+  /// @brief Per-process debugger session state.
+  ///
+  /// @details Mirrors the debug-related fields the kernel maintains on
+  /// @c struct @c kfd_process in
+  /// @c drivers/gpu/drm/amd/amdkfd/kfd_priv.h.
+  /// Managed by the @c AMDKFD_IOC_DBG_TRAP ioctl handler
+  /// (@c kfd_ioctl_set_debug_trap in the real driver).
+  ///
+  /// Field mapping to @c kfd_priv.h:
+  /// | DebugSession field     | kfd_process field                               |
+  /// |------------------------|-------------------------------------------------|
+  /// | @ref enabled           | @c bool @c debug_trap_enabled                   |
+  /// | @ref runtime_state     | @c kfd_runtime_info @c runtime_info.runtime_state (kfd_ioctl.h) |
+  /// | @ref exception_enable_mask | @c uint64_t @c exception_enable_mask        |
+  /// | @ref dbg_fd            | @c struct @c file* @c dbg_ev_file (flattened to fd) |
+  /// | @ref debugger_pid      | @c struct @c kfd_process* @c debugger_process (stored as pid) |
+  struct DebugSession {
+    /// @brief Mirrors @c kfd_process::debug_trap_enabled.
+    /// Set when the device process is debug-attached with a reserved VMID.
+    bool enabled = false;
+
+    /// @brief Mirrors @c kfd_process::runtime_info.runtime_state.
+    /// Holds a @c kfd_dbg_runtime_state value (see @c kfd_ioctl.h).
+    uint32_t runtime_state = 0;
+
+    /// @brief Mirrors @c kfd_process::exception_enable_mask.
+    /// Bitmask of exception classes that are forwarded to the debugger.
+    uint64_t exception_enable_mask = 0;
+
+    /// @brief Mirrors @c kfd_process::dbg_ev_file (flattened from @c struct @c file* to fd).
+    /// File descriptor used as the debugger notification / poll target.
+    /// -1 when no debugger is attached.
+    int dbg_fd = -1;
+
+    /// @brief Owns @ref dbg_fd when the daemon received it out-of-band.
+    /// @details In daemon mode the notifier is a descriptor dup'd into the
+    /// daemon's own fd table (SCM_RIGHTS), which the session must close when the
+    /// debug session ends (DISABLE) or the process tears down. Engaged only in
+    /// daemon mode; empty in local mode, where @ref dbg_fd is the debugger's own
+    /// descriptor and is not owned here. RAII replaces an explicit close.
+    util::UniqueHandle owned_dbg_fd;
+
+    /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
+    /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.
+    pid_t debugger_pid = 0;
+  };
+
   /// @brief Per-page translation entry, mirroring HW PTE fields.
   /// @details Stores the host pointer for VA→PA translation and the PTE MTYPE
   /// that the GPU MMU uses to override instruction-level caching. On real
@@ -144,6 +199,10 @@ public:
     auto *base = static_cast<uint8_t *>(host_ptr);
     for (size_t off = 0; off < size; off += kPageSize)
       page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype};
+    // Keep publication in the page-table critical section. Cached readers
+    // validate this generation while holding the shared side of the same lock;
+    // publishing after unlock would permit a stale-cache hit in between.
+    publish_page_table_mutation_locked();
   }
 
   /// @brief Unmap pages from this process's GPU page table.
@@ -151,7 +210,49 @@ public:
     std::unique_lock lock(page_table_mutex_);
     for (size_t off = 0; off < size; off += kPageSize)
       page_table_.erase((gpu_va + off) >> kPageShift);
+    // See map_pages(): the mutation and generation publication are one
+    // page-table critical section by design.
+    publish_page_table_mutation_locked();
   }
+
+  /// @brief Replace mapped host pages while preserving their other PTE fields.
+  /// @details The mutation and cache-generation publication occur under one
+  /// page-table critical section. Only entries still pointing at the expected
+  /// old page are changed.
+  void remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr, void *new_host_ptr, size_t size) {
+    std::unique_lock lock(page_table_mutex_);
+    auto *old_base = static_cast<uint8_t *>(old_host_ptr);
+    auto *new_base = static_cast<uint8_t *>(new_host_ptr);
+    bool changed = false;
+    for (size_t off = 0; off < size; off += kPageSize) {
+      auto it = page_table_.find((gpu_va + off) >> kPageShift);
+      if (it != page_table_.end() && it->second.host_ptr == old_base + off &&
+          it->second.host_ptr != new_base + off) {
+        it->second.host_ptr = new_base + off;
+        changed = true;
+      }
+    }
+    if (changed)
+      publish_page_table_mutation_locked();
+  }
+
+  /// @brief Update the MTYPE of mapped pages and invalidate cached PTE copies.
+  void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
+    std::unique_lock lock(page_table_mutex_);
+    bool changed = false;
+    for (size_t off = 0; off < size; off += kPageSize) {
+      auto it = page_table_.find((gpu_va + off) >> kPageShift);
+      if (it != page_table_.end() && it->second.mtype != mtype) {
+        it->second.mtype = mtype;
+        changed = true;
+      }
+    }
+    if (changed)
+      publish_page_table_mutation_locked();
+  }
+
+  /// @brief Return the mutation counter used by GpuMemory translation caches.
+  const uint64_t *page_table_generation() const { return &page_table_generation_; }
 
   mutable std::shared_mutex page_table_mutex_;
   PageTable page_table_;
@@ -162,6 +263,12 @@ public:
   pid_t client_pid_ = 0;
   std::atomic<uint32_t> open_ref_count_{1};
 
+  /// @brief Serializes this process's ioctls, analogous to the real KFD's
+  /// per-process lock. Taken as the outermost per-process lock in dispatch_ioctl.
+  /// AMDKFD_IOC_WAIT_EVENTS is intentionally NOT taken under this lock: it blocks
+  /// waiting for signals that SET_EVENT/RESET_EVENT (which DO run under this lock)
+  /// must produce, so holding it would deadlock forward progress.
+  std::mutex op_mutex_;
   mutable std::mutex alloc_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;
   uint64_t next_handle_ = 1;
@@ -191,7 +298,17 @@ public:
   std::mutex runtime_mutex_;
   RuntimeState runtime_state_;
 
+  mutable std::mutex debug_mutex_;
+  DebugSession debug_session_;
+
 private:
+  void publish_page_table_mutation_locked() { ++page_table_generation_; }
+
+  /// @brief Page table version counter, bumped on every PTE mutation.
+  /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
+  ///          this generation; all reads and writes occur while holding
+  ///          page_table_mutex_, so the counter itself does not need atomics.
+  uint64_t page_table_generation_{1};
 };
 
 } // namespace rocjitsu
