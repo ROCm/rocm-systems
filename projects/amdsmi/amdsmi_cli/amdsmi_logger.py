@@ -704,6 +704,7 @@ class AMDSMILogger:
         tabular=False,
         dual_csv_output=False,
         dynamic=False,
+        emit_empty=False,
     ):
         """Print current output according to format and then destination
         params:
@@ -712,12 +713,17 @@ class AMDSMILogger:
             watching_output (bool) - True if printing watch output
             dynamic (bool) - Defaults to False. True turns on dynamic resizing for
                 left justified table output
+            emit_empty (bool) - JSON stdout only. If True, emit `[]` even when
+                there are no records, so consumers parsing stdout as JSON always
+                get a valid document instead of empty output
         return:
             Nothing
         """
         if self.is_json_format():
             self._print_json_output(
-                multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
+                multiple_device_enabled=multiple_device_enabled,
+                watching_output=watching_output,
+                emit_empty=emit_empty,
             )
         elif self.is_csv_format():
             if dual_csv_output:
@@ -741,14 +747,18 @@ class AMDSMILogger:
                     multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
                 )
 
-    def _print_json_output(self, multiple_device_enabled=False, watching_output=False):
+    def _print_json_output(
+        self, multiple_device_enabled=False, watching_output=False, emit_empty=False
+    ):
         if multiple_device_enabled:
             json_output = self.multiple_device_output
         else:
             json_output = [self.output]
 
         if self.destination == "stdout":
-            if json_output:
+            # Callers parsing stdout as JSON need a valid document even with no
+            # records; emit_empty renders that as `[]` instead of nothing.
+            if json_output or emit_empty:
                 json_std_output = json.dumps(json_output, indent=4)
                 print(json_std_output)
         else:  # Write output to file

@@ -32,6 +32,9 @@ namespace D3D11Interop {
  *
  * @param device ROCr device to validate against
  * @param d3d11Device D3D11 device to associate
+ * @param gfxContext Owning amd::Context*, used to cache the DXX extension
+ * @param validateOnly When true, only check LUID compatibility and skip
+ *        creating/caching the DXX extension objects (used by query paths)
  * @return true if devices can interoperate, false otherwise
  */
 bool associateD3D11Device(
