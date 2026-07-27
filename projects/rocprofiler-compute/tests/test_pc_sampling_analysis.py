@@ -1099,6 +1099,7 @@ def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
 
 
 def test_load_pc_sampling_data_preserves_display_identity_boundaries() -> None:
+    """Keep rows distinct when kernel, instruction, or source metadata differs."""
     tool_data_records = [
         make_display_row_tool_data(
             "host_trap",
@@ -1155,6 +1156,7 @@ def test_load_pc_sampling_data_preserves_display_identity_boundaries() -> None:
 
 
 def test_load_pc_sampling_data_retains_missing_instruction_metadata() -> None:
+    """Aggregate matching rows even when their instruction metadata is missing."""
     tool_data_records = [
         make_display_row_tool_data(
             "host_trap",
@@ -1267,6 +1269,7 @@ def test_load_pc_sampling_data_stitches_multi_process_rows() -> None:
 
 
 def test_load_pc_sampling_data_applies_top_n_after_global_aggregation() -> None:
+    """Apply the row limit after combining counts from all process records."""
     first_tool_data = make_tool_data(
         host_trap=[
             *[make_host_trap_record(5, 0x10, 0, dispatch_id=0) for _ in range(3)],
@@ -1310,6 +1313,7 @@ def test_load_pc_sampling_data_applies_top_n_after_global_aggregation() -> None:
 
 
 def test_merge_stall_reason_rows_sums_counts_and_skips_empty_rows() -> None:
+    """Sum duplicate stall reasons while ignoring empty and missing rows."""
     stall_reason_rows = pd.Series([
         [("WAITCNT", 2), ("ALU_DEPENDENCY", 1)],
         [],
@@ -1385,6 +1389,7 @@ def test_nullify_unevaluated_metrics_empty_df_skipped() -> None:
 def test_load_pc_sampling_results_loads_all_pid_files_in_numeric_order(
     tmp_path: Path,
 ) -> None:
+    """Load only numeric PID result files in PID order."""
     write_results_json(tmp_path / "101_ps_file_results.json", pid=101)
     write_results_json(tmp_path / "3_ps_file_results.json", pid=3)
     write_results_json(tmp_path / "20_ps_file_results.json", pid=20)
@@ -1411,6 +1416,7 @@ def test_load_pc_sampling_results_loads_all_pid_files_in_numeric_order(
 def test_load_pc_sampling_results_prefers_pid_files_over_legacy(
     tmp_path: Path,
 ) -> None:
+    """Prefer PID-prefixed result files when the legacy file also exists."""
     write_results_json(tmp_path / "ps_file_results.json", pid=999)
     write_results_json(tmp_path / "42_ps_file_results.json", pid=42)
 
@@ -1422,6 +1428,7 @@ def test_load_pc_sampling_results_prefers_pid_files_over_legacy(
 def test_load_pc_sampling_results_falls_back_to_legacy(
     tmp_path: Path,
 ) -> None:
+    """Load the legacy result file when no PID-prefixed files exist."""
     write_results_json(tmp_path / "ps_file_results.json", pid=77)
 
     tool_data_records = load_pc_sampling_results(str(tmp_path))
@@ -1440,6 +1447,7 @@ def test_load_pc_sampling_results_returns_empty_without_result_files(
     tmp_path: Path,
     directory_exists: bool,
 ) -> None:
+    """Return no records when the directory or its result files are absent."""
     workload_path = tmp_path if directory_exists else tmp_path / "missing"
 
     assert load_pc_sampling_results(str(workload_path)) == []
@@ -1456,6 +1464,7 @@ def test_load_pc_sampling_results_multiple_records_require_unique_process_ids(
     tmp_path: Path,
     process_ids: list[int | None],
 ) -> None:
+    """Reject multi-file results with missing or duplicate process IDs."""
     for file_index, process_id in enumerate(process_ids):
         write_results_json(
             tmp_path / f"{file_index}_ps_file_results.json",
@@ -1570,6 +1579,7 @@ def test_process_pc_sampling_unmapped_kernel_id() -> None:
 
 
 def test_process_pc_sampling_single_record_allows_missing_process_id() -> None:
+    """Allow a single tool record without a process ID during conversion."""
     tool_data = make_tool_data(
         kernel_symbols=[make_kernel_symbol(12, 2, "vecCopy")],
         kernel_dispatch=[make_dispatch(1, 12)],
@@ -1670,6 +1680,7 @@ def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
 def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
     tmp_path: Path,
 ) -> None:
+    """Include every process-local dispatch in workload statistics."""
     workload = schema.Workload()
     args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
     instance = make_db_analysis(str(tmp_path))
@@ -1694,6 +1705,7 @@ def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
 def test_pc_sampling_dispatch_filter_matches_every_process(
     tmp_path: Path,
 ) -> None:
+    """Match the filtered dispatch ID independently in every process."""
     workload = schema.Workload(filter_dispatch_ids=["0"])
     args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
     instance = make_db_analysis(str(tmp_path))
@@ -1969,6 +1981,7 @@ def test_calc_dispatch_data_warns_for_empty_pc_sampling_results(
 def test_calc_dispatch_data_stitches_pc_sampling_tool_records(
     tmp_path: Path,
 ) -> None:
+    """Combine dispatch rows from all PC sampling tool records."""
     instance = make_db_analysis(str(tmp_path))
     instance._profiling_config = {"filter_blocks": ["21"]}
 
