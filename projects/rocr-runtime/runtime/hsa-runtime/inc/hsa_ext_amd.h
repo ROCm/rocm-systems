@@ -984,6 +984,9 @@ typedef enum hsa_amd_agent_info_s {
    * For CPU agents: indicates host memory can be allocated and exported.
    * For GPU agents: indicates the GPU can access such host-allocated memory.
    * The type of this attribute is bool.
+   * 
+   * @note This query will be deprecated in the future.
+   * Use HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED instead.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
 } hsa_amd_agent_info_t;

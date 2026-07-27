@@ -2362,19 +2362,12 @@ void Device::deviceVmemRelease(uint64_t mem_handle) const {
   }
 }
 
-bool Device::hostVmemSupported(int numaNode) const {
+bool Device::hostVmemSupported() const {
   if (cpu_agents_.empty()) {
     return false;
-  }
-  int node = numaNode;
-  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
-    node = static_cast<int>(numa::getCurrentNumaNode());
-  }
-  hsa_agent_t cpu = getCpuAgent(node);
+  }  
   bool supported = false;
-  hsa_status_t hsa_status = Hsa::agent_get_info(
-      cpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED),
-      &supported);
+  hsa_status_t hsa_status = Hsa::system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED, &supported);
   if (hsa_status != HSA_STATUS_SUCCESS) {
     // Older ROCr predates this query: treat host-NUMA VMM as unsupported.
     return false;
@@ -2383,6 +2376,11 @@ bool Device::hostVmemSupported(int numaNode) const {
 }
 
 uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const {
+  if (!hostVmemSupported()) {
+    LogError("hostVmemAlloc: host memory VMM not supported on this system");
+    return 0;
+  }
+
   // numaNode < 0 (HostNumaCurrent) resolves to the calling thread's current node.
   int node = numaNode;
   if (node < 0) {
@@ -2391,11 +2389,6 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
   if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
     LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", numaNode,
                    cpu_agents_.size());
-    return 0;
-  }
-
-  if (!hostVmemSupported(node)) {
-    LogError("hostVmemAlloc: host memory VMM not supported on this CPU agent");
     return 0;
   }
 
