@@ -31,25 +31,35 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
 #include "util/except.h"
 
 namespace rocjitsu {
@@ -71,9 +81,12 @@ inline constexpr uint16_t kScalarPositiveInlineBase = 128;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 // Scalar-operand codes for special registers, used as the ssrc/sdst of a plain
 // s_mov to save/restore them across a probe call. VCC_LO and EXEC_LO are stable
-// across every AMDGPU generation; M0 moved (see scalar_operand_m0).
-inline constexpr uint16_t kScalarOperandVccLo = 106;
-inline constexpr uint16_t kScalarOperandExecLo = 126;
+// across every AMDGPU generation, so we take them from a representative arch's
+// generated operand table; the generation-stability check lives in
+// InstructionBuilder.ScalarOperandCodesMatchGeneratedTables. M0 moved between
+// generations and is resolved per-arch (see scalar_operand_m0).
+inline constexpr uint16_t kScalarOperandVccLo = cdna4::OPR_SDST_VCC_LO;
+inline constexpr uint16_t kScalarOperandExecLo = cdna4::OPR_SDST_EXEC_LO;
 // Inline-constant scalar source for -1 (all bits set); as a b64 source it sign-
 // extends to 0xFFFF'FFFF'FFFF'FFFF, i.e. `s_mov_b64 exec, -1` = all lanes active.
 inline constexpr uint16_t kScalarInlineNegOne = 193;
@@ -309,22 +322,30 @@ inline constexpr uint16_t kScalarInlineNegOne = 193;
 /// @brief Scalar-operand code for M0 on @p arch.
 ///
 /// M0 is operand 124 on gfx9 / gfx10.x (CDNA1-4, RDNA1/2) but was moved to 125
-/// on gfx11+ (RDNA3/3.5/4, gfx1250), where 124 became NULL. Callers that encode
-/// an s_mov touching M0 must use the per-arch code.
+/// on gfx11+ (RDNA3/3.5/4, gfx1250), where 124 became NULL. Each case returns
+/// that arch's generated OPR_SDST_M0 code so the value tracks the operand table.
 [[nodiscard]] inline constexpr uint16_t scalar_operand_m0(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_RDNA2:
-    return 124;
+    return rdna2::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return 125;
+    return gfx1250::OPR_SDST_M0;
   default:
     throw util::UnimplementedInst("M0 operand code for target architecture");
   }

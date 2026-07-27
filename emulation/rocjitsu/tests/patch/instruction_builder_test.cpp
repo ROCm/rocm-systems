@@ -343,5 +343,46 @@ TEST(InstructionBuilder, BuildWaitStoresComplete) {
   EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_RDNA4), 0xBFC10000u);
 }
 
+// VCC_LO/EXEC_LO scalar-operand codes are generation-stable: the header sources
+// them from one arch's generated table, so this guards that every generation's
+// table still agrees (and that the well-known 106/126 values have not moved).
+TEST(InstructionBuilder, ScalarOperandCodesMatchGeneratedTables) {
+  EXPECT_EQ(kScalarOperandVccLo, 106);
+  EXPECT_EQ(kScalarOperandExecLo, 126);
+
+  EXPECT_EQ(kScalarOperandVccLo, cdna1::OPR_SDST_VCC_LO);
+  EXPECT_EQ(kScalarOperandVccLo, cdna4::OPR_SDST_VCC_LO);
+  EXPECT_EQ(kScalarOperandVccLo, rdna2::OPR_SDST_VCC_LO);
+  EXPECT_EQ(kScalarOperandVccLo, rdna4::OPR_SDST_VCC_LO);
+  EXPECT_EQ(kScalarOperandVccLo, gfx1250::OPR_SDST_VCC_LO);
+
+  EXPECT_EQ(kScalarOperandExecLo, cdna1::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(kScalarOperandExecLo, cdna4::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(kScalarOperandExecLo, rdna2::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(kScalarOperandExecLo, rdna4::OPR_SDST_EXEC_LO);
+  EXPECT_EQ(kScalarOperandExecLo, gfx1250::OPR_SDST_EXEC_LO);
+}
+
+// M0 moved from 124 (gfx9/gfx10.x) to 125 (gfx11+); each arch resolves to its
+// own generated OPR_SDST_M0.
+TEST(InstructionBuilder, ScalarOperandM0IsPerArch) {
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA1), cdna1::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA2), cdna2::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA3), cdna3::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA4), cdna4::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA1), rdna1::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA2), rdna2::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA3), rdna3::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA3_5), rdna3_5::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA4), rdna4::OPR_SDST_M0);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_GFX1250), gfx1250::OPR_SDST_M0);
+
+  // gfx9 / gfx10.x = 124; gfx11+ = 125.
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_CDNA4), 124);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA2), 124);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_RDNA4), 125);
+  EXPECT_EQ(scalar_operand_m0(ROCJITSU_CODE_ARCH_GFX1250), 125);
+}
+
 } // namespace
 } // namespace rocjitsu
