@@ -45,7 +45,7 @@ constexpr uint64_t kMi300xSpxTotal = 206141652992ULL;  // ~192 GiB
 
 // Failed sysfs read (the MI300A path, where mem_info_vram_total is absent)
 // always prefers KFD, regardless of partition mode.
-TEST(AmdSmiVramTotalPreferKfdTest, UnusableSysfsAlwaysPrefersKfd) {
+TEST(GpuUnit, VramTotalUnusableSysfsPrefersKfd) {
   for (const char* mode : {"", "SPX", "CPX", "DPX", "TPX", "QPX"}) {
     EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(false, kSampleVramTotal, mode, kSampleVramTotal))
         << "Failed sysfs read must fall back to KFD (mode=" << mode << ")";
@@ -53,7 +53,7 @@ TEST(AmdSmiVramTotalPreferKfdTest, UnusableSysfsAlwaysPrefersKfd) {
 }
 
 // A zero sysfs total is unusable and must fall back to the KFD total.
-TEST(AmdSmiVramTotalPreferKfdTest, ZeroSysfsTotalPrefersKfd) {
+TEST(GpuUnit, VramTotalZeroSysfsPrefersKfd) {
   for (const char* mode : {"", "SPX", "CPX", "DPX", "TPX", "QPX"}) {
     EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, 0, mode, kSampleVramTotal))
         << "Zero sysfs total must fall back to KFD (mode=" << mode << ")";
@@ -62,14 +62,14 @@ TEST(AmdSmiVramTotalPreferKfdTest, ZeroSysfsTotalPrefersKfd) {
 
 // Usable sysfs on a non-partitioned GPU (SPX or empty) is trusted; KFD is not
 // preferred.
-TEST(AmdSmiVramTotalPreferKfdTest, UsableSysfsNonPartitionedKeepsSysfs) {
+TEST(GpuUnit, VramTotalUsableNonPartitionedKeepsSysfs) {
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "SPX", kSampleVramTotal));
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "", kSampleVramTotal));
 }
 
 // In a multi-partition mode, sysfs reports the whole device split evenly and is
 // misleading, so the per-partition KFD total must be preferred.
-TEST(AmdSmiVramTotalPreferKfdTest, UsableSysfsPartitionedPrefersKfd) {
+TEST(GpuUnit, VramTotalUsablePartitionedPrefersKfd) {
   for (const char* mode : {"CPX", "DPX", "TPX", "QPX"}) {
     EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, mode, kSampleVramTotal / 6))
         << "Partition mode " << mode << " must prefer the KFD per-partition total";
@@ -78,19 +78,19 @@ TEST(AmdSmiVramTotalPreferKfdTest, UsableSysfsPartitionedPrefersKfd) {
 
 // APU (e.g. gfx1151 / Strix Halo): sysfs reports only the small BIOS VRAM
 // carveout while KFD reports the true, larger unified pool, which must win.
-TEST(AmdSmiVramTotalPreferKfdTest, ApuCarveoutPrefersKfd) {
+TEST(GpuUnit, VramTotalApuCarveoutPrefersKfd) {
   EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, kApuCarveout, "", kApuUnified));
   EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, kApuCarveout, "SPX", kApuUnified));
 }
 
 // MI300X SPX: sysfs and KFD report the same value, so the final clause is
 // false and the sysfs value is kept. Values confirmed on hardware.
-TEST(AmdSmiVramTotalPreferKfdTest, Mi300xSpxAgreeingSourcesKeepsSysfs) {
+TEST(GpuUnit, VramTotalMi300xSpxKeepsSysfs) {
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kMi300xSpxTotal, "SPX", kMi300xSpxTotal));
 }
 
 // Discrete GPU: sysfs and KFD agree, so the sysfs value is kept.
-TEST(AmdSmiVramTotalPreferKfdTest, DiscreteAgreeingSourcesKeepsSysfs) {
+TEST(GpuUnit, VramTotalDiscreteKeepsSysfs) {
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "SPX", kSampleVramTotal));
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "", kSampleVramTotal));
 }
