@@ -68,15 +68,17 @@ mpirun -np 2 rocprof-sys-run -- ./rocshmem-test
 
 ### Recommended Configuration
 
-| Argument | Value | Purpose |
+| Variable | Value | Purpose |
 | --- | --- | --- |
-| `--rocm-domains` | `hip_runtime_api kernel_dispatch rocshmem_api` | Enable HIP runtime API, kernel dispatch, and rocSHMEM API tracing |
-| `--output-format` | `rocpd proto` | Output a `rocpd` database and perfetto (protobuf) file |
+| `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,rocshmem_api` | Enable HIP runtime API, kernel dispatch, and rocSHMEM API tracing |
+| `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace as output |
+| `ROCPROFSYS_ROCPD` | `true` | Generate rocpd database as output |
 
 ```bash
+ROCPROFSYS_ROCM_DOMAINS="hip_runtime_api,kernel_dispatch,rocshmem_api" \
+ROCPROFSYS_TRACE=true \
+ROCPROFSYS_ROCPD=true \
 mpirun -np 2 rocprof-sys-run \
-    --rocm-domains hip_runtime_api kernel_dispatch rocshmem_api \
-    --output-format rocpd proto \
     -- ./rocshmem-test
 ```
 
