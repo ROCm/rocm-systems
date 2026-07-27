@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: endurthiabhilash/TheRock
-          ref: users/aendurth/include-subproject-tests
+          ref: users/aendurth/support-dynamic-subproject-testing
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -112,7 +112,7 @@ jobs:
 
   setup:
     needs: configure
-    uses: endurthiabhilash/TheRock/.github/workflows/setup_multi_arch.yml@users/aendurth/include-subproject-tests
+    uses: endurthiabhilash/TheRock/.github/workflows/setup_multi_arch.yml@users/aendurth/support-dynamic-subproject-testing
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
@@ -124,7 +124,7 @@ jobs:
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       repository: endurthiabhilash/TheRock
-      ref: users/aendurth/include-subproject-tests
+      ref: users/aendurth/support-dynamic-subproject-testing
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       external_repo: >-
@@ -151,7 +151,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: endurthiabhilash/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/aendurth/include-subproject-tests
+    uses: endurthiabhilash/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/aendurth/support-dynamic-subproject-testing
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -162,7 +162,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: endurthiabhilash/TheRock
-      ref: users/aendurth/include-subproject-tests
+      ref: users/aendurth/support-dynamic-subproject-testing
     permissions:
       contents: read
       id-token: write
@@ -176,7 +176,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: endurthiabhilash/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/aendurth/include-subproject-tests
+    uses: endurthiabhilash/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/aendurth/support-dynamic-subproject-testing
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -187,7 +187,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: endurthiabhilash/TheRock
-      ref: users/aendurth/include-subproject-tests
+      ref: users/aendurth/support-dynamic-subproject-testing
     permissions:
       contents: read
       id-token: write
@@ -205,7 +205,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "endurthiabhilash/TheRock"
-          ref: users/aendurth/include-subproject-tests
+          ref: users/aendurth/support-dynamic-subproject-testing
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
