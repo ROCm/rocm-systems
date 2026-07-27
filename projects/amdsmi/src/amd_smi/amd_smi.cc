@@ -5458,8 +5458,11 @@ static void merge_proc_into_pid_map(std::map<uint32_t, amdsmi_proc_info_by_pid_t
   auto& gpu_entry = entry.gpus[entry.num_gpus++];
   gpu_entry.gpu_index = gpu_index;
   gpu_entry.mem = proc_info.mem;
-  gpu_entry.engine_usage = proc_info.engine_usage;
-  gpu_entry.memory_usage = proc_info.memory_usage;
+  gpu_entry.engine_usage.gfx = proc_info.engine_usage.gfx;
+  gpu_entry.engine_usage.enc = proc_info.engine_usage.enc;
+  gpu_entry.memory_usage.gtt_mem = proc_info.memory_usage.gtt_mem;
+  gpu_entry.memory_usage.cpu_mem = proc_info.memory_usage.cpu_mem;
+  gpu_entry.memory_usage.vram_mem = proc_info.memory_usage.vram_mem;
   gpu_entry.cu_occupancy = proc_info.cu_occupancy;
   gpu_entry.evicted_time = proc_info.evicted_time;
   gpu_entry.sdma_usage = proc_info.sdma_usage;
