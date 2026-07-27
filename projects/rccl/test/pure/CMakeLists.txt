@@ -34,6 +34,7 @@ add_executable(rccl-PureUnitTests
   ${RCCL_TEST_DIR}/EnqueueCountTests.cpp
   ${RCCL_TEST_DIR}/BootstrapBidirTests.cpp
   ${RCCL_TEST_DIR}/AltRsmiTests.cpp
+  ${RCCL_TEST_DIR}/NullParentTests.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
   bootstrap_bidir_stub.cpp
   ${RCCL_SRC_DIR}/misc/kernel_config.cc

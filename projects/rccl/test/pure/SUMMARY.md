@@ -4,7 +4,7 @@
 **Host:** Dell Strix Halo laptop (gfx1151 iGPU present, not used by this binary)
 **Compiler:** g++ 13.3.0 (Ubuntu 24.04)
 **GTest:** 1.14.0 (system)
-**Result:** 211 tests, 0 failures, ~160ms wall time
+**Result:** 222 tests, 0 failures, ~180ms wall time
 
 ## What This Is
 
@@ -20,7 +20,7 @@ Zero HIP/ROCm/HSA libraries:
 libstdc++.so.6, libm.so.6, libgcc_s.so.1, libc.so.6
 ```
 
-## Test Suites (11 test files, 211 tests)
+## Test Suites (12 test files, 222 tests)
 
 | Source File | Suite | Tests | What It Covers |
 |-------------|-------|-------|----------------|
@@ -34,6 +34,7 @@ libstdc++.so.6, libm.so.6, libgcc_s.so.1, libc.so.6
 | EnqueueCountTests.cpp | EnqueueCountTests | 4 | ncclFuncSendCount/RecvCount/MaxSendRecvCount |
 | BootstrapBidirTests.cpp | BootstrapBidir | 16 | Bootstrap bidirectional AllGather gating contract |
 | AltRsmiTests.cpp | AltRsmiTest | 44 | Alt-RSMI sysfs/DRM topology parsing |
+| NullParentTests.cpp | NullParentTest | 11 | Null gpu.parent guard in topo path/search (5cb9833) |
 | *(support)* ProcessIsolatedTestRunner.cpp | — | — | Fork-based test isolation framework |
 
 ## How It Works
@@ -65,7 +66,7 @@ make -j$(nproc)
 
 ## Test Run Log
 
-Full log: `test-run-20260727-115907.log` (67KB, 211/211 passed)
+Full log: `test-run-20260727-115907.log` (67KB, 211/211 passed — before NullParentTests addition)
 
 ## Remaining Feasible Candidates
 
