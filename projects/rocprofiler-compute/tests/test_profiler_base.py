@@ -20,6 +20,7 @@ from utils.utils_exceptions import (
     NoScriptInCommandError,
     PythonScriptNotFoundError,
 )
+from vendored import yaml
 
 
 def _make_sanitize_args(remaining, torch_trace=False, **overrides):
@@ -629,6 +630,51 @@ def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_
     else:
         instance.sanitize()
         assert args.filter_blocks == expected_filter_blocks
+
+
+# ---------------------------------------------------------------------------
+# pre_processing(): memory-bandwidth configuration persistence
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "effective_filter_blocks",
+    [
+        pytest.param(["30"], id="full_block"),
+        pytest.param(["30.13"], id="ea_interface_submetric"),
+    ],
+)
+def test_pre_processing_persists_membw_analysis_config(
+    tmp_path: Path,
+    effective_filter_blocks: list[str],
+) -> None:
+    profiling_args = argparse.Namespace(
+        attach_pid=None,
+        config_dir=tmp_path / "analysis_configs",
+        experimental=True,
+        filter_blocks=[],
+        membw_analysis=True,
+        no_roof=True,
+        output_directory=str(tmp_path),
+        remaining="./app",
+    )
+    mock_soc = Mock()
+    mock_soc._mspec = SimpleNamespace()
+    mock_soc.profiling_setup.return_value = effective_filter_blocks
+    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
+    profiler = rocprof_v3_profiler(
+        profiling_args,
+        profiler_mode="rocprofv3",
+        soc=mock_soc,
+    )
+
+    with patch("rocprof_compute_profile.profiler_base.gen_sysinfo"):
+        profiler.pre_processing()
+
+    mock_soc.profiling_setup.assert_called_once_with()
+    profiling_config = yaml.safe_load(
+        (tmp_path / "profiling_config.yaml").read_text(encoding="utf-8")
+    )
+    assert profiling_config["membw_analysis"] is True
+    assert profiling_config["filter_blocks"] == effective_filter_blocks
 
 
 # ---------------------------------------------------------------------------
