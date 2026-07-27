@@ -786,13 +786,66 @@ TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
   REQUIRE(ret == 2);
 }
 
+// ---------------------------------------------------------------------------
+// Helper: capture a workload and replay it with byte-exact D2H validation.
+//
+// hrr_run_roundtrip() cannot be used for this because it offers no way to pass
+// playback environment variables.  A workload built only from memsets is
+// bit-deterministic, so the numeric-tolerance fallback in the D2H validator can
+// only weaken the oracle: at the default atol=rtol=1e-3 it accepts any small
+// float interpretation, including an all-zero buffer against a small-magnitude
+// expectation.  HIP_HRR_D2H_EXACT=1 makes any byte difference a failure.
+// ---------------------------------------------------------------------------
+static void hrr_run_exact_roundtrip(const std::string& direct_case,
+                                    const fs::path& cap_path) {
+  hrr_capture_direct(direct_case, cap_path);
+
+  auto [ret, out] = hrr_playback_env(cap_path, {{"HIP_HRR_D2H_EXACT", "1"}});
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+
+  // A handler returning anything other than hipSuccess aborts the replay pass
+  // before the summary block is printed, so the presence of the summary line is
+  // a platform-independent proof that the replay ran to completion.
+  size_t pos = out.find("D2H checks");
+  REQUIRE(pos != std::string::npos);
+  size_t colon = out.find(':', pos);
+  REQUIRE(colon != std::string::npos);
+  // Summary format: "N pass (E exact, T within tol), F fail, S skipped".
+  int d2h_pass = 0;
+  REQUIRE(sscanf(out.c_str() + colon + 1, " %d pass", &d2h_pass) == 1);
+  INFO("D2H pass=" << d2h_pass);
+
+#ifdef _WIN32
+  // Same policy as hrr_run_playback(): on the Windows CI target replay is not
+  // guaranteed to reproduce device output bit-for-bit, so D2H fidelity is
+  // best-effort there.  The completion check above still applies, and a crash
+  // still fails via this bound.
+  REQUIRE(ret < 128);
+#else
+  // hrr-playback exits non-zero when any D2H validation fails and also when
+  // every D2H event was skipped, so this is the load-bearing fidelity
+  // assertion; the pass count rules out the one remaining vacuous case, an
+  // archive that carried no D2H blob at all.
+  REQUIRE(ret == 0);
+  REQUIRE(d2h_pass >= 1);
+#endif
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_MemsetD2D_Direct: hipMemsetD2D8 / hipMemsetD2D8Async /
+ *     hipMemsetD2D16 / hipMemsetD2D16Async / hipMemsetD2D32 /
+ *     hipMemsetD2D32Async over a sub-region of a buffer allocated with a real
+ *     row stride, on top of a whole-buffer sentinel.
+ *   - Replay with byte-exact D2H: the fills must reproduce the pattern in the
+ *     written sub-region AND leave the inter-row padding at the sentinel, so
+ *     neither a skipped fill nor a fill that ignores the pitch can pass.
+ */
 HIP_TEST_CASE(Unit_HRR_MemsetD2DRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetd2d"};
-  // Exercises hipMemsetD2D8 / hipMemsetD2D8Async / hipMemsetD2D16 /
-  // hipMemsetD2D16Async / hipMemsetD2D32 / hipMemsetD2D32Async (pitched
-  // device-to-device memset). Replay must reproduce the final bytes and
-  // validate them via D2H.
-  hrr_run_roundtrip("Unit_HRR_MemsetD2D_Direct", cap.path);
+  hrr_run_exact_roundtrip("Unit_HRR_MemsetD2D_Direct", cap.path);
 }
 
 HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {

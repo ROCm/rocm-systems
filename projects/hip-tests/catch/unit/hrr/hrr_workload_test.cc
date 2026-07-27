@@ -881,6 +881,63 @@ TEST_CASE("Unit_HRR_StressApis_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
+// Pitched device-to-device memset (hipMemsetD2D*): shared geometry
+//
+// PITCH must be strictly greater than WIDTH.  CLR short-circuits the pitched
+// fill to the plain non-pitched one whenever pitch == extent.width
+// (ihipMemset3DCommand), so a contiguous buffer never reaches the pitched
+// FillMemoryCommand at all, and it has no inter-row padding, so there is
+// nothing to prove the fill stayed inside the requested sub-region.
+//
+// Note on units: CLR treats `width` as BYTES (sizeBytes = width * height);
+// the D2D8/16/32 flavour only selects the fill-pattern width via elementSize,
+// despite the doxygen wording implying elements.  hipMemsetD2D32Async.cc in
+// catch/unit/memory/ likewise passes width = numW * sizeof(int).
+// ===========================================================================
+namespace {
+constexpr size_t kD2DWidth = 32 * sizeof(int);          // 128 bytes filled per row
+constexpr size_t kD2DPitch = 192;                       // row stride (> width)
+constexpr size_t kD2DRows  = 32;
+constexpr size_t kD2DTotal = kD2DPitch * kD2DRows;      // 6144 bytes
+constexpr size_t kD2DPad   = kD2DPitch - kD2DWidth;     // 64 untouched bytes/row
+
+// Sentinel pre-fill of the WHOLE buffer vs the pattern written into the
+// WIDTH sub-region.  The two must be far apart under every dtype the replay
+// D2H validator guesses (f32/bf16/f16/f64 at atol=rtol=1e-3), otherwise a
+// replay that never ran the memsets (HRR zero-initialises replay allocations,
+// so the buffer reads back all-zero) would land inside the tolerance and
+// "pass".  0x5A5A5A5A and 0x44444444 decode to (f32) 1.54e16 / 785.07,
+// (bf16) 1.53e16 / 784, (f16) 203.25 / 4.266 and (f64) 1.78e127 / 7.48e20;
+// against zero, and against each other, every one of those is far outside
+// tolerance, so both a skipped-memset replay and a pitch-ignoring replay
+// (which would overwrite the padding with the pattern) genuinely FAIL.
+constexpr unsigned char kD2DSentinelByte = 0x5Au;       // 0x5A5A5A5A per int
+constexpr unsigned int  kD2DPattern      = 0x44444444u;
+
+static_assert(kD2DPitch > kD2DWidth, "pitched memset path requires pitch > width");
+static_assert(kD2DWidth % sizeof(unsigned int) == 0, "width must hold whole ints");
+
+// Count ints in the filled sub-region that hold `pattern`, and bytes in the
+// inter-row padding that still hold the sentinel.  Aggregated rather than
+// asserted per element so a mismatch does not emit thousands of Catch2 failures.
+void d2d_count_matches(const std::vector<unsigned char>& buf, unsigned int pattern,
+                       size_t* filled_ok, size_t* padding_ok) {
+  *filled_ok = 0;
+  *padding_ok = 0;
+  for (size_t r = 0; r < kD2DRows; ++r) {
+    const unsigned char* row = buf.data() + r * kD2DPitch;
+    for (size_t c = 0; c < kD2DWidth; c += sizeof(unsigned int)) {
+      unsigned int v = 0;
+      memcpy(&v, row + c, sizeof(v));
+      if (v == pattern) ++*filled_ok;
+    }
+    for (size_t b = kD2DWidth; b < kD2DPitch; ++b)
+      if (row[b] == kD2DSentinelByte) ++*padding_ok;
+  }
+}
+}  // namespace
+
+// ===========================================================================
 // Workload: pitched device-to-device memset (hipMemsetD2D*)
 //
 // Exercises hipMemsetD2D8 / hipMemsetD2D8Async / hipMemsetD2D16 /
@@ -888,49 +945,56 @@ TEST_CASE("Unit_HRR_StressApis_Direct", "[.][hrr-direct]") {
 // replayed faithfully (mirror the hipMemset2D handler, with alloc-map pointer
 // translation and stream translation for the async variants); replay must
 // reproduce the final byte pattern.
-// Final blob: every int == 0x2A2A2A2A.
+//
+// Final blob (whole allocation, padding included): the first kD2DWidth bytes
+// of every row are kD2DPattern, the remaining kD2DPad bytes still hold
+// kD2DSentinelByte.
 // ===========================================================================
 TEST_CASE("Unit_HRR_MemsetD2D_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipSetDevice(0));
-  constexpr int    N  = 1024;
-  constexpr size_t SZ = N * sizeof(int);  // 4096 bytes
 
   hipStream_t s;
   HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
 
-  int* d = nullptr;
-  HIP_CHECK(hipMalloc(&d, SZ));
+  void* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, kD2DTotal));
+  const hipDeviceptr_t dp = reinterpret_cast<hipDeviceptr_t>(d);
 
-  // Treat d as a contiguous COLS x ROWS 2-D region (pitch == row width), so
-  // every D2D memset covers the whole buffer and the final state is fully
-  // defined for byte-for-byte D2H validation.
-  constexpr size_t COLS  = 32;
-  constexpr size_t ROWS  = N / COLS;            // 32 rows
-  constexpr size_t PITCH = COLS * sizeof(int);  // 128 bytes/row, contiguous
-
-  // 8-bit pitched D2D memset (sync + async).
-  HIP_CHECK(hipMemsetD2D8(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x11, PITCH, ROWS));
-  HIP_CHECK(hipMemsetD2D8Async(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x22, PITCH, ROWS, s));
-  HIP_CHECK(hipStreamSynchronize(s));
-
-  // 16-bit pitched D2D memset (sync + async).
-  HIP_CHECK(hipMemsetD2D16(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x3333, PITCH, ROWS));
-  HIP_CHECK(hipMemsetD2D16Async(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x4444, PITCH, ROWS, s));
-  HIP_CHECK(hipStreamSynchronize(s));
-
-  // 32-bit pitched D2D memset (sync) then final async -> known pattern 0x2A2A2A2A.
-  HIP_CHECK(hipMemsetD2D32(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x11223344u, PITCH, ROWS));
-  HIP_CHECK(hipMemsetD2D32Async(reinterpret_cast<hipDeviceptr_t>(d), PITCH, 0x2A2A2A2Au, PITCH, ROWS, s));
-  HIP_CHECK(hipStreamSynchronize(s));
+  // Sentinel the whole allocation, padding included, using an API that is
+  // already replayed faithfully, so the padding has a known non-zero value
+  // that the pitched fills below must leave alone.
+  HIP_CHECK(hipMemsetD8(dp, kD2DSentinelByte, kD2DTotal));
   HIP_CHECK(hipDeviceSynchronize());
 
-  int* h = new int[N]();
-  HIP_CHECK(hipMemcpy(h, d, SZ, hipMemcpyDeviceToHost));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 0x2A2A2A2A);
+  // Pitched fills, kD2DWidth bytes per row only.
+  HIP_CHECK(hipMemsetD2D8(dp, kD2DPitch, 0x11, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D8Async(dp, kD2DPitch, 0x22, kD2DWidth, kD2DRows, s));
+  HIP_CHECK(hipMemsetD2D16(dp, kD2DPitch, 0x3333, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D16Async(dp, kD2DPitch, 0x4444, kD2DWidth, kD2DRows, s));
+  HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, 0x11223344u, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D32Async(dp, kD2DPitch, 0x55667788u, kD2DWidth, kD2DRows, s));
+
+  // The non-Async D2D memsets are NOT synchronous here: ihipMemset3D flips
+  // isAsync true for a plain device allocation at offset 0 and enqueues on the
+  // null stream without finish(), and `s` was created hipStreamNonBlocking so
+  // it never implicitly waits on the null stream.  The fills above are
+  // therefore mutually unordered.  Drain the device, then issue one final
+  // deterministic fill and drain again, so the captured end state is unique.
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, kD2DPattern, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // D2H the WHOLE allocation so the captured blob covers the padding too.
+  std::vector<unsigned char> h(kD2DTotal, 0);
+  HIP_CHECK(hipMemcpy(h.data(), d, kD2DTotal, hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipFree(d));
   HIP_CHECK(hipStreamDestroy(s));
-  delete[] h;
+
+  size_t filled_ok = 0, padding_ok = 0;
+  d2d_count_matches(h, kD2DPattern, &filled_ok, &padding_ok);
+  REQUIRE(filled_ok == kD2DRows * (kD2DWidth / sizeof(unsigned int)));
+  REQUIRE(padding_ok == kD2DRows * kD2DPad);
 }
 
 // ===========================================================================
