@@ -758,21 +758,6 @@ if(BUILD_TESTS)
   endif()
   add_subdirectory(test)
 
-  if(BUILD_SHARED_LIBS)
-    # rccl is defined in src/, so avoid TARGET-signature command here.
-    # Use an output-stamp command plus a local custom target dependency.
-    set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
-    add_custom_command(
-      OUTPUT "${extract_metadata_stamp}"
-      COMMENT "Extracting metadata from librccl.so"
-      COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
-      COMMAND ${CMAKE_COMMAND} -E touch "${extract_metadata_stamp}"
-      DEPENDS rccl
-      VERBATIM
-    )
-    add_custom_target(extract_rccl_metadata ALL DEPENDS "${extract_metadata_stamp}")
-  endif()
-
 endif()
 
 rocm_create_package(

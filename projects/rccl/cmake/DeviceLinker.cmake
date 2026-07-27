@@ -47,6 +47,36 @@ set(DEVICE_BUILD_DIR "${PROJECT_BINARY_DIR}/device_build")
 set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 
 # ---------------------------------------------------------------------------
+# Compile options inherited from the rccl target
+#
+# This file is included after every target_compile_options(rccl ...) call, so
+# the target already carries the flags that govern device codegen -- notably
+# -mllvm --amdgpu-kernarg-preload-count=N and -fvisibility=hidden.  The custom
+# commands below invoke amdclang++ directly, so without forwarding these they
+# silently produce different code than the -fgpu-rdc build.  Losing kernarg
+# preloading in particular costs a memory round trip at every kernel entry,
+# which is measurable on the small latency-bound kernels (DDA).
+#
+# Dropped here: flags selecting the compilation model (each command sets its
+# own -x hip / --offload-arch, and --offload-host-only would suppress the very
+# device code these commands exist to produce), -parallel-jobs (would
+# oversubscribe an already parallel build), --offload-compress (packaging, see
+# ENABLE_COMPRESS below) and diagnostics (generated sources are compiled
+# quietly by design, and some need -w).
+# ---------------------------------------------------------------------------
+set(DL_INHERITED_FLAGS "")
+get_target_property(_rccl_copts rccl COMPILE_OPTIONS)
+if(_rccl_copts)
+  foreach(_opt IN LISTS _rccl_copts)
+    if(_opt MATCHES "^(-x|hip|-fgpu-rdc|--offload-host-only|--offload-compress|--offload-arch=.*|-parallel-jobs=.*|-w|-W.*)$")
+      continue()
+    endif()
+    list(APPEND DL_INHERITED_FLAGS "${_opt}")
+  endforeach()
+endif()
+message(STATUS "Device Linker: inherited compile options: ${DL_INHERITED_FLAGS}")
+
+# ---------------------------------------------------------------------------
 # Parse GPU_TARGETS: strip target features, build offload-arch flag list
 # ---------------------------------------------------------------------------
 set(DL_GPU_TARGETS "")
@@ -438,6 +468,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     ${DL_HOST_COMPRESS}
@@ -462,6 +493,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${ONERANK_FAT_OBJ}
@@ -495,6 +527,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
       ${_link_def_flags}
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
+      ${DL_INHERITED_FLAGS}
       -std=c++17
       -fPIC
       -MD -MF ${COLLECTIVES_DEPFILE}
@@ -515,6 +548,7 @@ else()
       ${_link_def_flags}
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
+      ${DL_INHERITED_FLAGS}
       -std=c++17
       -fPIC
       -c -o ${COLLECTIVES_FAT_OBJ}
@@ -544,6 +578,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
@@ -562,6 +597,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
@@ -580,6 +616,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_ALL_GATHER_IPC_FAT_OBJ}
@@ -598,6 +635,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     -c -o ${DDA_ALLTOALL_IPC_FAT_OBJ}
@@ -621,6 +659,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -644,6 +683,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -663,6 +703,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -682,6 +723,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -715,6 +757,7 @@ if(GENERATE_SYM_KERNELS)
         ${_link_def_flags}
         ${_host_inc_flags}
         ${DL_OPT_FLAGS}
+        ${DL_INHERITED_FLAGS}
         -std=c++17
         -fPIC
         -c -o ${_sym_obj}
