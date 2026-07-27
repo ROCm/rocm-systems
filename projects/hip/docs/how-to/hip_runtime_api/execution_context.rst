@@ -687,56 +687,145 @@ Worked example
 ===============================================================================
 
 This example reserves CUs for an urgent kernel so it is not blocked by a
-long-running one. Two kernels run on separate non-blocking streams: a
-long-running kernel starts first, and a short, critical kernel follows.
+long-running one, and measures the difference. A large background kernel runs
+concurrently with a small, latency-sensitive critical kernel, and the critical
+kernel's runtime is timed in two configurations:
 
-Without execution contexts, the critical kernel waits for the long-running
+- **Baseline**: both kernels run on ordinary streams and share all of the
+  device's CUs, so the critical kernel contends with the background kernel.
+- **Partitioned**: the CUs are split into two execution contexts, so the
+  critical kernel runs on its own CUs while the background kernel is confined to
+  the rest.
+
+Without execution contexts, the critical kernel waits for the background
 kernel's thread blocks to retire before CUs open up, even with a higher stream
 priority. With execution contexts, each kernel owns a distinct set of CUs, so the
 critical kernel starts right away. Both kernels give up access to the full GPU,
 so each may run slightly longer alone, but the critical kernel is no longer held
 back.
 
+A busy kernel stands in for a compute-bound workload. Oversubscribing the grid,
+launching many more thread blocks than the device runs at once, keeps every CU
+occupied for the whole measurement:
+
+.. code-block:: cpp
+
+    __global__ void busy_kernel(unsigned int* out, unsigned int iterations)
+    {
+        volatile unsigned int acc = 0;
+        for(unsigned int i = 0; i < iterations; ++i)
+        {
+            acc += i;
+        }
+        if(threadIdx.x == 0)
+        {
+            out[blockIdx.x] = acc;
+        }
+    }
+
+A helper launches the background kernel, then times the critical kernel with HIP
+events while the background kernel is still running. Passing two streams that
+belong to disjoint execution contexts confines each kernel to its own CUs;
+passing two ordinary streams lets them contend:
+
+.. code-block:: cpp
+
+    float time_critical_with_background(hipStream_t   background_stream,
+                                        hipStream_t   critical_stream,
+                                        unsigned int* d_out_background,
+                                        unsigned int* d_out_critical)
+    {
+        hipEvent_t start, stop;
+        HIP_CHECK(hipEventCreate(&start));
+        HIP_CHECK(hipEventCreate(&stop));
+
+        // Launch the background kernel; it keeps running on its own stream.
+        busy_kernel<<<background_grid, block_size, 0, background_stream>>>(
+            d_out_background, background_iterations);
+        HIP_CHECK(hipGetLastError());
+
+        // Time the critical kernel while the background kernel runs.
+        HIP_CHECK(hipEventRecord(start, critical_stream));
+        busy_kernel<<<critical_grid, block_size, 0, critical_stream>>>(
+            d_out_critical, critical_iterations);
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipEventRecord(stop, critical_stream));
+        HIP_CHECK(hipEventSynchronize(stop));
+
+        float critical_ms = 0.0f;
+        HIP_CHECK(hipEventElapsedTime(&critical_ms, start, stop));
+        HIP_CHECK(hipStreamSynchronize(background_stream));
+
+        HIP_CHECK(hipEventDestroy(start));
+        HIP_CHECK(hipEventDestroy(stop));
+        return critical_ms;
+    }
+
+The baseline runs both kernels on ordinary non-blocking streams, so they share
+the whole device:
+
+.. code-block:: cpp
+
+    hipStream_t shared_background, shared_critical;
+    HIP_CHECK(hipStreamCreateWithFlags(&shared_background, hipStreamNonBlocking));
+    HIP_CHECK(hipStreamCreateWithFlags(&shared_critical, hipStreamNonBlocking));
+
+    float baseline_ms = time_critical_with_background(
+        shared_background, shared_critical, d_out_background, d_out_critical);
+
+    HIP_CHECK(hipStreamDestroy(shared_background));
+    HIP_CHECK(hipStreamDestroy(shared_critical));
+
+The partitioned run splits the CUs into a group for the background kernel and a
+disjoint group for the critical kernel, then follows the four-step setup: read
+the device's CUs, split them, wrap each group in a descriptor, and create an
+execution context per group. A stream on each context confines its kernel to that
+context's CUs:
+
 .. code-block:: cpp
 
     // Step 1: Read the device's CUs.
     hipDevResource cu_resources = {};
     HIP_CHECK(hipDeviceGetDevResource(0, &cu_resources, hipDevResourceTypeSm));
+    unsigned int total_cus    = cu_resources.sm.smCount;
+    unsigned int critical_cus = total_cus / 4;
 
-    // Step 2: Split into a large group and a small group.
+    // Step 2: Split into a background group and a smaller critical group.
     hipDevResource result[2] = {};
     hipDevSmResourceGroupParams group_params[2] = {
-        {/*smCount=*/112, 0, 0, 0},
-        {/*smCount=*/16,  0, 0, 0}};
+        {/*smCount=*/total_cus - critical_cus, 0, 0, 0},
+        {/*smCount=*/critical_cus,             0, 0, 0}};
     HIP_CHECK(hipDevSmResourceSplit(&result[0], 2, &cu_resources, nullptr, 0, &group_params[0]));
 
     // Step 3: Wrap each group in a descriptor.
-    hipDevResourceDesc_t desc_long = {};
-    hipDevResourceDesc_t desc_critical = {};
-    HIP_CHECK(hipDevResourceGenerateDesc(&desc_long, &result[0], 1));
+    hipDevResourceDesc_t desc_background = {};
+    hipDevResourceDesc_t desc_critical   = {};
+    HIP_CHECK(hipDevResourceGenerateDesc(&desc_background, &result[0], 1));
     HIP_CHECK(hipDevResourceGenerateDesc(&desc_critical, &result[1], 1));
 
     // Step 4: Create an execution context per group.
-    hipExecutionCtx_t ctx_long = {};
-    hipExecutionCtx_t ctx_critical = {};
-    HIP_CHECK(hipGreenCtxCreate(&ctx_long, desc_long, 0, 0));
+    hipExecutionCtx_t ctx_background = {};
+    hipExecutionCtx_t ctx_critical   = {};
+    HIP_CHECK(hipGreenCtxCreate(&ctx_background, desc_background, 0, 0));
     HIP_CHECK(hipGreenCtxCreate(&ctx_critical, desc_critical, 0, 0));
 
-    // A stream on each context, then launch each kernel on its stream.
-    hipStream_t strm_long, strm_critical;
-    HIP_CHECK(hipExecutionCtxStreamCreate(&strm_long, ctx_long, hipStreamDefault, 0));
+    // A stream on each context, then run the same timed measurement.
+    hipStream_t strm_background, strm_critical;
+    HIP_CHECK(hipExecutionCtxStreamCreate(&strm_background, ctx_background, hipStreamDefault, 0));
     HIP_CHECK(hipExecutionCtxStreamCreate(&strm_critical, ctx_critical, hipStreamDefault, 0));
 
-    long_running_kernel<<<grid_long, block_long, 0, strm_long>>>();
-    critical_kernel<<<grid_critical, block_critical, 0, strm_critical>>>();
-    HIP_CHECK(hipGetLastError());
+    float partitioned_ms = time_critical_with_background(
+        strm_background, strm_critical, d_out_background, d_out_critical);
 
     // Release everything.
-    HIP_CHECK(hipStreamDestroy(strm_long));
+    HIP_CHECK(hipStreamDestroy(strm_background));
     HIP_CHECK(hipStreamDestroy(strm_critical));
-    HIP_CHECK(hipExecutionCtxDestroy(ctx_long));
+    HIP_CHECK(hipExecutionCtxDestroy(ctx_background));
     HIP_CHECK(hipExecutionCtxDestroy(ctx_critical));
 
-Settle on the CU split by measuring your own workload. The
+Comparing ``baseline_ms`` with ``partitioned_ms`` shows the critical kernel
+finishing sooner once it has its own CUs. Settle on the CU split by measuring your
+own workload. The
 `HIP-Basic execution context example <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/execution_context>`_
-contains a complete, buildable version.
+contains a complete, buildable version that sweeps several partition sizes and
+also provides a CUDA green context backend.
