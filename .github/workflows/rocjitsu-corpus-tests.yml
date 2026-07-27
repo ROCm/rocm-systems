@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/07/07.
-        default: "3278883f548e1353ffbda1a8090219d866eca035"
+        # Last updated on 2026/07/17.
+        default: "aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4"
         required: true
 
 concurrency:
@@ -39,6 +39,7 @@ env:
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
+  ROCM_SDK_VERSION: 7.14.0a20260624
 
 jobs:
   test:
@@ -49,31 +50,61 @@ jobs:
       options: --user 0:0
       env:
         DEBIAN_FRONTEND: noninteractive
-    continue-on-error: true
+    continue-on-error: ${{ matrix.allow_failure }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: release
+            allow_failure: true
+            test_regex: ''
             build_type: Release
             enable_asan: 0
             enable_ubsan: 0
             enable_tsan: 0
-            enable_msan: 0
+            enable_expensive_checks: 0
+            sanitizer_runtime: STATIC
           - name: asan-ubsan
+            allow_failure: true
+            test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 1
             enable_ubsan: 1
             enable_tsan: 0
-            enable_msan: 0
+            enable_expensive_checks: 1
+            sanitizer_runtime: SHARED
+          - name: tsan
+            allow_failure: true
+            test_regex: ''
+            build_type: RelWithDebInfo
+            enable_asan: 0
+            enable_ubsan: 0
+            enable_tsan: 1
+            enable_expensive_checks: 1
+            sanitizer_runtime: SHARED
           - name: asan-ubsan-gcc
+            allow_failure: true
+            test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 1
             enable_ubsan: 1
             enable_tsan: 0
-            enable_msan: 0
+            enable_expensive_checks: 1
+            sanitizer_runtime: SHARED
             c_compiler: gcc
             cxx_compiler: g++
+          - name: tsan-sparse-memory
+            allow_failure: false
+            run_static_asan_launch: true
+            # The simulator-wide stress tests exceed TSan's fixed 128-lock
+            # deadlock-tracker capacity; keep the race gate focused on the
+            # concurrent memory surfaces hardened by this change.
+            test_regex: '^(SparseMemory(Threading)?Test|GpuMemoryThreadingTest|L2CacheThreadingTest)\.'
+            build_type: RelWithDebInfo
+            enable_asan: 0
+            enable_ubsan: 0
+            enable_tsan: 1
+            sanitizer_runtime: STATIC
 
     steps:
       - name: Install base dependencies
@@ -84,6 +115,7 @@ jobs:
             ca-certificates \
             cmake \
             git \
+            libclang-rt-dev \
             libdrm-dev \
             ninja-build \
             clang
@@ -102,8 +134,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/07.
-          ref: 3278883f548e1353ffbda1a8090219d866eca035
+          # Last updated on 2026/07/17.
+          ref: ${{ github.event.inputs.corpus_ref || 'aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4' }}
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -116,7 +148,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --pre \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
-            "rocm[devel,libraries]==7.14.0a20260624"
+            "rocm[devel,libraries]==${ROCM_SDK_VERSION}"
           ROCM_LIB="$(rocm-sdk path --root)"/lib
           echo "LD_LIBRARY_PATH=${ROCM_LIB}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
@@ -125,15 +157,13 @@ jobs:
         shell: bash
         run: |
           ROCMINFO=RocminfoTest
-          ROCBLAS_GEMM=RocblasGemmTest
           RCCL_DAEMON=RcclDaemonTest
-          ROCBLAS_GEMMS=RocblasGemmTest
-          ROCBLAS_GEMM_FUZZ=RocblasGemmFuzz
-          ROCBLAS_GEMM_CDNA3=RocblasGemmCdna3
-          EXCLUDED_TESTS="${ROCMINFO}|${ROCBLAS_GEMM}|${RCCL_DAEMON}|${ROCBLAS_GEMMS}|${ROCBLAS_GEMM_FUZZ}|${ROCBLAS_GEMM_CDNA3}"
+          EXCLUDED_TESTS="${ROCMINFO}|${RCCL_DAEMON}"
           ASAN_UBSAN_EXCLUDED_TESTS=(
             "HsaTest\.InitSucceeded"
             "HsaTest\.GpuAgentFound"
+            "Cdna4ToCdna3SimulatedDispatchTest\..*"
+            "Cdna4ToCdna3DbtGuestTest\..*"
             "HipMemcpyTest\.RoundTripFloat"
             "HipMemcpyTest\.RoundTripInt"
             "HipMemcpyTest\.DeviceToDevice"
@@ -143,13 +173,22 @@ jobs:
             "DaemonTest\.HipMemcpyRoundTripInt"
             "DaemonTest\.HipMemcpyDeviceToDevice"
             "DaemonTest\.TwoIndependentClients"
+            "DaemonTest\.LoggingPlugin"
             "BfeRegressionTest\.ThreadIdxY"
             "LoggingTest\.dispatch_logged"
             "ProfiledPluginTest\.hook_profile_output"
             "CvtNarrow\.AllTests"
-            "Interposer.*Test\..*"
-            "GuestKfd.*\..*"
             "RaceTest\..*"
+          )
+          # https://github.com/ROCm/rocm-systems/issues/8922
+          TSAN_EXCLUDED_TESTS=(
+            "${ASAN_UBSAN_EXCLUDED_TESTS[@]}"
+            "MatmulStressTest\.TiledAllCU"
+            "MatmulStressTest\.MfmaAllCUs"
+            "VectorAddStressTest\.AllCUsGoldenReference"
+            "Gfx1250SimulationTest\.*"
+            "Gfx1250ExecutionTest\.*"
+            "InterposerDupTest.SerializedReopenUnderContentionStaysRoutable"
           )
 
           CMAKE_CONFIG_FLAGS=()
@@ -159,6 +198,9 @@ jobs:
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
             )
+          fi
+          if [[ "${{ matrix.enable_tsan }}" == "1" ]]; then
+            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_EXCLUDED_TESTS[*]}")"
           fi
           if [[ -n "${{ matrix.c_compiler }}" ]]; then
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
@@ -180,16 +222,48 @@ jobs:
             -DRJ_ENABLE_ASAN=${{ matrix.enable_asan }} \
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
-            -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }}
+            -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
+            -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
-          cmake --build "${ROCJITSU_BUILD_DIR}"
+          # Set a conservative number of workers to avoid OOM and excessive system load.
+          WORKERS="$(( ($(nproc) + 1) / 2 ))"
+          cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
 
+          CTEST_SELECTION=()
+          if [[ -n "${{ matrix.test_regex }}" ]]; then
+            CTEST_SELECTION=(-R "${{ matrix.test_regex }}")
+          fi
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            "${CTEST_SELECTION[@]}" \
             -E "${EXCLUDED_TESTS}" \
-            --output-on-failure
+            --output-on-failure \
+            -j "${WORKERS}"
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      - name: Test static ASan launcher preload
+        if: matrix.run_static_asan_launch
+        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
+        shell: bash
+        run: |
+          STATIC_ASAN_BUILD_DIR="${ROCJITSU_BUILD_DIR}-asan-static-launch-preload"
+          CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+          ROCM_PATH="$(rocm-sdk path --root)" \
+            cmake -B "${STATIC_ASAN_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
+            -DRJ_ENABLE_ASAN=1 \
+            -DRJ_ENABLE_UBSAN=0 \
+            -DRJ_ENABLE_TSAN=0 \
+            -DRJ_ENABLE_EXPENSIVE_CHECKS=0 \
+            -DRJ_SANITIZER_RUNTIME=STATIC
+
+          cmake --build "${STATIC_ASAN_BUILD_DIR}" \
+            --target launch_preload_test
+          ctest --test-dir "${STATIC_ASAN_BUILD_DIR}" \
+            -R '^LaunchPreloadTest\.' \
+            --output-on-failure
 
       - name: Install corpus test dependencies
         if: matrix.name == 'release'
@@ -197,6 +271,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          python -m pip install --pre \
+            --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+            "rocm-sdk-device-gfx942==${ROCM_SDK_VERSION}" \
+            "rocm-sdk-device-gfx950==${ROCM_SDK_VERSION}"
+          rocm-sdk init
 
       - name: Run amdisa tests
         if: matrix.name == 'release'
@@ -212,30 +291,19 @@ jobs:
           ROCJITSU_ROOT: ${{ env.ROCJITSU_SOURCE_DIR }}
           ROCJITSU_BUILD: ${{ env.ROCJITSU_BUILD_DIR }}
         run: |
-          targets=(
-            "gfx942 gfx942_cdna3.json gfx942_skip_tests.json"
-            "gfx950 gfx950_cdna4.json gfx950_skip_tests.json"
-            "gfx1100 gfx1100_w7900.json gfx1100_skip_tests.json"
-            "gfx1201 gfx1201_r9700.json gfx1201_skip_tests.json"
-            "gfx1250 gfx1250.json gfx1250_skip_tests.json"
-          )
 
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
-          corpus_status=0
-          for target in "${targets[@]}"; do
-            read -r name rocjitsu_config skip_tests_config <<< "${target}"
-            echo "::group::pytest (${name})"
-            if ! rocjitsu \
-              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
-              -- pytest \
-              tests/test_corpus.py -vv \
-              --target "${name}" \
-              --suite iree,kernels,cts \
-              --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
-              --timeout 15; then
-              corpus_status=1
-            fi
-            echo "::endgroup::"
-          done
-          exit "${corpus_status}"
+          export ROCJITSU_SOURCE_DIR
+
+          corpus_test_status=0
+
+          WORKERS="$(( ($(nproc) + 1) / 2 ))"
+          corpus_test_flags=(
+            --workers "${WORKERS}" \
+            --soft-timeout 15 \
+            --hard-timeout 30 \
+            --rerun-failed \
+          )
+          bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
+          exit "${corpus_test_status}"

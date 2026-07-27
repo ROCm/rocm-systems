@@ -79,9 +79,8 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                               const void* buffer_base, uint64_t buffer_base_size) const;
   hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
-                              core::MemoryRegion::AllocateFlags alloc_flags, void** mem,
-                              size_t size, uint32_t agent_node_id,
-                              core::DriverMemoryHandle* handle) override;
+                              core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                              uint32_t agent_node_id, core::DriverMemoryHandle* handle) override;
   hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
   hsa_status_t AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const;
   hsa_status_t RegisterMemory(void* ptr, uint64_t size, HsaMemFlags mem_flags) const override;
@@ -123,6 +122,8 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const;
   hsa_status_t IsModelEnabled(bool* enable) const override;
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
+
+  hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 };
 
 }  // namespace AMD

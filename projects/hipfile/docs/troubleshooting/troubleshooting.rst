@@ -18,7 +18,7 @@ fallback path instead.
 hipFile's fastpath requires the following:
 
 * A Linux kernel with P2PDMA support enabled
-* ROCm 7.4 or later, including:
+* ROCm 7.14.0 or later, including:
 
   * the HIP runtime
   * ``amdgpu``
@@ -68,7 +68,7 @@ To disable NVMe multipath on Ubuntu 24.04:
   sudo systemctl reboot
 
 Alignment and I/O size
-=====================
+========================
 
 Each I/O request must satisfy alignment and size requirements of the underlying
 file system and storage device to use hipFile's fastpath. Clients can use
@@ -81,7 +81,7 @@ use the fallback path. ``ais-stats`` can be used to determine if I/O requests
 are using the fallback path.
 
 I/O statistics
-=============
+===============
 
 Use ``ais-stats`` to display runtime hipFile I/O statistics. These stats help
 determine whether requests are using the fastpath or fallback path.
@@ -91,7 +91,7 @@ Set ``HIPFILE_STATS_LEVEL`` to ``1`` (default) or ``2`` before running
 :doc:`/reference/hipFile-ais-stats-tool`.
 
 Performance baseline
-====================
+=====================
 
 Use ``fio`` with the ``psync`` engine to establish a performance baseline for
 hipFile. When using the same storage device and similar I/O settings (for

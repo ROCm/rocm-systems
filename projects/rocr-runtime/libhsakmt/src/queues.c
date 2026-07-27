@@ -1002,6 +1002,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfoCtx(HsaKFDContext *ctx,
 	QueueInfo->QueueDetailError = 0;
 	QueueInfo->QueueTypeExtended = 0;
 	QueueInfo->SaveAreaHeader = q->ctx_save_restore;
+	QueueInfo->SaveAreaAllocSize = q->ctx_save_restore_size;
 
 	return HSAKMT_STATUS_SUCCESS;
 }
@@ -1166,6 +1167,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(
 						 HsaQueueInfo *QueueInfo)
 {
 	return hsaKmtGetQueueInfoCtx(&hsakmt_primary_kfd_ctx, QueueId, QueueInfo);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetKernelQueueId(
+						 HSA_QUEUEID QueueId,
+						 HSAuint32 *KernelInternalQueueId)
+{
+	struct queue *q = PORT_UINT64_TO_VPTR(QueueId);
+
+	if (!q || !KernelInternalQueueId)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	*KernelInternalQueueId = q->queue_id;
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,

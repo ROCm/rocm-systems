@@ -61,7 +61,13 @@ namespace AMD {
 /// @details The user-mode driver for AMD AIE that provides APIs for the ROCr core to allocate
 /// memory, manage DMA buffers, allocate queues, and more.
 class XdnaDriver final : public core::Driver {
- public:
+  /// Pool of command BOs owned by a kernel mode queue. Needs BOHandle and the
+  /// BO create/destroy helpers to build and tear down its entries.
+  friend struct CmdBOPool;
+  /// Kernel mode queue metadata. Holds a CmdBOPool and the BO handle scratch
+  /// buffers reused across submissions.
+  friend struct KmqMetadata;
+
   /// @brief BO handle information.
   struct BOHandle {
     /// Mapped address.
@@ -104,9 +110,8 @@ public:
   hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
                                   std::vector<HsaCacheProperties>& cache_props) const override;
   hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
-                              core::MemoryRegion::AllocateFlags alloc_flags, void** mem,
-                              size_t size, uint32_t node_id,
-                              core::DriverMemoryHandle* handle) override;
+                              core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                              uint32_t node_id, core::DriverMemoryHandle* handle) override;
   hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
@@ -188,7 +193,15 @@ public:
 
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
+  hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
+
  private:
+  /// @brief Destroys @p bo_handle.
+  ///
+  /// @note This function will unmap the virtual address and close the BO, even if the former fails.
+  ///
+  /// @param[in,out] bo_handle BO handle to destroy.
+  hsa_status_t DestroyBOHandle(BOHandle& bo_handle) const;
 
   /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
@@ -198,6 +211,12 @@ public:
 
   /// @brief Free device accessible heap space.
   hsa_status_t FreeDeviceHeap();
+
+  /// @brief Creates a command BO and returns it to @p bo_info.
+  ///
+  /// @param[in] size size of memory to allocate
+  /// @param[out] bo_info allocated BO
+  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
 
   /// @brief Virtual address range allocated for the device heap.
   ///

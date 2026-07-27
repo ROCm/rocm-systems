@@ -236,6 +236,7 @@ else()
   set_property ( TARGET ${HSAKMT_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}" )
   set_property ( TARGET ${HSAKMT_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
 
+  set(HSAKMT_FIND_NUMA_DEPENDENCY OFF)
   find_package(PkgConfig)
   # get OS-info for OS-specific build dependencies
   get_os_info()
@@ -247,6 +248,18 @@ else()
     find_package(NUMA)
     if(NUMA_FOUND)
       set(NUMA "${NUMA_LIBRARIES}")
+      # In BUILD_SHARED_LIBS mode hsakmt-config.cmake loads hsakmtTargets.cmake.
+      # Because hsakmt is static, its private imported dependencies are exported
+      # through LINK_ONLY and must be recreated by the package config. The
+      # staticdrm package path links the raw library name instead.
+      if(BUILD_SHARED_LIBS)
+        foreach(_numa_library IN LISTS NUMA_LIBRARIES)
+          if(TARGET "${_numa_library}")
+            set(HSAKMT_FIND_NUMA_DEPENDENCY ON)
+            break()
+          endif()
+        endforeach()
+      endif()
     else()
       find_library(NUMA NAMES numa REQUIRED)
     endif()
@@ -273,6 +286,7 @@ else()
     target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 
     include(CheckFunctionExists)
+    include(CheckSymbolExists)
     set(CMAKE_REQUIRED_DEFINITIONS -D__USE_GNU=1)
     set(CMAKE_REQUIRED_INCLUDES sys/mman.h)
     check_function_exists(memfd_create HAVE_MEMFD_CREATE)
@@ -280,10 +294,11 @@ else()
       target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
     endif()
 
-    set(CMAKE_REQUIRED_INCLUDES stdlib.h)
-    check_function_exists(secure_getenv HAVE_SECURE_GETENV)
-    if(HAVE_SECURE_GETENV)
-      target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_SECURE_GETENV=1)
+    # check_symbol_exists (not check_function_exists) so CMAKE_REQUIRED_INCLUDES
+    # is honored and we also verify AT_SECURE / the declaration are visible.
+    check_symbol_exists(getauxval "sys/auxv.h" HAVE_GETAUXVAL)
+    if(HAVE_GETAUXVAL)
+      target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_GETAUXVAL=1)
     endif()
 
     # Trusted search path for HSA_MODEL_LIB dlopen (see hsakmtmodel.c).
@@ -442,8 +457,8 @@ else()
     endif()
     target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
     if(UNIX)
-      if(HAVE_SECURE_GETENV)
-        target_compile_definitions(${HSAKMT_STATIC_DRM_TARGET} PRIVATE -DHAVE_SECURE_GETENV=1)
+      if(HAVE_GETAUXVAL)
+        target_compile_definitions(${HSAKMT_STATIC_DRM_TARGET} PRIVATE -DHAVE_GETAUXVAL=1)
       endif()
       target_compile_definitions(${HSAKMT_STATIC_DRM_TARGET} PRIVATE
         "HSAKMT_INSTALL_LIBDIR=\"${HSAKMT_INSTALL_LIBDIR}\"")

@@ -114,7 +114,7 @@ public:
         wf->set_lds(placement->lds);
         wf->set_dispatch_id(wg.entry->dispatch_id);
         wf->set_process_id(wg.entry->process_id);
-        wf->set_exec(initial_exec_mask_for_wave(*wg.entry, w, cu->wf_size()));
+        wf->set_exec(initial_exec_mask_for_wave(*wg.entry, wg.global_wg_id, w, cu->wf_size()));
         init_wf(cu, wf, *wg.entry, wg.global_wg_id, w);
         wg_wfs.push_back(wf);
       }
@@ -125,18 +125,6 @@ public:
       return true;
     }
     return false;
-  }
-
-  /// @brief Step each CU once (one round-robin pass within this SE).
-  bool step() {
-    bool any_active = false;
-    for (auto *cu : cus_) {
-      if (cu->has_active_wfs()) {
-        cu->step();
-        any_active = true;
-      }
-    }
-    return any_active;
   }
 
   /// @brief Check if any WGs are queued or any CU is active.
@@ -150,20 +138,6 @@ public:
     return false;
   }
 
-  /// @brief Run all CUs to idle (functional mode, for test harness use).
-  void run_to_idle() {
-    bool progress = true;
-    while (progress) {
-      progress = false;
-      for (auto *cu : cus_) {
-        if (cu->has_active_wfs()) {
-          cu->step();
-          progress = true;
-        }
-      }
-    }
-  }
-
   /// @brief Legacy: select a CU with capacity for direct dispatch.
   ///
   /// @details Used by dispatch_workgroups() fallback path when SPIs are not
@@ -174,7 +148,6 @@ public:
     for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
       size_t idx = (next_cu_ + attempt) % cus_.size();
       auto *cu = cus_[idx];
-      cu->retire_halted_wfs();
       const size_t wgp_index = cu_to_wgp_[idx];
       if (wgp_index != std::numeric_limits<size_t>::max() &&
           wgps_[wgp_index]->active_workgroups != 0)
@@ -206,8 +179,6 @@ public:
     for (size_t attempt = 0; attempt < wgps_.size(); ++attempt) {
       size_t wgp_index = (next_wgp_ + attempt) % wgps_.size();
       auto &wgp = *wgps_[wgp_index];
-      wgp.cu0->retire_halted_wfs();
-      wgp.cu1->retire_halted_wfs();
 
       // A WGP allocation cannot overlap CU-mode residents or cluster-pinned
       // CU-local LDS state. Existing WGP-mode workgroups may share the pool.

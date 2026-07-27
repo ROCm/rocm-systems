@@ -42,11 +42,13 @@
 
 #include "core/inc/amd_kfd_driver.h"
 
+#if defined(__linux__) || defined(__FreeBSD__)
+    #include <sys/ioctl.h>
+    #include <link.h>
+#endif
+
 #if defined(__linux__)
-#include <amdgpu_drm.h>
-#include <link.h>
-#include <sys/ioctl.h>
-#include <fcntl.h>
+    #include <amdgpu_drm.h>
 #endif
 
 #include "hsakmt/hsakmt.h"
@@ -225,18 +227,19 @@ hsa_status_t KfdDriver::GetCacheProperties(uint32_t node_id, uint32_t processor_
 }
 
 hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
-                                       core::MemoryRegion::AllocateFlags alloc_flags, void** mem,
-                                       size_t size, uint32_t agent_node_id,
-                                       core::DriverMemoryHandle* handle) {
+                                       core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                                       uint32_t agent_node_id, core::DriverMemoryHandle* handle) {
   const MemoryRegion &m_region(static_cast<const MemoryRegion &>(mem_region));
   HsaMemFlags kmt_alloc_flags(m_region.mem_flags());
+  void* mem = nullptr;
 
-  // Fills the caller's handle from whatever *mem holds: a VA for fragment and
+  // Fills the caller's handle from whatever mem holds: a VA for fragment and
   // mapped allocations, or the opaque memory-only handle for NoAddress
   // allocations. For KFD both are the allocation word reinterpreted as uint64_t.
   // Export-only fields stay at their defaults and are filled lazily on export.
   auto populate_handle = [&]() {
-    handle->handle = reinterpret_cast<uint64_t>(*mem);
+    handle->handle = reinterpret_cast<uint64_t>(mem);
+    handle->vaddr = mem;
     handle->size = size;
   };
 
@@ -304,12 +307,11 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
         ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
 
     if (useSubAlloc) {
-      *mem = m_region.fragment_alloc(size);
+      mem = m_region.fragment_alloc(size);
 
       if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
-          HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(*mem)) != HSAKMT_STATUS_SUCCESS) {
-        m_region.fragment_free(*mem);
-        *mem = nullptr;
+          HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
+        m_region.fragment_free(mem);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
 
@@ -330,10 +332,10 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   //// Allocate memory.
   //// If it fails attempt to release memory from the block allocator and retry.
 
-  auto status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, mem));
+  auto status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, &mem));
   if (status == HSAKMT_STATUS_NO_MEMORY) {
     m_region.owner()->Trim();
-    status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, mem));
+    status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, kmt_alloc_flags, &mem));
   }
   if (status == HSAKMT_STATUS_SUCCESS) {
     if (kmt_alloc_flags.ui32.NoAddress) {
@@ -373,17 +375,17 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     }
 
     MAKE_NAMED_SCOPE_GUARD(memoryGuard, [&]() {
-      if (*mem != nullptr) {
-        HSAKMT_CALL(hsaKmtFreeMemory(*mem, size));
-        *mem = nullptr;
+      if (mem != nullptr) {
+        HSAKMT_CALL(hsaKmtFreeMemory(mem, size));
+        mem = nullptr;
       }
     });
 
     uint64_t alternate_va = 0;
 
-    const bool is_resident =
-      (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(*mem, size, &alternate_va, map_flag,
-                                             map_node_count, const_cast<uint32_t*>(map_node_id))) == HSAKMT_STATUS_SUCCESS);
+    const bool is_resident = (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(
+                                  mem, size, &alternate_va, map_flag, map_node_count,
+                                  const_cast<uint32_t*>(map_node_id))) == HSAKMT_STATUS_SUCCESS);
 
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
@@ -399,7 +401,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     }
 
     if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
-        HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(*mem)) != HSAKMT_STATUS_SUCCESS) {
+        HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
@@ -1010,6 +1012,31 @@ hsa_status_t KfdDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** addres
 
   *address = queue_info.SaveAreaHeader;
   *size = queue_info.SaveAreaSizeInBytes;
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const {
+  const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
+  const auto& properties = gpu_agent.properties();
+
+  std::string status_path =
+  "/sys/class/drm/renderD" + std::to_string(properties.DrmRenderMinor) + "/device/ualink/accel_state";
+  FILE* file = fopen(status_path.c_str(), "r");
+  if (!file) {
+    return HSA_STATUS_ERROR;
+  }
+  char status[10];
+  if (fscanf(file, "%9s", status) != 1) {
+    fclose(file);
+    return HSA_STATUS_ERROR;
+  }
+  fclose(file);
+  if (!strcmp(status, "ready") || !strcmp(status, "active")) {
+    *ready = true;
+  } else {
+    *ready = false;
+  }
 
   return HSA_STATUS_SUCCESS;
 }

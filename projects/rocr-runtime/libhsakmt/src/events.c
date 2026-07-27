@@ -273,6 +273,7 @@ static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, 
 	uint32_t node_id = 0;
 	HSAuint32 s_attr;
 	HSAuint32 i;
+	HSAKMT_STATUS ret;
 	HSA_SVM_ATTRIBUTE attrs[] = {
 					{HSA_SVM_ATTR_PREFERRED_LOC, 0},
 					{HSA_SVM_ATTR_PREFETCH_LOC, 0},
@@ -284,7 +285,12 @@ static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, 
 	CHECK_KFD_MINOR_VERSION(5);
 
 	s_attr = sizeof(attrs);
-	args = alloca(sizeof(*args) + s_attr);
+
+	/* s_attr is a compile-time constant (32 bytes); no overflow possible */
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
+
 	args->start_addr = address;
 	args->size = PAGE_SIZE;
 	args->op = KFD_IOCTL_SVM_OP_GET_ATTR;
@@ -292,7 +298,8 @@ static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, 
 	memcpy(args->attrs, attrs, s_attr);
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op get range attrs failed %s\n", strerror(errno));
-		return HSAKMT_STATUS_ERROR;
+		ret = HSAKMT_STATUS_ERROR;
+		goto out;
 	}
 
 	pr_err("GPU address 0x%lx, is Unified memory\n", address);
@@ -337,11 +344,16 @@ static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, 
 			break;
 		default:
 			pr_debug("get invalid attr type 0x%x\n", args->attrs[i].type);
-			return HSAKMT_STATUS_ERROR;
+			ret = HSAKMT_STATUS_ERROR;
+			goto out;
 		}
 	}
 
-	return HSAKMT_STATUS_SUCCESS;
+	ret = HSAKMT_STATUS_SUCCESS;
+
+out:
+	free(args);
+	return ret;
 }
 //Analysis memory exception data, print debug messages
 static void analysis_memory_exception(HsaKFDContext *ctx,

@@ -42,7 +42,7 @@ struct ncclDevrWindowSorted;
 struct ncclDevrTeam;
 
 struct ncclDevrRegTask {
-  struct ncclDevrRegTask *next;
+  struct ncclDevrRegTask* next;
   void* userPtr;
   size_t userSize;
   int winFlags;
@@ -50,7 +50,7 @@ struct ncclDevrRegTask {
 };
 
 struct ncclDevrCommCreateTask {
-  struct ncclDevrCommCreateTask *next;
+  struct ncclDevrCommCreateTask* next;
   struct ncclDevCommRequirements* reqs;
   struct ncclDevComm* outDevComm;
   struct ncclDevCommCompat* devCompat;
@@ -104,24 +104,20 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm);
 // If found *outWinHost will be populated and *outWinId >= 0, otherwise *outWinId == -1
 ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin);
 
-ncclResult_t ncclDevrWindowRegisterInGroup(
-  struct ncclComm* comm, void* ptr, size_t size, int winFlags, ncclWindow_t* outWinDev
-);
+ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* ptr, size_t size, int winFlags,
+                                           ncclWindow_t* outWinDev);
 
-ncclResult_t ncclDevrCommCreateInternal(
-  struct ncclComm* comm, struct ncclDevCommRequirements* reqs, struct ncclDevComm* outDevComm,
-  bool isInternal = false, struct ncclDevCommCompat* devCompat = nullptr
-);
-void freeDevCommRequirements(
-  struct ncclDevCommRequirements* reqs
-);
+ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCommRequirements* reqs,
+                                        struct ncclDevComm* outDevComm, bool isInternal = false,
+                                        struct ncclDevCommCompat* devCompat = nullptr);
+void freeDevCommRequirements(struct ncclDevCommRequirements* reqs);
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);
 
-
 // Get the corresponding pointer in another lsa rank's symmetric memory window
-ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank, void** outPtr);
+ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank,
+                                   void** outPtr);
 
 // Convert a world rank to an LSA rank.
 ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm* comm, int peerWorldRank, int* peerLsaRank);
@@ -130,8 +126,20 @@ ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm* comm, int peerWorldRank, in
 ncclGinWindow_t ncclDevrGetRmaDevWin(struct ncclDevrWindow* winHost, int ctx);
 
 // Get the multicast address for a given team
-ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, struct ncclTeam lsaTeam, void** outPtr);
+ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset,
+                                     struct ncclTeam lsaTeam, void** outPtr);
 
 // Copies the devComm data from "rank" to "lsaBarrier".  Assumes the same memory layout at source and destination.
 void ncclDevCommCopyLsaData(void* dstRankPtr, void const* srcRankPtr);
+
+// Get the LSA flat VA for self rank corresponding to a primary (ncclMemAlloc) address.
+// If addr is already in the LSA flat range, returns addr unchanged.
+// If addr matches a registered memory's primaryAddr, returns lsaFlatBase + lsaSelf*bigSize + bigOffset.
+// outAddr is set to nullptr if addr cannot be resolved.
+ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr);
+
+// LSA flat window base + stride for GIN Anvil symmetric registration (ncclGetLsaPointer layout).
+ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr, uintptr_t* outLsaFlatBase,
+                                          uint32_t* outStride4G);
+
 #endif
