@@ -752,13 +752,11 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
 
   // The handle word is the driver-native BO id. vaddr is always the allocation's
   // real VA (the dev-heap VA for dev-SVM BOs, the mmap'd VA for share BOs), so it
-  // resolves at submit time and can be written at load time. owns_mapping tracks
-  // whether FreeMemory must munmap it: true only for share BOs, false for dev-SVM
-  // allocations that borrow the shared device-heap mapping. Export-only fields
-  // stay at defaults.
+  // resolves at submit time and can be written at load time. FreeMemory decides
+  // whether to unmap by the VA itself (dev-heap range vs. an owned mmap), so no
+  // ownership flag is carried. Export-only fields stay at defaults.
   handle->handle = bo_handle.handle;
   handle->vaddr = bo_handle.vaddr;
-  handle->owns_mapping = bo_handle.unmap_vaddr;
   handle->size = size;
 
   return HSA_STATUS_SUCCESS;
@@ -772,10 +770,12 @@ hsa_status_t XdnaDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
   BOHandle bo_handle;
   bo_handle.handle = static_cast<uint32_t>(handle.handle);
   bo_handle.size = handle.size;
-  // DestroyBOHandle unmaps vaddr only when we own the mapping; dev-SVM allocations
-  // borrow the shared device-heap mapping and must not be unmapped here.
+  // Unmap only share BOs, which own an independent mmap. Dev-SVM allocations carve
+  // their VA out of the shared device heap and must leave that mapping intact; they
+  // are recognized by the VA falling inside the device-heap range. A null vaddr
+  // (AllocateMemoryOnly share BOs) has nothing to unmap.
   bo_handle.vaddr = handle.vaddr;
-  bo_handle.unmap_vaddr = handle.owns_mapping;
+  bo_handle.unmap_vaddr = handle.vaddr != nullptr && !IsDevHeapVA(handle.vaddr);
 
   return DestroyBOHandle(bo_handle);
 }
