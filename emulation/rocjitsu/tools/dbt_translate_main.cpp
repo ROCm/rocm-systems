@@ -96,7 +96,7 @@ void print_help() {
       << "  --show-all-translations         Include unchanged identity mappings in diff output\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
-      << "Note: gfx1250 b0-to-a0 applies the errata policy; equal revisions are identity.\n\n"
+      << "Note: gfx1250 b0-to-a0 selects its translation profile; equal revisions are identity.\n\n"
       << "Supported target names: ";
   print_supported_targets(std::cout);
   std::cout << ".\n";

@@ -1808,9 +1808,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   // conflicting definition, unknown bank, or overlapping VGPR write therefore
   // still fails closed.
   //
-  // The gfx1250 A0 trap-recovery workaround requires S_SET_VGPR_MSB SIMM16[15:8]
-  // to carry the previous bank state. The architectural bank update remains
-  // SIMM16[7:0], so analysis intentionally ignores the workaround metadata byte.
+  // The gfx1250 A0 profile uses S_SET_VGPR_MSB SIMM16[15:8] for the previous
+  // bank state. The bank update remains SIMM16[7:0], so analysis ignores the
+  // profile metadata byte.
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
