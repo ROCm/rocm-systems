@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <functional>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -69,9 +68,9 @@ public:
     void register_trigger(std::string_view name, action initial,
                           scope event_scope = scope::global);
 
-    void unregister_trigger(std::string_view name);
+    void unregister_trigger(std::string_view name, scope event_scope = scope::global);
 
-    void set_action(std::string_view name, action act);
+    void set_action(std::string_view name, action act, scope event_scope = scope::global);
 
     [[nodiscard]] bool is_active(scope event_scope = scope::global) const noexcept
     {
@@ -89,13 +88,9 @@ public:
 private:
     static constexpr std::size_t scope_count = static_cast<std::size_t>(scope::count_);
 
-    struct entry
-    {
-        action act{ action::trace };
-        scope  event_scope{ scope::global };
-    };
+    using scoped_actions = std::unordered_map<std::string, action>;
 
-    std::unordered_map<std::string, entry>     m_actions;
+    std::array<scoped_actions, scope_count>    m_actions;
     std::vector<subscriber>                    m_subscribers;
     std::array<std::atomic<bool>, scope_count> m_active{};
 
@@ -107,11 +102,10 @@ private:
     void               notify_pause(scope event_scope);
     void               notify_resume(scope event_scope);
 
-    /// Applies @p mutate to m_actions under lock, recomputes the active
-    /// state for the scope it reports affected (nullopt = no-op), and
-    /// broadcasts if that state changed. Shared by register_trigger(),
-    /// unregister_trigger(), and set_action().
-    void apply_locked_transition(const std::function<std::optional<scope>()>& mutate,
-                                 std::string_view                             name);
+    /// Applies @p mutate to the scoped action map under lock, recomputes
+    /// that scope's active state, and broadcasts if it changed. Shared by
+    /// register_trigger(), unregister_trigger(), and set_action().
+    void apply_locked_transition(const std::function<void()>& mutate,
+                                 std::string_view name, scope event_scope);
 };
 }  // namespace rocprofsys::control
