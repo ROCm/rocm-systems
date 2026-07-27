@@ -24,14 +24,7 @@
 #include <cstdint>
 #include <string>
 
-namespace amd::smi {
-
-// Internal helper under test: decides whether the KFD topology total is
-// preferred over sysfs mem_info_vram_total for VRAM (see rocm_smi.cc).
-bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
-                           const std::string& compute_partition, uint64_t kfd_total);
-
-}  // namespace amd::smi
+#include "rocm_smi/rocm_smi_vram.h"
 
 namespace {
 

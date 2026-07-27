@@ -377,6 +377,7 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_binary_parser.h"
     "${ROCM_INC_DIR}/rocm_smi_board_temp.h"
     "${ROCM_INC_DIR}/rocm_smi_npm.h"
+    "${ROCM_INC_DIR}/rocm_smi_vram.h"
 )
 
 add_subdirectory("rocm_smi")
