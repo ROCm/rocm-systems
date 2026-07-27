@@ -570,8 +570,9 @@ void TestMemoryPartitionReadWrite::Run(void) {
                   << "Available Memory Partition Capabilities: " << memory_caps_str << "\n"
                   << "\t**"
                   << "current_memory_partition_mode: "
-                  << (ret_caps == AMDSMI_STATUS_SUCCESS ? memoryPartitionString(current_memory_config.mp_mode)
-                                                       : "N/A")
+                  << (ret_caps == AMDSMI_STATUS_SUCCESS
+                          ? memoryPartitionString(current_memory_config.mp_mode)
+                          : "N/A")
                   << "\n"
                   << "\t**"
                   << "Requested partition supported by hardware: "
