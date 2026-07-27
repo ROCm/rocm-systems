@@ -199,9 +199,9 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
 
     # do not link to sqlite3 library here. Python will import the _sqlite3 extension
     # module which links to sqlite3, and we want to avoid mixed-lib symbol collisions by
-    # ensuring Python and librocpd use the same sqlite3 library.
-    # Use the sanitizer-only target because this Python MODULE intentionally leaves
-    # SQLite symbols unresolved until Python loads _sqlite3.
+    # ensuring Python and librocpd use the same sqlite3 library. Use the sanitizer-only
+    # target because this Python MODULE intentionally leaves SQLite symbols unresolved
+    # until Python loads _sqlite3.
     target_link_libraries(
         rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
         PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers

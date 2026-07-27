@@ -14,20 +14,20 @@ endif()
 set_property(CACHE ROCPROFILER_MEMCHECK PROPERTY STRINGS "${ROCPROFILER_MEMCHECK_TYPES}")
 
 # Keep sanitizer instrumentation (rocprofiler-sdk-sanitizer) separate from the strict link
-# policy (rocprofiler-sdk-memcheck) so targets such as Python MODULE libraries can opt into
-# instrumentation without --no-undefined.
+# policy (rocprofiler-sdk-memcheck) so targets such as Python MODULE libraries can opt
+# into instrumentation without --no-undefined.
 function(rocprofiler_add_memcheck_flags _TYPE _LIB_BASE _FLAG)
     target_compile_options(
         rocprofiler-sdk-sanitizer
         INTERFACE $<BUILD_INTERFACE:-g3 -Og -fno-omit-frame-pointer
                   -fno-optimize-sibling-calls -fno-inline-functions -fsanitize=${_FLAG}
                   ${ARGN}>)
-    target_link_options(rocprofiler-sdk-sanitizer
-                        INTERFACE $<BUILD_INTERFACE:-fsanitize=${_FLAG}>)
+    target_link_options(rocprofiler-sdk-sanitizer INTERFACE
+                        $<BUILD_INTERFACE:-fsanitize=${_FLAG}>)
     target_link_libraries(rocprofiler-sdk-memcheck
                           INTERFACE rocprofiler-sdk::rocprofiler-sdk-sanitizer)
-    target_link_options(rocprofiler-sdk-memcheck
-                        INTERFACE $<BUILD_INTERFACE:-Wl,--no-undefined>)
+    target_link_options(rocprofiler-sdk-memcheck INTERFACE
+                        $<BUILD_INTERFACE:-Wl,--no-undefined>)
 
     if(NOT EXISTS ${PROJECT_BINARY_DIR}/CMakeFiles/CMakeTmp)
         file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/CMakeFiles/CMakeTmp")
