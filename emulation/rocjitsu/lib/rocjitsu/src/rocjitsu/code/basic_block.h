@@ -138,10 +138,14 @@ public:
   /// @param[in] decoder Decoder for the target ISA.
   /// @param[in] arch ISA architecture used to match static PC builders.
   /// @param[in] extra_leaders Byte offsets that must start a basic block.
+  /// @param[in] entry_policy Whether predecessorless blocks are inferred to be
+  /// external function entries. Use ExplicitOnly only when extra_leaders
+  /// enumerates every externally reachable entry.
   /// @returns Ordered list of basic blocks with their decoded instructions.
   static std::vector<std::unique_ptr<BasicBlock>>
   build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-        std::span<const uint64_t> extra_leaders = {});
+        std::span<const uint64_t> extra_leaders = {},
+        ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless);
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
