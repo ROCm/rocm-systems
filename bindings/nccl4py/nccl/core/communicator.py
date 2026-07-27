@@ -202,11 +202,9 @@ class GinBarrierRequirement:
 
 @dataclass(frozen=True)
 class LLA2ARequirement:
-    """Requests a low-latency all-to-all resource with ``n_blocks`` blocks and
-    ``n_slots`` slots.
-
-    Pass ``n_slots`` directly, or use :meth:`for_elements` to size it from an
-    element count and size.
+    """Requests a low-latency all-to-all resource with ``n_blocks`` blocks,
+    sized to hold up to ``max_elements`` elements of at most
+    ``max_element_size`` bytes each.
 
     Add to :py:attr:`NCCLDevCommRequirements.resources`; the finalized
     :py:class:`~nccl.core.resources.LLA2AHandle` is returned in
@@ -214,21 +212,8 @@ class LLA2ARequirement:
     """
 
     n_blocks: int
-    n_slots: int
-
-    @staticmethod
-    def calc_slots(max_elements: int, max_element_size: int) -> int:
-        """``n_slots`` needed to hold ``max_elements`` elements of at most
-        ``max_element_size`` bytes each (wraps ``ncclLLA2ACalcSlots``)."""
-        return _nccl_bindings.lla2a_calc_slots(int(max_elements), int(max_element_size))
-
-    @classmethod
-    def for_elements(
-        cls, n_blocks: int, max_elements: int, max_element_size: int
-    ) -> "LLA2ARequirement":
-        """Build a requirement whose ``n_slots`` is sized to hold ``max_elements``
-        elements of at most ``max_element_size`` bytes each."""
-        return cls(n_blocks=n_blocks, n_slots=cls.calc_slots(max_elements, max_element_size))
+    max_elements: int
+    max_element_size: int
 
 
 @dataclass(kw_only=True)
@@ -406,8 +391,11 @@ def _materialize_resource_requirements(
             )
         elif isinstance(resource, LLA2ARequirement):
             handle = _nccl_bindings.LLA2AHandle()
+            n_slots = _nccl_bindings.lla2a_calc_slots(
+                resource.max_elements, resource.max_element_size
+            )
             _nccl_bindings.ll_a2a_create_requirement(
-                resource.n_blocks, resource.n_slots, handle.ptr, node.ptr
+                resource.n_blocks, n_slots, handle.ptr, node.ptr
             )
         else:
             raise TypeError(f"unknown resource requirement: {type(resource).__name__}")
