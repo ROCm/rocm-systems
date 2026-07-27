@@ -153,11 +153,12 @@ std::optional<VisibilityOverride> normalized_client_visible_devices(
     std::optional<std::string_view> hip_visible, std::optional<std::string_view> cuda_visible,
     std::optional<uint32_t> first_gpu_id) {
   const auto client = client_selector(hip_visible, cuda_visible);
-  if (!client)
+  if (!client && !first_gpu_id)
     return std::nullopt;
 
   const std::vector<VisibleGpu> rocr_gpus = filter_rocr_visible_gpus(topology, rocr_visible);
-  std::vector<VisibleGpu> selected = filter_client_visible_gpus(rocr_gpus, client->second);
+  std::vector<VisibleGpu> selected =
+      client ? filter_client_visible_gpus(rocr_gpus, client->second) : rocr_gpus;
   if (first_gpu_id) {
     const auto first = std::find_if(selected.begin(), selected.end(), [&](const VisibleGpu &gpu) {
       return gpu.gpu_id == *first_gpu_id;
@@ -173,7 +174,8 @@ std::optional<VisibilityOverride> normalized_client_visible_devices(
     if (match != rocr_gpus.end())
       ordinals.push_back(std::to_string(std::distance(rocr_gpus.begin(), match)));
   }
-  return VisibilityOverride{std::string(client->first), join_comma(ordinals)};
+  const std::string name = client ? std::string(client->first) : "HIP_VISIBLE_DEVICES";
+  return VisibilityOverride{name, join_comma(ordinals)};
 }
 
 std::optional<std::string>

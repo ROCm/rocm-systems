@@ -241,6 +241,22 @@ TEST(RocmVisibilityTest, NormalizesSelectedDbtHostToClientDeviceZero) {
   EXPECT_EQ("1,0", normalized->value);
 }
 
+TEST(RocmVisibilityTest, SynthesizesClientOrderForSelectedDbtHost) {
+  const std::vector<rocjitsu::cli::VisibleGpu> heterogeneous_gpus{
+      {0, 100, 110000, 0x1111111111111111ULL}, {1, 101, 90402, 0x2222222222222222ULL}};
+  const auto normalized = rocjitsu::cli::normalized_client_visible_devices(
+      heterogeneous_gpus, std::nullopt, std::nullopt, std::nullopt, 101);
+
+  ASSERT_TRUE(normalized);
+  EXPECT_EQ("HIP_VISIBLE_DEVICES", normalized->name);
+  EXPECT_EQ("1,0", normalized->value);
+}
+
+TEST(RocmVisibilityTest, DoesNotSynthesizeClientOrderWithoutSelectedHost) {
+  EXPECT_FALSE(rocjitsu::cli::normalized_client_visible_devices(
+      test_gpus(), std::nullopt, std::nullopt, std::nullopt, std::nullopt));
+}
+
 TEST(RocmVisibilityTest, SelectsDbtHostFromClientVisibleGpusBeforeNormalization) {
   const auto visible =
       rocjitsu::cli::effective_visible_gpus(test_gpus(), std::nullopt, "1", std::nullopt);
