@@ -1187,6 +1187,16 @@ explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
   return entries;
 }
 
+[[nodiscard]] bool
+is_analysis_root(size_t block_index, std::span<const uint8_t> external_entries,
+                 const std::vector<std::vector<size_t>> &predecessors,
+                 ExternalEntryPolicy entry_policy) {
+  if (external_entries[block_index] != 0)
+    return true;
+  return entry_policy == ExternalEntryPolicy::InferPredecessorless &&
+         predecessors[block_index].empty();
+}
+
 void set_kill_transfer(AnalysisBlock &block, uint16_t pair_lo) {
   // KILL is weaker than SET for the same block: if the final state proves a
   // concrete builder, earlier dirty writes in the block should not downgrade it.
@@ -1530,16 +1540,17 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
 [[nodiscard]] std::vector<LatticeFacts>
 run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
                    std::span<const PendingConsumer> pending_consumers,
-                   std::span<const uint64_t> extra_leaders) {
+                   std::span<const uint64_t> extra_leaders,
+                   ExternalEntryPolicy entry_policy) {
   // Phase 3: compute block-entry facts to a fixed point.
   //
   // entry[B] = JOIN(exit[P]) for every predecessor P of B.
   //
   // Explicit external entries begin with an empty map. Empty does not mean
   // "known empty set"; at those entries every pair has an unconstrained
-  // hardware-supplied value unless a predecessor later mentions it. A
-  // predecessorless non-entry is instead unreachable (BOTTOM), so its empty
-  // map must not participate in a successor join.
+  // hardware-supplied value unless a predecessor later mentions it. Under the
+  // ExplicitOnly policy, a predecessorless non-entry is instead unreachable
+  // (BOTTOM), so its empty map must not participate in a successor join.
   std::vector<std::vector<size_t>> predecessors(blocks.size());
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     for (size_t successor : blocks[block_index].successors)
@@ -1569,14 +1580,15 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
   // caller-provided kernel entry are nevertheless external roots even when
   // they have structural predecessors.
   //
-  // Do not infer an external entry merely because a block has no predecessor.
-  // In the DBT pipeline every descriptor- or firmware-visible kernel entry is
-  // supplied in extra_leaders. Translation then walks each entry's reachable
-  // CFG and emits shared blocks separately in every kernel-local scope. A
-  // callable helper is either an explicit leader itself or has a direct or
-  // recovered predecessor edge; a predecessorless block after a non-returning
-  // instruction such as s_trap 2 cannot acquire a hidden incoming edge from
-  // another kernel scope.
+  // With ExplicitOnly, do not infer an external entry merely because a block
+  // has no predecessor. BinaryTranslator supplies every descriptor- or
+  // firmware-visible kernel entry, then walks each entry's reachable CFG and
+  // emits shared blocks separately in every kernel-local scope. A callable
+  // helper is either an explicit leader itself or has a direct or recovered
+  // predecessor edge; a predecessorless block after a non-returning instruction
+  // such as s_trap 2 cannot acquire a hidden incoming edge from another kernel
+  // scope. Generic callers without a complete entry list use
+  // InferPredecessorless to preserve conservative multi-function recovery.
   std::vector<bool> reachable(blocks.size(), false);
   // Keep key presence separate from the sparse fact vectors. The dataflow
   // join needs the union of predecessor keys on every worklist visit; caching
@@ -1598,7 +1610,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
     LatticeFacts new_entry;
     std::bitset<REGISTER_SET_MAX_SGPRS> mentioned_pairs;
     const bool new_reachable =
-        external_entries[block_index] != 0 ||
+        is_analysis_root(block_index, external_entries, predecessors, entry_policy) ||
         std::ranges::any_of(predecessors[block_index],
                             [&](size_t predecessor) { return reachable[predecessor]; });
     if (new_reachable && !predecessors[block_index].empty()) {
@@ -1821,7 +1833,8 @@ struct VectorLaneFlowState {
 
 void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
                                      std::vector<IndirectCallFixup> &recovered,
-                                     std::span<const uint64_t> extra_leaders) {
+                                     std::span<const uint64_t> extra_leaders,
+                                     ExternalEntryPolicy entry_policy) {
   // gfx1250 device functions sometimes keep a small static call set in one
   // VGPR: getpc-built low/high halves are written to fixed lanes, then read
   // back into an SGPR pair before swappc. Track only fixed-lane
@@ -2056,13 +2069,13 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
         new_entry.vgpr_msb_imm = std::nullopt;
     }
 
-    // A block with no direct predecessors is a possible device-function entry.
-    // Section entry and every caller-provided kernel entry are explicit
-    // external entries even when they have structural predecessors. Meet the
-    // corresponding external state with any reachable predecessor: it
-    // contributes no lane stash, and explicit kernel entries begin in bank
-    // zero according to the entry contract.
-    if (predecessors[block_index].empty() || external_entries[block_index] != 0) {
+    // Generic callers conservatively infer predecessorless device-function
+    // entries; callers with a complete entry list leave unlisted blocks at
+    // BOTTOM. Explicit entries remain roots even with structural predecessors.
+    // Meet a root's external state with any reachable predecessor: it
+    // contributes no lane stash, and explicit entries begin in bank zero
+    // according to the entry contract.
+    if (is_analysis_root(block_index, external_entries, predecessors, entry_policy)) {
       new_reachable = true;
       VectorLaneFlowState external_entry;
       if (external_entries[block_index] != 0)
@@ -2209,10 +2222,11 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 [[nodiscard]] std::vector<IndirectCallFixup>
 discover_indirect_branch_edges_unfiltered(std::span<const Instruction *const> insts,
                                           std::span<const uint8_t> text, rj_code_arch_t arch,
-                                          std::span<const uint64_t> extra_leaders) {
+                                          std::span<const uint64_t> extra_leaders,
+                                          ExternalEntryPolicy entry_policy) {
   std::vector<IndirectCallFixup> recovered;
   AnalysisContext ctx = build_context(insts, text, arch);
-  recover_vector_lane_stashed_pcs(ctx, recovered, extra_leaders);
+  recover_vector_lane_stashed_pcs(ctx, recovered, extra_leaders, entry_policy);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
 
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
@@ -2229,7 +2243,8 @@ discover_indirect_branch_edges_unfiltered(std::span<const Instruction *const> in
 
     size_t unresolved_consumers = 0;
     if (!pending_consumers.empty()) {
-      const auto entry_facts = run_block_dataflow(blocks, pending_consumers, extra_leaders);
+      const auto entry_facts =
+          run_block_dataflow(blocks, pending_consumers, extra_leaders, entry_policy);
       unresolved_consumers = classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
                                                         iteration_recovered);
     }
@@ -2250,7 +2265,8 @@ discover_indirect_branch_edges_unfiltered(std::span<const Instruction *const> in
 std::vector<IndirectCallFixup>
 discover_indirect_branch_edges(std::span<const Instruction *const> insts,
                                std::span<const uint8_t> text, rj_code_arch_t arch,
-                               std::span<const uint64_t> extra_leaders) {
+                               std::span<const uint64_t> extra_leaders,
+                               ExternalEntryPolicy entry_policy) {
   if (insts.empty())
     return {};
 
@@ -2263,14 +2279,14 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
 #ifndef NDEBUG
     // Keep the cheap predicate coupled to every fixup producer. A future
     // recovery path for another consumer kind must extend the predicate above.
-    const auto unfiltered =
-        discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders);
+    const auto unfiltered = discover_indirect_branch_edges_unfiltered(
+        insts, text, arch, extra_leaders, entry_policy);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
   }
 
-  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders);
+  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy);
 }
 
 } // namespace rocjitsu

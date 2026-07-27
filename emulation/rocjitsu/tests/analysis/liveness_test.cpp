@@ -839,7 +839,8 @@ TEST(CfgAnalysis, UnreachablePostRocrAbortBlockDoesNotPoisonPcBuilder) {
   TestCodeObject co(std::move(words));
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, {},
+                                  ExternalEntryPolicy::ExplicitOnly);
 
   auto *consumer = block_starting_at(blocks, 32);
   ASSERT_NE(consumer, nullptr);
@@ -848,6 +849,39 @@ TEST(CfgAnalysis, UnreachablePostRocrAbortBlockDoesNotPoisonPcBuilder) {
   EXPECT_EQ(fixup.source_target_offset, 44u);
   EXPECT_FALSE(fixup.source_incomplete)
       << "unreachable code after a non-returning trap must remain dataflow BOTTOM";
+}
+
+TEST(CfgAnalysis, DefaultEntryPolicyRecoversPredecessorlessFunction) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // Generic BasicBlock::build callers may not know every function entry in a
+  // shared .text section. Preserve the conservative default that treats the
+  // second function as an inferred external entry, allowing its cross-block
+  // PC builder to reach the setpc consumer.
+  std::vector<uint32_t> words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x00: first function.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: second entry, s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
+      24,                                                  // 0x0c: 0x08 + 24 = target 0x20.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14: -> consumer at 0x18.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x18: s_setpc_b64.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x1c: padding.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *consumer = block_starting_at(blocks, 24);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 32u);
+  EXPECT_FALSE(consumer->static_indirect_call_fixups()[0].source_incomplete);
 }
 
 TEST(CfgAnalysis, DirectCallEdgeUsesTerminatorOffset) {
@@ -1316,6 +1350,56 @@ TEST(CfgAnalysis, Gfx1250CarriesLaneStashAcrossProvenBlockBoundary) {
   ASSERT_NE(consumer, nullptr);
   ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
   EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 60u);
+}
+
+TEST(CfgAnalysis, Gfx1250UnreachablePostRocrAbortBlockDoesNotPoisonLaneStash) {
+  constexpr auto live_branch =
+      gfx1250::build_sopp(gfx1250::kSCbranchScc0Sopp, {.simm16 = 3});
+  constexpr auto dead_branch = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = 1});
+  constexpr auto call =
+      gfx1250::build_sop1(gfx1250::kSSwapPcI64Sop1, {.ssrc0 = 0, .sdst = 30});
+
+  // Mirror the scalar post-trap regression with a gfx1250 PC stashed in v44:
+  //
+  //   writelanes --conditional-----------------------> readlanes/call
+  //                    |
+  //                    +--> s_trap 2 -X-> dead edge --^
+  //
+  // In ExplicitOnly mode the dead post-trap block remains BOTTOM. Letting it
+  // contribute an empty lane-stash state would erase the valid v44 definitions
+  // at the join and lose this otherwise proven call target.
+  std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      68u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(68) -> target 0x48.
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u,                                        // 0x18: lane 1 <- s1.
+      live_branch[0],                                     // 0x20: -> join at 0x30.
+      build_s_trap(ROCJITSU_CODE_ARCH_GFX1250, 2),        // 0x24: abort terminator.
+      dead_branch[0],                                     // 0x28: dead edge -> 0x30.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),         // 0x2c: dead padding.
+      0xD7600000u,
+      0x0201012Cu, // 0x30: v_readlane_b32 s0, v44, 0.
+      0xD7600001u,
+      0x0201032Cu,                                        // 0x38: lane 1 -> s1.
+      call[0],                                            // 0x40: s_swap_pc_i64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),         // 0x44: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),         // 0x48: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, {},
+                                  ExternalEntryPolicy::ExplicitOnly);
+
+  auto *consumer = block_starting_at(blocks, 64);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 72u);
 }
 
 TEST(CfgAnalysis, Gfx1250DirectCallKillsCarriedLaneStash) {

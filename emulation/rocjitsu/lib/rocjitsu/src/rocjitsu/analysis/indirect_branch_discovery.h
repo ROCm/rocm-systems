@@ -16,6 +16,18 @@ namespace rocjitsu {
 
 class Instruction;
 
+/// @brief How indirect-target discovery identifies externally reachable blocks.
+enum class ExternalEntryPolicy : uint8_t {
+  /// Treat every predecessorless block as a possible external function entry.
+  /// This preserves conservative recovery when callers do not have a complete
+  /// list of entries for all functions sharing one .text section.
+  InferPredecessorless,
+  /// Treat only section entry and caller-supplied leaders as external entries.
+  /// Callers may use this when their supplied leader list contains every
+  /// externally reachable entry; other predecessorless blocks remain unreachable.
+  ExplicitOnly,
+};
+
 /// @brief Recovered indirect PC-relative branch through a statically-built PC register.
 ///
 /// @details BasicBlock construction uses this metadata in two ways. A recovered
@@ -70,10 +82,13 @@ struct IndirectCallFixup {
 /// @param text Raw .text bytes matching @p insts.
 /// @param arch ISA architecture used for scalar instruction matching.
 /// @param extra_leaders Additional known block starts, usually kernel entries.
+/// @param entry_policy Whether predecessorless blocks are inferred to be external entries.
 /// @returns Recovered indirect branch/call metadata.
 [[nodiscard]] std::vector<IndirectCallFixup>
 discover_indirect_branch_edges(std::span<const Instruction *const> insts,
                                std::span<const uint8_t> text, rj_code_arch_t arch,
-                               std::span<const uint64_t> extra_leaders = {});
+                               std::span<const uint64_t> extra_leaders = {},
+                               ExternalEntryPolicy entry_policy =
+                                   ExternalEntryPolicy::InferPredecessorless);
 
 } // namespace rocjitsu

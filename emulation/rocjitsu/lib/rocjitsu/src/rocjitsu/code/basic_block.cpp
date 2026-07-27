@@ -150,7 +150,7 @@ void BasicBlock::add_static_indirect_call_fixup(IndirectCallFixup fixup) {
 
 std::vector<std::unique_ptr<BasicBlock>>
 BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-                  std::span<const uint64_t> extra_leaders) {
+                  std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -208,7 +208,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
     const auto decoded_span =
         std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size());
     std::vector<IndirectCallFixup> recovered_indirect_targets =
-        discover_indirect_branch_edges(decoded_span, text, arch, extra_leaders);
+        discover_indirect_branch_edges(decoded_span, text, arch, extra_leaders, entry_policy);
 
     std::set<uint64_t> leaders;
     leaders.insert(decoded.front()->src_loc());
