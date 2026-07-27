@@ -13,7 +13,7 @@ The Shader Processor Input (SPI) is the RDNA front-end unit that accepts dispatc
 The sections below list RDNA3.5 (gfx115x) metric descriptions for SPI.
 
 .. Note::
-   
+
    For AMD Instinct-centric Shader engine coverage, see :doc:`../cdna/shader-engine`.
 
 SPI utilization

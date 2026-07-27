@@ -28,7 +28,7 @@
 namespace amd::dbgapi
 {
 
-compute_queue_t &
+queue_t &
 workgroup_t::queue () const
 {
   return dispatch ().queue ();

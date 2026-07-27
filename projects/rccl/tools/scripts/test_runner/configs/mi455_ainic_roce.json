@@ -613,7 +613,8 @@
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "100",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
-        "NCCL_IB_RETURN_ASYNC_EVENTS": "1"
+        "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
+        "RCCL_IB_FAULT_INJECTION":     "1"
       },
       "tests": [
         {
@@ -1112,6 +1113,11 @@
           "name": "ParamTests",
           "description": "Parameter handling tests",
           "test_filter": "ParamTests.*"
+        },
+        {
+          "name": "ParameterApiTests",
+          "description": "Public ncclParam C API tests",
+          "test_filter": "ParameterApiTests.*"
         },
         {
           "name": "ArgCheck",

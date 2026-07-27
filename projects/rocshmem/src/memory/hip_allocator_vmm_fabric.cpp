@@ -26,7 +26,7 @@
 #include "log.hpp"
 #include "hip_allocator_vmm_common.hpp"
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 
 #include <cstring>
 
@@ -48,7 +48,6 @@ hipError_t HIPAllocatorVMMFabric::VMMAlloc(void** ptr, size_t size)
   VMMFabricAllocationInfo info;
   info.handle = common_info.handle;
   info.size = common_info.size;
-  info.fabric_id = 0;  // Not yet exported
   allocations_[*ptr] = info;
 
   return hipSuccess;
@@ -324,4 +323,4 @@ hipError_t HIPAllocatorVMMFabric::GetDmabufHandle(void *dev_ptr, size_t size, in
 
 }  // namespace rocshmem
 
-#endif  // HIP_VERSION >= 70000000
+#endif  // HIP_VERSION >= 70200000

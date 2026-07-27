@@ -17,6 +17,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.utils_counter_defs import UNIT_COUNTER
 
 NS_TO_MS = 1.0 / 1_000_000.0
 
@@ -607,6 +608,11 @@ def is_workload_empty(path: str) -> None:
             break
 
 
+def add_unit_counter(df: pd.DataFrame) -> None:
+    """Add the UNIT_COUNTER column in place: 1 per dispatch, so SUM == N."""
+    df[UNIT_COUNTER] = 1
+
+
 def impute_counters_iteration_multiplex(
     df: pd.DataFrame,
     policy: str,
@@ -792,6 +798,6 @@ def get_matrix_ops_type(gpu_series: str) -> str:
     Fused Multiply-Add instructions; all other architectures support Warp
     Matrix Multiply-Accumulate operations.
     """
-    if gpu_series in ["MI200", "MI300", "MI350"]:
+    if gpu_series.upper() in ["MI200", "MI300", "MI350"]:
         return "MFMA"
     return "WMMA"

@@ -29,6 +29,8 @@
 #include <sys/stat.h>
 #include <cinttypes>
 #include <cstdint>
+#include <climits>
+#include <cerrno>
 #if defined(__linux__)
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
@@ -39,6 +41,7 @@
 #include <cstring>
 #include <cassert>
 #include <mutex>
+#include <new>
 #include <algorithm>
 #include "util/os.h"
 #include "util/utils.h"
@@ -504,6 +507,19 @@ static void prepare_fork_handler(void) { dxg_runtime->hsakmt_mutex.lock(); }
 static void parent_fork_handler(void) { dxg_runtime->hsakmt_mutex.unlock(); }
 static void child_fork_handler(void) {
   dxg_runtime->is_forked = true;
+
+  /* prepare_fork_handler() locked hsakmt_mutex right before fork() so that
+   * no other thread would be mid-operation during the fork snapshot. In the
+   * child only this one thread survives, and its TID differs from whichever
+   * thread performed the lock in the parent, so the mutex's internal
+   * owner/lock state inherited via fork() is stale and can never be
+   * legitimately released by calling unlock() here. Reset it in place so
+   * the child starts with a fresh, unlocked mutex - otherwise the next
+   * hsaKmtOpenKFD() call in the child deadlocks forever waiting on a lock
+   * nobody in this process can release.
+   */
+  dxg_runtime->hsakmt_mutex.~recursive_mutex();
+  new (&dxg_runtime->hsakmt_mutex) std::recursive_mutex();
 }
 
 /* Call this from the child process after fork. This will clear all
@@ -539,38 +555,60 @@ static inline void init_page_size(void) {
 #endif
 }
 
+namespace {
+
+int safe_env_to_int(const char* envvar, int default_val) {
+  if (envvar == nullptr) return default_val;
+  char* endptr = nullptr;
+  errno = 0;
+  const long val = strtol(envvar, &endptr, 10);
+  if (errno == ERANGE) return default_val;
+  if (endptr == envvar) return default_val;
+  while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r') {
+    ++endptr;
+  }
+  if (*endptr != '\0') return default_val;
+  if (val < INT_MIN || val > INT_MAX) return default_val;
+  return static_cast<int>(val);
+}
+
+}  // namespace
+
 static HSAKMT_STATUS init_vars_from_env(void) {
   const char* envvar;
 
   // Enable debug messages via HSAKMT_DEBUG_LEVEL environment variable.
   // Libraries normally suppress messages; this allows debugging output when needed.
   if ((envvar = getenv("HSAKMT_DEBUG_LEVEL")) != nullptr) {
-    dxg_runtime->hsakmt_debug_level = atoi(envvar);
+    dxg_runtime->hsakmt_debug_level = safe_env_to_int(envvar, 0);
   }
 
   // Enable Zero Frame Buffer (ZFB) support if HSA_ZFB is set.
   if ((envvar = getenv("HSA_ZFB")) != nullptr) {
-    dxg_runtime->zfb_support = atoi(envvar);
+    dxg_runtime->zfb_support = safe_env_to_int(envvar, 0);
   }
 
   // Enable vendor-specific AQL packet processing if WSLKMT_VENDOR_PACKET is set.
   if ((envvar = getenv("WSLKMT_VENDOR_PACKET")) != nullptr) {
-    dxg_runtime->vendor_packet_process = atoi(envvar);
+    dxg_runtime->vendor_packet_process = safe_env_to_int(envvar, 0);
   }
 
   // Enable thunk sub-allocator via WSL_ENABLE_THUNK_SUB_ALLOCATOR.
   if ((envvar = getenv("WSL_ENABLE_THUNK_SUB_ALLOCATOR")) != nullptr) {
-    dxg_runtime->enable_thunk_sub_allocator = atoi(envvar);
+    dxg_runtime->enable_thunk_sub_allocator = safe_env_to_int(envvar, 0);
   }
 
   // Enable PM4 packet usage if ROCR_USE_PM4 is set.
   if ((envvar = getenv("ROCR_USE_PM4")) != nullptr) {
-    dxg_runtime->use_pm4_ = atoi(envvar);
+    dxg_runtime->use_pm4_ = safe_env_to_int(envvar, 0);
   }
+#ifdef __linux__
+  dxg_runtime->use_pm4_ = 1;  // Force PM4 usage on Linux for now
+#endif
 
   // Disable wait timeout if ROCR_DISABLE_WAIT_TIMEOUT is set.
   if ((envvar = getenv("ROCR_DISABLE_WAIT_TIMEOUT")) != nullptr) {
-    dxg_runtime->disable_wait_timeout_ = atoi(envvar);
+    dxg_runtime->disable_wait_timeout_ = safe_env_to_int(envvar, 0);
   }
 
   // Check available system memory before allocation if WSL_CHECK_AVAIL_SYSRAM is "1".
@@ -595,7 +633,7 @@ static HSAKMT_STATUS init_vars_from_env(void) {
       !(envvar && envvar[0] == '0' && envvar[1] == '\0') && false;
 
   if ((envvar = getenv("HSAKMT_DEBUG_SYSMEM")) != nullptr) {
-    dxg_runtime->hsakmt_debug_sysmem = atoi(envvar);
+    dxg_runtime->hsakmt_debug_sysmem = safe_env_to_int(envvar, 0);
   }
 
   return HSAKMT_STATUS_SUCCESS;

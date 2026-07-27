@@ -34,7 +34,7 @@ Additional hooks: `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `che
 | **Go** | `GO_<subsystem>_<verb>_<noun>` (uppercase prefix, underscore-separated) |
 | **Rust** | Functions: `snake_case` mirroring C API. Types: `PascalCase`. Returns `AmdsmiResult<T>` |
 | **CMake** | Functions: `snake_case`. Variables: `UPPER_CASE`. Commands: lowercase |
-| **Commits** | Prefer `[AMD-SMI]`, `[SWDEV-XXXXXX]`, or `[ROCM-XXXXXX]` prefix tags |
+| **Commits / PR titles** | Conventional Commits `type(amdsmi): summary` (lowercase type/scope, 10–80 chars). Legacy `[AMD-SMI]` tags fail the Systems PR Bot |
 
 ## Severity
 
