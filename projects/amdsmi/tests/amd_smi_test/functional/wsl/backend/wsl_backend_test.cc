@@ -28,9 +28,9 @@
 #if defined(ENABLE_WSL_BACKEND)
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <set>
-#include <unistd.h>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -43,13 +43,11 @@ using amd::smi::AMDSmiSocket;
 using amd::smi::WSLGPUBackend;
 
 // IsActive() is false before any TryPopulate() call.
-TEST(WslBackendActivation, InactiveByDefault) {
-  EXPECT_FALSE(WSLGPUBackend::IsActive());
-}
+TEST(WslFunctionalReadOnly, InactiveByDefault) { EXPECT_FALSE(WSLGPUBackend::IsActive()); }
 
 // TryPopulate() on a machine without /dev/dxg returns NOT_SUPPORTED.
 // Skipped on real WSL machines where /dev/dxg is present.
-TEST(WslBackendActivation, TryPopulateWithoutDxg) {
+TEST(WslFunctionalReadOnly, TryPopulateWithoutDxg) {
   if (access("/dev/dxg", F_OK) == 0) {
     GTEST_SKIP() << "/dev/dxg present — skipped on WSL machines";
   }
