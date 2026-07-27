@@ -1104,9 +1104,10 @@ hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) con
 }
 
 bool XdnaDriver::IsDevHeapVA(const void* vaddr) const {
+  if (dev_heap_aligned == nullptr) return false;
   const auto addr = reinterpret_cast<uintptr_t>(vaddr);
   const auto base = reinterpret_cast<uintptr_t>(dev_heap_aligned);
-  return (addr >= base) && (addr < base + dev_heap_size);
+  return (addr >= base) && ((addr - base) < dev_heap_size);
 }
 
 hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
