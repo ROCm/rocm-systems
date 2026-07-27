@@ -2213,8 +2213,12 @@ amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle
   AMDSMI_CHECK_INIT();
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-  if (r != AMDSMI_STATUS_SUCCESS) return r;
-  if (auto* b = gpu_device->backend()) return b->GetFanRpms(sensor_ind, speed);
+  if (r != AMDSMI_STATUS_SUCCESS) {
+    return r;
+  }
+  if (auto* b = gpu_device->backend()) {
+    return b->GetFanRpms(sensor_ind, speed);
+  }
 #endif
   return rsmi_wrapper(rsmi_dev_fan_rpms_get, processor_handle, 0, sensor_ind, speed);
 }

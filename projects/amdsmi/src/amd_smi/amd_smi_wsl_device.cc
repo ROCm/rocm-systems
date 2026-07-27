@@ -121,9 +121,9 @@ static bool bind_sym(void* handle, const char* name, T& fn) {
 // dlopen librocdxg.so and bind all required symbols into g_wsl_syms.
 static bool load_rocdxg() {
   if (g_rocdxg_handle) return true;
-  g_rocdxg_handle = dlopen("librocdxg.so.1", RTLD_NOW | RTLD_GLOBAL);
+  g_rocdxg_handle = dlopen("librocdxg.so.1", RTLD_NOW | RTLD_LOCAL);
   if (!g_rocdxg_handle)
-    g_rocdxg_handle = dlopen("librocdxg.so", RTLD_NOW | RTLD_GLOBAL);
+    g_rocdxg_handle = dlopen("librocdxg.so", RTLD_NOW | RTLD_LOCAL);
   if (!g_rocdxg_handle) {
     std::cerr << "[WSL] dlopen librocdxg.so failed: " << dlerror() << std::endl;
     return false;
