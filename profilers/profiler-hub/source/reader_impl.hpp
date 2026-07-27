@@ -109,11 +109,7 @@ struct reader_t::impl
         uint32_t                           max_edges);
 
     // Scalar / pmc detail queries (by event handle)
-    [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_scalar_details(
-        const reader_types::event_id_t& id);
     [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_pmc_event_details(
-        const reader_types::event_id_t& id);
-    [[nodiscard]] std::optional<reader_types::sample_data_t> get_sample_details(
         const reader_types::event_id_t& id);
 
     // Event detail queries

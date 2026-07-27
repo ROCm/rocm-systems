@@ -3144,19 +3144,6 @@ reader_t::impl::build_pmc_event_data(const data_storage::scalar_detail_result& r
 }
 
 std::optional<reader_types::pmc_event_data_t>
-reader_t::impl::get_scalar_details(const reader_types::event_id_t& id)
-{
-    if(reader_types::detail::event_id_access::type(id) !=
-       reader_types::event_type_t::sample)
-        return std::nullopt;
-    auto rows = m_read_statements
-                    ->scalar_detail()(reader_types::detail::event_id_access::row_id(id))
-                    .to_vector();
-    if(rows.empty()) return std::nullopt;
-    return build_pmc_event_data(rows.front());
-}
-
-std::optional<reader_types::pmc_event_data_t>
 reader_t::impl::get_pmc_event_details(const reader_types::event_id_t& id)
 {
     if(reader_types::detail::event_id_access::type(id) !=
@@ -3168,26 +3155,6 @@ reader_t::impl::get_pmc_event_details(const reader_types::event_id_t& id)
             .to_vector();
     if(rows.empty()) return std::nullopt;
     return build_pmc_event_data(rows.front());
-}
-
-std::optional<reader_types::sample_data_t>
-reader_t::impl::get_sample_details(const reader_types::event_id_t& id)
-{
-    if(reader_types::detail::event_id_access::type(id) !=
-       reader_types::event_type_t::sample)
-        return std::nullopt;
-    auto rows = m_read_statements
-                    ->scalar_detail()(reader_types::detail::event_id_access::row_id(id))
-                    .to_vector();
-    if(rows.empty()) return std::nullopt;
-
-    const auto&                 r = rows.front();
-    reader_types::sample_data_t data;
-    data.timestamp = r.timestamp;
-
-    auto tit = m_track_info_utility.find(r.track_id);
-    if(tit != m_track_info_utility.end()) data.track = tit->second;
-    return data;
 }
 
 std::optional<reader_types::region_data_t>
@@ -3377,10 +3344,21 @@ reader_t::impl::get_event_info(const reader_types::event_id_t& id)
         }
         case event_type_t::sample:
         {
-            auto d = get_sample_details(id);
-            if(!d) return std::nullopt;
-            // Point event: only timestamp; no end, no scalar payload of its own.
-            detail.ts = d->timestamp;
+            // DESIGN DECISION (task 052, draft §7): a sample-typed id is
+            // unambiguously a counter sample -- get_scalar_track (counter arm) is
+            // the sole event_type_t::sample mint site. Its §7 detail is the counter
+            // name (from the track) + value (from scalar_detail()); it is a point
+            // event so te stays nullopt. build_pmc_event_data sources value +
+            // timestamp + track from the one scalar_detail row.
+            auto rows =
+                m_read_statements
+                    ->scalar_detail()(reader_types::detail::event_id_access::row_id(id))
+                    .to_vector();
+            if(rows.empty()) return std::nullopt;
+            auto d    = build_pmc_event_data(rows.front());
+            detail.ts = d.sample.timestamp;  // point event: te stays nullopt
+            if(d.sample.track) detail.name = d.sample.track->name;
+            detail.properties.push_back({ "value", d.value });
             break;
         }
         case event_type_t::pmc_event:

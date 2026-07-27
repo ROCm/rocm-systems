@@ -4,7 +4,7 @@
 -- WHY THIS EXISTS:
 --   No real captured v4.0 database available to the project contains any
 --   rocpd_sample rows, so the v4.0 scalar/counter read path
---   (get_scalar_track / get_scalar_details + counter-track classification)
+--   (get_scalar_track / get_event_info + counter-track classification)
 --   cannot be positively exercised by a real fixture. This file, together with
 --   the canonical schema in rocpd_v4.0_tables.sql, deterministically constructs
 --   a tiny v4.0 database that DOES contain counter samples, purely to close that

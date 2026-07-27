@@ -801,7 +801,7 @@ using interval_event_list_t = std::vector<interval_event_t>;
 
 struct scalar_event_t
 {
-    event_id_t     id{};         ///< Opaque handle; pass to get_scalar_details().
+    event_id_t     id{};         ///< Opaque handle; pass to get_event_info().
     timestamp_ns_t timestamp{};  ///< Sample time (nanoseconds).
     double         value{};      ///< Counter value (REAL).
 };
