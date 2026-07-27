@@ -1514,7 +1514,7 @@ TEST(ExecutionPluginTest, SdwaClampIsAppliedInsideArchitecturalDestinationWrite)
   EXPECT_EQ(writes[0].byte_mask, ExecutionPlugin::kFullByteMask);
 }
 
-TEST(ExecutionPluginTest, SdwaClampPreservesLegacyNanBehavior) {
+TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
   ForceScalarOverride force_simd(false);
   PluginFixture f(/*num_wf_slots=*/1);
   auto *cu = f.cu();
@@ -1524,9 +1524,8 @@ TEST(ExecutionPluginTest, SdwaClampPreservesLegacyNanBehavior) {
 
   constexpr uint32_t kSrc = 2;
   constexpr uint32_t kDst = 5;
-  constexpr uint32_t kQuietNan = 0x7FC00000u;
+  constexpr uint32_t kQuietNan = 0x7FC12345u;
   const uint32_t vb = wf->vgpr_alloc().base;
-  cu->write_vgpr(vb + kSrc, 0, kQuietNan);
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   uint32_t words[2] = {
@@ -1536,9 +1535,23 @@ TEST(ExecutionPluginTest, SdwaClampPreservesLegacyNanBehavior) {
   };
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
-  cu->execute_instruction(inst.get(), *wf);
 
-  EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), amdgpu::sdwa::sdwa_clamp_f32(kQuietNan));
+  struct Case {
+    uint32_t mode;
+    uint32_t expected;
+  };
+  constexpr std::array cases{
+      Case{0, kQuietNan},
+      Case{amdgpu::Wavefront::DX10_CLAMP_BIT, std::bit_cast<uint32_t>(0.0f)},
+  };
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.mode);
+    wf->set_mode_raw(test_case.mode);
+    cu->write_vgpr(vb + kSrc, 0, kQuietNan);
+    cu->write_vgpr(vb + kDst, 0, 0xDEADBEEFu);
+    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), test_case.expected);
+  }
 }
 
 TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsFullDwordWrite) {

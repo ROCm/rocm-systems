@@ -441,7 +441,7 @@ inline uint8_t sdwa_dst_byte_mask(uint32_t dst_sel, uint32_t dst_unused) {
   return sdwa_src_byte_mask(dst_sel);
 }
 
-inline uint32_t sdwa_clamp_f32(uint32_t result);
+inline uint32_t sdwa_clamp_f32(uint32_t result, const Wavefront &wf);
 
 /// @brief Whether a generated SIMD path can store its result without a
 /// destination transform.
@@ -499,10 +499,13 @@ inline void write_lane64(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32
 /// @brief Apply SDWA clamp to an ALU result.
 ///
 /// For floating-point operations, clamps the result to [0.0, 1.0].
-/// The caller determines whether the operation is float or integer
-/// based on the instruction's semantic type.
-inline uint32_t sdwa_clamp_f32(uint32_t result) {
+/// NaN bits are preserved unless MODE.DX10_CLAMP requests conversion to zero.
+/// The caller determines whether the operation is float or integer based on
+/// the instruction's semantic type.
+inline uint32_t sdwa_clamp_f32(uint32_t result, const Wavefront &wf) {
   float f = std::bit_cast<float>(result);
+  if (std::isnan(f))
+    return wf.dx10_clamp() ? std::bit_cast<uint32_t>(0.0f) : result;
   f = std::fmin(std::fmax(f, 0.0f), 1.0f);
   return std::bit_cast<uint32_t>(f);
 }

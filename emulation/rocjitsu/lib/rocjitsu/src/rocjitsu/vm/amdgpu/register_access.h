@@ -125,7 +125,8 @@ class RegisterAccess {
   }
 
 public:
-  using PostWriteTransform = uint32_t (*)(uint32_t);
+  /// @brief Transform a merged destination dword using current architectural state.
+  using PostWriteTransform = uint32_t (*)(uint32_t, const Wavefront &);
 
   class OperandReadView {
   public:
@@ -828,7 +829,7 @@ public:
     const uint32_t bit_mask = byte_bit_mask(update_byte_mask);
     uint32_t merged = ((*storage)[lane] & ~bit_mask) | (value & bit_mask);
     if (post_transform)
-      merged = post_transform(merged);
+      merged = post_transform(merged, wf);
     (*storage)[lane] = merged;
   }
 
