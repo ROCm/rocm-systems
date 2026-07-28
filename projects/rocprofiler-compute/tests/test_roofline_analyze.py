@@ -273,10 +273,9 @@ def test_roof_mem_levels(
 # =============================================================================
 
 # Each datatype must take the correct roofline branch:
-# FP64 is dual-path (VALU + MFMA), BF16 is MFMA-only.
 DATATYPE_LEGEND_CASES = {
-    "FP64": {"present": ["Peak VALU", "Peak MFMA"], "absent": []},
-    "BF16": {"present": ["Peak MFMA"], "absent": ["Peak VALU"]},
+    "FP64": {"present": ["Peak VALU-FP64", "Peak MFMA-FP64"], "absent": []},
+    "BF16": {"present": ["Peak MFMA-BF16"], "absent": ["Peak VALU-BF16"]},
 }
 
 

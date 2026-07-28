@@ -6,15 +6,8 @@
 import argparse
 import json
 
-import plotly.graph_objects as go
-
-from roofline.roofline_html import (
-    PLOT_DIV_ID,
-    RooflineViewModel,
-    build_interactive_document,
-)
-from roofline.roofline_main import Roofline, build_kernel_colors
-from utils.kernel_name_shortener import format_kernel_signature
+from roofline.roofline_html import RooflineViewModel
+from roofline.roofline_main import Roofline
 
 
 class MockMspec:
@@ -36,101 +29,105 @@ def make_roofline() -> Roofline:
     return Roofline(argparse.Namespace(), mspec, run_parameters)
 
 
-# A ceiling_data with two compute peaks (VALU + matrix), enough structure for
-# _determine_kernel_bound_status and the active-compute-cap math.
-CEILING = {
-    "hbm": [[0.01, 1.0], [1.0, 1500.0], 1500.0],
-    "l2": [[0.01, 1.0], [1.0, 3000.0], 3000.0],
-    "valu": [[0.01, 1000.0], [9000.0, 9000.0], 9000.0],
-    "matrix_ops": [[0.01, 1000.0], [90000.0, 90000.0], 90000.0],
-}
-
-
-def make_view_model() -> RooflineViewModel:
-    return RooflineViewModel(
-        peaks=["L2", "HBM"],
-        peak_colors={"L2": "#009E73", "HBM": "#D55E00"},
-        default_peak="HBM",
-        kernels=[
-            {
-                "name": "kA",
-                "color": "#123456",
-                "traceIndex": 0,
-                "points": [
-                    {"peak": "HBM", "ai": 1.2, "perf": 300.0, "status": "Memory"}
-                ],
-            }
-        ],
-        kernel_trace_indices=[0],
-    )
+# Bandwidth ceilings only
+CEILING = {"hbm": [[0.01, 1.0], [1.0, 1500.0], 1500.0]}
+COMPUTE_PEAKS = [("FP32 VALU", 9000.0), ("FP32 MFMA", 90000.0)]
 
 
 # =============================================================================
-# Kernel-name display formatting (trims to function(argument types))
+# Envelope cap: which compute ceiling a kernel point is scored against
 # =============================================================================
 
 
-def test_format_kernel_signature_trims_return_type_and_template() -> None:
-    assert (
-        format_kernel_signature("void ns::foo<double>(double*, double*, int)")
-        == "ns::foo(double*, double*, int)"
-    )
+def pct_roof(kernel: dict, point_index: int = 0) -> float:
+    """The percent-of-roofline the tooltip shows for one of a kernel's points."""
+    return float(kernel["points"][point_index]["hoverCells"][1])
 
 
-def test_format_kernel_signature_passthrough_without_args() -> None:
-    # Tensile / plain kernel names have no argument list; leave them unchanged.
-    for name in ("Cijk_Ailk_Bjlk_SB_MT128x64x32", "sgprbound", ""):
-        assert format_kernel_signature(name) == name
-
-
-# =============================================================================
-# Per-kernel trace builder (circles-only; memory level lives in the model)
-# =============================================================================
-
-
-def test_build_kernel_traces_one_marker_trace_per_kernel() -> None:
+def test_build_kernel_traces_scores_against_the_tallest_drawn_ceiling() -> None:
+    """A stacked figure caps points at the tallest compute roof drawn, so the
+    reported peak and limiter do not depend on the order datatypes were
+    stacked."""
     roofline = make_roofline()
-    # kernel "kA" has an L2 and an HBM point; "kB" only an L2 point (its HBM
-    # entry is zeroed out and must be dropped).
     roofline._Roofline__ai_data = {
-        "ai_l2": [[2.0, 5.0], [200.0, 400.0]],
-        "ai_hbm": [[1.0, 0.0], [200.0, 0.0]],
+        # AI 100 at 1500 GB/s puts the roof above the 9000 VALU peak, so the
+        # cap is what decides the reported peak.
+        "ai_hbm": [[100.0], [50000.0]],
+        "kernelNames": ["kA"],
+    }
+
+    matrix_traces, matrix_capped = roofline._build_kernel_traces(
+        kernel_names=["kA"],
+        kernel_colors=["#123456"],
+        sanitized_cache_hierarchy=["HBM"],
+        ceiling_data=CEILING,
+        ops_flops="FLOP",
+        compute_peaks=COMPUTE_PEAKS,
+    )
+    valu_traces, valu_capped = roofline._build_kernel_traces(
+        kernel_names=["kA"],
+        kernel_colors=["#123456"],
+        sanitized_cache_hierarchy=["HBM"],
+        ceiling_data=CEILING,
+        ops_flops="FLOP",
+        compute_peaks=[("FP32 VALU", 9000.0)],
+    )
+
+    assert pct_roof(matrix_capped[0]) < 100.0
+    assert pct_roof(valu_capped[0]) > 100.0
+    # The limiter is constant across a kernel's points, so it ships in the
+    # trace's hover template rather than in the client model.
+    assert "Performance limiter: FP32 MFMA" in matrix_traces[0].hovertemplate
+    assert "Performance limiter: FP32 VALU" in valu_traces[0].hovertemplate
+
+
+# =============================================================================
+# Performance limiter: which roof binds a kernel
+# =============================================================================
+
+
+def test_build_kernel_traces_limiter_names_the_binding_roof() -> None:
+    """A kernel whose bandwidth roof sits under the compute cap is limited by
+    its memory level, and falls back to Unknown when the ceiling data holds no
+    roof for that level at all. Levels with no positive AI are not plotted.
+    """
+    roofline = make_roofline()
+    roofline._Roofline__ai_data = {
+        # kA is at AI 1, where HBM tops out at 1500 -- far below either compute
+        # peak -- so HBM binds. Its L2 entry is zeroed and must be dropped, and
+        # kB has no entry at either level.
+        "ai_hbm": [[1.0], [900.0]],
+        "ai_l2": [[0.0], [0.0]],
         "kernelNames": ["kA", "kB"],
     }
-    colors = build_kernel_colors(2)
 
     traces, model = roofline._build_kernel_traces(
         kernel_names=["kA", "kB"],
-        kernel_colors=colors,
+        kernel_colors=["#123456", "#654321"],
         sanitized_cache_hierarchy=["HBM", "L2"],
         ceiling_data=CEILING,
         ops_flops="FLOP",
+        compute_peaks=COMPUTE_PEAKS,
     )
+    assert [kernel["name"] for kernel in model] == ["kA"]
+    assert [point["peak"] for point in model[0]["points"]] == ["HBM"]
+    assert "Performance limiter: HBM" in traces[0].hovertemplate
 
-    assert len(traces) == 2
-    assert [t.name for t in traces] == ["kA", "kB"]
-    # One color per kernel; points are drawn as uniform circles (memory level
-    # is encoded by color/model, not by a per-peak marker shape).
-    assert traces[0].mode == "markers"
-    assert traces[0].marker.color == colors[0]
-    assert traces[1].marker.color == colors[1]
-    assert traces[0].marker.symbol is None, "points are circles, not per-peak shapes"
-
-    # The memory level of each point is carried in the view model, not the trace.
-    assert [p["peak"] for p in model[0]["points"]] == ["L2", "HBM"]
-    assert [p["peak"] for p in model[1]["points"]] == ["L2"]
-    # pctRoof is measured against the active (highest) compute cap, so it never
-    # exceeds 100% even though this datatype has both a VALU and a matrix peak.
-    assert all(p["pctRoof"] <= 100.0 for k in model for p in k["points"])
-
-    # customdata carries the fully-rendered per-point hover; the kernel name is
-    # embedded in it.
-    assert list(traces[0].customdata[0]) == [model[0]["points"][0]["hover"]]
-    assert "kA" in model[0]["points"][0]["hover"]
+    unroofed_traces, unroofed = roofline._build_kernel_traces(
+        kernel_names=["kA"],
+        kernel_colors=["#123456"],
+        sanitized_cache_hierarchy=["HBM", "L2"],
+        ceiling_data={},
+        ops_flops="FLOP",
+        compute_peaks=[],
+    )
+    assert "Performance limiter: Unknown" in unroofed_traces[0].hovertemplate
+    # With no roof to score against, both per-point tooltip values read N/A.
+    assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A"]
 
 
 # =============================================================================
-# View-model serialization + document assembler
+# View-model serialization
 # =============================================================================
 
 
@@ -140,34 +137,3 @@ def test_view_model_to_json_escapes_script_close() -> None:
     assert "</script>" not in serialized, "must not allow a script element to close"
     # Still valid JSON that decodes back to the original kernel name.
     assert json.loads(serialized)["kernels"][0]["name"] == "evil</script>"
-
-
-def test_build_interactive_document_includes_controls_and_model() -> None:
-    fig = go.Figure()
-    # A roof line whose legend name must survive into the document text.
-    fig.add_trace(go.Scatter(x=[0.01, 1.0], y=[1.0, 1500.0], name="HBM"))
-    fig.add_trace(go.Scatter(x=[1.2], y=[300.0], name="kA", mode="markers"))
-
-    document = build_interactive_document(fig, make_view_model(), title="Doc")
-
-    for marker in [
-        "roofline-peak-select",
-        "roofline-show-all",
-        "roofline-reset-view",
-        "roofline-export-png",
-        'id="roofline-model"',
-        "roofline-kernel-list",
-        "roofline-roof-list",
-        PLOT_DIV_ID,
-        "Plotly.newPlot",
-    ]:
-        assert marker in document, f"document missing {marker!r}"
-
-
-def test_build_interactive_document_is_self_contained() -> None:
-    """plotly.js is inlined (offline), not pulled from a CDN script tag."""
-    document = build_interactive_document(go.Figure(), RooflineViewModel())
-    assert '<script src="https://cdn.plot.ly' not in document
-    assert "<!DOCTYPE html>" in document
-    # The inlined library makes the document large; a CDN reference would not.
-    assert len(document) > 1_000_000

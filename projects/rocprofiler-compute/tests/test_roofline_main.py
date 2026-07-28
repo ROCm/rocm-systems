@@ -16,22 +16,6 @@ import plotly.graph_objects as go
 from roofline.roofline_main import Roofline
 
 
-def make_run_parameters(
-    workload_dir: str, roofline_data_type: list[str], **extra: object
-) -> dict[str, object]:
-    """Build the run_parameters dict shared by the Roofline unit tests."""
-    run_parameters: dict[str, object] = {
-        "workload_dir": workload_dir,
-        "device_id": 0,
-        "sort_type": "kernels",
-        "mem_level": "ALL",
-        "is_standalone": True,
-        "roofline_data_type": roofline_data_type,
-    }
-    run_parameters.update(extra)
-    return run_parameters
-
-
 class MockMspec:
     """Minimal MachineSpecs"""
 
@@ -56,7 +40,15 @@ def make_roofline(
     Roofline never reads its ``args`` argument on the cli_generate_plot /
     generate_plot paths, so a bare Namespace suffices.
     """
-    run_parameters = make_run_parameters(workload_dir, roofline_data_type, **extra)
+    run_parameters: dict[str, object] = {
+        "workload_dir": workload_dir,
+        "device_id": 0,
+        "sort_type": "kernels",
+        "mem_level": "ALL",
+        "is_standalone": True,
+        "roofline_data_type": roofline_data_type,
+    }
+    run_parameters.update(extra)
     return Roofline(argparse.Namespace(), mspec, run_parameters)
 
 
@@ -98,7 +90,7 @@ def legend_names(fig: go.Figure) -> set[str]:
 # =============================================================================
 
 
-def test_roofline_missing_file_handling() -> None:
+def test_cli_generate_plot_empty_ai_data() -> None:
     """cli_generate_plot with empty ai_data returns None at the ai_data guard."""
     roofline_instance = make_roofline(mi200_mspec(), ["FP32"])
 
@@ -120,7 +112,7 @@ def test_roofline_invalid_datatype_cli() -> None:
 
 
 def test_generate_plot_mfma_bf16_legend() -> None:
-    """BF16 on CDNA2 emits a Peak MFMA roof and no VALU roof."""
+    """BF16 on CDNA2 emits a Peak MFMA-BF16 roof and no VALU roof."""
     with tempfile.TemporaryDirectory() as workload_dir:
         write_mfma_roofline_csv(workload_dir)
         roofline_instance = mfma_roofline_instance(workload_dir)
@@ -129,21 +121,21 @@ def test_generate_plot_mfma_bf16_legend() -> None:
         # skipped; only the ceiling/legend traces are added.
         fig = roofline_instance.generate_plot("BF16", fig=go.Figure())
 
-        names = " ".join(n for n in legend_names(fig) if n)
-        assert "Peak MFMA" in names, "BF16 should emit a Peak MFMA roof"
-        assert "Peak WMMA" not in names, "CDNA2 path must not label roofs WMMA"
-        assert "Peak VALU" not in names, "BF16 is matrix-only; no VALU roof"
+        names = legend_names(fig)
+        assert "Peak MFMA-BF16" in names, "BF16 should emit a Peak MFMA-BF16 roof"
+        assert "Peak WMMA-BF16" not in names, "CDNA2 path must not label roofs WMMA"
+        assert "Peak VALU-BF16" not in names, "BF16 is matrix-only; no VALU roof"
 
 
 def test_generate_plot_mfma_fp64_dual_legend() -> None:
-    """FP64 on CDNA2 emits both a Peak VALU and a Peak MFMA roof."""
+    """FP64 on CDNA2 emits both a Peak VALU-FP64 and a Peak MFMA-FP64 roof."""
     with tempfile.TemporaryDirectory() as workload_dir:
         write_mfma_roofline_csv(workload_dir)
         roofline_instance = mfma_roofline_instance(workload_dir)
 
         fig = roofline_instance.generate_plot("FP64", fig=go.Figure())
 
-        names = " ".join(n for n in legend_names(fig) if n)
-        assert "Peak VALU" in names, "FP64 is dual-path; expected a VALU roof"
-        assert "Peak MFMA" in names, "FP64 should emit a Peak MFMA roof"
-        assert "Peak WMMA" not in names, "CDNA2 path must not label roofs WMMA"
+        names = legend_names(fig)
+        assert "Peak VALU-FP64" in names, "FP64 is dual-path; expected a VALU roof"
+        assert "Peak MFMA-FP64" in names, "FP64 should emit a Peak MFMA-FP64 roof"
+        assert "Peak WMMA-FP64" not in names, "CDNA2 path must not label roofs WMMA"

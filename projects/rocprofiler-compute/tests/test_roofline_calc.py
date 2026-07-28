@@ -2,6 +2,8 @@
 # SPDX-License-Identifier:  MIT
 
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -18,16 +20,22 @@ from utils.roofline_calc import (
 
 
 def run_calc_ai_analyze_with_values(
-    monkeypatch: pytest.MonkeyPatch, metric_values: dict[str, object]
+    monkeypatch: pytest.MonkeyPatch,
+    metric_values: dict[str, object],
+    top_stats: dict[str, object] | None = None,
 ) -> dict:
     """
     Build mocks and invoke calc_ai_analyze with controlled metric values.
 
-    ``metric_values`` is a dict with keys ``ai_hbm``, ``ai_l2``, ``ai_l1``,
-    ``ai_lds``, ``performance`` whose values are injected into the table-402
-    DataFrame that ``eval_metric`` would normally populate.
+    metric_values is a dict with keys ai_hbm, ai_l2, ai_l1,
+    ai_lds, performance whose values are injected into the table-402
+    DataFrame that eval_metric would normally populate.
 
-    Returns the plot-points dict produced by ``calc_ai_analyze``.
+    top_stats adds columns to the top-kernels table, which is where the
+    per-kernel dispatch count, aggregate time, and percent runtime are joined
+    from. Omit it to exercise the missing-stats path.
+
+    Returns the plot-points dict produced by calc_ai_analyze.
 
     Note: this mock simulates MI350 AI metric values based on the architecture's cache
     levels available on the hardware. Cache levels will vary for other architectures.
@@ -35,8 +43,12 @@ def run_calc_ai_analyze_with_values(
     kernel_name = "test_kernel"
     kernel_id = 0
 
+    top_columns: dict[str, list[object]] = {"Kernel_Name": [kernel_name]}
+    for column, value in (top_stats or {}).items():
+        top_columns[column] = [value]
+
     workload = schema.Workload()
-    workload.dfs = {1: pd.DataFrame({"Kernel_Name": [kernel_name]}, index=[kernel_id])}
+    workload.dfs = {1: pd.DataFrame(top_columns, index=[kernel_id])}
     workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx90a"}])
     workload.roofline_peaks = pd.DataFrame()
     workload.filter_kernel_ids = []
@@ -191,10 +203,85 @@ def test_calc_ai_analyze_na_and_empty_replaced(
     assert result["ai_lds"][0] == [0], "'' should be replaced with 0"
 
 
+def test_calc_ai_analyze_nan_is_zeroed_and_stays_json_safe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A NaN AI is zeroed so the per-level lists stay aligned and JSON-safe.
+
+    Each level's AI and performance list must stay parallel with
+    kernelNames, and the result must not carry a bare NaN, which the
+    browser's JSON.parse rejects outright.
+    """
+    result = run_calc_ai_analyze_with_values(
+        monkeypatch,
+        {
+            "ai_hbm": np.nan,
+            "ai_l2": float("nan"),
+            "ai_l1": 2.0,
+            "ai_lds": np.nan,
+            "performance": 100.0,
+        },
+    )
+
+    kernel_count = len(result["kernelNames"])
+    for level in ("ai_hbm", "ai_l2", "ai_l1", "ai_lds"):
+        assert len(result[level][0]) == kernel_count, f"{level} AI list desynced"
+        assert len(result[level][1]) == kernel_count, f"{level} perf list desynced"
+    assert result["ai_hbm"][0] == [0], "NaN should be replaced with 0"
+    assert result["ai_l2"][0] == [0], "NaN should be replaced with 0"
+    assert result["ai_l1"][0] == [2.0], "valid float should pass through"
+    # allow_nan=False is what the browser's JSON.parse effectively enforces.
+    json.dumps(result, allow_nan=False)
+
+
+def test_calc_ai_analyze_joins_per_kernel_stats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dispatch count, aggregate time, and percent runtime join onto each kernel."""
+    result = run_calc_ai_analyze_with_values(
+        monkeypatch,
+        {
+            "ai_hbm": 2.0,
+            "ai_l2": 2.0,
+            "ai_l1": 2.0,
+            "ai_lds": 2.0,
+            "performance": 100.0,
+        },
+        top_stats={"Count": 128, "Sum(ns)": 154000.0, "Percent": 12.4},
+    )
+
+    assert result["counts"] == [128]
+    assert result["totalTime"] == [154000.0]
+    assert result["pctRuntime"] == [12.4]
+    assert result["timeUnit"] == "ns", "unit is only recoverable from the column name"
+
+
+def test_calc_ai_analyze_missing_stats_are_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Absent stat columns yield None, which the tooltip renders as N/A."""
+    result = run_calc_ai_analyze_with_values(
+        monkeypatch,
+        {
+            "ai_hbm": 2.0,
+            "ai_l2": 2.0,
+            "ai_l1": 2.0,
+            "ai_lds": 2.0,
+            "performance": 100.0,
+        },
+    )
+
+    assert result["counts"] == [None]
+    assert result["totalTime"] == [None]
+    assert result["pctRuntime"] == [None]
+    assert result["timeUnit"] == ""
+
+
 def test_sanitize_ai_value_replaces_invalid_values_with_zero() -> None:
     """Invalid values are replaced with 0."""
     assert sanitize_ai_value(np.inf) == 0
     assert sanitize_ai_value(-np.inf) == 0
+    assert sanitize_ai_value(np.nan) == 0
     assert sanitize_ai_value("N/A") == 0
     assert sanitize_ai_value("") == 0
     assert sanitize_ai_value(None) == 0

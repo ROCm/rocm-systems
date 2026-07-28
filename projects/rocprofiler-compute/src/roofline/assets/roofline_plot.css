@@ -252,7 +252,16 @@ body {
   accent-color: var(--roofline-accent);
 }
 
+.roofline-runtime-filter.locked {
+  opacity: 0.45;
+}
+
+.roofline-runtime-filter input[type="range"]:disabled {
+  cursor: default;
+}
+
 .roofline-panel-list {
+  flex: 1 1 auto;
   list-style: none;
   margin: 0;
   padding: 4px;
@@ -261,10 +270,6 @@ body {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-
-#roofline-kernel-list {
-  flex: 1 1 auto;
 }
 
 .roofline-panel-item {
@@ -318,6 +323,14 @@ body {
 
 .roofline-kernel-name {
   font-family: var(--roofline-kernel-font, monospace);
+  /* A demangled name can exceed 5000 characters. Uncapped, one row wraps taller
+     than the whole list and buries every other kernel. The first lines carry the
+     template arguments, which is what tells two instantiations apart. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
 }
 
 .roofline-kernel-pct {
@@ -327,11 +340,6 @@ body {
   color: var(--roofline-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.roofline-roof-list {
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
 .roofline-roof-swatch {
@@ -358,7 +366,6 @@ body {
     flex-direction: column;
   }
   .roofline-plot-col {
-    flex: 1 1 0;
     width: 100%;
   }
   .roofline-panel-wrap {

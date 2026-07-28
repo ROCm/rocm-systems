@@ -13,6 +13,7 @@ all driven by a single embedded JSON model:
 from __future__ import annotations
 
 import functools
+import html
 import json
 import math
 import re
@@ -22,29 +23,18 @@ from typing import Any, Optional
 
 import plotly.graph_objects as go
 
-from roofline.roofline_shared import (
-    ALL_PEAKS_LABEL,
-    ALL_PEAKS_VALUE,
-    FALLBACK_COLOR,
-    FRAME_MIN_DECADES,
-    FRAME_PAD,
-    FRAME_ROOF_SEGMENT_DECADES,
-    KERNEL_NAME_FONT_FAMILY,
-    PLOT_DIM_OPACITY,
-    ROOF_EXTRAP_MAX_AI,
-    ROOF_SAMPLES,
-)
+# Values below are forwarded to the browser by RooflineViewModel.to_json rather
+# than re-hardcoded in the client assets, so they only change in one place.
+KERNEL_NAME_FONT_FAMILY = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
-PLOT_DIV_ID = "roofline-plot"
+# Sentinel value for the "every memory level" dropdown option.
+ALL_PEAKS_VALUE = "all"
 
-_ASSETS_DIR = Path(__file__).parent / "assets"
+# Multiplicative padding left around the data when framing the axes.
+FRAME_PAD = 1.6
 
-_PLOT_CONFIG: dict[str, Any] = {
-    "displayModeBar": False,
-    "responsive": True,
-    "scrollZoom": True,
-    "doubleClick": False,
-}
+# Roofs are extrapolated out to this AI so they still span a panned view.
+ROOF_EXTRAP_MAX_AI = 1e150
 
 _PAGE_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -59,9 +49,12 @@ __CSS__
 <body>
 <div class="roofline-app">
   <div class="roofline-toolbar">
-    <label class="roofline-control" for="roofline-peak-select">Memory peak
+    <label class="roofline-control" id="roofline-peak-control"
+           for="roofline-peak-select"
+           title="__PEAK_TITLE__">AI axis
       <select id="roofline-peak-select"
-              aria-label="Memory peak for kernel points"></select>
+              aria-label="Memory level for the arithmetic intensity axis">
+      </select>
     </label>
     <span class="roofline-hint">Scroll to zoom &middot; drag to pan &middot;
       double-click to reset</span>
@@ -89,9 +82,8 @@ __PLOT_FRAGMENT__
         again to show all. Ctrl+click (&#8984;+click on Mac) to add or remove
         kernels.</p>
       <div id="roofline-runtime-filter" class="roofline-runtime-filter">
-        <label for="roofline-runtime-threshold"
-               title="Show only the heaviest kernels whose combined GPU resident
-time reaches this percentage. 100% shows every kernel.">
+        <label for="roofline-runtime-threshold" id="roofline-runtime-label"
+               title="__RUNTIME_TITLE__">
           Runtime shown
           <span id="roofline-runtime-value" class="roofline-runtime-value">100%</span>
         </label>
@@ -133,22 +125,40 @@ def build_interactive_document(
     title: str = "Empirical Roofline Analysis",
 ) -> str:
     """Build a fully self-contained interactive roofline HTML document."""
+    figure.update_layout(showlegend=False)
     fragment = figure.to_html(
         full_html=False,
         include_plotlyjs=True,
         div_id=view_model.div_id,
-        config=_PLOT_CONFIG,
+        config={
+            "displayModeBar": False,
+            "responsive": True,
+            "scrollZoom": True,
+            "doubleClick": False,
+        },
     )
 
     substitutions = {
-        "TITLE": _escape_html(title),
+        "TITLE": html.escape(title),
+        "PEAK_TITLE": html.escape(
+            "Plot each kernel at its arithmetic intensity for this memory level, "
+            "matching the (AI axis) marker in the Bandwidth rooflines panel. "
+            "All peaks plots every level at once."
+        ),
+        # The stops are the kernels' own cumulative percentages, so the last one
+        # is whatever they add up to rather than a flat 100%.
+        "RUNTIME_TITLE": html.escape(
+            "Show only the heaviest kernels whose combined percent of GPU "
+            "resident time reaches this cutoff. The rightmost stop shows every "
+            "plotted kernel."
+        ),
         "CSS": _read_asset("roofline_plot.css"),
         "PLOT_FRAGMENT": fragment,
         "MODEL_JSON": view_model.to_json(),
         "JS": _read_asset("roofline_plot.js"),
     }
     return re.sub(
-        r"__(TITLE|CSS|PLOT_FRAGMENT|MODEL_JSON|JS)__",
+        r"__(TITLE|PEAK_TITLE|RUNTIME_TITLE|CSS|PLOT_FRAGMENT|MODEL_JSON|JS)__",
         lambda match: substitutions[match.group(1)],
         _PAGE_TEMPLATE,
     )
@@ -161,7 +171,7 @@ def _read_asset(name: str) -> str:
     Cached because both the Ops and Flops documents are written in one run and
     the assets never change at runtime.
     """
-    return (_ASSETS_DIR / name).read_text(encoding="utf-8")
+    return (Path(__file__).parent / "assets" / name).read_text(encoding="utf-8")
 
 
 def _json_safe(value: object) -> object:
@@ -177,45 +187,40 @@ def _json_safe(value: object) -> object:
     return value
 
 
-def _escape_html(text: str) -> str:
-    return (
-        text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
-
-
 @dataclass
 class RooflineViewModel:
     """Client-facing description of the interactive roofline.
 
     Attributes:
         peaks: Ordered memory levels that have at least one point (e.g.
-            ["L1", "L2", "HBM", "LDS"]).
+            ["L1", "L2", "HBM", "LDS"]). Empty on a roofs-only figure.
         peak_colors: Map from memory level to its roof color, used to color an
-            isolated kernel's dots by memory level
-        default_peak: Memory region shown on load
+            isolated kernel's dots and every roofline panel row by memory level.
+            Covers every level drawn, whether or not a kernel reaches it.
+        default_peak: Memory level shown on load, or ALL_PEAKS_VALUE for every
+            level at once.
         kernels: One entry per plotted kernel, in the same order as
             kernel_trace_indices:
-            {"name", "color", "count", "totalTime", "pctRuntime", "limiter",
-            "points": [{"peak", "ai", "perf", "status", "pctRoof", "peakPerf",
-            "hover"}]}. count/totalTime/pctRuntime are the dispatch count,
-            aggregate time (in time_unit), and percent of total runtime;
-            limiter is the specific binding roof; pctRoof is the percent of the
-            roofline achieved at each point; hover is the prebuilt tooltip body.
-            The client reads pctRuntime, color, name, and points[*].{ai, perf,
-            peak, hover}; the rest support the server-built hover. Any may be
-            None when the underlying data is missing.
+            {"name", "color", "pctRuntime",
+            "points": [{"peak", "ai", "perf", "hoverCells"}]}.
+            This carries only what the client itself needs: pctRuntime (percent
+            of total runtime) orders the kernel panel and drives the runtime
+            filter, and hoverCells holds the two per-point tooltip values
+            (peak throughput and percent of roofline, preformatted). Everything
+            else a tooltip shows is constant across a kernel's points and so is
+            baked into that trace's hover template instead of restated here.
+            pctRuntime is None when the underlying data is missing.
         kernel_trace_indices: Indices into figure.data of the per-kernel
             scatter traces, in the same order as kernels.
-        roofline_traces: Bandwidth-roof (memory-level) line traces; clicking one
-            in the legend isolates it, each {"level", "traceIndex", "bandwidth"}.
+        roofline_traces: Bandwidth-roof (memory-level) line traces, each
+            {"level", "traceIndex", "bandwidth"}. Clicking a roofline panel row
+            isolates the matching trace.
         compute_traces: Horizontal compute-ceiling traces (VALU/matrix), each
-            {"traceIndex", "peakPerf"}. Kept off the legend. While roofs are
-            isolated the base ceiling dims and its compute_overlay_traces
-            counterpart carries the bright cap from the isolated slope rightward.
+            {"traceIndex", "label", "peakPerf"}.
+        compute_overlay_traces: One hidden highlight trace per compute ceiling,
+            each {"traceIndex", "peakPerf"}. While roofs are isolated the base
+            ceiling dims and its overlay carries the bright cap from the
+            isolated slope rightward.
         div_id: Id of the Plotly graph div.
     """
 
@@ -227,9 +232,7 @@ class RooflineViewModel:
     roofline_traces: list[dict[str, Any]] = field(default_factory=list)
     compute_traces: list[dict[str, Any]] = field(default_factory=list)
     compute_overlay_traces: list[dict[str, Any]] = field(default_factory=list)
-    ceiling_dense_hi: float = 0.0
-    roof_samples: int = ROOF_SAMPLES
-    div_id: str = PLOT_DIV_ID
+    div_id: str = "roofline-plot"
 
     def to_json(self) -> str:
         """Serialize the model for embedding in a <script> tag."""
@@ -243,16 +246,18 @@ class RooflineViewModel:
             "rooflineTraces": self.roofline_traces,
             "computeTraces": self.compute_traces,
             "computeOverlayTraces": self.compute_overlay_traces,
-            "ceilingDenseHi": self.ceiling_dense_hi,
-            "roofSamples": self.roof_samples,
             "roofExtremeMaxAi": ROOF_EXTRAP_MAX_AI,
             "allPeaksValue": ALL_PEAKS_VALUE,
-            "allPeaksLabel": ALL_PEAKS_LABEL,
-            "fallbackColor": FALLBACK_COLOR,
-            "plotDimOpacity": PLOT_DIM_OPACITY,
+            "allPeaksLabel": "All peaks",
+            # Marker color for a level or kernel with no assigned color.
+            "fallbackColor": "#888888",
+            # Opacity of the non-isolated roofs and ceilings while isolating.
+            "plotDimOpacity": 0.15,
+            # Client-side framing: pad factor, the minimum decades an axis range
+            # is widened to, and the decades of each roof kept in frame.
             "framePad": FRAME_PAD,
-            "frameMinDecades": FRAME_MIN_DECADES,
-            "frameRoofSegmentDecades": FRAME_ROOF_SEGMENT_DECADES,
+            "frameMinDecades": 2.5,
+            "frameRoofSegmentDecades": 2,
             "kernelNameFontFamily": KERNEL_NAME_FONT_FAMILY,
         }
         return json.dumps(_json_safe(payload), allow_nan=False).replace("</", "<\\/")

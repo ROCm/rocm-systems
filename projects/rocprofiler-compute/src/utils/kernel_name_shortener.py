@@ -114,50 +114,6 @@ def shorten_demangled_name(demangled_name: str, level: int) -> str:
     return shortened_name if shortened_name else demangled_name
 
 
-def _argument_list_start(name: str) -> int:
-    """Index of the ``(`` that opens the argument list, or -1 if none."""
-    first_paren = name.find("(")
-    if first_paren == -1:
-        return -1
-    operator_index = name.find("operator()")
-    if operator_index != -1 and first_paren == operator_index + len("operator"):
-        return name.find("(", operator_index + len("operator()"))
-    return first_paren
-
-
-def format_kernel_signature(name: str) -> str:
-    """Trim a demangled kernel name to function(argument types)."""
-    if not name or "(" not in name:
-        return name
-
-    opening_parenthesis_index = _argument_list_start(name)
-    if opening_parenthesis_index == -1:
-        return name
-    parenthesis_depth = 0
-    closing_parenthesis_index = -1
-    for character_index in range(opening_parenthesis_index, len(name)):
-        if name[character_index] == "(":
-            parenthesis_depth += 1
-        elif name[character_index] == ")":
-            parenthesis_depth -= 1
-            if parenthesis_depth == 0:
-                closing_parenthesis_index = character_index
-                break
-    if closing_parenthesis_index == -1:
-        return name
-
-    argument_signature = name[opening_parenthesis_index : closing_parenthesis_index + 1]
-    name_without_templates = _strip_template_parameters(
-        name[:opening_parenthesis_index]
-    ).strip()
-    # The function is what follows the return type; a
-    # demangled return type, when present, is separated by a top-level space.
-    function_name = name_without_templates.rsplit(" ", 1)[-1]
-    if not function_name:
-        return name
-    return f"{function_name}{argument_signature}"
-
-
 def process_single_kernel_name(
     original_name: str, level: int, cpp_filt_path: str = CPP_FILT_PATH
 ) -> str:
@@ -228,17 +184,3 @@ def kernel_name_shortener(df: pd.DataFrame, level: int) -> Optional[pd.DataFrame
     except Exception as e:
         console_error(f"Error during kernel name shortening: {e}")
         return df
-
-
-def _strip_template_parameters(text: str) -> str:
-    """Remove nested C++ template arguments from a demangled name."""
-    characters_outside_templates = []
-    template_depth = 0
-    for character in text:
-        if character == "<":
-            template_depth += 1
-        elif character == ">":
-            template_depth = max(template_depth - 1, 0)
-        elif template_depth == 0:
-            characters_outside_templates.append(character)
-    return "".join(characters_outside_templates)
