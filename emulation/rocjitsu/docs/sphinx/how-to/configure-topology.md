@@ -104,7 +104,7 @@ if (status != ROCJITSU_STATUS_SUCCESS) {
 ### Create from a JSON string
 
 ``` c
-const char *json = "{"max_ticks":100000,"vm":{"arch":"cdna4"}, ...}";
+const char *json = "{\"max_ticks\":100000,\"vm\":{\"arch\":\"cdna4\"}}";
 rj_vm_t *vm = NULL;
 rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &vm);
 ```

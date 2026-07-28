@@ -18,9 +18,7 @@ compiled HIP fat binary or a standalone device ELF without running the
 GPU virtual machine --- for example, during offline analysis, tooling
 integration, or debugging a dynamic binary translation pipeline.
 
-The code shown below is derived from the example in the rocJITsu
-`docs/architecture.md` *Code* section. See
-[API reference: code object](../reference/api-code-object.md) for the full
+See [API reference: code object](../reference/api-code-object.md) for the full
 API reference.
 
 ## Load the executable

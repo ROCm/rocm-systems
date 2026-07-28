@@ -15,6 +15,14 @@ interpreting the diagnostic output, and confirming the fix.
 You do not need a physical AMD GPU for this workflow. The rocJITsu
 emulator runs the kernel entirely on the CPU.
 
+```{note}
+This tutorial uses the built-in race detector, an execution plugin that
+runs inside the rocJITsu emulator (`RJ_RACE=1`). To detect the same
+class of LDS races on a physical GPU without the emulator, use the
+ConSan DBI sanitizer instead---see
+[Detect an LDS data race with ConSan](consan-detect-lds-race.md).
+```
+
 ## Write the kernel
 
 The `transpose_lds` kernel loads data into a shared-memory tile and

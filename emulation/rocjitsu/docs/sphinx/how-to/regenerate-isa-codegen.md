@@ -25,7 +25,7 @@ pulling updated MR ISA XML files.
   ```
 
 - MR ISA XML files at `../../shared/machine-readable-isa/isa/` relative to
-  the rocjitsu project root (in the `rocm-systems` repository)
+  the rocJITsu project root (in the `rocm-systems` repository)
 - `clang-format` on `PATH` for formatting generated output
 
 ## Generated file locations
@@ -59,7 +59,7 @@ When neither `--gen-isas` nor `--gen-dbt` is specified, both are generated.
 
 ## Regenerate everything
 
-Run all commands from the rocjitsu project root. Set environment variables for
+Run all commands from the rocJITsu project root. Set environment variables for
 the MR ISA XML directories:
 
 ```bash

@@ -17,6 +17,13 @@ This tutorial walks through a complete cycle: writing a HIP kernel with
 a deliberate missing barrier, running it under ConSan, interpreting the
 race report, fixing the bug, and verifying the clean output.
 
+```{note}
+ConSan patches native machine code at load time and runs on a physical
+GPU. To detect the same class of LDS races without a physical GPU, use
+the built-in race detector inside the rocJITsu emulator instead---see
+[Detect a missing barrier with the race detector](race-detection-walkthrough.md).
+```
+
 ## What ConSan instruments
 
 ConSan instruments **LDS read and write operations** (`ds_load_*`,
@@ -196,5 +203,5 @@ patched sites and zero diagnostics.
     for an overview of rocJITsu's plugin architecture and how ConSan
     fits into the DBI hooks system.
 -   Explore the other instrumentation profiles (Record/Replay, Sampled)
-    to understand the precision and overhead tradeoffs described in
-    `docs/consan/USAGE.md` in the repository.
+    to understand the precision and overhead tradeoffs, described in
+    [ConSan GPU LDS sanitizer reference](../reference/consan.md).
