@@ -40,6 +40,7 @@
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
@@ -80,7 +81,7 @@ public:
 
     // Get the dimensions of a record (what CU/SE/etc the counter is for). High cost operation
     // should be cached if possible.
-    static std::unordered_map<std::string, size_t> get_record_dimensions(
+    static std::unordered_map<std::string, std::pair<size_t, size_t>> get_record_dimensions(
         const rocprofiler_counter_record_t& rec);
 
     // Sample the counter values for a set of counters, returns the records in the out parameter.
@@ -185,11 +186,11 @@ counter_sampler::decode_record_name(const rocprofiler_counter_record_t& rec) con
     return id_to_name_.at(counter_id.handle);
 }
 
-std::unordered_map<std::string, size_t>
+std::unordered_map<std::string, std::pair<size_t, size_t>>
 counter_sampler::get_record_dimensions(const rocprofiler_counter_record_t& rec)
 {
-    std::unordered_map<std::string, size_t> out;
-    rocprofiler_counter_id_t                counter_id = {.handle = 0};
+    std::unordered_map<std::string, std::pair<size_t, size_t>> out;
+    rocprofiler_counter_id_t                                   counter_id = {.handle = 0};
     rocprofiler_query_record_counter_id(rec.id, &counter_id);
     auto dims = get_counter_dimensions(counter_id);
 
@@ -197,7 +198,7 @@ counter_sampler::get_record_dimensions(const rocprofiler_counter_record_t& rec)
     {
         size_t pos = 0;
         rocprofiler_query_record_dimension_position(rec.id, dim.id, &pos);
-        out.emplace(dim.name, pos);
+        out.emplace(dim.name, std::make_pair(pos, dim.instance_size));
     }
     return out;
 }
@@ -365,6 +366,13 @@ exit_toggle()
     return exit_toggle;
 }
 
+bool
+is_terminal_status(rocprofiler_status_t status)
+{
+    return status == ROCPROFILER_STATUS_ERROR_FINALIZED ||
+           status == ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+}
+
 rocprofiler_client_finalize_t    finalize       = nullptr;
 rocprofiler_client_id_t*         client_id      = nullptr;
 std::shared_ptr<counter_sampler> sampler        = {};
@@ -395,18 +403,21 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     sampler_thread = new std::thread{[output_stream]() {
         size_t                                    count              = 1;
-        bool                                      dimensions_written = false;
+        bool                                      printed_dimensions = false;
         std::vector<rocprofiler_counter_record_t> records;
         while(sampler && exit_toggle().load() == false)
         {
-            auto status = sampler->sample_counter_values({"SQ_WAVES"}, records, {.value = count});
-            if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED)
+            auto status = sampler->sample_counter_values(
+                {"SQ_WAVES", "GRBM_COUNT"}, records, {.value = count});
+            if(exit_toggle().load()) break;
+            if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
+               status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
             {
-                std::clog << "HSA not loaded yet....\n";
+                std::clog << "Device counting service not ready yet....\n";
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 continue;
             }
-            if(status == ROCPROFILER_STATUS_ERROR_FINALIZED) break;
+            if(is_terminal_status(status)) break;
             if(status == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
             {
                 *output_stream << "Device counting unavailable: no hardware counters\n";
@@ -421,17 +432,18 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 *output_stream << "\tCounter: " << record.id << " Name: " << recname
                                << " Value: " << record.counter_value
                                << " User data: " << record.user_data.value << "\n";
-                if(!dimensions_written)
+                if(!printed_dimensions)
                 {
                     if(!sampler) break;
                     auto dims = sampler->get_record_dimensions(record);
-                    for(const auto& [name, pos] : dims)
+                    for(const auto& [name, position] : dims)
                     {
-                        *output_stream << "\t\tDimension Name: " << name << ": " << pos << "\n";
+                        *output_stream << "\t\tDimension Name: " << name << ": " << position.first
+                                       << "/" << position.second << "\n";
                     }
                 }
             }
-            if(!records.empty()) dimensions_written = true;
+            if(!records.empty()) printed_dimensions = true;
             count++;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
