@@ -14,7 +14,6 @@
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
-#include "rocjitsu/vm/virtual_machine.h"
 
 #include "simdojo/sim/simulation.h"
 
@@ -31,6 +30,7 @@ RJ_DIAGNOSTIC_POP
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -827,9 +827,9 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
   auto restored = config::restore_checkpoint(checkpoint.path());
-  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
-  ASSERT_NE(restored_vm, nullptr);
-  auto *restored_cu = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *restored_soc = restored.soc();
+  ASSERT_NE(restored_soc, nullptr);
+  auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
   auto *restored_wf = restored_cu->wf(0);
   ASSERT_NE(restored_wf, nullptr);
@@ -884,9 +884,9 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
   auto restored = config::restore_checkpoint(checkpoint.path());
-  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
-  ASSERT_NE(restored_vm, nullptr);
-  auto *restored_wf = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  auto *restored_soc = restored.soc();
+  ASSERT_NE(restored_soc, nullptr);
+  auto *restored_wf = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_EQ(restored_wf->exec(), 0xFULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
@@ -939,9 +939,9 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
   auto restored = config::restore_checkpoint(checkpoint.path());
-  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
-  ASSERT_NE(restored_vm, nullptr);
-  auto *restored_wf = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  auto *restored_soc = restored.soc();
+  ASSERT_NE(restored_soc, nullptr);
+  auto *restored_wf = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_EQ(restored_wf->status_raw(), kStatus);
   EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
@@ -981,6 +981,27 @@ TEST(CApiTest, CreateAndDestroyFromString) {
   EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(handle, nullptr);
   rj_vm_destroy(handle);
+}
+
+TEST(CApiTest, CheckpointRoundTrip) {
+  rj_vm_t *raw_source = nullptr;
+  ASSERT_EQ(rj_vm_create((CONFIG_DIR_PATH + "/gfx942_cdna3.json").c_str(), RJ_VM_MODE_DEFAULT,
+                         &raw_source),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_source, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
+
+  test::ScopedTempFile checkpoint("rocjitsu-c-api-checkpoint-");
+  ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint.path().c_str(), 42),
+            ROCJITSU_STATUS_SUCCESS);
+
+  rj_vm_t *raw_restored = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(checkpoint.path().c_str(), &raw_restored),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_restored, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(raw_restored, &rj_vm_destroy);
+
+  EXPECT_EQ(rj_vm_step(restored.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
 }
 
 TEST(CApiTest, PluginLifecycleDispatchesProfiledShutdownThroughBaseGroup) {

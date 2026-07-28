@@ -196,10 +196,10 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   engine_config.max_ticks = fb_config->max_ticks();
   engine_config.num_threads = fb_config->num_threads();
 
-  // Build a VirtualMachine from the old-format config, then extract SoC as root.
-  auto vm = std::make_unique<VirtualMachine>(vm_config);
-  auto *soc_ptr = vm->soc();
-  auto *mem_ptr = vm->memory();
+  // Rebuild the SoC root expected by LoadedConfig and create_from_loaded().
+  auto soc = std::make_unique<SoC>("gpu_soc", vm_config.soc);
+  auto *soc_ptr = soc.get();
+  auto *mem_ptr = soc->memory();
 
   // Restore GPU memory pages.
   if (auto *mem_state = checkpoint->memory()) {
@@ -266,10 +266,10 @@ LoadedConfig restore_checkpoint(const std::string &path) {
     }
   }
 
-  // Return as LoadedConfig with the VirtualMachine as root (legacy checkpoint path).
+  // Return the same root shape as the JSON configuration loader.
   LoadedConfig result;
   result.engine_config = engine_config;
-  result.build_result.root = std::move(vm);
+  result.build_result.root = std::move(soc);
   result.build_result.memory = mem_ptr;
   return result;
 }
