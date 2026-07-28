@@ -15,7 +15,7 @@
 #include "mproc.hpp"
 #include "perf.hpp"
 #include "perfetto.hpp"
-#include "rocprofiler-sdk.hpp"
+#include "sdk-tracing-config.hpp"
 #include "utility.hpp"
 
 #include <timemory/backends/capability.hpp>

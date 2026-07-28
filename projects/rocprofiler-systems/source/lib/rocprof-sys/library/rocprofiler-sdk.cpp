@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/rocprofiler-sdk.hpp"
+#include "library/rocprofiler-sdk.hpp"
 #include "api.hpp"
 #include "binary/analysis.hpp"
 #include "common/delimit.hpp"
@@ -17,13 +17,13 @@
 #include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/sdk-tracing-config.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
-#include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/kfd_events.hpp"

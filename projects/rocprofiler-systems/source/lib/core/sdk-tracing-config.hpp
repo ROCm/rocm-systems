@@ -6,9 +6,7 @@
 #include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
-#include "core/config.hpp"
-#include "core/state.hpp"
-#include "core/timemory.hpp"
+#include "core/sdk-tracing-config-deps.hpp"
 #include "logger/debug.hpp"
 
 #include <cctype>
@@ -48,55 +46,6 @@ struct version_info
     }
 };
 
-// Default Externals for sdk_core: reads settings and config from the global singletons.
-// Replaced by a mock in tests.
-struct default_sdk_externals
-{
-    using Settings = tim::settings;
-    static Settings* get_settings() { return ::rocprofsys::settings::instance(); }
-    static bool      get_use_rcclp() { return ::rocprofsys::config::get_use_rcclp(); }
-    static bool      get_use_ompt() { return ::rocprofsys::config::get_use_ompt(); }
-    static bool      get_use_unified_memory_profiling()
-    {
-        return ::rocprofsys::config::get_use_unified_memory_profiling();
-    }
-    static bool get_use_process_sampling()
-    {
-        return ::rocprofsys::config::get_use_process_sampling();
-    }
-    static std::string get_trace_region()
-    {
-        return ::rocprofsys::config::get_trace_region();
-    }
-    static std::string get_rocm_domains()
-    {
-        return ::rocprofsys::get_setting_value<std::string>(
-                   std::string{ ::rocprofsys::env_vars::ROCM_DOMAINS })
-            .value_or(std::string{});
-    }
-    static std::string get_rocm_events_setting()
-    {
-        return ::rocprofsys::get_setting_value<std::string>(
-                   std::string{ ::rocprofsys::env_vars::ROCM_EVENTS })
-            .value_or(std::string{});
-    }
-    static std::string get_gpu_perf_counters()
-    {
-        return ::rocprofsys::get_gpu_perf_counters();
-    }
-
-    static std::optional<std::string> get_setting_value(std::string_view s)
-    {
-        return ::rocprofsys::get_setting_value<std::string>(std::string{ s });
-    }
-
-    using StateType = State;
-
-    constexpr static StateType StateFinalized = State::Finalized;
-
-    static void set_state(StateType state) { ::rocprofsys::set_state(state); }
-};
-
 // Constrains TracingKind to the two tracing-kind types Wrapper exposes, so a
 // mismatched type fails at the get_operations_impl call site instead of deep inside it.
 template <typename Wrapper, typename TracingKind>
@@ -105,7 +54,7 @@ concept tracing_kind_for =
     std::same_as<TracingKind, typename Wrapper::buffer_tracing_kind>;
 
 template <typename Wrapper, typename Externals = default_sdk_externals>
-class sdk_core
+class sdk_tracing_config
 {
 public:
     static void config_settings(const std::shared_ptr<typename Externals::Settings>&);
@@ -180,7 +129,7 @@ private:
     static std::optional<typename Wrapper::buffer_name_info_t>   s_buffer_names;
 };
 
-using core_sdk = sdk_core<wrapper>;
+using core_sdk = sdk_tracing_config<wrapper>;
 
 }  // namespace rocprofsys::rocprofiler_sdk
 
@@ -194,7 +143,7 @@ namespace rocprofsys::rocprofiler_sdk
 template <typename Wrapper, typename Externals>
 template <typename Tp>
 std::string
-sdk_core<Wrapper, Externals>::to_lower(const Tp& value)
+sdk_tracing_config<Wrapper, Externals>::to_lower(const Tp& value)
 {
     auto str_copy = std::string{ value };
 
@@ -208,7 +157,7 @@ sdk_core<Wrapper, Externals>::to_lower(const Tp& value)
 
 template <typename Wrapper, typename Externals>
 std::string
-sdk_core<Wrapper, Externals>::get_setting_name(const std::string& value)
+sdk_tracing_config<Wrapper, Externals>::get_setting_name(const std::string& value)
 {
     constexpr auto prefix             = std::string_view{ "rocprofsys_" };
     const auto     lower_setting_name = to_lower(value);
@@ -225,28 +174,29 @@ sdk_core<Wrapper, Externals>::get_setting_name(const std::string& value)
 
 template <typename Wrapper, typename Externals>
 std::unordered_map<typename Wrapper::callback_tracing_kind,
-                   typename sdk_core<Wrapper, Externals>::operation_options>
-    sdk_core<Wrapper, Externals>::s_callback_operation_option_names{};
+                   typename sdk_tracing_config<Wrapper, Externals>::operation_options>
+    sdk_tracing_config<Wrapper, Externals>::s_callback_operation_option_names{};
 
 template <typename Wrapper, typename Externals>
 std::unordered_map<typename Wrapper::buffer_tracing_kind,
-                   typename sdk_core<Wrapper, Externals>::operation_options>
-    sdk_core<Wrapper, Externals>::s_buffered_operation_option_names{};
+                   typename sdk_tracing_config<Wrapper, Externals>::operation_options>
+    sdk_tracing_config<Wrapper, Externals>::s_buffered_operation_option_names{};
 
 template <typename Wrapper, typename Externals>
 std::optional<typename Wrapper::callback_name_info_t>
-    sdk_core<Wrapper, Externals>::s_callback_names{};
+    sdk_tracing_config<Wrapper, Externals>::s_callback_names{};
 
 template <typename Wrapper, typename Externals>
 std::optional<typename Wrapper::buffer_name_info_t>
-    sdk_core<Wrapper, Externals>::s_buffer_names{};
+    sdk_tracing_config<Wrapper, Externals>::s_buffer_names{};
 
 template <typename Wrapper, typename Externals>
-version_info sdk_core<Wrapper, Externals>::s_version{};
+version_info sdk_tracing_config<Wrapper, Externals>::s_version{};
 
 template <typename Wrapper, typename Externals>
 void
-sdk_core<Wrapper, Externals>::finalize_and_throw(std::string_view message_for_exception)
+sdk_tracing_config<Wrapper, Externals>::finalize_and_throw(
+    std::string_view message_for_exception)
 {
     Externals::set_state(Externals::StateFinalized);
     throw std::runtime_error(std::string{ message_for_exception });
@@ -256,7 +206,7 @@ sdk_core<Wrapper, Externals>::finalize_and_throw(std::string_view message_for_ex
 template <typename Wrapper, typename Externals>
 template <typename TracingKind, typename TracingNameTable, typename LoadTracingNamesFn>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper, Externals>::operation_ids_for_tracing_kind(
+sdk_tracing_config<Wrapper, Externals>::operation_ids_for_tracing_kind(
     TracingKind tracing_kind, const std::string& operations_setting,
     std::optional<TracingNameTable>& cached_tracing_names,
     LoadTracingNamesFn&&             load_tracing_names)
@@ -284,9 +234,9 @@ sdk_core<Wrapper, Externals>::operation_ids_for_tracing_kind(
     auto operations_filter = Externals::get_setting_value(operations_setting);
     if(!operations_filter)
     {
-        finalize_and_throw(
-            fmt::format("sdk_core::get_operations_impl: no registered setting '{}'",
-                        operations_setting));
+        finalize_and_throw(fmt::format(
+            "sdk_tracing_config::get_operations_impl: no registered setting '{}'",
+            operations_setting));
     }
 
     if(operations_filter->empty())
@@ -332,8 +282,8 @@ template <typename Wrapper, typename Externals>
 template <typename TracingKind>
     requires tracing_kind_for<Wrapper, TracingKind>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations_impl(TracingKind        tracing_kind,
-                                                  const std::string& operations_setting)
+sdk_tracing_config<Wrapper, Externals>::get_operations_impl(
+    TracingKind tracing_kind, const std::string& operations_setting)
 {
     if constexpr(std::same_as<TracingKind, typename Wrapper::callback_tracing_kind>)
     {
@@ -351,7 +301,7 @@ sdk_core<Wrapper, Externals>::get_operations_impl(TracingKind        tracing_kin
 
 template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper, Externals>::filter_operations(
+sdk_tracing_config<Wrapper, Externals>::filter_operations(
     const std::unordered_set<std::int32_t>& complete_set,
     const std::unordered_set<std::int32_t>& to_include,
     const std::unordered_set<std::int32_t>& to_exclude)
@@ -382,7 +332,7 @@ sdk_core<Wrapper, Externals>::filter_operations(
 template <typename Wrapper, typename Externals>
 template <typename Tp>
 auto
-sdk_core<Wrapper, Externals>::insert_config_setting(
+sdk_tracing_config<Wrapper, Externals>::insert_config_setting(
     const std::shared_ptr<typename Externals::Settings>& config,
     std::string_view env_name, std::string_view description, Tp initial_value,
     const std::initializer_list<std::string_view>& extra_categories)
@@ -409,7 +359,7 @@ sdk_core<Wrapper, Externals>::insert_config_setting(
 /// @return The version of the rocprofiler-sdk or 0 if not initialized
 template <typename Wrapper, typename Externals>
 version_info&
-sdk_core<Wrapper, Externals>::get_version()
+sdk_tracing_config<Wrapper, Externals>::get_version()
 {
     if(s_version.formatted() == 0)
     {
@@ -421,7 +371,7 @@ sdk_core<Wrapper, Externals>::get_version()
 
 template <typename Wrapper, typename Externals>
 void
-sdk_core<Wrapper, Externals>::config_settings(
+sdk_tracing_config<Wrapper, Externals>::config_settings(
     const std::shared_ptr<typename Externals::Settings>& _config)
 {
     const auto buffered_tracing_info = Wrapper::get_buffer_tracing_names();
@@ -600,7 +550,7 @@ sdk_core<Wrapper, Externals>::config_settings(
 
 template <typename Wrapper, typename Externals>
 std::unordered_set<typename Wrapper::callback_tracing_kind>
-sdk_core<Wrapper, Externals>::get_callback_domains()
+sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
 {
     using kind_t             = typename Wrapper::callback_tracing_kind;
     const auto callback_info = Wrapper::get_callback_tracing_names();
@@ -728,7 +678,7 @@ sdk_core<Wrapper, Externals>::get_callback_domains()
 
 template <typename Wrapper, typename Externals>
 std::unordered_set<typename Wrapper::buffer_tracing_kind>
-sdk_core<Wrapper, Externals>::get_buffered_domains()
+sdk_tracing_config<Wrapper, Externals>::get_buffered_domains()
 {
     using kind_t           = typename Wrapper::buffer_tracing_kind;
     const auto buffer_info = Wrapper::get_buffer_tracing_names();
@@ -928,19 +878,20 @@ sdk_core<Wrapper, Externals>::get_buffered_domains()
 
 template <typename Wrapper, typename Externals>
 std::vector<std::string>
-sdk_core<Wrapper, Externals>::get_rocm_events()
+sdk_tracing_config<Wrapper, Externals>::get_rocm_events()
 {
     return rocprofsys::delimit(Externals::get_rocm_events_setting(), " ,;\t\n");
 }
 
 template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations(typename Wrapper::callback_tracing_kind kind)
+sdk_tracing_config<Wrapper, Externals>::get_operations(
+    typename Wrapper::callback_tracing_kind kind)
 {
     if(s_callback_operation_option_names.count(kind) == 0)
     {
         finalize_and_throw(
-            fmt::format("sdk_core::get_operations: no options registered for "
+            fmt::format("sdk_tracing_config::get_operations: no options registered for "
                         "callback tracing kind {}",
                         static_cast<int>(kind)));
     }
@@ -964,12 +915,13 @@ sdk_core<Wrapper, Externals>::get_operations(typename Wrapper::callback_tracing_
 
 template <typename Wrapper, typename Externals>
 std::vector<std::int32_t>
-sdk_core<Wrapper, Externals>::get_operations(typename Wrapper::buffer_tracing_kind kind)
+sdk_tracing_config<Wrapper, Externals>::get_operations(
+    typename Wrapper::buffer_tracing_kind kind)
 {
     if(s_buffered_operation_option_names.count(kind) == 0)
     {
         finalize_and_throw(
-            fmt::format("sdk_core::get_operations: no options registered for "
+            fmt::format("sdk_tracing_config::get_operations: no options registered for "
                         "buffer tracing kind {}",
                         static_cast<int>(kind)));
     }
@@ -990,15 +942,15 @@ sdk_core<Wrapper, Externals>::get_operations(typename Wrapper::buffer_tracing_ki
 
 template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper, Externals>::get_backtrace_operations(
+sdk_tracing_config<Wrapper, Externals>::get_backtrace_operations(
     typename Wrapper::callback_tracing_kind kind)
 {
     if(s_callback_operation_option_names.count(kind) == 0)
     {
-        finalize_and_throw(
-            fmt::format("sdk_core::get_backtrace_operations: no options registered for "
-                        "callback tracing kind {}",
-                        static_cast<int>(kind)));
+        finalize_and_throw(fmt::format(
+            "sdk_tracing_config::get_backtrace_operations: no options registered for "
+            "callback tracing kind {}",
+            static_cast<int>(kind)));
     }
 
     const auto& annotate_backtrace_operations =
@@ -1014,15 +966,15 @@ sdk_core<Wrapper, Externals>::get_backtrace_operations(
 
 template <typename Wrapper, typename Externals>
 std::unordered_set<std::int32_t>
-sdk_core<Wrapper, Externals>::get_backtrace_operations(
+sdk_tracing_config<Wrapper, Externals>::get_backtrace_operations(
     typename Wrapper::buffer_tracing_kind kind)
 {
     if(s_buffered_operation_option_names.count(kind) == 0)
     {
-        finalize_and_throw(
-            fmt::format("sdk_core::get_backtrace_operations: no options registered for "
-                        "buffer tracing kind {}",
-                        static_cast<int>(kind)));
+        finalize_and_throw(fmt::format(
+            "sdk_tracing_config::get_backtrace_operations: no options registered for "
+            "buffer tracing kind {}",
+            static_cast<int>(kind)));
     }
 
     const auto& annotate_backtrace_operations =

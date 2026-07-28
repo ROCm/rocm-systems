@@ -19,10 +19,10 @@ target_link_libraries(
 
 target_include_directories(track-registry-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
 
-add_library(sdk-core-tests OBJECT test_sdk_core.cpp)
+add_library(sdk-tracing-config-tests OBJECT test_sdk_tracing_config.cpp)
 
 target_link_libraries(
-    sdk-core-tests
+    sdk-tracing-config-tests
     PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems-core-library
@@ -32,7 +32,10 @@ target_link_libraries(
         rocprofiler-systems-timemory
 )
 
-target_include_directories(sdk-core-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
+target_include_directories(
+    sdk-tracing-config-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
+)
 
 add_library(output-format-tests OBJECT test_output_format.cpp)
 
