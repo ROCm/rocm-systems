@@ -80,6 +80,7 @@ extern const char* HipExtraSourceCodeNoGWS;
 
 namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
+bool roc::Device::hostVmemSupported_ = false;
 std::vector<hsa_agent_t> roc::Device::gpu_agents_;
 std::vector<AgentInfo> roc::Device::cpu_agents_;
 
@@ -390,6 +391,10 @@ bool Device::init() {
     LogPrintfError("hsa_iterate_agents failed with %x", status);
     return false;
   }
+
+  bool vmem_supported = false;
+  Hsa::system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED, &vmem_supported);
+  hostVmemSupported_ = !cpu_agents_.empty() && vmem_supported;
 
   std::string ordinals =
       amd::IS_HIP ? ((HIP_VISIBLE_DEVICES[0] != '\0') ? HIP_VISIBLE_DEVICES : CUDA_VISIBLE_DEVICES)
@@ -2362,21 +2367,8 @@ void Device::deviceVmemRelease(uint64_t mem_handle) const {
   }
 }
 
-bool Device::hostVmemSupported() const {
-  if (cpu_agents_.empty()) {
-    return false;
-  }  
-  bool supported = false;
-  hsa_status_t hsa_status = Hsa::system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED, &supported);
-  if (hsa_status != HSA_STATUS_SUCCESS) {
-    // Older ROCr predates this query: treat host-NUMA VMM as unsupported.
-    return false;
-  }
-  return supported;
-}
-
 uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const {
-  if (!hostVmemSupported()) {
+  if (!hostVmemSupported_) {
     LogError("hostVmemAlloc: host memory VMM not supported on this system");
     return 0;
   }
