@@ -195,7 +195,7 @@ Kernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
   const amd::NDRange<> global(sizes.global());
 
   // Check if runtime has to find local workgroup size
-  FindLocalWorkSize(sizes.dimensions(), global(), local);
+  FindLocalWorkSize(sizes.dimensions(), global, local);
 
   address hidden_arguments = const_cast<address>(parameters);
 
