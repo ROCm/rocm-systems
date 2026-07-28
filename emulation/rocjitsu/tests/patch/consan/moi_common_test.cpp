@@ -2434,6 +2434,64 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
                          actual_prologue_words.begin()));
 }
 
+TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "lds_probe", /*vgpr_granulated=*/0);
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_init_owner_epoch = true;
+  options.moi_owner_source = ConSanMoiOwnerSource::HwId;
+  options.moi_owner_sgpr = 20;
+  options.moi_owner_vgpr = 11;
+  options.moi_epoch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  ASSERT_TRUE(result.resolved_moi_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
+  ASSERT_TRUE(hwreg);
+  const uint16_t owner_sgpr = *result.resolved_moi_owner_sgpr;
+  const auto get_hw_id = build_s_getreg_b32(owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto is_owner_zero = instrumentation::build_s_cmp_eq_u32(
+      owner_sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  constexpr uint16_t kUnusedWaveId = 1u << 5;
+  const auto replace_owner_zero = instrumentation::build_s_cselect_b32(
+      owner_sgpr, scalar_positive_inline_u32(kUnusedWaveId), owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(get_hw_id);
+  ASSERT_TRUE(is_owner_zero);
+  ASSERT_TRUE(replace_owner_zero);
+  const auto wait_owner = build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(wait_owner);
+  const std::array<uint32_t, 7> expected_prefix = {
+      *get_hw_id,
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      *is_owner_zero,
+      *replace_owner_zero,
+      *wait_owner,
+      build_v_mov_b32_e32(*result.resolved_moi_owner_vgpr, owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
+      build_v_mov_b32_e32(12, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint32_t> actual_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  EXPECT_TRUE(contains_subsequence(actual_words, expected_prefix));
+}
+
 TEST(ConSanMoi, AutomaticPersistentProloguesOnlyTargetEmittedProbeOwners) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.unrelated_has_lds = true;

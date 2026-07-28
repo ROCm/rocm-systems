@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 #include "embedded_schema.h"
+#include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/config/config_loader.h"
 
@@ -734,7 +735,7 @@ TEST(ConSanMoi, CompactWorkgroupShadowUsesOneWordPerGuestCell) {
   EXPECT_TRUE(layout->compact);
 }
 
-TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesGenerationTaggedWorkgroupLocalLdsMirror) {
+TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesInitializedWorkgroupLocalLdsMirror) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,
       0x00000000u, // ds_store_b32
@@ -772,7 +773,9 @@ TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesGenerationTaggedWorkgroupLocalLds
   for (const ConSanPatchInfo *patch : {&*access, &*prologue}) {
     EXPECT_EQ(patch->workgroup_shadow_base, 4352u);
     EXPECT_EQ(patch->workgroup_shadow_size, 8704u);
-    EXPECT_EQ(patch->required_group_segment_size, 13056u);
+    EXPECT_EQ(patch->workgroup_shadow_validity_base, 13056u);
+    EXPECT_EQ(patch->workgroup_shadow_validity_size, 272u);
+    EXPECT_EQ(patch->required_group_segment_size, 13328u);
     EXPECT_TRUE(patch->workgroup_shadow_lazy_initialization);
     EXPECT_FALSE(patch->workgroup_shadow_compact);
   }
@@ -784,7 +787,7 @@ TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesGenerationTaggedWorkgroupLocalLds
   ASSERT_LE(descriptor_offset + sizeof(KD), result.elf_bytes.size());
   KD descriptor{};
   std::memcpy(&descriptor, result.elf_bytes.data() + descriptor_offset, sizeof(descriptor));
-  EXPECT_EQ(descriptor.group_segment_fixed_size, 13056u);
+  EXPECT_EQ(descriptor.group_segment_fixed_size, 13328u);
 
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto *text = patched.text_sections().front();
@@ -881,16 +884,16 @@ TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesGenerationTaggedWorkgroupLocalLds
   const auto store_wide =
       build_ds_store_b64(/*vaddr=*/24, /*vdata=*/25, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(store_wide);
-  EXPECT_FALSE(contains_subsequence(prologue_words, *store_wide));
+  EXPECT_TRUE(contains_subsequence(prologue_words, *store_wide));
   EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
                        *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4)),
-            0);
+            1);
   EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
                        *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4)),
-            0);
+            1);
 }
 
-TEST(ConSanMoi, Rdna4AtomicTrackingUsesDispatchTaggedWorkgroupLocalLdsMirror) {
+TEST(ConSanMoi, Rdna4AtomicTrackingUsesInitializedWorkgroupLocalLdsMirror) {
   const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
       ROCJITSU_CODE_ARCH_RDNA4);
@@ -931,7 +934,9 @@ TEST(ConSanMoi, Rdna4AtomicTrackingUsesDispatchTaggedWorkgroupLocalLdsMirror) {
   ASSERT_NE(prologue, result.patches.end());
   EXPECT_EQ(access->workgroup_shadow_base, 4352u);
   EXPECT_EQ(access->workgroup_shadow_size, 8704u);
-  EXPECT_EQ(access->required_group_segment_size, 13056u);
+  EXPECT_EQ(access->workgroup_shadow_validity_base, 13056u);
+  EXPECT_EQ(access->workgroup_shadow_validity_size, 272u);
+  EXPECT_EQ(access->required_group_segment_size, 13328u);
   EXPECT_TRUE(access->workgroup_shadow_lazy_initialization);
   EXPECT_FALSE(access->workgroup_shadow_compact);
   EXPECT_TRUE(prologue->workgroup_shadow_lazy_initialization);
@@ -945,10 +950,10 @@ TEST(ConSanMoi, Rdna4AtomicTrackingUsesDispatchTaggedWorkgroupLocalLdsMirror) {
               prologue->trampoline_size);
   EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
                        *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4)),
-            0);
+            1);
   EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
                        *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4)),
-            0);
+            1);
 
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
   ASSERT_TRUE(access->scratch_vgpr);
@@ -963,11 +968,54 @@ TEST(ConSanMoi, Rdna4AtomicTrackingUsesDispatchTaggedWorkgroupLocalLdsMirror) {
       generation_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(mix_dispatch_low);
   ASSERT_TRUE(mix_dispatch_high);
-  EXPECT_NE(std::ranges::find(access_words, *mix_dispatch_low), access_words.end());
-  EXPECT_NE(std::ranges::find(access_words, *mix_dispatch_high), access_words.end());
+  EXPECT_EQ(std::ranges::find(access_words, *mix_dispatch_low), access_words.end());
+  EXPECT_EQ(std::ranges::find(access_words, *mix_dispatch_high), access_words.end());
 }
 
-TEST(ConSanMoi, Rdna4BarrierTrackingUsesDispatchTaggedWorkgroupLocalLdsMirror) {
+TEST(ConSanMoi, Rdna4InlineShadowEagerlyClearsExactMirrorWhenValidityBitmapDoesNotFit) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words, "eager_exact_mirror");
+  mutate_first_kernel_descriptor(
+      bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 21840u; });
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(prologue, result.patches.end());
+  for (const ConSanPatchInfo *patch : {&*access, &*prologue}) {
+    EXPECT_EQ(patch->workgroup_shadow_base, 21840u);
+    EXPECT_EQ(patch->workgroup_shadow_size, 43680u);
+    EXPECT_EQ(patch->workgroup_shadow_validity_size, 0u);
+    EXPECT_EQ(patch->required_group_segment_size, 65520u);
+    EXPECT_FALSE(patch->workgroup_shadow_lazy_initialization);
+    EXPECT_FALSE(patch->workgroup_shadow_compact);
+  }
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  EXPECT_EQ(
+      std::ranges::count(prologue_words, *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4)), 1);
+  EXPECT_EQ(std::ranges::count(prologue_words, *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4)),
+            1);
+}
+
+TEST(ConSanMoi, Rdna4BarrierTrackingUsesInitializedWorkgroupLocalLdsMirror) {
   const auto signal = build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4);
   const auto wait = build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(signal && wait);
@@ -997,7 +1045,9 @@ TEST(ConSanMoi, Rdna4BarrierTrackingUsesDispatchTaggedWorkgroupLocalLdsMirror) {
   ASSERT_NE(access, result.patches.end());
   EXPECT_EQ(access->workgroup_shadow_base, 4352u);
   EXPECT_EQ(access->workgroup_shadow_size, 8704u);
-  EXPECT_EQ(access->required_group_segment_size, 13056u);
+  EXPECT_EQ(access->workgroup_shadow_validity_base, 13056u);
+  EXPECT_EQ(access->workgroup_shadow_validity_size, 272u);
+  EXPECT_EQ(access->required_group_segment_size, 13328u);
   EXPECT_TRUE(access->workgroup_shadow_lazy_initialization);
   EXPECT_FALSE(access->workgroup_shadow_compact);
 
@@ -1014,10 +1064,10 @@ TEST(ConSanMoi, Rdna4BarrierTrackingUsesDispatchTaggedWorkgroupLocalLdsMirror) {
               prologue->trampoline_size);
   EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
                        *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4)),
-            0);
+            1);
   EXPECT_EQ(std::count(prologue_words.begin(), prologue_words.end(),
                        *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4)),
-            0);
+            1);
 }
 
 TEST(ConSanMoi, InlineShadowFallsBackToExternalMirrorWhenLocalMirrorDoesNotFit) {
@@ -1153,18 +1203,52 @@ TEST(ConSanMoi, InlineShadowLoopsOverEveryWideWorkgroupLocalCellCompactly) {
   EXPECT_EQ(count_subsequence(body, *local_exchange), 1u);
   const auto exec_loop_encoding = build_s_cbranch_execnz(0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(exec_loop_encoding);
-  const auto loop_branch = std::ranges::find_if(body, [&](uint32_t word) {
-    return (word & 0xffff0000u) == (*exec_loop_encoding & 0xffff0000u) &&
-           static_cast<int16_t>(word) < 0;
-  });
-  ASSERT_NE(loop_branch, body.end());
-  ASSERT_NE(loop_branch, body.begin());
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   const auto masked_predicate =
       build_s_and_saveexec_b64(static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 14u),
                                /*vcc=*/106, ROCJITSU_CODE_ARCH_RDNA4);
+  const uint16_t loop_counter_vgpr =
+      consan_detail::inline_shadow_loop_counter_vgpr(scratch, /*has_exec_save=*/true,
+                                                     /*track_atomics=*/false);
+  const auto advance_counter =
+      ib::build_v_add_u32(loop_counter_vgpr, scalar_positive_inline_u32(1u), loop_counter_vgpr,
+                          ROCJITSU_CODE_ARCH_RDNA4);
+  const auto more_cells = ib::build_v_cmp_gt_u32_vcc(scalar_positive_inline_u32(4u),
+                                                     loop_counter_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(masked_predicate);
+  ASSERT_TRUE(advance_counter);
+  ASSERT_TRUE(more_cells);
+  std::vector<uint32_t> expected_loop_control(advance_counter->begin(), advance_counter->end());
+  expected_loop_control.push_back(*more_cells);
+  expected_loop_control.push_back(*masked_predicate);
+  const auto loop_control = std::search(body.begin(), body.end(), expected_loop_control.begin(),
+                                        expected_loop_control.end());
+  ASSERT_NE(loop_control, body.end());
+  const auto state_index =
+      ib::build_v_and_b32_literal(static_cast<uint16_t>(scratch + 8u), 15u,
+                                  static_cast<uint16_t>(scratch + 7u), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto scale_state_index =
+      ib::build_v_lshlrev_b32(static_cast<uint16_t>(scratch + 8u), scalar_positive_inline_u32(1u),
+                              static_cast<uint16_t>(scratch + 8u), ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(state_index);
+  ASSERT_TRUE(scale_state_index);
+  std::vector<uint32_t> expected_two_bit_state(state_index->begin(), state_index->end());
+  expected_two_bit_state.push_back(*scale_state_index);
+  EXPECT_TRUE(contains_subsequence(body, expected_two_bit_state))
+      << "adjacent shadow cells must use disjoint initializing/ready bit pairs";
+  const auto loop_branch = std::next(loop_control, expected_loop_control.size());
+  ASSERT_NE(loop_branch, body.end());
+  EXPECT_EQ(*loop_branch & 0xffff0000u, *exec_loop_encoding & 0xffff0000u);
+  EXPECT_LT(static_cast<int16_t>(*loop_branch), 0);
   EXPECT_EQ(*(loop_branch - 1), *masked_predicate);
+  EXPECT_EQ(std::ranges::count_if(body,
+                                  [&](uint32_t word) {
+                                    return (word & 0xffff0000u) ==
+                                               (*exec_loop_encoding & 0xffff0000u) &&
+                                           static_cast<int16_t>(word) < 0;
+                                  }),
+            2u)
+      << "wide lazy shadow requires one readiness poll and one publication loop";
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
 
   ConSanResult broken_loop = result;
@@ -1177,7 +1261,7 @@ TEST(ConSanMoi, InlineShadowLoopsOverEveryWideWorkgroupLocalCellCompactly) {
   const std::vector<std::string> loop_errors = validate_consan_modified_elf(bytes, broken_loop);
   EXPECT_TRUE(std::ranges::any_of(loop_errors, [](const std::string &error) {
     return error.find("workgroup-local exact-shadow publication semantics") != std::string::npos;
-  }));
+  })) << testing::PrintToString(loop_errors);
 }
 
 TEST(ConSanMoi, InlineWorkgroupShadowPublishesVisibleEvidenceOncePerAccess) {
@@ -1210,8 +1294,9 @@ TEST(ConSanMoi, InlineWorkgroupShadowPublishesVisibleEvidenceOncePerAccess) {
   ASSERT_NE(access, result.patches.end());
   ASSERT_EQ(access->scratch_vgpr, 16);
   EXPECT_LT(access->trampoline_size, 2100u)
-      << "two-range local diagnostics must retain the compact record writer; cumulative growth "
-         "moves large-code-object entry prologues outside the executable operating range";
+      << "two-range local diagnostics must retain the compact record writer while including the "
+         "deterministic bitmap cold path; cumulative growth moves large-code-object entry "
+         "prologues outside the executable operating range";
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1589,6 +1674,53 @@ TEST(ConSanMoi, Gfx1250InlineLargeLocalMirrorUsesGenerationTaggedExactCells) {
   EXPECT_EQ(prologue->workgroup_shadow_validity_base, 0u);
   EXPECT_EQ(prologue->workgroup_shadow_validity_size, 0u);
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+}
+
+TEST(ConSanMoi, Gfx1250CompactLocalMirrorUsesDisjointTwoBitValidityState) {
+  constexpr auto store = gfx1250::build_vds(gfx1250::kDsStoreB32Vds, {.addr = 0, .data0 = 0});
+  const std::array<uint32_t, 3> text_words = {
+      store[0],
+      store[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "compact_validity_state");
+  mutate_first_kernel_descriptor(
+      bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 68u * 1024u; });
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_inline_workgroup_shadow = true;
+  options.moi_max_workgroup_lds_bytes = 256u * 1024u;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+  EXPECT_TRUE(access->workgroup_shadow_compact);
+  EXPECT_TRUE(access->workgroup_shadow_lazy_initialization);
+  EXPECT_EQ(access->workgroup_shadow_validity_size, 4352u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> body =
+      text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  const uint16_t scratch = *access->scratch_vgpr;
+  const auto state_index =
+      ib::build_v_and_b32_literal(static_cast<uint16_t>(scratch + 8u), 15u,
+                                  static_cast<uint16_t>(scratch + 7u), ROCJITSU_CODE_ARCH_GFX1250);
+  const auto scale_state_index =
+      ib::build_v_lshlrev_b32(static_cast<uint16_t>(scratch + 8u), scalar_positive_inline_u32(1u),
+                              static_cast<uint16_t>(scratch + 8u), ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(state_index);
+  ASSERT_TRUE(scale_state_index);
+  std::vector<uint32_t> two_bit_state(state_index->begin(), state_index->end());
+  two_bit_state.push_back(*scale_state_index);
+  EXPECT_TRUE(contains_subsequence(body, two_bit_state))
+      << "adjacent gfx1250 shadow cells must use disjoint initializing/ready bit pairs";
 }
 
 TEST(ConSanMoi, Gfx1250GenerationTaggedShadowValidatesAtomicTokenWithWorkgroupKey) {
@@ -2320,7 +2452,55 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesWave32OwnerShift) {
   EXPECT_TRUE(contains_subsequence(words, expected_owner));
 }
 
-TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesGenerationTaggedLocalMirror) {
+TEST(ConSanMoi, InlineShadowPrivateHwIdOwnerRemapWaitsBeforeProbeValuRead) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_private_epoch = true;
+  options.moi_owner_source = ConSanMoiOwnerSource::HwId;
+  options.moi_owner_sgpr = 20u;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
+  const auto get_hw_id =
+      hwreg ? build_s_getreg_b32(*options.moi_owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4)
+            : std::nullopt;
+  const auto is_owner_zero = instrumentation::build_s_cmp_eq_u32(
+      *options.moi_owner_sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto replace_owner_zero = instrumentation::build_s_cselect_b32(
+      *options.moi_owner_sgpr, scalar_positive_inline_u32(1u << 5), *options.moi_owner_sgpr,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto wait_owner = build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(get_hw_id);
+  ASSERT_TRUE(is_owner_zero);
+  ASSERT_TRUE(replace_owner_zero);
+  ASSERT_TRUE(wait_owner);
+  const std::array<uint32_t, 6> expected_owner = {
+      *get_hw_id,
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      *is_owner_zero,
+      *replace_owner_zero,
+      *wait_owner,
+      build_v_mov_b32_e32(static_cast<uint16_t>(*access->scratch_vgpr + 4u),
+                          *options.moi_owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint32_t> access_words =
+      text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
+  EXPECT_TRUE(contains_subsequence(access_words, expected_owner));
+}
+
+TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesInitializedLocalMirror) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,
       0x00000000u, // ds_store_b32
@@ -2356,7 +2536,9 @@ TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesGenerationTaggedLocalMirror) {
   EXPECT_EQ(prologue->spilled_vgpr_count, 3u);
   EXPECT_EQ(access->workgroup_shadow_base, 4352u);
   EXPECT_EQ(access->workgroup_shadow_size, 8704u);
-  EXPECT_EQ(access->required_group_segment_size, 13056u);
+  EXPECT_EQ(access->workgroup_shadow_validity_base, 13056u);
+  EXPECT_EQ(access->workgroup_shadow_validity_size, 272u);
+  EXPECT_EQ(access->required_group_segment_size, 13328u);
   EXPECT_TRUE(access->workgroup_shadow_lazy_initialization);
   EXPECT_FALSE(access->workgroup_shadow_compact);
 
@@ -2373,21 +2555,21 @@ TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesGenerationTaggedLocalMirror) {
       ib::build_v_lshlrev_b32(static_cast<uint16_t>(scratch + 2u), scalar_positive_inline_u32(3u),
                               /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto shadow_base = ib::build_v_add_u32_literal(
-      scratch, 4352u, static_cast<uint16_t>(scratch + 2u), ROCJITSU_CODE_ARCH_RDNA4);
+      scratch, 13056u, static_cast<uint16_t>(scratch + 2u), ROCJITSU_CODE_ARCH_RDNA4);
   const auto store_wide = build_ds_store_b64(scratch, static_cast<uint16_t>(scratch + 1u),
                                              /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(shadow_offset);
   ASSERT_TRUE(shadow_base);
   ASSERT_TRUE(store_wide);
-  EXPECT_EQ(std::ranges::find(words, *shadow_offset), words.end());
-  EXPECT_FALSE(contains_subsequence(words, *shadow_base));
-  EXPECT_FALSE(contains_subsequence(words, *store_wide));
+  EXPECT_NE(std::ranges::find(words, *shadow_offset), words.end());
+  EXPECT_TRUE(contains_subsequence(words, *shadow_base));
+  EXPECT_TRUE(contains_subsequence(words, *store_wide));
   EXPECT_EQ(
       std::count(words.begin(), words.end(), *build_s_barrier_signal_all(ROCJITSU_CODE_ARCH_RDNA4)),
-      0);
+      1);
   EXPECT_EQ(
       std::count(words.begin(), words.end(), *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4)),
-      0);
+      1);
 }
 
 TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {

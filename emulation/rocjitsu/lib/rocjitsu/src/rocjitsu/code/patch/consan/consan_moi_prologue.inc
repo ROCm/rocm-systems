@@ -716,8 +716,10 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       const auto hwreg = build_hwreg_imm(kGfx12HwRegHwId1, 0, kGfx12HwIdOwnerBits);
       const auto get_hw_id =
           hwreg ? build_s_getreg_b32(*persistent_owner_sgpr, *hwreg, arch) : std::nullopt;
-      if (!get_hw_id || !append_moi_entry_salu_write(words, *get_hw_id, arch)) {
-        errors.emplace_back("ConSan MOI scalar owner prologue could not read HW_ID1");
+      if (!get_hw_id || !append_moi_entry_salu_write(words, *get_hw_id, arch) ||
+          (one_based_owner_ids &&
+           !append_gfx12_nonzero_hw_id_owner(words, *persistent_owner_sgpr, arch))) {
+        errors.emplace_back("ConSan MOI scalar owner prologue could not encode HW_ID1");
         return std::nullopt;
       }
       break;
@@ -976,6 +978,11 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       }
       if (!append_moi_entry_salu_write(words, *get_hw_id, arch)) {
         errors.emplace_back("ConSan MOI owner/epoch prologue cannot encode its HW_ID delay");
+        return std::nullopt;
+      }
+      if (one_based_owner_ids && !append_gfx12_nonzero_hw_id_owner(words, *owner_sgpr, arch)) {
+        errors.emplace_back("ConSan MOI owner/epoch prologue could not encode its nonzero HW_ID1 "
+                            "owner");
         return std::nullopt;
       }
       words.push_back(build_v_mov_b32_e32(owner_vgpr, *owner_sgpr, arch));

@@ -2074,6 +2074,9 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_TEST_KERNEL_FILTER=padded_atomic_ordered_lds_accesses"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MOI_OWNER_SOURCE=hw_id"
+                    # Stress the physical HW_ID zero-sentinel remap while the
+                    # structural unit tests cover its exact instruction shape.
+                    "CONSAN_SC_CLEAN_LAUNCHES=100"
                     "RJ_CONSAN_MAX_PATCHES=8"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
         )

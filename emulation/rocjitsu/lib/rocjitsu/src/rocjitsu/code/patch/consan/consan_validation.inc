@@ -2758,6 +2758,15 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
               ? decoded_local_exchange_b32_count + 2u * decoded_local_exchange_b64_count
               : decoded_local_exchange_b64_count;
       const bool needs_compact_loop = minimum_cell_count > decoded_local_exchange_cell_count;
+      // A bitmap-backed lazy mirror contributes one readiness-poll loop per
+      // logical exchange cell. A wide access whose cells share one generated
+      // exchange must additionally retain its outer publication loop; merely
+      // finding any backward branch would let a bitmap poll mask its removal.
+      const bool bitmap_backed_lazy_shadow =
+          patch.workgroup_shadow_lazy_initialization && patch.workgroup_shadow_validity_size != 0u;
+      const size_t minimum_backward_loop_count =
+          (bitmap_backed_lazy_shadow ? decoded_local_exchange_cell_count : 0u) +
+          (needs_compact_loop ? 1u : 0u);
       const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
       const uint16_t old_value_offset = cdna ? 6u : 5u;
       const auto expected_local_exchange_b32 = instrumentation::build_ds_storexchg_rtn_b32(
@@ -2779,7 +2788,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
           !expected_local_exchange_b64 || !expected_first_diagnostic_claim || decoded_legacy_swap ||
           decoded_cas_count != decoded_local_exchange_cell_count ||
           decoded_local_exchange_count == 0u || candidate == result.moi_candidates.end() ||
-          (needs_compact_loop && decoded_backward_local_loop_count == 0u) ||
+          decoded_backward_local_loop_count < minimum_backward_loop_count ||
           decoded_nonbackward_local_loop ||
           (patch.workgroup_shadow_compact
                ? count_pattern(*expected_local_exchange_b32) != decoded_local_exchange_b32_count ||
@@ -2798,6 +2807,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
             " decoded_local_cells=" + std::to_string(decoded_local_exchange_cell_count) +
             " minimum_cells=" + std::to_string(minimum_cell_count) +
             " backward_loops=" + std::to_string(decoded_backward_local_loop_count) +
+            " minimum_backward_loops=" + std::to_string(minimum_backward_loop_count) +
             " nonbackward_loop=" + std::to_string(decoded_nonbackward_local_loop) +
             " legacy_swap=" + std::to_string(decoded_legacy_swap) + " expected_exchange_b32=" +
             std::to_string(expected_local_exchange_b32 ? count_pattern(*expected_local_exchange_b32)

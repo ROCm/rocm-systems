@@ -1435,9 +1435,10 @@
     return true;
   if (consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow))
     return true;
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || !options.scratch_vgpr || !options.moi_exec_save_sgpr ||
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250) ||
+      !options.scratch_vgpr || !options.moi_exec_save_sgpr ||
       workgroup_shadow.validity_size == 0u) {
-    errors.emplace_back("ConSan MOI lazy local shadow requires gfx1250 packed validity state");
+    errors.emplace_back("ConSan MOI lazy local shadow requires gfx12 packed validity state");
     return false;
   }
 
@@ -1460,6 +1461,8 @@
       validity_address_vgpr, workgroup_shadow.validity_base, temporary_vgpr, arch);
   const auto state_index =
       instrumentation::build_v_and_b32_literal(initializing_mask_vgpr, 15u, saved_cell_vgpr, arch);
+  const auto scale_state_index = instrumentation::build_v_lshlrev_b32(
+      initializing_mask_vgpr, scalar_positive_inline_u32(1u), initializing_mask_vgpr, arch);
   const auto initializing_mask = instrumentation::build_v_lshlrev_b32(
       initializing_mask_vgpr, vector_source_vgpr(initializing_mask_vgpr), ready_mask_vgpr, arch);
   const auto ready_mask = instrumentation::build_v_lshlrev_b32(
@@ -1497,21 +1500,22 @@
   const auto continue_poll = instrumentation::build_s_cbranch_execnz(0, arch);
   const auto restore_bounded =
       instrumentation::build_s_mov_b64(kRdna4ExecLo, bounded_exec_sgpr, arch);
-  if (!state_word || !scale_state_word || !validity_address || !state_index || !initializing_mask ||
-      !ready_mask || !claim || !prior_claim || !won_claim || !narrow_winners ||
-      !shadow_byte_offset || !shadow_address || !clear_slot || !publish_ready ||
+  if (!state_word || !scale_state_word || !validity_address || !state_index || !scale_state_index ||
+      !initializing_mask || !ready_mask || !claim || !prior_claim || !won_claim ||
+      !narrow_winners || !shadow_byte_offset || !shadow_address || !clear_slot || !publish_ready ||
       !restore_participants || !observe_ready || !observed_ready || !is_ready || !remove_ready ||
       !skip_initialization || !continue_poll || !restore_bounded) {
     errors.emplace_back(
-        "ConSan MOI lazy local shadow could not encode packed gfx1250 state transitions");
+        "ConSan MOI lazy local shadow could not encode packed gfx12 state transitions");
     return false;
   }
 
   words.push_back(*state_word);
   words.push_back(*scale_state_word);
   words.insert(words.end(), validity_address->begin(), validity_address->end());
-  words.insert(words.end(), state_index->begin(), state_index->end());
   words.push_back(build_v_mov_b32_e32(ready_mask_vgpr, scalar_positive_inline_u32(1u), arch));
+  words.insert(words.end(), state_index->begin(), state_index->end());
+  words.push_back(*scale_state_index);
   words.push_back(*initializing_mask);
   words.push_back(*ready_mask);
   // The steady-state path observes ready with an ordinary LDS load and
@@ -1735,7 +1739,8 @@
   words.insert(words.end(), local_address->begin(), local_address->end());
   words.insert(words.end(), exchange->begin(), exchange->end());
   if (!append_moi_lds_wait(words, arch)) {
-    errors.emplace_back("ConSan MOI inline-shadow local publish could not encode its LDS wait");
+    errors.emplace_back(
+        "ConSan MOI inline-shadow local publish could not encode its LDS result wait");
     return false;
   }
 
@@ -1866,11 +1871,11 @@
             ? std::optional<uint16_t>(static_cast<uint16_t>(first_snapshot + 1u))
             : std::optional<uint16_t>(first_snapshot);
   } else if (moi_load_clobbers_address(candidate)) {
-    saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
-        consan_detail::inline_shadow_loop_counter_vgpr(
-            *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
-            options.moi_track_atomics) +
-        inline_shadow_loop_scratch_count(options, candidate));
+    saved_lds_byte_offset_vgpr =
+        static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
+                                  *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
+                                  options.moi_track_atomics) +
+                              inline_shadow_loop_scratch_count(options, candidate));
   }
 
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
@@ -2127,10 +2132,9 @@
         if (cell_range.cell_count > 1u) {
           if (cell_index != 0u)
             continue;
-          const uint16_t loop_counter_vgpr =
-              consan_detail::inline_shadow_loop_counter_vgpr(
-                  *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
-                  options.moi_track_atomics);
+          const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
+              *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
+              options.moi_track_atomics);
           const uint16_t loop_offset_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
           if (range.static_byte_offset == 0u) {
             words.push_back(build_v_mov_b32_e32(loop_offset_vgpr,
@@ -2217,10 +2221,8 @@
         continue;
       }
       const bool loop_external_cells = cell_range.cell_count > 1u;
-      const uint16_t loop_counter_vgpr =
-          consan_detail::inline_shadow_loop_counter_vgpr(
-              *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
-              options.moi_track_atomics);
+      const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
+          *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(), options.moi_track_atomics);
       const uint16_t saved_workgroup_key_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
       if (loop_external_cells) {
         if (cell_index != 0u)

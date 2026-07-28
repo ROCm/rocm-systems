@@ -14,6 +14,27 @@ struct MoiPrivateEpochLayout {
   return static_cast<uint8_t>(encoded + 1u);
 }
 
+[[nodiscard]] bool append_gfx12_nonzero_hw_id_owner(std::vector<uint32_t> &words,
+                                                    uint16_t owner_sgpr, rj_code_arch_t arch) {
+  // HW_ID1[4:0] is WAVE_ID and HW_ID1[9:8] is SIMD_ID. Bits 5 through 7 are
+  // unassigned, so WAVE_ID 32 is not a hardware owner. Inline metadata reserves
+  // zero for empty entries; remap only hardware owner zero to that unused value
+  // and leave every other hardware owner unchanged.
+  const auto is_zero =
+      instrumentation::build_s_cmp_eq_u32(owner_sgpr, scalar_positive_inline_u32(0), arch);
+  const auto replace_zero = instrumentation::build_s_cselect_b32(
+      owner_sgpr, scalar_positive_inline_u32(kGfx12InlineOwnerZeroReplacement), owner_sgpr, arch);
+  const auto wait_owner = build_s_wait_alu_sa_sdst0(arch);
+  if (!is_zero || !replace_zero || !wait_owner)
+    return false;
+  words.push_back(*is_zero);
+  words.push_back(*replace_zero);
+  // The remap is an SALU write consumed by a later VALU. RDNA4 requires the
+  // scalar-destination dependency drain before that cross-pipeline read.
+  words.push_back(*wait_owner);
+  return true;
+}
+
 [[nodiscard]] std::optional<uint16_t>
 common_moi_private_owner_shift(std::span<const uint8_t> image,
                                const ResolvedMoiScratchPlan &resources,
@@ -181,14 +202,16 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
           "ConSan MOI workgroup shadow requires fixed LDS that fits with its exact mirror");
       return std::nullopt;
     }
-    // RDNA4 LDS contents are not guaranteed to begin zeroed. Qualify every
-    // local cell with a dispatch-scoped workgroup generation rather than
-    // depending on a large entry-prologue clear. Atomic token tables retain
-    // the persistent coordinate key separately, so synchronized local cells
-    // no longer need to share their bounded generation with global metadata.
+    // RDNA4 LDS contents are not guaranteed to begin zeroed, and dispatch IDs
+    // are queue-local: concurrent processes can reuse both an LDS allocation
+    // and the same bounded generation. Clear a compact validity bitmap at
+    // entry and initialize exact cells on first use. If the bitmap does not
+    // fit, retain the full-width layout and clear its mirror eagerly.
     if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
-      layout = plan_consan_moi_generation_tagged_workgroup_shadow(
-          descriptor.group_segment_fixed_size, max_workgroup_lds_bytes);
+      if (auto lazy_layout = plan_consan_moi_lazy_workgroup_shadow(
+              descriptor.group_segment_fixed_size, max_workgroup_lds_bytes)) {
+        layout = lazy_layout;
+      }
     }
     // A near-capacity exact mirror is still useful when either its cells are
     // compacted or its eager clear is replaced by a validity bitmap. Preserve
@@ -2225,7 +2248,18 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       errors.emplace_back("ConSan MOI inline-shadow probe could not derive owner from HW_ID1");
       return false;
     }
+    const auto get_hw_id_delay = instrumentation::build_salu_dependency_delay(arch);
+    if (!get_hw_id_delay) {
+      errors.emplace_back("ConSan MOI inline-shadow probe could not encode its HW_ID1 read delay");
+      return false;
+    }
     words.push_back(*get_hw_id);
+    words.push_back(*get_hw_id_delay);
+    if (!append_gfx12_nonzero_hw_id_owner(words, *options.moi_owner_sgpr, arch)) {
+      errors.emplace_back("ConSan MOI inline-shadow probe could not encode its nonzero HW_ID1 "
+                          "owner");
+      return false;
+    }
     words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_owner_sgpr, arch));
     break;
   }
