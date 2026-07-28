@@ -1283,6 +1283,14 @@ void GraphExecSegmented::ComputeCompletionSignalFlags() {
 //   - sid rotates at leaf segments (end of branch), not at forks
 //   - each root segment starts on the next stream (round-robin across roots)
 void GraphExecSegmented::DFSStreamAssignment() {
+  // Use actual graph parallelism (max concurrent segments at any level) as the
+  // pool size — avoids allocating more streams than the graph can use in parallel,
+  // which would add unnecessary cross-stream barrier/signal overhead.
+  auto getPoolSize = [&](int dev_id) -> int {
+    auto it = max_streams_dev_.find(dev_id);
+    return (it != max_streams_dev_.end() && it->second > 0) ? it->second : 1;
+  };
+
   // Reset all stream IDs
   for (auto& seg : segments_) {
     seg.stream_id = -1;
@@ -1295,8 +1303,11 @@ void GraphExecSegmented::DFSStreamAssignment() {
   for (int i = 0; i < static_cast<int>(segments_.size()); ++i) {
     if (segments_[i].stream_id != -1) continue;
 
-    // Stack carries segment ids — sid is shared across the entire DFS from this root
-    // exactly like ScheduleOneNode's single `sid` variable
+    // Determine pool size for this entry's device
+    int pool = getPoolSize(segments_[i].dev_id);
+
+    // Stack carries segment ids — sid is shared across the entire DFS from this
+    // entry point, exactly like ScheduleOneNode's single `sid` variable.
     std::vector<int> pending;
     pending.push_back(i);
 
@@ -1309,7 +1320,7 @@ void GraphExecSegmented::DFSStreamAssignment() {
 
       if (cur.stream_id != -1) continue;
 
-      cur.stream_id = sid % static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
+      cur.stream_id = sid % pool;
 
       // Push unassigned successors in reverse order (preserve left-to-right)
       bool end_of_branch = true;
@@ -1324,12 +1335,12 @@ void GraphExecSegmented::DFSStreamAssignment() {
 
       // Rotate sid at leaf — mirrors ScheduleOneNode exactly
       if (end_of_branch) {
-        sid = (sid + 1) % static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
+        sid = (sid + 1) % pool;
       }
     }
 
-    // Mirrors ScheduleNodes()'s stream_id = (stream_id+1) % pool after each root
-    sid = (sid + 1) % static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
+    // Mirrors ScheduleNodes()'s stream_id = (stream_id+1) % pool after each entry
+    sid = (sid + 1) % pool;
   }
 
   ComputeCompletionSignalFlags();
