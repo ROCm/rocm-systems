@@ -53,8 +53,13 @@ static void VectorScalarAddELF(benchmark::State& state) {
   for (auto _ : state) {
     bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
-    unsigned int opcode = 3;
-    auto run = kernel(opcode, 0, 0, bo_in, bo_out);
+    // The full-ELF flow embeds the instruction sequence in the ELF, so the
+    // kernel takes only the runtime-sequence buffers (in, out) positionally --
+    // not the xclbin ABI's (opcode, instr, ninstr, in, out).
+    auto run = xrt::run(kernel);
+    run.set_arg(0, bo_in);
+    run.set_arg(1, bo_out);
+    run.start();
     run.wait2();
 
     bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
