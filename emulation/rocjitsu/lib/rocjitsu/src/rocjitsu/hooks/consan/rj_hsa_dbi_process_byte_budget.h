@@ -3,10 +3,11 @@
 
 #pragma once
 
+#include "rocjitsu/checked_byte_budget.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
-#include <limits>
 #include <optional>
 
 namespace rocjitsu::consan_hook {
@@ -18,11 +19,7 @@ namespace rocjitsu::consan_hook {
 /// lock so admission and ownership form a single transaction.
 class ProcessByteBudget {
 public:
-  enum class ChargeOutcome : uint8_t {
-    WithinLimit,
-    LimitExceeded,
-    AccountingOverflow,
-  };
+  using ChargeOutcome = byte_accounting::ChargeOutcome;
 
   struct ChargePlan {
     ChargeOutcome outcome = ChargeOutcome::AccountingOverflow;
@@ -42,9 +39,7 @@ public:
   [[nodiscard]] ChargePlan plan_charge(uint64_t charge_bytes,
                                        std::optional<uint64_t> limit_bytes) const {
     const std::optional<uint64_t> required_bytes =
-        charge_bytes <= std::numeric_limits<uint64_t>::max() - live_bytes_
-            ? std::optional<uint64_t>(live_bytes_ + charge_bytes)
-            : std::nullopt;
+        byte_accounting::checked_allocation_charge(live_bytes_, 1, charge_bytes);
     ChargeOutcome outcome = ChargeOutcome::WithinLimit;
     if (!required_bytes) {
       outcome = ChargeOutcome::AccountingOverflow;

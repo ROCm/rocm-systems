@@ -395,6 +395,7 @@ add_executable(
     buffer_operand_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
+    checked_byte_budget_test.cpp
     transcendental_test.cpp
     analysis/liveness_test.cpp
     analysis/waitcheck_c_api_test.cpp

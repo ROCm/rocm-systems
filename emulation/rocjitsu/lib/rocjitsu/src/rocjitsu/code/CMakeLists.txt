@@ -3,6 +3,7 @@
 
 rj_add_object_library(rocjitsu_code
     amdgpu_code_object.cpp
+    amdgpu_kernel_metadata.cpp
     basic_block.cpp
     executable.cpp
     file_io.cpp

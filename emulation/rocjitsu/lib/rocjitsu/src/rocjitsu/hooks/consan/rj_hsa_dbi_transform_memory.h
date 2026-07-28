@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/patch/consan/consan.h"
 
@@ -119,18 +120,12 @@ inline constexpr std::array<ConSanTransformOwnership, 3> kConSanTransformOwnersh
 [[nodiscard]] inline std::optional<uint64_t>
 consan_transform_phase_reservation_bytes(const ConSanTransformOwnership &ownership,
                                          uint64_t input_image_bytes, uint64_t maximum_image_bytes) {
-  if ((ownership.input_image_copies != 0 &&
-       input_image_bytes > std::numeric_limits<uint64_t>::max() / ownership.input_image_copies) ||
-      (ownership.maximum_image_copies != 0 &&
-       maximum_image_bytes >
-           std::numeric_limits<uint64_t>::max() / ownership.maximum_image_copies)) {
+  const auto input_reservation = byte_accounting::checked_allocation_charge(
+      0, ownership.input_image_copies, input_image_bytes);
+  if (!input_reservation)
     return std::nullopt;
-  }
-  const uint64_t input_reservation = input_image_bytes * ownership.input_image_copies;
-  const uint64_t maximum_image_reservation = maximum_image_bytes * ownership.maximum_image_copies;
-  if (input_reservation > std::numeric_limits<uint64_t>::max() - maximum_image_reservation)
-    return std::nullopt;
-  return input_reservation + maximum_image_reservation;
+  return byte_accounting::checked_allocation_charge(
+      *input_reservation, ownership.maximum_image_copies, maximum_image_bytes);
 }
 
 [[nodiscard]] inline std::optional<ConSanTransformReservationEstimate>

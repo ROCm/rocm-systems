@@ -290,6 +290,16 @@ constexpr inline std::optional<T> checked_mul(T lhs, T rhs) {
   return lhs * rhs;
 }
 
+/// @brief Round @p val up to an arbitrary nonzero alignment when representable.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline std::optional<T> checked_align_up(T val, T alignment) {
+  if (alignment == 0)
+    return std::nullopt;
+  const T remainder = val % alignment;
+  return remainder == 0 ? std::optional<T>(val) : checked_add(val, alignment - remainder);
+}
+
 /// @brief Return true when @p val is aligned to @p alignment.
 /// @param alignment Must be a power of 2.
 template <typename T>

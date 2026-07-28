@@ -7,8 +7,10 @@
 #ifndef ROCJITSU_CODE_AMDGPU_CODE_OBJECT_H_
 #define ROCJITSU_CODE_AMDGPU_CODE_OBJECT_H_
 
+#include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/rj_code.h"
+#include "util/bit.h"
 
 #include <array>
 #include <cstdint>
@@ -68,44 +70,26 @@ struct AmdGpuFunctionInfo {
 
 namespace amdgpu_code_object_detail {
 
-/// Parser-private layout models and checked ownership-charge arithmetic.
+/// Parser-private layout models and section classification helpers.
 ///
 /// The private container charges remain expressible as constant expressions in
 /// this header and are pinned against the production types in
 /// amdgpu_code_object.cpp.
-[[nodiscard]] inline constexpr uint64_t aligned_charge(uint64_t bytes, uint64_t alignment) {
-  return ((bytes + alignment - 1u) / alignment) * alignment;
-}
-
 inline constexpr uint64_t kAssociativeEntryBookkeepingBytes = 4 * sizeof(void *);
 inline constexpr uint64_t kViewedBooleanEntryBytes =
     sizeof(std::pair<const std::string_view, bool>);
-inline constexpr uint64_t kFunctionSymbolEntryBytes = aligned_charge(
-    sizeof(std::string_view) + 4 * sizeof(uint64_t) + sizeof(bool), alignof(uint64_t));
+inline constexpr uint64_t kFunctionSymbolEntryBytes =
+    util::checked_align_up(sizeof(std::string_view) + 4 * sizeof(uint64_t) + sizeof(bool),
+                           alignof(uint64_t))
+        .value();
 inline constexpr uint64_t kFunctionEvidenceEntryBytes =
-    aligned_charge(3 * sizeof(uint64_t) + sizeof(bool), alignof(uint64_t));
+    util::checked_align_up(3 * sizeof(uint64_t) + sizeof(bool), alignof(uint64_t)).value();
 inline constexpr uint64_t kKernelMetadataEntryBytes =
-    aligned_charge(sizeof(std::string_view) + sizeof(bool) + sizeof(std::optional<bool>) +
-                       sizeof(std::optional<uint16_t>) +
-                       sizeof(std::optional<std::array<uint32_t, 3>>) + sizeof(uint64_t),
-                   alignof(void *));
-
-[[nodiscard]] inline constexpr std::optional<uint64_t>
-checked_allocation_charge(uint64_t accumulated, uint64_t count, uint64_t element_bytes) {
-  if (count != 0 && element_bytes > std::numeric_limits<uint64_t>::max() / count)
-    return std::nullopt;
-  const uint64_t bytes = count * element_bytes;
-  if (bytes > std::numeric_limits<uint64_t>::max() - accumulated)
-    return std::nullopt;
-  return accumulated + bytes;
-}
-
-[[nodiscard]] inline constexpr std::optional<uint64_t>
-excess_vector_charge(uint64_t capacity, uint64_t requested, uint64_t element_bytes) {
-  if (capacity < requested)
-    return std::nullopt;
-  return checked_allocation_charge(0, capacity - requested, element_bytes);
-}
+    util::checked_align_up(sizeof(std::string_view) + sizeof(bool) + sizeof(std::optional<bool>) +
+                               sizeof(std::optional<uint16_t>) +
+                               sizeof(std::optional<std::array<uint32_t, 3>>) + sizeof(uint64_t),
+                           alignof(void *))
+        .value();
 
 inline constexpr uint64_t kSectionClassificationBitsPerWord = std::numeric_limits<uint64_t>::digits;
 
@@ -113,7 +97,7 @@ inline constexpr uint64_t kSectionClassificationBitsPerWord = std::numeric_limit
 section_classification_charge(uint64_t section_count) {
   const uint64_t word_count = section_count / kSectionClassificationBitsPerWord +
                               (section_count % kSectionClassificationBitsPerWord != 0);
-  return checked_allocation_charge(0, word_count, sizeof(uint64_t));
+  return byte_accounting::checked_allocation_charge(0, word_count, sizeof(uint64_t));
 }
 
 [[nodiscard]] inline constexpr bool set_section_classification(std::span<uint64_t> words,
@@ -133,13 +117,6 @@ section_classification_charge(uint64_t section_count) {
           (uint64_t{1} << (section_index % kSectionClassificationBitsPerWord))) != 0;
 }
 
-static_assert(checked_allocation_charge(0, 2, std::numeric_limits<uint64_t>::max() / 2) ==
-              std::numeric_limits<uint64_t>::max() - 1);
-static_assert(checked_allocation_charge(1, 1, std::numeric_limits<uint64_t>::max() - 1) ==
-              std::numeric_limits<uint64_t>::max());
-static_assert(checked_allocation_charge(std::numeric_limits<uint64_t>::max(), 0, 8) ==
-              std::numeric_limits<uint64_t>::max());
-static_assert(excess_vector_charge(0, 0, 8) == 0);
 static_assert(section_classification_charge(0) == 0);
 static_assert(section_classification_charge(1) == sizeof(uint64_t));
 static_assert(section_classification_charge(kSectionClassificationBitsPerWord) == sizeof(uint64_t));
