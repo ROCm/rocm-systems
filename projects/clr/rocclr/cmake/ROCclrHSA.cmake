@@ -99,7 +99,6 @@ else()
     endif()
   endif()
 endif()
-
 find_package(OpenGL REQUIRED)
 
 target_sources(rocclr PRIVATE

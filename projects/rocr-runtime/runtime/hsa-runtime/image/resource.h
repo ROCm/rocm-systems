@@ -81,8 +81,8 @@ typedef struct metadata_amd_s {
 
 /// @brief What an imported interop metadata descriptor carries in its SRD words.
 enum class InteropDescriptorContent {
-  /// Words 0-7 hold a real driver-supplied SRD (GL/D3D interop fills it via CLQueryResource):
-  /// use it verbatim.
+  /// Words 0-7 hold a real driver-supplied SRD (GL/D3D interop fills it via
+  /// wglResourceAttachAMD/CLQueryResource): use it verbatim.
   kDriverSrd,
   /// Words 0-7 are empty; only the surface swizzle mode + pipe-bank-XOR are provided in the
   /// descriptor's fallback slots (Vulkan image interop on Windows, where the AMD Vulkan driver

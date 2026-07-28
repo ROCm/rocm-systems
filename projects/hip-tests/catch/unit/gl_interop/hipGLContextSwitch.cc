@@ -56,15 +56,58 @@ constexpr size_t kLargeBufferSize = 4096 * sizeof(float);  // For tests needing 
 //==============================================================================
 
 /**
- * @brief RAII wrapper for a GLUT window with its own GL context.
+ * @brief Process-wide pool of persistent GLUT windows for the context-switch tests.
  *
- * Extends the common GLUT initialization pattern with support for multiple
- * windows and context switching. Each window has an associated GL context.
+ * These tests deliberately use multiple distinct windows/contexts (that is what a context switch
+ * is), but creating and destroying a fresh window per GLUTWindow accumulates native window handles
+ * in freeglut and eventually hangs the window manager (seen on Linux) — the same accumulation that
+ * made the common header switch to a single persistent shared window. So windows here are created
+ * once, kept alive for the whole process, and recycled (acquire/release a slot) across tests. At
+ * most a handful are ever live simultaneously (4, for the Patterns / RapidMultiContextSwitching
+ * tests), so the pool never exceeds a few windows regardless of how many tests run.
  *
- * These tests deliberately create multiple windows (that is what context switching exercises), so
- * unlike GLUTContextScopeGuard they do not share a single window. They MUST still share the single
- * process-wide glutInit() via EnsureGlutInitialized(); a second glutInit() raises an "illegal
- * glutInit() reinitialization attempt" error and can hang the run.
+ * Tests run serially (Catch2 is single-threaded here), so no synchronization is needed.
+ */
+class GlutWindowPool {
+ public:
+  // Returns a slot index whose backing GLUT window is unused; lazily creates a new persistent
+  // window if none is free. The window is never destroyed.
+  int acquire() {
+    for (size_t i = 0; i < window_ids_.size(); ++i) {
+      if (!in_use_[i]) {
+        in_use_[i] = true;
+        return static_cast<int>(i);
+      }
+    }
+    glutInitWindowSize(64, 64);
+    int id = glutCreateWindow("");
+    REQUIRE(id > 0);
+    window_ids_.push_back(id);
+    in_use_.push_back(true);
+    return static_cast<int>(window_ids_.size() - 1);
+  }
+
+  void release(int slot) { in_use_[slot] = false; }
+  int id(int slot) const { return window_ids_[slot]; }
+
+ private:
+  std::vector<int> window_ids_;
+  std::vector<bool> in_use_;
+};
+
+inline GlutWindowPool& glutWindowPool() {
+  static GlutWindowPool pool;
+  return pool;
+}
+
+/**
+ * @brief RAII handle to a pooled GLUT window with its own GL context.
+ *
+ * Borrows a persistent window from glutWindowPool() on construction and returns it on destruction
+ * WITHOUT destroying the underlying window (see GlutWindowPool for why). Concurrently-live handles
+ * always map to distinct pool windows, so their id()s differ — the property the switch tests check.
+ * All handles MUST share the single process-wide glutInit() via EnsureGlutInitialized(); a second
+ * glutInit() raises an "illegal glutInit() reinitialization attempt" error and can hang the run.
  */
 class GLUTWindow {
  public:
@@ -73,9 +116,8 @@ class GLUTWindow {
     if (glut_init_failed) {
       HIP_SKIP_TEST("GLUT Init Failed");
     }
-    // Smaller windows for the rapid context-switching tests that create many windows.
-    glutInitWindowSize(64, 64);
-    window_id_ = glutCreateWindow("");
+    slot_ = glutWindowPool().acquire();
+    window_id_ = glutWindowPool().id(slot_);
     REQUIRE(window_id_ > 0);
 
 #ifdef USE_GLEW
@@ -83,7 +125,8 @@ class GLUTWindow {
     GLenum err = glewInit();
     if (err != GLEW_OK) {
       fprintf(stderr, "GLEW init failed: %s\n", glewGetErrorString(err));
-      glutDestroyWindow(window_id_);
+      glutWindowPool().release(slot_);
+      slot_ = -1;
       window_id_ = 0;
       HIP_SKIP_TEST(HipTest::SkipReason::kGlewInitFailed);
     }
@@ -91,8 +134,8 @@ class GLUTWindow {
   }
 
   ~GLUTWindow() {
-    if (window_id_ > 0) {
-      glutDestroyWindow(window_id_);
+    if (slot_ >= 0) {
+      glutWindowPool().release(slot_);
     }
   }
 
@@ -105,6 +148,7 @@ class GLUTWindow {
   GLUTWindow& operator=(GLUTWindow&&) = delete;
 
  private:
+  int slot_ = -1;
   int window_id_ = 0;
 };
 

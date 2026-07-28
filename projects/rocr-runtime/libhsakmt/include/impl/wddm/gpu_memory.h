@@ -134,6 +134,9 @@ struct GpuMemoryDesc {
     swizzle_mode = 0;
     tile_swizzle = 0;
     swizzle_valid = false;
+    compression_mode = 0;
+    max_comp_blk = 0;
+    max_uncomp_blk = 0;
   }
 
   Wkmi::AllocDomain domain;
@@ -151,6 +154,9 @@ struct GpuMemoryDesc {
   uint32_t swizzle_mode;  // from VCAM_SURFACE_DESC.swizzleMode; 0 if not available
   uint32_t tile_swizzle;  // from VCAM_SURFACE_DESC.ulTileSwizzle; 0 if not available
   bool swizzle_valid;     // true if swizzle_mode/tile_swizzle are populated from driver data
+  uint32_t compression_mode;  // VCAM_SURFACE_DESC.ulCompressionMode (0 = uncompressed). gfx12+.
+  uint32_t max_comp_blk;      // VCAM_SURFACE_DESC.maxCompressedBlockSize. gfx12+.
+  uint32_t max_uncomp_blk;    // VCAM_SURFACE_DESC.maxUncompressedBlockSize. gfx12+.
 };
 
 struct SharedHandleInfo {
@@ -165,6 +171,9 @@ struct SharedHandleInfo {
   uint32_t swizzle_mode;  // VCAM_SURFACE_DESC.swizzleMode (0 = LINEAR when valid=false)
   uint32_t tile_swizzle;  // VCAM_SURFACE_DESC.ulTileSwizzle (pipe-bank XOR)
   bool swizzle_valid;     // true if swizzle_mode/tile_swizzle were populated from driver data
+  uint32_t compression_mode;  // VCAM_SURFACE_DESC.ulCompressionMode (0 = uncompressed). gfx12+.
+  uint32_t max_comp_blk;      // VCAM_SURFACE_DESC.maxCompressedBlockSize. gfx12+.
+  uint32_t max_uncomp_blk;    // VCAM_SURFACE_DESC.maxUncompressedBlockSize. gfx12+.
 };
 
 using GpuMemoryHandle = void *;
@@ -209,6 +218,9 @@ public:
     surface_metadata_.version = 1;
     surface_metadata_.swizzle_mode = desc_.swizzle_mode;
     surface_metadata_.tile_swizzle = desc_.tile_swizzle;
+    surface_metadata_.compression_mode = desc_.compression_mode;
+    surface_metadata_.max_comp_blk = desc_.max_comp_blk;
+    surface_metadata_.max_uncomp_blk = desc_.max_uncomp_blk;
   }
   inline void SetGpuAddress(uint64_t gpu_addr) { desc_.gpu_addr = gpu_addr; }
   inline void SetCpuAddress(void* cpu_addr) { desc_.cpu_addr = cpu_addr; }
@@ -291,7 +303,8 @@ private:
   bool is_phymem_created = false; // status of physical memory allocation
   bool is_sysmem_locked_ = false; // kSystem allocation pinned via D3DKMTLock2
 
-  uint32_t mapping_count_ = 1; // Number of outstanding GPU mappings of a user pointer. 
+  // Number of outstanding GPU mappings of a user pointer.
+  uint32_t mapping_count_ = 1;
   HsaWddmSurfaceMetadata surface_metadata_{}; // stable storage for swizzle metadata blob
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemory);

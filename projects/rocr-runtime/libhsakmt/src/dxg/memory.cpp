@@ -575,7 +575,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
                                           reinterpret_cast<void *>(gpu_mem->GpuAddress()):
                                           reinterpret_cast<void*>(gpu_mem->HandleApeAddress());
   // Populate swizzle metadata for the ROCr interop layer to use as a fallback when
-  // the DXX extension (CLQueryResource11/CLQueryResource) is unavailable.
+  // the DXX extension (CLQueryResource11/CLQueryResource) or GL extension(wglResourceAttachAMD)
+  // is unavailable.
   const HsaWddmSurfaceMetadata* meta = gpu_mem->GetSurfaceMetadata();
   GraphicsResourceInfo->Metadata = meta;
   GraphicsResourceInfo->MetadataSizeInBytes = meta ? sizeof(HsaWddmSurfaceMetadata) : 0;

@@ -218,13 +218,6 @@ struct VideoBiosInfo {
   char date[24];        // "yyyy/mm/dd hh:mm"
 };
 
-/// Driver identification from KMTQAITYPE_QUERYREGISTRY adapter keys.
-struct DriverRegInfo {
-  char radeon_software_version[256]; // RadeonSoftwareVersion key
-  char release_version[256];         // ReleaseVersion key (parsed version)
-  char driver_desc[256];             // DriverDesc key
-  char adapter_string[MAX_PATH];     // AdapterString from KMTQAITYPE_ADAPTERREGISTRYINFO
-};
 
 // ============================================================================
 // GPU Telemetry Functions
@@ -253,8 +246,6 @@ NTSTATUS QueryChipsetId(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
 NTSTATUS QueryVideoBiosInfo(D3DKMT_HANDLE adapter, D3DKMT_HANDLE device,
                             VideoBiosInfo* out);
 
-/// @brief Read driver version strings and adapter name from registry.
-NTSTATUS QueryDriverRegInfo(D3DKMT_HANDLE adapter, DriverRegInfo* out);
 
 // ============================================================================
 // Device Query Functions

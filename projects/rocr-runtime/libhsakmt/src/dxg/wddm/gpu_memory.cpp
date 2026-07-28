@@ -744,6 +744,9 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
     desc_.swizzle_mode = shared_info_ptr->swizzle_mode;
     desc_.tile_swizzle = shared_info_ptr->tile_swizzle;
     desc_.swizzle_valid = shared_info_ptr->swizzle_valid;
+    desc_.compression_mode = shared_info_ptr->compression_mode;
+    desc_.max_comp_blk = shared_info_ptr->max_comp_blk;
+    desc_.max_uncomp_blk = shared_info_ptr->max_uncomp_blk;
     if (desc_.size == 0) {
       pr_err("import failed: could not determine allocation size from shared handle\n");
       return ErrorCode::InvalidateParams;
@@ -795,6 +798,9 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
           shared_info_ptr->swizzle_mode = swizzle_info.swizzle_mode;
           shared_info_ptr->tile_swizzle = swizzle_info.tile_swizzle;
           shared_info_ptr->swizzle_valid = swizzle_info.valid;
+          shared_info_ptr->compression_mode = swizzle_info.compression_mode;
+          shared_info_ptr->max_comp_blk = swizzle_info.max_comp_blk;
+          shared_info_ptr->max_uncomp_blk = swizzle_info.max_uncomp_blk;
         }
       }
       // If wkmi returned zero size the private data is not in UMDKMDIF format (e.g. a
@@ -842,6 +848,9 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
           shared_info_ptr->swizzle_mode = swizzle_info.swizzle_mode;
           shared_info_ptr->tile_swizzle = swizzle_info.tile_swizzle;
           shared_info_ptr->swizzle_valid = swizzle_info.valid;
+          shared_info_ptr->compression_mode = swizzle_info.compression_mode;
+          shared_info_ptr->max_comp_blk = swizzle_info.max_comp_blk;
+          shared_info_ptr->max_uncomp_blk = swizzle_info.max_uncomp_blk;
         }
       }
       // Same fallback as the KMT path: foreign D3D11 resource with non-UMDKMDIF private data.

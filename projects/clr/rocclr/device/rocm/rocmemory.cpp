@@ -262,9 +262,18 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
       // reconstruct the SRD for an imported tiled surface (Vulkan image interop).
       amdImageDesc_->data[HSA_WDDM_SWIZZLE_MODE_DATA_OFFSET] = wddm_meta->swizzle_mode;
       amdImageDesc_->data[HSA_WDDM_TILE_SWIZZLE_DATA_OFFSET] = wddm_meta->tile_swizzle;
+      // gfx12 compression state (0 == uncompressed); the image manager applies these to the SRD's
+      // WORD6 compression fields for imported surfaces so shader image loads decode correctly.
+      amdImageDesc_->data[HSA_WDDM_COMPRESSION_MODE_DATA_OFFSET] = wddm_meta->compression_mode;
+      amdImageDesc_->data[HSA_WDDM_MAX_COMP_BLK_DATA_OFFSET] = wddm_meta->max_comp_blk;
+      amdImageDesc_->data[HSA_WDDM_MAX_UNCOMP_BLK_DATA_OFFSET] = wddm_meta->max_uncomp_blk;
     }
   }
 #else
+  // On Linux the AMD Vulkan driver (radv or amdvlk) stamps the shared BO with a real driver SRD in
+  // the amdgpu umd_metadata (returned here as a metadata_amd_t: {version, deviceID, srd word0..7}).
+  // Copy it into amdImageDesc_ so the image manager builds the imported tiled SRD from it. ROCr
+  // overrides the SRD base address with the ROCr-mapped VA, so the exporter's VA here is harmless.
   if ((amdImageDesc_ != nullptr) && (metadata_size != 0) &&
       (reinterpret_cast<hsa_amd_image_descriptor_t*>(metadata)->deviceID ==
        amdImageDesc_->deviceID)) {
@@ -1043,14 +1052,15 @@ bool Buffer::create(bool alloc_local) {
     amd::InteropObject* interop = owner()->getInteropObj();
     auto ext_memory = interop->asExternalMemory();
     if (ext_memory != nullptr) {
-#if IS_WINDOWS
-      // The AMD Vulkan driver does not expose an extension to query an imported image's SRD.
-      // Instead, libhsakmt returns the surface's swizzle mode + pipe-bank-XOR as
-      // HsaWddmSurfaceMetadata. Allocate the interop image descriptor up front so that
-      // interopMapBuffer can stash that swizzle metadata (data[62]/[63]); the gfx image manager
-      // reconstructs the SRD from it when a tiled surface is imported as an image.
+      // Allocate the interop image descriptor up front so interopMapBuffer can stash the imported
+      // surface's layout for the gfx image manager to build the tiled SRD. The AMD Vulkan driver
+      // on Windows exposes no SRD-query extension, so libhsakmt returns the swizzle mode +
+      // pipe-bank-XOR (HsaWddmSurfaceMetadata, stashed at data[62]/[63]) and ROCr reconstructs the
+      // SRD. The AMD OpenGL and D3D driver on Windows expose SRD-query extension to copy full SRD
+      // into data[0..7]. And the Vulkan driver (radv/amdvlk) on Linux stamps a full SRD in the
+      // dma-buf BO metadata, copied verbatim into data[0..7].
+      // In all ways the descriptor must exist before the map.
       if (!allocateInteropImageDescriptor()) return false;
-#endif
       // Win32-KMT handles need ROCR's KMT branch in libhsakmt; the default
       // (no flag) takes the NT path and fails with STATUS_INVALID_HANDLE.
       hsa_interop_map_flag_t map_flags = HSA_INTEROP_MAP_FLAG_NONE;
@@ -1456,8 +1466,7 @@ bool Image::createInteropImage() {
   // Handle ExternalMemory (hipExternalMemory / Vulkan image interop)
   auto ext_memory = owner()->getInteropObj()->asExternalMemory();
   if (ext_memory != nullptr) {
-    // Memory::create() already called interopMapBuffer and filled amdImageDesc_ (on Windows,
-    // QueryVulkanImageSrd populated the SRD for ExternalImage via vkWriteResourceDescriptorsEXT).
+    // Memory::create() already called interopMapBuffer and filled amdImageDesc_.
     originalDeviceMemory_ = deviceMemory_;
     hsa_status_t err =
         Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
@@ -1641,39 +1650,63 @@ bool Image::createView(const Memory& parent) {
     flags_ |= HostMemoryDirectAccess;
   }
 
-  // An imported tiled surface (Vulkan image interop on Windows) is backed by an interop buffer
-  // whose descriptor carries swizzle metadata but no CPU-linear layout. Such a view must go
-  // through the metadata image_create path (which reconstructs the tiled SRD), not the LINEAR
-  // path that the buffer ancestor would otherwise select.
-  // Detect an imported tiled surface (Vulkan image interop on Windows). Only the view whose DIRECT
-  // parent is the interop buffer reconstructs the tiled SRD from swizzle metadata; per-mip-level
-  // views (direct parent is the mipmap image) instead derive from that reconstructed SRD via
+  // An imported tiled surface (Vulkan image interop) is backed by an interop buffer whose
+  // descriptor carries the imported layout but no CPU-linear layout. Such a view must go through
+  // the metadata image_create path (which builds the tiled SRD), not the LINEAR path that the
+  // buffer ancestor would otherwise select. The descriptor carries image info in one of two
+  // forms: a full driver SRD in data[0..7] (Linux Vulkan driver, D3D/GL), or (when no SRD-query extension
+  // exists) the swizzle mode + pipe-bank-XOR in data[62]/[63] (Windows Vulkan, reconstructed by
+  // ROCr). Only the view whose DIRECT parent is the interop buffer builds the base tiled SRD;
+  // per-mip-level views (direct parent is the mipmap image) derive from it via
   // image_get_mipmap_level (handled below).
+  auto interopDescHasImageInfo = [](const hsa_amd_image_descriptor_t* desc) -> bool {
+    if (desc == nullptr || desc->version != 1) return false;
+    const bool srd_words_present =
+        (desc->data[0] | desc->data[1] | desc->data[2] | desc->data[3] | desc->data[4] |
+         desc->data[5] | desc->data[6] | desc->data[7]) != 0;
+    if (srd_words_present) return true;
+#if IS_WINDOWS
+    // Windows Vulkan interop delivers no SRD; the swizzle-fallback slot signals a tiled surface
+    // to reconstruct. (HSA_WDDM_* offsets are only visible on Windows in this translation unit.)
+    // A non-zero compression block-size slot signals a compressed surface (which may be LINEAR,
+    // swizzle 0). It must also go through the metadata image_create path so ROCr reconstructs the SRD
+    // with the gfx12 WORD6 compression bits. The AMD driver leaves ulCompressionMode == 0 but reports
+    // the block sizes, so key off those.
+    if (desc->data[HSA_WDDM_SWIZZLE_MODE_DATA_OFFSET] != 0 ||
+        desc->data[HSA_WDDM_MAX_COMP_BLK_DATA_OFFSET] != 0 ||
+        desc->data[HSA_WDDM_MAX_UNCOMP_BLK_DATA_OFFSET] != 0)
+      return true;
+#endif
+    return false;
+  };
+
   hsa_amd_image_descriptor_t* interop_swizzle_desc = nullptr;
   bool interop_mip_level_view = false;
-#if IS_WINDOWS
   if (kind_ == MEMORY_KIND_INTEROP) {
     if (parent.owner()->asBuffer() != nullptr) {
       hsa_amd_image_descriptor_t* desc = parent.getAmdImageDesc();
-      if (desc != nullptr && desc->version == 1 &&
-          desc->data[HSA_WDDM_SWIZZLE_MODE_DATA_OFFSET] != 0) {
+      if (interopDescHasImageInfo(desc)) {
         interop_swizzle_desc = desc;
         linearLayout = false;
       }
     } else if (ancestor->asBuffer() != nullptr &&
                parent.owner()->asImage() != nullptr &&
-               parent.owner()->asImage()->getMipLevels() > 1 &&
                imageDescriptor_.mipmap_levels == 1 &&
-               static_cast<const Image&>(parent).amdImageDesc_ != nullptr &&
-               static_cast<const Image&>(parent).amdImageDesc_->data[
-                   HSA_WDDM_SWIZZLE_MODE_DATA_OFFSET] != 0) {
+               interopDescHasImageInfo(static_cast<const Image&>(parent).amdImageDesc_)) {
       // Restrict to Vulkan external-memory interop: its root ancestor is a buffer. GL/D3D interop
       // images are image-backed (no buffer ancestor), so they keep their existing view path.
-      interop_mip_level_view = true;
+      if (parent.owner()->asImage()->getMipLevels() > 1) {
+        // Multi-level: derive this level from the parent's reconstructed mipmap SRD.
+        interop_mip_level_view = true;
+      } else {
+        // Single-level (e.g. a linear compressed Vulkan image): image_get_mipmap_level needs a
+        // mipmapped parent, which we don't have, so reconstruct this level's SRD directly from the
+        // parent's interop descriptor (the image_create path below sets the WORD6 compression bits).
+        interop_swizzle_desc = static_cast<const Image&>(parent).amdImageDesc_;
+      }
       linearLayout = false;
     }
   }
-#endif
 
   hsa_status_t status;
   if (interop_mip_level_view) {
@@ -1684,9 +1717,10 @@ bool Image::createView(const Memory& parent) {
         dev().getBackendDevice(), &parentImage.hsaImageObject_,
         owner()->asImage()->getBaseMipLevel(), nullptr, &hsaImageObject_);
   } else if (interop_swizzle_desc != nullptr) {
-    // Reconstruct the tiled SRD from the imported surface's swizzle metadata. amdImageDesc_ is
-    // borrowed from the interop buffer; Image::destroy early-returns for views (parent != null)
-    // before freeing it, so the buffer remains the sole owner.
+    // Build the base tiled SRD from the imported surface's descriptor (driver SRD in data[0..7],
+    // or swizzle metadata reconstructed by ROCr). amdImageDesc_ is borrowed from the interop
+    // buffer; Image::destroy early-returns for views (parent != null) before freeing it, so the
+    // buffer remains the sole owner.
     amdImageDesc_ = interop_swizzle_desc;
     status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
                                deviceMemory_, permission_, &hsaImageObject_);

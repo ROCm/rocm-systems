@@ -449,6 +449,18 @@ class Resource {
                    bool forceLinear = false  //!< forces linear tiling for images
   );
 
+  /*! \brief Reopens an imported external buffer (Vulkan/D3D image interop) as a shared image so PAL
+   *   applies the driver's real tiling, then builds the SRD. Used for the ImageExternalBuffer path.
+   *
+   *  \return True if we successfully created the shared image and SRD
+   */
+  bool CreateImageFromExternalBuffer(
+      Pal::ChNumFormat format,           //!< PAL channel/number format for the view
+      Pal::ChannelMapping channels,      //!< PAL channel swizzle for the view
+      Pal::ImageViewInfo viewInfo,       //!< view template (viewType/possibleLayouts preset)
+      const Pal::SubresRange& subresRange  //!< subresource range for the view
+  );
+
   /*! \brief Creates a PAL interop object, associated with the resource
    *
    *  \return True if we succesfully created a PAL interop resource

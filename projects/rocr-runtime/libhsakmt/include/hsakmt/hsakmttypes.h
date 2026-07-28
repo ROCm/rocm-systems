@@ -619,11 +619,15 @@ typedef struct _HsaGraphicsResourceInfo {
 
 // Windows-only metadata populated in HsaGraphicsResourceInfo::Metadata when the imported
 // resource's VCAM_SURFACE_DESC is available. Provides swizzle mode as a fallback for when
-// the DXX extension (CLQueryResource11/CLQueryResource) is not available.
+// the DXX extension (CLQueryResource11/CLQueryResource) or GL extension(wglResourceAttachAMD)
+// is not available.
 typedef struct _HsaWddmSurfaceMetadata {
     HSAuint32 version;           // Always 1
     HSAuint32 swizzle_mode;      // VCAM_SURFACE_DESC.swizzleMode (union value)
     HSAuint32 tile_swizzle;      // VCAM_SURFACE_DESC.ulTileSwizzle (pipe-bank XOR)
+    HSAuint32 compression_mode;  // VCAM_SURFACE_DESC.ulCompressionMode (0 = uncompressed). gfx12+.
+    HSAuint32 max_comp_blk;      // VCAM_SURFACE_DESC.maxCompressedBlockSize. gfx12+.
+    HSAuint32 max_uncomp_blk;    // VCAM_SURFACE_DESC.maxUncompressedBlockSize. gfx12+.
 } HsaWddmSurfaceMetadata;
 
 // Fallback slots inside the ROCr image descriptor's data[] dword array where the interop layer
@@ -633,6 +637,10 @@ typedef struct _HsaWddmSurfaceMetadata {
 // (data[0..7]) and mip offsets (data[8..]).
 #define HSA_WDDM_SWIZZLE_MODE_DATA_OFFSET  62
 #define HSA_WDDM_TILE_SWIZZLE_DATA_OFFSET  63
+// gfx12 compression state, adjacent to the swizzle slots at the tail of data[] (see above).
+#define HSA_WDDM_COMPRESSION_MODE_DATA_OFFSET  61
+#define HSA_WDDM_MAX_COMP_BLK_DATA_OFFSET      60
+#define HSA_WDDM_MAX_UNCOMP_BLK_DATA_OFFSET    59
 
 typedef enum _HSA_CACHING_TYPE
 {

@@ -564,7 +564,7 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandleWithLayout(
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
   }
 
-  if (num_mipmap_levels == 0) { //?
+  if (num_mipmap_levels == 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -581,7 +581,6 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandleWithLayout(
   mipmap_array->num_levels = num_mipmap_levels;
   mipmap_array->data = const_cast<void*>(image_data);
   mipmap_array->flags = 0;
-  // mipmap_array->tile_mode = Image::TILED;  // always titled for num_mipmap_levels > 1
   ImageManager* manager = image_manager(component);
   if (!manager) {
     MipmappedArray::Destroy(mipmap_array);
