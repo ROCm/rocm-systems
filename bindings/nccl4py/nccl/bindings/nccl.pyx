@@ -3935,6 +3935,23 @@ cpdef object team_rail(intptr_t comm):
     return team_py
 
 
+# Hand-written: the team rank mappers take ncclTeam_t by value and return int
+# (not ncclResult_t), so there is no status to check.
+
+cpdef int team_rank_to_world(intptr_t comm, intptr_t team, int rank):
+    cdef int result
+    with nogil:
+        result = ncclTeamRankToWorld(<Comm>comm, (<ncclTeam_t*>team)[0], rank)
+    return result
+
+
+cpdef int team_rank_to_lsa(intptr_t comm, intptr_t team, int rank):
+    cdef int result
+    with nogil:
+        result = ncclTeamRankToLsa(<Comm>comm, (<ncclTeam_t*>team)[0], rank)
+    return result
+
+
 # Hand-written: LSA/GIN barrier requirement creators take ncclTeam_t by value
 # (SKIP_LOWPP in nccl.cybind.yaml; cybind cannot emit by-value structs). Each
 # fills the out-req node and wires it to write into the out-handle during

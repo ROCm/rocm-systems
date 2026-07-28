@@ -303,6 +303,14 @@ cdef ncclTeam_t ncclTeamRail(ncclComm_t comm) except* nogil:
     return _nccl._ncclTeamRail(comm)
 
 
+cdef int ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil:
+    return _nccl._ncclTeamRankToWorld(comm, team, rank)
+
+
+cdef int ncclTeamRankToLsa(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil:
+    return _nccl._ncclTeamRankToLsa(comm, team, rank)
+
+
 cdef ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t team, int nBarriers, ncclLsaBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     return _nccl._ncclLsaBarrierCreateRequirement(team, nBarriers, outHandle, outReq)
 

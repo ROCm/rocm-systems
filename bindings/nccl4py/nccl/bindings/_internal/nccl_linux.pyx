@@ -142,6 +142,8 @@ cdef void* __ncclGetPeerDevicePointer = NULL
 cdef void* __ncclTeamWorld = NULL
 cdef void* __ncclTeamLsa = NULL
 cdef void* __ncclTeamRail = NULL
+cdef void* __ncclTeamRankToWorld = NULL
+cdef void* __ncclTeamRankToLsa = NULL
 cdef void* __ncclLsaBarrierCreateRequirement = NULL
 cdef void* __ncclGinBarrierCreateRequirement = NULL
 cdef void* __ncclLLA2ACreateRequirement = NULL
@@ -677,6 +679,20 @@ cdef int _check_or_init_nccl() except -1 nogil:
                 handle = load_library()
             __ncclTeamRail = dlsym(handle, 'ncclTeamRail')
 
+        global __ncclTeamRankToWorld
+        __ncclTeamRankToWorld = dlsym(RTLD_DEFAULT, 'ncclTeamRankToWorld')
+        if __ncclTeamRankToWorld == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclTeamRankToWorld = dlsym(handle, 'ncclTeamRankToWorld')
+
+        global __ncclTeamRankToLsa
+        __ncclTeamRankToLsa = dlsym(RTLD_DEFAULT, 'ncclTeamRankToLsa')
+        if __ncclTeamRankToLsa == NULL:
+            if handle == NULL:
+                handle = load_library()
+            __ncclTeamRankToLsa = dlsym(handle, 'ncclTeamRankToLsa')
+
         global __ncclLsaBarrierCreateRequirement
         __ncclLsaBarrierCreateRequirement = dlsym(RTLD_DEFAULT, 'ncclLsaBarrierCreateRequirement')
         if __ncclLsaBarrierCreateRequirement == NULL:
@@ -937,6 +953,12 @@ cpdef dict _inspect_function_pointers():
 
     global __ncclTeamRail
     data["__ncclTeamRail"] = <intptr_t>__ncclTeamRail
+
+    global __ncclTeamRankToWorld
+    data["__ncclTeamRankToWorld"] = <intptr_t>__ncclTeamRankToWorld
+
+    global __ncclTeamRankToLsa
+    data["__ncclTeamRankToLsa"] = <intptr_t>__ncclTeamRankToLsa
 
     global __ncclLsaBarrierCreateRequirement
     data["__ncclLsaBarrierCreateRequirement"] = <intptr_t>__ncclLsaBarrierCreateRequirement
@@ -1720,6 +1742,26 @@ cdef ncclTeam_t _ncclTeamRail(ncclComm_t comm) except* nogil:
             raise FunctionNotFoundError("function ncclTeamRail is not found")
     return (<ncclTeam_t (*)(ncclComm_t) noexcept nogil>__ncclTeamRail)(
         comm)
+
+
+cdef int _ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil:
+    global __ncclTeamRankToWorld
+    _check_or_init_nccl()
+    if __ncclTeamRankToWorld == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclTeamRankToWorld is not found")
+    return (<int (*)(ncclComm_t, ncclTeam_t, int) noexcept nogil>__ncclTeamRankToWorld)(
+        comm, team, rank)
+
+
+cdef int _ncclTeamRankToLsa(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil:
+    global __ncclTeamRankToLsa
+    _check_or_init_nccl()
+    if __ncclTeamRankToLsa == NULL:
+        with gil:
+            raise FunctionNotFoundError("function ncclTeamRankToLsa is not found")
+    return (<int (*)(ncclComm_t, ncclTeam_t, int) noexcept nogil>__ncclTeamRankToLsa)(
+        comm, team, rank)
 
 
 cdef ncclResult_t _ncclLsaBarrierCreateRequirement(ncclTeam_t team, int nBarriers, ncclLsaBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:

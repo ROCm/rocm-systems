@@ -1156,6 +1156,59 @@ class Communicator:
         self._check_valid("get railed_gin_type")
         return NcclGinType(self._get_comm_properties().railed_gin_type)
 
+    def team_rank_to_world(self, team: NCCLTeam, team_rank: int) -> int:
+        """Maps a rank within ``team`` to its rank in this communicator.
+
+        ``team`` is anchored at this rank, so ``team.rank`` maps back to
+        :py:attr:`rank` and neighbours are offset by ``team.stride``.
+
+        Args:
+            team: The team ``team_rank`` is expressed in, as returned by
+                :py:attr:`team_world`, :py:attr:`team_lsa`, or
+                :py:attr:`team_rail`.
+            team_rank: Rank within ``team``.
+
+        Returns:
+            The corresponding rank in this communicator.
+
+        Raises:
+            NcclInvalid: If the communicator is not initialized.
+
+        See Also:
+            :c:func:`ncclTeamRankToWorld`
+        """
+        self._check_valid("team_rank_to_world")
+        team_lowpp = team._to_lowpp()
+        return _nccl_bindings.team_rank_to_world(self.ptr, team_lowpp.ptr, team_rank)
+
+    def team_rank_to_lsa(self, team: NCCLTeam, team_rank: int) -> int:
+        """Maps a rank within ``team`` to its rank in the LSA team.
+
+        The LSA-relative counterpart of :py:meth:`team_rank_to_world`:
+        ``team.rank`` maps back to this rank's index in
+        :py:attr:`team_lsa`. Only meaningful when ``team_rank`` names a
+        peer that shares this rank's LSA team.
+
+        Args:
+            team: The team ``team_rank`` is expressed in, as returned by
+                :py:attr:`team_world`, :py:attr:`team_lsa`, or
+                :py:attr:`team_rail`.
+            team_rank: Rank within ``team``.
+
+        Returns:
+            The corresponding rank in the LSA team, or ``-1`` if the
+            device resource state could not be initialized.
+
+        Raises:
+            NcclInvalid: If the communicator is not initialized.
+
+        See Also:
+            :c:func:`ncclTeamRankToLsa`
+        """
+        self._check_valid("team_rank_to_lsa")
+        team_lowpp = team._to_lowpp()
+        return _nccl_bindings.team_rank_to_lsa(self.ptr, team_lowpp.ptr, team_rank)
+
     # --- Point-to-Point Communication ---
     def send(
         self, sendbuf: NcclBufferSpec, peer: int, *, stream: NcclStreamSpec | None = None

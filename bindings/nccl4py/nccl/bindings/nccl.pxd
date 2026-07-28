@@ -103,6 +103,8 @@ cpdef ll_a2a_create_requirement(int n_blocks, int n_slots, intptr_t out_handle, 
 cpdef object team_world(intptr_t comm)
 cpdef object team_lsa(intptr_t comm)
 cpdef object team_rail(intptr_t comm)
+cpdef int team_rank_to_world(intptr_t comm, intptr_t team, int rank)
+cpdef int team_rank_to_lsa(intptr_t comm, intptr_t team, int rank)
 cpdef lsa_barrier_create_requirement(intptr_t team, int n_barriers, intptr_t out_handle, intptr_t out_req)
 cpdef gin_barrier_create_requirement(intptr_t comm, intptr_t team, int n_barriers, intptr_t out_handle, intptr_t out_req)
 cpdef object get_library_path()

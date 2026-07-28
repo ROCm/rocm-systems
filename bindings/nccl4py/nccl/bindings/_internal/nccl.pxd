@@ -84,6 +84,8 @@ cdef ncclResult_t _ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, 
 cdef ncclTeam_t _ncclTeamWorld(ncclComm_t comm) except* nogil
 cdef ncclTeam_t _ncclTeamLsa(ncclComm_t comm) except* nogil
 cdef ncclTeam_t _ncclTeamRail(ncclComm_t comm) except* nogil
+cdef int _ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil
+cdef int _ncclTeamRankToLsa(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil
 cdef ncclResult_t _ncclLsaBarrierCreateRequirement(ncclTeam_t team, int nBarriers, ncclLsaBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
 cdef ncclResult_t _ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t team, int nBarriers, ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
 cdef ncclResult_t _ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2AHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil
