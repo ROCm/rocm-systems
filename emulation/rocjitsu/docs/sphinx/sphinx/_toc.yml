@@ -33,6 +33,7 @@ subtrees:
       - file: reference/rocjitsu-cli
       - file: reference/environment-variables
       - file: reference/supported-architectures
+      - file: reference/changelog
   - caption: About
     entries:
       - file: license
