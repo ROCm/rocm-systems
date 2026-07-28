@@ -21,7 +21,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the CSV profile output backend and the `--format-rocprof-output` profile mode option. Profiling now always uses the `rocpd` output format, which was already the default.
 
-* Removed the `--join-type` profile mode option. It only ever selected between the `kernel` and `grid` variants of the CSV wide merge, which is gone, so both values had already become no-ops.
+* Removed the `--join-type` profile mode option. It only ever selected between the `kernel` and `grid` variants of the CSV wide merge, which is gone, so the argument is unnecessary.
 
 * Removed analyze support for workloads produced by the CSV profile backend. Such workloads are now rejected with an error telling you to re-profile with a current release.
 

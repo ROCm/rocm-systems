@@ -57,7 +57,6 @@ test_categories:
       - test_data_imputation
       - test_profile_dispatch
       - test_profile_kernel_execution
-      - test_profile_join
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
@@ -123,7 +122,6 @@ test_categories:
       - test_data_imputation
       - test_profile_dispatch
       - test_profile_kernel_execution
-      - test_profile_join
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
@@ -189,7 +187,6 @@ test_categories:
       - test_data_imputation
       - test_profile_dispatch
       - test_profile_kernel_execution
-      - test_profile_join
       - test_profile_misc
       - test_profile_path
       - test_pc_sampling
