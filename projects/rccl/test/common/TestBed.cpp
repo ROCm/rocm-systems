@@ -108,7 +108,8 @@ namespace RcclUnitTesting
                           std::vector<int>              const& numCollectivesInGroup,
                           std::vector<int>              const& numStreamsPerGroup,
                           int                           const  numGroupCalls,
-                          bool                          const  useBlocking)
+                          bool                          const  useBlocking,
+                          MemAllocType                  const  memAllocType)
   {
     InteractiveWait("Starting InitComms");
 
@@ -171,6 +172,7 @@ namespace RcclUnitTesting
          std::string sVerbose      = std::to_string(ev.verbose ? 1 : 0);
          std::string sPrintVal     = std::to_string(ev.printValues);
          std::string sThreading    = std::to_string(ev.useMultithreading ? 1 : 0);
+         std::string sMemAllocType  = std::to_string(memAllocType);
 
          //Re-execute binary to clear inherited HIP/HSA driver state
          execl("/proc/self/exe", "rccl_unit_test",
@@ -181,6 +183,7 @@ namespace RcclUnitTesting
             sVerbose.c_str(),
             sPrintVal.c_str(),
             sThreading.c_str(),
+            sMemAllocType.c_str(),
             NULL);
         perror("execl failed");
          _exit(1);
@@ -260,6 +263,10 @@ namespace RcclUnitTesting
       // Send the RCCL communication with blocking or non-blocking option
       PIPE_WRITE(childId, useBlocking);
 
+      // Send memAllocType to child process
+      int const memAllocTypeVal = static_cast<int>(memAllocType);
+      PIPE_WRITE(childId, memAllocTypeVal);
+
       // Send whether to use MultiRank interfaces or not.
       PIPE_WRITE(childId, useMulti);
 
@@ -292,15 +299,15 @@ namespace RcclUnitTesting
   }
 
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
-                          int const numCollectivesInGroup, int const numStreamsPerGroup, int const numGroupCalls, bool const useBlocking)
+                          int const numCollectivesInGroup, int const numStreamsPerGroup, int const numGroupCalls, bool const useBlocking, MemAllocType const memAllocType)
   {
-    InitComms(deviceIdsPerProcess, TestBed::GetNumCollsPerGroup(numCollectivesInGroup, numGroupCalls), TestBed::GetNumStreamsPerGroup(numStreamsPerGroup, numGroupCalls), numGroupCalls, useBlocking);
+    InitComms(deviceIdsPerProcess, TestBed::GetNumCollsPerGroup(numCollectivesInGroup, numGroupCalls), TestBed::GetNumStreamsPerGroup(numStreamsPerGroup, numGroupCalls), numGroupCalls, useBlocking, memAllocType);
   }
 
-  void TestBed::InitComms(int const numGpus, int const numCollectivesInGroup, int const numStreamsPerGroup, int const numGroupCalls, bool const useBlocking)
+  void TestBed::InitComms(int const numGpus, int const numCollectivesInGroup, int const numStreamsPerGroup, int const numGroupCalls, bool const useBlocking, MemAllocType const memAllocType)
   {
      const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
-     InitComms(GetDeviceIdsList(1, numGpus, gpuPriorityOrder), TestBed::GetNumCollsPerGroup(numCollectivesInGroup, numGroupCalls), TestBed::GetNumStreamsPerGroup(numStreamsPerGroup, numGroupCalls), numGroupCalls, useBlocking);
+     InitComms(GetDeviceIdsList(1, numGpus, gpuPriorityOrder), TestBed::GetNumCollsPerGroup(numCollectivesInGroup, numGroupCalls), TestBed::GetNumStreamsPerGroup(numStreamsPerGroup, numGroupCalls), numGroupCalls, useBlocking, memAllocType);
   }
 
   void TestBed::SetCollectiveArgs(ncclFunc_t      const funcType,
@@ -377,9 +384,28 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, useManagedMem);
         PIPE_WRITE(childId, userRegistered);
         PIPE_WRITE(childId, currGroup);
-        PIPE_CHECK(childId);
       }
     }
+    // Wait for all children to complete allocation before registering
+    for (int childId = 0; childId < this->numActiveChildren; ++childId) {
+      PIPE_CHECK(childId);
+    }
+    // =========================================================================
+    // PHASE 2: Grouped RCCL Window Registration across all active children
+    // =========================================================================
+    int const regCmd = TestBedChild::CHILD_REGISTER_MEM;
+    for (auto currGroup : groupList) {
+      // 1. Send CHILD_REGISTER_MEM command to ALL active children FIRST
+      for (int childId = 0; childId < this->numActiveChildren; ++childId) {
+        PIPE_WRITE(childId, regCmd);
+        PIPE_WRITE(childId, currGroup);
+        PIPE_WRITE(childId, collId);
+      }
+      // 2. THEN wait for all child ACKs after all children have entered registration
+      for (int childId = 0; childId < this->numActiveChildren; ++childId) {
+         PIPE_CHECK(childId);
+         }
+      }
     InteractiveWait("Finishing AllocateMem");
   }
 
@@ -544,19 +570,21 @@ namespace RcclUnitTesting
     for (int i = 0; i < this->numGroupCalls; ++i)
       if (groupId == -1 || groupId == i) groupList.push_back(i);
 
-    int const cmd = TestBedChild::CHILD_DEALLOCATE_MEM;
-
-    for (auto currGroup : groupList)
-    {
+    int const deallocCmd = TestBedChild::CHILD_DEALLOCATE_MEM;
+    for (auto currGroup : groupList) {
       for (auto currRank : rankList)
       {
         int const childId = rankToChildMap[currRank];
-        PIPE_WRITE(childId, cmd);
+        PIPE_WRITE(childId, deallocCmd);
         PIPE_WRITE(childId, currRank);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
-        PIPE_CHECK(childId);
       }
+    }
+
+    // Wait for all physical deallocations to complete
+    for (int childId = 0; childId < this->numActiveChildren; ++childId) {
+      PIPE_CHECK(childId);
     }
 
     InteractiveWait("Finishing DeallocateMem");
@@ -793,7 +821,8 @@ namespace RcclUnitTesting
                                std::vector<bool>           const& inPlaceList,
                                std::vector<bool>           const& managedMemList,
                                std::vector<bool>           const& useHipGraphList,
-                               bool                        const& enableSweep)
+                               bool                        const& enableSweep,
+                               MemAllocType                memAllocType)
   {
     // Sort numElements in descending order to cut down on # of allocations
     std::vector<int> sortedN = numElements;
@@ -825,7 +854,7 @@ namespace RcclUnitTesting
         continue;
       }
       const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
-      this->InitComms(this->GetDeviceIdsList(numChildren, numGpus, ranksPerGpu, gpuPriorityOrder));
+      this->InitComms(this->GetDeviceIdsList(numChildren, numGpus, ranksPerGpu, gpuPriorityOrder),1,1,1,true,memAllocType);
       if (testing::Test::HasFailure())
       {
         isCorrect = false;
@@ -848,6 +877,11 @@ namespace RcclUnitTesting
       for (int ipIdx = 0; ipIdx < inPlaceList.size()    && isCorrect; ++ipIdx)
       for (int mmIdx = 0; mmIdx < managedMemList.size() && isCorrect; ++mmIdx)
       {
+        //  GUARD: Symmetric Memory is incompatible with Managed memory
+        if (memAllocType == MEM_ALLOC_SYMMETRIC_WIN && managedMemList[mmIdx])
+        {
+          continue; 
+        }
         for (int neIdx = 0; neIdx < numElements.size() && isCorrect; ++neIdx)
         {
           int numInputElements, numOutputElements;
@@ -877,7 +911,7 @@ namespace RcclUnitTesting
           // Only allocate once for largest size
           if (neIdx == 0)
           {
-            this->AllocateMem(inPlaceList[ipIdx], managedMemList[mmIdx]);
+            this->AllocateMem(inPlaceList[ipIdx], managedMemList[mmIdx],-1,-1,-1, (memAllocType == MEM_ALLOC_SYMMETRIC_WIN));
             if (testing::Test::HasFailure())
             {
               isCorrect = false;

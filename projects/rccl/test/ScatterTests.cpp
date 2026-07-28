@@ -159,7 +159,7 @@ namespace RcclUnitTesting
     setenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1", 1);
     setenv("NCCL_CUMEM_ENABLE","1",1);
     testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
-                           inPlaceList, managedMemList, useHipGraphList);
+                           inPlaceList, managedMemList, useHipGraphList,true,MEM_ALLOC_SYMMETRIC_WIN);
     
     testBed.Finalize();
     unsetenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE");

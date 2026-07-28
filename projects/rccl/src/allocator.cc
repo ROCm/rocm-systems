@@ -93,6 +93,8 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
       if (i == cudaDev || (CUDASUCCESS(cudaDeviceCanAccessPeer(&p2p, i, cudaDev)) && p2p)) {
+        hipDeviceptr_t dummyCtx;
+        hipDevicePrimaryCtxRetain((hipCtx_t*)&dummyCtx, i);
         accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
         accessDesc.location.id = i;
         accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;

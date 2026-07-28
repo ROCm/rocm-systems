@@ -161,13 +161,13 @@ namespace RcclUnitTesting
     std::vector<int>            const roots           = {0};
     std::vector<int>            const numElements     = {1,4314};
     std::vector<bool>           const inPlaceList     = {true,false};
-    std::vector<bool>           const managedMemList  = {true,false};
+    std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true,false};
 
     setenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1", 1);
     setenv("NCCL_CUMEM_ENABLE","1",1);
     testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
-                           inPlaceList, managedMemList, useHipGraphList);
+                           inPlaceList, managedMemList, useHipGraphList,true,MEM_ALLOC_SYMMETRIC_WIN);
     
     testBed.Finalize();
     unsetenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE");

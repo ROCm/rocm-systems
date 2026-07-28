@@ -179,6 +179,7 @@ namespace RcclUnitTesting
       case CHILD_INIT_COMMS      : status = InitComms();            break;
       case CHILD_SET_COLL_ARGS   : status = SetCollectiveArgs();    break;
       case CHILD_ALLOCATE_MEM    : status = AllocateMem();          break;
+      case CHILD_REGISTER_MEM    : status = RegisterMem();          break;
       case CHILD_PREPARE_DATA    : status = PrepareData();          break;
       case CHILD_EXECUTE_COLL    : status = ExecuteCollectives();   break;
       case CHILD_VALIDATE_RESULTS: status = ValidateResults();      break;
@@ -254,6 +255,10 @@ namespace RcclUnitTesting
        numCollSize * sizeof(int));
   }
   PIPE_READ(this->useBlocking);
+  int allocTypeInt = 0;
+  PIPE_READ(allocTypeInt);
+  this->memAllocType = static_cast<MemAllocType>(allocTypeInt);
+
   bool useMultiRankPerGpu;
   PIPE_READ(useMultiRankPerGpu);
   // PIPE_READ(this->numStreamsPerGroup);
@@ -501,8 +506,6 @@ namespace RcclUnitTesting
       {
         CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
         CHECK_CALL(collArg.AllocateMem(inPlace, useManagedMem, userRegistered));
-        if (collArg.userRegistered && (collArg.funcType == ncclCollSend || collArg.funcType == ncclCollRecv))
-          CHILD_NCCL_CALL(ncclCommRegister(this->comms[localRank], collArg.inputGpu.ptr, collArg.numInputBytesAllocated, &(collArg.commRegHandle)),"ncclCommRegister");
         if (this->verbose) TEST_INFO("Rank %d on child %d allocates memory for collective %d in group %d on device %d (%s,%s,%s) Input: %p Output %p",
                                 globalRank, this->childId, collIdx, groupId, this->deviceIds[localRank],
                                 inPlace ? "in-place" : "out-of-place",
@@ -573,7 +576,7 @@ namespace RcclUnitTesting
       PIPE_READ(tempRank);
       ranksToExecute.push_back(tempRank - this->rankOffset);
     }
-    if (this->verbose) TEST_INFO("Child %d begins ExecuteCollectives() %s", this->childId, useHipGraph ? "(using hipGraphs)" : "");
+    if (this->verbose) TEST_INFO("Child %d begins ExecuteCollectives() %s with allocation type %d", this->childId, useHipGraph ? "(using hipGraphs)" : "", (int32_t)this->memAllocType);
 
     // Determine which local ranks to execute on
     std::vector<int> localRanksToExecute;
@@ -586,6 +589,39 @@ namespace RcclUnitTesting
     }
 
     numRanksToExecute = (int)localRanksToExecute.size();
+ 
+    // =========================================================================
+  // STAGE 1: PRE-COLLECTIVE DEBUG PRINTING (BEFORE ncclGroupStart)
+  // =========================================================================
+  if (this->printValues && !useHipGraph)
+  {
+    for (int collId = 0; collId < this->numCollectivesInGroup[groupId]; ++collId)
+    {
+      for (int localRank : localRanksToExecute)
+      {
+        CollectiveArgs& collArg = this->collArgs[groupId][localRank][collId];
+        CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+
+        int const numInputElementsToPrint = (this->printValues < 0 ? collArg.numInputElements : this->printValues);
+        PtrUnion inputCpu;
+        size_t const numInputBytes = numInputElementsToPrint * DataTypeToBytes(collArg.dataType);
+        inputCpu.AllocateCpuMem(numInputBytes);
+        
+        // Safe hipMemcpy BEFORE collective launch
+        CHECK_HIP(hipMemcpy(inputCpu.ptr, collArg.inputGpu.ptr, numInputBytes, hipMemcpyDeviceToHost));
+        printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Input",
+               inputCpu.ToString(collArg.dataType, numInputElementsToPrint).c_str());
+        inputCpu.FreeCpuMem();
+
+        int const numOutputElementsToPrint = (this->printValues < 0 ? collArg.numOutputElements : this->printValues);
+        size_t const numOutputBytes = numOutputElementsToPrint * DataTypeToBytes(collArg.dataType);
+        CHECK_HIP(hipMemcpy(collArg.outputCpu.ptr, collArg.outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
+        printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Pre-Output",
+               collArg.outputCpu.ToString(collArg.dataType, numOutputElementsToPrint).c_str());
+      }
+    }
+  }
+
     this->graphs[groupId].resize(numRanksToExecute);
     this->graphExecs[groupId].resize(numRanksToExecute);
     this->graphEnabled[groupId].resize(numRanksToExecute);
@@ -610,10 +646,11 @@ namespace RcclUnitTesting
       }
     }
 
-    int numThreadsToUse = this->useRankThreading ? numRanksToExecute : 1;
+    // int numThreadsToUse = this->useRankThreading ? numRanksToExecute : 1;
+    int numThreadsToUse = (this->useRankThreading && useHipGraph) ? numRanksToExecute : 1;
 
     // Start group call
-    CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart");
+    CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart ExecuteCollectives");
 
     // Loop over all collectives to be executed in group call
     for (int collId = 0; collId < this->numCollectivesInGroup[groupId]; ++collId)
@@ -633,23 +670,23 @@ namespace RcclUnitTesting
 
         CollectiveArgs& collArg = this->collArgs[groupId][localRank][collId];
 
-        if (this->printValues && !useHipGraph)
-        {
-          int const numInputElementsToPrint = (this->printValues < 0 ? collArg.numInputElements : this->printValues);
-          PtrUnion inputCpu;
-          size_t const numInputBytes = numInputElementsToPrint * DataTypeToBytes(collArg.dataType);
-          inputCpu.AllocateCpuMem(numInputBytes);
-          CHECK_HIP_RANK(errCode, hipMemcpy(inputCpu.ptr, collArg.inputGpu.ptr, numInputBytes, hipMemcpyDeviceToHost));
-          printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Input",
-                 inputCpu.ToString(collArg.dataType, numInputElementsToPrint).c_str());
-          inputCpu.FreeCpuMem();
+        // if (this->printValues && !useHipGraph)
+        // {
+        //   int const numInputElementsToPrint = (this->printValues < 0 ? collArg.numInputElements : this->printValues);
+        //   PtrUnion inputCpu;
+        //   size_t const numInputBytes = numInputElementsToPrint * DataTypeToBytes(collArg.dataType);
+        //   inputCpu.AllocateCpuMem(numInputBytes);
+        //   CHECK_HIP_RANK(errCode, hipMemcpy(inputCpu.ptr, collArg.inputGpu.ptr, numInputBytes, hipMemcpyDeviceToHost));
+        //   printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Input",
+        //          inputCpu.ToString(collArg.dataType, numInputElementsToPrint).c_str());
+        //   inputCpu.FreeCpuMem();
 
-          int const numOutputElementsToPrint = (this->printValues < 0 ? collArg.numOutputElements : this->printValues);
-          size_t const numOutputBytes = numOutputElementsToPrint * DataTypeToBytes(collArg.dataType);
-          CHECK_HIP_RANK(errCode, hipMemcpy(collArg.outputCpu.ptr, collArg.outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
-          printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Pre-Output",
-                 collArg.outputCpu.ToString(collArg.dataType, numOutputElementsToPrint).c_str());
-        }
+        //   int const numOutputElementsToPrint = (this->printValues < 0 ? collArg.numOutputElements : this->printValues);
+        //   size_t const numOutputBytes = numOutputElementsToPrint * DataTypeToBytes(collArg.dataType);
+        //   CHECK_HIP_RANK(errCode, hipMemcpy(collArg.outputCpu.ptr, collArg.outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
+        //   printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Pre-Output",
+        //          collArg.outputCpu.ToString(collArg.dataType, numOutputElementsToPrint).c_str());
+        // }
 
         switch (collArg.funcType)
         {
@@ -822,7 +859,7 @@ namespace RcclUnitTesting
     else
     {
       // In case of blocking communication just call ncclGroupEnd
-      CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd");
+      CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd ExecuteCollectives");
     }
 
     // Instantiate and launch HIP graph if requested
@@ -995,48 +1032,96 @@ namespace RcclUnitTesting
   {
     if (this->verbose) TEST_INFO("Child %d begins DeallocateMem", this->childId);
 
-    // Read values sent by parent [see TestBed::DeallocateMem()]
-    int globalRank, groupId, collId;
-    PIPE_READ(globalRank);
-    PIPE_READ(groupId);
-    PIPE_READ(collId);
+    // Read values sent by parent [matches IPC pipe format]
+  int globalRank, groupId, collId;
+  PIPE_READ(globalRank);
+  PIPE_READ(groupId);
+  PIPE_READ(collId);
 
-    if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-    int const localRank = globalRank - rankOffset;
-    CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+  if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
+  {
+    TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
+    return TEST_FAIL;
+  }
 
-    for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
+  int const localRank = globalRank - rankOffset;
+  CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+
+  // Enclose RCCL deregistration calls in a group for safety
+  CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart DeregisterMem");
+
+  for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
+  {
+    CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
+    if (collId == -1 || collId == collIdx)
     {
-      CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
-      if (collId == -1 || collId == collIdx)
+      if (this->verbose)
       {
-        if (this->verbose)
-        {
-          TEST_INFO("Child %d release memory for collective %d in group %d (Input: %p Output %p",
-               this->childId, collIdx, groupId, collArg.inputGpu.ptr, collArg.outputGpu.ptr);
-        }
-        if (collArg.userRegistered && (collArg.funcType == ncclCollSend || collArg.funcType == ncclCollRecv))
-        {
-          CHILD_NCCL_CALL(ncclCommDeregister(this->comms[localRank], collArg.commRegHandle), "ncclCommDeregister");
-        }
-
-        CHECK_CALL(collArg.DeallocateMem());
+        TEST_INFO("Child %d deregistering memory for collective %d in group %d",
+                  this->childId, collIdx, groupId);
       }
-      if (collArg.options.scalarMode >= 0 /*!= -1*/)
+
+      // =====================================================================
+      // 1. Deregister Symmetric Windows (ncclCommWindowDeregister)
+      // =====================================================================
+      if (collArg.inputWin != nullptr)
+      {
+        CHILD_NCCL_CALL(ncclCommWindowDeregister(this->comms[localRank], collArg.inputWin),
+                        "ncclCommWindowDeregister (input)");
+        collArg.inputWin = nullptr;
+      }
+
+      if (!collArg.inPlace && collArg.outputWin != nullptr)
+      {
+        CHILD_NCCL_CALL(ncclCommWindowDeregister(this->comms[localRank], collArg.outputWin),
+                        "ncclCommWindowDeregister (output)");
+        collArg.outputWin = nullptr;
+      }
+
+      // =====================================================================
+      // 2. Deregister Standard Buffers (ncclCommDeregister)
+      // =====================================================================
+      if (collArg.commRegHandle != nullptr)
+      {
+        CHILD_NCCL_CALL(ncclCommDeregister(this->comms[localRank], collArg.commRegHandle),
+                        "ncclCommDeregister");
+        collArg.commRegHandle = nullptr;
+      }
+
+      if (collArg.biasRegHandle != nullptr)
+      {
+        CHILD_NCCL_CALL(ncclCommDeregister(this->comms[localRank], collArg.biasRegHandle),
+                        "ncclCommDeregister (bias)");
+        collArg.biasRegHandle = nullptr;
+      }
+    }
+  }
+  CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd DeregisterMem");
+  for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
+  {
+    CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
+    if (collId == -1 || collId == collIdx)
+    {
+       CHECK_CALL(collArg.DeallocateMem());
+      // =====================================================================
+      // 3. Destroy Custom Reduction Operators
+      // =====================================================================
+      if (collArg.options.scalarMode >= 0)
       {
         CHILD_NCCL_CALL(ncclRedOpDestroy(collArg.options.redOp, this->comms[localRank]),
                         "ncclRedOpDestroy");
-        if (verbose) TEST_INFO("Child %d destroys custom redop %d for collective %d in group %d",
-                          this->childId, collArg.options.redOp, collIdx, groupId);
+        if (this->verbose)
+        {
+          TEST_INFO("Child %d destroys custom redop %d for collective %d in group %d",
+                    this->childId, collArg.options.redOp, collIdx, groupId);
+        }
       }
     }
-    if (this->verbose) TEST_INFO("Child %d finishes DeallocateMem", this->childId);
-    return TEST_SUCCESS;
   }
+
+  if (this->verbose) TEST_INFO("Child %d finishes DeregisterMem", this->childId);
+  return TEST_SUCCESS;
+}
 
   ErrCode TestBedChild::DestroyComms()
 {
@@ -1128,6 +1213,78 @@ namespace RcclUnitTesting
     this->graphEnabled[groupId].clear();
 
     if (this->verbose) TEST_INFO("Child %d finishes DestroyGraphs", this->childId);
+    return TEST_SUCCESS;
+  }
+
+  ErrCode TestBedChild::RegisterMem()
+  {
+    if (this->verbose) TEST_INFO("Child %d begins RegisterMem()", this->childId);
+
+    int groupId;
+    int collId;
+
+    PIPE_READ(groupId);
+    PIPE_READ(collId);
+
+    ErrCode errCode = TEST_SUCCESS;
+
+    // Grouped window registration across ALL local ranks managed by this child process
+    CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart RegisterMem");
+
+    for (size_t localRank = 0; localRank < this->comms.size(); ++localRank)
+    {
+      CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+
+      for (size_t collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
+      {
+        if (collId == -1 || collId == (int)collIdx)
+        {
+          CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
+
+          // CASE 1: Symmetric Memory Path
+          if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN)
+          {
+            CHILD_NCCL_CALL_RANK(errCode,
+              ncclCommWindowRegister(this->comms[localRank],
+                                     collArg.inputGpu.ptr,
+                                     collArg.numInputBytesAllocated,
+                                     &(collArg.inputWin),
+                                     NCCL_WIN_COLL_SYMMETRIC),
+              "ncclCommWindowRegister (input)");
+
+            if (collArg.inPlace)
+            {
+              collArg.outputWin = collArg.inputWin;
+            }
+            else
+            {
+              CHILD_NCCL_CALL_RANK(errCode,
+                ncclCommWindowRegister(this->comms[localRank],
+                                       collArg.outputGpu.ptr,
+                                       collArg.numOutputBytesAllocated,
+                                       &(collArg.outputWin),
+                                       NCCL_WIN_COLL_SYMMETRIC),
+                "ncclCommWindowRegister (output)");
+            }
+          }
+          // CASE 2: Legacy Buffer Path (Send/Recv)
+          else if (collArg.userRegistered && (collArg.funcType == ncclCollSend || collArg.funcType == ncclCollRecv))
+          {
+            CHILD_NCCL_CALL_RANK(errCode,
+              ncclCommRegister(this->comms[localRank],
+                               collArg.inputGpu.ptr,
+                               collArg.numInputBytesAllocated,
+                               &(collArg.commRegHandle)),
+             "ncclCommRegister");
+         }
+       }
+     }
+   }
+
+    // Completes handle exchange for all local ranks simultaneously
+    CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd RegisterMem");
+
+    if (this->verbose) TEST_INFO("Child %d finishes RegisterMem()", this->childId);
     return TEST_SUCCESS;
   }
 }

@@ -307,19 +307,8 @@ class Primitives<
         subBarrier();
 
         if(ncclShmem.comm.p2pSingleProcMemRegActive) {
-            // Fetch our unique global pointer array passed from the host,
-            // offset by the current execution channel group
-            // Only block 0, thread 0 of Wavefront 0 prints
-            // ====================================================================
-            // INTEGRATION FIX: LOCK RANKS AT THE SLICE START
-            // ====================================================================
-            // if(blockIdx.x == 0 && threadIdx.x == 0) {
-            //     printf("[GPU DEBUG] Rank %d successfully reached the L1 invalidation block! ncclShmem.comm.p2pSingleProcMemRegActive = %d \n",
-            //            ncclShmem.comm.rank,ncclShmem.comm.p2pSingleProcMemRegActive);}
-            // uint64_t* globalBarrierSlot = ncclShmem.comm.crossGpuBarrierPool + group;
-            // crossGpuMonotonicBarrier(globalBarrierSlot, ncclShmem.comm.nRanks);
             // subBarrier();
-            __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "");
+            // __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "");
             // asm volatile("s_waitcnt vmcnt(0)");
             // invalidate_vector_l1(); // Purge local L1 cache lines
             // asm volatile("" ::: "memory"); // Compiler fence
