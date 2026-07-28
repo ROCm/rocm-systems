@@ -11,13 +11,17 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
 
+* Deprecated the ``--join-type`` profile mode option, it has no effect now that the CSV wide merge it fed is gone. It will be removed in a future release.
+
 ### Removed
 
 * Removed the CSV profile output backend and the ``--format-rocprof-output`` profile mode option. Profiling now always uses the ``rocpd`` output format, which was already the default.
 
-* Removed analyze support for legacy CSV-shaped workload directories. Analyze now builds `pmc_perf.csv` only by concatenating the `rocpd` `results_*.csv` intermediate, rather than merging the legacy CSV-shaped per-counter files (`results_pmc_perf_*.csv`, `SQ_*.csv`, `SQC_*.csv`). Workloads produced by the removed CSV profile backend (`format_rocprof_output: csv`) are now rejected with a clear error in all analyze modes instead of being silently misread; use an older rocprof-compute release to analyze them.
+* Removed analyze support for legacy CSV-shaped workload directories. Analyze now builds `pmc_perf.csv` only by concatenating the `rocpd` `results_*.csv` intermediate, rather than merging the legacy CSV-shaped per-counter files (`results_pmc_perf_*.csv`, `SQ_*.csv`, `SQC_*.csv`). Workloads produced by the removed CSV profile backend (`format_rocprof_output: csv`) are now rejected with an error naming the workload directory, in every analyze mode, instead of being silently misread; use an older rocprof-compute release to analyze them. Workloads that predate the CSV backend and ship an already-joined `pmc_perf.csv` are still analyzable.
 
 ### Optimized
+
+* Profile mode now streams the rocpd counter collection CSV when writing `results_*.csv` instead of loading every counter row into memory, and it writes the intermediate copy under `out/` only when ML API tracing consumes it. This lowers peak memory and removes one full-file write per counter collection pass, which is most noticeable on large AI workloads.
 
 ### Resolved issues
 

@@ -32,7 +32,7 @@ class tui_analysis(OmniAnalyze_Base):
     @demarcate
     def pre_processing(self) -> None:
         self._profiling_config = file_io.load_profiling_config(self.path)
-        validate_profiling_format(self._profiling_config)
+        validate_profiling_format(self._profiling_config, self.path)
         self._runs = self.initalize_runs()
 
         if self.args.random_port:
@@ -66,7 +66,6 @@ class tui_analysis(OmniAnalyze_Base):
             self.path,
             self.args.kernel_verbose,
             self.args.verbose,
-            self._profiling_config,
         )
 
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(

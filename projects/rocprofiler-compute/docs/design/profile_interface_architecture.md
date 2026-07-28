@@ -1,6 +1,6 @@
 # Profile Interface Architecture
 
-Status: proposal
+Status: proposal (Phase A implemented; Phases A-2 onward not started)
 
 This document describes the architecture for profile data storage and access in
 rocprofiler-compute, and records the decisions made in the design review so the
@@ -228,14 +228,16 @@ sequenceDiagram
             computeAnalyze->>resultCsv: Read
             resultCsv-->>computeAnalyze: Data
         end
-        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat + pivot)
-        computeAnalyze->>pmcPerf: Read back
+        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat)
+        computeAnalyze->>pmcPerf: Read back and pivot to one row per dispatch
         pmcPerf-->>computeAnalyze: Data
         computeAnalyze->>computeAnalyze: build pandas dataframe
     end
 ```
 
 ## Phase A: Remove the CSV Profile Backend
+
+Status: implemented.
 
 Phase A deletes the csv format choice and the csv-format analyze branch, but
 keeps the rocpd read path (`results_*.csv` -> `pmc_perf.csv`). Phase A changes nothing visible in the above sequence diagram.
@@ -284,23 +286,28 @@ flowchart LR
     subgraph disk["On-Disk"]
         db["ROCPD .db (transient)"]
         res["results_*.csv"]
+        pmc["pmc_perf.csv"]
     end
     uprof -->|"writes via"| urocpd
     urocpd -->|"writes"| db
     urocpd -->|"converted to (via csv helper)"| res
     uprof -->|"writes via"| ucsv
     ucsv -->|"writes"| res
-    abase -->|"reads"| res
-    fio -->|"reads"| res
+    abase -->|"concatenates"| res
+    abase -->|"writes"| pmc
+    fio -->|"reads, pivots"| pmc
 ```
 
 Removed in this phase:
 
 - the `if csv` branch in `utils_profile.py` and related csv-only conversion helpers
 - the `--format-rocprof-output` flag and its uses (default and only output becomes rocpd)
-  - while this phase results in a single format output being rocpd, we still keep the variable _PROFILE_OUTPUT_FORMAT to align with the Phase B boundary to leave the door open for future formats.
+  - while this phase results in a single format output being rocpd, we still keep the variable `PROFILE_OUTPUT_FORMAT` to align with the Phase B boundary to leave the door open for future formats. Profile mode stamps it into `profiling_config.yaml`; analyze reads it only to reject a workload written by a removed backend.
 - related csv-only test functions
-- analyze no longer supports csv-shaped workload directories.
+- analyze no longer supports csv-shaped workload directories, meaning a workload
+  whose `profiling_config.yaml` names a non-rocpd format is rejected up front.
+  Analyze decides how to read `pmc_perf.csv` from the shape of the frame, not
+  from the config, so it does not depend on a workload having that key.
 
 Intentionally **kept** in this phase:
 
@@ -311,14 +318,24 @@ Intentionally **kept** in this phase:
 - `utils_profile_csv.py`. It is still a necessary csv helper file used by the
   rocpd path, `sysinfo.csv`, and marker-trace augmentation. It is removed as csv intermediates are eliminated in later phases.
 
-Note: Two workloads in rocprof-compute /vcopy/MI350 currently store csv intermediates, and were generated before rocpd support was added. These workloads must be regenerated to match the other workloads, all of which have rocpd intermediates.
+Note: the MI350 `no_roof` and `vcopy` golden workloads stored csv intermediates,
+having been generated before rocpd support was added. Phase A regenerated them so
+that every golden workload carries rocpd intermediates.
+
+Pre-rocpd golden workloads for older architectures stay as they are: they ship an
+already-joined wide `pmc_perf.csv` and no `profiling_config.yaml`, which analyze
+still reads. Only the removed backend's per-counter csv shape is unsupported.
 
 ### Phase A-2: Remove the now-dead `--join-type` option
 
 `--join-type {kernel,grid}` only ever fed the csv-format wide merge in
-`join_prof`. With that merge removed in Phase A, nothing
-in `src/` reads it, and `grid` vs `kernel` now produce identical output
-Removing it is a small follow-up to Phase A rather than part of the csv-output
+`join_prof` (renamed to `concat_result_csvs` in Phase A, since concatenating
+is all it still does). With that merge removed in Phase A, nothing
+in `src/` reads it, and `grid` vs `kernel` now produce identical output.
+Phase A therefore marks it deprecated: passing it warns and changes nothing, and
+it is no longer written into `profiling_config.yaml`.
+
+Deleting the option outright is a follow-up rather than part of the csv-output
 removal itself because it also deletes user-facing surface, the dedicated
 `join_type_grid` / `join_type_kernel` golden workloads, their related tests,
 and the `--join-type` references in the docs.
@@ -407,8 +424,8 @@ sequenceDiagram
             resultCsv-->>compression: Data
             compression-->>computeAnalyze: Data
         end
-        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat + pivot)
-        computeAnalyze->>pmcPerf: Read back
+        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat)
+        computeAnalyze->>pmcPerf: Read back and pivot to one row per dispatch
         pmcPerf-->>computeAnalyze: Data
         computeAnalyze->>computeAnalyze: build pandas dataframe
     end
@@ -466,8 +483,8 @@ sequenceDiagram
             compression-->>computeAnalyze: Counter data
         end
         computeAnalyze->>computeAnalyze: merge kernels + counters (all processes)
-        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat + pivot)
-        computeAnalyze->>pmcPerf: Read back
+        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat)
+        computeAnalyze->>pmcPerf: Read back and pivot to one row per dispatch
         pmcPerf-->>computeAnalyze: Data
         computeAnalyze->>computeAnalyze: build pandas dataframe
     end

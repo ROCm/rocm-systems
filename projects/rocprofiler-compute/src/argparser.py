@@ -447,13 +447,10 @@ Examples:
         metavar="",
         required=False,
         choices=["kernel", "grid"],
-        default="grid",
+        default=None,
         help=(
             "\t\t\t[DEPRECATED] No longer has any effect; will be removed in a "
-            "future release.\n"
-            "\t\t\tChoose how to join rocprof runs: (DEFAULT: grid)\n"
-            "\t\t\t   kernel (i.e. By unique kernel name dispatches)\n"
-            "\t\t\t   grid (i.e. By unique kernel name + grid size dispatches)"
+            "future release."
         ),
     )
     profile_group.add_argument(

@@ -2,29 +2,24 @@
 # SPDX-License-Identifier:  MIT
 
 """
-Pure stdlib CSV operations - Pandas compatibility layer for profile mode.
+Pure stdlib CSV read/write helpers for profile mode.
 
-This module provides pandas-like operations using only Python standard library.
-Used in profile mode to eliminate external pandas dependency while maintaining
-similar API and functionality.
-
-All functions operate on list[dict] representation of CSV data, which is the
-natural Python representation that csv.DictReader/DictWriter use.
+Profile mode does not import pandas, so counter CSVs are handled here with the
+standard library only. Rows are ``list[dict]`` or an iterator of dicts, the
+natural representation csv.DictReader/DictWriter use. Counter data is streamed
+rather than loaded, since a single pass can hold millions of rows.
 
 This module is ONLY used in profile mode. Analyze mode can use pandas freely.
 """
 
 import csv
-from collections.abc import Iterator
-from typing import Optional
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import ExitStack
+from typing import Callable, Optional
 
 
 def read_csv_as_dicts(csv_file: str) -> tuple[list[dict], list[str]]:
-    """
-    Read CSV file and return list of dicts + fieldnames.
-
-    Equivalent to: df = pd.read_csv(csv_file)
-    """
+    """Read a whole CSV file into a list of dicts, plus its fieldnames."""
     try:
         with open(csv_file, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -54,11 +49,7 @@ def iter_csv_dicts(csv_file: str) -> Iterator[dict]:
 def write_csv_from_dicts(
     csv_file: str, rows: list[dict], fieldnames: Optional[list[str]] = None
 ) -> None:
-    """
-    Write list of dicts to CSV file.
-
-    Equivalent to: df.to_csv(csv_file, index=False)
-    """
+    """Write a list of dicts to a CSV file."""
     if not rows and not fieldnames:
         # Nothing to write
         return
@@ -76,46 +67,82 @@ def write_csv_from_dicts(
             writer.writerows(rows)
 
 
-def drop_column_from_rows(rows: list[dict], column_name: str) -> None:
-    """
-    Remove a column from rows (modifies in place).
+class GroupIdAssigner:
+    """Assign sequential ids to unique combinations of columns, first seen first.
 
-    Equivalent to: df = df.drop(columns=[column_name])
-    """
-    for row in rows:
-        row.pop(column_name, None)
-
-
-def assign_group_ids(
-    rows: list[dict], group_by_columns: list[str], new_column_name: str
-) -> None:
-    """
-    Assign sequential group IDs based on unique combinations of columns.
-
-    Equivalent to: df[new_column_name] = df.groupby(group_by_columns).ngroup()
-
-    Note: Empty rows list is valid (no-op). Missing columns use None as value.
+    Ids are handed out one row at a time so a CSV never has to be held in
+    memory.
 
     Example:
-        rows = [
-            {'name': 'A', 'value': 1},
-            {'name': 'B', 'value': 2},
-            {'name': 'A', 'value': 1},
-        ]
-        assign_group_ids(rows, ['name', 'value'], 'group_id')
-        # rows[0]['group_id'] = 0
-        # rows[1]['group_id'] = 1
-        # rows[2]['group_id'] = 0  (same as first row)
+        assigner = GroupIdAssigner(["name", "value"], "group_id")
+        assigner.apply({"name": "A", "value": 1})  # group_id 0
+        assigner.apply({"name": "B", "value": 2})  # group_id 1
+        assigner.apply({"name": "A", "value": 1})  # group_id 0 again
     """
-    groups = {}
-    group_id = 0
 
-    for row in rows:
-        # Create tuple key from group columns (single hash operation)
-        key = tuple(row.get(col) for col in group_by_columns)
+    def __init__(self, group_by_columns: Sequence[str], new_column_name: str) -> None:
+        self._columns = tuple(group_by_columns)
+        self._target = new_column_name
+        self._ids: dict[tuple, int] = {}
 
-        if key not in groups:
-            groups[key] = group_id
-            group_id += 1
+    def apply(self, row: dict) -> dict:
+        """Set the id column on row, in place, and return it."""
+        # A row missing one of the columns contributes None for it rather than
+        # raising, so a malformed row still gets an id.
+        key = tuple(row.get(col) for col in self._columns)
+        row[self._target] = self._ids.setdefault(key, len(self._ids))
+        return row
 
-        row[new_column_name] = groups[key]
+
+def stream_csv_to_files(
+    src: str,
+    dests: Iterable[str],
+    transform: Optional[Callable[[dict], dict]] = None,
+    drop_columns: Sequence[str] = (),
+) -> int:
+    """Copy src to every destination one row at a time, and return the row count.
+
+    Each row passes through transform before being written, so callers can
+    relabel columns without materializing the file. Columns in drop_columns are
+    removed from the output header and from every row.
+
+    Raises ValueError if src has no header row.
+    """
+    dropped = set(drop_columns)
+    with ExitStack() as stack:
+        infile = stack.enter_context(open(src, newline="", encoding="utf-8"))
+        reader = csv.DictReader(infile)
+        if reader.fieldnames is None:
+            raise ValueError(f"CSV file {src} has no header row")
+
+        first_row = next(reader, None)
+        if first_row is not None and transform is not None:
+            first_row = transform(first_row)
+        # Take the header from the transformed row so that columns a transform
+        # adds are written too.
+        header_source = reader.fieldnames if first_row is None else first_row
+        fieldnames = [f for f in header_source if f not in dropped]
+
+        writers = []
+        for dest in dests:
+            outfile = stack.enter_context(open(dest, "w", newline="", encoding="utf-8"))
+            writer = csv.DictWriter(
+                outfile, fieldnames=fieldnames, extrasaction="ignore"
+            )
+            writer.writeheader()
+            writers.append(writer)
+
+        if first_row is None:
+            return 0
+
+        rows_written = 0
+        row: Optional[dict] = first_row
+        while row is not None:
+            for writer in writers:
+                writer.writerow(row)
+            rows_written += 1
+            row = next(reader, None)
+            if row is not None and transform is not None:
+                row = transform(row)
+
+    return rows_written

@@ -36,7 +36,7 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
-_PROFILE_OUTPUT_FORMAT = "rocpd"
+PROFILE_OUTPUT_FORMAT = "rocpd"
 
 # Shared suffix for the invalid --block error in the profile and analyze paths.
 INVALID_BLOCK_HINT = (
@@ -49,18 +49,21 @@ def is_gfx115x(gpu_arch: Optional[str]) -> bool:
     return bool(gpu_arch and gpu_arch.startswith("gfx115"))
 
 
-def validate_profiling_format(profiling_config: dict[str, Any]) -> None:
+def validate_profiling_format(
+    profiling_config: dict[str, Any], workload_path: Optional[str] = None
+) -> None:
     """Reject workloads produced by a removed profile backend."""
     output_format = profiling_config.get("format_rocprof_output")
-    if output_format is not None and output_format != _PROFILE_OUTPUT_FORMAT:
-        console_error(
-            "analysis",
-            f"Unsupported profiling output format (format_rocprof_output: "
-            f"{output_format!r}). Analyze only supports workloads profiled "
-            f"with the {_PROFILE_OUTPUT_FORMAT!r} output format. Legacy "
-            "CSV-backend workloads are no longer supported; re-profile the "
-            "workload, or analyze it with an older rocprof-compute release.",
-        )
+    if output_format is None or output_format == PROFILE_OUTPUT_FORMAT:
+        return
+    workload = f"{workload_path}: " if workload_path else ""
+    console_error(
+        "analysis",
+        f"{workload}unsupported profiling output format (format_rocprof_output: "
+        f"{output_format!r}). Analyze only supports workloads profiled "
+        f"with the {PROFILE_OUTPUT_FORMAT!r} output format. Legacy "
+        "CSV-backend workloads are no longer supported.",
+    )
 
 
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:

@@ -7,7 +7,7 @@ import shlex
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, console_log, demarcate
-from utils.utils_common import _PROFILE_OUTPUT_FORMAT
+from utils.utils_common import PROFILE_OUTPUT_FORMAT
 from utils.utils_profile import pc_sampling_unit
 
 
@@ -50,7 +50,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             f"{self.get_args().output_directory}/out",
             trace_option,
             "--output-format",
-            _PROFILE_OUTPUT_FORMAT,
+            PROFILE_OUTPUT_FORMAT,
         ]
 
         if args.attach_pid:

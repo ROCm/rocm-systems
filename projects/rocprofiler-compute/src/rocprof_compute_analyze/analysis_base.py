@@ -308,7 +308,9 @@ class OmniAnalyze_Base:
                 console_error("analysis", "You cannot provide the same path twice.")
             seen_paths.add(dir_info[0])
 
-            validate_profiling_format(file_io.load_profiling_config(dir_info[0]))
+            validate_profiling_format(
+                file_io.load_profiling_config(dir_info[0]), dir_info[0]
+            )
 
         self._profiling_config: dict[str, Any] = file_io.load_profiling_config(
             args.path[0][0]
@@ -369,52 +371,62 @@ class OmniAnalyze_Base:
             )
 
     @demarcate
-    def join_prof(self, workload_dir: Path, out: Optional[str] = None) -> None:
-        """Concatenate the rocpd ``results_*.csv`` files into ``pmc_perf.csv``.
+    def concat_result_csvs(self, result_files: list[Path], output_file: Path) -> None:
+        """Vertically concatenate rocpd ``results_*.csv`` files into one CSV.
+
+        Every file shares the long-form header rocpd writes, so the header is
+        taken from the first non-empty file and the remaining rows are appended.
 
         Args:
-            workload_dir: Path to workload directory containing results_*.csv
-            out: Optional output file path (defaults to workload_dir/pmc_perf.csv)
+            result_files: The results_*.csv files to concatenate
+            output_file: Destination CSV
         """
-        output_file = out or str(workload_dir / "pmc_perf.csv")
-
-        # Vertically concat (by rows) the rocpd results_*.csv into pmc_perf.csv.
-        result_files = list(workload_dir.glob("results_*.csv"))
-
         console_warning(
             "Reading intermediate results_*.csv files is deprecated and "
             "will be removed in a future release."
         )
 
+        rows_written = 0
         with open(output_file, "w", newline="", encoding="utf-8") as outfile:
             writer = None
             for file in result_files:
                 with open(file, newline="", encoding="utf-8") as infile:
                     reader = csv.reader(infile)
-                    header = next(reader)
+                    header = next(reader, None)
+                    if header is None:
+                        console_warning(f"Skipping empty {file}")
+                        continue
                     # Write header only once
                     if writer is None:
                         writer = csv.writer(outfile)
                         writer.writerow(header)
                     for row in reader:
                         writer.writerow(row)
+                        rows_written += 1
 
-        console_debug(f"Created file: {output_file}")
+        if writer is None:
+            output_file.unlink(missing_ok=True)
+            console_error(
+                f"All results_*.csv files in {output_file.parent} are empty.\n"
+                f"Please re-run 'rocprof-compute profile'."
+            )
+
+        console_debug(f"Created file: {output_file} ({rows_written} counter rows)")
 
     def join_workload_csvs(self, workload_dir: Path) -> None:
-        """Join results_*.csv source files into pmc_perf.csv if needed.
+        """Concatenate results_*.csv source files into pmc_perf.csv if needed.
 
         Args:
             workload_dir: Path to the workload directory
         """
         pmc_perf = workload_dir / "pmc_perf.csv"
-        results_files = list(workload_dir.glob("results_*.csv"))
+        result_files = list(workload_dir.glob("results_*.csv"))
 
         if pmc_perf.exists():
             console_debug(f"Using existing {pmc_perf}")
-        elif results_files:
+        elif result_files:
             console_log(f"Joining results_*.csv for {workload_dir}...")
-            self.join_prof(workload_dir, out=str(pmc_perf))
+            self.concat_result_csvs(result_files, pmc_perf)
             console_log(f"Created {pmc_perf}")
         else:
             console_error(

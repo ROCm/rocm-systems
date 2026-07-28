@@ -11,7 +11,7 @@ from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
 from utils.utils_common import (
-    _PROFILE_OUTPUT_FORMAT,
+    PROFILE_OUTPUT_FORMAT,
     resolve_rocm_library_path,
 )
 from utils.utils_profile import pc_sampling_unit
@@ -54,7 +54,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         options.update({
             "LD_PRELOAD": ld_preload_value,
             "ROCPROF_KERNEL_TRACE": "1",
-            "ROCPROF_OUTPUT_FORMAT": _PROFILE_OUTPUT_FORMAT,
+            "ROCPROF_OUTPUT_FORMAT": PROFILE_OUTPUT_FORMAT,
             "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out/pmc_1",
         })
 

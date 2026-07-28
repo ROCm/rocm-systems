@@ -20,7 +20,6 @@ from utils.logger import (
     demarcate,
 )
 from utils.utils_common import (
-    _PROFILE_OUTPUT_FORMAT,
     canonical_config_arch,
     normalize_filter_to_str_list,
 )
@@ -293,7 +292,6 @@ def create_df_pmc(
     raw_data_dir: str,
     kernel_verbose: int,
     verbose: int,
-    config_dict: dict[str, Any],
 ) -> pd.DataFrame:
     """
     Load all raw pmc counters and join into one df.
@@ -304,7 +302,9 @@ def create_df_pmc(
 
     df = pd.read_csv(pmc_perf_path)
 
-    if config_dict.get("format_rocprof_output") == _PROFILE_OUTPUT_FORMAT:
+    # rocpd emits one row per counter per dispatch; pivot those to one row per
+    # dispatch. Anything else is already one row per dispatch.
+    if {"Counter_Name", "Counter_Value"}.issubset(df.columns):
         df = utils_analysis.process_rocpd_csv(df)
 
     # Demangle original KernelNames

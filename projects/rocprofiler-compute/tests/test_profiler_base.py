@@ -13,7 +13,7 @@ from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
 from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
-from utils.utils_common import _PROFILE_OUTPUT_FORMAT
+from utils.utils_common import PROFILE_OUTPUT_FORMAT
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
     NoScriptInCommandError,
@@ -385,7 +385,7 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
     assert options["LD_PRELOAD"] == "user_lib:sdk_tool:native_tool"
     assert options["ROCPROF_COUNTER_COLLECTION"] == "0"
     assert options["ROCPROF_KERNEL_TRACE"] == "1"
-    assert options["ROCPROF_OUTPUT_FORMAT"] == _PROFILE_OUTPUT_FORMAT
+    assert options["ROCPROF_OUTPUT_FORMAT"] == PROFILE_OUTPUT_FORMAT
     assert options["ROCPROF_OUTPUT_PATH"] == f"{tmp_path / 'workload'}/out/pmc_1"
     assert options["APP_CMD"] == ["my_app", "--flag"]
 
@@ -441,7 +441,6 @@ def test_sdk_pc_sampling_options(
     args = _make_sanitize_args(
         ["/bin/true"],
         rocprofiler_sdk_tool_path="/opt/sdk/tool.so",
-        format_rocprof_output="csv",
         output_directory=str(tmp_path),
         pc_sampling_method=method,
         pc_sampling_interval=1000,

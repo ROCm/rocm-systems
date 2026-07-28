@@ -133,95 +133,6 @@ def test_iter_csv_dicts_no_header_raises(temp_csv_file):
 
 
 # =============================================================================
-# Column Manipulation Tests
-# =============================================================================
-
-
-def test_drop_column_from_rows():
-    """Test dropping a column from rows."""
-    rows = [{"a": 1, "b": 2, "c": 3}, {"a": 4, "b": 5, "c": 6}]
-
-    csv_ops.drop_column_from_rows(rows, "b")
-
-    assert rows[0] == {"a": 1, "c": 3}
-    assert rows[1] == {"a": 4, "c": 6}
-
-
-def test_drop_nonexistent_column():
-    """Test dropping nonexistent column does nothing."""
-    rows = [{"a": 1}]
-
-    csv_ops.drop_column_from_rows(rows, "nonexistent")
-
-    assert rows[0] == {"a": 1}
-
-
-# =============================================================================
-# GroupBy Tests
-# =============================================================================
-
-
-def test_assign_group_ids_single_column():
-    """Test assigning group IDs based on single column."""
-    rows = [
-        {"category": "A"},
-        {"category": "B"},
-        {"category": "A"},
-        {"category": "C"},
-        {"category": "B"},
-    ]
-
-    csv_ops.assign_group_ids(rows, ["category"], "group_id")
-
-    assert rows[0]["group_id"] == 0  # First A
-    assert rows[1]["group_id"] == 1  # First B
-    assert rows[2]["group_id"] == 0  # Second A (same as first)
-    assert rows[3]["group_id"] == 2  # First C
-    assert rows[4]["group_id"] == 1  # Second B (same as first)
-
-
-def test_assign_group_ids_multiple_columns():
-    """Test assigning group IDs based on multiple columns."""
-    rows = [
-        {"name": "A", "value": 1},
-        {"name": "B", "value": 2},
-        {"name": "A", "value": 1},
-        {"name": "A", "value": 2},
-    ]
-
-    csv_ops.assign_group_ids(rows, ["name", "value"], "group_id")
-
-    assert rows[0]["group_id"] == 0  # A,1
-    assert rows[1]["group_id"] == 1  # B,2
-    assert rows[2]["group_id"] == 0  # A,1 (same)
-    assert rows[3]["group_id"] == 2  # A,2 (different)
-
-
-def test_assign_group_ids_empty_rows():
-    """Test assign_group_ids with empty rows list."""
-    rows = []
-    csv_ops.assign_group_ids(rows, ["col"], "group_id")
-    # Should not crash
-    assert rows == []
-
-
-def test_assign_group_ids_missing_columns():
-    """Test assign_group_ids with missing columns in some rows."""
-    rows = [
-        {"a": 1, "b": 2},
-        {"a": 1},  # Missing 'b'
-        {"b": 2},  # Missing 'a'
-    ]
-
-    csv_ops.assign_group_ids(rows, ["a", "b"], "group_id")
-
-    # Missing keys become None in tuple
-    assert rows[0]["group_id"] == 0  # (1, 2)
-    assert rows[1]["group_id"] == 1  # (1, None)
-    assert rows[2]["group_id"] == 2  # (None, 2)
-
-
-# =============================================================================
 # Integration Tests
 # =============================================================================
 
@@ -244,8 +155,8 @@ def test_write_csv_extra_keys(temp_csv_file):
 
 
 def test_full_workflow(temp_csv_file):
-    """Test complete workflow: read, transform, write."""
-    # Create source data
+    """The profile-mode workflow: write rows, then stream them out with group ids
+    assigned and a column dropped."""
     source_data = [
         {"name": "Alice", "category": "A", "value": "10"},
         {"name": "Bob", "category": "B", "value": "20"},
@@ -253,26 +164,67 @@ def test_full_workflow(temp_csv_file):
     ]
     csv_ops.write_csv_from_dicts(temp_csv_file, source_data)
 
-    # Read
-    rows, _ = csv_ops.read_csv_as_dicts(temp_csv_file)
-
-    # Transform: assign group IDs
-    csv_ops.assign_group_ids(rows, ["category"], "group_id")
-
-    # Transform: drop a column
-    csv_ops.drop_column_from_rows(rows, "value")
-
-    # Write back
+    groups = csv_ops.GroupIdAssigner(["category"], "group_id")
     output_file = temp_csv_file + ".out"
-    csv_ops.write_csv_from_dicts(output_file, rows)
+    rows_written = csv_ops.stream_csv_to_files(
+        temp_csv_file,
+        [output_file],
+        transform=groups.apply,
+        drop_columns=["value"],
+    )
 
-    # Verify
     result, _ = csv_ops.read_csv_as_dicts(output_file)
 
+    assert rows_written == 3
     assert len(result) == 3
     assert "value" not in result[0]
-    assert "group_id" in result[0]
     assert result[0]["group_id"] == result[2]["group_id"]  # Both category A
+    assert result[1]["group_id"] != result[0]["group_id"]
 
     # Cleanup
     Path(output_file).unlink(missing_ok=True)
+
+
+# =============================================================================
+# Streaming Tests
+# =============================================================================
+
+
+def test_stream_csv_to_files_writes_every_destination(tmp_path):
+    """The ML API trace path needs the same rows in two places from one pass."""
+    src = tmp_path / "in.csv"
+    src.write_text("a,b\n1,2\n3,4\n")
+    first = tmp_path / "first.csv"
+    second = tmp_path / "second.csv"
+
+    assert csv_ops.stream_csv_to_files(str(src), [str(first), str(second)]) == 2
+    assert first.read_bytes() == second.read_bytes()
+    assert first.read_text() == "a,b\n1,2\n3,4\n"
+
+
+def test_stream_csv_to_files_header_only_writes_no_rows(tmp_path):
+    """A workload that dispatched no kernels yields a header-only CSV; the caller
+    detects that from the returned count."""
+    src = tmp_path / "in.csv"
+    src.write_text("a,b\n")
+    dest = tmp_path / "out.csv"
+
+    assert csv_ops.stream_csv_to_files(str(src), [str(dest)]) == 0
+
+
+def test_stream_csv_to_files_rejects_headerless_input(tmp_path):
+    src = tmp_path / "empty.csv"
+    src.write_text("")
+
+    with pytest.raises(ValueError, match="no header row"):
+        csv_ops.stream_csv_to_files(str(src), [str(tmp_path / "out.csv")])
+
+
+def test_group_id_assigner_reuses_ids_for_repeated_keys():
+    assigner = csv_ops.GroupIdAssigner(["name"], "group_id")
+
+    assert assigner.apply({"name": "a"})["group_id"] == 0
+    assert assigner.apply({"name": "b"})["group_id"] == 1
+    assert assigner.apply({"name": "a"})["group_id"] == 0
+    # A missing column contributes None rather than raising.
+    assert assigner.apply({})["group_id"] == 2

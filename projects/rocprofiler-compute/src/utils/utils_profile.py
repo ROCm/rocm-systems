@@ -131,7 +131,6 @@ def run_prof(
     fnames: Union[list[str], str],
     profiler_options: ProfilerOptions,
     workload_dir: str,
-    loglevel: int,
     ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
     extra_env: Optional[dict[str, str]] = None,
@@ -273,55 +272,41 @@ def run_prof(
                 _classify_output_line(stripped)
         console_error("Profiling execution failed.")
 
+    out_dir = Path(workload_dir) / "out"
+    out_pmc_1 = out_dir / "pmc_1"
+    db_paths = sorted(out_pmc_1.glob("*/*.db"))
+
     # If using native tool for counter collection
     if (
         get_rocprof_cmd() == "rocprofiler-sdk"
         and options["ROCPROF_COUNTER_COLLECTION"] == "0"
     ):
-        for db_name in (Path(workload_dir) / "out/pmc_1").glob("*/*.db"):
+        for db_name in db_paths:
             pid = db_name.stem.split("_")[0]
-            counter_csv = (
-                Path(workload_dir)
-                / "out"
-                / "pmc_1"
-                / f"{pid}_native_counter_collection.csv"
-            )
-            if not counter_csv.is_file():
+            native_counter_csv = out_pmc_1 / f"{pid}_native_counter_collection.csv"
+            if not native_counter_csv.is_file():
                 console_debug(
                     f"No native counter CSV for pid {pid}; "
                     f"skipping rocpd update for {db_name}."
                 )
                 continue
             rocpd_data.update_rocpd_pmc_events(
-                str(counter_csv),
+                str(native_counter_csv),
                 str(db_name),
             )
             console_debug(f"Updated rocpd db {db_name} with native tool counters.")
     # Write results_fbase.csv
+    counter_csv = out_pmc_1 / f"{fbase}_counter_collection.csv"
     rocpd_data.convert_dbs_to_csv(
-        [str(p) for p in (Path(workload_dir) / "out/pmc_1").glob("*/*.db")],
-        workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
-        workload_dir + f"/out/pmc_1/{fbase}_marker_api_trace.csv",
+        [str(p) for p in db_paths],
+        str(counter_csv),
+        str(out_pmc_1 / f"{fbase}_marker_api_trace.csv"),
     )
-    # Subprocess succeeded but may have dispatched zero GPU kernels,
-    # in which case the CSV is missing or has no data rows.
-    try:
-        combined_rows, _ = csv_ops.read_csv_as_dicts(
-            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
-        )
-    except (FileNotFoundError, ValueError):
-        combined_rows = []
-    if not combined_rows:
-        console_warning(
-            "No GPU kernel data collected. "
-            "The workload may not have dispatched any GPU kernels."
-        )
-        shutil.rmtree(f"{workload_dir}/out", ignore_errors=True)
-        return
-    # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
-    # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
-    csv_ops.assign_group_ids(
-        combined_rows,
+
+    # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size, Workgroup_Size,
+    # LDS_Per_Workgroup, Start_Timestamp, End_Timestamp, and Kernel_ID based on
+    # Kernel_Name, Grid_Size, Workgroup_Size, LDS_Per_Workgroup.
+    dispatch_ids = csv_ops.GroupIdAssigner(
         [
             "PID",
             "Kernel_Name",
@@ -333,35 +318,49 @@ def run_prof(
         ],
         "Dispatch_ID",
     )
-    # Reset Kernel_ID based on Kernel_Name, Grid_Size,
-    # Workgroup_Size, LDS_Per_Workgroup
-    csv_ops.assign_group_ids(
-        combined_rows,
+    kernel_ids = csv_ops.GroupIdAssigner(
         ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
         "Kernel_ID",
     )
-    # Drop PID since its not required
-    csv_ops.drop_column_from_rows(combined_rows, "PID")
-    # Write back to CSV
-    csv_ops.write_csv_from_dicts(
-        workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
-        combined_rows,
-    )
-    csv_ops.write_csv_from_dicts(workload_dir + f"/results_{fbase}.csv", combined_rows)
-    console_warning(
-        "Intermediate results_*.csv generation from rocpd databases is "
-        "deprecated and will be replaced with automatic .db file "
-        "retention in a future release."
-    )
+
+    # The counter CSV holds one row per dispatch per counter, so it is streamed
+    # rather than held in memory. Only the ML API trace path reads the relabeled
+    # copy under out/, so it is written only when that path needs it.
+    # PID is only needed to group dispatches; it is dropped from the output.
+    relabeled_counter_csv = out_pmc_1 / f"{fbase}_counter_collection.relabeled.csv"
+    dests = [Path(workload_dir) / f"results_{fbase}.csv"]
+    if ml_api_trace_enabled:
+        dests.append(relabeled_counter_csv)
+    # Subprocess succeeded but may have dispatched zero GPU kernels,
+    # in which case the CSV is missing or has no data rows.
+    try:
+        rows_written = csv_ops.stream_csv_to_files(
+            str(counter_csv),
+            [str(dest) for dest in dests],
+            transform=lambda row: kernel_ids.apply(dispatch_ids.apply(row)),
+            drop_columns=["PID"],
+        )
+    except (FileNotFoundError, ValueError):
+        rows_written = 0
+    if not rows_written:
+        for dest in dests:
+            dest.unlink(missing_ok=True)
+        console_warning(
+            "No GPU kernel data collected. "
+            "The workload may not have dispatched any GPU kernels."
+        )
+        shutil.rmtree(str(out_dir), ignore_errors=True)
+        return
     if ml_api_trace_enabled:
         # move counter collection and marker trace to workload dir
+        relabeled_counter_csv.replace(counter_csv)
         save_ml_api_trace_inputs(workload_dir, fbase)
     if retain_rocpd_output:
         console_warning(
             "--retain-rocpd-output is deprecated and will be removed in "
             "a future release. .db files will be retained automatically."
         )
-        for db_path in (Path(workload_dir) / "out/pmc_1").glob("*/*.db"):
+        for db_path in db_paths:
             pid = db_path.stem.split("_")[0]
             shutil.copyfile(
                 db_path,
@@ -371,7 +370,7 @@ def run_prof(
                 f"Retaining large raw rocpd database: {workload_dir}/{fbase}_{pid}.db"
             )
     # Remove temp directory
-    shutil.rmtree(workload_dir + "/" + "out")
+    shutil.rmtree(str(out_dir), ignore_errors=True)
 
 
 @demarcate
