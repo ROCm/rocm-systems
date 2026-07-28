@@ -303,9 +303,9 @@ struct reader_t
      *         of get_flows({}).
      */
     [[nodiscard]] reader_types::flow_list_t get_flows_in_window(
-        const std::vector<size_t>&         tracks,
-        const reader_types::time_window_t& window,
-        uint32_t                           max_edges) const;
+        const std::vector<reader_types::track_id_t>& tracks,
+        const reader_types::time_window_t&           window,
+        uint32_t                                     max_edges) const;
 
     /**
      *@section Event Detail (On-Demand, Unified)

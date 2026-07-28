@@ -104,9 +104,9 @@ struct reader_t::impl
         const reader_types::flow_id_t& flow_id);
 
     [[nodiscard]] reader_types::flow_list_t get_flows_in_window(
-        const std::vector<size_t>&         tracks,
-        const reader_types::time_window_t& window,
-        uint32_t                           max_edges);
+        const std::vector<reader_types::track_id_t>& tracks,
+        const reader_types::time_window_t&           window,
+        uint32_t                                     max_edges);
 
     // Scalar / pmc detail queries (by event handle)
     [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_pmc_event_details(

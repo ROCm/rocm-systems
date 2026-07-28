@@ -2998,15 +2998,13 @@ reader_t::impl::get_flows_for_chain(const reader_types::flow_id_t& flow_id)
 }
 
 reader_types::flow_list_t
-reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
-                                    const reader_types::time_window_t& window,
-                                    uint32_t                           max_edges)
+reader_t::impl::get_flows_in_window(const std::vector<reader_types::track_id_t>& tracks,
+                                    const reader_types::time_window_t&           window,
+                                    uint32_t                                     max_edges)
 {
-    // DESIGN DECISION (gap #3 windowed selector, 2026-07-20): signature keeps the
-    // reader's raw size_t track-id spelling and the existing time_window_t, NOT the
-    // draft's track_id_t struct (unused by this reader). Reversible. Open for Anthony
-    // review — see design/draft_api_2026-06-22.md §6,
-    // design/gap_analysis_current_vs_design_2026-07-23.md.
+    // The tracks param speaks the opaque track_id_t (task 056 — the 4th/final public
+    // track-id consumer to adopt it, completing draft principle #3). Membership is tested
+    // opaque-id-to-opaque-id against track_info_t::id, so no .value unwrap is needed here.
     auto edges = get_flows({});
     if(edges.empty()) return edges;
 
@@ -3023,7 +3021,8 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
         bool                         seen{ false };
     };
     std::unordered_map<reader_types::event_id_t, endpoint_geom>       geom;
-    std::unordered_map<reader_types::event_id_t, std::vector<size_t>> on_tracks;
+    std::unordered_map<reader_types::event_id_t, std::vector<reader_types::track_id_t>>
+        on_tracks;
     for(const auto& t : get_tracks())
     {
         if(!t) continue;
@@ -3043,11 +3042,11 @@ reader_t::impl::get_flows_in_window(const std::vector<size_t>&         tracks,
                 g.seen  = true;
             }
             on_tracks[ev.id].push_back(
-                t->id.value);  // multi-track: kd is on gpu_queue + pmc + stream
+                t->id);  // multi-track: kd is on gpu_queue + pmc + stream
         }
     }
 
-    const std::set<size_t> track_set(tracks.begin(), tracks.end());
+    const std::set<reader_types::track_id_t> track_set(tracks.begin(), tracks.end());
     const bool has_window = window.start.has_value() || window.end.has_value();
     const auto wlo        = window.start.value_or(0);
     const auto whi =
