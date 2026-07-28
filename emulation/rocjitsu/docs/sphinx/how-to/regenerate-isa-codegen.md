@@ -4,7 +4,6 @@ myst:
         "description": "How to regenerate ISA simulation and DBT source files from AMD Machine-Readable ISA XML using the rocJITsu amdisa Python library."
         "keywords": "rocJITsu, ROCm, ISA, codegen, DBT, amdisa, regenerate, code generation"
 ---::: note
-Note
 Regenerating ISA and DBT source files requires the `amdisa` Python
 codegen library and AMD Machine-Readable ISA XML specification files.
 Documenting the full regeneration workflow requires the contents of

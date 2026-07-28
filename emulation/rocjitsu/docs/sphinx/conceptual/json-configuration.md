@@ -16,9 +16,9 @@ hierarchy, and load any program binaries before returning a ready-to-run
 virtual machine handle.
 
 For CMake-level build options that affect the configuration subsystem,
-see [/install/install](/install/install.md). For a step-by-step
+see [install](../install/install.md). For a step-by-step
 guide to writing or modifying a topology file, see
-[/how-to/configure-topology](/how-to/configure-topology.md).
+[configure-topology](../how-to/configure-topology.md).
 
 ## Top-level fields
 
@@ -38,19 +38,13 @@ objects for the virtual machine and the topology.
 }
 ```
 
-  --------------------------------------------------------------------------
-  Field           Type     Description
-  --------------- -------- -------------------------------------------------
-  `max_ticks`     int      Maximum simulation ticks. A value of `0` means
-                           unlimited.
+| Field | Type | Description |
+|-------|------|-------------|
+| `max_ticks` | int | Maximum simulation ticks. A value of `0` means unlimited. |
+| `num_threads` | int | Worker threads for the PDES engine. |
+| `exec_mode` | string | Execution mode: `"functional"` or `"cycle"`. |
+| `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
 
-  `num_threads`   int      Worker threads for the PDES engine.
-
-  `exec_mode`     string   Execution mode: `"functional"` or `"cycle"`.
-
-  `vm.arch`       string   Target architecture, such as `cdna3`, `cdna4`, or
-                           `rdna4`.
-  --------------------------------------------------------------------------
 
 ## Component hierarchy and range expansion
 
@@ -120,7 +114,7 @@ values must be consistent with the component hierarchy defined in
 `topology`.
 
 The fields in this section correspond to the members of
-`rj_vm_gpu_info_t` documented in [/reference/api-vm](/reference/api-vm.md). When `rj_vm_gpu_info` is called, the returned structure
+`rj_vm_gpu_info_t` documented in [api-vm](../reference/api-vm.md). When `rj_vm_gpu_info` is called, the returned structure
 reflects the device section values from the active configuration.
 
 ## FlatBuffers schema validation
@@ -131,7 +125,7 @@ in the `schemas/` directory of the repository:
 -   `simulation_config.fbs` --- Covers topology and simulation
     parameters.
 -   `checkpoint.fbs` --- Covers simulation state checkpointing (see
-    [/how-to/checkpoint-restore](/how-to/checkpoint-restore.md)).
+    [checkpoint-restore](../how-to/checkpoint-restore.md)).
 
 Validation occurs at VM creation time. If the JSON does not conform to
 the schema, `rj_vm_create` returns `ROCJITSU_STATUS_ERROR`. Common
@@ -142,28 +136,17 @@ and malformed range expressions.
 
 The `configs/` directory ships several ready-to-use topology files:
 
-  -------------------------------------------------------------------------------
-  File                                    Description
-  --------------------------------------- ---------------------------------------
-  `amdgpu_cdna3.json`                     Single CDNA3 GPU, standalone
-                                          simulation.
+| File | Description |
+|------|-------------|
+| `amdgpu_cdna3.json` | Single CDNA3 GPU, standalone simulation. |
+| `amdgpu_cdna3_kmd.json` | Single CDNA3 GPU, daemon or KFD mode. |
+| `amdgpu_cdna4.json` | Single CDNA4 GPU, standalone simulation. |
+| `amdgpu_cdna4_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
+| `amdgpu_cdna4_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
+| `amdgpu_gfx1250.json` | Single gfx1250 GPU, standalone simulation (no KMD). |
+| `amdgpu_rdna3_gfx1100_w7900_kmd.json` | Single RDNA3 gfx1100 GPU, KFD mode. |
+| `amdgpu_rdna4_gfx1201_r9700_kmd.json` | Single RDNA4 gfx1201 GPU, KFD mode. |
 
-  `amdgpu_cdna3_kmd.json`                 Single CDNA3 GPU, daemon or KFD mode.
-
-  `amdgpu_cdna4.json`                     Single CDNA4 GPU, standalone
-                                          simulation.
-
-  `amdgpu_cdna4_kmd.json`                 Single CDNA4 GPU, daemon or KFD mode.
-
-  `amdgpu_cdna4_kmd_2gpu.json`            Two CDNA4 GPUs, multi-GPU daemon mode.
-
-  `amdgpu_gfx1250.json`                   Single gfx1250 GPU, standalone
-                                          simulation (no KMD).
-
-  `amdgpu_rdna3_gfx1100_w7900_kmd.json`   Single RDNA3 gfx1100 GPU, KFD mode.
-
-  `amdgpu_rdna4_gfx1201_r9700_kmd.json`   Single RDNA4 gfx1201 GPU, KFD mode.
-  -------------------------------------------------------------------------------
 
 Standalone configs (without `_kmd` in the name) are used with
 `RJ_VM_MODE_DEFAULT`, where the caller drives the simulation via

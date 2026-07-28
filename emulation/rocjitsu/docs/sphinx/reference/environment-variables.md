@@ -11,9 +11,9 @@ plugins, diagnostic output, and path resolution. This page documents
 each variable, its default value, allowed values, and effect.
 
 For details on how plugins use these variables, see
-[/conceptual/execution-plugins](/conceptual/execution-plugins.md). For
+[execution-plugins](../conceptual/execution-plugins.md). For
 command-line options that interact with these variables, see
-[/reference/rocjitsu-cli](/reference/rocjitsu-cli.md).
+[rocjitsu-cli](rocjitsu-cli.md).
 
 ## Execution plugins
 
@@ -91,9 +91,6 @@ Directory path for file-based sinks.
 ### `RJ_LOG_GROUPS`
 
 > **Note**
-
-title
-Note
 `RJ_LOG_GROUPS` to document its default value, allowed values, or
 precise effect. Documenting this variable requires inspection of the
 plugin logging implementation.
@@ -102,9 +99,6 @@ plugin logging implementation.
 ### `RJ_FORCE_SCALAR`
 
 > **Note**
-
-title
-Note
 `RJ_FORCE_SCALAR` to document its default value, allowed values, or
 precise effect. Documenting this variable requires inspection of the
 simulation engine\'s scalar execution path.

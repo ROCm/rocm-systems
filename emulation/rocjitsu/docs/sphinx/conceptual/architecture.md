@@ -21,10 +21,10 @@ infrastructure) to top (unmodified user binaries).
 ```mermaid
 flowchart
 
-:   A\[\"HIP / ROCR / RCCL\"\] \--\> B\[\"KMD emulation\"\] B \--\>
-    C\[\"VM / hardware model\"\] C \--\> D\[\"ISA layer\"\] D \--\>
-    E\[\"Code layer\"\] E \--\> F\[\"Configuration\"\] F \--\>
-    G\[\"simdojo PDES engine\"\]
+:   A\["HIP / ROCR / RCCL"\] \--\> B\["KMD emulation"\] B \--\>
+    C\["VM / hardware model"\] C \--\> D\["ISA layer"\] D \--\>
+    E\["Code layer"\] E \--\> F\["Configuration"\] F \--\>
+    G\["simdojo PDES engine"\]
 ```
 Each layer in the stack depends on the layers below it, with the
 configuration and simulation engine providing the foundation.
@@ -58,7 +58,7 @@ FlatBuffers schemas. Range expansion (for example, `xcd[0:8]`) and
 pattern-based link wiring allow compact multi-GPU configurations. The
 configuration layer builds the full component hierarchy from a single
 JSON file. For details on the JSON format, see
-[/conceptual/json-configuration](/conceptual/json-configuration.md).
+[json-configuration](json-configuration.md).
 
 ### Code layer
 
@@ -110,10 +110,10 @@ Models the GPU hardware pipeline as simdojo components:
 -   **Cache hierarchy** --- L1 vector cache, L1 scalar cache, L2 cache,
     and memory-side cache with MTYPE awareness.
 -   **Execution plugins** --- Pluggable hooks for runtime analysis. See
-    [/conceptual/execution-plugins](/conceptual/execution-plugins.md).
+    [execution-plugins](execution-plugins.md).
 
 For a deeper discussion of the hardware model, see
-[/conceptual/gpu-vm-design](/conceptual/gpu-vm-design.md).
+[gpu-vm-design](gpu-vm-design.md).
 
 ### KMD emulation
 

@@ -15,7 +15,7 @@ the `rj_vm_step` C API.
 
 ## Prerequisites
 
--   rocJITsu built from source (see [/install/install](/install/install.md)).
+-   rocJITsu built from source (see [install](../install/install.md)).
 -   A ROCm toolchain that provides `hipcc` (needed to compile the kernel
     for `--offload-arch=gfx950`).
 
@@ -38,9 +38,6 @@ hipcc -o /tmp/vector_add vector_add.hip --offload-arch=gfx950
 ```
 
 > **Note**
-
-title
-Note
 JSON configuration file you use to create the virtual machine. The
 pre-built `configs/amdgpu_cdna4_kmd.json` targets CDNA4 (gfx950).
 ## Run the kernel in local mode
@@ -58,7 +55,7 @@ build/tools/rocjitsu/rocjitsu \
 The `--config` flag points to a JSON topology file that describes the
 simulated GPU. The `--` separator marks the start of the application
 command line. For details on the JSON format, see
-[/conceptual/json-configuration](/conceptual/json-configuration.md).
+[json-configuration](../conceptual/json-configuration.md).
 
 ## What happens inside
 
@@ -89,7 +86,7 @@ The following sequence occurs when the CLI launches the application:
     results.
 
 For a deeper look at the GPU hardware model and simulation architecture,
-see [/conceptual/gpu-vm-design](/conceptual/gpu-vm-design.md).
+see [gpu-vm-design](../conceptual/gpu-vm-design.md).
 
 ## Enable VM logging
 
@@ -150,19 +147,19 @@ uint64_t ticks = 0;
 rj_vm_run(vm, &ticks);
 ```
 
-See [/reference/api-vm](/reference/api-vm.md) for the full
+See [api-vm](../reference/api-vm.md) for the full
 virtual machine API reference.
 
 ## Next steps
 
--   [/tutorials/inspect-code-object](/tutorials/inspect-code-object.md) ---
+-   [inspect-code-object](inspect-code-object.md) ---
     decode and disassemble the kernel\'s code object with the rocJITsu
     code object API.
--   [/tutorials/translate-cdna4-to-rdna4](/tutorials/translate-cdna4-to-rdna4.md)
+-   [translate-cdna4-to-rdna4](translate-cdna4-to-rdna4.md)
     --- translate the gfx950 code object to RDNA4 using the dynamic
     binary translator.
--   [/how-to/configure-topology](/how-to/configure-topology.md) ---
+-   [configure-topology](../how-to/configure-topology.md) ---
     customize the simulated GPU topology with your own JSON
     configuration.
--   [/how-to/checkpoint-restore](/how-to/checkpoint-restore.md) --- save
+-   [checkpoint-restore](../how-to/checkpoint-restore.md) --- save
     and restore simulation state.

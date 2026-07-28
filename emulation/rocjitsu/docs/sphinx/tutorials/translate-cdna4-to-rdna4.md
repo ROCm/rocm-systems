@@ -19,9 +19,9 @@ for example, when verifying that a kernel you compiled for one
 architecture can be correctly translated to another.
 
 For a broader look at the DBT architecture, see
-[/conceptual/architecture](/conceptual/architecture.md). For a complete
+[architecture](../conceptual/architecture.md). For a complete
 reference of `rj_dbt_translate` options, see
-[/reference/rj-dbt-translate](/reference/rj-dbt-translate.md).
+[rj-dbt-translate](../reference/rj-dbt-translate.md).
 
 ## Compile a HIP kernel for gfx950
 
@@ -178,8 +178,8 @@ problems:
 
 ## Next steps
 
--   Read the full [/reference/rj-dbt-translate](/reference/rj-dbt-translate.md) for all supported options and targets.
--   See [/conceptual/architecture](/conceptual/architecture.md) for an
+-   Read the full [rj-dbt-translate](../reference/rj-dbt-translate.md) for all supported options and targets.
+-   See [architecture](../conceptual/architecture.md) for an
     overview of how the DBT fits into the rocJITsu component stack.
--   Try [/tutorials/inspect-code-object](/tutorials/inspect-code-object.md)
+-   Try [inspect-code-object](inspect-code-object.md)
     to explore code objects with the rocJITsu C API.

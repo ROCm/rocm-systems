@@ -18,7 +18,7 @@ Optional prerequisites:
 
 -   **Python 3.10 or later** --- required only for ISA code generation
     with the `amdisa` pipeline. See
-    [/how-to/regenerate-isa-codegen](/how-to/regenerate-isa-codegen.md) for
+    [regenerate-isa-codegen](../how-to/regenerate-isa-codegen.md) for
     details.
 -   **AMD ROCm toolchain** (`hipcc`, `libhsa-runtime64`) --- required
     only for HIP kernel tests and daemon-mode tests. When the ROCm
@@ -101,29 +101,13 @@ inside the source tree by default. To relocate the download directory
 
 ### CMake options
 
-  ----------------------------------------------------------------------------------
-  Option                         Default     Description
-  ------------------------------ ----------- ---------------------------------------
-  `RJ_SANITIZER`                 *(empty)*   Enable a sanitizer build. Accepted
-                                             values: `asan`, `ubsan`, `tsan`,
-                                             `msan`.
-
-  `RJ_CLANG_TIDY`                `OFF`       Enable clang-tidy static analysis
-                                             during the build.
-
-  `LTO`                          `OFF`       Enable link-time optimization (IPO) for
-                                             `Release` and `RelWithDebInfo`
-                                             configurations. Incompatible with
-                                             `RJ_SANITIZER`; setting both causes a
-                                             fatal error.
-
-  `RJ_ENABLE_EXPENSIVE_CHECKS`   `OFF`       Enable expensive exhaustive test suites
-                                             such as MFMA and WMMA SIMD
-                                             bit-exactness checks.
-
-  `BUILD_TESTING`                `ON`        Standard CMake option. Set to `OFF` to
-                                             skip building the test suite.
-  ----------------------------------------------------------------------------------
+| Option | Default | Description |
+|--------|---------|-------------|
+| `RJ_SANITIZER` | *(empty)* | Enable a sanitizer build. Accepted values: `asan`, `ubsan`, `tsan`, `msan`. |
+| `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis during the build. |
+| `LTO` | `OFF` | Enable link-time optimization (IPO) for `Release` and `RelWithDebInfo` configurations. Incompatible with `RJ_SANITIZER`; setting both causes a fatal error. |
+| `RJ_ENABLE_EXPENSIVE_CHECKS` | `OFF` | Enable expensive exhaustive test suites such as MFMA and WMMA SIMD bit-exactness checks. |
+| `BUILD_TESTING` | `ON` | Standard CMake option. Set to `OFF` to skip building the test suite. |
 
 ### Sanitizer builds
 
@@ -212,6 +196,6 @@ rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json -- \
 ```
 
 For additional information about the `rocjitsu` CLI modes, see
-[/reference/rocjitsu-cli](/reference/rocjitsu-cli.md). For JSON
+[rocjitsu-cli](../reference/rocjitsu-cli.md). For JSON
 topology configuration, see
-[/conceptual/json-configuration](/conceptual/json-configuration.md).
+[json-configuration](../conceptual/json-configuration.md).

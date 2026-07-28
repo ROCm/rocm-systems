@@ -13,9 +13,9 @@ bundled AMDGPU code objects. The tool is primarily intended for
 debugging DBT behavior.
 
 For the underlying C API used by the translator, see
-[/reference/api-code-object](/reference/api-code-object.md). For a
+[api-code-object](api-code-object.md). For a
 hands-on translation walkthrough, see
-[/tutorials/translate-cdna4-to-rdna4](/tutorials/translate-cdna4-to-rdna4.md).
+[translate-cdna4-to-rdna4](../tutorials/translate-cdna4-to-rdna4.md).
 
 ## Synopsis
 
@@ -93,7 +93,7 @@ The following LLVM machine names are accepted by `--input-target` and
 -   `gfx1201`
 
 For a full list of architecture identifiers and their mappings, see
-[/reference/supported-architectures](/reference/supported-architectures.md).
+[supported-architectures](supported-architectures.md).
 
 ## Output conventions
 
@@ -195,13 +195,13 @@ rj_dbt_translate vector_add.o \
 
 ## Related pages
 
--   [/reference/api-code-object](/reference/api-code-object.md) --- C API
+-   [api-code-object](api-code-object.md) --- C API
     for code objects and the `rj_code_translate` function
--   [/reference/supported-architectures](/reference/supported-architectures.md)
+-   [supported-architectures](supported-architectures.md)
     --- full list of supported GPU architectures
--   [/tutorials/translate-cdna4-to-rdna4](/tutorials/translate-cdna4-to-rdna4.md)
+-   [translate-cdna4-to-rdna4](../tutorials/translate-cdna4-to-rdna4.md)
     --- tutorial for translating a CDNA4 code object to RDNA4
--   [/tutorials/inspect-code-object](/tutorials/inspect-code-object.md) ---
+-   [inspect-code-object](../tutorials/inspect-code-object.md) ---
     tutorial for inspecting code objects
--   [/reference/rocjitsu-cli](/reference/rocjitsu-cli.md) ---
+-   [rocjitsu-cli](rocjitsu-cli.md) ---
     `rocjitsu` main CLI reference

@@ -13,9 +13,9 @@ command processor to wavefront execution on compute units, and how the
 simulated memory hierarchy maintains coherency.
 
 For information on how the SoC topology is declared in JSON, see
-[/how-to/configure-topology](/how-to/configure-topology.md). For details
+[configure-topology](../how-to/configure-topology.md). For details
 on how the KMD emulation layer routes host-side ioctls to the simulated
-driver, see [/conceptual/architecture](/conceptual/architecture.md).
+driver, see [architecture](architecture.md).
 
 ## SoC component hierarchy
 
@@ -78,7 +78,7 @@ manages the accumulator register file.
 Execution plugins receive callbacks at key points in the wavefront
 lifecycle --- dispatch, memory operations, register reads, barriers, and
 `s_waitcnt` events. See
-[/conceptual/execution-plugins](/conceptual/execution-plugins.md) for
+[execution-plugins](execution-plugins.md) for
 details on the plugin interface.
 
 ## Memory hierarchy
@@ -156,4 +156,4 @@ The architecture is selected through the `vm.arch` field in the JSON
 configuration and determines which ISA decoder and execution bodies the
 CUs use. For a complete list of simulation, DBT, and DBI support status
 per architecture, see
-[/reference/supported-architectures](/reference/supported-architectures.md).
+[supported-architectures](../reference/supported-architectures.md).

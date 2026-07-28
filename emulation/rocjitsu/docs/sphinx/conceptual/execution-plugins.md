@@ -67,17 +67,11 @@ redirectable, and composable.
 
 Three sink types are available:
 
-  -----------------------------------------------------------------------
-  Sink type  Behavior
-  ---------- ------------------------------------------------------------
-  `stderr`   Writes to standard error (the default).
-
-  `stdout`   Writes to standard output.
-
-  `file`     Writes to a per-plugin log file inside a specified
-             directory. Each plugin writes to
-             `<RJ_SINK_DIR>/<plugin_name>.log`.
-  -----------------------------------------------------------------------
+| Sink type | Behavior |
+|-----------|----------|
+| `stderr` | Writes to standard error (the default). |
+| `stdout` | Writes to standard output. |
+| `file` | Writes to a per-plugin log file inside a specified directory. Each plugin writes to `<RJ_SINK_DIR>/<plugin_name>.log`. |
 
 The `RJ_SINKS` environment variable accepts a comma-separated list so
 that multiple sinks can be active at the same time. For example,
@@ -85,22 +79,16 @@ that multiple sinks can be active at the same time. For example,
 
 ## Environment variables
 
-  -------------------------------------------------------------------------
-  Variable        Default    Description
-  --------------- ---------- ----------------------------------------------
-  `RJ_RACE`       unset      Set to `1` to load the race detection plugin.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RJ_RACE` | unset | Set to `1` to load the race detection plugin. |
+| `RJ_LOG` | unset | Set to `1` to load the kernel logging plugin. |
+| `RJ_SINKS` | `stderr` | Comma-separated list of sink types: `stderr`, `stdout`, `file`. |
+| `RJ_SINK_DIR` | *(none)* | Directory for file sinks. Required when `file` appears in `RJ_SINKS`. |
 
-  `RJ_LOG`        unset      Set to `1` to load the kernel logging plugin.
-
-  `RJ_SINKS`      `stderr`   Comma-separated list of sink types: `stderr`,
-                             `stdout`, `file`.
-
-  `RJ_SINK_DIR`   *(none)*   Directory for file sinks. Required when `file`
-                             appears in `RJ_SINKS`.
-  -------------------------------------------------------------------------
 
 For a full reference of all rocJITsu environment variables, see
-[/reference/environment-variables](/reference/environment-variables.md).
+[environment-variables](../reference/environment-variables.md).
 
 ## Built-in plugins
 
@@ -135,7 +123,7 @@ RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
 ```
 
 The plugin name for file sinks is `race`. For a hands-on walkthrough,
-see [/tutorials/race-detection-walkthrough](/tutorials/race-detection-walkthrough.md).
+see [race-detection-walkthrough](../tutorials/race-detection-walkthrough.md).
 
 ### Kernel logging
 
@@ -178,10 +166,10 @@ RJ_RACE=1 RJ_SINKS=stderr,file RJ_SINK_DIR=/tmp/output \
 
 ## Related pages
 
--   [/tutorials/race-detection-walkthrough](/tutorials/race-detection-walkthrough.md) --- step-by-step race detection tutorial
--   [/reference/waitcheck](/reference/waitcheck.md) --- static
+-   [race-detection-walkthrough](../tutorials/race-detection-walkthrough.md) --- step-by-step race detection tutorial
+-   [waitcheck](../reference/waitcheck.md) --- static
     wait-hazard checker for AMDGPU code objects
--   [/reference/consan](/reference/consan.md) --- DBI-based LDS
+-   [consan](../reference/consan.md) --- DBI-based LDS
     data race sanitizer
--   [/reference/api-vm](/reference/api-vm.md) --- virtual
+-   [api-vm](../reference/api-vm.md) --- virtual
     machine C API reference
