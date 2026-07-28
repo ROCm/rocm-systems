@@ -217,6 +217,9 @@ class NDRangeContainer {
   const NDRange8&  cluster() const { return cluster_; }
 };
 
+static_assert(sizeof(NDRangeContainer) <= 64,
+              "Aim to keep NDRangeContainer under half a cache line sizes");
+
 
 /*! @}\
  *  @}
