@@ -4,6 +4,7 @@
 
 set(TEST_SRC
     hipMemGetAllocationGranularity.cc
+    test_hipMemGetAllocationGranularity.cc
     hipMemRetainAllocationHandle.cc)
 
 if(HIP_PLATFORM MATCHES "nvidia")
