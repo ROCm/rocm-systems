@@ -302,6 +302,35 @@ timings time_partitioned_case(int             device_id,
 }
 #endif
 
+#ifdef __HIP_PLATFORM_AMD__
+/// \brief Reads and prints a device's compute-unit resource and its work queue
+/// configuration. These read-only queries are the starting point before
+/// partitioning a device into execution contexts.
+void demonstrate_reading_resources()
+{
+    // [read-cu-resource-start]
+    int current_device = 0;
+    HIP_CHECK(hipSetDevice(current_device));
+
+    hipDevResource cu_resources = {};
+    HIP_CHECK(hipDeviceGetDevResource(current_device, &cu_resources, hipDevResourceTypeSm));
+
+    std::cout << "Device ID: " << current_device << "\n";
+    std::cout << "Available CUs: " << cu_resources.sm.smCount << "\n";
+    std::cout << "Min. partition size: " << cu_resources.sm.minSmPartitionSize << "\n";
+    std::cout << "Co-scheduled alignment: " << cu_resources.sm.smCoscheduledAlignment << "\n";
+    // [read-cu-resource-end]
+
+    // [read-wq-config-start]
+    hipDevResource wq_config = {};
+    HIP_CHECK(hipDeviceGetDevResource(current_device, &wq_config, hipDevResourceTypeWorkqueueConfig));
+
+    std::cout << "WQ concurrency limit: " << wq_config.wqConfig.wqConcurrencyLimit << "\n";
+    std::cout << "WQ sharing scope: " << wq_config.wqConfig.sharingScope << "\n";
+    // [read-wq-config-end]
+}
+#endif
+
 /// \brief Prints one row of the results table.
 void print_row(const std::string& configuration,
                const std::string& critical_cus,
@@ -336,6 +365,9 @@ int main()
     // Query the total number of CUs through the device resource.
     HIP_CHECK(hipDeviceGetDevResource(device_id, &all_cu_resources, hipDevResourceTypeSm));
     total_cus = all_cu_resources.sm.smCount;
+
+    // Show the read-only resource queries that precede partitioning.
+    demonstrate_reading_resources();
 #else
     // The CUDA green-context flow uses the driver API. Initialize it, get a
     // driver device handle, and query its SM resource, which is the whole-device
@@ -345,9 +377,9 @@ int main()
     CU_CHECK(cuDeviceGet(&cu_device, device_id));
     CU_CHECK(cuDeviceGetDevResource(cu_device, &all_cu_resources, CU_DEV_RESOURCE_TYPE_SM));
     total_cus = all_cu_resources.sm.smCount;
-#endif
 
     std::cout << "Compute units on device " << device_id << ": " << total_cus << std::endl;
+#endif
 
     constexpr unsigned int min_required_cus = 4;
     if(total_cus < min_required_cus)
