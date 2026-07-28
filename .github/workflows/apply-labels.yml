@@ -9,8 +9,8 @@ on:
         default: '.github/labels.yml'
 
 permissions:
+  contents: read
   issues: write
-
 jobs:
   apply-labels:
     runs-on: ubuntu-latest

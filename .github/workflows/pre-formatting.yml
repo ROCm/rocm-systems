@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: write
-
+  pull-requests: read
 jobs:
   pre-commit:
     runs-on: ubuntu-latest

@@ -9,8 +9,8 @@ on:
         default: '.github/repos-config.json'
 
 permissions:
+  contents: read
   issues: read
-
 jobs:
   collect-labels:
     runs-on: ubuntu-latest
