@@ -47,8 +47,6 @@ CDNA_WORKLOADS = [
     "ipblocks_TCC",
     "ipblocks_TCP",
     "ipblocks_TD",
-    "join_type_grid",
-    "join_type_kernel",
     "kernel",
     "kernel_inv_int",
     "kernel_inv_str",

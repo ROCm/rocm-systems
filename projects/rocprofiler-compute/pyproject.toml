@@ -81,7 +81,6 @@ markers = [
     "misc",
     "mem",
     "sort",
-    "join",
     "verbosity",
     "dispatch",
     "list_metrics",
