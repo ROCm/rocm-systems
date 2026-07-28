@@ -2887,7 +2887,7 @@ extern "C" hsa_status_t HSA_API hsa_amd_queue_create_with_flags(
   core::Queue* cmd_queue = nullptr;
   hsa_status_t status = agent->QueueCreate(size, type, flags, callback, data,
                                            private_segment_size,
-                                           group_segment_size, &cmd_queue);
+                                           group_segment_size, true, &cmd_queue);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   assert(cmd_queue != nullptr && "Queue not returned but status was success.\n");
