@@ -32,20 +32,11 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
 # Make sure the hipify step has run before trying to compile the test.
 add_dependencies(rccl-UnitTestsMicro hipify_all copy_nccl_device_headers)
 
-# Independent coverage knob for this binary. We can't reuse the global
-# ENABLE_CODE_COVERAGE because src/CMakeLists.txt gates that on Debug
-# builds (librccl.so's internal symbols are only visible in Debug). The
-# microtest binary doesn't link librccl.so -- it compiles p2p.cc directly --
-# so it gets full symbol visibility in any build type. Enable with
-# -DENABLE_MICROTEST_COVERAGE=ON; use test/microtest/coverage.sh to render reports.
-option(ENABLE_MICROTEST_COVERAGE "Build rccl-UnitTestsMicro with llvm source-based coverage" OFF)
-if(ENABLE_MICROTEST_COVERAGE)
-  message(STATUS "rccl-UnitTestsMicro: coverage instrumentation enabled")
-  target_compile_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-endif()
+# Always build this binary with llvm source-based coverage.
+target_compile_options(rccl-UnitTestsMicro PRIVATE
+  -fprofile-instr-generate -fcoverage-mapping)
+target_link_options(rccl-UnitTestsMicro PRIVATE
+  -fprofile-instr-generate -fcoverage-mapping)
 
 if(BUILD_ADDRESS_SANITIZER)
   target_compile_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address)
