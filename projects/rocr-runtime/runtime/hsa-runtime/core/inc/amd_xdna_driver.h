@@ -218,6 +218,14 @@ public:
   /// @param[out] bo_info allocated BO
   hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
 
+  /// @brief Returns true if @p vaddr lies within the shared device-heap mapping.
+  ///
+  /// Dev-SVM BOs carve their VA out of the device heap and borrow its mapping, so
+  /// FreeMemory must not unmap them. This lets FreeMemory distinguish those from
+  /// share BOs (which own an independent mmap) by the VA alone, without the caller
+  /// tracking mapping ownership.
+  bool IsDevHeapVA(const void* vaddr) const;
+
   /// @brief Virtual address range allocated for the device heap.
   ///
   /// Allocate a large enough space so we can carve out the device heap in
