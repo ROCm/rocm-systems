@@ -67,6 +67,7 @@ set(functionalSources
     ${SRC_DIR}/functional/rdci_group.cc
     ${SRC_DIR}/functional/rdci_stats.cc
     ${SRC_DIR}/functional/rdci_cpu_support.cc
+    ${SRC_DIR}/functional/test_bad_page.cc
 )
 
 link_directories(${ROCM_INSTALL_DIR} ${AMD_SMI_LIB_DIR})

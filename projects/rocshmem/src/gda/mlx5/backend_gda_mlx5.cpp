@@ -109,12 +109,16 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   rocm_memory_lock_to_fine_grain(qp.uar->reg_addr, MLX5_DB_BLUEFLAME_BUFFER_SIZE,
                                  &gpu_db_ptr, hip_dev_id);
 
-  uint32_t qpn       = qp.qpn;
-  void*    base_heap = heap.get_local_heap_base();
-  size_t   heap_size = heap.get_size();
-  uint32_t lkey      = nic.heap_mr->lkey;
-  uint32_t rkey      = heap_rkey[pe * num_nics_ + nic_idx];
-  ibv_pd*  pd        = nic.pd_orig;
+  uint32_t  qpn        = qp.qpn;
+  uintptr_t heap_laddr = reinterpret_cast<uintptr_t>(heap.get_local_heap_base());
+  uintptr_t heap_raddr = reinterpret_cast<uintptr_t>(heap.get_heap_bases()[pe]);
+  size_t    heap_size  = heap.get_size();
+  uint32_t  heap_lkey  = nic.heap_mr->lkey;
+  uint32_t  heap_rkey  = heap_rkey[flat_pe_nic_idx(pe, nic_idx)];
+  ibv_pd*   pd         = nic.pd_orig;
+
+  const QpSymmEntry *symm_entries = get_symm_entries_slice(pe, nic_idx);
+  const int         *symm_count   = symm_count_;
 
   gda_mlx5_wqe*      sq_buf   = reinterpret_cast<gda_mlx5_wqe*>(qp.sq);
   // qp.dbrec points to two __be32 values: RQ dbrec at MLX5_RCV_DBR and SQ dbrec at MLX5_SND_DBR
@@ -128,7 +132,9 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   /* QueuePair is either QueuePairMLX5 or QueuePairMux
    * both have a constructor that accepts rvalue reference QueuePairMLX5&&,
    * so just use that instead of trying to figure out which one we're using */
-  new (gpu_qp) QueuePair{QueuePairMLX5{qpn, base_heap, heap_size, lkey, rkey, pd,
+  new (gpu_qp) QueuePair{QueuePairMLX5{qpn, heap_laddr, heap_lkey,
+                                       heap_raddr, heap_rkey, heap_size,
+                                       symm_entries, symm_count, pd,
                                        gda_mlx5_device_sq{sq_buf, sq_dbrec, sq_db, sq_depth},
                                        gda_mlx5_device_cq{cq_buf, cq_dbrec}}};
 }

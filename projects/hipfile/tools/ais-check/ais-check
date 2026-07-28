@@ -37,6 +37,7 @@ import errno
 import glob
 import gzip
 import os
+import subprocess
 import sys
 
 # Mounts backed by these (or any non-block source) can never use the fast path.
@@ -66,9 +67,115 @@ PSEUDO_FSTYPES = {
 }
 
 
-def kernel_supports_p2pdma():
+# amdgpu DKMS builds newer than this expose an authoritative AIS P2P-DMA state
+# through the KFD topology "capability" bit. On such drivers we trust that bit
+# instead of the kernel's CONFIG_PCI_P2PDMA, which only reports build-time
+# support, not whether AIS actually came up.
+KFD_AIS_CAPABILITY_MIN_VERSION = 2327936
+
+# Bit set in a KFD topology node's "capability" mask once AIS P2P-DMA is
+# initialized for that GPU.
+KFD_CAPABILITY_AIS = 0x40
+
+# Per-GPU topology directory the kernel's KFD driver publishes.
+KFD_TOPOLOGY_NODES = "/sys/class/kfd/kfd/topology/nodes"
+
+
+def amdgpu_dkms_version():
     """
-    Check for P2P DMA support in the kernel
+    Return the amdgpu DKMS build number (e.g. 2278356 from a module version of
+    "6.16.13-2278356.24.04"), or None if it cannot be determined.
+
+    The build number is the integer immediately after the first '-' in the
+    module version. dkms lists one entry per installed kernel; the entry for the
+    running kernel is preferred, otherwise the highest build number is used.
+    """
+    try:
+        result = subprocess.run(
+            ["dkms", "status", "amdgpu"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+
+    running = os.uname().release
+    builds = []
+    running_build = None
+    for line in result.stdout.splitlines():
+        # Two dkms output shapes exist: "amdgpu/<ver>, <kernel>, ..." (newer)
+        # and "amdgpu, <ver>, <kernel>, ..." (older). Parse the status-free head
+        # by comma, then reconcile the version/kernel split.
+        head = line.split(":", 1)[0]
+        parts = [p.strip() for p in head.split(",")]
+        first = parts[0]
+        if "/" in first:
+            version = first.partition("/")[2]
+            kernel = parts[1] if len(parts) > 1 else None
+        else:
+            version = parts[1] if len(parts) > 1 else None
+            kernel = parts[2] if len(parts) > 2 else None
+
+        if not version or "-" not in version:
+            continue
+        token = version.split("-", 1)[1].split(".", 1)[0]
+        if not token.isdigit():
+            continue
+
+        build = int(token)
+        builds.append(build)
+        if kernel == running:
+            running_build = build
+
+    if running_build is not None:
+        return running_build
+    if builds:
+        return max(builds)
+    return None
+
+
+def topology_reports_ais():
+    """
+    True if any KFD topology GPU node reports AIS P2P-DMA initialized via its
+    "capability" bit (capability & KFD_CAPABILITY_AIS). Only GPU nodes are
+    considered, identified by a non-zero "simd_count"; CPU nodes (simd_count 0
+    or absent) are skipped.
+    """
+    try:
+        nodes = os.listdir(KFD_TOPOLOGY_NODES)
+    except OSError:
+        return False
+
+    for node in nodes:
+        path = os.path.join(KFD_TOPOLOGY_NODES, node, "properties")
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                simd_count = 0
+                capability = 0
+                for line in f:
+                    key, _, value = line.partition(" ")
+                    if key not in ("simd_count", "capability"):
+                        continue
+                    try:
+                        parsed = int(value.strip())
+                    except ValueError:
+                        continue
+                    if key == "simd_count":
+                        simd_count = parsed
+                    else:
+                        capability = parsed
+                if simd_count and (capability & KFD_CAPABILITY_AIS):
+                    return True
+        except OSError:
+            continue
+
+    return False
+
+
+def config_supports_p2pdma():
+    """
+    Check for P2P DMA support via the kernel's CONFIG_PCI_P2PDMA config.
     """
 
     kr = os.uname().release
@@ -91,6 +198,21 @@ def kernel_supports_p2pdma():
     if not configs_found:
         print("No kernel config files found!", file=sys.stderr)
     return False
+
+
+def kernel_supports_p2pdma():
+    """
+    Check for P2P DMA support.
+
+    On amdgpu DKMS builds newer than KFD_AIS_CAPABILITY_MIN_VERSION the KFD
+    topology exposes an authoritative AIS capability bit, so it alone decides the
+    verdict. Older builds -- and any case where the driver version can't be
+    determined -- fall back to inspecting the kernel's CONFIG_PCI_P2PDMA.
+    """
+    version = amdgpu_dkms_version()
+    if version is not None and version > KFD_AIS_CAPABILITY_MIN_VERSION:
+        return topology_reports_ais()
+    return config_supports_p2pdma()
 
 
 def find_hip_runtimes():

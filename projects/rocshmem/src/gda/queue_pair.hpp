@@ -59,6 +59,7 @@
 
 #include "containers/free_list_impl.hpp"
 #include "memory/hip_allocator.hpp"
+#include "gda/gda_symm_table.hpp"
 
 namespace rocshmem {
 
@@ -547,9 +548,12 @@ public:
   /**
    * @brief Create and enqueue a non-blocking put work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are virtual addresses at origin or target,
+   * as appropriate for the direction of data transfer.
+   *
+   * @param[in] dest Destination address for data transmission. Remote virtual address at target.
    * @param[in] dest_rkey RKey of destination address.
-   * @param[in] source Source address for data transmission.
+   * @param[in] source Source address for data transmission. Local virtual address at origin.
    * @param[in] source_lkey LKey of source address.
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
@@ -575,9 +579,12 @@ public:
   /**
    * @brief Create and enqueue a non-blocking get work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are virtual addresses at origin or target,
+   * as appropriate for the direction of data transfer.
+   *
+   * @param[in] dest Destination address for data transmission. Local virtual address at origin.
    * @param[in] dest_lkey LKey of destination address.
-   * @param[in] source Source address for data transmission.
+   * @param[in] source Source address for data transmission. Remote virtual address at target.
    * @param[in] source_rkey RKey of source address.
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
@@ -612,7 +619,10 @@ public:
   /**
    * @brief Create and enqueue a blocking atomic fetch-and-add work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are virtual addresses at origin or target,
+   * as appropriate for the direction of data transfer.
+   *
+   * @param[in] dest Destination address for data transmission. Remote virtual address at target.
    * @param[in] dest_rkey RKey of destination address.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
@@ -639,9 +649,12 @@ public:
   /**
    * @brief Create and enqueue a non-blocking atomic fetch-and-add work queue entry (WQE).
    *
-   * @param[in] fetch Address for fetched value.
+   * All address arguments are virtual addresses at origin or target,
+   * as appropriate for the direction of data transfer.
+   *
+   * @param[in] fetch Address for fetched value. Local virtual address at origin.
    * @param[in] fetch_lkey LKey of address for fetched value.
-   * @param[in] dest Destination address for data transmission.
+   * @param[in] dest Destination address for data transmission. Remote virtual address at target.
    * @param[in] dest_rkey RKey of destination address.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
@@ -670,7 +683,10 @@ public:
   /**
    * @brief Create and enqueue a non-fetching atomic add work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are virtual addresses at origin or target,
+   * as appropriate for the direction of data transfer.
+   *
+   * @param[in] dest Destination address for data transmission. Remote virtual address at target.
    * @param[in] dest_rkey RKey of destination address.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
@@ -694,7 +710,10 @@ public:
   /**
    * @brief Create and enqueue a blocking atomic compare-and-swap work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are virtual addresses at origin or target,
+   * as appropriate for the direction of data transfer.
+   *
+   * @param[in] dest Destination address for data transmission. Remote virtual address at target.
    * @param[in] dest_rkey RKey of destination address.
    * @param[in] cond Used in atomic comparisons.
    * @param[in] value Data value for the atomic operation.
@@ -724,9 +743,12 @@ public:
   /**
    * @brief Create and enqueue a non-blocking atomic compare-and-swap work queue entry (WQE).
    *
-   * @param[in] fetch Address for fetched value.
+   * All address arguments are virtual addresses at origin or target,
+   * as appropriate for the direction of data transfer.
+   *
+   * @param[in] fetch Address for fetched value. Local virtual address at origin.
    * @param[in] fetch_lkey LKey of address for fetched value.
-   * @param[in] dest Destination address for data transmission.
+   * @param[in] dest Destination address for data transmission. Remote virtual address at target.
    * @param[in] dest_rkey RKey of destination address.
    * @param[in] cond Used in atomic comparisons.
    * @param[in] value Data value for the atomic operation.
@@ -842,8 +864,11 @@ public:
   /**
    * @brief Create and enqueue a non-blocking put work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
-   * @param[in] source Source address for data transmission.
+   * All address arguments are symmetric addresses in the default or user symmetric heaps.
+   * Virtual addresses, LKeys, and RKeys are resolved internally.
+   *
+   * @param[in] dest Destination symmetric address for data transmission.
+   * @param[in] source Source symmetric address for data transmission.
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    *
@@ -859,8 +884,11 @@ public:
   /**
    * @brief Create and enqueue a non-blocking get work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
-   * @param[in] source Source address for data transmission.
+   * All address arguments are symmetric addresses in the default or user symmetric heaps.
+   * Virtual addresses, LKeys, and RKeys are resolved internally.
+   *
+   * @param[in] dest Destination symmetric address for data transmission.
+   * @param[in] source Source symmetric address for data transmission.
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    *
@@ -885,7 +913,10 @@ public:
   /**
    * @brief Create and enqueue a blocking atomic fetch-and-add work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are symmetric addresses in the default or user symmetric heaps.
+   * Virtual addresses, LKeys, and RKeys are resolved internally.
+   *
+   * @param[in] dest Destination symmetric address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
@@ -904,8 +935,11 @@ public:
   /**
    * @brief Create and enqueue a non-blocking atomic fetch-and-add work queue entry (WQE).
    *
-   * @param[in] fetch Address for fetched value.
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are symmetric addresses in the default or user symmetric heaps.
+   * Virtual addresses, LKeys, and RKeys are resolved internally.
+   *
+   * @param[in] fetch Symmetric address for fetched value.
+   * @param[in] dest Destination symmetric address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
@@ -924,7 +958,10 @@ public:
   /**
    * @brief Create and enqueue a non-fetching atomic add work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are symmetric addresses in the default or user symmetric heaps.
+   * Virtual addresses, LKeys, and RKeys are resolved internally.
+   *
+   * @param[in] dest Destination symmetric address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
    *
@@ -940,7 +977,10 @@ public:
   /**
    * @brief Create and enqueue a blocking atomic compare-and-swap work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are symmetric addresses in the default or user symmetric heaps.
+   * Virtual addresses, LKeys, and RKeys are resolved internally.
+   *
+   * @param[in] dest Destination symmetric address for data transmission.
    * @param[in] cond Used in atomic comparisons.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
@@ -960,8 +1000,11 @@ public:
   /**
    * @brief Create and enqueue a non-blocking atomic compare-and-swap work queue entry (WQE).
    *
-   * @param[in] fetch Address for fetched value.
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are symmetric addresses in the default or user symmetric heaps.
+   * Virtual addresses, LKeys, and RKeys are resolved internally.
+   *
+   * @param[in] fetch Symmetric address for fetched value.
+   * @param[in] dest Destination symmetric address for data transmission.
    * @param[in] cond Used in atomic comparisons.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
@@ -981,7 +1024,10 @@ public:
   /**
    * @brief Create and enqueue a non-fetching atomic compare-and-swap work queue entry (WQE).
    *
-   * @param[in] dest Destination address for data transmission.
+   * All address arguments are symmetric addresses in the default or user symmetric heaps.
+   * Virtual addresses, LKeys, and RKeys are resolved internally.
+   *
+   * @param[in] dest Destination symmetric address for data transmission.
    * @param[in] cond Used in atomic comparisons.
    * @param[in] value Data value for the atomic operation.
    * @param[in] wf_info Wavefront information.
@@ -1030,14 +1076,10 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::put_nbi(
     void *dest, const void *source, size_t nelems,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uintptr_t s_laddr = reinterpret_cast<uintptr_t>(source);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
-  /* only need source lkey when RDMA_WRITE can't be inlined */
-  uint32_t s_lkey = !Provider::template can_inline<OpCode::RDMA_WRITE>(nelems) ?
-                                                  provider().get_lkey(s_laddr) : 0;
+  bool inlined_wqe = Provider::template can_inline<OpCode::RDMA_WRITE>(nelems);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
+  auto [s_laddr, s_lkey] = provider().get_laddr_info(source, inlined_wqe);
   provider().put_nbi(d_raddr, d_rkey, s_laddr, s_lkey, nelems, wf_info, post_options);
-//  QueuePairInterface<Provider>::put_nbi(d_raddr, d_rkey, s_laddr, s_lkey, nelems, wf_info, post_options);
 }
 
 template <typename Provider>
@@ -1045,12 +1087,9 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::put_nbi_single(
     void *dest, const void *source, size_t nelems,
     PostOpt<PostOptions...> post_options) {
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uintptr_t s_laddr = reinterpret_cast<uintptr_t>(source);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
-  /* only need source lkey when RDMA_WRITE can't be inlined */
-  uint32_t s_lkey = !Provider::template can_inline<OpCode::RDMA_WRITE>(nelems) ?
-                                                  provider().get_lkey(s_laddr) : 0;
+  bool inlined_wqe = Provider::template can_inline<OpCode::RDMA_WRITE>(nelems);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
+  auto [s_laddr, s_lkey] = provider().get_laddr_info(source, inlined_wqe);
   provider().put_nbi_single(d_raddr, d_rkey, s_laddr, s_lkey, nelems, post_options);
 }
 
@@ -1059,10 +1098,8 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::get_nbi(
     void *dest, const void *source, size_t nelems,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  uintptr_t d_laddr = reinterpret_cast<uintptr_t>(dest);
-  uintptr_t s_raddr = reinterpret_cast<uintptr_t>(source);
-  uint32_t d_lkey = provider().get_lkey(d_laddr);
-  uint32_t s_rkey = provider().get_rkey(s_raddr);
+  auto [d_laddr, d_lkey] = provider().get_laddr_info(dest);
+  auto [s_raddr, s_rkey] = provider().get_raddr_info(source);
   provider().get_nbi(d_laddr, d_lkey, s_raddr, s_rkey, nelems, wf_info, post_options);
 }
 
@@ -1071,10 +1108,8 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::get_nbi_single(
     void *dest, const void *source, size_t nelems,
     PostOpt<PostOptions...> post_options) {
-  uintptr_t d_laddr = reinterpret_cast<uintptr_t>(dest);
-  uintptr_t s_raddr = reinterpret_cast<uintptr_t>(source);
-  uint32_t d_lkey = provider().get_lkey(d_laddr);
-  uint32_t s_rkey = provider().get_rkey(s_raddr);
+  auto [d_laddr, d_lkey] = provider().get_laddr_info(dest);
+  auto [s_raddr, s_rkey] = provider().get_raddr_info(source);
   provider().get_nbi_single(d_laddr, d_lkey, s_raddr, s_rkey, nelems, post_options);
 }
 
@@ -1083,8 +1118,7 @@ template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add(
     void *dest, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   return provider().atomic_fetch_add(d_raddr, d_rkey, value, wf_info, post_options);
 }
 
@@ -1093,8 +1127,7 @@ template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
     void *dest, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   return provider().atomic_fetch_add_single(d_raddr, d_rkey, value, post_options);
 }
 
@@ -1104,10 +1137,8 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi(
     uint64_t *fetch, void *dest, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  uintptr_t f_laddr = reinterpret_cast<uintptr_t>(fetch);
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t f_lkey = provider().get_lkey(f_laddr);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [f_laddr, f_lkey] = provider().get_laddr_info(fetch);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   provider().atomic_fetch_add_nbi(f_laddr, f_lkey, d_raddr, d_rkey, value, wf_info, post_options);
 }
 
@@ -1116,10 +1147,8 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi_single(
     uint64_t *fetch, void *dest, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  uintptr_t f_laddr = reinterpret_cast<uintptr_t>(fetch);
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t f_lkey = provider().get_lkey(f_laddr);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [f_laddr, f_lkey] = provider().get_laddr_info(fetch);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   provider().atomic_fetch_add_nbi_single(f_laddr, f_lkey, d_raddr, d_rkey, value, post_options);
 }
 #endif
@@ -1129,8 +1158,7 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_add(
     void *dest, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   provider().atomic_add(d_raddr, d_rkey, value, wf_info, post_options);
 }
 
@@ -1139,8 +1167,7 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_add_single(
     void *dest, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   provider().atomic_add_single(d_raddr, d_rkey, value, post_options);
 }
 
@@ -1149,8 +1176,7 @@ template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap(
     void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   return provider().atomic_compare_swap(d_raddr, d_rkey, cond, value, wf_info, post_options);
 }
 
@@ -1159,8 +1185,7 @@ template <typename... PostOptions>
 __device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap_single(
     void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   return provider().atomic_compare_swap_single(d_raddr, d_rkey, cond, value, post_options);
 }
 
@@ -1170,10 +1195,8 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nbi(
     uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  uintptr_t f_laddr = reinterpret_cast<uintptr_t>(fetch);
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t f_lkey = provider().get_lkey(f_laddr);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [f_laddr, f_lkey] = provider().get_laddr_info(fetch);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   provider().atomic_compare_swap_nbi(f_laddr, f_lkey, d_raddr, d_rkey, cond, value, wf_info, post_options);
 }
 
@@ -1182,10 +1205,8 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nbi_single(
     uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  uintptr_t f_laddr = reinterpret_cast<uintptr_t>(fetch);
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t f_lkey = provider().get_lkey(f_laddr);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [f_laddr, f_lkey] = provider().get_laddr_info(fetch);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   provider().atomic_compare_swap_nbi_single(f_laddr, f_lkey, d_raddr, d_rkey, cond, value, post_options);
 }
 #endif
@@ -1195,8 +1216,7 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nofetch(
     void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   /* QueuePairInterface doesn't provide atomic_compare_swap_nofetch */
   provider().template post_wqe_amo<OpCode::ATOMIC_CS, AMOFetchType::NonFetching>(
       d_raddr, d_rkey, value, cond, wf_info, post_options);
@@ -1207,8 +1227,7 @@ template <typename... PostOptions>
 __device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nofetch_single(
     void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
-  uintptr_t d_raddr = reinterpret_cast<uintptr_t>(dest);
-  uint32_t d_rkey = provider().get_rkey(d_raddr);
+  auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
   /* QueuePairInterface doesn't provide atomic_compare_swap_nofetch_single */
   provider().template post_wqe_amo_single<OpCode::ATOMIC_CS, AMOFetchType::NonFetching>(
       d_raddr, d_rkey, value, cond, post_options);
@@ -1264,14 +1283,17 @@ public:
    * @brief Constructor.
    *
    * @param[in] qpn Queue Pair number.
-   * @param[in] base_heap Base address of local heap.
+   * @param[in] heap_laddr Base address of local heap.
+   * @param[in] heap_lkey LKey of local heap.
+   * @param[in] heap_raddr Base address of remote heap.
+   * @param[in] heap_rkey RKey of remote heap.
    * @param[in] heap_size Size of heap, in bytes.
-   * @param[in] lkey LKey of local heap.
-   * @param[in] rkey RKey of remote heap.
    * @param[in] pd IBVerbs Protection Domain for registering additional buffers and heaps.
    */
-  __host__ explicit QueuePairBase(uint32_t qpn, void *base_heap, size_t heap_size,
-                                  uint32_t lkey, uint32_t rkey, struct ibv_pd* pd);
+  __host__ explicit QueuePairBase(uint32_t qpn, uintptr_t heap_laddr, uint32_t heap_lkey,
+                                  uintptr_t heap_raddr, uint32_t heap_rkey, size_t heap_size,
+                                  const QpSymmEntry *symm_entries, const int *symm_count,
+                                  struct ibv_pd* pd);
 
 protected:
   /**
@@ -1357,24 +1379,35 @@ public:
   __host__ int buffer_unregister_all();
 
   /**
-   * @brief Retrieve LKey for address.
+   * @brief Resolve the local (origin) virtual address and LKey of a symmetric address.
    *
-   * @param[in] addr Address to lookup LKey of.
+   * Attempts to resolve the address in the following order of locations:
+   *   1. The default symmetric heap.
+   *   2. All user-registered local buffers.
+   *   3. All user-registered symmetric buffers.
    *
-   * @return LKey for addr or std::numeric_limits<uint32_t>::max() if not found.
+   * @param[in] addr Symmetric address to resolve.
+   *
+   * @return {laddr, lkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned LKey value is ProviderEndianness.
    */
-  __device__ __forceinline__ uint32_t get_lkey(uintptr_t addr);
+  __device__ __forceinline__
+  std::tuple<uintptr_t, uint32_t> get_laddr_info(const void *addr, bool inlined = false) const;
 
   /**
-   * @brief Retrieve RKey for address.
+   * @brief Resolve the remote (target) virtual address and RKey of a symmetric address.
    *
-   * @param[in] addr Address to lookup RKey of.
+   * Attempts to resolve the address in the following order of locations:
+   *   1. The default symmetric heap.
+   *   2. All user-registered symmetric buffers.
    *
-   * @return RKey for addr or std::numeric_limits<uint32_t>::max() if not found.
+   * @param[in] addr Symmetric address to resolve.
+   *
+   * @return {raddr, rkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned RKey value is ProviderEndianness.
    */
-  __device__ __forceinline__ uint32_t get_rkey(uintptr_t addr);
+  __device__ __forceinline__
+  std::tuple<uintptr_t, uint32_t> get_raddr_info(const void *addr) const;
 
   /*
    * @brief Query whether data can be inlined into a WQE.
@@ -1413,10 +1446,10 @@ protected:
   friend Provider;
 
   template <AMOFetchType Fetch>
-  __device__ constexpr uint64_t* get_atomic_addr();
+  __device__ constexpr uint64_t* get_atomic_addr() const;
 
   template <AMOFetchType Fetch>
-  __device__ constexpr uint32_t get_atomic_lkey();
+  __device__ constexpr uint32_t get_atomic_lkey() const;
 
 private:
   __device__ Provider& provider() {
@@ -1434,19 +1467,54 @@ private:
  *
  * @{
  */
-public:
-  uintptr_t base_heap;
+protected:
+  /**
+   * @brief Cached local heap base for this QP.
+   *
+   * Equals heap_bases[my_pe], captured once at setup. Lets the (common) heap
+   * translation run as pure register arithmetic with no memory load.
+   */
+  uintptr_t heap_laddr;
+
+  /**
+   * @brief Cached remote heap base for this QP's connected peer.
+   *
+   * Equals heap_bases[dest_pe], captured once at setup. Lets the (common) heap
+   * translation run as pure register arithmetic with no memory load.
+   */
+  uintptr_t heap_raddr;
+
+  /**
+   * @brief Cached heap size for this QP.
+   */
   size_t heap_size;
 
-protected:
+  /**
+   * @brief Contiguous slice of registration entries for this QP's fixed
+   * (dest_pe, nic_idx), indexed by registration slot [0, *symm_count).
+   *
+   * Points into the backend's flat entry table; every entry is already
+   * specialized to this QP, so a match yields the remote address and keys with
+   * no further dereference. Null when symmetric registration is unavailable.
+   */
+  const QpSymmEntry *symm_entries;
+
+  /**
+   * @brief Shared registration count (number of live entries per slice).
+   *
+   * Single device int shared by all QPs; register/unregister publish updates
+   * here. One load per non-heap lookup (null when registration unavailable).
+   */
+  const int *symm_count;
+
   // Used in most WQEs
   uint32_t qp_num;
-  uint32_t lkey;
-  uint32_t rkey;
+  uint32_t heap_lkey;
+  uint32_t heap_rkey;
   uint32_t fetching_atomic_idx{0};
 
 private:
-  // Used by get_lkey
+  // Used by get_laddr
   size_t num_user_buffers{0};
   BufferInfo* buffer_info{nullptr};
 
@@ -1478,13 +1546,18 @@ private:
 
 
 template <typename Provider>
-__host__ QueuePairBase<Provider>::QueuePairBase(uint32_t qpn, void *base_heap, size_t heap_size,
-                                                uint32_t lkey, uint32_t rkey, struct ibv_pd* pd)
-  : base_heap{reinterpret_cast<uintptr_t>(base_heap)},
+__host__ QueuePairBase<Provider>::QueuePairBase(
+    uint32_t qpn, uintptr_t heap_laddr, uint32_t heap_lkey,
+    uintptr_t heap_raddr, uint32_t heap_rkey, size_t heap_size,
+    const QpSymmEntry *symm_entries, const int *symm_count, struct ibv_pd* pd)
+  : heap_laddr{heap_laddr},
+    heap_raddr{heap_raddr},
     heap_size{heap_size},
+    symm_entries{symm_entries},
+    symm_count{symm_count},
     qp_num{qpn},
-    lkey{to_provider_endianness(lkey)},
-    rkey{to_provider_endianness(rkey)},
+    heap_lkey{to_provider_endianness(heap_lkey)},
+    heap_rkey{to_provider_endianness(heap_rkey)},
     pd{pd} {
   int access = IBV_ACCESS_LOCAL_WRITE
              | IBV_ACCESS_REMOTE_WRITE
@@ -1526,11 +1599,14 @@ __host__ QueuePairBase<Provider>::QueuePairBase(uint32_t qpn, void *base_heap, s
 
 template <typename Provider>
 __host__ QueuePairBase<Provider>::QueuePairBase(QueuePairBase&& other) noexcept
-  : base_heap               {std::move(other.base_heap)},
+  : heap_laddr              {std::move(other.heap_laddr)},
+    heap_raddr              {std::move(other.heap_raddr)},
     heap_size               {std::move(other.heap_size)},
+    symm_entries            {std::move(other.symm_entries)},
+    symm_count              {std::move(other.symm_count)},
     qp_num                  {std::move(other.qp_num)},
-    lkey                    {std::move(other.lkey)},
-    rkey                    {std::move(other.rkey)},
+    heap_lkey               {std::move(other.heap_lkey)},
+    heap_rkey               {std::move(other.heap_rkey)},
     fetching_atomic_idx     {std::move(other.fetching_atomic_idx)},
     num_user_buffers        {std::move(other.num_user_buffers)},
     buffer_info             {std::move(other.buffer_info)},
@@ -1597,11 +1673,14 @@ __host__ QueuePairBase<Provider>& QueuePairBase<Provider>::operator=(QueuePairBa
   }
 
   /* Step 2: member-wise move of all data members from other to *this */
-  base_heap                = std::move(other.base_heap);
+  heap_laddr               = std::move(other.heap_laddr);
+  heap_raddr               = std::move(other.heap_raddr);
   heap_size                = std::move(other.heap_size);
+  symm_entries             = std::move(other.symm_entries);
+  symm_count               = std::move(other.symm_count);
   qp_num                   = std::move(other.qp_num);
-  lkey                     = std::move(other.lkey);
-  rkey                     = std::move(other.rkey);
+  heap_lkey                = std::move(other.heap_lkey);
+  heap_rkey                = std::move(other.heap_rkey);
   fetching_atomic_idx      = std::move(other.fetching_atomic_idx);
   num_user_buffers         = std::move(other.num_user_buffers);
   buffer_info              = std::move(other.buffer_info);
@@ -1776,26 +1855,61 @@ __host__ int QueuePairBase<Provider>::buffer_unregister_all() {
 }
 
 template <typename Provider>
-__device__ __forceinline__ uint32_t QueuePairBase<Provider>::get_lkey(uintptr_t addr) {
-  /* Check if in heap */
-  if (is_ptr_in_range(base_heap, heap_size, addr)) [[likely]] {
-    return lkey;
+__device__ __forceinline__ std::tuple<uintptr_t, uint32_t>
+QueuePairBase<Provider>::get_laddr_info(const void *addr, bool inlined) const {
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(addr);
+  /* Check for inlined RDMA_WRITE */
+  if (inlined) {
+    return {laddr, 0};
   }
 
-  /* Get the correct lkey for the user buffer */
+  /* Check symmetric heap */
+  if (is_ptr_in_range(heap_laddr, heap_size, laddr)) [[likely]] {
+    return {laddr, heap_lkey};
+  }
+
+  /* Check user-registered local buffers */
   for (size_t i = 0; i < num_user_buffers; i++) {
-    if (is_ptr_in_range(buffer_info[i].addr, buffer_info[i].length, addr)) {
-      return buffer_info[i].lkey;
+    if (is_ptr_in_range(buffer_info[i].addr, buffer_info[i].length, laddr)) {
+      return {laddr, buffer_info[i].lkey};
     }
   }
 
-  LOGD_ERROR_ABORT("Valid lkey for address %p not found", reinterpret_cast<void*>(addr));
-  return std::numeric_limits<uint32_t>::max();
+  /* Check user-registered symmetric buffers */
+  if (symm_count) {
+    for (int i = 0; i < *symm_count; i++) {
+      if (is_ptr_in_range(symm_entries[i].local_base, symm_entries[i].length, laddr)) {
+        return {laddr, symm_entries[i].lkey};
+      }
+    }
+  }
+
+  LOGD_ERROR_ABORT("Valid <laddr, lkey> for address %p not found", addr);
+  return {0, std::numeric_limits<uint32_t>::max()};
 }
 
 template <typename Provider>
-__device__ __forceinline__ uint32_t QueuePairBase<Provider>::get_rkey([[maybe_unused]] uintptr_t addr) {
-  return rkey;
+__device__ __forceinline__
+std::tuple<uintptr_t, uint32_t> QueuePairBase<Provider>::get_raddr_info(const void *addr) const {
+  uintptr_t laddr = reinterpret_cast<uintptr_t>(addr);
+  /* Check symmetric heap */
+  if (is_ptr_in_range(heap_laddr, heap_size, laddr)) [[likely]] {
+    uintptr_t raddr = heap_raddr + (laddr - heap_laddr);
+    return {raddr, heap_rkey};
+  }
+
+  /* Check user-registered symmetric buffers */
+  if (symm_count) {
+    for (int i = 0; i < *symm_count; i++) {
+      if (is_ptr_in_range(symm_entries[i].local_base, symm_entries[i].length, laddr)) {
+        uintptr_t raddr = symm_entries[i].remote_base + (laddr - symm_entries[i].local_base);
+        return {raddr, symm_entries[i].rkey};
+      }
+    }
+  }
+
+  LOGD_ERROR_ABORT("Valid <raddr, rkey> for address %p not found", addr);
+  return {0, std::numeric_limits<uint32_t>::max()};
 }
 
 template <typename Provider>
@@ -1816,7 +1930,7 @@ __host__ __device__ constexpr T QueuePairBase<Provider>::to_provider_endianness(
 
 template <typename Provider>
 template <AMOFetchType Fetch>
-__device__ constexpr uint64_t* QueuePairBase<Provider>::get_atomic_addr() {
+__device__ constexpr uint64_t* QueuePairBase<Provider>::get_atomic_addr() const {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   if constexpr (Fetch == AMOFetchType::Blocking) {
     return fetching_atomic;
@@ -1827,7 +1941,7 @@ __device__ constexpr uint64_t* QueuePairBase<Provider>::get_atomic_addr() {
 
 template <typename Provider>
 template <AMOFetchType Fetch>
-__device__ constexpr uint32_t QueuePairBase<Provider>::get_atomic_lkey() {
+__device__ constexpr uint32_t QueuePairBase<Provider>::get_atomic_lkey() const {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   if constexpr (Fetch == AMOFetchType::Blocking) {
     return fetching_atomic_lkey;

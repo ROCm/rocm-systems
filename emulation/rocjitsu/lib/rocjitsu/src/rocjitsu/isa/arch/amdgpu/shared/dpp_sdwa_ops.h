@@ -15,8 +15,10 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_DPP_SDWA_OPS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <bit>
@@ -27,47 +29,12 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-/// @brief VOP1/VOP2 src0 encoding values that indicate a DPP or SDWA suffix.
-constexpr uint32_t SRC_SDWA = 249;
-constexpr uint32_t SRC_DPP = 250;
-constexpr uint32_t SRC_DPP8_FI_0 = 233;
-constexpr uint32_t SRC_DPP8_FI_1 = 234;
-constexpr uint32_t SRC_DPP8_LO = SRC_DPP8_FI_0;
-constexpr uint32_t SRC_DPP8_HI = SRC_DPP8_FI_1;
-
 namespace dpp {
-
-inline bool is_src_dpp8(uint32_t src0) { return src0 == SRC_DPP8_FI_0 || src0 == SRC_DPP8_FI_1; }
-
-inline uint32_t src_dpp8_fi(uint32_t src0) { return src0 == SRC_DPP8_FI_1 ? 1u : 0u; }
 
 /// Row size for DPP operations (16 lanes per row).
 constexpr int ROW_SIZE = 16;
 /// Number of banks per row (4 banks of 4 lanes each).
 constexpr int NUM_BANKS = 4;
-
-/// @brief DPP control value ranges.
-enum DppCtrl : uint32_t {
-  QUAD_PERM_MAX = 0xFF,
-  ROW_SHL1 = 0x101, // row shift left 1..15
-  ROW_SHL_MAX = 0x10F,
-  ROW_SHR1 = 0x111, // row shift right 1..15
-  ROW_SHR_MAX = 0x11F,
-  ROW_ROR1 = 0x121, // row rotate right 1..15
-  ROW_ROR_MAX = 0x12F,
-  WF_SHL1 = 0x130,
-  WF_ROL1 = 0x134, // wave rotate left 1
-  WF_SRL1 = 0x138, // wave shift right 1
-  WF_ROR1 = 0x13C, // wave rotate right 1
-  ROW_MIRROR = 0x140,
-  ROW_HALF_MIRROR = 0x141,
-  ROW_BCAST15 = 0x142,    // broadcast lane 15 of each row to the following row
-  ROW_BCAST31 = 0x143,    // broadcast lane 31 to the upper half-wave
-  ROW_SHARE_BASE = 0x150, // row_share/row_newbcast: broadcast one lane within each row
-  ROW_SHARE_MAX = 0x15F,
-  ROW_XMASK_BASE = 0x160, // row_xmask (GFX10+)
-  ROW_XMASK_MAX = 0x16F,
-};
 
 /// @brief Compute the source lane index for a DPP permutation.
 ///
@@ -305,13 +272,14 @@ inline uint32_t dpp_read(const uint32_t *src_data, int lane, int wf_size, uint32
 inline void apply_dpp(Operand *&src0, uint32_t dpp_ctrl, uint32_t row_mask, uint32_t bank_mask,
                       uint32_t bound_ctrl, uint32_t fi, std::unique_ptr<DppOperand> &storage,
                       amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
   uint32_t ws = wf.wf_size();
-  uint32_t vbase = wf.vgpr_alloc().base + src0->encoding_value_;
+  uint64_t lane_mask = ws >= 64 ? ~uint64_t{0} : ((uint64_t{1} << ws) - 1);
+  RegisterAccess regs(wf);
+  auto src_view = regs.read_operand(*src0, lane_mask);
   uint64_t exec_mask = wf.exec();
   uint32_t raw[64], result[64];
   for (uint32_t i = 0; i < ws; ++i)
-    raw[i] = cu.read_vgpr(vbase, i);
+    raw[i] = src_view.lane(i);
   for (uint32_t i = 0; i < ws; ++i)
     result[i] = dpp_read(raw, static_cast<int>(i), static_cast<int>(ws), dpp_ctrl, row_mask,
                          bank_mask, bound_ctrl, fi, raw[i], exec_mask);
@@ -336,13 +304,14 @@ inline uint32_t dpp8_read(const uint32_t *src_data, uint32_t lane, uint32_t wf_s
 
 inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, uint32_t fi,
                        std::unique_ptr<DppOperand> &storage, amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
   uint32_t ws = wf.wf_size();
-  uint32_t vbase = wf.vgpr_alloc().base + src0->encoding_value_;
+  uint64_t lane_mask = ws >= 64 ? ~uint64_t{0} : ((uint64_t{1} << ws) - 1);
+  RegisterAccess regs(wf);
+  auto src_view = regs.read_operand(*src0, lane_mask);
   uint64_t exec_mask = wf.exec();
   uint32_t raw[64], result[64];
   for (uint32_t i = 0; i < ws; ++i)
-    raw[i] = cu.read_vgpr(vbase, i);
+    raw[i] = src_view.lane(i);
   for (uint32_t lane = 0; lane < ws; ++lane)
     result[lane] = dpp8_read(raw, lane, ws, lane_sel, fi, exec_mask);
   storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
@@ -352,24 +321,6 @@ inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, uint32_t fi,
 } // namespace dpp
 
 namespace sdwa {
-
-/// @brief SDWA sub-dword selection values.
-enum SdwaSel : uint32_t {
-  BYTE_0 = 0,
-  BYTE_1 = 1,
-  BYTE_2 = 2,
-  BYTE_3 = 3,
-  WORD_0 = 4,
-  WORD_1 = 5,
-  DWORD = 6,
-};
-
-/// @brief SDWA unused bits handling for destination.
-enum SdwaUnused : uint32_t {
-  UNUSED_PAD = 0,      ///< Zero-fill unused bytes/words.
-  UNUSED_SEXT = 1,     ///< Sign-extend from the selected portion's MSB.
-  UNUSED_PRESERVE = 2, ///< Keep the original destination register value.
-};
 
 /// @brief Extract a sub-dword from a source value per SDWA sel.
 ///
@@ -451,6 +402,7 @@ inline uint32_t sdwa_clamp_f32(uint32_t result) {
 }
 
 } // namespace sdwa
+
 } // namespace amdgpu
 } // namespace rocjitsu
 

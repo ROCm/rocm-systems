@@ -31,10 +31,13 @@
 
 namespace rocshmem {
 
-__host__ QueuePairMLX5::QueuePairMLX5(uint32_t qpn, void *base_heap, size_t heap_size,
-                                      uint32_t lkey, uint32_t rkey, struct ibv_pd* pd,
+__host__ QueuePairMLX5::QueuePairMLX5(uint32_t qpn, uintptr_t heap_laddr, uint32_t heap_lkey,
+                                      uintptr_t heap_raddr, uint32_t heap_rkey, size_t heap_size,
+                                      const QpSymmEntry *symm_entries, const int *symm_count,
+                                      struct ibv_pd* pd,
                                       gda_mlx5_device_sq&& sq, gda_mlx5_device_cq&& cq)
-  : QueuePairBase{qpn, base_heap, heap_size, lkey, rkey, pd},
+  : QueuePairBase{qpn, heap_laddr, heap_lkey, heap_raddr, heap_rkey, heap_size,
+                  symm_entries, symm_count, pd},
     sq{std::move(sq)}, cq{std::move(cq)} {
 }
 

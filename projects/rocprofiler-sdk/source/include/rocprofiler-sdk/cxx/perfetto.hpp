@@ -100,6 +100,8 @@ ROCPROFILER_DEFINE_CATEGORY(category, memory_copy, "Async memory copy")
 ROCPROFILER_DEFINE_CATEGORY(category, memory_allocation, "Memory Allocation")
 ROCPROFILER_DEFINE_CATEGORY(category, rocdecode_api, "rocDecode API function")
 ROCPROFILER_DEFINE_CATEGORY(category, rocjpeg_api, "rocJPEG API function")
+ROCPROFILER_DEFINE_CATEGORY(category, rocshmem_api, "rocSHMEM API function")
+ROCPROFILER_DEFINE_CATEGORY(category, hipfile_api, "hipFILE API function")
 ROCPROFILER_DEFINE_CATEGORY(category, counter_collection, "Counter Collection")
 ROCPROFILER_DEFINE_CATEGORY(category, kfd_events, "KFD events collection")
 ROCPROFILER_DEFINE_CATEGORY(category, scratch_memory, "Scratch Memory Allocation")
@@ -117,6 +119,8 @@ ROCPROFILER_DEFINE_CATEGORY(category, none, "Unknown category")
         ROCPROFILER_PERFETTO_CATEGORY(category::memory_allocation),                                \
         ROCPROFILER_PERFETTO_CATEGORY(category::rocdecode_api),                                    \
         ROCPROFILER_PERFETTO_CATEGORY(category::rocjpeg_api),                                      \
+        ROCPROFILER_PERFETTO_CATEGORY(category::rocshmem_api),                                     \
+        ROCPROFILER_PERFETTO_CATEGORY(category::hipfile_api),                                      \
         ROCPROFILER_PERFETTO_CATEGORY(category::scratch_memory),                                   \
         ROCPROFILER_PERFETTO_CATEGORY(category::none)
 
@@ -238,6 +242,10 @@ ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(KFD_EVENT_DROPPED_EVENTS, kfd_event
 ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(KFD_PAGE_MIGRATE, kfd_events)
 ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(KFD_PAGE_FAULT, kfd_events)
 ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(KFD_QUEUE, kfd_events)
+ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(HIP_GRAPH, hip_api)
+ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(ROCSHMEM_API, rocshmem_api)
+ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(ROCSHMEM_API_EXT, rocshmem_api)
+ROCPROFILER_PERFETTO_BUFFER_TRACING_CATEGORY(HIPFILE_API_EXT, hipfile_api)
 
 ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(NONE, none)
 ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(HSA_CORE_API, hsa_api)
@@ -261,6 +269,24 @@ ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(RUNTIME_INITIALIZATION, none)
 ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(ROCDECODE_API, rocdecode_api)
 ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(ROCJPEG_API, rocjpeg_api)
 ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(HIP_STREAM, hip_api)
+ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(HIP_GRAPH, hip_api)
+ROCPROFILER_PERFETTO_CALLBACK_TRACING_CATEGORY(ROCSHMEM_API, rocshmem_api)
+
+template <>
+struct rocprofiler_tracing_perfetto_category<rocprofiler_buffer_tracing_kind_t,
+                                             ROCPROFILER_BUFFER_TRACING_HIPFILE_API>
+{
+    static constexpr auto name =
+        ::rocprofiler::sdk::perfetto_category<::rocprofiler::sdk::category::hipfile_api>::name;
+};
+
+template <>
+struct rocprofiler_tracing_perfetto_category<rocprofiler_callback_tracing_kind_t,
+                                             ROCPROFILER_CALLBACK_TRACING_HIPFILE_API>
+{
+    static constexpr auto name =
+        ::rocprofiler::sdk::perfetto_category<::rocprofiler::sdk::category::hipfile_api>::name;
+};
 
 template <typename KindT, size_t Idx, size_t... Tail>
 const char*

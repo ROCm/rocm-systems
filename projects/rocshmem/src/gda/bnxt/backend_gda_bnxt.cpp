@@ -69,12 +69,16 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   CHECK_HIP(hipHostRegister(bnxt_qps[conn_num].db_region_attr->dbr, getpagesize(), hipHostRegisterDefault));
   CHECK_HIP(hipHostGetDevicePointer(&gpu_dbr_ptr, bnxt_qps[conn_num].db_region_attr->dbr, 0));
 
-  uint32_t qpn       = ib_qp->qp_num;
-  void*    base_heap = heap.get_local_heap_base();
-  size_t   heap_size = heap.get_size();
-  uint32_t lkey      = nic.heap_mr->lkey;
-  uint32_t rkey      = heap_rkey[pe * num_nics_ + nic_idx];
-  ibv_pd*  pd        = nic.pd_orig;
+  uint32_t  qpn        = ib_qp->qp_num;
+  uintptr_t heap_laddr = reinterpret_cast<uintptr_t>(heap.get_local_heap_base());
+  uintptr_t heap_raddr = reinterpret_cast<uintptr_t>(heap.get_heap_bases()[pe]);
+  size_t    heap_size  = heap.get_size();
+  uint32_t  heap_lkey  = nic.heap_mr->lkey;
+  uint32_t  heap_rkey  = heap_rkey[flat_pe_nic_idx(pe, nic_idx)];
+  ibv_pd*   pd         = nic.pd_orig;
+
+  const QpSymmEntry *symm_entries = get_symm_entries_slice(pe, nic_idx);
+  const int         *symm_count   = symm_count_;
 
   uint64_t* dbr = reinterpret_cast<uint64_t*>(gpu_dbr_ptr);
 
@@ -96,7 +100,9 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   /* QueuePair is either QueuePairBNXT or QueuePairMux
    * both have a constructor that accepts rvalue reference QueuePairBNXT&&,
    * so just use that instead of trying to figure out which one we're using */
-  new (gpu_qp) QueuePair{QueuePairBNXT{qpn, base_heap, heap_size, lkey, rkey, pd, dbr,
+  new (gpu_qp) QueuePair{QueuePairBNXT{qpn, heap_laddr, heap_lkey,
+                                       heap_raddr, heap_rkey, heap_size,
+                                       symm_entries, symm_count, pd, dbr,
                                        bnxt_device_sq{sq_buf, sq_depth, msntbl, msn_tbl_sz,
                                                       psn_sz_log2, mtu},
                                        bnxt_device_cq{cq_buf, cq_depth}}};

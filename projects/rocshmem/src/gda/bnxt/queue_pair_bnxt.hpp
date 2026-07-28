@@ -53,8 +53,10 @@ template <> struct QueuePairTraits<QueuePairBNXT> {
 
 class QueuePairBNXT : public QueuePairBase<QueuePairBNXT> {
 public:
-  __host__ explicit QueuePairBNXT(uint32_t qpn, void *base_heap, size_t heap_size,
-                                  uint32_t lkey, uint32_t rkey, struct ibv_pd* pd,
+  __host__ explicit QueuePairBNXT(uint32_t qpn, uintptr_t heap_laddr, uint32_t heap_lkey,
+                                  uintptr_t heap_raddr, uint32_t heap_rkey, size_t heap_size,
+                                  const QpSymmEntry *symm_entries, const int *symm_count,
+                                  struct ibv_pd* pd,
                                   uint64_t* dbr, bnxt_device_sq&& sq, bnxt_device_cq&& cq);
 
   __host__ QueuePairBNXT(const QueuePairBNXT& other)            = delete;

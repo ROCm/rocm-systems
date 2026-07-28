@@ -54,8 +54,10 @@ template <> struct QueuePairTraits<QueuePairIONIC> {
 
 class QueuePairIONIC : public QueuePairBase<QueuePairIONIC> {
 public:
-  __host__ explicit QueuePairIONIC(uint32_t qpn, void *base_heap, size_t heap_size,
-                                   uint32_t lkey, uint32_t rkey, struct ibv_pd* pd,
+  __host__ explicit QueuePairIONIC(uint32_t qpn, uintptr_t heap_laddr, uint32_t heap_lkey,
+                                   uintptr_t heap_raddr, uint32_t heap_rkey, size_t heap_size,
+                                   const QpSymmEntry *symm_entries, const int *symm_count,
+                                   struct ibv_pd* pd,
                                    ionic_device_sq&& sq, ionic_device_cq&& cq);
 
   __host__ QueuePairIONIC(const QueuePairIONIC& other)            = delete;

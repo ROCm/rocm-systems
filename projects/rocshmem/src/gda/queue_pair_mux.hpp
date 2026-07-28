@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_GDA_QUEUE_PAIR_MUX_HPP_
 
 #include <algorithm>
+#include <tuple>
 
 #include <hip/hip_runtime.h>
 
@@ -149,24 +150,33 @@ public:
   __host__ int buffer_unregister_all();
 
   /**
-   * @brief Retrieve LKey for address.
+   * @brief Resolve the local (origin) virtual address and LKey of a symmetric address.
    *
-   * @param[in] addr Address to lookup LKey of.
+   * Attempts to resolve the address in the following order of locations:
+   *   1. The default symmetric heap.
+   *   2. All user-registered local buffers.
+   *   3. All user-registered symmetric buffers.
    *
-   * @return LKey for addr or std::numeric_limits<uint32_t>::max() if not found.
+   * @param[in] addr Symmetric address to resolve.
+   *
+   * @return {laddr, lkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned LKey value is ProviderEndianness.
    */
-  __device__ __forceinline__ uint32_t get_lkey(uintptr_t addr);
+  __device__ __forceinline__ std::tuple<uintptr_t, uint32_t> get_laddr_info(const void *addr) const;
 
   /**
-   * @brief Retrieve RKey for address.
+   * @brief Resolve the remote (target) virtual address and RKey of a symmetric address.
    *
-   * @param[in] addr Address to lookup RKey of.
+   * Attempts to resolve the address in the following order of locations:
+   *   1. The default symmetric heap.
+   *   2. All user-registered symmetric buffers.
    *
-   * @return RKey for addr or std::numeric_limits<uint32_t>::max() if not found.
+   * @param[in] addr Symmetric address to resolve.
+   *
+   * @return {raddr, rkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned RKey value is ProviderEndianness.
    */
-  __device__ __forceinline__ uint32_t get_rkey(uintptr_t addr);
+  __device__ __forceinline__ std::tuple<uintptr_t, uint32_t> get_raddr_info(const void *addr) const;
 
   /*
    * @brief Query whether data can be inlined into a WQE.
@@ -191,7 +201,7 @@ public:
   __host__ T to_provider_endianness(T val);
 
   template <typename T>
-  __device__ __forceinline__ T to_provider_endianness(T val);
+  static __device__ __forceinline__ T to_provider_endianness(T val);
 
 private:
   union QueuePairUnion {
@@ -414,19 +424,20 @@ __device__ __forceinline__ void QueuePairMux::quiet_single() {
   }
 }
 
-__device__ __forceinline__ uint32_t QueuePairMux::get_lkey(uintptr_t addr) {
+__device__ __forceinline__
+std::tuple<uintptr_t, uint32_t> QueuePairMux::get_laddr_info(const void *addr) const {
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return qp.ionic.get_lkey(addr);
+    return qp.ionic.get_laddr_info(addr);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.get_lkey(addr);
+    return qp.bnxt.get_laddr_info(addr);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.get_lkey(addr);
+    return qp.mlx5.get_laddr_info(addr);
 #endif
   default:
     assert(false /* invalid GDAProvider */);
@@ -434,19 +445,20 @@ __device__ __forceinline__ uint32_t QueuePairMux::get_lkey(uintptr_t addr) {
   }
 }
 
-__device__ __forceinline__ uint32_t QueuePairMux::get_rkey(uintptr_t addr) {
+__device__ __forceinline__
+std::tuple<uintptr_t, uint32_t> QueuePairMux::get_raddr_info(const void *addr) const {
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return qp.ionic.get_rkey(addr);
+    return qp.ionic.get_raddr_info(addr);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.get_rkey(addr);
+    return qp.bnxt.get_raddr_info(addr);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.get_rkey(addr);
+    return qp.mlx5.get_raddr_info(addr);
 #endif
   default:
     assert(false /* invalid GDAProvider */);
