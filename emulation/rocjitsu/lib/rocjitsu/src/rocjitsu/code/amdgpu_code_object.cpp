@@ -109,6 +109,8 @@ static_assert(kAmdGpuCodeObjectKernelMetadataEntryChargeBytes <=
 
 struct KernelMetadataReadResult {
   KernelMetadataMap metadata;
+  size_t malformed_note_count = 0;
+  bool scan_complete = true;
   bool budget_exceeded = false;
   std::optional<byte_accounting::ChargeOutcome> parse_work_failure;
   bool replay_failed = false;
@@ -124,8 +126,11 @@ read_kernel_metadata(std::span<const uint8_t> image, const Elf64_Ehdr &header,
   uint64_t next_source_note = 0;
   byte_accounting::CheckedByteBudget metadata_parse_work(byte_accounting::saturating_multiply(
       kAmdGpuCodeObjectMetadataParseWorkImageUnits, image.size()));
+  if (header.e_phnum == 0)
+    return result;
   if (header.e_phentsize != sizeof(Elf64_Phdr) || header.e_phoff > image.size() ||
       static_cast<uint64_t>(header.e_phnum) * sizeof(Elf64_Phdr) > image.size() - header.e_phoff) {
+    result.scan_complete = false;
     return result;
   }
   for (uint16_t index = 0; index < header.e_phnum; ++index) {
@@ -133,23 +138,39 @@ read_kernel_metadata(std::span<const uint8_t> image, const Elf64_Ehdr &header,
     std::memcpy(&program_header,
                 image.data() + header.e_phoff + static_cast<uint64_t>(index) * sizeof(Elf64_Phdr),
                 sizeof(program_header));
-    if (program_header.p_type != PT_NOTE || program_header.p_offset > image.size() ||
+    if (program_header.p_type != PT_NOTE)
+      continue;
+    if (program_header.p_filesz == 0)
+      continue;
+    if (program_header.p_offset > image.size() ||
         program_header.p_filesz > image.size() - program_header.p_offset) {
+      result.scan_complete = false;
       continue;
     }
     uint64_t cursor = program_header.p_offset;
     const uint64_t end = cursor + program_header.p_filesz;
-    while (cursor <= end && sizeof(Elf64_Nhdr) <= end - cursor) {
+    while (cursor < end) {
+      if (sizeof(Elf64_Nhdr) > end - cursor) {
+        const auto trailing =
+            image.subspan(static_cast<size_t>(cursor), static_cast<size_t>(end - cursor));
+        if (!std::ranges::all_of(trailing, [](uint8_t byte) { return byte == 0; }))
+          result.scan_complete = false;
+        break;
+      }
       Elf64_Nhdr note{};
       std::memcpy(&note, image.data() + cursor, sizeof(note));
       cursor += sizeof(note);
       const uint64_t name_bytes = align4(note.n_namesz);
       const uint64_t desc_bytes = align4(note.n_descsz);
-      if (name_bytes > end - cursor || desc_bytes > end - cursor - name_bytes)
+      if (name_bytes > end - cursor || desc_bytes > end - cursor - name_bytes) {
+        result.scan_complete = false;
+        if (note.n_type == NT_AMDGPU_METADATA)
+          ++result.malformed_note_count;
         break;
+      }
       const uint64_t desc_offset = cursor + name_bytes;
       cursor = desc_offset + desc_bytes;
-      if (note.n_type != NT_AMDGPU_METADATA || note.n_descsz > image.size() - desc_offset)
+      if (note.n_type != NT_AMDGPU_METADATA)
         continue;
       const auto payload = image.subspan(static_cast<size_t>(desc_offset), note.n_descsz);
       // Account both passes before parsing. Valid non-overlapping payloads fit
@@ -164,9 +185,11 @@ read_kernel_metadata(std::span<const uint8_t> image, const Elf64_Ehdr &header,
       // Validate the entire note before retaining any part of it. The second
       // pass deliberately re-parses the bounded payload, then charges each
       // unique entry before its map allocation.
-      if (amdgpu_code_object_detail::visit_kernel_metadata_payload(
-              payload, [](std::string_view, const KernelMetadata &) { return true; }) !=
-          KernelMetadataVisitStatus::Complete) {
+      const KernelMetadataVisitStatus validation_status =
+          amdgpu_code_object_detail::visit_kernel_metadata_payload(
+              payload, [](std::string_view, const KernelMetadata &) { return true; });
+      if (validation_status != KernelMetadataVisitStatus::Complete) {
+        ++result.malformed_note_count;
         continue;
       }
       const uint64_t source_note = next_source_note++;
@@ -259,6 +282,8 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   kd_offsets_ = std::move(other.kd_offsets_);
   kernels_ = std::move(other.kernels_);
   functions_ = std::move(other.functions_);
+  malformed_kernel_metadata_note_count_ = other.malformed_kernel_metadata_note_count_;
+  kernel_metadata_scan_complete_ = other.kernel_metadata_scan_complete_;
 }
 
 AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
@@ -725,6 +750,8 @@ void AmdGpuCodeObject::load_sections() {
   auto metadata_result = read_kernel_metadata(
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(image_.data()), image_.size()),
       elf_header, retain_derived_state_bytes);
+  malformed_kernel_metadata_note_count_ = metadata_result.malformed_note_count;
+  kernel_metadata_scan_complete_ = metadata_result.scan_complete;
   if (metadata_result.budget_exceeded || metadata_result.parse_work_failure ||
       metadata_result.replay_failed) {
     is_valid_ = false;

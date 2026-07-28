@@ -581,6 +581,135 @@ TEST(ConSan, MalformedCodeObjectsNeverProduceReplacementBytes) {
   }
 }
 
+TEST(ConSan, RejectsCodeObjectWithMalformedKernelMetadataNote) {
+  const std::array<uint32_t, 4> text_words = {
+      build_v_mov_b32_e32(/*vdst=*/11, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
+      0xD8340000u,
+      0x00000000u, // ds_store_b32
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  constexpr std::array<uint8_t, 3> kRequiredWorkgroupSize{2u, 4u, 8u};
+  const auto make_bytes = [&] {
+    std::vector<uint8_t> bytes =
+        make_rdna4_lds_code_object(text_words, "malformed_kernel_metadata");
+    append_kernel_metadata_note(bytes, "malformed_kernel_metadata",
+                                /*uses_dynamic_stack=*/true, /*sgpr_count=*/24u,
+                                /*private_segment_fixed_size=*/0u, kRequiredWorkgroupSize,
+                                /*has_dynamic_lds=*/true);
+    return bytes;
+  };
+
+  struct MetadataDamageCase {
+    std::string_view description;
+    std::vector<uint8_t> bytes;
+    size_t malformed_note_count = 0;
+    std::string expected_error;
+  };
+  std::vector<MetadataDamageCase> cases;
+  auto malformed_payload = make_bytes();
+  Elf64_Ehdr header{};
+  std::memcpy(&header, malformed_payload.data(), sizeof(header));
+  Elf64_Phdr note_segment{};
+  std::memcpy(&note_segment, malformed_payload.data() + header.e_phoff, sizeof(note_segment));
+  malformed_payload[note_segment.p_offset + sizeof(Elf64_Nhdr) + 8u] = 0xc1u;
+  cases.push_back({.description = "payload",
+                   .bytes = std::move(malformed_payload),
+                   .malformed_note_count = 1u,
+                   .expected_error =
+                       "ConSan cannot safely transform a code object with 1 malformed AMDGPU "
+                       "kernel metadata note"});
+
+  auto malformed_framing = make_bytes();
+  std::memcpy(&header, malformed_framing.data(), sizeof(header));
+  std::memcpy(&note_segment, malformed_framing.data() + header.e_phoff, sizeof(note_segment));
+  Elf64_Nhdr note_header{};
+  std::memcpy(&note_header, malformed_framing.data() + note_segment.p_offset, sizeof(note_header));
+  note_header.n_descsz += 64u;
+  std::memcpy(malformed_framing.data() + note_segment.p_offset, &note_header, sizeof(note_header));
+  cases.push_back({.description = "framing",
+                   .bytes = std::move(malformed_framing),
+                   .malformed_note_count = 1u,
+                   .expected_error =
+                       "ConSan cannot safely transform a code object with 1 malformed AMDGPU "
+                       "kernel metadata note"});
+
+  auto incomplete_scan = make_bytes();
+  std::memcpy(&header, incomplete_scan.data(), sizeof(header));
+  std::memcpy(&note_segment, incomplete_scan.data() + header.e_phoff, sizeof(note_segment));
+  note_segment.p_filesz = incomplete_scan.size();
+  std::memcpy(incomplete_scan.data() + header.e_phoff, &note_segment, sizeof(note_segment));
+  cases.push_back(
+      {.description = "out-of-range note segment",
+       .bytes = std::move(incomplete_scan),
+       .expected_error =
+           "ConSan cannot safely transform a code object with incomplete AMDGPU kernel metadata"});
+
+  // Absence is accepted by InlineShadowSpillingWorksWithoutMetadata; a note
+  // that claims metadata but cannot be read is rejected by every engine.
+  for (const MetadataDamageCase &damage : cases) {
+    AmdGpuCodeObject malformed(damage.bytes.data(), damage.bytes.size());
+    ASSERT_TRUE(malformed.is_valid());
+    ASSERT_FALSE(malformed.kernel_metadata_is_trustworthy());
+    ASSERT_EQ(malformed.malformed_kernel_metadata_note_count(), damage.malformed_note_count);
+
+    for (const auto &profile : all_consan_transform_profiles()) {
+      SCOPED_TRACE(::testing::Message() << damage.description << ": " << profile.name);
+      const ConSanResult result = try_patch_consan(damage.bytes, profile.options);
+      EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
+      EXPECT_FALSE(result.modified);
+      EXPECT_FALSE(result.final_validation_passed);
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.patches.empty());
+      EXPECT_FALSE(result.kernel_metadata_trustworthy);
+      EXPECT_EQ(result.malformed_kernel_metadata_note_count, damage.malformed_note_count);
+      EXPECT_EQ(result.target_name, "gfx1201");
+      ASSERT_EQ(result.errors.size(), 1u);
+      EXPECT_EQ(result.errors.front(), damage.expected_error);
+      EXPECT_EQ(consan_install_action(result, false), ConSanInstallAction::LoadOriginal);
+      EXPECT_EQ(consan_install_action(result, true), ConSanInstallAction::Reject);
+    }
+  }
+}
+
+TEST(ConSan, ReportsMultipleMalformedKernelMetadataNotes) {
+  const std::array<uint32_t, 1> text_words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "multiple_malformed_metadata");
+  append_kernel_metadata_note(bytes, "multiple_malformed_metadata",
+                              /*uses_dynamic_stack=*/true, /*sgpr_count=*/24u);
+
+  Elf64_Ehdr header{};
+  std::memcpy(&header, bytes.data(), sizeof(header));
+  Elf64_Phdr note_segment{};
+  std::memcpy(&note_segment, bytes.data() + header.e_phoff, sizeof(note_segment));
+  const std::vector<uint8_t> duplicate = first_note_segment_bytes(bytes);
+  ASSERT_FALSE(duplicate.empty());
+  const uint64_t second_note_offset = note_segment.p_offset + duplicate.size();
+  bytes.insert(bytes.end(), duplicate.begin(), duplicate.end());
+  note_segment.p_filesz += duplicate.size();
+  note_segment.p_memsz = note_segment.p_filesz;
+  std::memcpy(bytes.data() + header.e_phoff, &note_segment, sizeof(note_segment));
+  bytes[note_segment.p_offset + sizeof(Elf64_Nhdr) + 8u] = 0xc1u;
+  bytes[second_note_offset + sizeof(Elf64_Nhdr) + 8u] = 0xc1u;
+
+  AmdGpuCodeObject malformed(bytes.data(), bytes.size());
+  ASSERT_TRUE(malformed.is_valid());
+  ASSERT_EQ(malformed.malformed_kernel_metadata_note_count(), 2u);
+  ASSERT_FALSE(malformed.kernel_metadata_is_trustworthy());
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  const ConSanResult result = try_patch_consan(bytes, options);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_FALSE(result.kernel_metadata_trustworthy);
+  EXPECT_EQ(result.malformed_kernel_metadata_note_count, 2u);
+  ASSERT_EQ(result.errors.size(), 1u);
+  EXPECT_NE(result.errors.front().find("2 malformed AMDGPU kernel metadata notes"),
+            std::string::npos);
+}
+
 TEST(ConSan, InfersZeroSizedKernelFunctionThroughTextEnd) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,

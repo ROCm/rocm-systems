@@ -183,6 +183,22 @@ make_named_kernel_metadata_payload(const std::vector<std::pair<char, uint8_t>> &
   return payload;
 }
 
+std::vector<uint8_t>
+make_metadata_payload_with_unknown_root_value(std::span<const uint8_t> encoded_value,
+                                              bool append_kernel_array = true) {
+  std::vector<uint8_t> payload;
+  payload.push_back(append_kernel_array ? 0x82u : 0x81u);
+  append_msgpack_string(payload, "future.root.field");
+  payload.insert(payload.end(), encoded_value.begin(), encoded_value.end());
+  if (!append_kernel_array)
+    return payload;
+  append_msgpack_string(payload, "amdhsa.kernels");
+  payload.push_back(0x91u); // one kernel
+  if (!append_kernel_metadata_record(payload, 'k', 8u))
+    return {};
+  return payload;
+}
+
 std::vector<std::pair<char, uint8_t>> make_distinct_kernel_metadata_records(size_t count) {
   if (count > 255) {
     ADD_FAILURE() << "metadata fixture has too many distinct one-byte names";
@@ -1025,6 +1041,144 @@ TEST(AmdGpuKernelMetadataPayload, SupportsFreeFunctionsAndMutableVisitors) {
   EXPECT_EQ(visitor.visit_count, 1u);
 }
 
+TEST(AmdGpuKernelMetadataPayload, HandlesExtensionValueBoundariesBeforeFirstKernelArray) {
+  struct EncodedValueCase {
+    std::string_view description;
+    std::vector<uint8_t> encoded;
+  };
+  const std::array<EncodedValueCase, 8> values = {
+      EncodedValueCase{"ext8", {0xc7u, 0x02u, 0x01u, 0xaau, 0xbbu}},
+      EncodedValueCase{"ext16", {0xc8u, 0x00u, 0x02u, 0x01u, 0xaau, 0xbbu}},
+      EncodedValueCase{"ext32", {0xc9u, 0x00u, 0x00u, 0x00u, 0x02u, 0x01u, 0xaau, 0xbbu}},
+      EncodedValueCase{"fixext1", {0xd4u, 0x01u, 0xaau}},
+      EncodedValueCase{"fixext2", {0xd5u, 0x01u, 0xaau, 0xbbu}},
+      EncodedValueCase{"fixext4", {0xd6u, 0x01u, 0xaau, 0xbbu, 0xccu, 0xddu}},
+      EncodedValueCase{"fixext8",
+                       {0xd7u, 0x01u, 0xaau, 0xbbu, 0xccu, 0xddu, 0xeeu, 0xf0u, 0x11u, 0x22u}},
+      EncodedValueCase{"fixext16",
+                       {0xd8u, 0x01u, 0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u, 0x08u,
+                        0x09u, 0x0au, 0x0bu, 0x0cu, 0x0du, 0x0eu, 0x0fu}},
+  };
+
+  for (const auto &value : values) {
+    SCOPED_TRACE(value.description);
+    const auto payload = make_metadata_payload_with_unknown_root_value(value.encoded);
+    std::vector<std::string> names;
+    EXPECT_EQ(amdgpu_code_object_detail::visit_kernel_metadata_payload(
+                  payload,
+                  [&](std::string_view name, const amdgpu_code_object_detail::KernelMetadata &) {
+                    names.emplace_back(name);
+                    return true;
+                  }),
+              amdgpu_code_object_detail::KernelMetadataVisitStatus::Complete);
+    EXPECT_EQ(names, std::vector<std::string>{"k"});
+    std::vector<uint8_t> truncated = value.encoded;
+    ASSERT_FALSE(truncated.empty());
+    truncated.pop_back();
+    // Omit the following root entry so its bytes cannot accidentally satisfy
+    // the shortened extension payload.
+    const auto truncated_payload =
+        make_metadata_payload_with_unknown_root_value(truncated, /*append_kernel_array=*/false);
+    EXPECT_EQ(amdgpu_code_object_detail::visit_kernel_metadata_payload(
+                  truncated_payload,
+                  [](std::string_view, const amdgpu_code_object_detail::KernelMetadata &) {
+                    return true;
+                  }),
+              amdgpu_code_object_detail::KernelMetadataVisitStatus::Malformed);
+  }
+}
+
+TEST(AmdGpuKernelMetadataPayload, EnforcesNestedUnknownValueDepthBeforeFirstKernelArray) {
+  const auto make_nested_array = [](size_t depth, bool declared_count) {
+    std::vector<uint8_t> encoded;
+    encoded.reserve(depth * (declared_count ? 3u : 1u) + 1u);
+    for (size_t level = 0; level < depth; ++level) {
+      if (declared_count)
+        encoded.insert(encoded.end(), {0xdcu, 0x00u, 0x01u});
+      else
+        encoded.push_back(0x91u);
+    }
+    encoded.push_back(0u);
+    return encoded;
+  };
+
+  for (const auto &[description, declared_count] : std::array<std::pair<std::string_view, bool>, 2>{
+           std::pair{"fixarray", false},
+           std::pair{"array16", true},
+       }) {
+    SCOPED_TRACE(description);
+    const auto maximum = make_metadata_payload_with_unknown_root_value(make_nested_array(
+        amdgpu_code_object_detail::kMaximumKernelMetadataNestingDepth, declared_count));
+    EXPECT_EQ(amdgpu_code_object_detail::visit_kernel_metadata_payload(
+                  maximum, [](std::string_view,
+                              const amdgpu_code_object_detail::KernelMetadata &) { return true; }),
+              amdgpu_code_object_detail::KernelMetadataVisitStatus::Complete);
+
+    const auto too_deep = make_metadata_payload_with_unknown_root_value(make_nested_array(
+        amdgpu_code_object_detail::kMaximumKernelMetadataNestingDepth + 1u, declared_count));
+    EXPECT_EQ(amdgpu_code_object_detail::visit_kernel_metadata_payload(
+                  too_deep, [](std::string_view,
+                               const amdgpu_code_object_detail::KernelMetadata &) { return true; }),
+              amdgpu_code_object_detail::KernelMetadataVisitStatus::Malformed);
+  }
+}
+
+TEST(AmdGpuKernelMetadataPayload, SkipsDeclaredCollectionsBeforeFirstKernelArray) {
+  struct EncodedValueCase {
+    std::string_view description;
+    std::vector<uint8_t> encoded;
+  };
+  const std::array<EncodedValueCase, 4> values = {
+      EncodedValueCase{"array16", {0xdcu, 0x00u, 0x01u, 0u}},
+      EncodedValueCase{"array32", {0xddu, 0x00u, 0x00u, 0x00u, 0x01u, 0u}},
+      EncodedValueCase{"map16", {0xdeu, 0x00u, 0x01u, 0xa1u, 'k', 0u}},
+      EncodedValueCase{"map32", {0xdfu, 0x00u, 0x00u, 0x00u, 0x01u, 0xa1u, 'k', 0u}},
+  };
+
+  for (const auto &value : values) {
+    SCOPED_TRACE(value.description);
+    const auto payload = make_metadata_payload_with_unknown_root_value(value.encoded);
+    EXPECT_EQ(amdgpu_code_object_detail::visit_kernel_metadata_payload(
+                  payload, [](std::string_view,
+                              const amdgpu_code_object_detail::KernelMetadata &) { return true; }),
+              amdgpu_code_object_detail::KernelMetadataVisitStatus::Complete);
+  }
+}
+
+TEST(AmdGpuKernelMetadataPayload, RejectsTruncatedDeclaredCollectionsBeforeFirstKernelArray) {
+  struct EncodedValueCase {
+    std::string_view description;
+    std::vector<uint8_t> encoded;
+  };
+  const std::array<EncodedValueCase, 4> values = {
+      EncodedValueCase{"array16", {0xdcu, 0x00u, 0x01u}},
+      EncodedValueCase{"array32", {0xddu, 0xffu, 0xffu, 0xffu, 0xffu}},
+      EncodedValueCase{"map16", {0xdeu, 0x00u, 0x01u, 0xa1u, 'k'}},
+      EncodedValueCase{"map32", {0xdfu, 0xffu, 0xffu, 0xffu, 0xffu}},
+  };
+
+  for (const auto &value : values) {
+    SCOPED_TRACE(value.description);
+    const auto payload =
+        make_metadata_payload_with_unknown_root_value(value.encoded,
+                                                      /*append_kernel_array=*/false);
+    EXPECT_EQ(amdgpu_code_object_detail::visit_kernel_metadata_payload(
+                  payload, [](std::string_view,
+                              const amdgpu_code_object_detail::KernelMetadata &) { return true; }),
+              amdgpu_code_object_detail::KernelMetadataVisitStatus::Malformed);
+  }
+}
+
+TEST(AmdGpuKernelMetadataPayload, RejectsUnsupportedValueBeforeFirstKernelArray) {
+  const std::array<uint8_t, 1> unsupported{0xc1u};
+  const auto payload = make_metadata_payload_with_unknown_root_value(unsupported);
+
+  EXPECT_EQ(amdgpu_code_object_detail::visit_kernel_metadata_payload(
+                payload, [](std::string_view,
+                            const amdgpu_code_object_detail::KernelMetadata &) { return true; }),
+            amdgpu_code_object_detail::KernelMetadataVisitStatus::Malformed);
+}
+
 TEST(AmdGpuKernelMetadataPayload, IgnoresRootEntriesAndBytesAfterFirstKernelArray) {
   std::vector<uint8_t> payload;
   payload.push_back(0x82u);
@@ -1093,6 +1247,7 @@ TEST(AmdGpuCodeObjectValidation, AcceptsAggregateCopiedSectionsEqualToImage) {
 
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.malformed_kernel_metadata_note_count(), 0u);
 }
 
 TEST(AmdGpuCodeObjectValidation, RejectsAggregateCopiedSectionsOneByteOverImage) {
@@ -1215,7 +1370,7 @@ TEST(AmdGpuCodeObjectValidation, DoesNotChargeDuplicateMetadataAcrossNotes) {
   EXPECT_TRUE(obj.is_valid());
 }
 
-TEST(AmdGpuCodeObjectValidation, MalformedNoteConsumesNoMetadataStateBudget) {
+TEST(AmdGpuCodeObjectValidation, ReportsMalformedNoteWithoutConsumingMetadataStateBudget) {
   const auto records = make_distinct_kernel_metadata_records(kMaximumKernelMetadataEntries);
   ASSERT_EQ(records.size(), kMaximumKernelMetadataEntries);
   const auto image = make_elf_with_kernel_metadata_payloads(
@@ -1224,6 +1379,91 @@ TEST(AmdGpuCodeObjectValidation, MalformedNoteConsumesNoMetadataStateBudget) {
 
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.malformed_kernel_metadata_note_count(), 1u);
+  EXPECT_FALSE(obj.kernel_metadata_is_trustworthy());
+}
+
+TEST(AmdGpuCodeObjectValidation, MalformedNoteTrustStateSurvivesMoveConstruction) {
+  const auto image = make_elf_with_kernel_metadata_payloads({{0x81u}});
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_EQ(obj.malformed_kernel_metadata_note_count(), 1u);
+  ASSERT_FALSE(obj.kernel_metadata_is_trustworthy());
+
+  AmdGpuCodeObject moved(std::move(obj));
+  EXPECT_TRUE(moved.is_valid());
+  EXPECT_EQ(moved.malformed_kernel_metadata_note_count(), 1u);
+  EXPECT_FALSE(moved.kernel_metadata_is_trustworthy());
+}
+
+TEST(AmdGpuCodeObjectValidation, RejectsAllMetadataFromPartiallyMalformedNote) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  auto payload = make_named_kernel_metadata_payload({{'k', 8u}, {'j', 8u}});
+  ASSERT_FALSE(payload.empty());
+  payload.back() = 0xc1u;
+  ASSERT_TRUE(
+      install_kernel_metadata_notes(image, {make_kernel_metadata_note_from_payload(payload)}));
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.malformed_kernel_metadata_note_count(), 1u);
+  EXPECT_FALSE(obj.kernel_metadata_is_trustworthy());
+  ASSERT_EQ(obj.kernels().size(), 1u);
+  EXPECT_FALSE(obj.kernels().front().sgpr_count);
+}
+
+TEST(AmdGpuCodeObjectValidation, CountsMalformedNotesAndRetainsLaterValidNote) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  const auto malformed_a = make_kernel_metadata_note_from_payload({0x81u});
+  const auto malformed_b = make_kernel_metadata_note_from_payload({0x81u, 0xa1u, 'x'});
+  const auto valid =
+      make_kernel_metadata_note_from_payload(make_named_kernel_metadata_payload({{'k', 8u}}));
+  ASSERT_TRUE(install_kernel_metadata_notes(image, {malformed_a, malformed_b, valid}));
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.malformed_kernel_metadata_note_count(), 2u);
+  EXPECT_FALSE(obj.kernel_metadata_is_trustworthy());
+  ASSERT_EQ(obj.kernels().size(), 1u);
+  EXPECT_EQ(obj.kernels().front().sgpr_count, std::optional<uint16_t>(8u));
+}
+
+TEST(AmdGpuCodeObjectValidation, ReportsMalformedMetadataNoteFraming) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  const auto note =
+      make_kernel_metadata_note_from_payload(make_named_kernel_metadata_payload({{'k', 8u}}));
+  ASSERT_TRUE(install_kernel_metadata_notes(image, {note}));
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  Elf64_Phdr note_segment{};
+  std::memcpy(&note_segment, image.data() + header.e_phoff, sizeof(note_segment));
+  Elf64_Nhdr note_header{};
+  std::memcpy(&note_header, image.data() + note_segment.p_offset, sizeof(note_header));
+  note_header.n_descsz = std::numeric_limits<uint32_t>::max();
+  std::memcpy(image.data() + note_segment.p_offset, &note_header, sizeof(note_header));
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.malformed_kernel_metadata_note_count(), 1u);
+  EXPECT_FALSE(obj.kernel_metadata_is_trustworthy());
+  ASSERT_EQ(obj.kernels().size(), 1u);
+  EXPECT_FALSE(obj.kernels().front().sgpr_count);
+}
+
+TEST(AmdGpuCodeObjectValidation, ReportsOutOfRangeNoteSegmentAsIncompleteMetadataScan) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  ASSERT_TRUE(install_kernel_metadata_note(image, 1u));
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  Elf64_Phdr note_segment{};
+  std::memcpy(&note_segment, image.data() + header.e_phoff, sizeof(note_segment));
+  note_segment.p_filesz = image.size();
+  std::memcpy(image.data() + header.e_phoff, &note_segment, sizeof(note_segment));
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.malformed_kernel_metadata_note_count(), 0u);
+  EXPECT_FALSE(obj.kernel_metadata_is_trustworthy());
 }
 
 TEST(AmdGpuCodeObjectValidation, RejectsRepeatedMetadataPayloadsAboveParseWorkBudget) {
@@ -1256,6 +1496,8 @@ TEST(AmdGpuCodeObjectValidation, RetainsLastRecordForDuplicateKernelNamesWithinO
 
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.malformed_kernel_metadata_note_count(), 0u);
+  EXPECT_TRUE(obj.kernel_metadata_is_trustworthy());
   ASSERT_EQ(obj.kernels().size(), 1u);
   EXPECT_EQ(obj.kernels().front().sgpr_count, std::optional<uint16_t>(16u));
 }
@@ -1283,6 +1525,8 @@ TEST(AmdGpuCodeObjectValidation, RetainsMetadataWhenLaterRootBytesAreUnsupported
 
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.malformed_kernel_metadata_note_count(), 0u);
+  EXPECT_TRUE(obj.kernel_metadata_is_trustworthy());
   ASSERT_EQ(obj.kernels().size(), 1u);
   EXPECT_EQ(obj.kernels().front().sgpr_count, std::optional<uint16_t>(8u));
 }

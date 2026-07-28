@@ -120,6 +120,9 @@ struct ConSanResult {
   bool moi_dispatch_id_sgprs_automatic = false;
   size_t input_size = 0;
   std::string input_fingerprint;
+  /// Machine-readable input-metadata trust state retained with the diagnostic.
+  bool kernel_metadata_trustworthy = false;
+  size_t malformed_kernel_metadata_note_count = 0;
   /// Immutable semantic options captured before the first MOI planning pass.
   /// A report-buffer retry derives its options from this snapshot and can
   /// change only ConSanMoiReportRetryConfig fields.

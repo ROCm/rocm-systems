@@ -110,7 +110,7 @@ struct MetadataCursor {
 }
 
 [[nodiscard]] bool skip_metadata_value(MetadataCursor &cursor, unsigned depth = 0) {
-  if (depth > 64u || cursor.offset >= cursor.bytes.size())
+  if (depth > kMaximumKernelMetadataNestingDepth || cursor.offset >= cursor.bytes.size())
     return false;
   const uint8_t tag = cursor.bytes[cursor.offset];
   if (tag <= 0x7fu || tag >= 0xe0u || tag == 0xc0u || tag == 0xc2u || tag == 0xc3u)

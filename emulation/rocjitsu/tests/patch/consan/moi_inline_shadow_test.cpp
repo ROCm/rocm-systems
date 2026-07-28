@@ -2317,50 +2317,33 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, InlineShadowSpillingIgnoresAbsentAndMalformedMetadata) {
+TEST(ConSanMoi, InlineShadowSpillingWorksWithoutMetadata) {
   const std::array<uint32_t, 4> text_words = {
       build_v_mov_b32_e32(/*vdst=*/11, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
       0xD8340000u,
       0x00000000u, // ds_store_b32
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
   };
-  const auto make_bytes = [&] {
-    return make_rdna4_lds_code_object(text_words, "dynamic_stack_metadata_independence",
-                                      kRdna4Wave64AllVgprsGranulated,
-                                      /*wave32=*/false, /*uses_dynamic_stack=*/true);
-  };
-  std::vector<std::pair<std::string_view, std::vector<uint8_t>>> cases;
-  cases.emplace_back("absent", make_bytes());
-  auto malformed = make_bytes();
-  append_kernel_metadata_note(malformed, "dynamic_stack_metadata_independence",
-                              /*uses_dynamic_stack=*/true, /*sgpr_count=*/0u,
-                              /*private_segment_fixed_size=*/0u);
-  Elf64_Ehdr header{};
-  std::memcpy(&header, malformed.data(), sizeof(header));
-  Elf64_Phdr note_segment{};
-  std::memcpy(&note_segment, malformed.data() + header.e_phoff, sizeof(note_segment));
-  malformed[note_segment.p_offset + sizeof(Elf64_Nhdr) + 8u] = 0xc1u;
-  cases.emplace_back("malformed", std::move(malformed));
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "dynamic_stack_without_metadata_note", kRdna4Wave64AllVgprsGranulated,
+      /*wave32=*/false, /*uses_dynamic_stack=*/true);
+  // The malformed-note counterpart is rejected in
+  // ConSan.RejectsCodeObjectWithMalformedKernelMetadataNote.
+  ASSERT_TRUE(first_note_segment_bytes(bytes).empty());
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  for (auto &[name, bytes] : cases) {
-    SCOPED_TRACE(name);
-    const std::vector<uint8_t> original_note = first_note_segment_bytes(bytes);
-    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-    options.force_vgpr_spill = true;
-    options.moi_report_buffer_address = 0x100000000ull;
-    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  const ConSanResult result = try_patch_consan(bytes, options);
 
-    const ConSanResult result = try_patch_consan(bytes, options);
-
-    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
-      return item.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
-    });
-    ASSERT_NE(patch, result.patches.end());
-    EXPECT_GT(patch->spilled_vgpr_count, 0u);
-    EXPECT_EQ(first_note_segment_bytes(result.elf_bytes), original_note);
-  }
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_GT(patch->spilled_vgpr_count, 0u);
 }
 
 TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesHwIdOwnerAndSpecialStateSgprs) {

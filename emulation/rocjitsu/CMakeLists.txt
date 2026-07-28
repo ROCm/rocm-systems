@@ -326,6 +326,7 @@ set(_rj_waitcheck_sources
     ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/rj_waitcheck.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/analysis/waitcheck.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/code/amdgpu_code_object.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/amdgpu_kernel_metadata.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/code/basic_block.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/code/file_io.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/code/kernel_symbol.cpp

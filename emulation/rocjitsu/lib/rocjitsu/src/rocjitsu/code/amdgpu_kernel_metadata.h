@@ -19,6 +19,8 @@
 
 namespace rocjitsu::amdgpu_code_object_detail {
 
+inline constexpr unsigned kMaximumKernelMetadataNestingDepth = 64;
+
 struct KernelMetadata {
   bool has_dynamic_lds = false;
   std::optional<bool> uses_dynamic_stack;

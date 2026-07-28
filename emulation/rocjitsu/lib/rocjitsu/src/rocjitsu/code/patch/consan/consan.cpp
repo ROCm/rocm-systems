@@ -164,6 +164,17 @@ namespace {
 validate_consan_input_layout(const AmdGpuCodeObject &code_object,
                              bool allow_descriptor_entry_redirect = false) {
   std::vector<std::string> errors;
+  if (!code_object.kernel_metadata_is_trustworthy()) {
+    const size_t malformed_notes = code_object.malformed_kernel_metadata_note_count();
+    if (malformed_notes == 0) {
+      errors.emplace_back(
+          "ConSan cannot safely transform a code object with incomplete AMDGPU kernel metadata");
+    } else {
+      errors.emplace_back(
+          "ConSan cannot safely transform a code object with " + std::to_string(malformed_notes) +
+          " malformed AMDGPU kernel metadata note" + (malformed_notes == 1u ? "" : "s"));
+    }
+  }
   for (const auto &section : code_object.all_sections()) {
     if (!range_contains(0, code_object.image_size(), section->sectionOffset(), section->size()))
       errors.emplace_back("ConSan input section '" + section->name() + "' exceeds ELF bytes");

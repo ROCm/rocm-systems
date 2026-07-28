@@ -13,6 +13,7 @@
 #include "util/bit.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -243,6 +244,25 @@ public:
   /// @brief All `.text` function symbols discovered in this code object.
   const std::vector<AmdGpuFunctionInfo> &functions() const { return functions_; }
 
+  /// @brief Number of AMDGPU metadata notes that could not be parsed safely.
+  ///
+  /// @details A malformed metadata note does not make the surrounding ELF
+  /// structurally invalid, but consumers that rely on retained kernel metadata
+  /// can use this count to diagnose decisions based on incomplete fields.
+  /// Absent metadata is not malformed: consumers can still use independent ELF,
+  /// symbol, and kernel-descriptor evidence when no note claims those fields.
+  /// @returns Number of notes with malformed framing or payloads.
+  [[nodiscard]] size_t malformed_kernel_metadata_note_count() const {
+    return malformed_kernel_metadata_note_count_;
+  }
+
+  /// @brief Whether retained kernel metadata is safe for semantic decisions.
+  /// @returns True when the complete note scan found no malformed framing or
+  /// payloads. An object with no metadata notes is trustworthy.
+  [[nodiscard]] bool kernel_metadata_is_trustworthy() const {
+    return kernel_metadata_scan_complete_ && malformed_kernel_metadata_note_count_ == 0;
+  }
+
   uint64_t kernel_descriptor_offset(const std::string &kernel_name) const override;
 
   /// @brief Smallest per-wavefront SGPR allocation across this object's kernels.
@@ -266,6 +286,8 @@ private:
   std::unordered_map<std::string, uint64_t> kd_offsets_; ///< kernel_name -> .kd symbol offset
   std::vector<AmdGpuKernelInfo> kernels_;
   std::vector<AmdGpuFunctionInfo> functions_;
+  size_t malformed_kernel_metadata_note_count_ = 0;
+  bool kernel_metadata_scan_complete_ = true;
 };
 
 } // namespace rocjitsu

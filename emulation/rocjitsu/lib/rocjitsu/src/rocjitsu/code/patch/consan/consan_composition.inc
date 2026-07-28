@@ -588,13 +588,14 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     result.errors.emplace_back("ConSan could not parse AMDGPU code object");
     return result;
   }
-  result.errors = validate_consan_input_layout(*code_object);
-  if (!result.errors.empty())
-    return result;
-
+  result.kernel_metadata_trustworthy = code_object->kernel_metadata_is_trustworthy();
+  result.malformed_kernel_metadata_note_count = code_object->malformed_kernel_metadata_note_count();
   result.target_name = target_name(code_object->target_id());
   result.arch_display_name = arch_name(code_object->target_id());
   result.arch = arch_for_target(code_object->target_id());
+  result.errors = validate_consan_input_layout(*code_object);
+  if (!result.errors.empty())
+    return result;
 
   for (const Section *section : code_object->text_sections()) {
     ConSanTextSection info;
