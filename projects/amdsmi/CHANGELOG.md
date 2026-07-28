@@ -11,12 +11,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Bumped the library major version to 27.0.0** (breaking).  
   - The shared library SONAME is now `libamd_smi.so.27`. Consumers linked against `libamd_smi.so.26` must relink; no source changes are required beyond the API changes listed elsewhere in this release.
 
-- **Restructured AMD SMI C++ tests into unit and functional suites**.  
-  - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
-  - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
-  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
-  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
-
 - **Widened five `amdsmi_gpu_metrics_t` accumulator counters from 32-bit to 64-bit** (breaking).  
   - `gfx_activity_acc`, `mem_activity_acc`, `pcie_nak_sent_count_acc`, `pcie_nak_rcvd_count_acc`, and `pcie_lc_perf_other_end_recovery` are now `uint64_t` to match the amdgpu pmfw metrics header. Recompile callers that read these fields; the struct layout and field offsets have changed.
 
@@ -30,6 +24,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Field access simplifies from `fabric_info.fabric_version.v1.<field>` to `fabric_info.v1.<field>`, and `fabric_info.version` becomes `fabric_version`.
   - The change is ABI-preserving: field offsets and the overall structure size are unchanged. The Python `amdsmi_get_gpu_fabric_info()` dictionary keys are also unchanged.
 
+- **Removed the `amdsmi_gpu_driver_reload()` API and its Python binding** (breaking).  
+  - Reload the amdgpu driver out of band with `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to apply memory partition changes instead.
+
+- **Removed unused public macros and a duplicate fabric telemetry enumerator to match the unified ABI** (breaking).  
+  - Dropped the `AMDSMI_MAX_VF_COUNT`, `AMDSMI_MAX_DRIVER_NUM`, `AMDSMI_DFC_FW_NUMBER_OF_ENTRIES`, `AMDSMI_MAX_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_BLACK_LIST_ELEMENTS`, `AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_ERR_RECORDS`, and `AMDSMI_MAX_PROFILE_COUNT` defines, which were unreferenced by any API or struct.
+  - Removed the redundant `AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN` enumerator from `amdsmi_fabric_telemetry_category_t`; `AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID` carries the same `0xFFFFFFFF` value.
+
+- **Restructured AMD SMI C++ tests into unit and functional suites**.  
+  - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
+  - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
+  - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
+  - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
+
 ### Fixed
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.
@@ -41,14 +48,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The per-process KFD lookup rebuilt the entire KFD node topology (an expensive sysfs walk) on every call just to translate the device BDF into its KFD GPU id.
   - The caller already knows this value, so it is now passed through to `gpuvsmi_get_pid_info()`, eliminating one full topology discovery per process per refresh. Falls back to the original discovery path when the id is unavailable.
 
-### Removed
-
-- **Removed the `amdsmi_gpu_driver_reload()` API and its Python binding** (breaking).  
-  - Reload the amdgpu driver out of band with `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to apply memory partition changes instead.
-
-- **Removed unused public macros and a duplicate fabric telemetry enumerator to match the unified ABI** (breaking).  
-  - Dropped the `AMDSMI_MAX_VF_COUNT`, `AMDSMI_MAX_DRIVER_NUM`, `AMDSMI_DFC_FW_NUMBER_OF_ENTRIES`, `AMDSMI_MAX_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_BLACK_LIST_ELEMENTS`, `AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_ERR_RECORDS`, and `AMDSMI_MAX_PROFILE_COUNT` defines, which were unreferenced by any API or struct.
-  - Removed the redundant `AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN` enumerator from `amdsmi_fabric_telemetry_category_t`; `AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID` carries the same `0xFFFFFFFF` value.
 
 ### Resolved Issues
 
