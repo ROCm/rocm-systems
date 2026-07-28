@@ -11,14 +11,24 @@
 #include "device.h"
 #include "bootstrap.h"
 #include "argcheck.h"
+#include "param.h"
+
+NCCL_PARAM(CftEnable, "CFT_ENABLE", 1);
 
 ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport) {
   *gpuCftSupport = 0;
 #if CUDA_VERSION >= 13030
-  int driverVersion;
-  CUDACHECK(cudaDriverGetVersion(&driverVersion));
-  if (comm->compCap >= 100 && driverVersion >= 13030) {
-    *gpuCftSupport = CUDA_VERSION < driverVersion ? CUDA_VERSION : driverVersion;
+  if (ncclParamCftEnable()) {
+    int driverVersion;
+    NCCLCHECK(ncclCudaDriverVersion(&driverVersion));
+    int unicastSupported = 0, multicastSupported = 0;
+    if (driverVersion >= 13030) {
+      CUCHECK(cuDeviceGetAttribute(&unicastSupported, CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_UNICAST_SUPPORTED,
+                                   (CUdevice)comm->cudaDev));
+      CUCHECK(cuDeviceGetAttribute(&multicastSupported, CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_MULTICAST_SUPPORTED,
+                                   (CUdevice)comm->cudaDev));
+    }
+    if (unicastSupported && multicastSupported) *gpuCftSupport = std::min(CUDA_VERSION, driverVersion);
   }
 #endif
   return ncclSuccess;
