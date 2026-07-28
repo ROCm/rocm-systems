@@ -104,7 +104,7 @@ deserialization fails.
 ## Save periodic checkpoints during a long simulation
 
 For simulations that run for many ticks, save checkpoints at regular
-intervals so that a crash or interruption loses at most one interval\'s
+intervals so that a crash or interruption loses at most one interval's
 worth of work.
 
 ``` c

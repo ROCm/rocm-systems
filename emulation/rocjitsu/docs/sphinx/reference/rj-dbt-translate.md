@@ -25,62 +25,22 @@ rj_dbt_translate INPUT --input-target TARGET --output-target TARGET [options]
 
 ## Required arguments
 
-`INPUT`
-
-:   Input file path. For host objects, the tool extracts an embedded
-    AMDGPU code object for the selected input target.
-
-`--input-target TARGET`
-
-:   Input LLVM machine name (for example, `gfx950`).
-
-`--output-target TARGET`
-
-:   Output LLVM machine name (for example, `gfx1200`).
+| Argument | Description |
+| --- | --- |
+| `INPUT` | Input file path. For host objects, the tool extracts an embedded AMDGPU code object for the selected input target. |
+| `--input-target TARGET` | Input LLVM machine name (for example, `gfx950`). |
+| `--output-target TARGET` | Output LLVM machine name (for example, `gfx1200`). |
 
 ## Options
 
-`--code-object-index N`
-
-:   Code-object index for executable inputs that contain multiple device
-    images. Defaults to `0`.
-
-`--output-mode MODE`
-
-:   Output format. Accepted values:
-
-    `disasm`
-
-    :   Print translated disassembly to stdout. This is the default.
-
-    `code-object`
-
-    :   Write the translated code-object bytes to stdout.
-
-    `diff`
-
-    :   Print a compact source-to-target translation report to stdout.
-
-`--debug-conservative-liveness N`
-
-:   Leave liveness dataflow unchanged but make VGPR scratch allocation
-    skip every register below `N`. Pass the descriptor-declared ordinary
-    VGPR count when checking whether a semantic lowering clobbers guest
-    VGPRs.
-
-`--debug-continue-after-failure`
-
-:   Keep scanning instructions after recoverable translation failures so
-    that a single run can report multiple diagnostics. The output code
-    object is left unchanged when any error diagnostic is emitted.
-
-`--list-code-objects`
-
-:   List extractable code objects in the input and exit.
-
-`--help`
-
-:   Print command-line help and exit.
+| Option | Description |
+| --- | --- |
+| `--code-object-index N` | Code-object index for executable inputs that contain multiple device images. Defaults to `0`. |
+| `--output-mode MODE` | Output format. Accepted values: `disasm` (print translated disassembly to stdout; this is the default), `code-object` (write the translated code-object bytes to stdout), `diff` (print a compact source-to-target translation report to stdout). |
+| `--debug-conservative-liveness N` | Leave liveness dataflow unchanged but make VGPR scratch allocation skip every register below `N`. Pass the descriptor-declared ordinary VGPR count when checking whether a semantic lowering clobbers guest VGPRs. |
+| `--debug-continue-after-failure` | Keep scanning instructions after recoverable translation failures so that a single run can report multiple diagnostics. The output code object is left unchanged when any error diagnostic is emitted. |
+| `--list-code-objects` | List extractable code objects in the input and exit. |
+| `--help` | Print command-line help and exit. |
 
 ## Supported target names
 
@@ -105,14 +65,10 @@ For a full list of architecture identifiers and their mappings, see
 
 ### Exit codes
 
-`0`
-
-:   Translation or inspection succeeded without errors.
-
-`1`
-
-:   An error occurred (command-line usage error, input parsing failure,
-    translation error, or validation failure).
+| Code | Meaning |
+| --- | --- |
+| `0` | Translation or inspection succeeded without errors. |
+| `1` | An error occurred (command-line usage error, input parsing failure, translation error, or validation failure). |
 
 ## Shell redirection examples
 

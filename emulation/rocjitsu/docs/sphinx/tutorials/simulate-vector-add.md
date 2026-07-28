@@ -37,9 +37,12 @@ kernel adding two arrays element-wise, then compile it for gfx950:
 hipcc -o /tmp/vector_add vector_add.hip --offload-arch=gfx950
 ```
 
-> **Note**
+```{note}
+The `--offload-arch` value must match the architecture declared in the
 JSON configuration file you use to create the virtual machine. The
 pre-built `configs/amdgpu_cdna4_kmd.json` targets CDNA4 (gfx950).
+```
+
 ## Run the kernel in local mode
 
 Local mode sets `LD_PRELOAD` on the target binary so that every call the
@@ -78,10 +81,10 @@ The following sequence occurs when the CLI launches the application:
     buffer, parses the kernel descriptor, and dispatches workgroups to
     the simulated compute units.
 5.  **ISA execution** --- each compute unit decodes and executes gfx950
-    instructions from the kernel\'s `.text` section. Execution proceeds
-    in the simulation engine\'s event-driven loop.
+    instructions from the kernel's `.text` section. Execution proceeds
+    in the simulation engine's event-driven loop.
 6.  **Completion** --- when all wavefronts retire, the completion
-    tracker fires the dispatch\'s completion signal. The HIP runtime\'s
+    tracker fires the dispatch's completion signal. The HIP runtime's
     `hipDeviceSynchronize` returns, and the application prints its
     results.
 
@@ -153,7 +156,7 @@ virtual machine API reference.
 ## Next steps
 
 -   [Inspect and disassemble a code object with the C API](inspect-code-object.md) ---
-    decode and disassemble the kernel\'s code object with the rocJITsu
+    decode and disassemble the kernel's code object with the rocJITsu
     code object API.
 -   [Translate a CDNA4 kernel to RDNA4 using rj_dbt_translate](translate-cdna4-to-rdna4.md)
     --- translate the gfx950 code object to RDNA4 using the dynamic

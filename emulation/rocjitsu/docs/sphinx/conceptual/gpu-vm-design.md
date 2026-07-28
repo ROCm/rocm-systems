@@ -141,19 +141,19 @@ architecture.
 The virtual machine supports simulation across a range of AMD GPU
 architectures and RISC-V:
 
-  Architecture   GFX target   ISA family
-  -------------- ------------ ------------
-  CDNA1          gfx908       GFX9
-  CDNA2          gfx90a       GFX9
-  CDNA3          gfx94x       GFX9
-  CDNA4          gfx950       GFX9
-  RDNA1          gfx1010      GFX10
-  RDNA2          gfx1030      GFX10
-  RDNA3          gfx1100      GFX11
-  RDNA3.5        gfx1150      GFX11
-  RDNA4          gfx1200      GFX12
-  gfx1250        gfx1250      GFX12
-  RISC-V         RV32IMAFDC   RV
+| Architecture | GFX target | ISA family |
+|--------------|------------|------------|
+| CDNA1 | gfx908 | GFX9 |
+| CDNA2 | gfx90a | GFX9 |
+| CDNA3 | gfx94x | GFX9 |
+| CDNA4 | gfx950 | GFX9 |
+| RDNA1 | gfx1010 | GFX10 |
+| RDNA2 | gfx1030 | GFX10 |
+| RDNA3 | gfx1100 | GFX11 |
+| RDNA3.5 | gfx1150 | GFX11 |
+| RDNA4 | gfx1200 | GFX12 |
+| gfx1250 | gfx1250 | GFX12 |
+| RISC-V | RV32IMAFDC | RV |
 
 The architecture is selected through the `vm.arch` field in the JSON
 configuration and determines which ISA decoder and execution bodies the

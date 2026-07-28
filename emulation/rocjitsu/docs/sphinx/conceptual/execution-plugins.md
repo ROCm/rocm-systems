@@ -49,7 +49,7 @@ update epoch or ordering state.
 
 Called when a wavefront executes `s_waitcnt` or one of its split-counter
 variants. This lets plugins retire in-flight memory events that are now
-known to have completed from the issuing wave\'s perspective.
+known to have completed from the issuing wave's perspective.
 
 ## Multi-plugin dispatch
 

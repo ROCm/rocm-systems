@@ -70,7 +70,7 @@ The file `configs/amdgpu_cdna4_kmd_2gpu.json` is a working two-GPU configuration
 
 1.  Duplicate the SoC subtree in the `topology.root.children` array.
 2.  Assign each SoC a unique `gpu_id` and `location_id` in its device section.
-3.  Add the corresponding link entries connecting each SoC\'s internal components.
+3.  Add the corresponding link entries connecting each SoC's internal components.
 
 ## Create a VM from C code
 

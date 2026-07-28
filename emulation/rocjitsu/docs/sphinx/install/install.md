@@ -18,8 +18,8 @@ Optional prerequisites:
 
 -   **Python 3.10 or later** --- required only for ISA code generation
     with the `amdisa` pipeline. See
-    [regenerate-isa-codegen](../how-to/regenerate-isa-codegen.md) for
-    details.
+    [Regenerate ISA and DBT source files](../how-to/regenerate-isa-codegen.md)
+    for details.
 -   **AMD ROCm toolchain** (`hipcc`, `libhsa-runtime64`) --- required
     only for HIP kernel tests and daemon-mode tests. When the ROCm
     toolchain is not found, those tests are disabled automatically.

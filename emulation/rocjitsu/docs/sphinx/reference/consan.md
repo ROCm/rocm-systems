@@ -90,7 +90,7 @@ Inline Shadow emits bounded first-N diagnostics recording:
 -   Current conflict EXEC mask.
 -   Visible overflow count.
 
-The prior writer\'s lane mask is unavailable in the compact exact-shadow word and is reported as unknown or zero.
+The prior writer's lane mask is unavailable in the compact exact-shadow word and is reported as unknown or zero.
 
 ## Supported race classes
 
@@ -204,11 +204,11 @@ Automatic report buffers are limited to 16 MiB per buffer and 256 MiB of live au
 
 ### Spilling
 
-ConSan\'s instrumentation probes require temporary registers. When no dead registers are available in the kernel\'s current allocation, ConSan uses descriptor-backed fresh windows or spill-preserved windows. On gfx1201, a standalone VGPR spill backend allocates stable slots, emits `scratch_store/load_b32` batches with conservative split waits, and grows the selected descriptor\'s fixed private segment. General SGPR and AccVGPR spilling do not exist; unsupported ownership or resource shapes fail explicitly.
+ConSan's instrumentation probes require temporary registers. When no dead registers are available in the kernel's current allocation, ConSan uses descriptor-backed fresh windows or spill-preserved windows. On gfx1201, a standalone VGPR spill backend allocates stable slots, emits `scratch_store/load_b32` batches with conservative split waits, and grows the selected descriptor's fixed private segment. General SGPR and AccVGPR spilling do not exist; unsupported ownership or resource shapes fail explicitly.
 
 ### Malformed input
 
-ConSan\'s transformation is transactional. Every invocation produces exactly one typed outcome:
+ConSan's transformation is transactional. Every invocation produces exactly one typed outcome:
 
 -   **ModifiedValid** --- replacement bytes are nonempty and independently validated.
 -   **Unchanged** --- no replacement bytes produced; the original is loaded.

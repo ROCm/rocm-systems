@@ -68,23 +68,23 @@ rj_waitcheck /path/to/site-packages/torch \
 
 | Option | Meaning |
 | --- | --- |
-| `\--target gfx942|gfx950|gfx1100|gfx1200|gfx1201|gfx1250` | Select one supported target from an executable input. |
-| `\--code-object-index N` | Select the Nth code object for the selected target. |
-| `\--kernel-entry OFFSET` | Analyze only the descriptor whose `.text` entry byte offset matches `OFFSET`. |
-| `\--all-code-objects` | Analyze all supported code objects in each input. |
-| `\--recursive` | Expand directory inputs into recursive file sweeps. |
-| `\--exhaustive` | Strict target-specific recursive sweep with code-object and kernel completeness totals. Requires `\--target`. Implies `\--recursive \--all-code-objects`. |
-| `\--progress` | Show exhaustive kernel progress even when standard error is not an interactive terminal. |
-| `\--no-progress` | Disable exhaustive kernel progress, including on an interactive terminal. |
-| `-j N`, `\--jobs N` | Analyze up to N kernels concurrently. Default is 1, maximum is 16. |
-| `\--slowest-kernels N` | Report the N slowest kernels after an all-code-object or exhaustive sweep. |
-| `\--diagnostics-jsonl PATH` | Losslessly write one JSON object per retained per-kernel diagnostic. Requires `\--all-code-objects` or `\--exhaustive`. |
-| `\--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
-| `\--max-diagnostics N` | Limit collected and printed diagnostics. Use `0` to suppress diagnostic payloads while preserving counts. |
-| `\--stop-after-first-diagnostic` | Stop each code object after the first observed hazard. |
-| `\--summary-only` | Print only final batch totals. |
-| `\--no-fail` | Return success even when hazards are reported. |
-| `\--list-code-objects` | List extractable code objects in the input and exit. |
+| `--target gfx942\|gfx950\|gfx1100\|gfx1200\|gfx1201\|gfx1250` | Select one supported target from an executable input. |
+| `--code-object-index N` | Select the Nth code object for the selected target. |
+| `--kernel-entry OFFSET` | Analyze only the descriptor whose `.text` entry byte offset matches `OFFSET`. |
+| `--all-code-objects` | Analyze all supported code objects in each input. |
+| `--recursive` | Expand directory inputs into recursive file sweeps. |
+| `--exhaustive` | Strict target-specific recursive sweep with code-object and kernel completeness totals. Requires `--target`. Implies `--recursive --all-code-objects`. |
+| `--progress` | Show exhaustive kernel progress even when standard error is not an interactive terminal. |
+| `--no-progress` | Disable exhaustive kernel progress, including on an interactive terminal. |
+| `-j N`, `--jobs N` | Analyze up to N kernels concurrently. Default is 1, maximum is 16. |
+| `--slowest-kernels N` | Report the N slowest kernels after an all-code-object or exhaustive sweep. |
+| `--diagnostics-jsonl PATH` | Losslessly write one JSON object per retained per-kernel diagnostic. Requires `--all-code-objects` or `--exhaustive`. |
+| `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
+| `--max-diagnostics N` | Limit collected and printed diagnostics. Use `0` to suppress diagnostic payloads while preserving counts. |
+| `--stop-after-first-diagnostic` | Stop each code object after the first observed hazard. |
+| `--summary-only` | Print only final batch totals. |
+| `--no-fail` | Return success even when hazards are reported. |
+| `--list-code-objects` | List extractable code objects in the input and exit. |
 
 ## Supported architectures
 
@@ -141,9 +141,9 @@ When `--summary-only` is used, only final batch totals are printed. For `--exhau
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Analysis succeeded and no hazards were found, or `\--no-fail` was set. |
+| `0` | Analysis succeeded and no hazards were found, or `--no-fail` was set. |
 | `1` | Command-line usage error. |
-| `2` | Input selection, parsing, or analysis error, including an incomplete `\--exhaustive` sweep. |
+| `2` | Input selection, parsing, or analysis error, including an incomplete `--exhaustive` sweep. |
 | `4` | One or more hazards were found. |
 
 ## Runtime HSA tool

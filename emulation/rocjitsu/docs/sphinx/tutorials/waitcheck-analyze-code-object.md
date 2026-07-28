@@ -13,7 +13,7 @@ before the memory operation that produces its value has completed. These
 *wait hazards* cause silent data corruption that is difficult to
 reproduce and diagnose at runtime.
 
-rocJITsu\'s **waitcheck** tool performs a static, forward dataflow
+rocJITsu's **waitcheck** tool performs a static, forward dataflow
 analysis over the final encoded instruction stream in an AMDGPU code
 object. It tracks outstanding wait-counter events across the
 control-flow graph and reports every instruction pair where a consumer
@@ -21,7 +21,7 @@ uses a result before the relevant counter has been waited on strongly
 enough.
 
 Use this tutorial when you need to verify that a compiled HIP kernel, a
-kernel generator\'s output, or a handwritten assembly routine contains
+kernel generator's output, or a handwritten assembly routine contains
 correct waits before you deploy it to hardware.
 
 ## Supported targets

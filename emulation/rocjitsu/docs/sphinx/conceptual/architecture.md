@@ -175,7 +175,7 @@ public C API, which takes a source code object and a
 ### Dynamic binary instrumentation
 
 Runtime instrumentation of GPU kernels for profiling, tracing, and
-analysis. DBI operates in the code layer\'s patching subsystem,
+analysis. DBI operates in the code layer's patching subsystem,
 intercepting HSA code-object loads and patching native GPU code in
 place. It uses the register liveness analysis from the analysis layer to
 find safe scratch registers and the code cave mechanism to insert

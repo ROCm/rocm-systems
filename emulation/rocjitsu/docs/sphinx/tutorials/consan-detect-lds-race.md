@@ -27,7 +27,7 @@ shadow metadata, or sampled watchpoint entries.
 
 ConSan does **not** detect global-memory races. Selected atomics and
 fences provide ordering evidence for LDS communication, but they are not
-general global-memory race instrumentation. For details on ConSan\'s
+general global-memory race instrumentation. For details on ConSan's
 scope and the four instrumentation profiles, see
 [ConSan GPU LDS sanitizer reference](../reference/consan.md).
 
@@ -193,7 +193,7 @@ patched sites and zero diagnostics.
     set of environment variables, profile descriptions, and coverage
     signals.
 -   See [Execution plugin system](../conceptual/execution-plugins.md)
-    for an overview of rocJITsu\'s plugin architecture and how ConSan
+    for an overview of rocJITsu's plugin architecture and how ConSan
     fits into the DBI hooks system.
 -   Explore the other instrumentation profiles (Record/Replay, Sampled)
     to understand the precision and overhead tradeoffs described in

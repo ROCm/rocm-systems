@@ -26,11 +26,6 @@ rocJITsu supports simulation, dynamic binary translation (DBT), and dynamic bina
 | RV32I | --- | RV |
 | RV64I | --- | RV |
 
-> **Note**
-
-title
-Note
-The full per-architecture simulation, DBT, and DBI status columns referenced in the README could not be included because the README content is not available in the current source material. When the README is available, this table should be expanded with those columns.
 ## Architecture enum
 
 The `rj_code_arch_e` enumeration identifies an ISA architecture throughout the rocJITsu C API. Use these values when creating decoders, specifying translation options, or querying architecture properties. For the full enumeration and the rest of the code object and instruction API, see [API reference: code object](/reference/api-code-object.md).

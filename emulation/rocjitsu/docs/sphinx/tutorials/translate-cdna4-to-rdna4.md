@@ -83,31 +83,12 @@ instruction lowered to a sequence of target instructions.
 The DBT classifies every source instruction into one of the following
 legalization actions before translating it:
 
-**Identity**
-
-:   The instruction encoding is identical on source and target. The
-    instruction word is copied verbatim. Identity translations are
-    hidden in diff mode unless their bytes changed for another reason.
-
-**Substitute**
-
-:   The instruction has the same encoding layout on both architectures
-    but uses a different opcode value. The translator swaps the opcode
-    field while preserving the rest of the encoding.
-
-**Lower**
-
-:   The instruction has a semantic equivalent on the target, but the
-    encoding differs enough that a field-by-field copy is not
-    sufficient. The translator emits a target-native instruction
-    sequence. Waitcnt splitting and barrier translation are common
-    examples.
-
-**Expand**
-
-:   No direct target equivalent exists. The translator emits a software
-    emulation sequence. MFMA matrix instructions translating from CDNA
-    to RDNA fall into this category because RDNA uses WMMA instead.
+| Action | Description |
+| --- | --- |
+| **Identity** | The instruction encoding is identical on source and target. The instruction word is copied verbatim. Identity translations are hidden in diff mode unless their bytes changed for another reason. |
+| **Substitute** | The instruction has the same encoding layout on both architectures but uses a different opcode value. The translator swaps the opcode field while preserving the rest of the encoding. |
+| **Lower** | The instruction has a semantic equivalent on the target, but the encoding differs enough that a field-by-field copy is not sufficient. The translator emits a target-native instruction sequence. Waitcnt splitting and barrier translation are common examples. |
+| **Expand** | No direct target equivalent exists. The translator emits a software emulation sequence. MFMA matrix instructions translating from CDNA to RDNA fall into this category because RDNA uses WMMA instead. |
 
 ### Waitcnt splitting
 
@@ -126,7 +107,7 @@ the diff output.
 Instructions whose encoding format changed between CDNA4 and RDNA4 go
 through semantic lowering. For example, CDNA4 memory instructions using
 the `ENC_FLAT`, `ENC_MUBUF`, or `ENC_DS` encoding families translate
-into RDNA4\'s `ENC_VFLAT`, `ENC_VBUFFER`, or `ENC_VDS` families. The
+into RDNA4's `ENC_VFLAT`, `ENC_VBUFFER`, or `ENC_VDS` families. The
 translator decodes the source instruction fields into a neutral
 representation, then re-encodes them into the target format, remapping
 field names and coherency bits as needed.
@@ -164,17 +145,10 @@ If the translator encounters instructions it cannot handle, it emits
 structured diagnostics to stderr. Two options help when investigating
 problems:
 
-`--debug-continue-after-failure`
-
-:   Continues scanning instructions after a recoverable translation
-    failure, so that a single run can surface multiple diagnostics.
-
-`--debug-conservative-liveness N`
-
-:   Forces the VGPR scratch allocator to skip every register below index
-    `N`. This is useful for checking whether a semantic lowering
-    clobbers guest VGPRs when you know the kernel\'s declared ordinary
-    VGPR count.
+| Option | Description |
+| --- | --- |
+| `--debug-continue-after-failure` | Continues scanning instructions after a recoverable translation failure, so that a single run can surface multiple diagnostics. |
+| `--debug-conservative-liveness N` | Forces the VGPR scratch allocator to skip every register below index `N`. This is useful for checking whether a semantic lowering clobbers guest VGPRs when you know the kernel's declared ordinary VGPR count. |
 
 ## Next steps
 

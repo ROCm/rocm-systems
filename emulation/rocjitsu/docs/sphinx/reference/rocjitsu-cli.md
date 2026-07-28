@@ -19,12 +19,12 @@ rocjitsu --config <config.json> [--daemon|--attach] [--] <app> [args...]
 
 | Option | Description |
 | --- | --- |
-| `\--config \<path\>` | Path to the simulation configuration JSON file. Required for all modes. |
-| `\--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `\-- \<app\>`, runs the daemon server only (no application is launched). |
-| `\--attach` | Attach to a running daemon. The socket path is resolved as described in `socket-path-resolution`. |
-| `\--help`, `-h` | Print usage information and exit. |
-| `\--version`, `-v` | Print the version string and exit. |
-| `\--` | Separator between rocJITsu options and the target application command line. |
+| `--config <path>` | Path to the simulation configuration JSON file. Required for all modes. |
+| `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only (no application is launched). |
+| `--attach` | Attach to a running daemon. The socket path is resolved as described in [Environment variables and socket path resolution](#socket-path-resolution). |
+| `--help`, `-h` | Print usage information and exit. |
+| `--version`, `-v` | Print the version string and exit. |
+| `--` | Separator between rocJITsu options and the target application command line. |
 
 ## Execution modes
 
@@ -48,7 +48,7 @@ rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json -- ./app args...
 rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json
 ```
 
-A child daemon process is forked to host the simulation engine and `SimulatedDriver`. The parent then `execve`\'s the target application with `LD_PRELOAD` set. Client processes communicate with the daemon over a Unix domain socket using the RPC protocol described below.
+A child daemon process is forked to host the simulation engine and `SimulatedDriver`. The parent then `execve`'s the target application with `LD_PRELOAD` set. Client processes communicate with the daemon over a Unix domain socket using the RPC protocol described below.
 
 GPU memory allocations are backed by `memfd` objects and shared between the daemon and client processes via `SCM_RIGHTS`. Both sides map every `memfd` at the same virtual address (`MAP_FIXED`), so GPU virtual addresses resolve correctly in both processes without translation.
 
@@ -60,16 +60,17 @@ This mode corresponds to `RJ_VM_MODE_DAEMON` in the C API. It supports multi-pro
 rocjitsu --attach --config configs/amdgpu_cdna4_kmd.json -- ./app
 ```
 
-Connects to an already-running daemon. The socket path is resolved using the environment variables described in `socket-path-resolution`.
+Connects to an already-running daemon. The socket path is resolved using the environment variables described in [Environment variables and socket path resolution](#socket-path-resolution).
 
-## Environment variables and socket path resolution {#socket-path-resolution}
+(socket-path-resolution)=
+## Environment variables and socket path resolution
 
 ### Environment variables
 
 | Variable | Description |
 | --- | --- |
-| `ROCJITSU_RUNTIME_DIR` | If set, the daemon socket path is `\$ROCJITSU_RUNTIME_DIR/daemon.sock`. |
-| `XDG_RUNTIME_DIR` | If `ROCJITSU_RUNTIME_DIR` is not set, the socket path is `\$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`. |
+| `ROCJITSU_RUNTIME_DIR` | If set, the daemon socket path is `$ROCJITSU_RUNTIME_DIR/daemon.sock`. |
+| `XDG_RUNTIME_DIR` | If `ROCJITSU_RUNTIME_DIR` is not set, the socket path is `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`. |
 
 ### Socket path resolution order
 
@@ -122,14 +123,14 @@ File descriptors (`memfd` handles) are passed via `sendmsg()`/`recvmsg()` with `
 2.  The child creates the VM with `RJ_VM_MODE_DAEMON`, which initializes the simulation engine, topology, driver, and `memfd`-backed GPU memory.
 3.  The child creates a listening Unix domain socket at the resolved socket path.
 4.  The child begins accepting client connections and dispatching RPC messages.
-5.  The parent sets `LD_PRELOAD` and `execve`\'s the target application (if one was specified with `--`).
+5.  The parent sets `LD_PRELOAD` and `execve`'s the target application (if one was specified with `--`).
 
 ### Shutdown
 
 1.  The HSA runtime calls `SET_EVENT` on wake signals during its async control shutdown.
 2.  All client-side pollers observe the event (auto-reset is skipped on `timeout=0` polls).
-3.  The runtime\'s async threads exit, and thread joins succeed.
+3.  The runtime's async threads exit, and thread joins succeed.
 4.  The runtime calls `DESTROY_QUEUE`, `DESTROY_EVENT`, and `close(kfd_fd)`.
-5.  The client\'s `RemoteDriver` sends `RPC_CLOSE` to the daemon.
+5.  The client's `RemoteDriver` sends `RPC_CLOSE` to the daemon.
 6.  The daemon closes the client connection and, when all clients have disconnected, shuts down the simulation engine.
 
