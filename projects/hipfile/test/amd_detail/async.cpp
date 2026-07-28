@@ -7,6 +7,7 @@
 #include "backend.h"
 #include "backend/asyncop-fallback.h"
 #include "backend/fallback.h"
+#include "backend/fastpath.h"
 #include "context.h"
 #include "file.h"
 #include "hipfile.h"
@@ -23,6 +24,7 @@
 #include "mstream.h"
 #include "msys.h"
 #include "state.h"
+#include "util.h"
 
 #include <array>
 #include <cerrno>
@@ -716,5 +718,256 @@ TEST_P(AsyncIoOpWithParams, cpuCopyReadPreadPwriteRetriesOnEINTR)
 INSTANTIATE_TEST_SUITE_P(AsyncIoOpWithParamsSuite, AsyncIoOpWithParams,
                          ::testing::Values(AsyncIoOpBindParams{IoType::Read, true, true, true},
                                            AsyncIoOpBindParams{IoType::Write, true, true, true}));
+
+struct FastpathAsyncIO : public HipFileOpened {
+    FastpathAsyncIO()
+        : mfile{std::make_shared<StrictMock<MFile>>()}, mbuffer{std::make_shared<StrictMock<MBuffer>>()},
+          mstream{std::make_shared<StrictMock<MStream>>()}, size{1024 * 1024}, file_offset{0},
+          buffer_offset{0}, bytes_transferred{0}
+    {
+    }
+    void SetUpStreamFlags()
+    {
+        EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*mstream, pageAligned).Times(AnyNumber()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*mbuffer, getBuffer)
+            .Times(AnyNumber())
+            .WillRepeatedly(Return(reinterpret_cast<hipStream_t>(0xFEFEFEFE)));
+    }
+    StrictMock<MHip>                     mhip;
+    StrictMock<MSys>                     msys;
+    std::shared_ptr<StrictMock<MFile>>   mfile;
+    std::shared_ptr<StrictMock<MBuffer>> mbuffer;
+    std::shared_ptr<StrictMock<MStream>> mstream;
+    size_t                               size;
+    hoff_t                               file_offset;
+    hoff_t                               buffer_offset;
+    ssize_t                              bytes_transferred;
+};
+
+TEST_F(FastpathAsyncIO, bufferOffsetNegativeThrows)
+{
+    buffer_offset = -1;
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_THROW(Fastpath().async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset,
+                                     &bytes_transferred, mstream),
+                 std::invalid_argument);
+}
+
+TEST_F(FastpathAsyncIO, bufferOffsetTooLargeThrows)
+{
+    buffer_offset = static_cast<hoff_t>(size);
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_THROW(Fastpath().async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset,
+                                     &bytes_transferred, mstream),
+                 std::invalid_argument);
+}
+
+TEST_F(FastpathAsyncIO, fileOffsetNegativeThrows)
+{
+    file_offset = -1;
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_THROW(Fastpath().async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset,
+                                     &bytes_transferred, mstream),
+                 std::invalid_argument);
+}
+
+TEST_F(FastpathAsyncIO, mismatchingGpuIdsThrows)
+{
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mbuffer, getGpuId).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(1));
+    EXPECT_THROW(Fastpath().async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset,
+                                     &bytes_transferred, mstream),
+                 std::invalid_argument);
+}
+
+TEST_F(FastpathAsyncIO, validParamsEnqueuesCopyAndCleanup)
+{
+    SetUpStreamFlags();
+    StrictMock<MAsyncMonitor> masync_monitor;
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mbuffer, getGpuId).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(masync_monitor, addOp);
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(2);
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_fastpath_copy), _));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+    Fastpath().async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset, &bytes_transferred,
+                        mstream);
+}
+
+TEST_F(FastpathAsyncIO, zeroSizeEnqueuesCopyAndCleanup)
+{
+    size = 0;
+    SetUpStreamFlags();
+    StrictMock<MAsyncMonitor> masync_monitor;
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(1024));
+    EXPECT_CALL(*mbuffer, getGpuId).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(masync_monitor, addOp);
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(2);
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_fastpath_copy), _));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+    Fastpath().async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset, &bytes_transferred,
+                        mstream);
+}
+
+TEST_F(FastpathAsyncIO, attemptToQueueCleanupOnStreamSubmissionFailure)
+{
+    SetUpStreamFlags();
+    StrictMock<MAsyncMonitor> masync_monitor;
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mbuffer, getGpuId).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(masync_monitor, addOp);
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(AnyNumber());
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_fastpath_copy), _))
+        .WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidHandle)));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+    EXPECT_THROW(Fastpath().async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset,
+                                     &bytes_transferred, mstream),
+                 Hip::RuntimeError);
+}
+
+TEST_F(FastpathAsyncIO, syslogCalledWhenCleanupEnqueueAlsoFails)
+{
+    SetUpStreamFlags();
+    StrictMock<MAsyncMonitor> masync_monitor;
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mbuffer, getGpuId).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(masync_monitor, addOp);
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(AnyNumber());
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_fastpath_copy), _))
+        .WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidHandle)));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _))
+        .WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidHandle)));
+    EXPECT_CALL(msys, syslog);
+    EXPECT_THROW(Fastpath().async_io(IoType::Read, mfile, mbuffer, &size, &file_offset, &buffer_offset,
+                                     &bytes_transferred, mstream),
+                 Hip::RuntimeError);
+}
+
+struct AsyncFastpathCopyParams {
+    IoType io_type;
+    bool   fixed_buffer_offset;
+    bool   fixed_file_offset;
+    bool   fixed_io_size;
+};
+
+struct AsyncFastpathCopyOp : public ::testing::Test,
+                             public ::testing::WithParamInterface<AsyncFastpathCopyParams> {
+    AsyncFastpathCopyOp()
+        : mfile{std::make_shared<StrictMock<MFile>>()}, mbuffer{std::make_shared<StrictMock<MBuffer>>()},
+          mstream{std::make_shared<StrictMock<MStream>>()}
+    {
+    }
+    void SetUp() override
+    {
+        auto [_io_type, _fixed_buffer_offset, _fixed_file_offset, _fixed_io_size] = GetParam();
+        io_type                                                                   = _io_type;
+        fixed_buffer_offset                                                       = _fixed_buffer_offset;
+        fixed_file_offset                                                         = _fixed_file_offset;
+        fixed_io_size                                                             = _fixed_io_size;
+
+        EXPECT_CALL(*mstream, fixedBufferOffset)
+            .Times(AnyNumber())
+            .WillRepeatedly(Return(fixed_buffer_offset));
+        EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(fixed_file_offset));
+        EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(fixed_io_size));
+        EXPECT_CALL(*mstream, pageAligned).Times(AnyNumber()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*mbuffer, getBuffer)
+            .Times(AnyNumber())
+            .WillRepeatedly(Return(reinterpret_cast<hipStream_t>(0xFEFEFEFE)));
+
+        op = std::make_shared<AsyncOp>(io_type, mfile, mbuffer, mstream, &size, &file_offset, &buffer_offset,
+                                       &bytes_transferred);
+    }
+    StrictMock<MHip>                     mhip;
+    StrictMock<MSys>                     msys;
+    StrictMock<MAsyncMonitor>            masync_monitor;
+    std::shared_ptr<StrictMock<MFile>>   mfile;
+    std::shared_ptr<StrictMock<MBuffer>> mbuffer;
+    std::shared_ptr<StrictMock<MStream>> mstream;
+    IoType                               io_type             = IoType::Read;
+    size_t                               size                = 1_MiB;
+    hoff_t                               file_offset         = 0;
+    hoff_t                               buffer_offset       = 0;
+    ssize_t                              bytes_transferred   = 0;
+    bool                                 fixed_buffer_offset = false;
+    bool                                 fixed_file_offset   = false;
+    bool                                 fixed_io_size       = false;
+    std::shared_ptr<AsyncOp>             op;
+};
+
+TEST_P(AsyncFastpathCopyOp, invalidRegionSetsError)
+{
+    // Overwrite the buffer_offset variant directly so both fixed and non-fixed
+    // cases present the invalid value when async_fastpath_copy runs.
+    op->buffer_offset.emplace<const hoff_t>(static_cast<hoff_t>(size));
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    async_fastpath_copy(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInvalidValue);
+}
+
+TEST_P(AsyncFastpathCopyOp, ioReturnsFullSize)
+{
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(42));
+    if (io_type == IoType::Read) {
+        EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Return(size));
+    }
+    else {
+        EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Return(size));
+    }
+    async_fastpath_copy(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, static_cast<ssize_t>(size));
+}
+
+TEST_P(AsyncFastpathCopyOp, hipExceptionSetsError)
+{
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(42));
+    if (io_type == IoType::Read) {
+        EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
+    }
+    else {
+        EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
+    }
+    async_fastpath_copy(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, -hipFileInternalError);
+}
+
+TEST_P(AsyncFastpathCopyOp, sizeClampedToMaxRwCount)
+{
+    // Overwrite the size variant directly so both fixed and non-fixed cases
+    // present the large size to async_fastpath_copy.
+    op->size = hipFile::getMaxRwCount() + 1;
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(hipFile::getMaxRwCount() + 1));
+    EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(42));
+    if (io_type == IoType::Read) {
+        EXPECT_CALL(mhip, hipAmdFileRead(_, _, Eq(hipFile::getMaxRwCount()), _))
+            .WillOnce(Return(hipFile::getMaxRwCount()));
+    }
+    else {
+        EXPECT_CALL(mhip, hipAmdFileWrite(_, _, Eq(hipFile::getMaxRwCount()), _))
+            .WillOnce(Return(hipFile::getMaxRwCount()));
+    }
+    async_fastpath_copy(op.get());
+    ASSERT_EQ(op->bytes_transferred_internal, static_cast<ssize_t>(hipFile::getMaxRwCount()));
+}
+
+INSTANTIATE_TEST_SUITE_P(AsyncFastpathCopyOpSuite, AsyncFastpathCopyOp,
+                         ::testing::Values(AsyncFastpathCopyParams{IoType::Read, true, true, true},
+                                           AsyncFastpathCopyParams{IoType::Write, true, true, true},
+                                           AsyncFastpathCopyParams{IoType::Read, false, false, false},
+                                           AsyncFastpathCopyParams{IoType::Write, false, false, false}));
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

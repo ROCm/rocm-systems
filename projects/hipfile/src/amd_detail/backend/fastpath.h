@@ -44,3 +44,7 @@ protected:
 };
 
 }
+
+extern "C" {
+void async_fastpath_copy(void *userArgs);
+}

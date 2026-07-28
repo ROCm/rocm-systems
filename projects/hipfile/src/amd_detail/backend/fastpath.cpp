@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "async.h"
 #include "buffer.h"
 #include "configuration.h"
 #include "context.h"
@@ -12,6 +13,7 @@
 #include "hipfile.h"
 #include "io.h"
 #include "stats.h"
+#include "util.h"
 
 #include <cerrno>
 #include <cstddef>
@@ -22,6 +24,7 @@
 #include <linux/stat.h>
 #include <memory>
 #include <stdexcept>
+#include <syslog.h>
 #include <system_error>
 
 using namespace hipFile;
@@ -225,16 +228,38 @@ Fastpath::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
                    hoff_t *file_offset_p, hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p,
                    std::shared_ptr<IStream> stream)
 {
-    (void)type;
-    (void)file;
-    (void)buffer;
-    (void)size_p;
-    (void)file_offset_p;
-    (void)buffer_offset_p;
-    (void)bytes_transferred_p;
-    (void)stream;
+    size_t limited_size = min(*size_p, hipFile::getMaxRwCount());
 
-    throw BackendDisabled();
+    if (!paramsValid(buffer, limited_size, *file_offset_p, *buffer_offset_p)) {
+        throw std::invalid_argument("The selected file or buffer region is invalid");
+    }
+
+    if (buffer->getGpuId() != stream->getHipDevice()) {
+        throw std::invalid_argument("Buffer GPU ID does not match Stream GPU ID");
+    }
+
+    *bytes_transferred_p = 0;
+
+    auto op = std::shared_ptr<AsyncOp>(new AsyncOp(type, std::move(file), buffer, stream, size_p,
+                                                   file_offset_p, buffer_offset_p, bytes_transferred_p));
+    Context<AsyncMonitor>::get()->addOp(op);
+
+    try {
+        auto stream_lock = stream->getLock();
+        Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_fastpath_copy, op.get());
+        Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cleanup, op.get());
+    }
+    catch (...) {
+        // If something threw, still try to enqueue cleanup function
+        try {
+            Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cleanup, op.get());
+        }
+        catch (...) {
+            Context<Sys>::get()->syslog(LOG_CRIT,
+                                        "Unable to enqueue async cleanup function. This will leak memory.");
+        }
+        throw;
+    }
 }
 
 bool
@@ -259,4 +284,47 @@ Fastpath::is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const
         // Thrown exception not eligible for fallback.
         return false;
     }
+}
+
+extern "C" {
+void
+async_fastpath_copy(void *userArgs)
+{
+    auto op = static_cast<AsyncOp *>(userArgs);
+
+    const hoff_t buffer_offset = *get_variant_ptr(op->buffer_offset);
+    const hoff_t file_offset   = *get_variant_ptr(op->file_offset);
+    const size_t size          = std::min(*get_variant_ptr(op->size), hipFile::getMaxRwCount());
+
+    if (!paramsValid(op->buffer, size, file_offset, buffer_offset)) {
+        op->bytes_transferred_internal = -hipFileInvalidValue;
+        return;
+    }
+
+    hipAmdFileHandle_t handle{};
+    handle.fd = op->file->unbufferedFd().value();
+    void *devptr =
+        reinterpret_cast<void *>(reinterpret_cast<intptr_t>(op->buffer->getBuffer()) + buffer_offset);
+
+    try {
+        ssize_t nbytes = 0;
+        switch (op->io_type) {
+            case IoType::Read:
+                nbytes = static_cast<ssize_t>(
+                    Context<Hip>::get()->hipAmdFileRead(handle, devptr, size, file_offset));
+                break;
+            case IoType::Write:
+                nbytes = static_cast<ssize_t>(
+                    Context<Hip>::get()->hipAmdFileWrite(handle, devptr, size, file_offset));
+                break;
+            default:
+                op->bytes_transferred_internal = -hipFileInternalError;
+                return;
+        }
+        op->bytes_transferred_internal = nbytes;
+    }
+    catch (...) {
+        op->bytes_transferred_internal = -hipFileInternalError;
+    }
+}
 }
