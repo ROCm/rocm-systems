@@ -534,16 +534,11 @@ Interactive Roofline HTML:
 * Hover over kernel dots and rooflines to see arithmetic intensity, throughput, roofline percentage, limiter, runtime, bandwidth, and compute-peak details.
 * Drag to pan, scroll to zoom, double-click or use *Reset zoom* to re-frame the chart, use *Export PNG* to save the current view, and use *Theme toggle* to switch between light and dark modes.
 
-Below are examples of the interactive HTML plot in light and dark modes:
+Below is an example of the interactive HTML plot:
 
 .. image:: ../../data/analyze/cli/roofline_html_interact.png
    :align: center
    :alt: HTML interactive plot
-   :width: 800
-
-.. image:: ../../data/analyze/cli/roofline_html_interact_dark.png
-   :align: center
-   :alt: HTML interactive plot in dark mode
    :width: 800
 
 .. _analysis-baseline-comparison:
