@@ -104,7 +104,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
   if (!replace_consan_text(patcher, new_text, options, "unmatched barrier abort", result)) {
     return;
   }
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), std::make_move_iterator(patches.begin()),
                         std::make_move_iterator(patches.end()));
   result.modified = true;

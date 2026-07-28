@@ -403,7 +403,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
   if (!replace_consan_text(patcher, new_text, options, "MOI atomic record patch", result)) {
     return;
   }
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.modified = true;
 }

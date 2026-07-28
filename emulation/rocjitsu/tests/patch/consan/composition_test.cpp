@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
 
 namespace rocjitsu {
 namespace {
@@ -26,6 +27,25 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
   EXPECT_TRUE(valid.staged_composition_validated);
   EXPECT_TRUE(valid.final_validation_passed);
   EXPECT_EQ(valid.applied_fault_mutations, 1u);
+  ASSERT_GE(valid.elf_bytes.size(), bytes.size());
+  const ConSanPatchedImageGrowthLimit exact_growth = {
+      .kind = ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+      .absolute_bytes = valid.elf_bytes.size() - bytes.size(),
+  };
+  const auto ownership_reservation =
+      consan_hook::consan_transform_major_image_reservation_bytes(bytes.size(), exact_growth);
+  ASSERT_TRUE(ownership_reservation);
+  const auto composite_phase =
+      std::ranges::find(consan_hook::kConSanTransformOwnershipPhases,
+                        consan_hook::ConSanTransformOwnershipPhase::CompositeIncrementalPatch,
+                        &consan_hook::ConSanTransformOwnership::phase);
+  ASSERT_NE(composite_phase, consan_hook::kConSanTransformOwnershipPhases.end());
+  const auto composite_reservation = consan_hook::consan_transform_phase_reservation_bytes(
+      *composite_phase, bytes.size(), valid.elf_bytes.size());
+  ASSERT_TRUE(composite_reservation);
+  EXPECT_EQ(*composite_reservation, bytes.size() + 9u * valid.elf_bytes.size())
+      << "modified composite transforms must retain their explicit nine-maximum-image phase";
+  EXPECT_GE(*ownership_reservation, *composite_reservation);
   const auto mutation = std::ranges::find(
       valid.patches, ConSanPatchKind::InlineAtomicAddressRewrite, &ConSanPatchInfo::kind);
   const auto record = std::ranges::find(valid.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,

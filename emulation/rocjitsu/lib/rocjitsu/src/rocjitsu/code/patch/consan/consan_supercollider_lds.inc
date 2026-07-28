@@ -4021,7 +4021,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         return;
       }
     }
-    result.elf_bytes = patcher.emit();
+    result.elf_bytes = std::move(patcher).emit();
     result.modified = true;
     return;
   }

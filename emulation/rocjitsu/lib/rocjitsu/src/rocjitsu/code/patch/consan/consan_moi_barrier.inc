@@ -2067,7 +2067,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.modified = true;
 }
@@ -2471,7 +2471,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     return;
   }
 
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.modified = true;
 }

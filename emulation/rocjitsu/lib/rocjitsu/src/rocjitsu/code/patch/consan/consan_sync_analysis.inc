@@ -2896,7 +2896,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
   if (!replace_consan_text(patcher, new_text, options, "SC perturbation", result)) {
     return;
   }
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   for (const PlannedPatch &patch : planned) {
     ConSanPatchInfo info;
     info.kind = ConSanPatchKind::TrampolineScPerturbation;

@@ -1251,7 +1251,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
         "ConSan MOI could not resolve every replacement owner while enabling workgroup IDs");
     return false;
   }
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   result.moi_full_workgroup_id_descriptor_offsets.assign(owner_descriptor_offsets.begin(),
                                                          owner_descriptor_offsets.end());
   std::ranges::sort(result.moi_full_workgroup_id_descriptor_offsets);
@@ -1712,7 +1712,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
   if (!replace_consan_text(patcher, new_text, options, "MOI private-epoch prologue", result)) {
     return;
   }
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.modified = true;
 }
@@ -2344,7 +2344,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.modified = true;
 }

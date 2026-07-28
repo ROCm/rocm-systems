@@ -1439,7 +1439,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
     if (!replace_consan_text(patcher, new_text, options, "markerless barrier move", result)) {
       return;
     }
-    result.elf_bytes = patcher.emit();
+    result.elf_bytes = std::move(patcher).emit();
 
     for (const BarrierSite &source : ordered_sources) {
       ConSanPatchInfo source_info;

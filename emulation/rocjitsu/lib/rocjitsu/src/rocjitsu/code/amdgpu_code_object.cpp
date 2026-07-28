@@ -593,6 +593,22 @@ void AmdGpuCodeObject::load_sections() {
   }
   const char *shstrtab_data = image_.data() + shstrtab.sh_offset;
 
+  // Bound aggregate string ownership before materializing section_names.
+  // Duplicate offsets and long unterminated suffixes must not amplify one
+  // string table into a quadratic parser working set.
+  uint64_t copied_section_name_bytes = 0;
+  for (const Elf64_Shdr &shdr : section_hdrs) {
+    if (shdr.sh_name >= shstrtab.sh_size)
+      continue;
+    const size_t max_len = shstrtab.sh_size - shdr.sh_name;
+    const size_t name_len = strnlen(shstrtab_data + shdr.sh_name, max_len);
+    if (name_len > image_.size() - copied_section_name_bytes) {
+      is_valid_ = false;
+      return;
+    }
+    copied_section_name_bytes += name_len;
+  }
+
   std::vector<std::string> section_names(section_hdrs.size());
   for (size_t i = 0; i < section_hdrs.size(); ++i) {
     const auto &shdr = section_hdrs[i];

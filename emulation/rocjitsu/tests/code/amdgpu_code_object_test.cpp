@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -162,6 +163,29 @@ make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels) 
   return image;
 }
 
+bool set_aggregate_copied_section_bytes(std::vector<uint8_t> &image, uint64_t aggregate_bytes) {
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  if (header.e_shnum <= 1)
+    return false;
+
+  std::vector<Elf64_Shdr> sections(header.e_shnum);
+  std::memcpy(sections.data(), image.data() + header.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+  uint64_t other_bytes = 0;
+  for (size_t i = 2; i < sections.size(); ++i) {
+    if (sections[i].sh_type != SHT_NULL && sections[i].sh_type != SHT_NOBITS &&
+        sections[i].sh_name != 0) {
+      other_bytes += sections[i].sh_size;
+    }
+  }
+  if (aggregate_bytes < other_bytes || aggregate_bytes - other_bytes > image.size())
+    return false;
+  sections[1].sh_offset = 0;
+  sections[1].sh_size = aggregate_bytes - other_bytes;
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  return true;
+}
+
 // CDNA: a granulated field of 0 encodes a real 8-SGPR allocation.
 TEST(AmdGpuCodeObjectSgpr, CdnaGranulatedZeroIsEightSgprs) {
   const auto image = make_elf_with_kds({{"k", 0}});
@@ -224,6 +248,52 @@ TEST(AmdGpuCodeObjectValidation, RejectsAggregateCopiedSectionsLargerThanImage) 
     section.sh_size = image.size();
     std::memcpy(image.data() + header_offset, &section, sizeof(section));
   }
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_FALSE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, AcceptsAggregateCopiedSectionsEqualToImage) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  ASSERT_TRUE(set_aggregate_copied_section_bytes(image, image.size()));
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, RejectsAggregateCopiedSectionsOneByteOverImage) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  ASSERT_TRUE(set_aggregate_copied_section_bytes(image, image.size() + 1));
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_FALSE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, RejectsAggregateSectionNameAmplificationBeforeAllocation) {
+  constexpr size_t kImageBytes = 4096;
+  constexpr size_t kSectionCount = 32;
+  constexpr size_t kSectionTableOffset = sizeof(Elf64_Ehdr);
+  constexpr size_t kStringTableOffset = kSectionTableOffset + kSectionCount * sizeof(Elf64_Shdr);
+  static_assert(kStringTableOffset < kImageBytes);
+
+  const auto seed = make_elf_with_kds({});
+  Elf64_Ehdr header{};
+  std::memcpy(&header, seed.data(), sizeof(header));
+  header.e_shoff = kSectionTableOffset;
+  header.e_shnum = kSectionCount;
+  header.e_shstrndx = 0;
+
+  std::vector<uint8_t> image(kImageBytes, 0);
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::fill(image.begin() + kStringTableOffset, image.end(), static_cast<uint8_t>('x'));
+
+  std::array<Elf64_Shdr, kSectionCount> sections{};
+  sections[0].sh_type = SHT_STRTAB;
+  sections[0].sh_offset = kStringTableOffset;
+  sections[0].sh_size = kImageBytes - kStringTableOffset;
+  for (Elf64_Shdr &section : sections)
+    section.sh_name = 1;
+  std::memcpy(image.data() + kSectionTableOffset, sections.data(), sizeof(sections));
 
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_FALSE(obj.is_valid());

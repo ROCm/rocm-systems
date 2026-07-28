@@ -582,20 +582,21 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   }
   result.input_fingerprint = code_object_fingerprint(code_object_bytes);
 
-  AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
-  if (!code_object.is_valid()) {
+  auto code_object =
+      std::make_unique<AmdGpuCodeObject>(code_object_bytes.data(), code_object_bytes.size());
+  if (!code_object->is_valid()) {
     result.errors.emplace_back("ConSan could not parse AMDGPU code object");
     return result;
   }
-  result.errors = validate_consan_input_layout(code_object);
+  result.errors = validate_consan_input_layout(*code_object);
   if (!result.errors.empty())
     return result;
 
-  result.target_name = target_name(code_object.target_id());
-  result.arch_display_name = arch_name(code_object.target_id());
-  result.arch = arch_for_target(code_object.target_id());
+  result.target_name = target_name(code_object->target_id());
+  result.arch_display_name = arch_name(code_object->target_id());
+  result.arch = arch_for_target(code_object->target_id());
 
-  for (const Section *section : code_object.text_sections()) {
+  for (const Section *section : code_object->text_sections()) {
     ConSanTextSection info;
     info.name = section->name();
     info.file_offset = section->sectionOffset();
@@ -604,7 +605,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     result.text_sections.push_back(std::move(info));
   }
 
-  for (const AmdGpuKernelInfo &kernel : code_object.kernels()) {
+  for (const AmdGpuKernelInfo &kernel : code_object->kernels()) {
     ConSanKernelInfo info;
     info.name = kernel.name;
     info.descriptor_file_offset = kernel.descriptor_file_offset;
@@ -621,11 +622,11 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   }
 
   std::unordered_set<std::string> kernel_names;
-  kernel_names.reserve(code_object.kernels().size());
-  for (const AmdGpuKernelInfo &kernel : code_object.kernels())
+  kernel_names.reserve(code_object->kernels().size());
+  for (const AmdGpuKernelInfo &kernel : code_object->kernels())
     kernel_names.insert(kernel.name);
 
-  for (const AmdGpuFunctionInfo &function : code_object.functions()) {
+  for (const AmdGpuFunctionInfo &function : code_object->functions()) {
     if (kernel_names.contains(function.name))
       continue;
     ConSanFunctionInfo info;
@@ -676,7 +677,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         "ConSan stopped before CFG analysis because an instruction could not be decoded");
     return result;
   }
-  relay_flat_pointer_provenance_across_calls(code_object_bytes, code_object, arch, result.kernels,
+  relay_flat_pointer_provenance_across_calls(code_object_bytes, *code_object, arch, result.kernels,
                                              result.functions, result.warnings);
   if (options.flavor == ConSanFlavor::SuperCollider && !options.fault_dry_run &&
       options.sc_perturb_kind == ConSanPerturbationKind::None) {
@@ -686,7 +687,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   reattribute_preapplied_code_ranges(code_object_bytes, *decoder, arch, options, result);
   if (!result.errors.empty())
     return result;
-  prune_unreachable_inferred_ranges(code_object, *decoder, arch, options, result);
+  prune_unreachable_inferred_ranges(*code_object, *decoder, arch, options, result);
   const bool needs_semantic_inventory = options.flavor == ConSanFlavor::Moi ||
                                         options.fault_dry_run || has_fault || has_perturbation ||
                                         options.abort_unmatched_barrier_wait ||
@@ -698,7 +699,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         !canonicalize_sync_events_by_physical_site(result))
       return result;
     const SyncEventIdentityIndex sync_events = build_sync_event_identity_index(result);
-    const auto sync_blocks = build_sync_basic_blocks(code_object, *decoder, arch, result);
+    const auto sync_blocks = build_sync_basic_blocks(*code_object, *decoder, arch, result);
     build_singleton_sync_sequences(sync_blocks, result);
     const bool allow_extended_barrier_pairs =
         options.fault_drop_barrier || options.fault_move_barrier ||
@@ -709,12 +710,12 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     associate_atomic_sync_sequences(sync_blocks, arch, sync_events, result);
     build_barrier_lifecycle_group_inventory(result);
     if (options.collect_barrier_move_destinations)
-      build_barrier_move_destination_inventory(code_object, sync_blocks, sync_events, arch,
+      build_barrier_move_destination_inventory(*code_object, sync_blocks, sync_events, arch,
                                                result);
-    annotate_execution_owners(code_object, *decoder, arch, options, &sync_blocks, result);
+    annotate_execution_owners(*code_object, *decoder, arch, options, &sync_blocks, result);
     associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events, result);
     associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, result);
-    build_communication_address_recipes(code_object, sync_blocks, sync_events, arch, result);
+    build_communication_address_recipes(*code_object, sync_blocks, sync_events, arch, result);
     build_moi_fence_candidate_inventory(result);
     build_perturbation_candidate_inventory(result);
     annotate_fault_sites_with_sync_sequences(result);
@@ -724,7 +725,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     // SuperCollider's ordinary clean transform does not consume synchronization
     // semantics. Shared-function memory sites still need kernel ownership,
     // while kernel-local sites carry their descriptor directly.
-    annotate_execution_owners(code_object, *decoder, arch, options, nullptr, result);
+    annotate_execution_owners(*code_object, *decoder, arch, options, nullptr, result);
   }
   if (options.fault_dry_run) {
     build_fault_mutation_plan(options, arch, result);
@@ -740,6 +741,11 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (options.flavor == ConSanFlavor::Moi) {
     result.moi_stage_warning_begin = result.warnings.size();
     result.moi_inventory_options = options;
+    // Incremental MOI passes reparse their current result. Release the
+    // pristine inventory parser before entering them so its image and copied
+    // sections cannot overlap every stage's parser, patcher, text, and
+    // transaction.
+    code_object.reset();
     return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch);
   }
 
@@ -760,10 +766,10 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
 
   if (has_redundant_access && redundant_options.max_patches != 0u) {
     if (options.probe_lds_check_trap)
-      try_apply_lds_load_check_trap_patch(code_object, arch, redundant_options, result);
+      try_apply_lds_load_check_trap_patch(*code_object, arch, redundant_options, result);
     if (options.probe_flat_check_trap && result.errors.empty()) {
       if (!result.modified) {
-        try_apply_flat_check_trap_patch(code_object, arch, redundant_options, result);
+        try_apply_flat_check_trap_patch(*code_object, arch, redundant_options, result);
       } else {
         const uint32_t max_patches = redundant_options.max_patches;
         const uint32_t access_patches = static_cast<uint32_t>(
@@ -787,11 +793,11 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
               "ConSan flat check/trap proof skipped after native LDS patching: "
               "patch budget already consumed");
         } else if (auto reserved_ranges =
-                       reserved_ranges_for_existing_patches(code_object, result)) {
+                       reserved_ranges_for_existing_patches(*code_object, result)) {
           ConSanOptions flat_options = redundant_options;
           if (flat_options.max_patches_is_expert_limit)
             flat_options.max_patches = max_patches - access_patches;
-          try_apply_flat_check_trap_patch(code_object, arch, flat_options, result,
+          try_apply_flat_check_trap_patch(*code_object, arch, flat_options, result,
                                           *reserved_ranges);
         } else {
           result.warnings.emplace_back(
@@ -804,16 +810,16 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     result.warnings.emplace_back(
         "ConSan redundant-access proof skipped: shared patch budget consumed by perturbation");
   } else if (!has_perturbation && options.probe_flat_trap)
-    try_apply_flat_trap_patch(code_object, arch, options, result);
+    try_apply_flat_trap_patch(*code_object, arch, options, result);
   else if (!has_perturbation && options.probe_lds_endpgm)
-    try_apply_lds_endpgm_patch(code_object, arch, result);
+    try_apply_lds_endpgm_patch(*code_object, arch, result);
   else if (!has_perturbation && options.probe_endpgm)
-    try_apply_proof_endpgm_patch(code_object, arch, result);
+    try_apply_proof_endpgm_patch(*code_object, arch, result);
   else if (!has_perturbation && (options.probe_nop || options.probe_trampoline_nop))
-    try_apply_proof_nop_patch(code_object, arch, options.probe_trampoline_nop, result);
+    try_apply_proof_nop_patch(*code_object, arch, options.probe_trampoline_nop, result);
 
   if (has_perturbation && result.errors.empty()) {
-    try_apply_perturbation_patches(code_object, arch, options, result);
+    try_apply_perturbation_patches(*code_object, arch, options, result);
     if (result.applied_perturbations != result.perturbation_plans.size()) {
       result.modified = false;
       result.elf_bytes.clear();
@@ -821,7 +827,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     }
   }
 
-  apply_fault_mutation_to_inventory(code_object, arch, options, result);
+  apply_fault_mutation_to_inventory(*code_object, arch, options, result);
 
   return result;
 }

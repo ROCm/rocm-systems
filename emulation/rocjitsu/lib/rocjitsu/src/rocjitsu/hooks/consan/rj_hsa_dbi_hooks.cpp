@@ -2943,6 +2943,22 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   bool using_replacement_reader = false;
   bool replacement_storage_retained = false;
   std::shared_ptr<const std::vector<uint8_t>> replacement_storage;
+  const auto release_replacement_storage = [&] {
+    if (!replacement_storage_retained) {
+      replacement_storage.reset();
+      return;
+    }
+    const std::vector<uint8_t> *storage_key = replacement_storage.get();
+    const std::weak_ptr<const std::vector<uint8_t>> storage_lifetime = replacement_storage;
+    // Relinquish the load call's owner while the registry still owns and
+    // charges the allocation. Registry release then destroys the final owner
+    // before another admission can enter its locked accounting domain.
+    replacement_storage.reset();
+    ReplacementCodeObjectStorageRegistry::instance().release(executable, storage_key);
+    assert(storage_lifetime.expired() &&
+           "replacement allocation outlived its retained-image accounting");
+    replacement_storage_retained = false;
+  };
   rocjitsu::ConSanInstallAction install_action = rocjitsu::ConSanInstallAction::LoadOriginal;
   std::optional<rocjitsu::ConSanResult> patch_result_storage;
   std::optional<ConSanStaticCoverage> static_coverage_storage;
@@ -3091,7 +3107,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       const bool relative_growth = patch_options.patched_image_growth_limit.kind ==
                                    rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent;
       log_message(kLogInfo,
-                  "ConSan transform admission reader=%llu input_image=%zu reservation=%s "
+                  "ConSan transform admission request reader=%llu input_image=%zu reservation=%s "
                   "growth_policy=%s growth_value=%llu",
                   static_cast<unsigned long long>(code_object_reader.handle), size,
                   reservation_bytes ? std::to_string(*reservation_bytes).c_str()
@@ -4602,9 +4618,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (!replacement_storage_retained) {
       // Fail-open policy already selected the untouched reader above.
     } else if (reader_status != HSA_STATUS_SUCCESS) {
-      ReplacementCodeObjectStorageRegistry::instance().release(executable,
-                                                               replacement_storage.get());
-      replacement_storage_retained = false;
+      release_replacement_storage();
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] failed to create replacement patched reader: %d\n",
                    static_cast<int>(reader_status));
       if (config->fail_closed) {
@@ -4632,11 +4646,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (original_destroy != nullptr)
       (void)original_destroy(replacement_reader);
     using_replacement_reader = false;
-    if (replacement_storage_retained) {
-      ReplacementCodeObjectStorageRegistry::instance().release(executable,
-                                                               replacement_storage.get());
-      replacement_storage_retained = false;
-    }
+    release_replacement_storage();
     if (loaded_code_object != nullptr)
       *loaded_code_object = {};
     log_message(kLogInfo,
@@ -4658,8 +4668,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (original_destroy != nullptr)
       (void)original_destroy(replacement_reader);
   }
-  if (load_status != HSA_STATUS_SUCCESS && replacement_storage_retained)
-    ReplacementCodeObjectStorageRegistry::instance().release(executable, replacement_storage.get());
+  if (load_status != HSA_STATUS_SUCCESS)
+    release_replacement_storage();
   record_static_coverage(load_status == HSA_STATUS_SUCCESS && using_replacement_reader);
   return load_status;
 }

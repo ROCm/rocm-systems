@@ -1440,7 +1440,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!replace_consan_text(patcher, new_text, options, "flat check/trap proof", result)) {
       return;
     }
-    result.elf_bytes = patcher.emit();
+    result.elf_bytes = std::move(patcher).emit();
   } else {
     std::optional<AmdGpuCodeObject> current_object;
     if (!result.elf_bytes.empty())

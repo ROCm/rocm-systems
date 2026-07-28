@@ -155,7 +155,7 @@ continues to return the HSA error to callers that correctly handle it.
 | `RJ_CONSAN_FLAT_PROVENANCE=likely|strict` | `likely` | Admit proven `Group` plus heuristic `MaybeGroup` flat LDS sites, or only proven `Group` sites. |
 | `RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES=N` | `201326592` (192 MiB) | Bound total additional ELF bytes, including alignment padding, across one code-object transformation. `N` is unsigned decimal; zero permits only no-growth rewrites. |
 | `RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT=N` | unset (absolute policy applies) | Use an alternative bound relative to the original code object: total additional ELF bytes may not exceed `floor(original input bytes * N / 100)`. `N` is unsigned decimal in `0..4294967295`; values above 100 intentionally allow growth larger than the original image. |
-| `RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=N` | unset (unlimited) | Bound the sum of conservative major-image reservations across code objects currently being transformed. Each reservation is `5 * original input bytes + 3 * (original input bytes + the configured per-object maximum growth)`. The ownership model separates input-only reader/staging/parser storage from result, patcher, and final-validation storage; all inventory and retry passes for one reader share it. `N` is unsigned decimal; zero rejects every nonempty transform. A rejected fail-open load bypasses transformation, runs the original object, and makes the final analysis verdict incomplete. Fail-closed mode and `RJ_CONSAN_REQUIRE_PATCH=1` instead reject the load because applicability is not yet known. |
+| `RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=N` | unset (unlimited) | Bound the sum of conservative major-image reservations across code objects currently being transformed. Each reservation is the maximum of the explicitly modeled incremental-patch, composite-patch, and final-validation ownership phases described below. All inventory and retry passes for one reader share it. `N` is unsigned decimal; zero rejects every nonempty transform. A rejected fail-open load bypasses transformation, runs the original object, and makes the final analysis verdict incomplete. Fail-closed mode and `RJ_CONSAN_REQUIRE_PATCH=1` instead reject the load because applicability is not yet known. |
 | `RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES=N` | unset (unlimited) | Bound the live aggregate of full retained replacement images. `N` is unsigned decimal; zero rejects every nonempty replacement, including a no-growth rewrite. Bytes are released when a replacement load fails or its executable is destroyed. Retained ownership and its charge survive hook unload/reload because unload does not quiesce runtime loads or invalidate existing executables. |
 | `RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES=N` | unset (unlimited) | Additionally bound the live aggregate of alignment-inclusive ELF growth across retained replacement code objects in this process. `N` is unsigned decimal; zero permits only no-growth replacements. Growth is released when a replacement load fails or its executable is destroyed and, like full-image ownership, survives hook unload/reload. In fail-open mode, an over-budget code object runs uninstrumented and makes the final analysis verdict incomplete; use fail-closed mode when every applicable object must be instrumented. |
 | `RJ_CONSAN_DUMP_DIR=PATH` | unset | Write original and transformed `.hsaco` objects for inspection. |
@@ -164,14 +164,23 @@ The three process controls are independent. The concurrent-transform control is
 acquired before semantic inventory. It is a conservative admission unit for
 major ELF and section storage, not a strict RSS limit: smaller analysis
 metadata, allocator bookkeeping, and unrelated process memory are outside the
-model. The parser rejects aggregate copied section payload larger than its
-backing image. The patcher preallocates every file insertion, transfers
-same-size transactional storage, and avoids a separate padding buffer so vector
+model. Let `I` be the original input size and `M` be `I` plus the configured
+per-object maximum growth. The modeled phases are `I + 8*M` for an ordinary
+incremental patch, `I + 9*M` while independently validated composite mutation
+storage remains live, and `5*I + 6*M` during final validation. Parser units
+cover the image, section-header storage, bounded payload, and bounded names.
+Admission uses
+the largest of those phase values. The parser rejects aggregate copied section
+payload and aggregate section-name bytes larger than its backing image. The
+patcher preallocates every file insertion, commits same-size rewrites directly,
+moves every emitted image, and avoids a separate padding buffer so vector
 growth cannot add an unmodelled geometric full-image allocation. The two
 retained-image controls are charged together after transformation, when the
 exact replacement size is known: one counts the full image and the other counts
 only its growth delta. Admission and ownership are one transaction, so failure
-of either retained budget commits neither charge. Unload starts a new
+of either retained budget commits neither charge. Failed replacement-reader
+creation or loading releases every local storage owner before refunding the
+retained charge or invoking a fallback loader. Unload starts a new
 peak-reporting interval without releasing live transform charges or retained
 replacement ownership; the latter remains until an executable destruction
 observed while the hook is active, or process exit. New HSA API calls made after

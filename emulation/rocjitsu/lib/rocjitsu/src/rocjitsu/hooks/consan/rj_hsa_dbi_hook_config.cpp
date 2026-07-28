@@ -565,11 +565,10 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
           "[rocjitsu-dbi-hooks] warning: "
           "RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=%llu cannot admit any nonempty "
           "code object; the smallest possible reservation is %llu bytes "
-          "(%llu * input bytes + %llu * (input bytes + maximum growth bytes))\n",
+          "(maximum across %zu modeled ownership phases)\n",
           static_cast<unsigned long long>(*config.process_concurrent_transform_limit_bytes),
           static_cast<unsigned long long>(*minimum_reservation),
-          static_cast<unsigned long long>(kConSanTransformInputImageCopies),
-          static_cast<unsigned long long>(kConSanTransformMaximumImageCopies));
+          kConSanTransformOwnershipPhases.size());
     }
   }
 

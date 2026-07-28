@@ -379,7 +379,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   if (!replace_consan_text(patcher, new_text, options, "MOI inline atomic patch", result)) {
     return;
   }
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.modified = true;
 }

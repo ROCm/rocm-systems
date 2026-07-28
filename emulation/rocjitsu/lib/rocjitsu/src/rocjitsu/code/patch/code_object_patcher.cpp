@@ -143,7 +143,8 @@ insert_file_bytes_impl(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   try {
     // Every insertion has a known final size. Reserve it before taking the
     // iterator so callers cannot accidentally add a geometric full-image
-    // reallocation to the transform ownership peak.
+    // reallocation to the transform ownership peak. Callers must batch bytes:
+    // every insertion may copy the full image into its exact final allocation.
     image.reserve(image.size() + byte_count);
     insert_bytes(image, static_cast<std::ptrdiff_t>(file_offset));
   } catch (const std::bad_alloc &) {
@@ -1024,23 +1025,32 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
     }
   } else {
     required_file_growth = 0;
-    // All fallible validation is complete and the remaining same-size edits
-    // cannot invalidate the ELF. Transfer ownership instead of retaining a
-    // redundant transactional image for the common no-growth rewrite.
-    image = std::move(image_);
   }
 
-  std::memcpy(image.data() + text_offset_, new_text.data(), new_text.size());
-  shdrs[*text_index].sh_size = new_text.size();
-  grow_text_function_symbols(image, header, shdrs, *text_index, text_size_, new_text.size());
+  const auto commit_replacement = [&](std::vector<uint8_t> &destination) {
+    std::memcpy(destination.data() + text_offset_, new_text.data(), new_text.size());
+    shdrs[*text_index].sh_size = new_text.size();
+    grow_text_function_symbols(destination, header, shdrs, *text_index, text_size_,
+                               new_text.size());
 
-  for (const Elf64_Phdr &phdr : phdrs) {
-    if (phdr.p_type != PT_LOAD || phdr.p_align <= 1)
-      continue;
-    assert(phdr.p_offset % phdr.p_align == phdr.p_vaddr % phdr.p_align &&
-           "patched LOAD lost file/virtual address congruence");
+    for (const Elf64_Phdr &phdr : phdrs) {
+      if (phdr.p_type != PT_LOAD || phdr.p_align <= 1)
+        continue;
+      assert(phdr.p_offset % phdr.p_align == phdr.p_vaddr % phdr.p_align &&
+             "patched LOAD lost file/virtual address congruence");
+    }
+    write_elf_tables(destination, header, shdrs, phdrs);
+  };
+  if (growth == 0) {
+    // All fallible validation is complete. Commit directly into the owned
+    // image so the common same-size rewrite neither copies the image nor
+    // creates a moved-from transactional window.
+    commit_replacement(image_);
+    text_size_ = new_text.size();
+    return TextReplacementResult::success(0);
   }
-  write_elf_tables(image, header, shdrs, phdrs);
+
+  commit_replacement(image);
   image_ = std::move(image);
   text_size_ = new_text.size();
   return TextReplacementResult::success(required_file_growth.value_or(0));
