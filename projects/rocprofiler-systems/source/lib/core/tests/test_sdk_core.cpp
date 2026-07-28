@@ -39,33 +39,36 @@ using mock_backend = ::rocprofsys::mock::rocprofiler_sdk::wrapper;
 // its own static caches (get_version cache, operation option maps, tracing info tables).
 enum backend_tag : int
 {
-    version_fields                  = 1,
-    version_formatted               = 2,
-    version_caching                 = 3,
-    ops_throw                       = 60,
-    config_domains                  = 80,
-    config_events                   = 81,
-    config_operations               = 82,
-    config_duplicate                = 83,
-    callback_backtrace_operations   = 84,
-    buffered_backtrace_operations   = 85,
-    callback_operations             = 86,
-    buffered_operations             = 87,
-    buffered_domains_memory_copy    = 88,
-    buffered_domains_aliases        = 89,
-    rocm_events                     = 90,
-    buffered_domains_kfd_events     = 91,
-    buffered_domains_kfd_individual = 92,
-    buffered_domains_allocation     = 93,
-    buffered_domains_unified_memory = 94,
-    buffered_domains_generic_lookup = 95,
-    buffered_domains_invalid        = 96,
-    buffered_domains_page_migration = 97,
-    callback_domains_aliases        = 98,
-    callback_domains_generic_lookup = 99,
-    callback_domains_implicit_flags = 100,
-    callback_domains_invalid        = 101,
-    callback_domains_version_gating = 102,
+    version_fields                               = 1,
+    version_formatted                            = 2,
+    version_caching                              = 3,
+    ops_throw                                    = 60,
+    config_domains                               = 80,
+    config_events                                = 81,
+    config_operations                            = 82,
+    config_duplicate                             = 83,
+    callback_backtrace_operations                = 84,
+    buffered_backtrace_operations                = 85,
+    callback_operations                          = 86,
+    buffered_operations                          = 87,
+    buffered_domains_memory_copy                 = 88,
+    buffered_domains_aliases                     = 89,
+    rocm_events                                  = 90,
+    buffered_domains_kfd_events                  = 91,
+    buffered_domains_kfd_individual              = 92,
+    buffered_domains_allocation                  = 93,
+    buffered_domains_unified_memory              = 94,
+    buffered_domains_generic_lookup              = 95,
+    buffered_domains_invalid                     = 96,
+    buffered_domains_page_migration              = 97,
+    callback_domains_aliases                     = 98,
+    callback_domains_generic_lookup              = 99,
+    callback_domains_implicit_flags              = 100,
+    callback_domains_invalid                     = 101,
+    callback_domains_version_gating              = 102,
+    callback_domains_rocshmem_hipfile_supported  = 103,
+    callback_domains_rocshmem_hipfile_partial    = 104,
+    callback_domains_rocshmem_hipfile_below_gate = 105,
 };
 
 template <int Tag>
@@ -79,6 +82,28 @@ template <>
 struct tagged_backend<buffered_domains_page_migration> : mock_backend
 {
     static constexpr std::uint32_t compile_time_version = 500;
+};
+
+// ROCSHMEM_API (>= 1.3.4) and HIPFILE_API (>= 1.3.5) are gated by independent
+// compile-time/runtime version checks in get_callback_domains(). Overriding
+// compile_time_version to 10305 makes both `if constexpr` blocks compile in,
+// so the tests below can exercise the runtime formatted_version comparison.
+template <>
+struct tagged_backend<callback_domains_rocshmem_hipfile_supported> : mock_backend
+{
+    static constexpr std::uint32_t compile_time_version = 10305U;
+};
+
+template <>
+struct tagged_backend<callback_domains_rocshmem_hipfile_partial> : mock_backend
+{
+    static constexpr std::uint32_t compile_time_version = 10305U;
+};
+
+template <>
+struct tagged_backend<callback_domains_rocshmem_hipfile_below_gate> : mock_backend
+{
+    static constexpr std::uint32_t compile_time_version = 10305U;
 };
 
 // ─── Shared fake name tables ───────────────────────────────────────────────────
@@ -144,6 +169,8 @@ make_callback_name_info()
     table.emplace(mock_backend::CALLBACK_TRACING_CODE_OBJECT, "CODE_OBJECT");
     table.emplace(mock_backend::CALLBACK_TRACING_RCCL_API, "RCCL_API");
     table.emplace(mock_backend::CALLBACK_TRACING_OMPT, "OMPT");
+    table.emplace(mock_backend::CALLBACK_TRACING_ROCSHMEM_API, "ROCSHMEM_API");
+    table.emplace(mock_backend::CALLBACK_TRACING_HIPFILE_API, "HIPFILE_API");
     return table;
 }
 
@@ -700,6 +727,119 @@ TEST_F(sdk_core_domains_test,
         .WillOnce(gtest::Return(std::string{ "rccl_api,ompt" }));
     EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(true));
     EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(true));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+
+    EXPECT_THAT(sut::get_callback_domains(), gtest::IsEmpty());
+}
+
+TEST_F(sdk_core_domains_test,
+       get_callback_domains_rocshmem_and_hipfile_supported_when_version_at_or_above_gate)
+{
+    using backend_t = tagged_backend<callback_domains_rocshmem_hipfile_supported>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock_wrapper, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 3;
+            *patch = 5;
+            return 0;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "rocshmem_api,hipfile_api" }));
+    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+
+    EXPECT_THAT(sut::get_callback_domains(),
+                gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_ROCSHMEM_API,
+                                            backend_t::CALLBACK_TRACING_HIPFILE_API));
+}
+
+TEST_F(sdk_core_domains_test,
+       get_callback_domains_rocshmem_supported_hipfile_excluded_between_gates)
+{
+    using backend_t = tagged_backend<callback_domains_rocshmem_hipfile_partial>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    // formatted_version 1.3.4 clears the ROCSHMEM gate (>= 10304) but falls
+    // short of the HIPFILE gate (>= 10305).
+    EXPECT_CALL(*g_mock_wrapper, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 3;
+            *patch = 4;
+            return 0;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "rocshmem_api,hipfile_api" }));
+    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_settings)
+        .Times(1)
+        .WillOnce(gtest::Return(config.get()));
+
+    EXPECT_THAT(sut::get_callback_domains(),
+                gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_ROCSHMEM_API));
+}
+
+TEST_F(sdk_core_domains_test,
+       get_callback_domains_rocshmem_and_hipfile_excluded_below_both_gates)
+{
+    using backend_t = tagged_backend<callback_domains_rocshmem_hipfile_below_gate>;
+    using sut       = sdk_core<backend_t, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(2)
+        .WillRepeatedly(gtest::Return(make_callback_name_info()));
+
+    auto config = std::make_shared<fake_settings>();
+    sut::config_settings(config);
+
+    EXPECT_CALL(*g_mock_wrapper, get_version)
+        .Times(1)
+        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
+            *major = 1;
+            *minor = 3;
+            *patch = 3;
+            return 0;
+        });
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "rocshmem_api,hipfile_api" }));
+    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
+    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
     EXPECT_CALL(*g_mock_externals, get_settings)
         .Times(1)
         .WillOnce(gtest::Return(config.get()));

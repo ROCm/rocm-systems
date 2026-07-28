@@ -665,6 +665,21 @@ sdk_tracing_config<SdkApi, Externals>::get_callback_domains()
         }
     }
 
+    if constexpr(Wrapper::compile_time_version >= 10304)
+    {
+        if(formatted_version >= 10304)
+        {
+            supported.emplace(Wrapper::CALLBACK_TRACING_ROCSHMEM_API);
+        }
+    }
+    if constexpr(Wrapper::compile_time_version >= 10305)
+    {
+        if(formatted_version >= 10305)
+        {
+            supported.emplace(Wrapper::CALLBACK_TRACING_HIPFILE_API);
+        }
+    }
+
     auto       callback_domains = std::unordered_set<kind_t>{};
     const auto domains_input =
         rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
