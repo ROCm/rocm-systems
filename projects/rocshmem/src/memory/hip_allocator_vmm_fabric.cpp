@@ -110,7 +110,7 @@ HIPAllocatorVMMFabric::HIPAllocatorVMMFabric()
 
   if (!fabric_supported) {
     fprintf(stderr, "ROCSHMEM_ERROR: Fabric handle type is not supported on device %d. "
-            "The USE_HEAP_DEVICE_VMM_FABRIC allocator requires a GPU with fabric handle support. "
+            "The vmm_fabric allocator requires a GPU with fabric handle support. "
             "Please use a different memory allocator.\n",
             device_id);
     abort();
