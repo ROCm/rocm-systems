@@ -3870,6 +3870,7 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void DsStoreAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3900,6 +3901,7 @@ DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void DsLoadAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {

@@ -46,7 +46,9 @@ enum InstFlags : uint64_t {
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
   ACCVGPR = (1ULL << 10),
   /// @brief Destination update is conditional and must not kill the old value.
-  PREDICATED_DEF = (1ULL << 11)
+  PREDICATED_DEF = (1ULL << 11),
+  /// @brief ISA metadata declares an implicit architectural register operand.
+  HAS_IMPLICIT_REGISTER_OPERAND = (1ULL << 12)
 };
 
 class BasicBlock;
@@ -205,6 +207,8 @@ public:
   bool is_mfma() const { return flags_ & MFMA; }
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
+
+  bool has_implicit_register_operand() const { return flags_ & HAS_IMPLICIT_REGISTER_OPERAND; }
 
   /// @brief Signed byte offset for a direct branch target.
   ///

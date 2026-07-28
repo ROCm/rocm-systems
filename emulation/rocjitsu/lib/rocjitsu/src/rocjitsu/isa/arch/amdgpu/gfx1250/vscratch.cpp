@@ -377,6 +377,7 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
@@ -393,6 +394,7 @@ ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 } // namespace gfx1250

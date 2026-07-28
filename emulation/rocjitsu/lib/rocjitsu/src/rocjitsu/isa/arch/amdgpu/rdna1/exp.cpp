@@ -30,6 +30,7 @@ ExpExp::ExpExp(const MachineInst *inst)
   src_operands_[3] = &vsrc3;
   num_src_ = 4;
   num_dst_ = 1;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void ExpExp::execute_impl(amdgpu::Wavefront &wf) {

@@ -3258,7 +3258,8 @@ private:
   [[nodiscard]] static bool is_vop3_carry_out(std::string_view mnemonic) {
     return mnemonic == "v_add_co_u32" || mnemonic == "v_add_co_ci_u32" ||
            mnemonic == "v_sub_co_u32" || mnemonic == "v_sub_co_ci_u32" ||
-           mnemonic == "v_subrev_co_u32" || mnemonic == "v_subrev_co_ci_u32";
+           mnemonic == "v_subrev_co_u32" || mnemonic == "v_subrev_co_ci_u32" ||
+           mnemonic == "v_mad_co_u64_u32" || mnemonic == "v_mad_co_i64_i32";
   }
 
   [[nodiscard]] static bool is_vop3_carry_in(std::string_view mnemonic) {
@@ -3495,6 +3496,34 @@ private:
     const auto mnemonic = inst.mnemonic();
     return starts_with(mnemonic, "s_") && !inst.is_waitcnt() && !inst.is_barrier() &&
            !inst.is_branch() && !is_scalar_memory_op(mnemonic);
+  }
+
+  [[nodiscard]] static bool instruction_has_register_operand(const Instruction &inst) {
+    if (inst.has_implicit_register_operand())
+      return true;
+    for (int i = 0; i < inst.num_dst_operands(); ++i) {
+      const Operand *operand = inst.dst_operand(i);
+      if (operand != nullptr && operand->is_register())
+        return true;
+    }
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      const Operand *operand = inst.src_operand(i);
+      if (operand != nullptr && operand->is_register())
+        return true;
+    }
+    return false;
+  }
+
+  [[nodiscard]] static bool instruction_waits_for_valu_sgpr_writes(const Instruction &inst) {
+    // Scalar memory is handled by apply_sgpr_hazard_memory_cull(). For SALU,
+    // model the issue stall used by LLVM's
+    // AMDGPUInsertDelayAlu::instructionWaitsForSGPRWrites: any explicit or
+    // implicit register operand waits for VA_SDST==0, even when unrelated to
+    // the outstanding destination. This deliberately differs from the more
+    // conservative data-dependency repair in AMDGPUWaitSGPRHazards; see
+    // llvm-project#131111 and llvm-project#145728.
+    return !is_scalar_memory_op(inst.mnemonic()) && starts_with(inst.mnemonic(), "s_") &&
+           instruction_has_register_operand(inst);
   }
 
   [[nodiscard]] static bool is_vector_alu(const Instruction &inst) {
@@ -4518,11 +4547,9 @@ private:
     const std::vector<size_t> producer_block_indices =
         cfg_block_indices_containing(event.section_offset);
     if (before_target && current_cfg_view_index_ && *current_cfg_view_index_ < cfg_views_.size() &&
-        std::ranges::any_of(
-            producer_block_indices,
-            [&](size_t producer_block_index) {
-              return cfg_block_dominates(producer_block_index, *current_cfg_view_index_);
-            })) {
+        std::ranges::any_of(producer_block_indices, [&](size_t producer_block_index) {
+          return cfg_block_dominates(producer_block_index, *current_cfg_view_index_);
+        })) {
       feasible_path_cache_[cache_key] = true;
       return true;
     }
@@ -4946,16 +4973,6 @@ private:
     return static_cast<uint16_t>((ref.index >> 1u) & 0x3fu);
   }
 
-  [[nodiscard]] static bool has_tracked_sgpr_use(const SgprHazardState &state,
-                                                 const RegisterSet &uses) {
-    bool result = false;
-    uses.for_each([&](RegisterRef ref) {
-      if (!result && ref.cls == RegClass::SGPR && state.tracked_pairs.test(sgpr_pair(ref)))
-        result = true;
-    });
-    return result;
-  }
-
   static void track_sgpr_uses(SgprHazardState &state, const RegisterSet &uses) {
     uses.for_each([&](RegisterRef ref) {
       if (ref.cls == RegClass::SGPR)
@@ -5098,6 +5115,9 @@ private:
   void update_sgpr_hazards(SgprHazardState &state, const Instruction &inst, const InstDefUse &du,
                            const std::string &section_name, uint64_t section_offset,
                            uint64_t file_offset, bool emit_diagnostics) {
+    if (instruction_waits_for_valu_sgpr_writes(inst))
+      clear_valu_sgpr_hazards(state);
+
     const bool is_salu = is_scalar_alu(inst);
     const bool is_valu = is_vector_alu(inst);
     if (!is_salu && !is_valu)
@@ -5105,8 +5125,6 @@ private:
 
     const bool uses_vcc = instruction_uses_vcc(inst);
     const bool defines_vcc = instruction_defines_vcc(inst, du);
-    if (is_salu && has_tracked_sgpr_use(state, du.uses))
-      clear_valu_sgpr_hazards(state);
     if (is_salu && uses_vcc)
       clear_valu_vcc_hazard(state);
     if (emit_diagnostics) {

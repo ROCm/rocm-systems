@@ -38,6 +38,7 @@ import xml.etree.ElementTree as elem_tree
 from amdisa import xml_schema as xs
 from amdisa.gpuisa import (
     DecodeTableEntry,
+    ImplicitOperand,
     InstEncoding,
     Instruction,
     IsaSpec,
@@ -45,6 +46,7 @@ from amdisa.gpuisa import (
     Operand,
     OperandNamePattern,
     OperandSelector,
+    REGISTER_ONLY_OPERAND_TYPES,
 )
 from amdisa.isa_profile import IsaProfile
 
@@ -160,6 +162,13 @@ def _collapse_register_ranges(
     current_range_min_enum = ''
     current_range_max_idx = -1
     current_int_min_enum = ''
+    selector_can_name_register = opnd_type_name in REGISTER_ONLY_OPERAND_TYPES or any(
+        re.match(
+            r'^\s*(v|s|ttmp|acc)[0-9]+$',
+            xs.get_node_text(pair.find(xs.NAME)),
+        )
+        for pair in pairs
+    )
 
     for pair_idx, predef_val_pair in enumerate(pairs):
         predef_name = xs.get_node_text(predef_val_pair.find(xs.NAME))
@@ -202,6 +211,7 @@ def _collapse_register_ranges(
                             prefix=current_range_prefix,
                             min_enum=current_range_min_enum,
                             max_enum=predef_name,
+                            is_register=True,
                         )
                     )
                 else:
@@ -265,6 +275,12 @@ def _collapse_register_ranges(
                                 OperandNamePattern.NAMED,
                                 operand_name=original_name,
                                 enum_name=predef_name,
+                                is_register=(
+                                    selector_can_name_register
+                                    and not original_name.lower().startswith(
+                                        ('src_literal', 'src_simm')
+                                    )
+                                ),
                             )
                         )
         if last:
@@ -902,6 +918,7 @@ class Parser:
                     continue
                 opcode = int(xs.get_node_text(opcode_node))
                 opnds = []
+                implicit_opnds = []
                 for opnd in operands_node:
                     is_in = opnd.attrib[xs.OPERAND_ATTR_INPUT].lower() == 'true'
                     is_out = opnd.attrib[xs.OPERAND_ATTR_OUTPUT].lower() == 'true'
@@ -919,7 +936,16 @@ class Parser:
                     data_format_name_node = opnd.find(xs.DATA_FORMAT_NAME)
                     opnd_size = int(xs.get_node_text(opnd.find(xs.OPERAND_SIZE)))
                     opnd_type = xs.get_node_text(opnd.find(xs.OPERAND_TYPE))
-                    if field_name_node is not None:
+                    if is_implicit:
+                        implicit_opnds.append(
+                            ImplicitOperand(
+                                opnd_size,
+                                opnd_type,
+                                is_in,
+                                is_out,
+                            )
+                        )
+                    elif field_name_node is not None:
                         field_name = xs.get_node_text(field_name_node).lower()
                         data_format_name = (
                             xs.get_node_text(data_format_name_node)
@@ -946,7 +972,12 @@ class Parser:
                     enc_name in self.isa_spec.alt_encs_with_implied_literal
                 )
                 inst = Instruction(
-                    inst_name, enc_name, opcode, opnds, is_implied_literal
+                    inst_name,
+                    enc_name,
+                    opcode,
+                    opnds,
+                    is_implied_literal,
+                    implicit_opnds,
                 )
 
                 # Implied-literal instructions go to the parent encoding's

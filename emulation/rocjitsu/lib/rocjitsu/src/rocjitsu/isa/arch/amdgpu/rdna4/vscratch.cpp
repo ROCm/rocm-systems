@@ -725,6 +725,7 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void ScratchLoadBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
@@ -752,6 +753,7 @@ ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void ScratchStoreBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {

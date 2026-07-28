@@ -18,8 +18,10 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -464,6 +466,40 @@ TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapTrackedRegisterRefs) {
   ASSERT_TRUE(acc.to_register_ref().has_value());
   EXPECT_EQ(*acc.to_register_ref(), (RegisterRef{RegClass::ACC_VGPR, 7, 1}));
   EXPECT_FALSE(imm32.to_register_ref().has_value());
+}
+
+TEST(RegisterSetAnalysis, GeneratedOperandsClassifyRegisterKindWithoutDisplayNames) {
+  rdna4::Operand rdna_sgpr(32, rdna4::OperandType::OPR_SRC, rdna4::OpSelSrc::OPR_SRC_SGPR_MIN + 7);
+  rdna4::Operand rdna_ttmp(32, rdna4::OperandType::OPR_SRC, rdna4::OpSelSrc::OPR_SRC_TTMP_MIN + 3);
+  rdna4::Operand rdna_null(32, rdna4::OperandType::OPR_SRC, rdna4::OpSelSrc::OPR_SRC_NULL);
+  rdna4::Operand rdna_shared_base(32, rdna4::OperandType::OPR_SRC,
+                                  rdna4::OpSelSrc::OPR_SRC_SRC_SHARED_BASE);
+  rdna4::Operand rdna_inline_constant(32, rdna4::OperandType::OPR_SRC,
+                                      rdna4::OpSelSrc::OPR_SRC_POS_INT_MIN + 1);
+  rdna4::Operand rdna_dsmem(32, rdna4::OperandType::OPR_DSMEM, rdna4::OpSelDsmem::OPR_DSMEM_DSMEM);
+
+  EXPECT_TRUE(rdna_sgpr.is_register());
+  EXPECT_TRUE(rdna_ttmp.is_register());
+  EXPECT_TRUE(rdna_null.is_register());
+  EXPECT_TRUE(rdna_shared_base.is_register());
+  EXPECT_FALSE(rdna_inline_constant.is_register());
+  EXPECT_FALSE(rdna_dsmem.is_register());
+  EXPECT_FALSE(rdna_ttmp.to_register_ref());
+  EXPECT_FALSE(rdna_null.to_register_ref());
+  EXPECT_FALSE(rdna_shared_base.to_register_ref());
+
+  gfx1250::Operand gfx1250_null(32, gfx1250::OperandType::OPR_SRC, gfx1250::OpSelSrc::OPR_SRC_NULL);
+  gfx1250::Operand gfx1250_shared_base(32, gfx1250::OperandType::OPR_SRC,
+                                       gfx1250::OpSelSrc::OPR_SRC_SRC_SHARED_BASE);
+  gfx1250::Operand gfx1250_inline_constant(32, gfx1250::OperandType::OPR_SRC,
+                                           gfx1250::OpSelSrc::OPR_SRC_POS_INT_MIN + 1);
+  gfx1250::Operand gfx1250_literal64(64, gfx1250::OperandType::OPR_SRC,
+                                     gfx1250::OpSelSrc::OPR_SRC_SRC_LITERAL64);
+
+  EXPECT_TRUE(gfx1250_null.is_register());
+  EXPECT_TRUE(gfx1250_shared_base.is_register());
+  EXPECT_FALSE(gfx1250_inline_constant.is_register());
+  EXPECT_FALSE(gfx1250_literal64.is_register());
 }
 
 TEST(RegisterSetAnalysis, Cdna4WritelaneDestinationIsUseAndDef) {

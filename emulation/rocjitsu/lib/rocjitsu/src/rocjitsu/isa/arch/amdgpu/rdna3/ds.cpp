@@ -2034,6 +2034,7 @@ DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
   src_operands_[0] = &addr;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -4123,6 +4124,7 @@ DsStoreAddtidB32Ds::DsStoreAddtidB32Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4155,6 +4157,7 @@ DsLoadAddtidB32Ds::DsLoadAddtidB32Ds(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {

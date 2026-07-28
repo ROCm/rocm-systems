@@ -4719,6 +4719,7 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
@@ -4781,6 +4782,7 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
@@ -4843,6 +4845,7 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
@@ -4905,6 +4908,7 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
@@ -4967,6 +4971,7 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
@@ -5029,6 +5034,7 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
@@ -5091,6 +5097,7 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
@@ -5153,6 +5160,7 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
@@ -5215,6 +5223,7 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
@@ -5277,6 +5286,7 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
@@ -5339,6 +5349,7 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
@@ -5401,6 +5412,7 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
@@ -5463,6 +5475,7 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
@@ -5525,6 +5538,7 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
@@ -5579,6 +5593,7 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
@@ -5633,6 +5648,7 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
@@ -5687,6 +5703,7 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
@@ -5741,6 +5758,7 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
@@ -5795,6 +5813,7 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
@@ -5849,6 +5868,7 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
@@ -5903,6 +5923,7 @@ VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
@@ -5957,6 +5978,7 @@ VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
@@ -6011,6 +6033,7 @@ VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
@@ -6065,6 +6088,7 @@ VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
@@ -6119,6 +6143,7 @@ VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
@@ -6173,6 +6198,7 @@ VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
@@ -6227,6 +6253,7 @@ VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
@@ -6281,6 +6308,7 @@ VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
@@ -6339,6 +6367,7 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
@@ -6397,6 +6426,7 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
@@ -6455,6 +6485,7 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
@@ -6513,6 +6544,7 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
@@ -6571,6 +6603,7 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
@@ -6629,6 +6662,7 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
@@ -6687,6 +6721,7 @@ VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
@@ -6745,6 +6780,7 @@ VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
@@ -6803,6 +6839,7 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
@@ -6861,6 +6898,7 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
@@ -6919,6 +6957,7 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
@@ -6977,6 +7016,7 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
@@ -7035,6 +7075,7 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
@@ -7093,6 +7134,7 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
@@ -7155,6 +7197,7 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
@@ -7217,6 +7260,7 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
@@ -7279,6 +7323,7 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
@@ -7341,6 +7386,7 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
@@ -7403,6 +7449,7 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
@@ -7465,6 +7512,7 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
@@ -7527,6 +7575,7 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
@@ -7589,6 +7638,7 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
@@ -7651,6 +7701,7 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
@@ -7713,6 +7764,7 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
@@ -7775,6 +7827,7 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
@@ -7837,6 +7890,7 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
@@ -7891,6 +7945,7 @@ VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
@@ -7945,6 +8000,7 @@ VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
@@ -7999,6 +8055,7 @@ VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
@@ -8053,6 +8110,7 @@ VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
@@ -8107,6 +8165,7 @@ VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
@@ -8161,6 +8220,7 @@ VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
@@ -8215,6 +8275,7 @@ VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
@@ -8269,6 +8330,7 @@ VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
@@ -8323,6 +8385,7 @@ VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
@@ -8377,6 +8440,7 @@ VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
@@ -8431,6 +8495,7 @@ VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
@@ -8485,6 +8550,7 @@ VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
@@ -8539,6 +8605,7 @@ VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
@@ -8593,6 +8660,7 @@ VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
@@ -8647,6 +8715,7 @@ VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
@@ -8701,6 +8770,7 @@ VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
@@ -8755,6 +8825,7 @@ VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
@@ -8809,6 +8880,7 @@ VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
@@ -8863,6 +8935,7 @@ VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
@@ -8917,6 +8990,7 @@ VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
@@ -8971,6 +9045,7 @@ VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
@@ -9025,6 +9100,7 @@ VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
@@ -9079,6 +9155,7 @@ VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
@@ -9133,6 +9210,7 @@ VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
@@ -9195,6 +9273,7 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
@@ -9249,6 +9328,7 @@ VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
@@ -9305,6 +9385,7 @@ VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
   }
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 } // namespace gfx1250

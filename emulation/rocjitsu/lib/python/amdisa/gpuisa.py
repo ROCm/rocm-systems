@@ -54,6 +54,37 @@ class Operand:
     data_format_name: str = ''
 
 
+@dataclass(frozen=True)
+class ImplicitOperand:
+    """An instruction operand supplied by the ISA rather than its encoding.
+
+    Implicit operands have no binary field name, so they cannot be represented
+    by the encoded :class:`Operand` list without teaching every code generator
+    consumer to skip them. Keep their typed read/write contract separately.
+    """
+
+    size: int
+    operand_type: str
+    is_input: bool
+    is_output: bool
+
+
+# These operand types always denote architectural registers. Mixed selector
+# types such as OPR_SRC are classified from their individual selector values by
+# the code generator instead.
+REGISTER_ONLY_OPERAND_TYPES = frozenset(
+    {
+        'OPR_EXEC',
+        'OPR_FLAT_SCRATCH',
+        'OPR_PC',
+        'OPR_SDST_EXEC',
+        'OPR_SDST_M0',
+        'OPR_SSRC_SPECIAL_SCC',
+        'OPR_VCC',
+    }
+)
+
+
 @dataclass
 class OperandNamePattern:
     """Pattern for resolving operand encoding values to operand name strings.
@@ -65,6 +96,7 @@ class OperandNamePattern:
         max_enum: OpSel enum name for the maximum of a range.
         operand_name: Operand name string for named/float_const patterns.
         enum_name: OpSel enum name for single-value patterns.
+        is_register: Whether this pattern denotes an architectural register.
     """
 
     REG_RANGE = 'reg_range'
@@ -80,6 +112,7 @@ class OperandNamePattern:
     max_enum: str = ''
     operand_name: str = ''
     enum_name: str = ''
+    is_register: bool = False
 
 
 @dataclass
@@ -185,7 +218,8 @@ class Instruction(InstBase):
     Attributes:
         name: Name of the instruction.
         opcode: Opcode of the instruction.
-        operands: The instruction's operands.
+        operands: Explicit operands represented in the instruction encoding.
+        implicit_operands: Typed operands supplied by the ISA contract.
     """
 
     def __init__(
@@ -195,11 +229,13 @@ class Instruction(InstBase):
         opcode: int,
         operands: list[Operand],
         is_implied_literal_enc: bool = False,
+        implicit_operands: list[ImplicitOperand] | None = None,
     ) -> None:
         super().__init__(enc_name, is_implied_literal_enc)
         self.name = name
         self.opcode = opcode
         self.operands = operands
+        self.implicit_operands = implicit_operands or []
 
     @cached_property
     def fmt_name(self) -> str:

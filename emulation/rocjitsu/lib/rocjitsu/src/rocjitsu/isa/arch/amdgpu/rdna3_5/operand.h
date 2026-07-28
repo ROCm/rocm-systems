@@ -27,6 +27,7 @@ public:
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
+  bool is_register() const override;
   bool simd_capable() const override;
 
 private:

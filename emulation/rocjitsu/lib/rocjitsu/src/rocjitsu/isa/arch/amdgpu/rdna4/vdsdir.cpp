@@ -25,6 +25,7 @@ DsParamLoadVdsdir::DsParamLoadVdsdir(const MachineInst *inst)
   src_operands_[0] = &attr;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void DsParamLoadVdsdir::execute_impl(amdgpu::Wavefront &wf) {
@@ -38,6 +39,7 @@ DsDirectLoadVdsdir::DsDirectLoadVdsdir(const MachineInst *inst)
   dst_operands_[0] = &vdst;
   num_src_ = 0;
   num_dst_ = 1;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void DsDirectLoadVdsdir::execute_impl(amdgpu::Wavefront &wf) {

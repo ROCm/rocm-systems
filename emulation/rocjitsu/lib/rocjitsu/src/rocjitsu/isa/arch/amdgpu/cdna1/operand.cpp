@@ -1142,6 +1142,480 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   return std::nullopt;
 }
 
+bool Operand::is_register() const {
+  if (size_bits_ == 0 || has_literal16_display_ || has_literal64_)
+    return false;
+  switch (opr_type_) {
+  case OperandType::OPR_ACCVGPR: {
+    if (encoding_value_ >= OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN &&
+        encoding_value_ <= OpSelAccvgpr::OPR_ACCVGPR_ACC_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_FLAT_SCRATCH: {
+    if (encoding_value_ == OpSelFlatScratch::OPR_FLAT_SCRATCH_FLAT_SCRATCH_ALL)
+      return true;
+    break;
+  }
+  case OperandType::OPR_PC: {
+    if (encoding_value_ == OpSelPc::OPR_PC_PC_ALL)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SDST: {
+    if (encoding_value_ >= OpSelSdst::OPR_SDST_SGPR_MIN &&
+        encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
+        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_M0)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SDST_EXEC: {
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SDST_M0: {
+    if (encoding_value_ == OpSelSdstM0::OPR_SDST_M0_M0)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SMEM_OFFSET: {
+    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN &&
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC: {
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_SGPR_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_M0)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_VCCZ)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_EXECZ)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SCC)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_BASE)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_BASE)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_POPS_EXITING_WAVE_ID)
+      return true;
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_LDS_DIRECT)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC_ACCVGPR: {
+    if (encoding_value_ >= OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN &&
+        encoding_value_ <= OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC_ACCVGPR_OR_CONST: {
+    if (encoding_value_ >= OpSelSrcAccvgprOrConst::OPR_SRC_ACCVGPR_OR_CONST_ACC_MIN &&
+        encoding_value_ <= OpSelSrcAccvgprOrConst::OPR_SRC_ACCVGPR_OR_CONST_ACC_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC_NOLDS: {
+    if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_SGPR_MIN &&
+        encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN &&
+        encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_M0)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_HI)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_VCCZ)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_EXECZ)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_SCC)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_SHARED_BASE)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_SHARED_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_PRIVATE_BASE)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_PRIVATE_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_POPS_EXITING_WAVE_ID)
+      return true;
+    if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN &&
+        encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC_NOLIT: {
+    if (encoding_value_ >= OpSelSrcNolit::OPR_SRC_NOLIT_SGPR_MIN &&
+        encoding_value_ <= OpSelSrcNolit::OPR_SRC_NOLIT_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MIN &&
+        encoding_value_ <= OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_M0)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_EXEC_HI)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_VCCZ)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_EXECZ)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_SCC)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_SHARED_BASE)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_SHARED_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_PRIVATE_BASE)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_PRIVATE_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_POPS_EXITING_WAVE_ID)
+      return true;
+    if (encoding_value_ >= OpSelSrcNolit::OPR_SRC_NOLIT_VGPR_MIN &&
+        encoding_value_ <= OpSelSrcNolit::OPR_SRC_NOLIT_VGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_LDS_DIRECT)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC_SIMPLE: {
+    if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MIN &&
+        encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN &&
+        encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_M0)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_HI)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_VCCZ)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_EXECZ)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_SCC)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_SHARED_BASE)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_SHARED_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_PRIVATE_BASE)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_PRIVATE_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_POPS_EXITING_WAVE_ID)
+      return true;
+    if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
+        encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC_VGPR: {
+    if (encoding_value_ >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN &&
+        encoding_value_ <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC_VGPR_OR_ACCVGPR: {
+    if (encoding_value_ >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN &&
+        encoding_value_ <= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MAX)
+      return true;
+    if (encoding_value_ >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN &&
+        encoding_value_ <= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SREG: {
+    if (encoding_value_ >= OpSelSreg::OPR_SREG_SGPR_MIN &&
+        encoding_value_ <= OpSelSreg::OPR_SREG_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSreg::OPR_SREG_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSreg::OPR_SREG_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSreg::OPR_SREG_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSreg::OPR_SREG_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
+        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_HI)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SREG_NOVCC: {
+    if (encoding_value_ >= OpSelSregNovcc::OPR_SREG_NOVCC_SGPR_MIN &&
+        encoding_value_ <= OpSelSregNovcc::OPR_SREG_NOVCC_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MIN &&
+        encoding_value_ <= OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SSRC: {
+    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_SGPR_MIN &&
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_M0)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_VCCZ)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_EXECZ)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SCC)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_BASE)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_BASE)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_POPS_EXITING_WAVE_ID)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SSRC_LANESEL: {
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_M0)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SSRC_NOLIT: {
+    if (encoding_value_ >= OpSelSsrcNolit::OPR_SSRC_NOLIT_SGPR_MIN &&
+        encoding_value_ <= OpSelSsrcNolit::OPR_SSRC_NOLIT_SGPR_MAX)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_XNACK_MASK_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_XNACK_MASK_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_FLAT_SCRATCH_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_FLAT_SCRATCH_HI)
+      return true;
+    if (encoding_value_ >= OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_M0)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_EXEC_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_VCCZ)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_EXECZ)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_SCC)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_SHARED_BASE)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_SHARED_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_PRIVATE_BASE)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_PRIVATE_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_POPS_EXITING_WAVE_ID)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SSRC_SPECIAL_SCC: {
+    if (encoding_value_ == OpSelSsrcSpecialScc::OPR_SSRC_SPECIAL_SCC_SRC_SCC)
+      return true;
+    break;
+  }
+  case OperandType::OPR_VCC: {
+    if (encoding_value_ == OpSelVcc::OPR_VCC_VCC)
+      return true;
+    break;
+  }
+  case OperandType::OPR_VGPR: {
+    if (encoding_value_ >= OpSelVgpr::OPR_VGPR_VGPR_MIN &&
+        encoding_value_ <= OpSelVgpr::OPR_VGPR_VGPR_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_VGPR_OR_LDS: {
+    if (encoding_value_ == OpSelVgprOrLds::OPR_VGPR_OR_LDS_SRC_LDS_DIRECT)
+      return true;
+    if (encoding_value_ >= OpSelVgprOrLds::OPR_VGPR_OR_LDS_VGPR_MIN &&
+        encoding_value_ <= OpSelVgprOrLds::OPR_VGPR_OR_LDS_VGPR_MAX)
+      return true;
+    break;
+  }
+  default:
+    break;
+  }
+  return false;
+}
+
 namespace {
 
 uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {

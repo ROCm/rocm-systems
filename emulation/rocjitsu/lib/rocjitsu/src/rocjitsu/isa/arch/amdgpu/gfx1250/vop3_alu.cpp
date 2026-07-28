@@ -5123,6 +5123,7 @@ VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
@@ -5198,6 +5199,7 @@ VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)

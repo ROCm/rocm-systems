@@ -2224,6 +2224,7 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
@@ -2253,6 +2254,7 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {

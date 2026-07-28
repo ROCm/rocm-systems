@@ -7,6 +7,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
@@ -183,6 +184,13 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   return inst;
 }
 
+[[nodiscard]] rdna4::Sop1MachineInst s_or_saveexec_b32(uint32_t sdst, uint32_t ssrc0) {
+  auto inst = std::bit_cast<rdna4::Sop1MachineInst>(0xBE802200U);
+  inst.sdst = sdst;
+  inst.ssrc0 = ssrc0;
+  return inst;
+}
+
 [[nodiscard]] rdna4::Sop1MachineInst s_mov_b64_exec_from_s0() {
   auto inst = std::bit_cast<rdna4::Sop1MachineInst>(0xBE800100U);
   inst.sdst = 126; // exec_lo
@@ -301,6 +309,12 @@ void append_v_cmp_gt_u32_sdst_s5_v12(std::vector<uint32_t> &program, uint32_t sd
 
 void append_v_cmp_gt_u32_s2_s5_v12(std::vector<uint32_t> &program) {
   append_v_cmp_gt_u32_sdst_s5_v12(program, 2);
+}
+
+void append_v_mad_co_s2(std::vector<uint32_t> &program, uint16_t opcode) {
+  const auto inst = rdna4::build_vop3_sdst_enc(
+      opcode, {.vdst = 0, .sdst = 2, .src0 = 256, .src1 = 257, .src2 = 258});
+  program.insert(program.end(), inst.begin(), inst.end());
 }
 
 void append_v_dual_cndmask_b32_v2_v1_v2_dual_mov_b32_v1_0(std::vector<uint32_t> &program) {
@@ -4222,6 +4236,136 @@ TEST(WaitcheckTest, ReportsMissingWaitAluVaSdstBeforeValuReadsTrackedSgpr) {
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::SGPR);
   EXPECT_EQ(report.diagnostics[0].reg.index, 2u);
   EXPECT_NE(report.diagnostics[0].message.find("depctr_va_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, UnrelatedSaluRegisterOperandWaitsForValuSgprWrites) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(0, 2, 0)); // Track the s[2:3] pair.
+  const auto readlane =
+      build_rdna4_v_readlane_b32(/*sdst=*/2, /*vsrc=*/40, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(readlane);
+  program.insert(program.end(), readlane->begin(), readlane->end());
+  append_inst(program, s_or_saveexec_b32(/*sdst=*/68, /*ssrc0=*/193)); // 193 is inline constant -1.
+  append_inst(program, v_add_f32_e32(1, 2, 1));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, SpecialSaluRegisterOperandsWaitForValuSgprWrites) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(0, 2, 0));
+  const auto readlane =
+      build_rdna4_v_readlane_b32(/*sdst=*/2, /*vsrc=*/40, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(readlane);
+  program.insert(program.end(), readlane->begin(), readlane->end());
+  program.push_back(0xBEFC01EBu); // s_mov_b64 null, src_shared_base
+  append_inst(program, v_add_f32_e32(1, 2, 1));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, ImplicitSaluRegisterOperandWaitsForValuSgprWrites) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(0, 2, 0));
+  const auto readlane =
+      build_rdna4_v_readlane_b32(/*sdst=*/2, /*vsrc=*/40, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(readlane);
+  program.insert(program.end(), readlane->begin(), readlane->end());
+  append_inst(program, sopp(/*op=*/33, /*simm16=*/0)); // s_cbranch_scc0
+  append_inst(program, v_add_f32_e32(1, 2, 1));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, HiddenModeRegisterOperandWaitsForValuSgprWrites) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(0, 2, 0));
+  const auto readlane =
+      build_rdna4_v_readlane_b32(/*sdst=*/2, /*vsrc=*/40, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(readlane);
+  program.insert(program.end(), readlane->begin(), readlane->end());
+  append_inst(program, s_setreg_imm32_b32(hwreg(/*id=*/1, /*offset=*/0, /*size=*/32), 0));
+  append_inst(program, v_add_f32_e32(1, 2, 1));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, SaluWithoutRegisterOperandDoesNotWaitForValuSgprWrites) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(0, 2, 0));
+  append_v_cmp_gt_u32_s2_s5_v12(program);
+  append_inst(program, sopp(/*op=*/0, /*simm16=*/0)); // s_nop 0
+  append_inst(program, v_add_f32_e32(1, 2, 1));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_NE(report.diagnostics[0].message.find("depctr_va_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201Wave32MadCarryDoesNotDefineEncodedHighSgpr) {
+  for (const uint16_t opcode : {rdna4::kVMadCoU64U32Vop3SdstEnc, rdna4::kVMadCoI64I32Vop3SdstEnc}) {
+    SCOPED_TRACE(opcode);
+    std::vector<uint32_t> program;
+    append_inst(program, v_add_f32_e32(4, 2, 4)); // Track the s[2:3] pair.
+    append_v_mad_co_s2(program, opcode);
+    append_inst(program, v_add_f32_e32(5, 3, 5));
+
+    auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+    EXPECT_TRUE(report.supported) << report.analysis_error;
+    EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1201Wave32MadCarryStillRequiresWaitForLowSgpr) {
+  for (const uint16_t opcode : {rdna4::kVMadCoU64U32Vop3SdstEnc, rdna4::kVMadCoI64I32Vop3SdstEnc}) {
+    SCOPED_TRACE(opcode);
+    std::vector<uint32_t> program;
+    append_inst(program, v_add_f32_e32(4, 2, 4));
+    append_v_mad_co_s2(program, opcode);
+    append_inst(program, v_add_f32_e32(5, 2, 5));
+
+    auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+    ASSERT_TRUE(report.supported) << report.analysis_error;
+    ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+    EXPECT_EQ(report.diagnostics[0].reg.index, 2u);
+    EXPECT_NE(report.diagnostics[0].message.find("depctr_va_sdst(0)"), std::string::npos);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1201Wave64MadCarryDefinesEncodedHighSgpr) {
+  for (const uint16_t opcode : {rdna4::kVMadCoU64U32Vop3SdstEnc, rdna4::kVMadCoI64I32Vop3SdstEnc}) {
+    SCOPED_TRACE(opcode);
+    std::vector<uint32_t> program;
+    append_inst(program, v_add_f32_e32(4, 2, 4));
+    append_v_mad_co_s2(program, opcode);
+    append_inst(program, v_add_f32_e32(5, 3, 5));
+
+    const auto image =
+        rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+    AmdGpuCodeObject code_object(image.data(), image.size());
+    auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+    ASSERT_TRUE(report.supported) << report.analysis_error;
+    ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+    EXPECT_EQ(report.diagnostics[0].reg.index, 3u);
+    EXPECT_NE(report.diagnostics[0].message.find("depctr_va_sdst(0)"), std::string::npos);
+  }
 }
 
 TEST(WaitcheckTest, AcceptsWaitAluVaSdstBeforeValuReadsTrackedSgpr) {

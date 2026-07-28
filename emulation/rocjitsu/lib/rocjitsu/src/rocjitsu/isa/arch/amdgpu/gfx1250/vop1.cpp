@@ -2374,6 +2374,7 @@ VMovreldB32Vop1::VMovreldB32Vop1(const MachineInst *inst)
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
@@ -2415,6 +2416,7 @@ VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
@@ -2456,6 +2458,7 @@ VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
@@ -2497,6 +2500,7 @@ VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VPermlane16SwapB32Vop1::VPermlane16SwapB32Vop1(const MachineInst *inst)
@@ -3839,6 +3843,7 @@ VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VNotB16Vop1::VNotB16Vop1(const MachineInst *inst)

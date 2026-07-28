@@ -35,6 +35,7 @@ from amdisa.gpuisa import (
     IsaSpec,
     Operand,
     OperandNamePattern,
+    REGISTER_ONLY_OPERAND_TYPES,
 )
 from amdisa.semantics import InstructionSemantics, SemanticsSpec
 
@@ -724,6 +725,7 @@ class CodeGenerator:
                 ),
             ],
             inst.is_implied_literal_enc,
+            inst.implicit_operands,
         )
 
     @staticmethod
@@ -7050,6 +7052,10 @@ class CodeGenerator:
                         'scalar_cmovk',
                     ):
                         ctor_body_parts.append('flags_ |= PREDICATED_DEF;')
+                    if self._instruction_has_implicit_register_operand(inst):
+                        ctor_body_parts.append(
+                            'flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;'
+                        )
 
                     _waitcnt_names = {
                         'S_WAITCNT',
@@ -9093,6 +9099,20 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             case _:
                 return None
 
+    @staticmethod
+    def _instruction_has_implicit_register_operand(inst: Instruction) -> bool:
+        """Return whether an instruction has hidden architectural register state."""
+        if any(
+            operand.operand_type in REGISTER_ONLY_OPERAND_TYPES
+            for operand in inst.implicit_operands
+        ):
+            return True
+
+        # LLVM represents hardware-register operations with implicit MODE
+        # operands. The MR ISA exposes the encoded selector but omits that
+        # hidden register, so preserve the same structural contract here.
+        return any(operand.operand_type == 'OPR_HWREG' for operand in inst.operands)
+
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
         arch = self.isa_spec.arch_name
@@ -9112,6 +9132,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         switch_cases = []
         ref_switch_cases = []
+        register_switch_cases = []
         opnd_types_with_selectors = set()
 
         for opnd_sel in self.isa_spec.opnd_selectors:
@@ -9122,6 +9143,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
             case_lines = []
             ref_case_lines = []
+            register_case_lines = []
             for pattern in opnd_sel.name_patterns:
                 if pattern.kind == OperandNamePattern.REG_RANGE:
                     case_lines.append(
@@ -9141,6 +9163,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                             f'return RegisterRef{{{reg_class}, static_cast<uint16_t>('
                             f'encoding_value_ - {opsel_name}::{pattern.min_enum}), reg_width}};'
                         )
+                    register_case_lines.append(
+                        f'if (encoding_value_ >= {opsel_name}::{pattern.min_enum} && '
+                        f'encoding_value_ <= {opsel_name}::{pattern.max_enum}) '
+                        f'return true;'
+                    )
                 elif pattern.kind == OperandNamePattern.POS_INT:
                     case_lines.append(
                         f'if (encoding_value_ >= {opsel_name}::{pattern.min_enum} && '
@@ -9165,6 +9192,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
                         f'return "{pattern.operand_name}";'
                     )
+                    if pattern.is_register:
+                        register_case_lines.append(
+                            f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
+                            f'return true;'
+                        )
                 elif pattern.kind == OperandNamePattern.LITERAL:
                     case_lines.append(
                         f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
@@ -9181,6 +9213,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             ref_switch_cases.append(
                 f'case OperandType::{opnd_sel.operand_type}: ' f'{{ {ref_case_body} }}'
             )
+            if register_case_lines:
+                register_case_lines.append('break;')
+                register_switch_cases.append(
+                    f'case OperandType::{opnd_sel.operand_type}: '
+                    f'{{ {" ".join(register_case_lines)} }}'
+                )
 
         no_sel_types = [
             t for t in self.isa_spec.operand_types if t not in opnd_types_with_selectors
@@ -9204,6 +9242,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 switch_cases.append(
                     f'case OperandType::{t}: return std::to_string(encoding_value_);'
                 )
+            if t in REGISTER_ONLY_OPERAND_TYPES:
+                register_switch_cases.append(f'case OperandType::{t}: return true;')
 
         switch_body = '\n'.join(switch_cases)
         packed_16bit_name_check = ''
@@ -9250,6 +9290,27 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             f'  break;\n'
             f'}}\n'
             f'return std::nullopt;\n'
+            f'}}'
+        )
+        register_switch_body = '\n'.join(register_switch_cases)
+        packed_16bit_register_check = ''
+        if uses_packed_16bit_sources:
+            packed_16bit_register_check = (
+                'if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_) ||\n'
+                '    packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))\n'
+                '  return true;\n'
+            )
+        register_impl = (
+            f'bool Operand::is_register() const {{\n'
+            f'if (size_bits_ == 0 || has_literal16_display_ || has_literal64_)\n'
+            f'  return false;\n'
+            f'{packed_16bit_register_check}'
+            f'switch (opr_type_) {{\n'
+            f'{register_switch_body}\n'
+            f'default:\n'
+            f'  break;\n'
+            f'}}\n'
+            f'return false;\n'
             f'}}'
         )
 
@@ -9371,6 +9432,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  std::string name() const override;\n'
                 f'{literal64_decl}'
                 '  std::optional<RegisterRef> to_register_ref() const override;\n'
+                '  bool is_register() const override;\n'
                 f'{execution_backend_public_decl}'
                 f'{execution_decls}'
                 'private:\n'
@@ -9443,6 +9505,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 cgen.Line(literal64_impl),
                 cgen.Line(name_impl),
                 cgen.Line(ref_impl),
+                cgen.Line(register_impl),
             ]
         )
 

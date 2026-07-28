@@ -1798,6 +1798,7 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
   num_dst_ = 0;
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
@@ -1809,6 +1810,7 @@ DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
   num_dst_ = 1;
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)

@@ -917,6 +917,7 @@ DsWriteAddtidB32Ds::DsWriteAddtidB32Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void DsWriteAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4835,6 +4836,7 @@ DsReadAddtidB32Ds::DsReadAddtidB32Ds(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void DsReadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {

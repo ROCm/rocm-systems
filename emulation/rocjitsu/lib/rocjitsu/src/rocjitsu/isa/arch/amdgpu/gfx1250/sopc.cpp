@@ -41,6 +41,7 @@ SCmpEqI32Sopc::SCmpEqI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
@@ -74,6 +75,7 @@ SCmpLgI32Sopc::SCmpLgI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
@@ -107,6 +109,7 @@ SCmpGtI32Sopc::SCmpGtI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
@@ -140,6 +143,7 @@ SCmpGeI32Sopc::SCmpGeI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
@@ -173,6 +177,7 @@ SCmpLtI32Sopc::SCmpLtI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
@@ -206,6 +211,7 @@ SCmpLeI32Sopc::SCmpLeI32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
@@ -239,6 +245,7 @@ SCmpEqU32Sopc::SCmpEqU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
@@ -272,6 +279,7 @@ SCmpLgU32Sopc::SCmpLgU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
@@ -305,6 +313,7 @@ SCmpGtU32Sopc::SCmpGtU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
@@ -338,6 +347,7 @@ SCmpGeU32Sopc::SCmpGeU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
@@ -371,6 +381,7 @@ SCmpLtU32Sopc::SCmpLtU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
@@ -404,6 +415,7 @@ SCmpLeU32Sopc::SCmpLeU32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
@@ -437,6 +449,7 @@ SBitcmp0B32Sopc::SBitcmp0B32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
@@ -470,6 +483,7 @@ SBitcmp1B32Sopc::SBitcmp1B32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
@@ -503,6 +517,7 @@ SBitcmp0B64Sopc::SBitcmp0B64Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
@@ -536,6 +551,7 @@ SBitcmp1B64Sopc::SBitcmp1B64Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
@@ -569,6 +585,7 @@ SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
@@ -602,6 +619,7 @@ SCmpLgU64Sopc::SCmpLgU64Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
@@ -635,6 +653,7 @@ SCmpLtF32Sopc::SCmpLtF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
@@ -670,6 +689,7 @@ SCmpLtF16Sopc::SCmpLtF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
@@ -703,6 +723,7 @@ SCmpEqF32Sopc::SCmpEqF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
@@ -738,6 +759,7 @@ SCmpEqF16Sopc::SCmpEqF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
@@ -771,6 +793,7 @@ SCmpLeF32Sopc::SCmpLeF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
@@ -806,6 +829,7 @@ SCmpLeF16Sopc::SCmpLeF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
@@ -839,6 +863,7 @@ SCmpGtF32Sopc::SCmpGtF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
@@ -874,6 +899,7 @@ SCmpGtF16Sopc::SCmpGtF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
@@ -907,6 +933,7 @@ SCmpLgF32Sopc::SCmpLgF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
@@ -942,6 +969,7 @@ SCmpLgF16Sopc::SCmpLgF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
@@ -975,6 +1003,7 @@ SCmpGeF32Sopc::SCmpGeF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
@@ -1010,6 +1039,7 @@ SCmpGeF16Sopc::SCmpGeF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
@@ -1043,6 +1073,7 @@ SCmpOF32Sopc::SCmpOF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
@@ -1078,6 +1109,7 @@ SCmpOF16Sopc::SCmpOF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
@@ -1111,6 +1143,7 @@ SCmpUF32Sopc::SCmpUF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
@@ -1146,6 +1179,7 @@ SCmpUF16Sopc::SCmpUF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
@@ -1179,6 +1213,7 @@ SCmpNgeF32Sopc::SCmpNgeF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
@@ -1214,6 +1249,7 @@ SCmpNgeF16Sopc::SCmpNgeF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
@@ -1247,6 +1283,7 @@ SCmpNlgF32Sopc::SCmpNlgF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
@@ -1282,6 +1319,7 @@ SCmpNlgF16Sopc::SCmpNlgF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
@@ -1315,6 +1353,7 @@ SCmpNgtF32Sopc::SCmpNgtF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
@@ -1350,6 +1389,7 @@ SCmpNgtF16Sopc::SCmpNgtF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
@@ -1383,6 +1423,7 @@ SCmpNleF32Sopc::SCmpNleF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
@@ -1418,6 +1459,7 @@ SCmpNleF16Sopc::SCmpNleF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
@@ -1451,6 +1493,7 @@ SCmpNeqF32Sopc::SCmpNeqF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
@@ -1486,6 +1529,7 @@ SCmpNeqF16Sopc::SCmpNeqF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
@@ -1519,6 +1563,7 @@ SCmpNltF32Sopc::SCmpNltF32Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
@@ -1554,6 +1599,7 @@ SCmpNltF16Sopc::SCmpNltF16Sopc(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 } // namespace gfx1250

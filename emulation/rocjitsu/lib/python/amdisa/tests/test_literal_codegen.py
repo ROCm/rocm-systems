@@ -6,7 +6,7 @@
 from types import SimpleNamespace
 
 from amdisa.codegen._generator import CodeGenerator
-from amdisa.gpuisa import InstEncoding, Instruction, Operand
+from amdisa.gpuisa import ImplicitOperand, InstEncoding, Instruction, Operand
 from amdisa.isa_profile import Rdna4Profile
 from amdisa.semantics import InstructionSemantics
 
@@ -306,12 +306,19 @@ def test_existing_literal_operand_does_not_need_simm32_fallback_member():
 
 
 def test_scalar_literal_fma_synthesizes_third_source_operand():
+    implicit_scc = ImplicitOperand(
+        size=1,
+        operand_type='OPR_SSRC_SPECIAL_SCC',
+        is_input=False,
+        is_output=True,
+    )
     inst = Instruction(
         'S_FMAAK_F32',
         'SOP2_INST_LITERAL',
         opcode=69,
         operands=[],
         is_implied_literal_enc=True,
+        implicit_operands=[implicit_scc],
     )
 
     fixed = CodeGenerator._with_scalar_literal_fma_operand(inst)
@@ -320,6 +327,7 @@ def test_scalar_literal_fma_synthesizes_third_source_operand():
     assert fixed.operands[-1].name == 'src2'
     assert fixed.operands[-1].operand_type == 'OPR_SIMM32'
     assert fixed.operands[-1].is_input
+    assert fixed.implicit_operands == [implicit_scc]
 
 
 def test_scalar_fmamk_semantic_sources_use_synthesized_literal_as_multiplier():

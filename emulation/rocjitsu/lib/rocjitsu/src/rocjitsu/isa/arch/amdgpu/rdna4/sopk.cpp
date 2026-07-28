@@ -57,6 +57,7 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= PREDICATED_DEF;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -73,6 +74,7 @@ SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAddkCoI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -111,6 +113,7 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -154,6 +157,7 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &sdst;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SSetregB32Sopk::implicit_uses(RegisterSet &uses) const {
@@ -191,6 +195,7 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
   dst_operands_[0] = &simm16;
   num_src_ = 0;
   num_dst_ = 1;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SSetregImm32B32Sopk::implicit_uses(RegisterSet &uses) const {
@@ -230,6 +235,7 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   flags_ |= INDIRECT_CALL;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 std::optional<int64_t> SCallB64Sopk::branch_offset_bytes() const {

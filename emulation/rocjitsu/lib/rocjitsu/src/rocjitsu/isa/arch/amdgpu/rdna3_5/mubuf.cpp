@@ -1243,6 +1243,7 @@ BufferLoadLdsU8Mubuf::BufferLoadLdsU8Mubuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void BufferLoadLdsU8Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1263,6 +1264,7 @@ BufferLoadLdsI8Mubuf::BufferLoadLdsI8Mubuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void BufferLoadLdsI8Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1283,6 +1285,7 @@ BufferLoadLdsU16Mubuf::BufferLoadLdsU16Mubuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void BufferLoadLdsU16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1303,6 +1306,7 @@ BufferLoadLdsI16Mubuf::BufferLoadLdsI16Mubuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void BufferLoadLdsI16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1323,6 +1327,7 @@ BufferLoadLdsB32Mubuf::BufferLoadLdsB32Mubuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void BufferLoadLdsB32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
@@ -1343,6 +1348,7 @@ BufferLoadLdsFormatXMubuf::BufferLoadLdsFormatXMubuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void BufferLoadLdsFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) {

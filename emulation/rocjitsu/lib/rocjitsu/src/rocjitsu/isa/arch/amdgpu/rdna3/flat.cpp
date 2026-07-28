@@ -45,6 +45,7 @@ FlatLoadU8Flat::FlatLoadU8Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadU8Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -82,6 +83,7 @@ FlatLoadI8Flat::FlatLoadI8Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadI8Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -120,6 +122,7 @@ FlatLoadU16Flat::FlatLoadU16Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadU16Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -157,6 +160,7 @@ FlatLoadI16Flat::FlatLoadI16Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadI16Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -195,6 +199,7 @@ FlatLoadB32Flat::FlatLoadB32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadB32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -232,6 +237,7 @@ FlatLoadB64Flat::FlatLoadB64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadB64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -269,6 +275,7 @@ FlatLoadB96Flat::FlatLoadB96Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadB96Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -306,6 +313,7 @@ FlatLoadB128Flat::FlatLoadB128Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadB128Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -343,6 +351,7 @@ FlatStoreB8Flat::FlatStoreB8Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatStoreB8Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -389,6 +398,7 @@ FlatStoreB16Flat::FlatStoreB16Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatStoreB16Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -435,6 +445,7 @@ FlatStoreB32Flat::FlatStoreB32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatStoreB32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -481,6 +492,7 @@ FlatStoreB64Flat::FlatStoreB64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatStoreB64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -529,6 +541,7 @@ FlatStoreB96Flat::FlatStoreB96Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatStoreB96Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -579,6 +592,7 @@ FlatStoreB128Flat::FlatStoreB128Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatStoreB128Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -631,6 +645,7 @@ FlatLoadD16U8Flat::FlatLoadD16U8Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadD16U8Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -669,6 +684,7 @@ FlatLoadD16I8Flat::FlatLoadD16I8Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadD16I8Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -708,6 +724,7 @@ FlatLoadD16B16Flat::FlatLoadD16B16Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadD16B16Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -746,6 +763,7 @@ FlatLoadD16HiU8Flat::FlatLoadD16HiU8Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadD16HiU8Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -784,6 +802,7 @@ FlatLoadD16HiI8Flat::FlatLoadD16HiI8Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadD16HiI8Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -823,6 +842,7 @@ FlatLoadD16HiB16Flat::FlatLoadD16HiB16Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatLoadD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -861,6 +881,7 @@ FlatStoreD16HiB8Flat::FlatStoreD16HiB8Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatStoreD16HiB8Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -908,6 +929,7 @@ FlatStoreD16HiB16Flat::FlatStoreD16HiB16Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatStoreD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -958,6 +980,7 @@ FlatAtomicSwapB32Flat::FlatAtomicSwapB32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicSwapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1009,6 +1032,7 @@ FlatAtomicCmpswapB32Flat::FlatAtomicCmpswapB32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicCmpswapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1062,6 +1086,7 @@ FlatAtomicAddU32Flat::FlatAtomicAddU32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicAddU32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1113,6 +1138,7 @@ FlatAtomicSubU32Flat::FlatAtomicSubU32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicSubU32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1164,6 +1190,7 @@ FlatAtomicMinI32Flat::FlatAtomicMinI32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicMinI32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1215,6 +1242,7 @@ FlatAtomicMinU32Flat::FlatAtomicMinU32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicMinU32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1266,6 +1294,7 @@ FlatAtomicMaxI32Flat::FlatAtomicMaxI32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicMaxI32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1317,6 +1346,7 @@ FlatAtomicMaxU32Flat::FlatAtomicMaxU32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicMaxU32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1368,6 +1398,7 @@ FlatAtomicAndB32Flat::FlatAtomicAndB32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicAndB32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1419,6 +1450,7 @@ FlatAtomicOrB32Flat::FlatAtomicOrB32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicOrB32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1470,6 +1502,7 @@ FlatAtomicXorB32Flat::FlatAtomicXorB32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicXorB32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1521,6 +1554,7 @@ FlatAtomicIncU32Flat::FlatAtomicIncU32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicIncU32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1572,6 +1606,7 @@ FlatAtomicDecU32Flat::FlatAtomicDecU32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicDecU32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1623,6 +1658,7 @@ FlatAtomicSwapB64Flat::FlatAtomicSwapB64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicSwapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1676,6 +1712,7 @@ FlatAtomicCmpswapB64Flat::FlatAtomicCmpswapB64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicCmpswapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1733,6 +1770,7 @@ FlatAtomicAddU64Flat::FlatAtomicAddU64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicAddU64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1786,6 +1824,7 @@ FlatAtomicSubU64Flat::FlatAtomicSubU64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicSubU64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1839,6 +1878,7 @@ FlatAtomicMinI64Flat::FlatAtomicMinI64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicMinI64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1892,6 +1932,7 @@ FlatAtomicMinU64Flat::FlatAtomicMinU64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicMinU64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1945,6 +1986,7 @@ FlatAtomicMaxI64Flat::FlatAtomicMaxI64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicMaxI64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -1998,6 +2040,7 @@ FlatAtomicMaxU64Flat::FlatAtomicMaxU64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicMaxU64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -2051,6 +2094,7 @@ FlatAtomicAndB64Flat::FlatAtomicAndB64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicAndB64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -2104,6 +2148,7 @@ FlatAtomicOrB64Flat::FlatAtomicOrB64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicOrB64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -2157,6 +2202,7 @@ FlatAtomicXorB64Flat::FlatAtomicXorB64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicXorB64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -2210,6 +2256,7 @@ FlatAtomicIncU64Flat::FlatAtomicIncU64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicIncU64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -2263,6 +2310,7 @@ FlatAtomicDecU64Flat::FlatAtomicDecU64Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicDecU64Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -2316,6 +2364,7 @@ FlatAtomicCmpswapF32Flat::FlatAtomicCmpswapF32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicCmpswapF32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -2369,6 +2418,7 @@ FlatAtomicMinF32Flat::FlatAtomicMinF32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicMinF32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -2420,6 +2470,7 @@ FlatAtomicMaxF32Flat::FlatAtomicMaxF32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicMaxF32Flat::execute_impl(amdgpu::Wavefront &wf) {
@@ -2471,6 +2522,7 @@ FlatAtomicAddF32Flat::FlatAtomicAddF32Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void FlatAtomicAddF32Flat::execute_impl(amdgpu::Wavefront &wf) {

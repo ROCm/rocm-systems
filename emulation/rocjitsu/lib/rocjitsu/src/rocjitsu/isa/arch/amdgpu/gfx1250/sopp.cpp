@@ -131,6 +131,7 @@ SBarrierLeaveSopp::SBarrierLeaveSopp(const MachineInst *inst)
            registered_exec_fn<SBarrierLeaveSopp>()) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCodeEndSopp::SCodeEndSopp(const MachineInst *inst)
@@ -164,6 +165,7 @@ SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= COND_BRANCH;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 std::optional<int64_t> SCbranchScc0Sopp::branch_offset_bytes() const {
@@ -179,6 +181,7 @@ SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= COND_BRANCH;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 std::optional<int64_t> SCbranchScc1Sopp::branch_offset_bytes() const {
@@ -194,6 +197,7 @@ SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= COND_BRANCH;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
@@ -209,6 +213,7 @@ SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= COND_BRANCH;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
@@ -224,6 +229,7 @@ SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= COND_BRANCH;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 std::optional<int64_t> SCbranchExeczSopp::branch_offset_bytes() const {
@@ -239,6 +245,7 @@ SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= COND_BRANCH;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 std::optional<int64_t> SCbranchExecnzSopp::branch_offset_bytes() const {
@@ -285,6 +292,7 @@ SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
@@ -294,6 +302,7 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
@@ -319,6 +328,7 @@ STtracedataSopp::STtracedataSopp(const MachineInst *inst)
            registered_exec_fn<STtracedataSopp>()) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 STtracedataImmSopp::STtracedataImmSopp(const MachineInst *inst)

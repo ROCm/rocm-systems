@@ -91,6 +91,14 @@ public:
   /// parse the display string returned by name().
   [[nodiscard]] virtual std::optional<RegisterRef> to_register_ref() const;
 
+  /// @brief Whether this encoded operand denotes an architectural register.
+  ///
+  /// @details This is broader than to_register_ref(): special registers such
+  /// as EXEC, VCC, SCC, M0, NULL, and target state registers are register
+  /// operands even when RegisterSet does not model their liveness. Generated
+  /// ISA operands override this from typed selector metadata.
+  [[nodiscard]] virtual bool is_register() const { return to_register_ref().has_value(); }
+
   /// @brief Raw encoding value from the instruction binary.
   int encoding_value() const { return encoding_value_; }
 
@@ -446,12 +454,15 @@ public:
   /// @param data Pre-permuted lane values (one per lane).
   /// @param lane_count Number of valid lanes.
   DppOperand(const Operand &base, const uint32_t *data, int lane_count)
-      : Operand(base.size_bits_, base.encoding_value_), lane_count_(lane_count) {
+      : Operand(base.size_bits_, base.encoding_value_), base_is_register_(base.is_register()),
+        lane_count_(lane_count) {
     for (int i = 0; i < lane_count && i < MAX_LANES; ++i)
       data_[i] = data[i];
   }
 
   std::string name() const override { return "dpp_src"; }
+
+  bool is_register() const override { return base_is_register_; }
 
   bool simd_capable() const override { return true; }
 
@@ -486,6 +497,7 @@ private:
   }
 
   uint32_t data_[MAX_LANES]{};
+  bool base_is_register_ = false;
   int lane_count_ = 0;
 };
 

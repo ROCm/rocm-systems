@@ -708,6 +708,226 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   return std::nullopt;
 }
 
+bool Operand::is_register() const {
+  if (size_bits_ == 0 || has_literal16_display_ || has_literal64_)
+    return false;
+  if (packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_) ||
+      packed_16bit_vgpr_dst(packed_16bit_dst_, size_bits_, opr_type_, encoding_value_))
+    return true;
+  switch (opr_type_) {
+  case OperandType::OPR_EXEC: {
+    if (encoding_value_ == OpSelExec::OPR_EXEC_EXEC)
+      return true;
+    break;
+  }
+  case OperandType::OPR_FLAT_SCRATCH: {
+    if (encoding_value_ == OpSelFlatScratch::OPR_FLAT_SCRATCH_FLAT_SCRATCH)
+      return true;
+    break;
+  }
+  case OperandType::OPR_PC: {
+    if (encoding_value_ == OpSelPc::OPR_PC_PC)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SDST: {
+    if (encoding_value_ >= OpSelSdst::OPR_SDST_SGPR_MIN &&
+        encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX)
+      return true;
+    if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
+        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_NULL)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_M0)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SDST_EXEC: {
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SDST_M0: {
+    if (encoding_value_ == OpSelSdstM0::OPR_SDST_M0_M0)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SMEM_OFFSET: {
+    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN &&
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX)
+      return true;
+    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_NULL)
+      return true;
+    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC: {
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_SGPR_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
+      return true;
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_NULL)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_M0)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SCC)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_BASE)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_BASE)
+      return true;
+    if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_LIMIT)
+      return true;
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC_VGPR: {
+    if (encoding_value_ >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN &&
+        encoding_value_ <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SRC_VGPR_OR_INLINE: {
+    if (encoding_value_ >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN &&
+        encoding_value_ <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SREG: {
+    if (encoding_value_ >= OpSelSreg::OPR_SREG_SGPR_MIN &&
+        encoding_value_ <= OpSelSreg::OPR_SREG_SGPR_MAX)
+      return true;
+    if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
+        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSreg::OPR_SREG_NULL)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SREG_M0_INL: {
+    if (encoding_value_ >= OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MIN &&
+        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MAX)
+      return true;
+    if (encoding_value_ >= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN &&
+        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_NULL)
+      return true;
+    if (encoding_value_ == OpSelSregM0Inl::OPR_SREG_M0_INL_M0)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SSRC: {
+    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_SGPR_MIN &&
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
+      return true;
+    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_NULL)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_M0)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SCC)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_BASE)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_LIMIT)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_BASE)
+      return true;
+    if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_LIMIT)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SSRC_LANESEL: {
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
+      return true;
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_LO)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_HI)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_NULL)
+      return true;
+    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_M0)
+      return true;
+    break;
+  }
+  case OperandType::OPR_SSRC_SPECIAL_SCC: {
+    if (encoding_value_ == OpSelSsrcSpecialScc::OPR_SSRC_SPECIAL_SCC_SRC_SCC)
+      return true;
+    break;
+  }
+  case OperandType::OPR_VCC: {
+    if (encoding_value_ == OpSelVcc::OPR_VCC_VCC)
+      return true;
+    break;
+  }
+  case OperandType::OPR_VGPR: {
+    if (encoding_value_ >= OpSelVgpr::OPR_VGPR_VGPR_MIN &&
+        encoding_value_ <= OpSelVgpr::OPR_VGPR_VGPR_MAX)
+      return true;
+    break;
+  }
+  default:
+    break;
+  }
+  return false;
+}
+
 namespace {
 
 uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {

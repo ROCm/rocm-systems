@@ -1139,6 +1139,7 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
@@ -1157,6 +1158,7 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 GlobalAtomicAddF64Vglobal::GlobalAtomicAddF64Vglobal(const MachineInst *inst)
@@ -1501,6 +1503,7 @@ ClusterLoadB32Vglobal::ClusterLoadB32Vglobal(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 ClusterLoadB64Vglobal::ClusterLoadB64Vglobal(const MachineInst *inst)
@@ -1519,6 +1522,7 @@ ClusterLoadB64Vglobal::ClusterLoadB64Vglobal(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 ClusterLoadB128Vglobal::ClusterLoadB128Vglobal(const MachineInst *inst)
@@ -1537,6 +1541,7 @@ ClusterLoadB128Vglobal::ClusterLoadB128Vglobal(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 ClusterLoadAsyncToLdsB8Vglobal::ClusterLoadAsyncToLdsB8Vglobal(const MachineInst *inst)
@@ -1555,6 +1560,7 @@ ClusterLoadAsyncToLdsB8Vglobal::ClusterLoadAsyncToLdsB8Vglobal(const MachineInst
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 ClusterLoadAsyncToLdsB32Vglobal::ClusterLoadAsyncToLdsB32Vglobal(const MachineInst *inst)
@@ -1573,6 +1579,7 @@ ClusterLoadAsyncToLdsB32Vglobal::ClusterLoadAsyncToLdsB32Vglobal(const MachineIn
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 ClusterLoadAsyncToLdsB64Vglobal::ClusterLoadAsyncToLdsB64Vglobal(const MachineInst *inst)
@@ -1591,6 +1598,7 @@ ClusterLoadAsyncToLdsB64Vglobal::ClusterLoadAsyncToLdsB64Vglobal(const MachineIn
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 ClusterLoadAsyncToLdsB128Vglobal::ClusterLoadAsyncToLdsB128Vglobal(const MachineInst *inst)
@@ -1609,6 +1617,7 @@ ClusterLoadAsyncToLdsB128Vglobal::ClusterLoadAsyncToLdsB128Vglobal(const Machine
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 GlobalLoadMonitorB32Vglobal::GlobalLoadMonitorB32Vglobal(const MachineInst *inst)

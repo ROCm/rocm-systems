@@ -66,6 +66,7 @@ SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= PREDICATED_DEF;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SCmovB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -86,6 +87,7 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= PREDICATED_DEF;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SCmovB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -104,6 +106,7 @@ SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SNotB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_not_b32_sop1(*this, wf); }
@@ -120,6 +123,7 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SNotB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_not_b64_sop1(*this, wf); }
@@ -136,6 +140,7 @@ SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SWqmB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wqm_b32_sop1(*this, wf); }
@@ -152,6 +157,7 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SWqmB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wqm_b64_sop1(*this, wf); }
@@ -205,6 +211,7 @@ SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SBcnt0I32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -224,6 +231,7 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SBcnt0I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -243,6 +251,7 @@ SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SBcnt1I32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -262,6 +271,7 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SBcnt1I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -547,6 +557,7 @@ SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
   dst_operands_[0] = &sdst;
   num_src_ = 0;
   num_dst_ = 1;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SGetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -565,6 +576,7 @@ SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= INDIRECT_BRANCH;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SSetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -585,6 +597,7 @@ SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   flags_ |= INDIRECT_CALL;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SSwappcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -603,6 +616,7 @@ SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_rfe_b64_sop1(*this, wf); }
@@ -620,6 +634,7 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAndSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -639,6 +654,7 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SOrSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -658,6 +674,7 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SXorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -677,6 +694,7 @@ SAndn2SaveexecB64Sop1::SAndn2SaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAndn2SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -696,6 +714,7 @@ SOrn2SaveexecB64Sop1::SOrn2SaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SOrn2SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -715,6 +734,7 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SNandSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -734,6 +754,7 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SNorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -753,6 +774,7 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SXnorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -772,6 +794,7 @@ SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SQuadmaskB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -791,6 +814,7 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SQuadmaskB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -810,6 +834,7 @@ SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -839,6 +864,7 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -868,6 +894,7 @@ SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -897,6 +924,7 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -925,6 +953,7 @@ SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAbsI32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_abs_i32_sop1(*this, wf); }
@@ -942,6 +971,7 @@ SAndn1SaveexecB64Sop1::SAndn1SaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAndn1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -961,6 +991,7 @@ SOrn1SaveexecB64Sop1::SOrn1SaveexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SOrn1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -980,6 +1011,7 @@ SAndn1WrexecB64Sop1::SAndn1WrexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAndn1WrexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -999,6 +1031,7 @@ SAndn2WrexecB64Sop1::SAndn2WrexecB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAndn2WrexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1037,6 +1070,7 @@ SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAndSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1056,6 +1090,7 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SOrSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1075,6 +1110,7 @@ SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SXorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1094,6 +1130,7 @@ SAndn2SaveexecB32Sop1::SAndn2SaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAndn2SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1113,6 +1150,7 @@ SOrn2SaveexecB32Sop1::SOrn2SaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SOrn2SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1132,6 +1170,7 @@ SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SNandSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1151,6 +1190,7 @@ SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SNorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1170,6 +1210,7 @@ SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SXnorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1189,6 +1230,7 @@ SAndn1SaveexecB32Sop1::SAndn1SaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAndn1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1208,6 +1250,7 @@ SOrn1SaveexecB32Sop1::SOrn1SaveexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SOrn1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1227,6 +1270,7 @@ SAndn1WrexecB32Sop1::SAndn1WrexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAndn1WrexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1246,6 +1290,7 @@ SAndn2WrexecB32Sop1::SAndn2WrexecB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SAndn2WrexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1265,6 +1310,7 @@ SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) {

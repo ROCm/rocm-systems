@@ -43,6 +43,7 @@ SAddCoU32Sop2::SAddCoU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SSubCoU32Sop2::SSubCoU32Sop2(const MachineInst *inst)
@@ -78,6 +79,7 @@ SSubCoU32Sop2::SSubCoU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SAddCoI32Sop2::SAddCoI32Sop2(const MachineInst *inst)
@@ -113,6 +115,7 @@ SAddCoI32Sop2::SAddCoI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SSubCoI32Sop2::SSubCoI32Sop2(const MachineInst *inst)
@@ -148,6 +151,7 @@ SSubCoI32Sop2::SSubCoI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SAddCoCiU32Sop2::SAddCoCiU32Sop2(const MachineInst *inst)
@@ -183,6 +187,7 @@ SAddCoCiU32Sop2::SAddCoCiU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SSubCoCiU32Sop2::SSubCoCiU32Sop2(const MachineInst *inst)
@@ -218,6 +223,7 @@ SSubCoCiU32Sop2::SSubCoCiU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
@@ -253,6 +259,7 @@ SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SLshlB32Sop2::SLshlB32Sop2(const MachineInst *inst)
@@ -288,6 +295,7 @@ SLshlB32Sop2::SLshlB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SLshlB64Sop2::SLshlB64Sop2(const MachineInst *inst)
@@ -323,6 +331,7 @@ SLshlB64Sop2::SLshlB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SLshrB32Sop2::SLshrB32Sop2(const MachineInst *inst)
@@ -358,6 +367,7 @@ SLshrB32Sop2::SLshrB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SLshrB64Sop2::SLshrB64Sop2(const MachineInst *inst)
@@ -393,6 +403,7 @@ SLshrB64Sop2::SLshrB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SAshrI32Sop2::SAshrI32Sop2(const MachineInst *inst)
@@ -428,6 +439,7 @@ SAshrI32Sop2::SAshrI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SAshrI64Sop2::SAshrI64Sop2(const MachineInst *inst)
@@ -463,6 +475,7 @@ SAshrI64Sop2::SAshrI64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SLshl1AddU32Sop2::SLshl1AddU32Sop2(const MachineInst *inst)
@@ -498,6 +511,7 @@ SLshl1AddU32Sop2::SLshl1AddU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SLshl2AddU32Sop2::SLshl2AddU32Sop2(const MachineInst *inst)
@@ -533,6 +547,7 @@ SLshl2AddU32Sop2::SLshl2AddU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SLshl3AddU32Sop2::SLshl3AddU32Sop2(const MachineInst *inst)
@@ -568,6 +583,7 @@ SLshl3AddU32Sop2::SLshl3AddU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SLshl4AddU32Sop2::SLshl4AddU32Sop2(const MachineInst *inst)
@@ -603,6 +619,7 @@ SLshl4AddU32Sop2::SLshl4AddU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SMinI32Sop2::SMinI32Sop2(const MachineInst *inst)
@@ -638,6 +655,7 @@ SMinI32Sop2::SMinI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SMinU32Sop2::SMinU32Sop2(const MachineInst *inst)
@@ -673,6 +691,7 @@ SMinU32Sop2::SMinU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SMaxI32Sop2::SMaxI32Sop2(const MachineInst *inst)
@@ -708,6 +727,7 @@ SMaxI32Sop2::SMaxI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SMaxU32Sop2::SMaxU32Sop2(const MachineInst *inst)
@@ -743,6 +763,7 @@ SMaxU32Sop2::SMaxU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SAndB32Sop2::SAndB32Sop2(const MachineInst *inst)
@@ -778,6 +799,7 @@ SAndB32Sop2::SAndB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SAndB64Sop2::SAndB64Sop2(const MachineInst *inst)
@@ -813,6 +835,7 @@ SAndB64Sop2::SAndB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
@@ -848,6 +871,7 @@ SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
@@ -883,6 +907,7 @@ SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)
@@ -918,6 +943,7 @@ SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SXorB64Sop2::SXorB64Sop2(const MachineInst *inst)
@@ -953,6 +979,7 @@ SXorB64Sop2::SXorB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SNandB32Sop2::SNandB32Sop2(const MachineInst *inst)
@@ -988,6 +1015,7 @@ SNandB32Sop2::SNandB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SNandB64Sop2::SNandB64Sop2(const MachineInst *inst)
@@ -1023,6 +1051,7 @@ SNandB64Sop2::SNandB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SNorB32Sop2::SNorB32Sop2(const MachineInst *inst)
@@ -1058,6 +1087,7 @@ SNorB32Sop2::SNorB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SNorB64Sop2::SNorB64Sop2(const MachineInst *inst)
@@ -1093,6 +1123,7 @@ SNorB64Sop2::SNorB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SXnorB32Sop2::SXnorB32Sop2(const MachineInst *inst)
@@ -1128,6 +1159,7 @@ SXnorB32Sop2::SXnorB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SXnorB64Sop2::SXnorB64Sop2(const MachineInst *inst)
@@ -1163,6 +1195,7 @@ SXnorB64Sop2::SXnorB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SAndNot1B32Sop2::SAndNot1B32Sop2(const MachineInst *inst)
@@ -1198,6 +1231,7 @@ SAndNot1B32Sop2::SAndNot1B32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
@@ -1233,6 +1267,7 @@ SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
@@ -1268,6 +1303,7 @@ SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
@@ -1303,6 +1339,7 @@ SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
@@ -1338,6 +1375,7 @@ SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SBfeI32Sop2::SBfeI32Sop2(const MachineInst *inst)
@@ -1373,6 +1411,7 @@ SBfeI32Sop2::SBfeI32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SBfeU64Sop2::SBfeU64Sop2(const MachineInst *inst)
@@ -1408,6 +1447,7 @@ SBfeU64Sop2::SBfeU64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SBfeI64Sop2::SBfeI64Sop2(const MachineInst *inst)
@@ -1443,6 +1483,7 @@ SBfeI64Sop2::SBfeI64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SBfmB32Sop2::SBfmB32Sop2(const MachineInst *inst)
@@ -1653,6 +1694,7 @@ SCselectB32Sop2::SCselectB32Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(32, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
@@ -1688,6 +1730,7 @@ SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 SPackLlB32B16Sop2::SPackLlB32B16Sop2(const MachineInst *inst)

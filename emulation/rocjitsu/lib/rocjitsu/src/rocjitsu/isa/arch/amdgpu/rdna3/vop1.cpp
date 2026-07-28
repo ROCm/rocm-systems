@@ -6697,6 +6697,7 @@ VMovreldB32Vop1::VMovreldB32Vop1(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void VMovreldB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -6827,6 +6828,7 @@ VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void VMovrelsB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -6957,6 +6959,7 @@ VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void VMovrelsdB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -6994,6 +6997,7 @@ VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void VMovrelsd2B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -10440,6 +10444,7 @@ VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 void VSwaprelB32Vop1::execute_impl(amdgpu::Wavefront &wf) {

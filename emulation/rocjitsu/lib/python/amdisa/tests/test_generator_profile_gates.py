@@ -30,7 +30,7 @@ from amdisa.codegen.execute.vector_cmp import (
 )
 from amdisa.codegen.execute.simd_codegen import simd_probe_line
 from amdisa.cross_isa import CrossIsaAnalyzer
-from amdisa.gpuisa import Instruction, Operand
+from amdisa.gpuisa import Instruction, Operand, REGISTER_ONLY_OPERAND_TYPES
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
@@ -330,6 +330,90 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
     assert checked > 0, f'{isa_name}: no instruction SCC contracts checked'
     assert checked_exclusions == expected_exclusions.get(isa_name, set())
     assert not mismatches, f'{isa_name}:\n' + '\n'.join(mismatches)
+
+
+def test_rdna4_parser_preserves_typed_implicit_operand_contracts():
+    spec = Parser(
+        str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'),
+        Rdna4Profile(),
+    ).parse()
+    instructions = {
+        (inst.name, inst.enc_name): inst
+        for enc in spec.inst_encodings
+        for inst in enc.insts
+    }
+
+    branch = instructions[('S_CBRANCH_SCC0', 'ENC_SOPP')]
+    assert [operand.operand_type for operand in branch.implicit_operands] == [
+        'OPR_SSRC_SPECIAL_SCC'
+    ]
+    assert branch.implicit_operands[0].is_input
+    assert not branch.implicit_operands[0].is_output
+    assert CodeGenerator._instruction_has_implicit_register_operand(branch)
+
+    scalar_load = instructions[('S_LOAD_B32', 'ENC_SMEM')]
+    assert [operand.operand_type for operand in scalar_load.implicit_operands] == [
+        'OPR_GPUMEM'
+    ]
+    assert not CodeGenerator._instruction_has_implicit_register_operand(scalar_load)
+
+    setreg = instructions[('S_SETREG_IMM32_B32', 'SOPK_INST_LITERAL')]
+    assert not setreg.implicit_operands
+    assert CodeGenerator._instruction_has_implicit_register_operand(setreg)
+
+    nop = instructions[('S_NOP', 'ENC_SOPP')]
+    assert not CodeGenerator._instruction_has_implicit_register_operand(nop)
+
+
+def test_named_inline_immediates_are_not_register_patterns():
+    spec = Parser(
+        str(_mrisa_dir() / 'amdgpu_isa_rdna1.xml'),
+        Rdna1Profile(),
+    ).parse()
+    selector = next(
+        selector
+        for selector in spec.opnd_selectors
+        if selector.operand_type == 'OPR_SMEM_OFFSET'
+    )
+    patterns = {pattern.operand_name: pattern for pattern in selector.name_patterns}
+
+    assert not patterns['src_simm21'].is_register
+    assert patterns['null'].is_register
+
+
+@pytest.mark.parametrize(
+    'isa_name,profile_type',
+    [
+        ('cdna1', Cdna1Profile),
+        ('cdna2', Cdna2Profile),
+        ('cdna3', CdnaProfile),
+        ('cdna4', CdnaProfile),
+        ('rdna1', Rdna1Profile),
+        ('rdna2', Rdna2Profile),
+        ('rdna3', Rdna3Profile),
+        ('rdna3_5', Rdna3_5Profile),
+        ('rdna4', Rdna4Profile),
+        ('gfx1250', Gfx1250Profile),
+    ],
+)
+def test_mrisa_implicit_operand_types_have_explicit_register_classification(
+    isa_name, profile_type
+):
+    isa_xml = _mrisa_dir() / f'amdgpu_isa_{isa_name}.xml'
+    if not isa_xml.is_file():
+        pytest.skip('Semantics XML not available')
+    spec = Parser(str(isa_xml), profile_type()).parse()
+    implicit_types = {
+        operand.operand_type
+        for enc in spec.inst_encodings
+        for inst in enc.insts
+        for operand in inst.implicit_operands
+    }
+
+    assert implicit_types <= REGISTER_ONLY_OPERAND_TYPES | {
+        'OPR_DSMEM',
+        'OPR_GPUMEM',
+    }
 
 
 def test_implicit_operand_accesses_covers_filters_merging_and_compat_insts():

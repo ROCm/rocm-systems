@@ -63,6 +63,7 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
@@ -104,6 +105,7 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
 VPrngB32Vop3::VPrngB32Vop3(const MachineInst *inst)
