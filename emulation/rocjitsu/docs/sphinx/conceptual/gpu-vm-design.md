@@ -25,7 +25,7 @@ XCD contains a command processor (CP), shader engines (SEs), an L2
 cache, and a memory-side cache. Each shader engine contains an array of
 compute units (CUs).
 
-```mermaid
+```{mermaid}
 flowchart LR
   SoC --> XCD
   SoC --> IOD

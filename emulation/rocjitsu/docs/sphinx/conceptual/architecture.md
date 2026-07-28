@@ -18,7 +18,7 @@ of these layers to serve different use cases.
 The following diagram shows the major layers from bottom (simulation
 infrastructure) to top (unmodified user binaries).
 
-```mermaid
+```{mermaid}
 flowchart
    A["HIP / ROCR / RCCL"] --> B["KMD emulation"]
    B --> C["VM / hardware model"]
