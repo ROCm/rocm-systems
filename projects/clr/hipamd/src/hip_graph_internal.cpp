@@ -1278,10 +1278,12 @@ void GraphExecSegmented::ComputeCompletionSignalFlags() {
 
 // ================================================================================================
 // DFS-based stream assignment for segment DAG.
-// Mirrors ScheduleOneNode from the classic path exactly:
+// Modeled after the classic path's ScheduleOneNode traversal pattern:
 //   - linear chains stay on the same stream
 //   - sid rotates at leaf segments (end of branch), not at forks
-//   - each root segment starts on the next stream (round-robin across roots)
+//   - DFS is started from every unscheduled segment (not just dependency-free
+//     roots), with sid incrementing once per outer-loop iteration
+//   - stream pool size is derived from graph parallelism, not DEBUG_HIP_FORCE_GRAPH_QUEUES
 void GraphExecSegmented::DFSStreamAssignment() {
   // Use actual graph parallelism (max concurrent segments at any level) as the
   // pool size — avoids allocating more streams than the graph can use in parallel,
