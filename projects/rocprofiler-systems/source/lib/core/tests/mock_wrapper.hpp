@@ -37,6 +37,8 @@ enum kind_callback_tracing
     CALLBACK_TRACING_ROCJPEG_API            = 19,
     CALLBACK_TRACING_HIP_STREAM             = 20,
     CALLBACK_TRACING_LAST                   = 22,
+    CALLBACK_TRACING_ROCSHMEM_API           = 23,
+    CALLBACK_TRACING_HIPFILE_API            = 24,
 };
 
 enum kind_buffer_tracing
@@ -1071,6 +1073,10 @@ struct wrapper
         callback_tracing_kind::CALLBACK_TRACING_ROCJPEG_API;
     static constexpr callback_tracing_kind CALLBACK_TRACING_HIP_STREAM =
         callback_tracing_kind::CALLBACK_TRACING_HIP_STREAM;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_ROCSHMEM_API =
+        callback_tracing_kind::CALLBACK_TRACING_ROCSHMEM_API;
+    static constexpr callback_tracing_kind CALLBACK_TRACING_HIPFILE_API =
+        callback_tracing_kind::CALLBACK_TRACING_HIPFILE_API;
 
     // ─── Buffer tracing kind constants ────────────────────────────────────────
     static constexpr buffer_tracing_kind BUFFER_TRACING_HSA_CORE_API =
