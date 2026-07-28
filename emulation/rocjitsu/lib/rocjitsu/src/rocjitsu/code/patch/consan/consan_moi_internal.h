@@ -79,13 +79,22 @@ struct ScalarOwnerContextSummary {
   std::optional<uint64_t> descriptor_file_offset;
   uint16_t current_sgpr_count = 0;
   uint16_t max_referenced_sgpr_count = 0;
+  /// Scalar-relative access can reach registers absent from explicit def/use
+  /// sets, so a static maximum alone does not bound this owner.
+  bool has_indirect_sgpr_access = false;
+  /// True only when every executable control-flow destination is represented
+  /// by the owner reference scan.
+  bool sgpr_reference_coverage_complete = false;
   bool descriptor_valid = false;
 };
 
 struct ScalarOwnerContextResolution {
   std::vector<size_t> context_indices;
+  /// Hard bound that dominates every SGPR any resolved owner may reach.
   uint32_t tail_floor = 0;
 };
+
+[[nodiscard]] uint16_t scalar_owner_tail_floor(const ScalarOwnerContextSummary &context);
 
 /// Fully encoded semantic identity for one sampled atomic synchronization
 /// candidate. Physical aliases may fold only when every field matches.

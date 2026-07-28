@@ -5555,6 +5555,65 @@ TEST(ConSanMoi, Gfx1201RecordReplayAvoidsPrivateEpochOnHotAccesses) {
   EXPECT_FALSE(prologue->persistent_epoch_private_offset);
 }
 
+TEST(ConSanMoi, Rdna4ScalarRelativeVariantsUseFixedWaveSgprBound) {
+  struct Target {
+    rj_code_arch_t arch;
+    std::string_view label;
+  };
+  constexpr std::array kTargets = {
+      Target{ROCJITSU_CODE_ARCH_RDNA4, "gfx1201"},
+      Target{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
+  };
+  constexpr std::array kIndirectInstructions = {
+      0xBE804002u, // s_movrels_b32 s0, s2
+      0xBE804202u, // s_movreld_b32 s0, s2
+      0xBE804402u, // s_movrelsd_2_b32 s0, s2
+  };
+  constexpr uint32_t kBarrierWait = 0xBF940000u;
+
+  for (const Target &target : kTargets) {
+    for (uint32_t indirect_instruction : kIndirectInstructions) {
+      SCOPED_TRACE(std::string(target.label) + ":" + std::to_string(indirect_instruction));
+      std::vector<uint32_t> text_words = {
+          0xD8340000u,
+          0x00000000u, // ds_store_b32 v0, v0
+      };
+      text_words.insert(text_words.end(), 33u, kBarrierWait);
+      text_words.push_back(0xBED00000u); // s_mov_b32 s80, s0
+      text_words.push_back(indirect_instruction);
+      text_words.push_back(build_s_endpgm(target.arch));
+      const std::vector<uint8_t> bytes =
+          target.arch == ROCJITSU_CODE_ARCH_GFX1250
+              ? make_gfx1250_code_object(text_words, "rdna_indirect_sgpr",
+                                         /*vgpr_granulated=*/3u)
+              : make_rdna4_lds_code_object(text_words, "rdna_indirect_sgpr",
+                                           /*vgpr_granulated=*/3u);
+
+      ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+      options.moi_dynamic_access_records = true;
+      options.moi_track_barriers = true;
+      options.moi_init_owner_epoch = true;
+      options.moi_report_buffer_address = 0x123456780000ull;
+      options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(64, 1, 0, 0, 64);
+
+      const ConSanResult result = try_patch_consan(bytes, options);
+
+      ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+      ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+      ASSERT_FALSE(result.resource_plans.empty());
+      EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
+        return plan.current_sgpr_count == 106u && plan.max_referenced_sgpr_count >= 81u &&
+               plan.scalar_tail_floor == 106u && plan.has_indirect_sgpr_access &&
+               plan.sgpr_reference_coverage_complete;
+      }));
+      EXPECT_FALSE(result.moi_persistent_sgprs_automatic);
+      EXPECT_FALSE(result.resolved_moi_persistent_owner_sgpr);
+      EXPECT_FALSE(result.resolved_moi_persistent_epoch_sgpr);
+      EXPECT_TRUE(result.final_validation_passed);
+    }
+  }
+}
+
 TEST(ConSanMoi, Gfx1250FullVgprRecordReplayUsesScalarEpochCoalescing) {
   constexpr uint32_t kBarrierWait = 0xBF94FFFFu;
   std::vector<uint32_t> text_words = {
@@ -6420,9 +6479,11 @@ TEST(ConSanMoi, Cdna4ScalarHoleFailsClosedWithoutCompleteTextCoverage) {
   const std::array<uint32_t, 1> helper_words = {build_s_endpgm(kArch)};
   // This executable tail is intentionally outside every declared function
   // range. Complete-text coverage must therefore fail rather than blessing an
-  // owner-local hole across the unresolved call.
+  // owner-local hole across the unresolved call. The omitted destination uses
+  // scalar-relative addressing, which is intentionally invisible to the
+  // recovered owner scope.
   const std::array<uint32_t, 3> uncovered_tail = {
-      build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/72u, kArch),
+      0xBE802A02u, // s_movrels_b32 s0, s2
       build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/73u, kArch),
       build_s_endpgm(kArch),
   };
@@ -6448,6 +6509,11 @@ TEST(ConSanMoi, Cdna4ScalarHoleFailsClosedWithoutCompleteTextCoverage) {
   EXPECT_FALSE(result.moi_persistent_sgprs_automatic);
   EXPECT_FALSE(result.resolved_moi_persistent_owner_sgpr);
   EXPECT_FALSE(result.resolved_moi_persistent_epoch_sgpr);
+  ASSERT_FALSE(result.resource_plans.empty());
+  EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
+    return !plan.has_indirect_sgpr_access && !plan.sgpr_reference_coverage_complete &&
+           plan.scalar_tail_floor >= 104u;
+  }));
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("unresolved guest call s_swappc_b64") != std::string::npos;
   })) << testing::PrintToString(result.warnings);

@@ -92,19 +92,21 @@ descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descri
   return descriptor_vgpr_allocation_count(desc, arch);
 }
 
-[[nodiscard]] uint16_t descriptor_sgpr_allocation_count(const KD &desc) {
+[[nodiscard]] uint16_t descriptor_sgpr_allocation_count(const KD &desc, rj_code_arch_t arch) {
   constexpr uint32_t kMaxOrdinarySgprs = 106u;
   const uint32_t granulated = AMDHSA_BITS_GET(
       desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  return static_cast<uint16_t>(std::min<uint32_t>((granulated + 1u) * 8u, kMaxOrdinarySgprs));
+  return static_cast<uint16_t>(std::min<uint32_t>(
+      amdgpu_kernel_descriptor_sgpr_count(granulated, arch), kMaxOrdinarySgprs));
 }
 
-[[nodiscard]] bool grow_descriptor_sgpr_allocation(KD &desc, uint16_t required_count) {
+[[nodiscard]] bool grow_descriptor_sgpr_allocation(KD &desc, uint16_t required_count,
+                                                   rj_code_arch_t arch) {
   constexpr uint32_t kSgprGranularity = 8u;
   constexpr uint32_t kMaxRdna4OrdinarySgprs = 106u;
   if (required_count == 0 || required_count > kMaxRdna4OrdinarySgprs)
     return false;
-  if (required_count <= descriptor_sgpr_allocation_count(desc))
+  if (required_count <= descriptor_sgpr_allocation_count(desc, arch))
     return true;
   const uint32_t rounded = (static_cast<uint32_t>(required_count) + kSgprGranularity - 1u) /
                            kSgprGranularity * kSgprGranularity;
@@ -159,6 +161,7 @@ merge_descriptor_sgpr_growths(std::span<const DescriptorSgprGrowth> growths) {
 [[nodiscard]] bool
 apply_descriptor_sgpr_growths_to_patcher(CodeObjectPatcher &patcher,
                                          std::span<const DescriptorSgprGrowth> growths,
+                                         rj_code_arch_t arch,
                                          std::vector<std::string> &errors) {
   const std::span<const uint8_t> current_image = patcher.image_bytes();
   for (const auto &[descriptor_file_offset, required_count] :
@@ -170,7 +173,7 @@ apply_descriptor_sgpr_growths_to_patcher(CodeObjectPatcher &patcher,
     }
     KD desc{};
     std::memcpy(&desc, current_image.data() + descriptor_file_offset, sizeof(desc));
-    if (!grow_descriptor_sgpr_allocation(desc, required_count) ||
+    if (!grow_descriptor_sgpr_allocation(desc, required_count, arch) ||
         !patcher.patch_kernel_descriptor(
             descriptor_file_offset, {reinterpret_cast<const uint8_t *>(&desc), sizeof(desc)})) {
       errors.emplace_back("ConSan relay reservoir could not grow descriptor SGPR allocation");
@@ -183,6 +186,7 @@ apply_descriptor_sgpr_growths_to_patcher(CodeObjectPatcher &patcher,
 [[nodiscard]] bool
 apply_descriptor_sgpr_growths_to_bytes(std::span<uint8_t> image,
                                        std::span<const DescriptorSgprGrowth> growths,
+                                       rj_code_arch_t arch,
                                        std::vector<std::string> &errors) {
   for (const auto &[descriptor_file_offset, required_count] :
        merge_descriptor_sgpr_growths(growths)) {
@@ -193,7 +197,7 @@ apply_descriptor_sgpr_growths_to_bytes(std::span<uint8_t> image,
     }
     KD desc{};
     std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-    if (!grow_descriptor_sgpr_allocation(desc, required_count)) {
+    if (!grow_descriptor_sgpr_allocation(desc, required_count, arch)) {
       errors.emplace_back("ConSan relay reservoir could not grow descriptor SGPR allocation");
       return false;
     }

@@ -3691,7 +3691,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             "ConSan MOI resource reader=%llu site=%s candidate=%zu text_offset=0x%llx "
             "source=%s reason=%s owners=%zu owner_names=%s scratch_vgpr=%s scratch_count=%u "
             "current_vgprs=%u max_referenced_vgprs=%u required_vgprs=%u "
-            "current_sgprs=%u max_referenced_sgprs=%u "
+            "current_sgprs=%u max_referenced_sgprs=%u scalar_tail_floor=%u "
+            "indirect_sgprs=%s sgpr_reference_coverage=%s "
             "private_bytes=%u",
             static_cast<unsigned long long>(code_object_reader.handle),
             moi_resource_site_kind_name(plan.site_kind), plan.candidate_index,
@@ -3702,6 +3703,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             plan.scratch_vgpr ? std::to_string(*plan.scratch_vgpr).c_str() : "-",
             plan.scratch_vgpr_count, plan.current_vgpr_count, plan.max_referenced_vgpr_count,
             plan.required_vgpr_count, plan.current_sgpr_count, plan.max_referenced_sgpr_count,
+            plan.scalar_tail_floor, plan.has_indirect_sgpr_access ? "true" : "false",
+            plan.sgpr_reference_coverage_complete ? "complete" : "open",
             plan.original_private_segment_size);
       }
       if (patch_result.resolved_moi_owner_vgpr || patch_result.resolved_moi_epoch_vgpr ||

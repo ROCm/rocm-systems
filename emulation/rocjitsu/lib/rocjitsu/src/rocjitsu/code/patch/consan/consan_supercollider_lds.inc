@@ -788,7 +788,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       context.owner_contexts.push_back(&*owner_context);
       KD descriptor{};
       std::memcpy(&descriptor, original_bytes.data() + owner, sizeof(descriptor));
-      const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(descriptor);
+      const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(descriptor, arch);
       context.max_owner_private_segment_size =
           std::max(context.max_owner_private_segment_size, descriptor.private_segment_fixed_size);
       context.common_allocated_vgpr_count =
@@ -3522,7 +3522,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       result.patches.clear();
       return;
     }
-    if (!apply_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths,
+    if (!apply_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths, arch,
                                                   result.errors)) {
       result.patches.clear();
       return;
@@ -4033,8 +4033,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     result.patches.clear();
     return;
   }
-  if (!apply_descriptor_sgpr_growths_to_bytes(result.elf_bytes, descriptor_sgpr_growths,
-                                              result.errors)) {
+  if (!apply_descriptor_sgpr_growths_to_bytes(result.elf_bytes, descriptor_sgpr_growths, arch,
+                                               result.errors)) {
     result.patches.clear();
     return;
   }

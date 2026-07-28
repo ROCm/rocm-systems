@@ -578,7 +578,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       KD descriptor{};
       std::memcpy(&descriptor, original_bytes.data() + kernel.descriptor_file_offset,
                   sizeof(descriptor));
-      allocated_sgpr_count = descriptor_sgpr_allocation_count(descriptor);
+      allocated_sgpr_count = descriptor_sgpr_allocation_count(descriptor, arch);
       original_private_segment_size = descriptor.private_segment_fixed_size;
     }
     for (const ConSanFlatSite &site : kernel.flat_sites)
@@ -634,7 +634,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         } else {
           KD descriptor{};
           std::memcpy(&descriptor, original_bytes.data() + owner, sizeof(descriptor));
-          const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(descriptor);
+          const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(descriptor, arch);
           max_owner_private_segment_size =
               std::max(max_owner_private_segment_size, descriptor.private_segment_fixed_size);
           common_allocated_sgpr_count = has_common_allocated_sgpr_count
@@ -1377,7 +1377,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   }
   if (has_appended_patch) {
     CodeObjectPatcher patcher(code_object);
-    if (!apply_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths, result.errors))
+    if (!apply_descriptor_sgpr_growths_to_patcher(patcher, descriptor_sgpr_growths, arch,
+                                                  result.errors))
       return;
     for (const auto &[descriptor_offset, required_private_bytes] :
          descriptor_private_requirements) {
@@ -1476,7 +1477,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       KD descriptor{};
       std::memcpy(&descriptor, patched_bytes.data() + *active_descriptor_offset,
                   sizeof(descriptor));
-      if (!grow_descriptor_sgpr_allocation(descriptor, required_count)) {
+      if (!grow_descriptor_sgpr_allocation(descriptor, required_count, arch)) {
         result.errors.emplace_back("ConSan flat check/trap proof could not grow SGPR allocation");
         return;
       }

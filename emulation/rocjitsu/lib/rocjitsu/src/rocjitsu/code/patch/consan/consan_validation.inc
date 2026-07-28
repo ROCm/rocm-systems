@@ -3582,7 +3582,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
       }
     }
     const uint16_t replacement_sgpr_count =
-        descriptor_sgpr_allocation_count(replacement_descriptor);
+        descriptor_sgpr_allocation_count(replacement_descriptor, arch);
     if (requirement.required_sgpr_count != 0 &&
         replacement_sgpr_count < requirement.required_sgpr_count) {
       errors.emplace_back(

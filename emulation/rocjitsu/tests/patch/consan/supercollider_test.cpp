@@ -4969,7 +4969,7 @@ TEST(ConSan, Gfx1250SharedLdsVccSpillUsesAllOwnersCommonSgprAllocation) {
   }
 }
 
-TEST(ConSan, Gfx1250SharedLdsDeadVccSaveGrowsEveryOwnerDescriptor) {
+TEST(ConSan, Gfx1250SharedLdsDeadVccSaveSatisfiesEveryOwnerDescriptor) {
   constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
   std::vector<uint32_t> helper_words = {load[0], load[1]};
   for (uint16_t sgpr = 0; sgpr < 8u; ++sgpr)
@@ -5038,11 +5038,17 @@ TEST(ConSan, Gfx1250SharedLdsDeadVccSaveGrowsEveryOwnerDescriptor) {
                 sizeof(descriptor));
     const uint32_t granulated = AMDHSA_BITS_GET(
         descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-    EXPECT_GE((granulated + 1u) * 8u, patch->required_sgpr_count);
+    const uint32_t allocated =
+        amdgpu_kernel_descriptor_sgpr_count(granulated, ROCJITSU_CODE_ARCH_GFX1250);
+    EXPECT_GE(allocated, patch->required_sgpr_count);
+    if (owner_name == "shared_owner_0")
+      EXPECT_GT(granulated, 3u);
+    else
+      EXPECT_EQ(granulated, 0u); // RDNA's fixed SGPR pool needs no field update.
   }
 }
 
-TEST(ConSan, Rdna4InlineLdsDeadVccSaveGrowsDescriptorInPlace) {
+TEST(ConSan, Rdna4InlineLdsDeadVccSaveUsesFixedSgprPoolWithoutGrowth) {
   std::vector<uint32_t> text_words = {
       0xD8D80000u,
       0x01000002u, // ds_load_b32 v1, v2
@@ -5088,7 +5094,9 @@ TEST(ConSan, Rdna4InlineLdsDeadVccSaveGrowsDescriptorInPlace) {
               sizeof(patched_descriptor));
   const uint32_t granulated = AMDHSA_BITS_GET(
       patched_descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  EXPECT_GE((granulated + 1u) * 8u, patch.required_sgpr_count);
+  EXPECT_EQ(granulated, 0u);
+  EXPECT_GE(amdgpu_kernel_descriptor_sgpr_count(granulated, ROCJITSU_CODE_ARCH_RDNA4),
+            patch.required_sgpr_count);
 }
 
 TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {

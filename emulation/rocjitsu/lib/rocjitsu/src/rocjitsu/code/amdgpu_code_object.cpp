@@ -823,8 +823,9 @@ namespace {
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
-// Decode one kernel descriptor's per-wave SGPR count from its granulated field.
-[[nodiscard]] uint32_t sgpr_count_from_granulated(uint32_t granulated, rj_code_arch_t arch) {
+} // namespace
+
+uint32_t amdgpu_kernel_descriptor_sgpr_count(uint32_t granulated, rj_code_arch_t arch) {
   // Descriptor-encoded (granulated != 0, or a CDNA target): (granulated + 1) * 8.
   // Otherwise the field is an RDNA-style sentinel and the wave owns the fixed
   // per-wave SGPR pool.
@@ -832,8 +833,6 @@ namespace {
     return (granulated + 1) * 8;
   return amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF;
 }
-
-} // namespace
 
 std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
   namespace kd = rocr::llvm::amdhsa;
@@ -854,7 +853,7 @@ std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t a
       std::memcpy(&desc, section->data() + off, sizeof(desc));
       const uint32_t granulated = AMDHSA_BITS_GET(
           desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-      const uint32_t count = sgpr_count_from_granulated(granulated, arch);
+      const uint32_t count = amdgpu_kernel_descriptor_sgpr_count(granulated, arch);
       min_count = min_count ? std::min(*min_count, count) : count;
       break;
     }

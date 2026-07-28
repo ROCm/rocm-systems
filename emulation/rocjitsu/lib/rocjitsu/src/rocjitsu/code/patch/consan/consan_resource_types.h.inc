@@ -98,6 +98,11 @@ struct ConSanCandidateResourcePlan {
   uint16_t required_vgpr_count = 0;
   uint16_t current_sgpr_count = 0;
   uint16_t max_referenced_sgpr_count = 0;
+  /// Per-owner dominating bound used by scalar persistent-state placement.
+  uint16_t scalar_tail_floor = 0;
+  /// Diagnostic aggregation; placement computes scalar_tail_floor per owner.
+  bool has_indirect_sgpr_access = false;
+  bool sgpr_reference_coverage_complete = false;
   uint32_t original_private_segment_size = 0;
 };
 

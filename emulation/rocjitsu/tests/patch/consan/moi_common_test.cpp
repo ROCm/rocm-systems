@@ -146,14 +146,46 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
 
 TEST(ConSanMoi, ScalarOwnerContextResolutionFailsClosedAndComputesTailFloor) {
   using Summary = consan_detail::ScalarOwnerContextSummary;
+  struct TailFloorCase {
+    uint16_t current;
+    uint16_t max_referenced;
+    bool indirect;
+    bool coverage_complete;
+    uint32_t expected;
+  };
+  constexpr std::array kTailFloorCases = {
+      TailFloorCase{80u, 72u, false, true, 72u},  TailFloorCase{40u, 48u, false, true, 48u},
+      TailFloorCase{80u, 72u, true, true, 80u},   TailFloorCase{40u, 48u, true, true, 48u},
+      TailFloorCase{80u, 72u, false, false, 80u}, TailFloorCase{40u, 48u, false, false, 48u},
+  };
+  constexpr std::array<uint64_t, 1> kSingleOwner = {0x10u};
+  for (const TailFloorCase &test_case : kTailFloorCases) {
+    SCOPED_TRACE(testing::PrintToString(test_case.expected));
+    const std::array context = {
+        Summary{.descriptor_file_offset = 0x10u,
+                .current_sgpr_count = test_case.current,
+                .max_referenced_sgpr_count = test_case.max_referenced,
+                .has_indirect_sgpr_access = test_case.indirect,
+                .sgpr_reference_coverage_complete = test_case.coverage_complete,
+                .descriptor_valid = true},
+    };
+    const auto resolved = consan_detail::resolve_scalar_owner_contexts(true, context, kSingleOwner);
+    ASSERT_TRUE(resolved);
+    EXPECT_EQ(resolved->tail_floor, test_case.expected);
+  }
+
   const std::array contexts = {
       Summary{.descriptor_file_offset = 0x10u,
               .current_sgpr_count = 40u,
               .max_referenced_sgpr_count = 48u,
+              .has_indirect_sgpr_access = false,
+              .sgpr_reference_coverage_complete = true,
               .descriptor_valid = true},
       Summary{.descriptor_file_offset = 0x20u,
               .current_sgpr_count = 80u,
               .max_referenced_sgpr_count = 72u,
+              .has_indirect_sgpr_access = true,
+              .sgpr_reference_coverage_complete = true,
               .descriptor_valid = true},
   };
   constexpr std::array<uint64_t, 2> kOwners = {0x20u, 0x10u};
@@ -163,6 +195,14 @@ TEST(ConSanMoi, ScalarOwnerContextResolutionFailsClosedAndComputesTailFloor) {
   ASSERT_TRUE(resolved);
   EXPECT_EQ(resolved->context_indices, (std::vector<size_t>{1u, 0u}));
   EXPECT_EQ(resolved->tail_floor, 80u);
+
+  std::array direct_only_contexts = contexts;
+  direct_only_contexts[1].has_indirect_sgpr_access = false;
+  // A closed direct-only owner may reclaim allocated but unreferenced SGPRs.
+  const auto direct_only =
+      consan_detail::resolve_scalar_owner_contexts(true, direct_only_contexts, kOwners);
+  ASSERT_TRUE(direct_only);
+  EXPECT_EQ(direct_only->tail_floor, 72u);
 
   EXPECT_FALSE(consan_detail::resolve_scalar_owner_contexts(false, contexts, kOwners));
   EXPECT_FALSE(
@@ -713,20 +753,21 @@ TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
   EXPECT_EQ(plan.scratch_vgpr_count, 6u);
 }
 
-TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
+std::vector<uint8_t> make_cdna4_shared_scalar_owner_code_object(bool indirect_sgpr_access) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto access =
       build_cdna4_ds_store_b32(/*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/0, kArch);
-  ASSERT_TRUE(access);
+  if (!access)
+    return {};
   std::vector<uint32_t> helper(access->begin(), access->end());
-  helper.push_back(0xBE802A02u); // s_movrels_b32 s0, s2
+  if (indirect_sgpr_access)
+    helper.push_back(0xBE802A02u); // s_movrels_b32 s0, s2
 
   TwoKernelSharedFixtureOptions fixture;
   fixture.first_vgpr_granulated = 3u;
   fixture.second_vgpr_granulated = 3u;
   fixture.entry_nop_words = 1u;
   std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture, kArch, helper);
-  ASSERT_FALSE(bytes.empty());
   mutate_kernel_descriptor(bytes, "shared_owner_0", [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                     1u);
@@ -751,6 +792,41 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
   append_kernel_metadata_note(bytes, "shared_owner_0", /*uses_dynamic_stack=*/true,
                               /*sgpr_count=*/0u, std::nullopt, std::nullopt,
                               /*has_dynamic_lds=*/false, kAdditionalOwners);
+  return bytes;
+}
+
+TEST(ConSanMoi, Cdna4DirectScalarStateReusesUnreferencedSharedOwnerAllocation) {
+  const std::vector<uint8_t> bytes =
+      make_cdna4_shared_scalar_owner_code_object(/*indirect_sgpr_access=*/false);
+  ASSERT_FALSE(bytes.empty());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.force_vgpr_spill = true;
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2);
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+  ASSERT_FALSE(result.resource_plans.empty());
+  EXPECT_LT(*result.resolved_moi_persistent_owner_sgpr, 80u);
+  EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
+    return !plan.has_indirect_sgpr_access && plan.sgpr_reference_coverage_complete &&
+           plan.scalar_tail_floor < 80u;
+  }));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
+  const std::vector<uint8_t> bytes =
+      make_cdna4_shared_scalar_owner_code_object(/*indirect_sgpr_access=*/true);
+  ASSERT_FALSE(bytes.empty());
 
   // The per-owner context path is shared by the Sampled/Inline dynamic-stack
   // fallback and Record/Replay's scalar tail. InlineShadow's scalar entry and
@@ -780,6 +856,7 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
         << testing::PrintToString(result.warnings);
     ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
     EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
+    EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 80u);
     EXPECT_EQ(*result.resolved_moi_persistent_epoch_sgpr,
               *result.resolved_moi_persistent_owner_sgpr + 1u);
     if (engine == ConSanMoiEngine::RecordReplay) {
@@ -798,6 +875,12 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
                  patch.owner_descriptor_file_offsets.size() == 2u;
         });
     ASSERT_NE(access_patch, result.patches.end());
+    ASSERT_FALSE(result.resource_plans.empty());
+    EXPECT_TRUE(
+        std::ranges::all_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+          return plan.has_indirect_sgpr_access && plan.sgpr_reference_coverage_complete &&
+                 plan.scalar_tail_floor >= 80u;
+        }));
     EXPECT_TRUE(result.final_validation_passed);
   }
 }
@@ -2190,7 +2273,8 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
   EXPECT_EQ(vgpr_granulated, 3u);
   const uint32_t sgpr_granulated = AMDHSA_BITS_GET(
       descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  EXPECT_EQ(sgpr_granulated, 2u);
+  // RDNA's zero field already denotes the complete fixed per-wave SGPR pool.
+  EXPECT_EQ(sgpr_granulated, 0u);
 
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);

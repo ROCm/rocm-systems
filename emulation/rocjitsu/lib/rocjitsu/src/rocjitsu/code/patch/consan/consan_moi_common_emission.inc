@@ -577,7 +577,7 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
     }
     KD descriptor{};
     std::memcpy(&descriptor, current_image.data() + active_descriptor_offset, sizeof(descriptor));
-    if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_count)) {
+    if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_count, result.arch)) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
       return false;
     }
@@ -674,7 +674,7 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
     }
     KD descriptor{};
     std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_count)) {
+    if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_count, result.arch)) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
       return false;
     }

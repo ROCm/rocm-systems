@@ -1219,7 +1219,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO) != 0
                ? 1u
                : 0u);
-      if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_sgpr_count)) {
+      if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_sgpr_count, arch)) {
         result.errors.emplace_back(
             "ConSan MOI could not allocate the full CDNA workgroup-ID payload");
         return false;
@@ -1268,7 +1268,8 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
     errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation");
     return false;
   }
-  if (required_sgpr_count != 0 && !grow_moi_descriptor_sgpr_allocation(desc, required_sgpr_count)) {
+  if (required_sgpr_count != 0 &&
+      !grow_moi_descriptor_sgpr_allocation(desc, required_sgpr_count, arch)) {
     errors.emplace_back("ConSan MOI could not grow descriptor SGPR allocation");
     return false;
   }
@@ -1321,7 +1322,7 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
   }
   const uint32_t required_sgpr_count = std::max<uint32_t>(
       plan.required_sgpr_count, static_cast<uint32_t>(persistent_dispatch_sgpr) + 2u);
-  if (!grow_moi_descriptor_sgpr_allocation(desc, required_sgpr_count)) {
+  if (!grow_moi_descriptor_sgpr_allocation(desc, required_sgpr_count, arch)) {
     errors.emplace_back("ConSan MOI could not grow dispatch-ID descriptor SGPR allocation");
     return false;
   }

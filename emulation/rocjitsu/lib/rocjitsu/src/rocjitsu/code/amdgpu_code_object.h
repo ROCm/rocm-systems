@@ -44,6 +44,14 @@ struct AmdGpuFunctionInfo {
   bool code_size_inferred_from_zero = false;
 };
 
+/// Decode `GRANULATED_WAVEFRONT_SGPR_COUNT` for one kernel descriptor.
+///
+/// A zero field denotes an eight-register allocation on CDNA and the fixed
+/// per-wave SGPR pool on RDNA. Nonzero fields encode `(granulated + 1) * 8`
+/// on both families.
+[[nodiscard]] uint32_t amdgpu_kernel_descriptor_sgpr_count(uint32_t granulated,
+                                                           rj_code_arch_t arch);
+
 /// @brief Represents a single AMD GPU HSA ELF code object.
 ///
 /// A code object is a device ELF containing GPU machine code (.text sections),

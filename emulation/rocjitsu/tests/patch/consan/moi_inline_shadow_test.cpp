@@ -2272,7 +2272,8 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesHwIdOwnerAndSpecialStateSgprs)
               sizeof(descriptor));
   const uint32_t sgpr_granulated = AMDHSA_BITS_GET(
       descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  EXPECT_GE(sgpr_granulated, 1u);
+  // RDNA's zero field already denotes the complete fixed per-wave SGPR pool.
+  EXPECT_EQ(sgpr_granulated, 0u);
 }
 
 TEST(ConSanMoi, InlineShadowPrivateEpochUsesWave32OwnerShift) {

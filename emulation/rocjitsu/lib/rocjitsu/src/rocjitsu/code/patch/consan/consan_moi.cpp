@@ -80,10 +80,16 @@ consan_detail::resolve_scalar_owner_contexts(bool planning_state_valid,
     resolution.context_indices.push_back(
         static_cast<size_t>(std::distance(contexts.begin(), context)));
     resolution.tail_floor =
-        std::max<uint32_t>(resolution.tail_floor, std::max(context->max_referenced_sgpr_count,
-                                                           context->current_sgpr_count));
+        std::max<uint32_t>(resolution.tail_floor, scalar_owner_tail_floor(*context));
   }
   return resolution;
+}
+
+uint16_t consan_detail::scalar_owner_tail_floor(const ScalarOwnerContextSummary &context) {
+  uint16_t floor = context.max_referenced_sgpr_count;
+  if (context.has_indirect_sgpr_access || !context.sgpr_reference_coverage_complete)
+    floor = std::max(floor, context.current_sgpr_count);
+  return floor;
 }
 
 bool consan_detail::validate_scalar_state_temporaries(const ConSanOptions &options,

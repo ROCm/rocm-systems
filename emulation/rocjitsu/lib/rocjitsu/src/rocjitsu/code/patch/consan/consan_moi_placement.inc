@@ -538,10 +538,11 @@ record_replay_persistent_workgroup_sources(const ConSanOptions &options, rj_code
   return std::min<uint32_t>(allocated, kMaxVgprs);
 }
 
-[[nodiscard]] uint32_t moi_descriptor_sgpr_allocation_count(const KD &desc) {
+[[nodiscard]] uint32_t moi_descriptor_sgpr_allocation_count(const KD &desc,
+                                                            rj_code_arch_t arch) {
   const uint32_t granulated = AMDHSA_BITS_GET(
       desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  const uint32_t allocated = (granulated + 1u) * 8u;
+  const uint32_t allocated = amdgpu_kernel_descriptor_sgpr_count(granulated, arch);
   return std::min<uint32_t>(allocated, kMaxSgprs);
 }
 
@@ -633,10 +634,11 @@ struct MoiSgprRange {
   return true;
 }
 
-[[nodiscard]] bool grow_moi_descriptor_sgpr_allocation(KD &desc, uint32_t required_count) {
+[[nodiscard]] bool grow_moi_descriptor_sgpr_allocation(KD &desc, uint32_t required_count,
+                                                       rj_code_arch_t arch) {
   if (required_count == 0 || required_count > kMaxSgprs)
     return false;
-  if (required_count <= moi_descriptor_sgpr_allocation_count(desc))
+  if (required_count <= moi_descriptor_sgpr_allocation_count(desc, arch))
     return true;
 
   constexpr uint32_t kSgprGranularity = 8;
@@ -970,6 +972,8 @@ struct MoiKernelResourceContext {
   uint16_t current_sgpr_count = 0;
   uint16_t max_referenced_sgpr_count = 0;
   uint32_t original_private_segment_size = 0;
+  bool has_indirect_sgpr_access = false;
+  bool sgpr_reference_coverage_complete = false;
   bool has_indirect_vgpr_access = false;
   bool descriptor_valid = false;
   bool liveness_is_restricted = false;
@@ -1099,13 +1103,19 @@ apply_record_replay_entry_workgroup_assignment(ConSanOptions &options,
          record_replay_entry_workgroup_capture_is_unambiguous(options);
 }
 
+[[nodiscard]] bool is_indirect_sgpr_access(const Instruction &instruction) {
+  return instruction.mnemonic().starts_with("s_movrel");
+}
+
+[[nodiscard]] bool is_indirect_vgpr_access(const Instruction &instruction) {
+  return instruction.mnemonic().starts_with("v_movrel");
+}
+
 [[nodiscard]] bool has_indirect_vgpr_access(const KernelCfgScope &scope) {
   for (BasicBlock *block : scope.blocks) {
     if (block == nullptr)
       continue;
-    if (std::ranges::any_of(block->instructions(), [](const Instruction &inst) {
-          return inst.mnemonic().starts_with("v_movrel");
-        })) {
+    if (std::ranges::any_of(block->instructions(), is_indirect_vgpr_access)) {
       return true;
     }
   }
@@ -1258,9 +1268,9 @@ struct MoiOwnerRegisterReferenceSummary {
 
         if (!scan_references)
           continue;
-        if (instruction.mnemonic().starts_with("s_movrel"))
+        if (is_indirect_sgpr_access(instruction))
           result.uses_indirect_sgprs = true;
-        if (instruction.mnemonic().starts_with("v_movrel"))
+        if (is_indirect_vgpr_access(instruction))
           result.uses_indirect_vgprs = true;
         const InstDefUse def_use(instruction);
         result.references |= def_use.defs | def_use.uses;
@@ -1314,7 +1324,7 @@ struct MoiOwnerRegisterReferenceSummary {
     if (block == nullptr)
       continue;
     for (const Instruction &instruction : block->instructions()) {
-      if (instruction.mnemonic().starts_with("s_movrel"))
+      if (is_indirect_sgpr_access(instruction))
         return true;
       const InstDefUse def_use(instruction);
       if (intersects(def_use.defs | def_use.uses))
@@ -1467,6 +1477,11 @@ struct MoiResourcePlanningState {
       stored.max_referenced_vgpr_count = max_referenced_vgpr_count(stored.scope);
       stored.max_referenced_sgpr_count = std::max<uint16_t>(max_referenced_sgpr_count(stored.scope),
                                                             kernel.sgpr_count.value_or(0u));
+      const std::array<const MoiKernelResourceContext *, 1> owner = {&stored};
+      const MoiOwnerRegisterReferenceSummary scalar_references =
+          summarize_moi_owner_register_references(owner);
+      stored.has_indirect_sgpr_access = scalar_references.uses_indirect_sgprs;
+      stored.sgpr_reference_coverage_complete = scalar_references.control_flow_closed;
       stored.has_indirect_vgpr_access = has_indirect_vgpr_access(stored.scope);
 
       if (kernel.descriptor_file_offset > bytes.size() ||
@@ -1489,7 +1504,7 @@ struct MoiResourcePlanningState {
         }
       }
       stored.current_sgpr_count =
-          static_cast<uint16_t>(moi_descriptor_sgpr_allocation_count(descriptor));
+          static_cast<uint16_t>(moi_descriptor_sgpr_allocation_count(descriptor, arch));
       stored.original_private_segment_size = descriptor.private_segment_fixed_size;
       stored.descriptor_valid = true;
     }
@@ -1591,9 +1606,9 @@ summarize_moi_complete_text_register_references(const MoiResourcePlanningState &
     if (!block)
       continue;
     for (const Instruction &instruction : block->instructions()) {
-      if (instruction.mnemonic().starts_with("s_movrel"))
+      if (is_indirect_sgpr_access(instruction))
         result.uses_indirect_sgprs = true;
-      if (instruction.mnemonic().starts_with("v_movrel"))
+      if (is_indirect_vgpr_access(instruction))
         result.uses_indirect_vgprs = true;
       const InstDefUse def_use(instruction);
       result.references |= def_use.defs | def_use.uses;
@@ -1631,6 +1646,8 @@ resolve_moi_scalar_owner_contexts(const MoiResourcePlanningState &state,
             context.kernel ? std::optional{context.kernel->descriptor_file_offset} : std::nullopt,
         .current_sgpr_count = context.current_sgpr_count,
         .max_referenced_sgpr_count = context.max_referenced_sgpr_count,
+        .has_indirect_sgpr_access = context.has_indirect_sgpr_access,
+        .sgpr_reference_coverage_complete = context.sgpr_reference_coverage_complete,
         .descriptor_valid = context.descriptor_valid,
     });
   }
@@ -1922,6 +1939,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   plan.current_vgpr_count = kMaxVgprs;
   plan.ordinary_vgpr_limit = kMaxVgprs;
   plan.current_sgpr_count = kMaxSgprs;
+  plan.sgpr_reference_coverage_complete = true;
   RegisterSet live_before_all_owners;
   bool descriptors_valid = true;
   for (MoiKernelResourceContext *owner : owners) {
@@ -1932,6 +1950,20 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     plan.current_sgpr_count = std::min(plan.current_sgpr_count, owner->current_sgpr_count);
     plan.max_referenced_sgpr_count =
         std::max(plan.max_referenced_sgpr_count, owner->max_referenced_sgpr_count);
+    const consan_detail::ScalarOwnerContextSummary scalar_owner = {
+        .descriptor_file_offset = owner->kernel->descriptor_file_offset,
+        .current_sgpr_count = owner->current_sgpr_count,
+        .max_referenced_sgpr_count = owner->max_referenced_sgpr_count,
+        .has_indirect_sgpr_access = owner->has_indirect_sgpr_access,
+        .sgpr_reference_coverage_complete = owner->sgpr_reference_coverage_complete,
+        .descriptor_valid = owner->descriptor_valid,
+    };
+    plan.scalar_tail_floor = std::max(
+        plan.scalar_tail_floor, consan_detail::scalar_owner_tail_floor(scalar_owner));
+    // These two fields summarize diagnostics only. The actionable bound above
+    // is computed per owner before aggregation.
+    plan.has_indirect_sgpr_access |= owner->has_indirect_sgpr_access;
+    plan.sgpr_reference_coverage_complete &= owner->sgpr_reference_coverage_complete;
     plan.original_private_segment_size =
         std::max(plan.original_private_segment_size, owner->original_private_segment_size);
     live_before_all_owners |= owner->liveness->live_before(*anchor);
@@ -4343,12 +4375,11 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
                 "state");
             return false;
           }
-          // This pair crosses arbitrary guest code. Start beyond both the
-          // statically named operands and every owner's original allocation:
-          // scalar-relative s_movrel access is valid only within that original
-          // allocation, so descriptor growth cannot expose the new tuple to
-          // the guest. The candidate filter below separately preserves the
-          // physical-VCC location before and after that growth.
+          // This pair crosses arbitrary guest code. Closed direct-only owners
+          // may reuse descriptor padding above their highest named operand.
+          // Scalar-relative owners and owners with open reference coverage
+          // start beyond their original allocation. The candidate filter below
+          // separately preserves physical VCC before and after growth.
           const uint32_t first = resolved_contexts->tail_floor;
           const uint16_t scalar_limit = moi_ordinary_sgpr_limit(arch);
           const auto unavailable = [&](uint16_t base) {
