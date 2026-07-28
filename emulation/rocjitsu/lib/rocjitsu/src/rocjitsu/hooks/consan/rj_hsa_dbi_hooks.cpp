@@ -1163,9 +1163,9 @@ private:
 
 /// Couples every load-scoped major-image owner to its admission reservation.
 ///
-/// Explicit teardown makes the required lifetime relationship independent of
-/// declaration order in the load hook: image owners are always destroyed
-/// before an early-return path refunds the process reservation.
+/// The reservation is declared before every load-scoped owner so reverse member
+/// destruction refunds it only after those owners are destroyed. Explicit
+/// release paths likewise discard relevant image storage before refunding.
 class TransformLoadState {
 private:
   // Declared first so reverse member destruction releases this reservation

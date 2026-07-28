@@ -15,20 +15,23 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
 
-inline constexpr uint64_t kAmdGpuCodeObjectRetainedSymbolStateImageUnits = 3;
+inline constexpr uint64_t kAmdGpuCodeObjectRetainedDerivedStateImageUnits = 3;
 
 /// Conservative image-sized ownership units retained by one parsed object.
 ///
 /// The bound covers the backing image, up to two units for section objects and
 /// their vector slots, one copied-payload unit, one copied-section-name unit,
-/// and up to three bounded symbol-derived units for names and fixed entry state.
+/// and up to three bounded symbol- and metadata-derived units for names and
+/// fixed entry state.
 inline constexpr uint64_t kAmdGpuCodeObjectRetainedMajorImageUnits =
-    5 + kAmdGpuCodeObjectRetainedSymbolStateImageUnits;
+    5 + kAmdGpuCodeObjectRetainedDerivedStateImageUnits;
 
 struct AmdGpuKernelInfo {
   std::string name;
@@ -57,19 +60,41 @@ struct AmdGpuFunctionInfo {
 /// Conservative fixed charges for symbol-derived parser roles.
 ///
 /// Aggregate accounting combines roles that share a logical name. These
-/// charges scale with retained public records and leave room for overlapping
-/// transient entries, vector capacity, and associative container nodes. Copied
-/// name bytes are charged separately. Allocator bookkeeping remains outside the
-/// major-image model.
-inline constexpr uint64_t kAmdGpuCodeObjectKernelEntryChargeBytes = 3 * sizeof(AmdGpuKernelInfo);
-inline constexpr uint64_t kAmdGpuCodeObjectKernelAndTransientEntryChargeBytes =
-    4 * sizeof(AmdGpuKernelInfo);
-inline constexpr uint64_t kAmdGpuCodeObjectFunctionEntryChargeBytes =
-    3 * sizeof(AmdGpuFunctionInfo) + sizeof(void *);
-inline constexpr uint64_t kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes =
-    4 * sizeof(AmdGpuFunctionInfo);
+/// charges are built from the retained public records, transient entries, and
+/// associative container nodes that each role owns. Copied name bytes and
+/// excess vector capacity are charged separately. Allocator bookkeeping remains
+/// outside the major-image model.
+namespace amdgpu_code_object_detail {
+
+[[nodiscard]] inline constexpr uint64_t aligned_charge(uint64_t bytes, uint64_t alignment) {
+  return ((bytes + alignment - 1u) / alignment) * alignment;
+}
+
+inline constexpr uint64_t kAssociativeEntryBookkeepingBytes = 4 * sizeof(void *);
+inline constexpr uint64_t kViewedBooleanEntryBytes =
+    aligned_charge(sizeof(std::string_view) + sizeof(bool), alignof(void *));
+inline constexpr uint64_t kFunctionSymbolEntryBytes = aligned_charge(
+    sizeof(std::string_view) + 4 * sizeof(uint64_t) + sizeof(bool), alignof(uint64_t));
+inline constexpr uint64_t kFunctionEvidenceEntryBytes =
+    aligned_charge(3 * sizeof(uint64_t) + sizeof(bool), alignof(uint64_t));
+
+} // namespace amdgpu_code_object_detail
+
 inline constexpr uint64_t kAmdGpuCodeObjectTransientSymbolEntryChargeBytes =
-    sizeof(AmdGpuFunctionInfo);
+    amdgpu_code_object_detail::kViewedBooleanEntryBytes +
+    amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes;
+inline constexpr uint64_t kAmdGpuCodeObjectKernelEntryChargeBytes =
+    sizeof(AmdGpuKernelInfo) + sizeof(std::pair<const std::string, uint64_t>) +
+    2 * sizeof(std::pair<const std::string_view, uint64_t>) +
+    3 * amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes;
+inline constexpr uint64_t kAmdGpuCodeObjectKernelAndTransientEntryChargeBytes =
+    kAmdGpuCodeObjectKernelEntryChargeBytes + kAmdGpuCodeObjectTransientSymbolEntryChargeBytes;
+inline constexpr uint64_t kAmdGpuCodeObjectFunctionEntryChargeBytes =
+    sizeof(AmdGpuFunctionInfo) + amdgpu_code_object_detail::kFunctionSymbolEntryBytes +
+    amdgpu_code_object_detail::kFunctionEvidenceEntryBytes +
+    2 * amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes;
+inline constexpr uint64_t kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes =
+    kAmdGpuCodeObjectFunctionEntryChargeBytes + kAmdGpuCodeObjectTransientSymbolEntryChargeBytes;
 
 /// Decode `GRANULATED_WAVEFRONT_SGPR_COUNT` for one kernel descriptor.
 ///

@@ -278,6 +278,8 @@ struct KernelMetadata {
   std::optional<std::array<uint32_t, 3>> required_workgroup_size;
 };
 
+using KernelMetadataMap = std::unordered_map<std::string_view, KernelMetadata>;
+
 [[nodiscard]] bool read_kernel_args_metadata(MetadataCursor &cursor, bool &has_dynamic_lds) {
   uint32_t argument_count = 0;
   if (!read_metadata_collection_count(cursor, /*map=*/false, argument_count))
@@ -303,9 +305,8 @@ struct KernelMetadata {
   return true;
 }
 
-[[nodiscard]] std::unordered_map<std::string_view, KernelMetadata>
-parse_kernel_metadata(std::span<const uint8_t> payload) {
-  std::unordered_map<std::string_view, KernelMetadata> result;
+[[nodiscard]] KernelMetadataMap parse_kernel_metadata(std::span<const uint8_t> payload) {
+  KernelMetadataMap result;
   MetadataCursor root{payload};
   uint32_t root_entries = 0;
   if (!read_metadata_collection_count(root, /*map=*/true, root_entries))
@@ -385,9 +386,9 @@ parse_kernel_metadata(std::span<const uint8_t> payload) {
 
 [[nodiscard]] uint64_t align4(uint64_t value) { return (value + 3u) & ~uint64_t{3}; }
 
-[[nodiscard]] std::unordered_map<std::string_view, KernelMetadata>
-read_kernel_metadata(std::span<const uint8_t> image, const Elf64_Ehdr &header) {
-  std::unordered_map<std::string_view, KernelMetadata> result;
+[[nodiscard]] KernelMetadataMap read_kernel_metadata(std::span<const uint8_t> image,
+                                                     const Elf64_Ehdr &header) {
+  KernelMetadataMap result;
   if (header.e_phentsize != sizeof(Elf64_Phdr) || header.e_phoff > image.size() ||
       static_cast<uint64_t>(header.e_phnum) * sizeof(Elf64_Phdr) > image.size() - header.e_phoff) {
     return result;
@@ -643,6 +644,8 @@ void AmdGpuCodeObject::load_sections() {
       return;
     }
     copied_section_bytes += shdr.sh_size;
+    // Only materialized, in-image sections participate in text classification.
+    // NOBITS has no file bytes and cannot provide patchable function ranges.
     text_section_indices[i] = sec_name == ".text";
     ++materialized_section_count;
     text_section_count += sec_name == ".text";
@@ -657,9 +660,25 @@ void AmdGpuCodeObject::load_sections() {
   sections_.reserve(materialized_section_count);
   text_sections_.reserve(text_section_count);
   rodata_sections_.reserve(rodata_section_count);
-  if (sections_.capacity() != materialized_section_count ||
-      text_sections_.capacity() != text_section_count ||
-      rodata_sections_.capacity() != rodata_section_count) {
+  uint64_t section_collection_bytes = 0;
+  const auto account_section_collection = [&](uint64_t count, uint64_t element_bytes) {
+    if (count != 0 && element_bytes > std::numeric_limits<uint64_t>::max() / count)
+      return false;
+    const uint64_t bytes = count * element_bytes;
+    if (bytes > std::numeric_limits<uint64_t>::max() - section_collection_bytes)
+      return false;
+    section_collection_bytes += bytes;
+    return true;
+  };
+  const uint64_t section_collection_budget =
+      image_.size() > std::numeric_limits<uint64_t>::max() / 2u
+          ? std::numeric_limits<uint64_t>::max()
+          : 2u * image_.size();
+  if (!account_section_collection(materialized_section_count, sizeof(HsaSection)) ||
+      !account_section_collection(sections_.capacity(), sizeof(std::unique_ptr<Section>)) ||
+      !account_section_collection(text_sections_.capacity(), sizeof(const Section *)) ||
+      !account_section_collection(rodata_sections_.capacity(), sizeof(const Section *)) ||
+      section_collection_bytes > section_collection_budget) {
     is_valid_ = false;
     return;
   }
@@ -690,14 +709,15 @@ void AmdGpuCodeObject::load_sections() {
   // kernels_) and one of each function name. Charging each distinct retained
   // role's copied name plus conservative aggregate fixed state therefore bounds
   // names, public records, and overlapping transient structures within the
-  // exported symbol-state budget. Aggregate accounting matters because a
+  // exported derived-state budget. Aggregate accounting matters because a
   // kernel, function, and dynamic-stack symbol commonly share one logical name.
-  uint64_t retained_symbol_state_bytes = 0;
+  uint64_t retained_derived_state_bytes = 0;
   std::unordered_map<std::string_view, uint64_t> kernel_descriptor_offsets;
   std::unordered_map<std::string_view, uint64_t> descriptor_file_offsets;
   std::unordered_map<std::string_view, FunctionSymbolInfo> function_symbols;
   std::unordered_map<std::string_view, bool> dynamic_stack_symbols;
-  constexpr uint64_t kAssociativeEntryBookkeepingBytes = 4 * sizeof(void *);
+  constexpr uint64_t kAssociativeEntryBookkeepingBytes =
+      amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes;
   static_assert(kAmdGpuCodeObjectKernelEntryChargeBytes >=
                 sizeof(AmdGpuKernelInfo) + sizeof(decltype(kd_offsets_)::value_type) +
                     sizeof(decltype(kernel_descriptor_offsets)::value_type) +
@@ -721,6 +741,12 @@ void AmdGpuCodeObject::load_sections() {
   static_assert(kAmdGpuCodeObjectTransientSymbolEntryChargeBytes >=
                 sizeof(decltype(dynamic_stack_symbols)::value_type) +
                     kAssociativeEntryBookkeepingBytes);
+  static_assert(kAmdGpuCodeObjectKernelAndTransientEntryChargeBytes ==
+                kAmdGpuCodeObjectKernelEntryChargeBytes +
+                    kAmdGpuCodeObjectTransientSymbolEntryChargeBytes);
+  static_assert(kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes ==
+                kAmdGpuCodeObjectFunctionEntryChargeBytes +
+                    kAmdGpuCodeObjectTransientSymbolEntryChargeBytes);
 
   enum class SymbolRetentionRole {
     Kernel,
@@ -729,20 +755,23 @@ void AmdGpuCodeObject::load_sections() {
   };
   const auto fixed_symbol_state_charge = [](bool has_kernel, bool has_function,
                                             bool has_dynamic_stack) {
-    if (has_kernel && has_function) {
-      return kAmdGpuCodeObjectKernelEntryChargeBytes +
-             (has_dynamic_stack ? kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes
-                                : kAmdGpuCodeObjectFunctionEntryChargeBytes);
+    return (has_kernel ? kAmdGpuCodeObjectKernelEntryChargeBytes : 0u) +
+           (has_function ? kAmdGpuCodeObjectFunctionEntryChargeBytes : 0u) +
+           (has_dynamic_stack ? kAmdGpuCodeObjectTransientSymbolEntryChargeBytes : 0u);
+  };
+  const uint64_t derived_state_budget_bytes =
+      image_.size() >
+              std::numeric_limits<uint64_t>::max() / kAmdGpuCodeObjectRetainedDerivedStateImageUnits
+          ? std::numeric_limits<uint64_t>::max()
+          : kAmdGpuCodeObjectRetainedDerivedStateImageUnits * image_.size();
+  const auto retain_derived_state_bytes = [&](uint64_t charge) {
+    if (charge > std::numeric_limits<uint64_t>::max() - retained_derived_state_bytes ||
+        retained_derived_state_bytes + charge > derived_state_budget_bytes) {
+      is_valid_ = false;
+      return false;
     }
-    if (has_kernel) {
-      return has_dynamic_stack ? kAmdGpuCodeObjectKernelAndTransientEntryChargeBytes
-                               : kAmdGpuCodeObjectKernelEntryChargeBytes;
-    }
-    if (has_function) {
-      return has_dynamic_stack ? kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes
-                               : kAmdGpuCodeObjectFunctionEntryChargeBytes;
-    }
-    return has_dynamic_stack ? kAmdGpuCodeObjectTransientSymbolEntryChargeBytes : 0u;
+    retained_derived_state_bytes += charge;
+    return true;
   };
   const auto retain_symbol_role = [&](std::string_view name, SymbolRetentionRole role) {
     bool has_kernel = kernel_descriptor_offsets.contains(name);
@@ -761,6 +790,10 @@ void AmdGpuCodeObject::load_sections() {
     has_dynamic_stack |= role == SymbolRetentionRole::DynamicStack;
     const uint64_t new_fixed_charge =
         fixed_symbol_state_charge(has_kernel, has_function, has_dynamic_stack);
+    if (new_fixed_charge < old_fixed_charge) {
+      is_valid_ = false;
+      return false;
+    }
     const uint64_t copied_name_count = role == SymbolRetentionRole::Kernel     ? 2u
                                        : role == SymbolRetentionRole::Function ? 1u
                                                                                : 0u;
@@ -775,23 +808,7 @@ void AmdGpuCodeObject::load_sections() {
       is_valid_ = false;
       return false;
     }
-    const uint64_t charge = fixed_charge_increment + copied_name_bytes;
-    if (charge > std::numeric_limits<uint64_t>::max() - retained_symbol_state_bytes) {
-      is_valid_ = false;
-      return false;
-    }
-    retained_symbol_state_bytes += charge;
-    uint64_t remaining_symbol_state_bytes = retained_symbol_state_bytes;
-    for (uint64_t unit = 0; unit < kAmdGpuCodeObjectRetainedSymbolStateImageUnits; ++unit) {
-      if (remaining_symbol_state_bytes <= image_.size())
-        return true;
-      remaining_symbol_state_bytes -= image_.size();
-    }
-    if (remaining_symbol_state_bytes != 0) {
-      is_valid_ = false;
-      return false;
-    }
-    return true;
+    return retain_derived_state_bytes(fixed_charge_increment + copied_name_bytes);
   };
   const auto symbol_file_offset = [&](const Elf64_Sym &sym) -> std::optional<uint64_t> {
     const std::optional<Elf64_Shdr> section = section_header(sym.st_shndx);
@@ -928,10 +945,20 @@ void AmdGpuCodeObject::load_sections() {
   const auto metadata = read_kernel_metadata(
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(image_.data()), image_.size()),
       elf_header);
+  constexpr uint64_t kKernelMetadataEntryChargeBytes =
+      sizeof(KernelMetadataMap::value_type) + kAssociativeEntryBookkeepingBytes;
+  if (metadata.size() > std::numeric_limits<uint64_t>::max() / kKernelMetadataEntryChargeBytes ||
+      !retain_derived_state_bytes(metadata.size() * kKernelMetadataEntryChargeBytes)) {
+    return;
+  }
 
   kernels_.clear();
   kernels_.reserve(kernel_descriptor_offsets.size());
-  if (kernels_.capacity() != kernel_descriptor_offsets.size()) {
+  if (kernels_.capacity() < kernel_descriptor_offsets.size() ||
+      kernels_.capacity() - kernel_descriptor_offsets.size() >
+          std::numeric_limits<uint64_t>::max() / sizeof(AmdGpuKernelInfo) ||
+      !retain_derived_state_bytes((kernels_.capacity() - kernel_descriptor_offsets.size()) *
+                                  sizeof(AmdGpuKernelInfo))) {
     is_valid_ = false;
     return;
   }
@@ -974,7 +1001,11 @@ void AmdGpuCodeObject::load_sections() {
 
   functions_.clear();
   functions_.reserve(function_symbols.size());
-  if (functions_.capacity() != function_symbols.size()) {
+  if (functions_.capacity() < function_symbols.size() ||
+      functions_.capacity() - function_symbols.size() >
+          std::numeric_limits<uint64_t>::max() / sizeof(AmdGpuFunctionInfo) ||
+      !retain_derived_state_bytes((functions_.capacity() - function_symbols.size()) *
+                                  sizeof(AmdGpuFunctionInfo))) {
     is_valid_ = false;
     return;
   }

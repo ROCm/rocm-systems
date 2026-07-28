@@ -64,8 +64,9 @@ consan_transform_ownership_phase_name(ConSanTransformOwnershipPhase phase) {
 /// result, a parser's exported ownership units, the patcher image, replacement
 /// text, and the transactional grown image. Each parser owns its image, section
 /// objects and vector slots, bounded payload, bounded section names, and
-/// conservatively charged symbol-derived state. Section headers, transient
-/// symbol-name characters, and metadata names are views into the parser image.
+/// conservatively charged symbol- and metadata-derived state. Section headers,
+/// transient symbol-name characters, and metadata names are views into the
+/// parser image.
 ///
 /// The composite variant additionally retains the independently validated
 /// mutation image while instrumenting it. That extra phase exists because the
@@ -78,10 +79,10 @@ consan_transform_ownership_phase_name(ConSanTransformOwnershipPhase phase) {
 /// MOI pipeline, and every patch stage moves its emitted image.
 ///
 /// AmdGpuCodeObject rejects aggregate copied section payload or section names
-/// larger than its backing image and symbol-derived state larger than its
-/// exported multi-unit budget. Allocator bookkeeping is not represented by
-/// these major-image units. The non-parser terms below keep the phase table
-/// mechanically coupled to the parser's exported ownership bound.
+/// larger than its backing image and symbol- and metadata-derived state larger
+/// than its exported multi-unit budget. Allocator bookkeeping is not
+/// represented by these major-image units. The non-parser terms below keep the
+/// phase table mechanically coupled to the parser's exported ownership bound.
 inline constexpr uint64_t kConSanIncrementalNonParserMaximumImageUnits = 4;
 inline constexpr uint64_t kConSanCompositeNonParserMaximumImageUnits = 5;
 inline constexpr uint64_t kConSanFinalOriginalNonParserInputImageUnits = 1;

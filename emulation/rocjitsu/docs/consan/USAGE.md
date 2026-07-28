@@ -162,25 +162,26 @@ continues to return the HSA error to callers that correctly handle it.
 
 The three process controls are independent. The concurrent-transform control is
 acquired before semantic inventory. It is a conservative admission unit for
-major ELF and parser storage, not a strict RSS limit: other non-image analysis
-metadata, allocator bookkeeping, and unrelated process memory are outside the
+major ELF and parser storage, not a strict RSS limit: allocator bookkeeping,
+other non-image analysis state, and unrelated process memory are outside the
 model. Let `I` be the original input size and `M` be `I` plus the configured
 per-object maximum growth. The modeled phases are `I + 12*M` for an ordinary
 incremental patch, `I + 13*M` while independently validated composite mutation
 storage remains live, and `9*I + 10*M` during final validation. Each parser has
 eight major-image units: its image, up to two units for section objects and
-their vector slots, bounded payload, bounded section names, and up to three units
-for symbol-derived state. That final budget charges each newly retained role
-for its copied name plus conservative aggregate kernel/function record and
-container state; roles sharing one logical symbol name share overlapping
-transient-state charges.
+their vector slots, bounded payload, bounded section names, and up to three
+units for symbol- and kernel-metadata-derived state. That final budget charges
+each newly retained role for its copied name plus conservative aggregate
+kernel/function record and container state; roles sharing one logical symbol
+name share overlapping transient-state charges. It also charges retained kernel
+metadata map entries and vector capacity beyond the requested entry count.
 Section headers, transient symbol-name characters, and metadata names are views
 into the image rather than duplicate owning collections.
 Admission uses the largest phase value and reports the governing phase and
 coefficients. The parser rejects aggregate copied section payload or
 section-name bytes larger than its backing image, and conservatively charged
-symbol-derived state larger than its three-unit budget. These coefficients
-supersede the earlier `I + 10*M`, `I + 11*M`, and
+symbol- and metadata-derived state larger than its three-unit budget. These
+coefficients supersede the earlier `I + 10*M`, `I + 11*M`, and
 `7*I + 8*M` model, which did not fully account for section-object, vector-slot,
 or dense per-symbol state. Deployments with a tuned concurrent-transform
 ceiling should rederive it from the current coefficients. The patcher
