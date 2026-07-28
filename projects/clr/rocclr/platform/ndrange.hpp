@@ -53,13 +53,23 @@ template <typename T = size_t> class NDRange : public EmbeddedObject {
   }
 
   //! Return the element at the given \a index.
-  T& operator[](size_t index) { return data_[index]; }
+  T& operator[](size_t index) {
+    assert(index < 3 && "Index overflows data_");
+    return data_[index];
+  }
 
   //! Return the element at the given \a index.
-  T operator[](size_t index) const { return data_[index]; }
+  T operator[](size_t index) const {
+    assert(index < 3 && "Index overflows data_");
+    return data_[index];
+  }
 
   //! Return the product of all three elements (unused dims must be set to 1 by caller).
-  T product() const { return data_[0] * data_[1] * data_[2]; }
+  //! product returns size_t to avoid overflows with narrow dtypes
+  size_t product() const {
+    return static_cast<size_t>(data_[0]) * static_cast<size_t>(data_[1]) *
+           static_cast<size_t>(data_[2]);
+  }
 
   //! Return true if this index space is identical to \a x.
   bool operator==(const NDRange& x) const {
@@ -100,6 +110,12 @@ struct LaunchParams {
         sharedMemBytes_(sharedMemBytes),
         hipParams_(hipParams),
         validConfig_(true) {
+    if (clusterX > std::numeric_limits<uint8_t>::max() ||
+        clusterY > std::numeric_limits<uint8_t>::max() ||
+        clusterZ > std::numeric_limits<uint8_t>::max()) {
+      validConfig_ = false;
+    }
+
     if (hipParams_) {
       // Check that the size_t globals fit in uint32_t before the narrowing cast above.
       if (globalX > std::numeric_limits<uint32_t>::max() ||
@@ -188,6 +204,7 @@ class NDRangeContainer {
         local_(1, 1, 1),
         cluster_(1, 1, 1),
         dimensions_(static_cast<uint16_t>(dimensions)) {
+    assert(dimensions_ < 3 && "Dimensions must be less than 3");
     for (size_t i = 0; i < dimensions; ++i) {
       offset_[i] = globalWorkOffset != nullptr ? globalWorkOffset[i] : 0;
       global_[i] = static_cast<uint32_t>(globalWorkSize[i]);
@@ -204,6 +221,7 @@ class NDRangeContainer {
         local_(1, 1, 1),
         cluster_(1, 1, 1),
         dimensions_(static_cast<uint16_t>(dimensions)) {
+    assert(dimensions_ < 3 && "Dimensions must be less than 3");
     for (size_t i = 0; i < dimensions; ++i) {
       offset_[i] = globalWorkOffset != nullptr ? globalWorkOffset[i] : 0;
       global_[i] = globalWorkSize[i];
