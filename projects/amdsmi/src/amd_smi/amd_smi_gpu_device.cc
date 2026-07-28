@@ -1074,7 +1074,7 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
    *      - 00000111 (last 3 bits are 1, all others 0)
    */
   // local_fabric_info.bdf.function_number = ((bdf_.function_number + kUALOE_BDF_OFFSET) & 0x07);
-  local_fabric_info.fabric_info =
+  local_fabric_info.fabric_version =
       std::numeric_limits<decltype(local_fabric_info.fabric_version)>::max();
 
   local_fabric_info.fabric_info.v1.fabric_type = static_cast<amdsmi_fabric_type_t>(
