@@ -95,7 +95,7 @@ def test_collection_period_trace(json_data, collection_period_data):
 
     data = json_data["rocprofiler-sdk-tool"]
 
-    on_core_records = 0
+    on_core_records = [0] * len(on_cores)
     off_core_records = {}
     for itr in ["hsa_api", "hip_api", "marker_api", "rccl_api"]:
         grp = data.buffer_records[itr]
@@ -107,8 +107,9 @@ def test_collection_period_trace(json_data, collection_period_data):
                     key = (index, record.thread_id)
                     off_core_records.setdefault(key, []).append((itr, record))
 
-            if any(w.in_region(ts) for w in on_cores):
-                on_core_records += 1
+            for index, window in enumerate(on_cores):
+                if window.in_region(ts):
+                    on_core_records[index] += 1
 
     # An API interceptor can snapshot the active context immediately before stop_context,
     # then be descheduled before taking the record's public start timestamp. Such a record
@@ -121,12 +122,21 @@ def test_collection_period_trace(json_data, collection_period_data):
             f"(window={off_cores[window_index]}, thread_id={thread_id}, "
             f"records={records}, guards={guards})"
         )
+        itr, record = records[0]
+        offset = record.start_timestamp - off_cores[window_index].offset
+        print(
+            "tolerated in-flight record while tracing was off "
+            f"(window={off_cores[window_index]}, thread_id={thread_id}, "
+            f"category={itr}, offset={offset / 1e6:.3f} ms)"
+        )
 
-    # Sanity check: collection must have actually captured data inside the active
-    # windows (guards against the feature silently collecting nothing).
-    assert on_core_records > 0, (
-        "no records were collected inside any active collection window "
-        f"(on_cores={on_cores}, guards={guards})"
+    # Collection must have captured data inside every active window.
+    empty_on_cores = [
+        window for window, count in zip(on_cores, on_core_records) if count == 0
+    ]
+    assert not empty_on_cores, (
+        f"no records were collected inside active collection window(s) {empty_on_cores} "
+        f"(counts={on_core_records}, guards={guards})"
     )
 
 

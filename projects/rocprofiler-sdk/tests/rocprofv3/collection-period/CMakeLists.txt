@@ -27,7 +27,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --runtime-trace --summary -d
         ${CMAKE_CURRENT_BINARY_DIR}/collection-period -o out --output-format csv json
         pftrace otf2 --log-level warning --collection-period 0:1:1 1:1:2 0.5:0.5:0
-        --collection-period-unit sec -- $<TARGET_FILE:reproducible-runtime> 5000 4
+        --collection-period-unit sec -- $<TARGET_FILE:reproducible-runtime> 6000 4
     DEPENDS reproducible-runtime
     TIMEOUT 120
     LABELS "integration-tests"
