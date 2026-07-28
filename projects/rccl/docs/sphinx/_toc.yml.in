@@ -4,6 +4,13 @@ subtrees:
 - entries:
   - file: what-is-rccl.rst
     title: What is RCCL?
+  - file: release-notes.rst
+    title: Release notes
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/collective-operations
+    title: Collective operations in RCCL
 
 - caption: Install
   entries:

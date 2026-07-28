@@ -8,10 +8,9 @@
 RCCL documentation
 ******************
 
-The ROCm Communication Collectives Library (RCCL) is a stand-alone library
-that provides multi-GPU and multi-node collective communication primitives
-optimized for AMD GPUs. It uses PCIe and xGMI high-speed interconnects.
-To learn more, see :doc:`what-is-rccl`
+The ROCm Communication Collectives Library (RCCL) (pronounced "rickle") is an open-source, host-initiated library enabling collective communications executed via GPU -- it also
+supports direct send/receive operations. RCCL supports collective algorithms across multiple processes/nodes via networking using Infiniband Verbs or TCP/IP sockets. RCCL is forked from
+the NVIDIA Collective Communication Library (NCCL); RCCL maintains an indentical API library to NCCL. 
 
 The RCCL public repository is located within the rocm-systems repo at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl>`_.
 
@@ -32,6 +31,9 @@ The RCCL public repository is located within the rocm-systems repo at `<https://
     * :doc:`Troubleshoot RCCL <./how-to/troubleshooting-rccl>`
     * :doc:`RCCL usage tips <./how-to/rccl-usage-tips>`
 
+  .. grid-item-card:: Conceptual
+
+    * :doc:`Collective operations in RCCL <./conceptual/collective-operations>`
 
   .. grid-item-card:: Examples
 
