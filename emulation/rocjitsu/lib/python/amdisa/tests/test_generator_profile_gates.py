@@ -108,7 +108,7 @@ def _generated_method_body(cpp: str, class_name: str, next_class_name: str) -> s
     start = cpp.index(f'void {class_name}::execute_impl')
     end_markers = (
         f'{next_class_name}::{next_class_name}',
-        f'const bool {next_class_name}::execute_registered_',
+        f'void {next_class_name}::execute_impl',
     )
     end = min(
         cpp.index(marker, start) for marker in end_markers if marker in cpp[start:]
@@ -1839,6 +1839,7 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     gfx1250_generated_root: Path,
 ):
     encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
+    encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
     vop3_alu = '\n'.join(
         path.read_text()
         for path in sorted(gfx1250_generated_root.glob('vop3_alu*.cpp'))
@@ -1850,6 +1851,14 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     ]
     assert 'uint32_t dpp_ctrl_ = 0;' in vop3_base
     assert 'uint32_t dpp_fi_ = 1;' in vop3_base
+    assert 'std::array<uint32_t, 3> raw_words_{};' in vop3_base
+
+    vop3_encoding_ctor = _generated_constructor_body(encodings_cpp, 'Vop3')
+    assert 'inst_.src0 == amdgpu::SRC_DPP' in vop3_encoding_ctor
+    assert 'amdgpu::dpp::is_src_dpp8(inst_.src0)' in vop3_encoding_ctor
+    assert 'size_ += sizeof(MachineInst);' in vop3_encoding_ctor
+    assert 'std::memcpy(raw_words_.data(), inst, size_);' in vop3_encoding_ctor
+    assert 'raw_encoding_ = raw_words_.data();' in vop3_encoding_ctor
 
     ctor = _generated_constructor_body(vop3_alu, 'VAddF16Vop3')
     assert 'Vop3VopDpp16MachineInst' in ctor
@@ -1863,6 +1872,59 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'if (dpp_src0_)' in body
     assert 'src0.set_delegate(dpp_src0_.get());' in body
     assert 'src0.clear_delegate();' in body
+
+
+@pytest.mark.parametrize(
+    'arch,class_names',
+    [
+        ('cdna1', ('Vop1', 'Vopc', 'Vop2')),
+        ('cdna2', ('Vop1', 'Vopc', 'Vop2')),
+        ('cdna3', ('Vop1', 'Vopc', 'Vop2')),
+        ('cdna4', ('Vop1', 'Vopc', 'Vop2')),
+        ('rdna1', ('Vop1', 'Vop2')),
+        ('rdna2', ('Vop1', 'Vop2')),
+        ('rdna3', ('Vop1', 'Vopc', 'Vop2', 'Vop3', 'Vop3p', 'Vop3SdstEnc')),
+        ('rdna3_5', ('Vop1', 'Vopc', 'Vop2', 'Vop3', 'Vop3p', 'Vop3SdstEnc')),
+        ('rdna4', ('Vop1', 'Vopc', 'Vop2', 'Vop3', 'Vop3p', 'Vop3SdstEnc')),
+        ('gfx1250', ('Vop1', 'Vopc', 'Vop2', 'Vop3', 'Vop3p', 'Vop3SdstEnc')),
+    ],
+)
+def test_generated_dpp_encodings_own_extension_words(
+    amdgpu_generated_root: Path,
+    arch: str,
+    class_names: tuple[str, ...],
+):
+    encodings_h = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+    encodings_cpp = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
+
+    for class_name in class_names:
+        class_start = encodings_h.index(f'class {class_name} ')
+        class_end = encodings_h.index('\n};', class_start)
+        class_body = encodings_h[class_start:class_end]
+        assert 'raw_words_' in class_body, f'{arch} {class_name}'
+
+        constructor = _generated_constructor_body(encodings_cpp, class_name)
+        assert 'std::memcpy(raw_words_.data(), inst, size_);' in constructor, (
+            arch,
+            class_name,
+        )
+        assert 'raw_encoding_ = raw_words_.data();' in constructor, (
+            arch,
+            class_name,
+        )
+        if class_name in ('Vop3', 'Vop3p', 'Vop3SdstEnc'):
+            assert 'inst_.src0 == amdgpu::SRC_DPP' in constructor, (
+                arch,
+                class_name,
+            )
+            assert 'amdgpu::dpp::is_src_dpp8(inst_.src0)' in constructor, (
+                arch,
+                class_name,
+            )
+            assert 'size_ += sizeof(MachineInst);' in constructor, (
+                arch,
+                class_name,
+            )
 
 
 def test_gfx1250_generated_vop1_dpp8_uses_src0_marker_for_fi(
@@ -2520,7 +2582,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'constexpr uint16_t kVopdFmaF64 = 32;' in exec_cpp
     assert 'constexpr uint16_t kVopdAddF64 = 33;' in exec_cpp
     assert 'bool Vopd::is_float64_op' in cpp
-    assert 'const bool Vopd::execute_registered_' in exec_cpp
+    assert 'execute_registered_' not in exec_cpp
     assert 'constexpr uint16_t kVopdMulF64 = 34;' in exec_cpp
     assert 'constexpr uint16_t kVopdMaxNumF64 = 35;' in exec_cpp
     assert 'constexpr uint16_t kVopdMinNumF64 = 36;' in exec_cpp

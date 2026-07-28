@@ -311,6 +311,9 @@ if(NOT AIS_CAPABLE_DIR)
     set(AIS_CAPABLE_DIR "/tmp" CACHE STRING "Directory to use for e2e tests.")
 endif()
 
+option(HIPFILE_ALLOW_SKIP_FASTPATH_TESTS
+  "Skip (instead of fail) fastpath-only tests when fastpath is unavailable" OFF)
+
 #-----------------------------------------------------------------------------
 # Configure hipFile
 #-----------------------------------------------------------------------------
