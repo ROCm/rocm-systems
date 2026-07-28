@@ -431,9 +431,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_device_cuid` function:
 
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INSUFFICIENT_SIZE` - Buffer provided is not of large enough size
 
 Example:
 

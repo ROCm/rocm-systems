@@ -75,6 +75,7 @@ class ListDevicesCommands:
         except amdsmi_exception.AmdSmiLibraryException:
             bdf = "N/A"
 
+        # Use CUID for UUID if available, fall back to the standard UUID if not
         try:
             uuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(args.gpu)
         except amdsmi_exception.AmdSmiLibraryException:

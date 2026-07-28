@@ -432,7 +432,15 @@ class AMDSMIHelpers:
 
             for gpu_id, device_handle in enumerate(device_handles):
                 bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
-                uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(device_handle)
+                try:
+                    uuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
+                except amdsmi_exception.AmdSmiLibraryException:
+                    uuid = "N/A"
+                if uuid == "N/A":
+                    try:
+                        uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(device_handle)
+                    except amdsmi_exception.AmdSmiLibraryException:
+                        uuid = "N/A"
                 gpu_choices[str(gpu_id)] = {
                     "bdf": bdf,
                     "UUID": uuid,

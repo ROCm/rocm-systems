@@ -67,16 +67,38 @@ if [ -e "${DIR}/build/CMakeCache.txt" ]; then
     echo "ENABLE_ESMI_LIB: [$ENABLE_ESMI_LIB]"
 fi
 
+CUID_DIR=$(cd "$DIR/../cuid" && pwd -P)
+
 DOCKER_TTY_FLAGS=(-i)
 if [ -t 0 ]; then DOCKER_TTY_FLAGS=(-t -i); fi
-docker run --rm "${DOCKER_TTY_FLAGS[@]}" --volume "$DIR":/src:rw "$IMAGE_REF" bash -c "
-cp -r /src /tmp/src \
+
+if [ "$CUID_DIR" != "" ]; then
+docker run --rm "${DOCKER_TTY_FLAGS[@]}" \
+    --volume "$DIR":/src:rw \
+    --volume "$CUID_DIR":/cuid:ro \
+    "$IMAGE_REF" bash -c "
+    cmake -B /tmp/cuid-build -S /cuid -DCMAKE_INSTALL_PREFIX=/opt/rocm/core -DAMDCUID_SHARED_CONFIG_DIR=/etc/amdcuid \
+    && make -C /tmp/cuid-build -j \$(nproc) \
+    && make -C /tmp/cuid-build install \
+    ## cp -r /src /tmp/src \
     && cd /tmp/src \
     && rm -rf build .cache \
     && cmake -B build -DBUILD_WRAPPER=ON $ENABLE_ESMI_LIB \
-    && make -C build -j $(nproc) \
+    && make -C build -j \$(nproc) \
     && cp /tmp/src/py-interface/amdsmi_wrapper.py /src/py-interface/amdsmi_wrapper.py \
     && chown --reference /src/py-interface/CMakeLists.txt /src/py-interface/amdsmi_wrapper.py"
+else
+    docker run --rm "${DOCKER_TTY_FLAGS[@]}" \
+    --volume "$DIR":/src:rw \
+    "$IMAGE_REF" bash -c "
+    && cp -r /src /tmp/src \
+    && cd /tmp/src \
+    && rm -rf build .cache \
+    && cmake -B build -DBUILD_WRAPPER=ON $ENABLE_ESMI_LIB \
+    && make -C build -j \$(nproc) \
+    && cp /tmp/src/py-interface/amdsmi_wrapper.py /src/py-interface/amdsmi_wrapper.py \
+    && chown --reference /src/py-interface/CMakeLists.txt /src/py-interface/amdsmi_wrapper.py"
+fi
 
 echo -e "Generated new wrapper!
 [$DIR/py-interface/amdsmi_wrapper.py]"

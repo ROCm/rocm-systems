@@ -48,7 +48,10 @@
 #include <string>
 #include <vector>
 
+#ifdef BUILD_CUID
 #include "amd_cuid.h"
+#endif
+
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_cper.h"
@@ -1326,9 +1329,10 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
 
 amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_handle,
                                            unsigned int* cuid_length, char* cuid) {
+#ifdef BUILD_CUID
   AMDSMI_CHECK_INIT();
 
-  if (cuid_length == nullptr || cuid == nullptr || *cuid_length < AMDSMI_GPU_UUID_SIZE) {
+  if (cuid_length == nullptr || cuid == nullptr || *cuid_length < AMDSMI_GPU_CUID_SIZE) {
     return AMDSMI_STATUS_INVAL;
   }
   amdsmi_status_t smi_status;
@@ -1350,15 +1354,22 @@ amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_han
   }
 
   const char* cuid_str = amdcuid_id_to_string(device_cuid);
-  int cuid_str_len = std::strlen(cuid_str);
-  if (cuid_str_len > *cuid_length) {
-    *cuid_length = cuid_str_len;
+  if (!cuid_str) {
+    *cuid_length = 0;
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  strncpy(cuid, cuid_str, cuid_str_len);
+  size_t cuid_str_len = std::strlen(cuid_str);
+  if (cuid_str_len >= *cuid_length) {
+    *cuid_length = cuid_str_len;
+    return AMDSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  snprintf(cuid, *cuid_length, "%s", cuid_str);
   *cuid_length = cuid_str_len;
 
   return AMDSMI_STATUS_SUCCESS;
+#else
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
 }
 
 // Add a static cache for KFD nodes with initialization flag

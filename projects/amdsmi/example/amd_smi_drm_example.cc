@@ -1237,12 +1237,13 @@ int main() {
       }
 
       // Get device cuid
-      unsigned int cuid_length = AMDSMI_GPU_UUID_SIZE;
-      char cuid[AMDSMI_GPU_UUID_SIZE];
+      unsigned int cuid_length = AMDSMI_GPU_CUID_SIZE;
+      char cuid[AMDSMI_GPU_CUID_SIZE];
       ret = amdsmi_get_gpu_device_cuid(processor_handles[device_index], &cuid_length, cuid);
-      CHK_AMDSMI_RET(ret)
-      printf("    Output of amdsmi_get_gpu_device_cuid:\n");
-      printf("\tDevice cuid: %s\n\n", cuid);
+      if (ret == AMDSMI_STATUS_SUCCESS) {
+        printf("    Output of amdsmi_get_gpu_device_cuid:\n");
+        printf("\tDevice cuid: %s\n\n", cuid);
+      }
 
       // Get device uuid
       unsigned int uuid_length = AMDSMI_GPU_UUID_SIZE;

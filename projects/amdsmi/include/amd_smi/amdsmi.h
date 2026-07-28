@@ -61,15 +61,16 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
-#define AMDSMI_MAX_MM_IP_COUNT 8             //!< Maximum number of multimedia IP blocks
-#define AMDSMI_MAX_STRING_LENGTH 256         //!< Maximum length for string buffers
-#define AMDSMI_MAX_DEVICES 32                //!< Maximum number of devices supported
-#define AMDSMI_MAX_CACHE_TYPES 10            //!< Maximum number of cache types
-#define AMDSMI_MAX_ACCELERATOR_PROFILE 32    //!< Maximum number of accelerator profiles
-#define AMDSMI_MAX_CP_PROFILE_RESOURCES 32   //!< Maximum number of compute profile resources
-#define AMDSMI_MAX_ACCELERATOR_PARTITIONS 8  //!< Maximum number of accelerator partitions
-#define AMDSMI_MAX_NUM_NUMA_NODES 32         //!< Maximum number of NUMA nodes
-#define AMDSMI_GPU_UUID_SIZE 38              //!< Size of GPU UUID string
+#define AMDSMI_MAX_MM_IP_COUNT 8                   //!< Maximum number of multimedia IP blocks
+#define AMDSMI_MAX_STRING_LENGTH 256               //!< Maximum length for string buffers
+#define AMDSMI_MAX_DEVICES 32                      //!< Maximum number of devices supported
+#define AMDSMI_MAX_CACHE_TYPES 10                  //!< Maximum number of cache types
+#define AMDSMI_MAX_ACCELERATOR_PROFILE 32          //!< Maximum number of accelerator profiles
+#define AMDSMI_MAX_CP_PROFILE_RESOURCES 32         //!< Maximum number of compute profile resources
+#define AMDSMI_MAX_ACCELERATOR_PARTITIONS 8        //!< Maximum number of accelerator partitions
+#define AMDSMI_MAX_NUM_NUMA_NODES 32               //!< Maximum number of NUMA nodes
+#define AMDSMI_GPU_UUID_SIZE 38                    //!< Size of GPU UUID string
+#define AMDSMI_GPU_CUID_SIZE AMDSMI_GPU_UUID_SIZE  //!< Size of GPU CUID string
 
 /**
  * @brief Common defines

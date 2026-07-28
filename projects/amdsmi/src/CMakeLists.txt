@@ -121,17 +121,25 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 
 add_subdirectory(nic/ai-nic/amdsmi_unified)
 
-set(ROCM_DIR_CORE "/opt/rocm/core")
-# include CUID library
-find_library(
-    AMDCUID_LIB
-    NAMES libamdcuid_shared.so amdcuid_shared
-    HINTS ${ROCM_DIR_CORE}/lib ${CMAKE_PREFIX_PATH}
-    REQUIRED
-)
-find_path(AMDCUID_INCLUDE_DIR NAMES amd_cuid.h HINTS ${ROCM_DIR_CORE}/include/amdcuid REQUIRED)
-find_package(OpenSSL REQUIRED)
+option(BUILD_CUID "Build CUID library" OFF)
 
+if(BUILD_CUID)
+    set(ROCM_DIR_CORE "/opt/rocm/core")
+    # include CUID library
+    find_library(
+        AMDCUID_LIB
+        NAMES libamdcuid_static.a amdcuid_static
+        HINTS ${ROCM_DIR_CORE}/lib ${CMAKE_PREFIX_PATH}
+        REQUIRED
+    )
+    find_path(
+        AMDCUID_INCLUDE_DIR
+        NAMES amd_cuid.h
+        HINTS ${ROCM_DIR_CORE}/include/amdcuid ${CMAKE_PREFIX_PATH}/include/amdcuid
+        REQUIRED
+    )
+    find_package(OpenSSL REQUIRED)
+endif(BUILD_CUID)
 #
 #   --- When BUILD_BOTH_LIBS: build shared and static; tests/examples link to static ---
 #   Otherwise: build one library (BUILD_SHARED_LIBS).
@@ -152,15 +160,7 @@ endif()
 foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
     target_link_libraries(
         ${_TARGET}
-        PRIVATE
-            rt
-            Threads::Threads
-            ${CMAKE_DL_LIBS}
-            amdsminic
-            ${FILESYSTEM_LIB}
-            ${UALOE_LINK_LIBRARIES}
-            ${AMDCUID_LIB}
-            OpenSSL::Crypto
+        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
     )
 
     target_include_directories(
@@ -182,8 +182,13 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
         PUBLIC
             "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
             "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
-            ${AMDCUID_INCLUDE_DIR}
     )
+
+    if(BUILD_CUID)
+        target_compile_definitions(${_TARGET} PRIVATE BUILD_CUID)
+        target_link_libraries(${_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+        target_include_directories(${_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
+    endif()
 
     target_link_directories(${_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)
 endforeach()
