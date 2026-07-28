@@ -748,7 +748,7 @@ bool rcclIsAboveWarpSpeedThreshold(struct ncclComm* comm, struct ncclTaskColl* i
 
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
   return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) &&
-         (rcclParamWarpSpeedAutoMode() != 0);
+         (rcclParamWarpSpeedAutoMode() != 0) && comm-> cuCount > 128; // Only use in SPX mode, 256 CU on gfx950
 }
 
 ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskColl* info) {
@@ -809,6 +809,47 @@ int rcclGetMaxWarpsPerBlock(struct ncclComm* comm) {
                       RCCL_DEFAULT_MAX_NTHREADS / comm->WarpSize;
   }
   return warpsPerBlock;
+}
+
+// Compute the bandwidth channel count (nc) when WarpSpeed is enabled, scaling the
+// base channel count by the per-block warp multiplier. 
+int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMultiplier, int maxChannels,
+                                  int adjustedMaxNchannels, bool userUpdatedMaxChannels) {
+  const bool singleNode = comm->nNodes == 1;
+  const bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  int maxNchannels;
+  // If user didn't override, use requested channels; otherwise keep capped max.
+  if (!userUpdatedMaxChannels) {
+    maxNchannels = nc * comm->nChannels * channelMultiplier;
+    nc = singleNode ? maxNchannels : std::min(maxNchannels, maxChannels);
+  } else {
+    nc = maxNchannels = std::min(adjustedMaxNchannels * channelMultiplier, MAXCHANNELS);
+  }
+
+  if (!userUpdatedMaxChannels && isGfx950 && singleNode && comm->nRanks == 8) {
+    // For gfx950 single-node, use half the channels since they are doubled on a single node
+    // Remove when all collectives have been optimized
+    nc /= 2;
+  }
+  INFO(NCCL_TUNING, "WarpSpeed enabled: warpSpeedChannelMultiplier %d, maxNchannels %d, nc %d", channelMultiplier,
+       maxNchannels, nc);
+  return nc;
+}
+
+// Adjust the per-collective channel count (nc) for WarpSpeed during algo/channel
+// tuning. No-op when WarpSpeed is disabled. 
+int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc) {
+  if (comm->topo->warpSpeedEnabled) {
+    nc /= comm->warpSpeedChannelMultiplier;
+    // Temporary check as we reduce CU usage for all collectives
+    // TODO: Remove this condition after optimizing all collectives
+    if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 &&
+        info->func != ncclFuncAllReduce && info->func != ncclFuncAllGather && info->func != ncclFuncReduceScatter &&
+        ncclParamMaxNchannels() < 0) {
+      nc *= 2;
+    }
+  }
+  return nc;
 }
 #endif
 

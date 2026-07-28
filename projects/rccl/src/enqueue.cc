@@ -2488,16 +2488,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", nBytes, info->algorithm, info->protocol, time);
   int nc = comm->nChannels;
 #ifdef ENABLE_WARP_SPEED
-  if (comm->topo->warpSpeedEnabled) {
-    nc /= comm->warpSpeedChannelMultiplier;
-    // Temporary check as we reduce CU usage for all collectives
-    // TODO: Remove this condition after optimizing all collectives
-    if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 &&
-        info->func != ncclFuncAllReduce && info->func != ncclFuncAllGather && info->func != ncclFuncReduceScatter &&
-        ncclParamMaxNchannels() < 0) {
-      nc *= 2;
-    }
-  }
+  nc = rcclWarpSpeedAdjustChannels(comm, info, nc);
 #endif
   int nt = comm->maxThreads[info->algorithm][info->protocol];
   int threadThreshold = comm->threadThresholds[info->algorithm][info->protocol];
