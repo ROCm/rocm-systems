@@ -487,9 +487,10 @@ read_mapped_file(const std::string& path, const mapped_object& object, bool requ
 std::optional<target_elf>
 open_target_elf(pid_t pid, const mapped_object& object)
 {
-    // Prefer map_files because it is a kernel-provided handle to the exact file
-    // backing the mapped object. If permissions block that path, fall back to
-    // the same path as seen through the target root and still validate device/inode.
+    // Prefer map_files because it identifies the exact file backing the
+    // mapping. If permissions block it, open the pathname through the target
+    // root. Device/inode equality remains the fast path; a mismatch requires
+    // matching GNU Build IDs.
     const auto& mapping        = object.mappings.front();
     auto        map_files_path = fmt::format("/proc/{}/map_files/{:x}-{:x}",
                                       pid,
@@ -572,27 +573,22 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
     auto page_size =
         (page_size_value > 0) ? static_cast<uint64_t>(page_size_value) : uint64_t{4096};
 
-    auto mapping_matches_bias = [&](const memory_mapping& mapping, uint64_t bias) {
-        for(const auto& segment : elf.load_segments)
-        {
-            if(segment.p_filesz == 0) continue;
-            auto file_end = checked_add(segment.p_offset, segment.p_filesz);
-            if(!file_end) continue;
-            auto file_page_begin = align_down(segment.p_offset, page_size);
-            auto file_page_end   = align_up(*file_end, page_size);
-            if(!file_page_end || mapping.file_offset < file_page_begin ||
-               mapping.file_offset >= *file_page_end)
-            {
-                continue;
-            }
+    auto load_segment_is_mapped = [&](const Elf64_Phdr& segment, uint64_t bias) {
+        if(segment.p_filesz == 0) return true;
 
-            auto virtual_page = align_down(segment.p_vaddr, page_size);
-            auto file_delta   = mapping.file_offset - file_page_begin;
-            auto relative     = checked_add(virtual_page, file_delta);
-            auto expected     = relative ? checked_add(bias, *relative) : std::nullopt;
-            if(expected && *expected == mapping.start) return true;
-        }
-        return false;
+        auto file_page    = align_down(segment.p_offset, page_size);
+        auto virtual_page = align_down(segment.p_vaddr, page_size);
+        auto runtime_page = checked_add(bias, virtual_page);
+        if(!runtime_page) return false;
+
+        return std::any_of(
+            object.mappings.begin(), object.mappings.end(), [&](const auto& mapping) {
+                if(*runtime_page < mapping.start || *runtime_page >= mapping.end) return false;
+
+                auto mapping_delta = *runtime_page - mapping.start;
+                auto mapped_offset = checked_add(mapping.file_offset, mapping_delta);
+                return mapped_offset && *mapped_offset == file_page;
+            });
     };
 
     auto candidates = std::vector<uint64_t>{};
@@ -617,11 +613,14 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
                                       : std::nullopt;
             if(!candidate) continue;
 
-            auto all_mappings_match =
-                std::all_of(object.mappings.begin(), object.mappings.end(), [&](const auto& item) {
-                    return mapping_matches_bias(item, *candidate);
+            // A valid loader instance must account for every file-backed
+            // PT_LOAD. Other mappings of the same inode are unrelated to that
+            // instance and must not invalidate an otherwise unique bias.
+            auto all_load_segments_mapped = std::all_of(
+                elf.load_segments.begin(), elf.load_segments.end(), [&](const auto& load) {
+                    return load_segment_is_mapped(load, *candidate);
                 });
-            if(all_mappings_match &&
+            if(all_load_segments_mapped &&
                std::find(candidates.begin(), candidates.end(), *candidate) == candidates.end())
             {
                 candidates.emplace_back(*candidate);
@@ -685,12 +684,18 @@ parse_gnu_build_id(const uint8_t* data, size_t size)
 bool
 note_is_file_backed_load(const target_elf& elf, const Elf64_Phdr& note)
 {
-    auto note_end = checked_add(note.p_vaddr, note.p_filesz);
-    if(!note_end) return false;
+    if(note.p_filesz == 0) return false;
 
     return std::any_of(elf.load_segments.begin(), elf.load_segments.end(), [&](const auto& load) {
-        auto load_end = checked_add(load.p_vaddr, load.p_filesz);
-        return load_end && note.p_vaddr >= load.p_vaddr && *note_end <= *load_end;
+        if(note.p_vaddr < load.p_vaddr || note.p_offset < load.p_offset) return false;
+
+        auto virtual_delta = note.p_vaddr - load.p_vaddr;
+        auto file_delta    = note.p_offset - load.p_offset;
+
+        // The note bytes read from the file must be the same bytes represented
+        // at note.p_vaddr in the file-backed PT_LOAD segment.
+        return virtual_delta == file_delta && virtual_delta <= load.p_filesz &&
+               note.p_filesz <= load.p_filesz - virtual_delta;
     });
 }
 
