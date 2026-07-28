@@ -1,0 +1,89 @@
+{
+  "projects": [
+    {
+      "folder": "amdsmi",
+      "rtd_slug": "advanced-micro-devices-amdsmi",
+      "rtd_alias": "amdsmi"
+    },
+    {
+      "folder": "aqlprofile",
+      "rtd_slug": "advanced-micro-devices-aqlprofile",
+      "rtd_alias": "aqlprofile"
+    },
+    {
+      "folder": "cuid",
+      "rtd_slug": "advanced-micro-devices-cuid",
+      "rtd_alias": "cuid"
+    },
+    {
+      "folder": "hip",
+      "rtd_slug": "advanced-micro-devices-hip",
+      "rtd_alias": "HIP"
+    },
+    {
+      "folder": "rccl",
+      "rtd_slug": "advanced-micro-devices-rccl",
+      "rtd_alias": "rccl"
+    },
+    {
+      "folder": "rdc",
+      "rtd_slug": "advanced-micro-devices-rdc",
+      "rtd_alias": "rdc"
+    },
+    {
+      "folder": "rocdecode",
+      "rtd_slug": "advanced-micro-devices-rocdecode",
+      "rtd_alias": "rocDecode"
+    },
+    {
+      "folder": "rocjpeg",
+      "rtd_slug": "advanced-micro-devices-rocjpeg",
+      "rtd_alias": "rocJPEG"
+    },
+    {
+      "folder": "rocm-smi-lib",
+      "rtd_slug": "advanced-micro-devices-rocm-smi-lib",
+      "rtd_alias": "rocm_smi_lib"
+    },
+    {
+      "folder": "rocminfo",
+      "rtd_slug": "advanced-micro-devices-rocminfo",
+      "rtd_alias": "rocminfo"
+    },
+    {
+      "folder": "rocprofiler-compute",
+      "rtd_slug": "advanced-micro-devices-rocprofiler-compute",
+      "rtd_alias": "rocprofiler-compute"
+    },
+    {
+      "folder": "rocprofiler-sdk",
+      "rtd_slug": "advanced-micro-devices-rocprofiler-sdk",
+      "rtd_alias": "rocprofiler-sdk"
+    },
+    {
+      "folder": "rocprofiler-systems",
+      "rtd_slug": "advanced-micro-devices-rocprofiler-systems",
+      "rtd_alias": "rocprofiler-systems"
+    },
+    {
+      "folder": "rocr-debug-agent",
+      "rtd_slug": "advanced-micro-devices-rocr-debug-agent",
+      "rtd_alias": "rocr_debug_agent"
+    },
+    {
+      "folder": "rocr-runtime",
+      "rtd_slug": "advanced-micro-devices-rocr-runtime",
+      "rtd_alias": "ROCR-Runtime"
+    },
+    {
+      "folder": "rocshmem",
+      "rtd_slug": "advanced-micro-devices-rocshmem",
+      "rtd_alias": "rocSHMEM"
+    },
+    {
+      "folder": "hipfile",
+      "rtd_slug": "advanced-micro-devices-hipfile",
+      "rtd_alias": "hipFile"
+    }
+  ]
+}
