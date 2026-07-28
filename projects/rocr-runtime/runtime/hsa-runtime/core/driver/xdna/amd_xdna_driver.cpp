@@ -63,6 +63,7 @@
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
 #include "core/util/memory.h"
+#include "core/util/os.h"
 #include "core/util/utils.h"
 #include "uapi/amdxdna_accel.h"
 
@@ -784,27 +785,25 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   if (use_bo_share) {
     if (alloc_flags & core::MemoryRegion::AllocateMemoryOnly) {
       bo_handle.vaddr = nullptr;
-      bo_handle.unmap_vaddr = false;
     } else {
       bo_handle.vaddr =
           mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, get_bo_info_args.map_offset);
       if (bo_handle.vaddr == MAP_FAILED) {
+        // bo_guard must not try to unmap MAP_FAILED.
+        bo_handle.vaddr = nullptr;
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
-      bo_handle.unmap_vaddr = true;
     }
   } else {
     /// This is dev heap and is already mapped. See InitDeviceHeap().
     bo_handle.vaddr = reinterpret_cast<void*>(get_bo_info_args.vaddr);
-    bo_handle.unmap_vaddr = false;
   }
 
   bo_guard.Dismiss();
 
-  // The handle word is the driver-native BO id. vaddr is always the allocation's
-  // real VA (the dev-heap VA for dev-SVM BOs, the mmap'd VA for share BOs), so it
-  // resolves at submit time and can be written at load time. FreeMemory decides
-  // whether to unmap by the VA itself (dev-heap range vs. an owned mmap), so no
+  // The handle word is the driver-native BO id. vaddr is the allocation's real VA (the VA for dev
+  // heap BOs, the mmap'd VA for share BOs). It is nullptr only for AllocateMemoryOnly SHARE BOs.
+  // FreeMemory decides whether to unmap by the VA itself (dev heap range vs. an owned mmap), so no
   // ownership flag is carried. Export-only fields stay at defaults.
   handle->handle = bo_handle.handle;
   handle->vaddr = bo_handle.vaddr;
@@ -821,12 +820,7 @@ hsa_status_t XdnaDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
   BOHandle bo_handle;
   bo_handle.handle = static_cast<uint32_t>(handle.handle);
   bo_handle.size = handle.size;
-  // Unmap only BO_SHAREs, which own an independent mmap. BO_DEV_HEAP allocations carve
-  // their VA out of the shared device heap and must leave that mapping intact; they
-  // are recognized by the VA falling inside the device-heap range. A null vaddr
-  // (AllocateMemoryOnly BO_SHAREs) has nothing to unmap.
   bo_handle.vaddr = handle.vaddr;
-  bo_handle.unmap_vaddr = (handle.vaddr != nullptr) && !IsDevHeapVA(handle.vaddr);
 
   return DestroyBOHandle(bo_handle);
 }
@@ -1055,7 +1049,6 @@ hsa_status_t XdnaDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
-
   *handle = {};
 
   return HSA_STATUS_SUCCESS;
@@ -1085,49 +1078,65 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
+  dev_heap_bo = create_bo_args.handle;
 
-  dev_heap_handle.handle = create_bo_args.handle;
-
-  // Unmap memory and close the BO in case of error.
-  MAKE_NAMED_SCOPE_GUARD(dev_heap_handle_guard, [&] { DestroyBOHandle(dev_heap_handle); });
+  // Unmap memory and close the dev heap BO in case of error.
+  MAKE_NAMED_SCOPE_GUARD(dev_heap_guard, [&] { FreeDeviceHeap(); });
 
   amdxdna_drm_get_bo_info get_bo_info_args = {};
-  get_bo_info_args.handle = dev_heap_handle.handle;
+  get_bo_info_args.handle = dev_heap_bo;
   err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
 
-  const size_t size = dev_heap_align * 2 - 1;
-  dev_heap_handle.vaddr =
-      mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (dev_heap_handle.vaddr == MAP_FAILED) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-  dev_heap_handle.unmap_vaddr = true;
-  dev_heap_handle.size = size;
-
-  void* addr_aligned = reinterpret_cast<void*>(
-      AlignUp(reinterpret_cast<uintptr_t>(dev_heap_handle.vaddr), dev_heap_align));
-
-  dev_heap_aligned =
-      mmap(addr_aligned, dev_heap_size, PROT_READ | PROT_WRITE,
-           MAP_SHARED | MAP_FIXED, fd_, get_bo_info_args.map_offset);
-  if (dev_heap_aligned == MAP_FAILED) {
-    dev_heap_aligned = nullptr;
+  // ReserveMemory over-allocates, aligns, and trims the slack, leaving exactly one
+  // dev_heap_size mapping to own.
+  void* heap = os::ReserveMemory(nullptr, dev_heap_size, dev_heap_alignment, os::MEM_PROT_NONE);
+  if (heap == nullptr) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
-  dev_heap_handle_guard.Dismiss();
+  if (!os::MapMemory(heap, dev_heap_size, os::MEM_PROT_RW, fd_, get_bo_info_args.map_offset)) {
+    os::ReleaseMemory(heap, dev_heap_size);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  dev_heap_vaddr = heap;
+
+  dev_heap_guard.Dismiss();
 
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::FreeDeviceHeap() {
-  hsa_status_t err = DestroyBOHandle(dev_heap_handle);
-  assert(err == HSA_STATUS_SUCCESS && "Failed to destroy device heap BO handle.");
-  dev_heap_aligned = nullptr;
-  return err;
+  if (dev_heap_bo == AMDXDNA_INVALID_BO_HANDLE) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // Unmap dev heap.
+  hsa_status_t munmap_err = HSA_STATUS_SUCCESS;
+  if (dev_heap_vaddr != nullptr && !os::ReleaseMemory(dev_heap_vaddr, dev_heap_size)) {
+    munmap_err = HSA_STATUS_ERROR;
+    assert(false && "Failed to unmap device heap BO.");
+  }
+
+  // dev_heap_vaddr is deliberately left set: DestroyBOHandle uses IsDevHeapVA() to
+  // recognize dev heap allocations that carve their VA out of the heap and must not be
+  // unmapped. Clearing it here would make a dev heap freed after teardown munmap a VA
+  // range that has since been recycled. InitDeviceHeap() overwrites it on re-init.
+
+  // Close the BO.
+  drm_gem_close close_bo_args = {};
+  close_bo_args.handle = dev_heap_bo;
+  hsa_status_t ioctl_err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_bo_args);
+  assert(ioctl_err == HSA_STATUS_SUCCESS && "Failed to destroy device heap BO handle.");
+  if (ioctl_err != HSA_STATUS_SUCCESS) {
+    return ioctl_err;
+  }
+
+  dev_heap_bo = AMDXDNA_INVALID_BO_HANDLE;
+
+  return munmap_err;
 }
 
 hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) const {
@@ -1159,7 +1168,6 @@ hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) con
     return HSA_STATUS_ERROR;
   }
   tmp_cmd_bo_handle.vaddr = mem;
-  tmp_cmd_bo_handle.unmap_vaddr = true;
 
   tmp_cmd_bo_handle_guard.Dismiss();
 
@@ -1169,9 +1177,9 @@ hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) con
 }
 
 bool XdnaDriver::IsDevHeapVA(const void* vaddr) const {
-  if (dev_heap_aligned == nullptr) return false;
+  if (dev_heap_vaddr == nullptr) return false;
   const auto addr = reinterpret_cast<uintptr_t>(vaddr);
-  const auto base = reinterpret_cast<uintptr_t>(dev_heap_aligned);
+  const auto base = reinterpret_cast<uintptr_t>(dev_heap_vaddr);
   return (addr >= base) && ((addr - base) < dev_heap_size);
 }
 
@@ -1412,27 +1420,28 @@ hsa_status_t XdnaDriver::DestroyBOHandle(BOHandle& bo_handle) const {
 
   hsa_status_t unmap_err = HSA_STATUS_SUCCESS;
 
-  // Unmap the memory.
-  if (bo_handle.unmap_vaddr) {
+  // Unmap only non-null BO_SHAREs, which own an independent mmap. Dev heap allocations carve
+  // their VA out of the shared device heap and must leave that mapping intact; they
+  // are recognized by the VA falling inside the device-heap range.
+  if ((bo_handle.vaddr != nullptr) && !IsDevHeapVA(bo_handle.vaddr)) {
     if (munmap(bo_handle.vaddr, bo_handle.size) != 0) {
       unmap_err = HSA_STATUS_ERROR;
       assert(false && "Failed to unmap BO memory.");
     } else {
-      bo_handle.unmap_vaddr = false;
       bo_handle.vaddr = nullptr;
       bo_handle.size = 0;
     }
   }
 
-  // Close the BO handle.
+  // Close the BO.
   drm_gem_close close_bo_args = {};
   close_bo_args.handle = bo_handle.handle;
   hsa_status_t ioctl_err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_bo_args);
-  bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
-
   if (ioctl_err != HSA_STATUS_SUCCESS) {
     return ioctl_err;
   }
+  bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
+
   return unmap_err;
 }
 
