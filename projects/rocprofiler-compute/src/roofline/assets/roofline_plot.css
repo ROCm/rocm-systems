@@ -2,6 +2,7 @@
 /* SPDX-License-Identifier:  MIT */
 
 :root {
+  color-scheme: light;
   --roofline-border: #d7dee8;
   --roofline-bg-soft: #f4f7fb;
   --roofline-surface: #ffffff;
@@ -12,6 +13,57 @@
   --roofline-swatch-border: rgba(0, 0, 0, 0.25);
   --roofline-dim-opacity: 0.4;
   --roofline-panel-basis: clamp(280px, 26vw, 440px);
+
+  /* Chart colors. */
+  --roofline-plot-area: #ffffff;
+  --roofline-plot-grid: rgba(0, 0, 0, 0.08);
+  --roofline-marker-outline: #000000;
+
+  /* Dark mode. */
+  --roofline-dark-border: #363c45;
+  --roofline-dark-bg-soft: #16191e;
+  --roofline-dark-surface: #0a0b0d;
+  --roofline-dark-accent: #58a6ff;
+  --roofline-dark-text: #e6e9ef;
+  --roofline-dark-muted: #9aa4b2;
+  --roofline-dark-selected-bg: rgba(88, 166, 255, 0.18);
+  --roofline-dark-swatch-border: rgba(255, 255, 255, 0.35);
+  --roofline-dark-plot-area: #000000;
+  --roofline-dark-plot-grid: rgba(255, 255, 255, 0.14);
+  --roofline-dark-marker-outline: rgba(255, 255, 255, 0.7);
+}
+
+/* Dark reading. */
+:root.roofline-theme-dark {
+  color-scheme: dark;
+  --roofline-border: var(--roofline-dark-border);
+  --roofline-bg-soft: var(--roofline-dark-bg-soft);
+  --roofline-surface: var(--roofline-dark-surface);
+  --roofline-accent: var(--roofline-dark-accent);
+  --roofline-text: var(--roofline-dark-text);
+  --roofline-muted: var(--roofline-dark-muted);
+  --roofline-selected-bg: var(--roofline-dark-selected-bg);
+  --roofline-swatch-border: var(--roofline-dark-swatch-border);
+  --roofline-plot-area: var(--roofline-dark-plot-area);
+  --roofline-plot-grid: var(--roofline-dark-plot-grid);
+  --roofline-marker-outline: var(--roofline-dark-marker-outline);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.roofline-theme-light) {
+    color-scheme: dark;
+    --roofline-border: var(--roofline-dark-border);
+    --roofline-bg-soft: var(--roofline-dark-bg-soft);
+    --roofline-surface: var(--roofline-dark-surface);
+    --roofline-accent: var(--roofline-dark-accent);
+    --roofline-text: var(--roofline-dark-text);
+    --roofline-muted: var(--roofline-dark-muted);
+    --roofline-selected-bg: var(--roofline-dark-selected-bg);
+    --roofline-swatch-border: var(--roofline-dark-swatch-border);
+    --roofline-plot-area: var(--roofline-dark-plot-area);
+    --roofline-plot-grid: var(--roofline-dark-plot-grid);
+    --roofline-marker-outline: var(--roofline-dark-marker-outline);
+  }
 }
 
 *,
@@ -140,6 +192,13 @@ body {
   overflow: hidden;
 }
 
+.roofline-plot-col > div {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 .roofline-plot-col .plotly-graph-div,
 .roofline-plot-col .js-plotly-plot,
 .roofline-plot-col .plot-container,
@@ -252,14 +311,6 @@ body {
   accent-color: var(--roofline-accent);
 }
 
-.roofline-runtime-filter.locked {
-  opacity: 0.45;
-}
-
-.roofline-runtime-filter input[type="range"]:disabled {
-  cursor: default;
-}
-
 .roofline-panel-list {
   flex: 1 1 auto;
   list-style: none;
@@ -323,14 +374,6 @@ body {
 
 .roofline-kernel-name {
   font-family: var(--roofline-kernel-font, monospace);
-  /* A demangled name can exceed 5000 characters. Uncapped, one row wraps taller
-     than the whole list and buries every other kernel. The first lines carry the
-     template arguments, which is what tells two instantiations apart. */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-  overflow: hidden;
 }
 
 .roofline-kernel-pct {

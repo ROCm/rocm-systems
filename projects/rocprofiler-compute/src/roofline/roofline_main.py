@@ -21,6 +21,7 @@ from roofline.roofline_hover import (
 )
 from roofline.roofline_html import (
     ALL_PEAKS_VALUE,
+    FRAME_MIN_DECADES,
     FRAME_PAD,
     ROOF_EXTRAP_MAX_AI,
     RooflineViewModel,
@@ -98,22 +99,42 @@ def build_kernel_colors(num_kernels: int) -> list[str]:
     return [_KERNEL_PALETTE[index % palette_size] for index in range(num_kernels)]
 
 
+def _widened_to_min_decades(lo: float, hi: float) -> tuple[float, float]:
+    """Widen a positive [lo, hi] about its midpoint to at least the minimum
+    decades, so an axis never opens on a sliver."""
+    log_lo = math.log10(lo)
+    log_hi = math.log10(hi)
+    if log_hi - log_lo >= FRAME_MIN_DECADES:
+        return lo, hi
+    mid = 0.5 * (log_lo + log_hi)
+    return (
+        10 ** (mid - 0.5 * FRAME_MIN_DECADES),
+        10 ** (mid + 0.5 * FRAME_MIN_DECADES),
+    )
+
+
 def roofline_axis_bounds(
     ceiling_data: dict[str, Any],
     ai_data: dict[str, Any],
     sanitized_cache_hierarchy: list[str],
 ) -> tuple[float, float, float, float]:
-    """Compute explicit log-axis bounds."""
-    roof_keys = [level.lower() for level in sanitized_cache_hierarchy]
-    roof_keys += ["valu", "matrix_ops"]
-
+    """Compute the log-axis bounds the figure opens on."""
     xs: list[float] = []
     ys: list[float] = []
 
-    for key in roof_keys:
-        line = ceiling_data.get(key)
+    for level in sanitized_cache_hierarchy:
+        line = ceiling_data.get(level.lower())
         if line and len(line) >= 2 and line[0] and line[1]:
-            xs.extend(v for v in line[0] if v is not None and v > 0)
+            knee = (line[0][-1], line[1][-1])
+            if all(v is not None and v > 0 for v in knee):
+                xs.append(knee[0])
+                ys.append(knee[1])
+
+    # Compute ceilings are horizontal and run off the right edge, so they bound
+    # throughput only.
+    for key in ("valu", "matrix_ops"):
+        line = ceiling_data.get(key)
+        if line and len(line) >= 2 and line[1]:
             ys.extend(v for v in line[1] if v is not None and v > 0)
 
     for cache_level in CACHE_LEVELS:
@@ -126,12 +147,9 @@ def roofline_axis_bounds(
     if not xs or not ys:
         return DEFAULT_AXIS_BOUNDS
 
-    return (
-        min(xs) / FRAME_PAD,
-        max(xs) * FRAME_PAD,
-        min(ys) / FRAME_PAD,
-        max(ys) * FRAME_PAD,
-    )
+    x_lo, x_hi = _widened_to_min_decades(min(xs) / FRAME_PAD, max(xs) * FRAME_PAD)
+    y_lo, y_hi = _widened_to_min_decades(min(ys) / FRAME_PAD, max(ys) * FRAME_PAD)
+    return (x_lo, x_hi, y_lo, y_hi)
 
 
 def _roof_sample_count(low_ai: float, high_ai: float) -> int:

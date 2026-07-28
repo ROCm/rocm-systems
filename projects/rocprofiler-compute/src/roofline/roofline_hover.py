@@ -1,12 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Plotly hover-tooltip HTML for the roofline figure.
-
-All tooltip markup lives here so ``roofline_main`` builds figures at one
-abstraction level and the (HTML-flavored) string assembly stays in one place.
-Each ``build_*`` function returns a Plotly ``hovertemplate`` body.
-"""
+"""Plotly hover-tooltip HTML for the roofline figure."""
 
 import html
 from typing import Optional
@@ -15,24 +10,16 @@ from roofline.roofline_html import KERNEL_NAME_FONT_FAMILY
 
 # Kernel names wrap at this width so a long name stays readable in the tooltip.
 _HOVER_WRAP_WIDTH = 44
-# A demangled name can exceed 5000 characters, which at the wrap width above
-# would build a tooltip several times taller than the plot and leave Plotly
-# nowhere to place it. The kept prefix still spans the template arguments, which
-# is what distinguishes two instantiations of the same function.
-_HOVER_MAX_NAME_LINES = 10
 
 
 def wrap_hover_name(name: str) -> str:
-    """Wrap a kernel name to a bounded block of lines for the tooltip."""
+    """Wrap a kernel name across as many tooltip lines as it takes."""
     if not name:
         return ""
     lines = [
         html.escape(name[start : start + _HOVER_WRAP_WIDTH], quote=False)
         for start in range(0, len(name), _HOVER_WRAP_WIDTH)
     ]
-    if len(lines) > _HOVER_MAX_NAME_LINES:
-        lines = lines[:_HOVER_MAX_NAME_LINES]
-        lines[-1] += "\u2026"
     return (
         f'<span style="font-family:{KERNEL_NAME_FONT_FAMILY}">'
         + "<br>".join(lines)

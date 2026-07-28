@@ -19,8 +19,6 @@
   }
 
   // ---- Config forwarded from roofline_html.py via the model ---------------
-  // These are never defaulted here: roofline_html.py is the single source of
-  // truth and re-hardcoding a value would let the two drift apart silently.
   var ALL_PEAKS_VALUE = model.allPeaksValue;
   var ALL_PEAKS_LABEL = model.allPeaksLabel;
   var FALLBACK_COLOR = model.fallbackColor;
@@ -29,10 +27,8 @@
   var PLOT_DIM_OPACITY = model.plotDimOpacity;
   var FRAME_PAD = model.framePad;
   var FRAME_MIN_DECADES = model.frameMinDecades;
-  var FRAME_ROOF_SEGMENT_DECADES = model.frameRoofSegmentDecades;
+  var FRAME_SLOPE_SKEW = model.frameSlopeSkew;
   var RUNTIME_EPSILON = 1e-6;
-  // Preserve the current chart aspect ratio while ensuring publication-sized
-  // output even when the browser viewport is small.
   var EXPORT_MIN_WIDTH = 960;
   var EXPORT_MIN_HEIGHT = 560;
   var EXPORT_LEGEND_MIN_WIDTH = 300;
@@ -65,17 +61,18 @@
   var runtimeSlider = document.getElementById("roofline-runtime-threshold");
   var runtimeValueEl = document.getElementById("roofline-runtime-value");
   var runtimeFilterEl = document.getElementById("roofline-runtime-filter");
-  var runtimeLabel = document.getElementById("roofline-runtime-label");
-  var runtimeLabelTitle = runtimeLabel ? runtimeLabel.title : "";
   var roofList = document.getElementById("roofline-roof-list");
   var roofCountEl = document.getElementById("roofline-roof-count");
   var showAllRoofsBtn = document.getElementById("roofline-show-all-roofs");
   var resetViewBtn = document.getElementById("roofline-reset-view");
   var exportPngBtn = document.getElementById("roofline-export-png");
+  var themeToggleBtn = document.getElementById("roofline-theme-toggle");
   var plotColumn = gd ? gd.closest(".roofline-plot-col") : null;
   var plotResizeFrame = null;
   var renderFrame = null;
   var exportTextMeasureContext = null;
+  var autoFramed = false;
+  var applyingFrame = false;
 
   // ---- Model data ---------------------------------------------------------
   var kernels = model.kernels;
@@ -235,23 +232,11 @@
     return (kernelCumulativePct[kernel.index] || 0) <= state.runtimeThreshold + RUNTIME_EPSILON;
   }
 
-  // The runtime slider and the kernel selection are the same filter seen two
-  // ways, so exactly one of them is ever in force: the threshold picks the
-  // shown set until the user names one explicitly, and syncRuntimeControl locks
-  // the slider for as long as that naming stands.
-  function thresholdIsInForce() {
-    return state.selected.size === 0;
-  }
-
   function kernelIsVisible(kernel) {
-    // An explicit selection always wins: only the selected kernels show, and
-    // they show regardless of the runtime-threshold filter. This is why
-    // isolating a heavy-tail kernel and then lowering the slider never makes
-    // the selected kernel vanish.
-    if (!thresholdIsInForce()) {
-      return state.selected.has(kernel.index);
+    if (!withinThreshold(kernel)) {
+      return false;
     }
-    return withinThreshold(kernel);
+    return state.selected.size === 0 || state.selected.has(kernel.index);
   }
 
   function kernelIsDrawn(kernel) {
@@ -385,26 +370,136 @@
     updateRoofPanel();
   }
 
-  // ===== Reset view (double-click) =========================================
+  // ===== Theme =============================================================
 
-  // Pad a positive [lo, hi] range in log space and widen it to at least
-  // FRAME_MIN_DECADES about its midpoint. Returns the padded range in log10
-  // units, ready for a Plotly log-axis range.
-  function paddedLogSpan(lo, hi) {
-    var logLo = Math.log10(lo) - Math.log10(FRAME_PAD);
-    var logHi = Math.log10(hi) + Math.log10(FRAME_PAD);
-    if (logHi - logLo < FRAME_MIN_DECADES) {
-      var mid = 0.5 * (logLo + logHi);
-      logLo = mid - 0.5 * FRAME_MIN_DECADES;
-      logHi = mid + 0.5 * FRAME_MIN_DECADES;
-    }
-    return [logLo, logHi];
+  function themeColor(name) {
+    return getComputedStyle(document.documentElement)
+      .getPropertyValue(name)
+      .trim();
   }
 
-  // Log-axis frame around the kernel points currently drawn
-  // under the active peak, selection, and runtime filter. Returns null when
-  // nothing is drawn, so the caller can fall back to the initial view.
-  function visibleKernelFrame() {
+  function readPlotTheme() {
+    return {
+      paper: themeColor("--roofline-surface"),
+      area: themeColor("--roofline-plot-area"),
+      grid: themeColor("--roofline-plot-grid"),
+      text: themeColor("--roofline-text"),
+      // Hover cards and the exported legend float above the chart the way the
+      // side panels sit beside it, so they borrow the panels' colors.
+      overlay: themeColor("--roofline-bg-soft"),
+      overlayBorder: themeColor("--roofline-border"),
+      markerOutline: themeColor("--roofline-marker-outline"),
+    };
+  }
+
+  // Repaint the chart in the active theme. Tick labels, axis titles, and the
+  // chart title all inherit layout.font, so one color covers every label.
+  function applyPlotTheme() {
+    if (!plotlyReady()) {
+      return;
+    }
+    var theme = readPlotTheme();
+    Plotly.relayout(gd, {
+      paper_bgcolor: theme.paper,
+      plot_bgcolor: theme.area,
+      "font.color": theme.text,
+      "xaxis.gridcolor": theme.grid,
+      "yaxis.gridcolor": theme.grid,
+      "hoverlabel.bgcolor": theme.overlay,
+      "hoverlabel.bordercolor": theme.overlayBorder,
+      "hoverlabel.font.color": theme.text,
+    });
+    if (kernelTraceIndices.length) {
+      // Kernel dots carry an outline so a kernel whose palette color lands near
+      // the background is still legible against it.
+      Plotly.restyle(
+        gd,
+        { "marker.line.color": theme.markerOutline },
+        kernelTraceIndices
+      );
+    }
+  }
+
+  function systemPrefersDark() {
+    return (
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches
+    );
+  }
+
+  // Dark until the reader says otherwise, and the system's preference until the
+  // reader says anything at all. Same order the stylesheet resolves.
+  function themeIsDark() {
+    var classes = document.documentElement.classList;
+    if (classes.contains("roofline-theme-dark")) {
+      return true;
+    }
+    if (classes.contains("roofline-theme-light")) {
+      return false;
+    }
+    return systemPrefersDark();
+  }
+
+  // The button names the theme it switches to, the way a light switch is
+  // labeled by what it does rather than by where it is.
+  function syncThemeToggle() {
+    if (!themeToggleBtn) {
+      return;
+    }
+    var dark = themeIsDark();
+    themeToggleBtn.textContent = dark ? "Light mode" : "Dark mode";
+    themeToggleBtn.setAttribute("aria-pressed", String(dark));
+    themeToggleBtn.title = dark
+      ? "Switch the page and chart to light colors"
+      : "Switch the page and chart to dark colors";
+  }
+
+  // Pin the theme to the reader's choice, which outranks the system preference
+  // from then on.
+  function setTheme(dark) {
+    var classes = document.documentElement.classList;
+    classes.remove("roofline-theme-dark", "roofline-theme-light");
+    classes.add(dark ? "roofline-theme-dark" : "roofline-theme-light");
+    syncThemeToggle();
+    applyPlotTheme();
+  }
+
+  function watchSystemTheme() {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    var query = window.matchMedia("(prefers-color-scheme: dark)");
+    var onChange = function () {
+      syncThemeToggle();
+      applyPlotTheme();
+    };
+    if (typeof query.addEventListener === "function") {
+      query.addEventListener("change", onChange);
+    } else if (typeof query.addListener === "function") {
+      query.addListener(onChange);
+    }
+  }
+
+  // ===== View framing ======================================================
+
+  function roofKnee(roof, data) {
+    var trace = data[roof.traceIndex];
+    var xs = (trace && trace.x) || [];
+    var ys = (trace && trace.y) || [];
+    var last = xs.length - 1;
+    if (last < 1) {
+      return null;
+    }
+    var ai = xs[last];
+    var perf = ys[last];
+    if (!(ai > 0) || !(perf > 0) || ai >= ROOF_EXTREME_MAX_AI) {
+      return null;
+    }
+    return { ai: ai, perf: perf };
+  }
+
+  // Everything the frame has to contain. 
+  function frameAnchors(data) {
     var xs = [];
     var ys = [];
     kernels.forEach(function (kernel) {
@@ -421,116 +516,147 @@
     if (!xs.length) {
       return null;
     }
-    return {
-      x: paddedLogSpan(Math.min.apply(null, xs), Math.max.apply(null, xs)),
-      y: paddedLogSpan(Math.min.apply(null, ys), Math.max.apply(null, ys)),
-    };
-  }
-
-  function roofLogGeometry(roof, data) {
-    var trace = data[roof.traceIndex];
-    var xs = (trace && trace.x) || [];
-    var bandwidth = Number(roof.bandwidth);
-    if (xs.length < 2 || !(xs[0] > 0) || !(xs[xs.length - 1] > 0)) {
-      return null;
-    }
-    if (!(bandwidth > 0)) {
-      return null;
-    }
-    return {
-      domainLo: Math.log10(xs[0]),
-      domainHi: Math.log10(xs[xs.length - 1]),
-      intercept: Math.log10(bandwidth),
-    };
-  }
-
-  // Expand symmetrically around the kernel-frame midpoint to expose a segment
-  // from every bandwidth roof. Each segment is placed near the kernels rather
-  // than at an extrapolated endpoint, so roof visibility cannot shift the
-  // kernel cluster away from the centre.
-  function includeRoofSegments(frame, data) {
-    var originalX = frame.x.slice().sort(function (a, b) {
-      return a - b;
-    });
-    var originalY = frame.y.slice().sort(function (a, b) {
-      return a - b;
-    });
-    var xMid = 0.5 * (originalX[0] + originalX[1]);
-    var yMid = 0.5 * (originalY[0] + originalY[1]);
-    var xHalfSpan = 0.5 * (originalX[1] - originalX[0]);
-    var yHalfSpan = 0.5 * (originalY[1] - originalY[0]);
-
     rooflineTraces.forEach(function (roof) {
-      var geometry = roofLogGeometry(roof, data);
-      if (!geometry) {
-        return;
+      var knee = roofKnee(roof, data);
+      if (knee) {
+        xs.push(knee.ai);
+        ys.push(knee.perf);
       }
-
-      var visibleLength = Math.min(
-        FRAME_ROOF_SEGMENT_DECADES,
-        geometry.domainHi - geometry.domainLo
-      );
-      if (!(visibleLength > 0)) {
-        return;
-      }
-      var halfLength = 0.5 * visibleLength;
-
-      var feasibleLo = Math.max(
-        geometry.domainLo + halfLength,
-        xMid - xHalfSpan + halfLength,
-        yMid - yHalfSpan - geometry.intercept + halfLength
-      );
-      var feasibleHi = Math.min(
-        geometry.domainHi - halfLength,
-        xMid + xHalfSpan - halfLength,
-        yMid + yHalfSpan - geometry.intercept - halfLength
-      );
-      if (feasibleLo <= feasibleHi) {
-        return;
-      }
-
-      var segmentMid = 0.5 * (xMid + (yMid - geometry.intercept));
-      segmentMid = clamp(
-        segmentMid,
-        geometry.domainLo + halfLength,
-        geometry.domainHi - halfLength
-      );
-      var segmentXLo = segmentMid - halfLength;
-      var segmentXHi = segmentMid + halfLength;
-      var segmentYLo = segmentXLo + geometry.intercept;
-      var segmentYHi = segmentXHi + geometry.intercept;
-
-      xHalfSpan = Math.max(
-        xHalfSpan,
-        Math.abs(segmentXLo - xMid),
-        Math.abs(segmentXHi - xMid)
-      );
-      yHalfSpan = Math.max(
-        yHalfSpan,
-        Math.abs(segmentYLo - yMid),
-        Math.abs(segmentYHi - yMid)
-      );
     });
-
-    return {
-      x: [xMid - xHalfSpan, xMid + xHalfSpan],
-      y: [yMid - yHalfSpan, yMid + yHalfSpan],
-    };
+    computeTraces.forEach(function (ceiling) {
+      if (ceiling.peakPerf > 0) {
+        ys.push(ceiling.peakPerf);
+      }
+    });
+    return { xs: xs, ys: ys };
   }
 
-  // Double-click handler: re-frame on whatever kernels are currently shown, so
-  // reset follows the active filter/selection instead of a fixed spot. With no
-  // kernels drawn, restore the baked initial range.
+  // Pad a positive [lo, hi] by FRAME_PAD on each side, in log10 units.
+  function paddedLogSpan(lo, hi) {
+    return [
+      Math.log10(lo) - Math.log10(FRAME_PAD),
+      Math.log10(hi) + Math.log10(FRAME_PAD),
+    ];
+  }
+
+  // Widen a log10 range about its midpoint until it spans `decades`. Never
+  // narrows, so nothing already framed can fall back out.
+  function widenTo(range, decades) {
+    var span = range[1] - range[0];
+    if (!(decades > span)) {
+      return range.slice();
+    }
+    var mid = 0.5 * (range[0] + range[1]);
+    return [mid - 0.5 * decades, mid + 0.5 * decades];
+  }
+
+  // Pixel size of the plotting area: the graph div less the margins the figure
+  // bakes in. Those margins are fixed rather than fitted (autoexpand is off),
+  // so this needs no reach into Plotly's internals. Null before first layout.
+  function plotAreaPixels() {
+    var margin = (gd.layout && gd.layout.margin) || {};
+    var width = gd.clientWidth - (margin.l || 0) - (margin.r || 0);
+    var height = gd.clientHeight - (margin.t || 0) - (margin.b || 0);
+    if (!(width > 0) || !(height > 0)) {
+      return null;
+    }
+    return { width: width, height: height };
+  }
+
+  // How steep a roof looks depends on the decades per pixel each axis is
+  // showing, so the same frame reads differently in a tall window than in a
+  // short one. Widen whichever axis is cramped until a roof lands within
+  // FRAME_SLOPE_SKEW of 45 degrees on screen: a short wide chart earns
+  // intensity decades, a tall narrow one throughput decades. Widening only,
+  // so every anchor stays in frame whatever the viewport.
+  function shapeToPlotArea(frame) {
+    var area = plotAreaPixels();
+    if (!area) {
+      return frame;
+    }
+    var xSpan = frame.x[1] - frame.x[0];
+    var ySpan = frame.y[1] - frame.y[0];
+    if (!(xSpan > 0) || !(ySpan > 0)) {
+      return frame;
+    }
+    var screenSlope = (area.height * xSpan) / (area.width * ySpan);
+    if (screenSlope > FRAME_SLOPE_SKEW) {
+      return {
+        x: frame.x.slice(),
+        y: widenTo(
+          frame.y,
+          (area.height * xSpan) / (area.width * FRAME_SLOPE_SKEW)
+        ),
+      };
+    }
+    if (screenSlope < 1 / FRAME_SLOPE_SKEW) {
+      return {
+        x: widenTo(
+          frame.x,
+          (area.width * ySpan) / (FRAME_SLOPE_SKEW * area.height)
+        ),
+        y: frame.y.slice(),
+      };
+    }
+    return frame;
+  }
+
+  // Log-axis frame for what is drawn right now. Null when nothing is drawn, so
+  // the caller can fall back to the range the figure was built with.
+  function currentFrame() {
+    var anchors = frameAnchors(gd.data || []);
+    if (!anchors) {
+      return null;
+    }
+    var frame = {
+      x: paddedLogSpan(
+        Math.min.apply(null, anchors.xs),
+        Math.max.apply(null, anchors.xs)
+      ),
+      y: paddedLogSpan(
+        Math.min.apply(null, anchors.ys),
+        Math.max.apply(null, anchors.ys)
+      ),
+    };
+    // The floor is on the intensity axis alone: shapeToPlotArea sizes the
+    // throughput axis against whatever x ends up being, and flooring both would
+    // fight that and reopen the frame.
+    frame.x = widenTo(frame.x, FRAME_MIN_DECADES);
+    return shapeToPlotArea(frame);
+  }
+
+  // Pin the axes to a computed frame. autoFramed records that what is on screen
+  // is this computed view rather than something the user zoomed or panned to;
+  // applyingFrame stops the relayout this fires from clearing that.
+  function applyFrame(frame) {
+    applyingFrame = true;
+    autoFramed = true;
+    var settled = Plotly.relayout(gd, {
+      "xaxis.range": frame.x,
+      "yaxis.range": frame.y,
+    });
+    var release = function () {
+      applyingFrame = false;
+    };
+    if (settled && typeof settled.then === "function") {
+      settled.then(release, release);
+    } else {
+      release();
+    }
+  }
+
+  // Reset (button, double-click, and the opening view): re-frame on whatever
+  // kernels are currently shown, so it follows the active filter and selection
+  // instead of a fixed spot.
   function resetView() {
     if (!plotlyReady()) {
       return;
     }
-    var frame = visibleKernelFrame() || initialRange;
+    var frame = currentFrame() || initialRange;
     if (!frame) {
       return;
     }
-    frame = includeRoofSegments(frame, gd.data || []);
-    Plotly.relayout(gd, { "xaxis.range": frame.x, "yaxis.range": frame.y });
+    applyFrame(frame);
   }
 
   // ===== PNG export ========================================================
@@ -626,18 +752,19 @@
   }
 
   function exportLegendLayout(x, xAnchor, y, yAnchor, fontFamily) {
+    var theme = readPlotTheme();
     return {
       x: x,
       xanchor: xAnchor,
       y: y,
       yanchor: yAnchor,
-      bgcolor: "rgba(255,255,255,0.96)",
-      bordercolor: "#d7dee8",
+      bgcolor: theme.overlay,
+      bordercolor: theme.overlayBorder,
       borderwidth: 1,
       font: {
         size: EXPORT_LEGEND_FONT_SIZE,
         family: fontFamily,
-        color: "#1b1f24",
+        color: theme.text,
       },
       itemclick: false,
       itemdoubleclick: false,
@@ -1028,25 +1155,6 @@
     }
   }
 
-  // Lock the slider while a selection is in force, so it cannot be dragged to
-  // no visible effect. Its stop is left where it is: clearing the selection
-  // hands control back to the filter the user last set, not to a reset one.
-  function syncRuntimeControl() {
-    var locked = !thresholdIsInForce();
-    if (runtimeSlider) {
-      runtimeSlider.disabled = locked;
-    }
-    if (runtimeFilterEl) {
-      runtimeFilterEl.classList.toggle("locked", locked);
-    }
-    if (runtimeLabel) {
-      runtimeLabel.title = locked
-        ? "Locked while kernels are isolated: the selected kernels are what is "
-          + "shown. Use Show all kernels to hand the view back to this filter."
-        : runtimeLabelTitle;
-    }
-  }
-
   // Build the per-kernel Plotly restyle payload for the current peak/selection.
   function buildKernelRestylePayload() {
     var xs = [];
@@ -1096,7 +1204,6 @@
 
   function render() {
     syncPeakControl();
-    syncRuntimeControl();
     if (!plotlyReady() || !kernelTraceIndices.length) {
       updatePanel();
       updateRoofPanel();
@@ -1133,16 +1240,8 @@
   function toggleKernel(index, event) {
     var multi = isMultiSelectEvent(event);
     if (multi && state.selected.size === 0) {
-      // Ctrl+click with nothing isolated means "remove this one from what is
-      // shown", so the seed is what the runtime filter is currently showing.
-      // Seeding from every kernel would silently void the filter, since a
-      // non-empty selection takes precedence over the threshold. This freezes
-      // the threshold's set into an explicit selection, which is why the
-      // slider locks from here until the selection is cleared.
       kernels.forEach(function (kernel) {
-        if (withinThreshold(kernel)) {
-          state.selected.add(kernel.index);
-        }
+        state.selected.add(kernel.index);
       });
       state.selected.delete(index);
     } else {
@@ -1311,14 +1410,7 @@
     eachKernelRow(function (item, kernel) {
       var selected = state.selected.has(kernel.index);
       setRowState(item, selected, filtering && !selected);
-      // Only mark rows the threshold is actually trimming, so the row styling
-      // reads as whichever filter is deciding rather than as both at once.
-      item.classList.toggle(
-        "filtered",
-        thresholdIsInForce() && !withinThreshold(kernel)
-      );
-      // A sole-isolated kernel is drawn across every level (colored by level),
-      // so its swatch becomes a gradient of those level colors to match.
+      item.classList.toggle("filtered", !withinThreshold(kernel));
       var swatch = item.querySelector(".roofline-swatch");
       if (swatch) {
         if (isSoleSelected(kernel)) {
@@ -1389,12 +1481,24 @@
     if (exportPngBtn) {
       exportPngBtn.addEventListener("click", exportPng);
     }
+    if (themeToggleBtn) {
+      themeToggleBtn.addEventListener("click", function () {
+        setTheme(!themeIsDark());
+      });
+    }
     if (gd && typeof gd.on === "function") {
-      // Plotly owns the chart's pointer interaction layer, so listen through
-      // its event emitter instead of relying on a native dblclick bubbling to
-      // the outer graph div. Config doubleClick:false suppresses Plotly's
-      // static reset while still allowing this event to be observed.
       gd.on("plotly_doubleclick", resetView);
+      gd.on("plotly_relayout", function (payload) {
+        if (applyingFrame || !payload) {
+          return;
+        }
+        var movedAxes = Object.keys(payload).some(function (key) {
+          return key.indexOf("axis.range") >= 0;
+        });
+        if (movedAxes) {
+          autoFramed = false;
+        }
+      });
       gd.on("plotly_click", function (data) {
         if (!data || !data.points || !data.points.length) {
           return;
@@ -1441,13 +1545,12 @@
     plotResizeFrame = window.requestAnimationFrame(function () {
       plotResizeFrame = null;
       resizePlot();
+      if (autoFramed) {
+        resetView();
+      }
     });
   }
 
-  // Plotly's responsive config already follows viewport resizes, but the
-  // chart's container can also change when the toolbar wraps or the side panel
-  // changes size. Observe the actual plot column so its canvas always consumes
-  // exactly the remaining space without retaining stale pixel dimensions.
   function observePlotContainer() {
     if (plotColumn && typeof window.ResizeObserver === "function") {
       new window.ResizeObserver(schedulePlotResize).observe(plotColumn);
@@ -1503,11 +1606,14 @@
       runtimeFilterEl.style.display = "none";
     }
     initRuntimeSlider();
+    syncThemeToggle();
+    watchSystemTheme();
     whenPlotReady(function () {
       captureInitialRange();
       wireEvents();
       observePlotContainer();
       resizePlot();
+      applyPlotTheme();
       render();
       resetView();
     }, PLOT_READY_MAX_ATTEMPTS);

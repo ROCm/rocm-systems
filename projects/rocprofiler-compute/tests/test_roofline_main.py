@@ -1,19 +1,21 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit coverage for ``roofline.roofline_main``.
-
-These tests drive ``Roofline`` directly with mocked machine specs and
-self-contained temp CSVs; they never exercise the analyze CLI.
-"""
+"""Unit coverage for roofline_main.py."""
 
 import argparse
+import math
 import tempfile
 from pathlib import Path
 
 import plotly.graph_objects as go
 
-from roofline.roofline_main import Roofline
+from roofline.roofline_html import FRAME_MIN_DECADES
+from roofline.roofline_main import (
+    DEFAULT_AXIS_BOUNDS,
+    Roofline,
+    roofline_axis_bounds,
+)
 
 
 class MockMspec:
@@ -139,3 +141,63 @@ def test_generate_plot_mfma_fp64_dual_legend() -> None:
         assert "Peak VALU-FP64" in names, "FP64 is dual-path; expected a VALU roof"
         assert "Peak MFMA-FP64" in names, "FP64 should emit a Peak MFMA-FP64 roof"
         assert "Peak WMMA-FP64" not in names, "CDNA2 path must not label roofs WMMA"
+
+
+# =============================================================================
+# Opening axis frame
+# =============================================================================
+
+
+KNEE_AI = 10.0
+PEAK_PERF = 5000.0
+CEILING_LEFT_EDGE = 0.01
+CEILING_RIGHT_EDGE = 1.0e6
+BOUNDS_CEILINGS = {
+    "hbm": [[CEILING_LEFT_EDGE, KNEE_AI], [5.0, PEAK_PERF], 500.0],
+    "valu": [[KNEE_AI, CEILING_RIGHT_EDGE], [PEAK_PERF, PEAK_PERF], PEAK_PERF],
+}
+BOUNDS_KERNELS = {"ai_hbm": [[20.0, 40.0], [1000.0, 2000.0]]}
+
+
+def test_axis_bounds_frame_the_roof_knee_not_its_drawn_edges() -> None:
+    """The frame holds the knee and the peak while ignoring the endpoints the
+    roofs are merely drawn to, which would otherwise open the plot decades wide
+    around an empty corner."""
+    x_lo, x_hi, y_lo, y_hi = roofline_axis_bounds(
+        BOUNDS_CEILINGS, BOUNDS_KERNELS, ["HBM"]
+    )
+
+    assert x_lo <= KNEE_AI <= x_hi, "the knee anchors the intensity axis"
+    assert y_lo <= PEAK_PERF <= y_hi, "the compute peak anchors the throughput axis"
+    assert x_lo > CEILING_LEFT_EDGE * 10, "the roof's left edge must not anchor x"
+    assert x_hi < CEILING_RIGHT_EDGE / 10, "the compute roof must not stretch x"
+
+
+def test_axis_bounds_hold_every_kernel_point() -> None:
+    """Every kernel drawn stays inside the opening frame."""
+    x_lo, x_hi, y_lo, y_hi = roofline_axis_bounds(
+        BOUNDS_CEILINGS, BOUNDS_KERNELS, ["HBM"]
+    )
+
+    ais, perfs = BOUNDS_KERNELS["ai_hbm"]
+    for ai, perf in zip(ais, perfs):
+        assert x_lo < ai < x_hi, f"kernel intensity {ai} fell outside the frame"
+        assert y_lo < perf < y_hi, f"kernel throughput {perf} fell outside the frame"
+
+
+def test_axis_bounds_widen_around_a_single_kernel() -> None:
+    """One kernel sitting on the knee gives the axes nothing to span, so both are
+    widened to the minimum rather than opening on a sliver."""
+    x_lo, x_hi, y_lo, y_hi = roofline_axis_bounds(
+        {"hbm": [[CEILING_LEFT_EDGE, KNEE_AI], [5.0, PEAK_PERF], 500.0]},
+        {"ai_hbm": [[KNEE_AI], [PEAK_PERF]]},
+        ["HBM"],
+    )
+
+    assert math.log10(x_hi / x_lo) >= FRAME_MIN_DECADES
+    assert math.log10(y_hi / y_lo) >= FRAME_MIN_DECADES
+
+
+def test_axis_bounds_fall_back_without_data() -> None:
+    """No ceilings and no kernels leaves nothing to frame."""
+    assert roofline_axis_bounds({}, {}, ["HBM"]) == DEFAULT_AXIS_BOUNDS

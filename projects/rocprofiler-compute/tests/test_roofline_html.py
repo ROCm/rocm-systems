@@ -5,9 +5,15 @@
 
 import argparse
 import json
+import re
+from pathlib import Path
 
+import roofline.roofline_html as roofline_html
+from roofline.roofline_hover import wrap_hover_name
 from roofline.roofline_html import RooflineViewModel
 from roofline.roofline_main import Roofline
+
+_ASSETS = Path(roofline_html.__file__).parent / "assets"
 
 
 class MockMspec:
@@ -127,6 +133,39 @@ def test_build_kernel_traces_limiter_names_the_binding_roof() -> None:
 
 
 # =============================================================================
+# Hover text: kernel name
+# =============================================================================
+
+
+def test_kernel_hover_carries_the_whole_name() -> None:
+    """A long demangled name reaches the tooltip whole. It is wrapped onto as
+    many lines as it takes, but nothing is dropped: two instantiations of the
+    same function are told apart by template arguments that run to the very end
+    of the name."""
+    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
+    roofline = make_roofline()
+    roofline._Roofline__ai_data = {
+        "ai_hbm": [[1.0], [900.0]],
+        "kernelNames": [name],
+    }
+
+    traces, _ = roofline._build_kernel_traces(
+        kernel_names=[name],
+        kernel_colors=["#123456"],
+        sanitized_cache_hierarchy=["HBM"],
+        ceiling_data=CEILING,
+        ops_flops="FLOP",
+        compute_peaks=COMPUTE_PEAKS,
+    )
+
+    wrapped = wrap_hover_name(name)
+    assert wrapped in traces[0].hovertemplate
+    # Undo the wrapping: what the tooltip shows is exactly the name.
+    lines = wrapped.split(">", 1)[1].removesuffix("</span>")
+    assert lines.replace("<br>", "") == name
+
+
+# =============================================================================
 # View-model serialization
 # =============================================================================
 
@@ -137,3 +176,53 @@ def test_view_model_to_json_escapes_script_close() -> None:
     assert "</script>" not in serialized, "must not allow a script element to close"
     # Still valid JSON that decodes back to the original kernel name.
     assert json.loads(serialized)["kernels"][0]["name"] == "evil</script>"
+
+
+# =============================================================================
+# Light and dark theme
+# =============================================================================
+
+
+def _custom_properties(css: str, selector: str) -> dict[str, str]:
+    """The declarations of the one rule with this exact selector."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    block = re.search(re.escape(selector) + r"\s*\{([^{}]*)\}", css)
+    assert block, f"no rule found for {selector}"
+    declarations = {}
+    for line in block.group(1).split(";"):
+        if ":" in line:
+            name, _, value = line.partition(":")
+            declarations[name.strip()] = value.strip()
+    return declarations
+
+
+def test_dark_theme_reads_the_same_palette_whichever_way_it_is_turned_on() -> None:
+    """A media query cannot join a selector list, so the reader's choice and the
+    system preference each map the dark tokens themselves. They have to map the
+    same ones to the same values, or one route themes something the other does
+    not."""
+    css = (_ASSETS / "roofline_plot.css").read_text(encoding="utf-8")
+
+    chosen = _custom_properties(css, ":root.roofline-theme-dark")
+    from_system = _custom_properties(css, ":root:not(.roofline-theme-light)")
+    assert chosen, "the toggle has to have something to switch to"
+    assert chosen == from_system
+
+    # Each mapping points at the palette rather than restating a color, which is
+    # what keeps the duplication above harmless.
+    root = _custom_properties(css, ":root")
+    for name, value in chosen.items():
+        if name == "color-scheme":
+            continue
+        token = re.fullmatch(r"var\((--roofline-dark-[a-z-]+)\)", value)
+        assert token, f"{name} should read a --roofline-dark-* token, got {value}"
+        assert token.group(1) in root, f"{token.group(1)} is never defined"
+
+
+def test_theme_toggle_button_matches_the_id_the_controller_looks_up() -> None:
+    """The page renders the button and the controller finds it by id. Nothing
+    would report the two drifting apart: the button would just stop working."""
+    controller = (_ASSETS / "roofline_plot.js").read_text(encoding="utf-8")
+
+    assert 'id="roofline-theme-toggle"' in roofline_html._PAGE_TEMPLATE
+    assert '"roofline-theme-toggle"' in controller

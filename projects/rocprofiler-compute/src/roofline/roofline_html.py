@@ -23,17 +23,14 @@ from typing import Any, Optional
 
 import plotly.graph_objects as go
 
-# Values below are forwarded to the browser by RooflineViewModel.to_json rather
-# than re-hardcoded in the client assets, so they only change in one place.
 KERNEL_NAME_FONT_FAMILY = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
-# Sentinel value for the "every memory level" dropdown option.
 ALL_PEAKS_VALUE = "all"
 
-# Multiplicative padding left around the data when framing the axes.
 FRAME_PAD = 1.6
+FRAME_MIN_DECADES = 2.5
+FRAME_SLOPE_SKEW = 2.0
 
-# Roofs are extrapolated out to this AI so they still span a panned view.
 ROOF_EXTRAP_MAX_AI = 1e150
 
 _PAGE_TEMPLATE = """<!DOCTYPE html>
@@ -64,6 +61,8 @@ __CSS__
     <button type="button" id="roofline-export-png"
             class="roofline-btn roofline-btn-sm"
             title="Download the current chart as a PNG image">Export PNG</button>
+    <button type="button" id="roofline-theme-toggle"
+            class="roofline-btn roofline-btn-sm" aria-pressed="false">Dark mode</button>
   </div>
   <div class="roofline-body">
     <div class="roofline-plot-col">
@@ -82,8 +81,7 @@ __PLOT_FRAGMENT__
         again to show all. Ctrl+click (&#8984;+click on Mac) to add or remove
         kernels.</p>
       <div id="roofline-runtime-filter" class="roofline-runtime-filter">
-        <label for="roofline-runtime-threshold" id="roofline-runtime-label"
-               title="__RUNTIME_TITLE__">
+        <label for="roofline-runtime-threshold" title="__RUNTIME_TITLE__">
           Runtime shown
           <span id="roofline-runtime-value" class="roofline-runtime-value">100%</span>
         </label>
@@ -253,11 +251,9 @@ class RooflineViewModel:
             "fallbackColor": "#888888",
             # Opacity of the non-isolated roofs and ceilings while isolating.
             "plotDimOpacity": 0.15,
-            # Client-side framing: pad factor, the minimum decades an axis range
-            # is widened to, and the decades of each roof kept in frame.
             "framePad": FRAME_PAD,
-            "frameMinDecades": 2.5,
-            "frameRoofSegmentDecades": 2,
+            "frameMinDecades": FRAME_MIN_DECADES,
+            "frameSlopeSkew": FRAME_SLOPE_SKEW,
             "kernelNameFontFamily": KERNEL_NAME_FONT_FAMILY,
         }
         return json.dumps(_json_safe(payload), allow_nan=False).replace("</", "<\\/")
