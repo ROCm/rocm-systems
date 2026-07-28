@@ -2877,6 +2877,23 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
     const size_t lo = filter.time_window.start.value_or(0);
     const size_t hi = filter.time_window.end.value_or(std::numeric_limits<size_t>::max());
 
+    // DESIGN DECISION (gap #3, 2026-07-28): flow SOURCE. Edges are sourced from
+    // stack_id (+ parent_stack_id for lineage), NOT the draft_api_2026-06-22 §6/§9.3
+    // correlation_id column. Rationale is measured, not owner-signed-off (029/030 recon
+    // on real captures): correlation_id is populated only 0-0.86% of the time (an
+    // external id pushed via roctx — 8/935 events on the measured capture, all
+    // group-size-1, 0 cross-track pairs), so flows sourced from it would yield a nearly
+    // empty cross-track graph, whereas the stack_id clique yields 100% clean cross-track
+    // pairs. Adopts recommendation (i) of design/flow_source_correction_2026-07-15.md.
+    // rec (ii) is only PARTIALLY adopted: this builder makes an UNDIRECTED stack_id
+    // clique with a heuristic direction (see the direction block below), grouped by
+    // flow_id = stack_id; it does NOT implement the stricter directed
+    // parent_stack_id->ancestor, cross-track-ONLY model — the region/sibling sets can
+    // still include same-track edges. Reversible. Open for Anthony review (the correction
+    // doc is an un-ratified proposal) — design/draft_api_2026-06-22.md §6/§9.3,
+    // design/flow_source_correction_2026-07-15.md,
+    // design/gap_analysis_current_vs_design_2026-07-23.md.
+
     // De-duplicate each unordered endpoint pair to ONE directed edge. The same-type sets
     // (region->region, kd/mc/ma siblings) emit both (a,b) and (b,a); cross-type sets emit
     // one direction. Key is the endpoint pair normalized to (min,max) so both orderings
