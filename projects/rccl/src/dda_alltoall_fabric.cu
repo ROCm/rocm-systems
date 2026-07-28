@@ -23,6 +23,20 @@ namespace {
 
 using nccl_dda_detail::DdaFabricBarrierState;
 
+template <typename T, int NRANKS_CT>
+static ncclResult_t launchDdaAllToAllFabric(T** d_ipcbuffs, T* recvbuff, size_t count, const T* sendbuff, int rank,
+                                              int nRanks, meta::comms::FabricGpuBarrier barrierHost, dim3 grid,
+                                              dim3 block, cudaStream_t stream, bool copyInKernel) {
+  if (copyInKernel) {
+    meta::comms::ddaAllToAllFabric<T, NRANKS_CT, true><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, recvbuff, count, sendbuff, rank, nRanks, barrierHost);
+  } else {
+    meta::comms::ddaAllToAllFabric<T, NRANKS_CT, false><<<grid, block, 0, stream>>>(
+        d_ipcbuffs, recvbuff, count, sendbuff, rank, nRanks, barrierHost);
+  }
+  return ncclSuccess;
+}
+
 template <typename T>
 static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
                                                cudaStream_t stream) {
@@ -50,24 +64,30 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
 
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
+  const bool copyInKernel = meta::comms::ddaAlltoAllSingleBlockGrid(count, sizeof(T));
 
   INFO(NCCL_COLL, "DDA fabric AllToAll: launching kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks, count,
        grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
-  CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+  if (!copyInKernel) {
+    CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
+  }
 
   switch (nRanks) {
   case 4:
-    meta::comms::ddaAllToAllFabric<T, 4><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+    launchDdaAllToAllFabric<T, 4>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost,
+        grid, block, stream, copyInKernel);
     break;
   case 8:
-    meta::comms::ddaAllToAllFabric<T, 8><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+    launchDdaAllToAllFabric<T, 8>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost,
+        grid, block, stream, copyInKernel);
     break;
   default:
-    meta::comms::ddaAllToAllFabric<T, 0><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
+    launchDdaAllToAllFabric<T, 0>(
+        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost,
+        grid, block, stream, copyInKernel);
     break;
   }
 
