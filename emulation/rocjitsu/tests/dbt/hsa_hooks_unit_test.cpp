@@ -38,7 +38,7 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_process_growth_budget.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -86,8 +86,8 @@ TEST(HsaHooksUnitTest, QueueInterceptionEntriesUsePublicAbiSignatures) {
                               ExpectedQueueInterceptRegister>));
 }
 
-TEST(ProcessGrowthBudgetTest, PlansCommitsRefundsAndTracksPeak) {
-  rocjitsu::consan_hook::ProcessGrowthBudget budget;
+TEST(ProcessByteBudgetTest, PlansCommitsRefundsAndTracksPeak) {
+  rocjitsu::consan_hook::ProcessByteBudget budget;
 
   const auto first = budget.plan_charge(4, 8);
   ASSERT_TRUE(first);
@@ -97,7 +97,7 @@ TEST(ProcessGrowthBudgetTest, PlansCommitsRefundsAndTracksPeak) {
 
   const auto rejected = budget.plan_charge(5, 8);
   EXPECT_EQ(rejected.outcome,
-            rocjitsu::consan_hook::ProcessGrowthBudget::ChargeOutcome::LimitExceeded);
+            rocjitsu::consan_hook::ProcessByteBudget::ChargeOutcome::LimitExceeded);
   EXPECT_EQ(rejected.live_bytes, 4u);
   EXPECT_EQ(rejected.required_bytes, 9u);
   EXPECT_TRUE(budget.refund(4));
@@ -105,15 +105,15 @@ TEST(ProcessGrowthBudgetTest, PlansCommitsRefundsAndTracksPeak) {
   EXPECT_EQ(budget.summary().peak_bytes, 4u);
 }
 
-TEST(ProcessGrowthBudgetTest, ReportsOverflowAndRecoversFromInvalidRefund) {
-  rocjitsu::consan_hook::ProcessGrowthBudget budget;
+TEST(ProcessByteBudgetTest, ReportsOverflowAndRecoversFromInvalidRefund) {
+  rocjitsu::consan_hook::ProcessByteBudget budget;
   const auto maximum = budget.plan_charge(std::numeric_limits<uint64_t>::max(), std::nullopt);
   ASSERT_TRUE(maximum);
   budget.commit_charge(maximum);
 
   const auto overflow = budget.plan_charge(1, std::nullopt);
   EXPECT_EQ(overflow.outcome,
-            rocjitsu::consan_hook::ProcessGrowthBudget::ChargeOutcome::AccountingOverflow);
+            rocjitsu::consan_hook::ProcessByteBudget::ChargeOutcome::AccountingOverflow);
   EXPECT_FALSE(overflow.required_bytes);
 
   EXPECT_TRUE(budget.refund(std::numeric_limits<uint64_t>::max()));
@@ -277,6 +277,11 @@ bool g_transform_override_models_fault_application = false;
 size_t g_transform_override_actual_fault_applications = 1;
 std::optional<rocjitsu::ConSanResult> g_transform_override_live_fault_result;
 std::mutex g_transform_observation_mutex;
+std::mutex g_transform_block_mutex;
+std::condition_variable g_transform_block_cv;
+bool g_block_first_transform = false;
+bool g_first_transform_entered = false;
+bool g_release_first_transform = false;
 std::mutex g_fault_application_block_mutex;
 std::condition_variable g_fault_application_block_cv;
 bool g_block_first_fault_application = false;
@@ -683,6 +688,14 @@ rocjitsu::ConSanResult transform_override(std::span<const uint8_t> bytes,
   }
   if (g_transform_override_uses_production)
     return rocjitsu::try_patch_consan(bytes, options);
+  {
+    std::unique_lock lock(g_transform_block_mutex);
+    if (g_block_first_transform && !g_first_transform_entered) {
+      g_first_transform_entered = true;
+      g_transform_block_cv.notify_all();
+      g_transform_block_cv.wait(lock, [] { return g_release_first_transform; });
+    }
+  }
   rocjitsu::ConSanResult result =
       queued_result ? std::move(*queued_result) : g_transform_override_result;
   if (g_transform_override_models_fault_application && fault_mutation_enabled &&
@@ -1226,6 +1239,12 @@ void reset_code_object_observations() {
   g_transform_override_actual_fault_applications = 1;
   g_transform_override_live_fault_result.reset();
   {
+    std::lock_guard lock(g_transform_block_mutex);
+    g_block_first_transform = false;
+    g_first_transform_entered = false;
+    g_release_first_transform = false;
+  }
+  {
     std::lock_guard lock(g_fault_application_block_mutex);
     g_block_first_fault_application = false;
     g_first_fault_application_entered = false;
@@ -1275,6 +1294,8 @@ void configure_consan_profile(const ConSanHookProfile &profile, bool fail_closed
   unsetenv("RJ_CONSAN_REPORT_BUFFER");
   unsetenv("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES");
   unsetenv("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT");
+  unsetenv("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES");
+  unsetenv("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES");
   unsetenv("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES");
   if (profile.expected_flavor == rocjitsu::ConSanFlavor::Moi) {
     setenv("RJ_CONSAN_MOI_REPORT_BUFFER", "4096", 1);
@@ -1320,6 +1341,8 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "0");
   ScopedEnvVar absolute_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", nullptr);
   ScopedEnvVar relative_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", nullptr);
+  ScopedEnvVar process_transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", nullptr);
+  ScopedEnvVar process_image_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES", nullptr);
   ScopedEnvVar process_growth_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES", nullptr);
 
   reset_code_object_observations();
@@ -1441,47 +1464,281 @@ TEST(HsaHooksUnitTest, ConSanRejectsMalformedPatchedImageGrowthLimits) {
   }
 }
 
-TEST(HsaHooksUnitTest, ConSanRejectsMalformedProcessPatchedImageGrowthLimits) {
+TEST(HsaHooksUnitTest, ConSanRejectsMalformedProcessMemoryLimits) {
+  constexpr std::array names = {
+      "RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES",
+      "RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES",
+      "RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES",
+  };
   constexpr std::array values = {
       "-1", " 1", "\t1", "+5", "0x10", "1x", "18446744073709551616",
   };
-  for (const char *value : values) {
-    SCOPED_TRACE(value);
-    configure_consan_profile(kConSanHookProfiles[1], false);
-    ScopedEnvVar process_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES", value);
+  for (const char *name : names) {
+    for (const char *value : values) {
+      SCOPED_TRACE(name);
+      SCOPED_TRACE(value);
+      configure_consan_profile(kConSanHookProfiles[1], false);
+      ScopedEnvVar process_limit(name, value);
 
-    reset_code_object_observations();
-    FakeApiTable api;
-    const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
-    InstalledDbiHook hook(api);
-    EXPECT_FALSE(hook.installed());
-    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
+      reset_code_object_observations();
+      FakeApiTable api;
+      const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
+      InstalledDbiHook hook(api);
+      EXPECT_FALSE(hook.installed());
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn, original_load);
+    }
   }
 }
 
-TEST(HsaHooksUnitTest, ConSanAcceptsBoundaryProcessPatchedImageGrowthLimits) {
-  constexpr std::array cases = {
-      std::pair{"", "process_patched_image_growth_limit_bytes=unlimited"},
-      std::pair{"0", "process_patched_image_growth_limit_bytes=0"},
-      std::pair{"18446744073709551615",
-                "process_patched_image_growth_limit_bytes=18446744073709551615"},
+TEST(HsaHooksUnitTest, ConSanAcceptsBoundaryProcessMemoryLimits) {
+  struct Limit {
+    const char *name;
+    const char *log_name;
   };
-  for (const auto &[value, expected_log] : cases) {
-    SCOPED_TRACE(value);
-    configure_consan_profile(kConSanHookProfiles[1], false);
-    ScopedEnvVar process_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES", value);
-    ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
-    reset_code_object_observations();
+  constexpr std::array limits = {
+      Limit{"RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES",
+            "process_concurrent_transform_limit_bytes"},
+      Limit{"RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES", "process_patched_image_limit_bytes"},
+      Limit{"RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES",
+            "process_patched_image_growth_limit_bytes"},
+  };
+  constexpr std::array values = {
+      "",
+      "0",
+      "18446744073709551615",
+  };
+  for (const Limit &limit : limits) {
+    for (const char *value : values) {
+      SCOPED_TRACE(limit.name);
+      SCOPED_TRACE(value);
+      configure_consan_profile(kConSanHookProfiles[1], false);
+      ScopedEnvVar process_limit(limit.name, value);
+      ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+      reset_code_object_observations();
 
-    testing::internal::CaptureStderr();
-    {
-      FakeApiTable api;
-      InstalledDbiHook hook(api);
-      ASSERT_TRUE(hook.installed()) << hook.error();
+      testing::internal::CaptureStderr();
+      {
+        FakeApiTable api;
+        InstalledDbiHook hook(api);
+        ASSERT_TRUE(hook.installed()) << hook.error();
+      }
+      const std::string log = testing::internal::GetCapturedStderr();
+      const std::string expected =
+          std::string(limit.log_name) + "=" + (value[0] == '\0' ? "unlimited" : value);
+      EXPECT_NE(log.find(expected), std::string::npos) << log;
     }
-    const std::string log = testing::internal::GetCapturedStderr();
-    EXPECT_NE(log.find(expected_log), std::string::npos) << log;
   }
+}
+
+TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitFailsOpenBeforeTransform) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "11");
+
+  g_transform_override_result = process_growth_replacement_result();
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  hook.unload();
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_TRUE(g_transform_override_flavors.empty());
+  EXPECT_EQ(g_loaded_code_object_readers, (std::vector<uint64_t>{reader.handle}));
+  EXPECT_NE(log.find("process concurrent transform limit exceeded: reader=101 input_image=8 "
+                     "live=0 reservation=12 required=12 limit=11"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("analysis_complete=false static_complete=false "
+                     "dynamic_complete=true applicable_code_objects=1 "
+                     "incomplete_code_objects=1 access=0/0"),
+            std::string::npos)
+      << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitFailsClosedBeforeTransform) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], true);
+  ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "11");
+
+  g_transform_override_result = process_growth_replacement_result();
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("reason=process-concurrent-transform-limit"), std::string::npos) << log;
+  EXPECT_TRUE(g_transform_override_flavors.empty());
+  EXPECT_TRUE(g_loaded_code_object_readers.empty());
+}
+
+TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitTracksAndRefundsReservations) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "12");
+
+  g_transform_override_result = process_growth_replacement_result();
+  g_block_first_transform = true;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  std::array<hsa_code_object_reader_t, 3> readers{};
+  for (hsa_code_object_reader_t &reader : readers) {
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+  }
+
+  testing::internal::CaptureStderr();
+  auto first_load = std::async(std::launch::async, [&] {
+    return api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                             readers[0], nullptr, nullptr);
+  });
+  {
+    std::unique_lock lock(g_transform_block_mutex);
+    if (!g_transform_block_cv.wait_for(lock, std::chrono::seconds(2),
+                                       [] { return g_first_transform_entered; })) {
+      g_release_first_transform = true;
+      lock.unlock();
+      g_transform_block_cv.notify_all();
+      (void)first_load.get();
+      (void)testing::internal::GetCapturedStderr();
+      FAIL() << "first transform did not reach the blocked transform boundary";
+      return;
+    }
+  }
+
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{8}, kHostAgent,
+                                                              readers[1], nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  {
+    std::lock_guard lock(g_transform_block_mutex);
+    g_release_first_transform = true;
+  }
+  g_transform_block_cv.notify_all();
+  EXPECT_EQ(first_load.get(), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{9}, kHostAgent,
+                                                              readers[2], nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_transform_override_flavors.size(), 2u);
+  EXPECT_EQ(g_loaded_code_object_readers, (std::vector<uint64_t>{102u, 104u, 105u}));
+
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{8}), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{9}), HSA_STATUS_SUCCESS);
+  hook.unload();
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("live=12 reservation=12 required=24 limit=12"), std::string::npos) << log;
+  EXPECT_NE(log.find("transform admission memory live_before_cleanup=0 live_after_cleanup=0 "
+                     "peak_reserved_bytes=12 process_ceiling=12"),
+            std::string::npos)
+      << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanProcessPatchedImageLimitIsAtomicWithGrowthBudget) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar process_growth_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES", "8");
+  ScopedEnvVar process_image_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES", "12");
+
+  g_transform_override_result = process_growth_replacement_result();
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  std::array<hsa_code_object_reader_t, 3> readers{};
+  for (hsa_code_object_reader_t &reader : readers) {
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+  }
+
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              readers[0], nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{8}, kHostAgent,
+                                                              readers[1], nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{9}, kHostAgent,
+                                                              readers[2], nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_loaded_code_object_readers, (std::vector<uint64_t>{104u, 102u, 105u}));
+
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{8}), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{9}), HSA_STATUS_SUCCESS);
+  hook.unload();
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("process patched-image limit exceeded: "
+                     "live=12 replacement_image=12 replacement_growth=4 "
+                     "required=24 limit=12"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("patched-image memory live_before_cleanup=0 live_after_cleanup=0 "
+                     "peak_image_bytes=12 process_ceiling=12"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("patched-image growth memory live_before_cleanup=0 "
+                     "live_after_cleanup=0 peak_growth_bytes=4 process_ceiling=8"),
+            std::string::npos)
+      << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanProcessPatchedImageLimitRejectsNoGrowthReplacement) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], true);
+  ScopedEnvVar process_image_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES", "0");
+
+  g_transform_override_result = process_growth_replacement_result(8);
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("reason=process-patched-image-limit"), std::string::npos) << log;
+  EXPECT_TRUE(g_loaded_code_object_readers.empty());
 }
 
 TEST(HsaHooksUnitTest, ConSanProcessPatchedImageGrowthLimitTracksLiveReplacements) {

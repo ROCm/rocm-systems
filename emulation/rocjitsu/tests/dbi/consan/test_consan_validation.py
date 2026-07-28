@@ -1606,6 +1606,8 @@ class ConSanValidationTest(unittest.TestCase):
         for name, value in (
             ("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4096"),
             ("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", "37"),
+            ("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "12288"),
+            ("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES", "16384"),
             ("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES", "8192"),
         ):
             [setting] = validation._audited_settings({name: value})

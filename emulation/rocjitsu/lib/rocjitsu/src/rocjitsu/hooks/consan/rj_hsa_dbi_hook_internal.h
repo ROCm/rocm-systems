@@ -141,6 +141,8 @@ struct HookConfig {
   bool moi_auto_report_buffer_size_explicit = false;
   uint32_t delay_nops = 0;
   rocjitsu::ConSanPatchedImageGrowthLimit patched_image_growth_limit;
+  std::optional<uint64_t> process_concurrent_transform_limit_bytes;
+  std::optional<uint64_t> process_patched_image_limit_bytes;
   std::optional<uint64_t> process_patched_image_growth_limit_bytes;
   uint32_t max_patches = kConSanAllSupportedPatchBudget;
   bool max_patches_explicit = false;
