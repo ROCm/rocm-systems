@@ -140,6 +140,7 @@ add_executable(rccl-PureUnitTests
   ${RCCL_TEST_DIR}/ChannelGroupTests.cpp
   ${RCCL_TEST_DIR}/BufferBoundsTests.cpp
   ${RCCL_TEST_DIR}/PipeReadTests.cpp
+  ${RCCL_TEST_DIR}/SyncRegressionTests.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
   bootstrap_bidir_stub.cpp
   ${RCCL_SRC_DIR}/misc/kernel_config.cc
