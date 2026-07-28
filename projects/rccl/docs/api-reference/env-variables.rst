@@ -35,9 +35,7 @@ in the following table.
           installed in a non-default prefix, such as inside a container or an
           HPC software module, where the loader cannot find the library by its
           default name. When the override is unset or fails to load, RCCL falls
-          back to ``libibverbs.so`` and then ``libibverbs.so.1``. This variable
-          supersedes the earlier ``NCCL_LIBIBVERBS_SO``, which is no longer
-          recognized; migrate existing configurations to ``NCCL_IBVERBS_LIB``.
+          back to ``libibverbs.so`` and then ``libibverbs.so.1``.
       - | String path or soname of the libibverbs shared object
         | Default: unset (loads ``libibverbs.so`` or ``libibverbs.so.1``)
 
