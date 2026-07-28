@@ -60,6 +60,20 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
     int vdev = -1;
     ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
     EXPECT_EQ(result, ncclInvalidUsage) << "Should fail with zero devices";
+
+    // Negative test: negative count. It clears every per-device check because the
+    // build loop never runs, so without an explicit bound it registers an empty vNIC.
+    int ndevBefore = 0;
+    ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
+
+    vProps.ndevs = -1;
+    vdev = -1;
+    EXPECT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclInvalidUsage)
+        << "Should fail with a negative device count";
+
+    int ndevAfter = 0;
+    ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+    EXPECT_EQ(ndevAfter, ndevBefore) << "A rejected request must not register a device";
 }
 
 TEST_F(NetIbMPITest, MakeVirtualDeviceMergeDisabled) {

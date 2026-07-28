@@ -256,7 +256,7 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // RCCL: bound the count before props->devs[] is indexed. A negative ndevs clears every
   // per-device check because the build loop never runs, and an over-limit count reads past the end.
-  if (props->ndevs < 0 || props->ndevs > NCCL_IB_MAX_DEVS_PER_NIC) {
+  if (props->ndevs < 1 || props->ndevs > NCCL_IB_MAX_DEVS_PER_NIC) {
     WARN("NET/IB : Can't make virtual NIC with %d devices, max %d", props->ndevs, NCCL_IB_MAX_DEVS_PER_NIC);
     return ncclInvalidUsage;
   }
