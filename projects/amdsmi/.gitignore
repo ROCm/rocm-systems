@@ -36,11 +36,6 @@ device/
 # misc
 esmi_ib_library/
 
-# editor / tooling backup files (keep accidental cruft out of the index)
-*.bak
-*.backup
-*.orig
-
 # do NOT ignore these files
 !.clang-format
 !.clang-tidy

@@ -3266,28 +3266,44 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
 
     lowest = std::min_element(
         queuePool_[qIndex].begin(), queuePool_[qIndex].end(),
-        [mode, pipe_dist, num_pipes, excluded_ids](PoolRef A, PoolRef B) {
+        [mode, pipe_dist, num_pipes, excluded_ids](PoolRef first_candidate,
+                                                   PoolRef second_candidate) {
           // Exclusion filtering: prefer non-excluded queues over excluded ones
-          bool a_excluded = excluded_ids && excluded_ids->count(A.first->id) > 0;
-          bool b_excluded = excluded_ids && excluded_ids->count(B.first->id) > 0;
-          if (a_excluded != b_excluded) return b_excluded;
+          bool first_is_excluded =
+              excluded_ids && excluded_ids->count(first_candidate.first->id) > 0;
+          bool second_is_excluded =
+              excluded_ids && excluded_ids->count(second_candidate.first->id) > 0;
+          if (first_is_excluded != second_is_excluded) return second_is_excluded;
+
+          // Always use an unshared regular queue before sharing an active queue. On devices
+          // with coarse-grained read pointer updates, an idle queue can retain a nonzero
+          // apparent depth and must not lose to a blocked queue with a smaller reported depth.
+          bool first_is_unshared =
+              first_candidate.second.refCount == 0 &&
+              !first_candidate.second.hasDedicatedQueue_;
+          bool second_is_unshared =
+              second_candidate.second.refCount == 0 &&
+              !second_candidate.second.hasDedicatedQueue_;
+          if (first_is_unshared != second_is_unshared) return first_is_unshared;
 
           if (mode >= 1) {
             // Mode 1+: Advanced weighted metric with dedicated queue penalty
             // Metric = dedicated_queue_penalty + (depth << 4) + refCount
-            uint64_t metricA = A.second.GetLoadMetric(A.first, mode);
-            uint64_t metricB = B.second.GetLoadMetric(B.first, mode);
+            uint64_t first_metric =
+                first_candidate.second.GetLoadMetric(first_candidate.first, mode);
+            uint64_t second_metric =
+                second_candidate.second.GetLoadMetric(second_candidate.first, mode);
 
-            if (metricA == metricB && pipe_dist) {
+            if (first_metric == second_metric && pipe_dist) {
               // gfx9XX pipe distribution: prefer lower pipe IDs for consistent distribution
-              uint64_t pipeA = A.first->id % num_pipes;
-              uint64_t pipeB = B.first->id % num_pipes;
-              return pipeA < pipeB;
+              uint64_t first_pipe = first_candidate.first->id % num_pipes;
+              uint64_t second_pipe = second_candidate.first->id % num_pipes;
+              return first_pipe < second_pipe;
             }
-            return metricA < metricB;
+            return first_metric < second_metric;
           } else {
             // Mode 0: Simple refCount-based selection
-            return A.second.refCount < B.second.refCount;
+            return first_candidate.second.refCount < second_candidate.second.refCount;
           }
         });
 
