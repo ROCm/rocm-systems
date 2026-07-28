@@ -1,11 +1,9 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
-# rccl-UnitTestsMicro: standalone unit-test binary for files under
-# src/transport/ that we want to compile directly into the test binary
-# (rather than reach via librccl.so). This lets us link-time-substitute
-# the HIP driver / NCCL proxy seams for hermetic, GPU-less coverage.
-#
-# Pattern modelled on rccl-UnitTestsAltRsmi in ../CMakeLists.txt.
+# rccl-UnitTestsMicro: standalone unit-test binary that we want to compile
+# directly into the test binary. This lets us use preprocessor and link-time
+# substitution for to provide test doubles for anything that would require
+# a GPU or other special hardware.
 
 if(NOT BUILD_TESTS)
   return()
@@ -24,18 +22,14 @@ target_include_directories(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_INCLUDE_DIR
 target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 target_link_libraries(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_LINK_LIBS})
 
-# Point p2p-test.cc at the hipified copy of p2p.cc that the main RCCL build
-# generates (cudaXxx -> hipXxx, CUdeviceptr -> hipDeviceptr_t, etc.). We
-# pass the absolute path through as a string literal so the #include in
-# the test TU stays independent of the build directory layout.
+# Pass the absolute path of hipified source files through as string
+# literals so the #include in the test translation unit stays independent of
+# the build directory layout.
 target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
 )
 
-# Make sure the hipify step has produced the file before we try to compile
-# the test. We depend on the `rccl` target (which owns the hipify outputs)
-# WITHOUT linking against it -- the test deliberately compiles p2p.cc
-# directly and provides its own stubs for the rest.
+# Make sure the hipify step has run before trying to compile the test.
 add_dependencies(rccl-UnitTestsMicro hipify_all copy_nccl_device_headers)
 
 # Independent coverage knob for this binary. We can't reuse the global
@@ -64,5 +58,4 @@ endif()
 # Deliberately NOT linking librccl.so: this binary is for tests that compile
 # their unit-under-test source file(s) directly. Add files to
 # TEST_MICRO_SOURCE_FILES above as new units come under test.
-
 rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
