@@ -147,4 +147,46 @@ TEST(IbWrIdPackingTest, PackedValuesDoNotOverlap) {
   }
 }
 
+// =========================================================================
+// remDevIdx used as array index before initialization
+// src/transport/net_ib_cast/common.cc:49 initializes remDevIdx to -1:
+//   baseComm->qps[i].remDevIdx = -1;
+//
+// It is only set to a valid value during RTR in connect.cc:724:
+//   localQp->remDevIdx = remQpInfo->devIndex;
+//
+// But IbCastPostFifo (p2p.cc:501) uses it as an array index:
+//   wr.wr.rdma.rkey = comm->base.remDevs[ctsQp->remDevIdx].rkey;
+//
+// If called before RTR completes, remDevIdx is still -1, producing
+// an array underflow that reads from memory before remDevs[].
+// =========================================================================
+
+TEST(IbCastRemDevIdxTest, InitialValueIsValidIndex) {
+  constexpr int NCCL_IB_MAX_DEVS_PER_NIC = 4;
+  int remDevIdx = -1;  // as initialized in IbCastBaseCommInit
+
+  EXPECT_GE(remDevIdx, 0)
+    << "remDevIdx initialized to " << remDevIdx
+    << "; used as array index in remDevs[remDevIdx] at p2p.cc:501 "
+       "before RTR sets it, causing buffer underflow";
+}
+
+TEST(IbCastRemDevIdxTest, NegativeIndexCaughtBeforeArrayAccess) {
+  constexpr int NCCL_IB_MAX_DEVS_PER_NIC = 4;
+
+  struct RemDev { uint32_t rkey; int ibv_dev_index; int lid; };
+  RemDev remDevs[NCCL_IB_MAX_DEVS_PER_NIC] = {};
+
+  int remDevIdx = -1;  // uninitialized state from common.cc:49
+
+  // The code at p2p.cc:501 does: remDevs[ctsQp->remDevIdx].rkey
+  // This should be guarded — assert the index is in bounds
+  bool inBounds = (remDevIdx >= 0 && remDevIdx < NCCL_IB_MAX_DEVS_PER_NIC);
+  EXPECT_TRUE(inBounds)
+    << "remDevIdx=" << remDevIdx << " is out of bounds for remDevs["
+    << NCCL_IB_MAX_DEVS_PER_NIC << "]; "
+       "array underflow causes SIGSEGV during CAST transport connect";
+}
+
 } // namespace RcclUnitTesting
