@@ -66,6 +66,7 @@ if(HAVE_HIPCC_WRAPPERS)
     --gcc-install-dir=${GCC_INSTALL_DIR}
     -D__HIP_PLATFORM_AMD__
     -DNCCL_OS_LINUX
+    -DROCM_VERSION=70000
     -Wno-tautological-constant-out-of-range-compare
   )
   set(HIPCC_INCLUDE_FLAGS
@@ -76,11 +77,13 @@ if(HAVE_HIPCC_WRAPPERS)
     -I${RCCL_HIPIFY_DIR}/src
     -I${RCCL_HIPIFY_DIR}/src/graph
     -I${RCCL_TEST_DIR}
+    -I${RCCL_TEST_DIR}/common
     -I${RCCL_BUILD_DIR}/_deps/fmt-src/include
   )
 
   # Compile each wrapper file with hipcc (custom commands)
-  foreach(wrapper paths_wrapper search_wrapper NullParentTests_wrapper)
+  foreach(wrapper paths_wrapper search_wrapper NullParentTests_wrapper
+                  mem_manager_src_wrapper mem_manager_test_wrapper)
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${wrapper}.o
       COMMAND ${HIPCC_EXECUTABLE} ${HIPCC_COMPILE_FLAGS} ${HIPCC_INCLUDE_FLAGS}
@@ -96,12 +99,16 @@ if(HAVE_HIPCC_WRAPPERS)
     ${CMAKE_CURRENT_BINARY_DIR}/paths_wrapper.o
     ${CMAKE_CURRENT_BINARY_DIR}/search_wrapper.o
     ${CMAKE_CURRENT_BINARY_DIR}/NullParentTests_wrapper.o
+    ${CMAKE_CURRENT_BINARY_DIR}/mem_manager_src_wrapper.o
+    ${CMAKE_CURRENT_BINARY_DIR}/mem_manager_test_wrapper.o
     PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE
   )
   add_library(rccl-real-source-wrappers STATIC
     ${CMAKE_CURRENT_BINARY_DIR}/paths_wrapper.o
     ${CMAKE_CURRENT_BINARY_DIR}/search_wrapper.o
     ${CMAKE_CURRENT_BINARY_DIR}/NullParentTests_wrapper.o
+    ${CMAKE_CURRENT_BINARY_DIR}/mem_manager_src_wrapper.o
+    ${CMAKE_CURRENT_BINARY_DIR}/mem_manager_test_wrapper.o
     wrapper_link_stubs.cpp
   )
   target_compile_definitions(rccl-real-source-wrappers PRIVATE
@@ -128,6 +135,7 @@ add_executable(rccl-PureUnitTests
   ${RCCL_TEST_DIR}/EnqueueCountTests.cpp
   ${RCCL_TEST_DIR}/BootstrapBidirTests.cpp
   ${RCCL_TEST_DIR}/AltRsmiTests.cpp
+  ${RCCL_TEST_DIR}/CodeReviewBugTests.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
   bootstrap_bidir_stub.cpp
   ${RCCL_SRC_DIR}/misc/kernel_config.cc

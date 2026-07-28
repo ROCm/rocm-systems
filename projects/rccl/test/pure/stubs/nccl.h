@@ -31,8 +31,10 @@ typedef struct ncclComm* ncclComm_t;
 struct ncclWindow_vidmem;
 typedef struct ncclWindow_vidmem* ncclWindow_t;
 
+extern "C" {
 const char* ncclGetErrorString(ncclResult_t code);
 ncclResult_t ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t* asyncError);
+}
 
 typedef enum {
     ncclInt8       = 0, ncclChar       = 0,

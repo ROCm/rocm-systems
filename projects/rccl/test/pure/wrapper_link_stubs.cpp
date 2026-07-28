@@ -28,7 +28,10 @@ const char* topoPathTypeStr[] = {"LOC", "NVL", "NVB", "C2C", "PIX", "PXB", "P2C"
 
 // --- Symbols from param.cc ---
 const char* ncclGetEnv(const char* name) { return getenv(name); }
-void ncclLoadParam(const char*, long, long, long* out, signed char*) { if(out) *out = 0; }
+int64_t ncclLoadParam(const char*, int64_t deftVal, int64_t uninitialized, int64_t* cache, signed char*) {
+  if (cache) *cache = deftVal;
+  return deftVal;
+}
 
 // --- Symbols from debug.cc ---
 thread_local signed char ncclDebugNoWarn = 0;
@@ -69,3 +72,65 @@ ncclResult_t ncclTopoGetStrFromSys(const char*, const char*, char*) { return ncc
 ncclResult_t ncclTopoRemoveNode(ncclTopoSystem*, int, int) { return ncclSuccess; }
 ncclResult_t getLocalNetCountByBw(ncclTopoSystem*, int, int*, float*) { return ncclSuccess; }
 int ncclParamWorkArgsBytes() { return 0; }
+
+// --- Stubs for mem_manager.cc dependencies ---
+
+// HIP runtime C-linkage stubs (return hipSuccess = 0)
+extern "C" {
+int hipHostFree(void*) { return 0; }
+const char* hipGetErrorString(int) { return "stub"; }
+int hipGetLastError() { return 0; }
+int hipMemAddressFree(void*, size_t) { return 0; }
+int hipMemUnmap(void*, size_t) { return 0; }
+int hipMemRelease(uint64_t) { return 0; }
+int hipMemCreate(uint64_t*, size_t, void*, unsigned long long) { return 0; }
+int hipMemMap(void*, size_t, size_t, uint64_t, unsigned long long) { return 0; }
+int hipMemSetAccess(void*, size_t, void*, size_t) { return 0; }
+int hipMemExportToShareableHandle(void*, uint64_t, int, unsigned long long) { return 0; }
+int hipMemAddressReserve(void**, size_t, size_t, void*, unsigned long long) { return 0; }
+int hipMemGetAllocationGranularity(size_t* g, void*, int) { if (g) *g = 65536; return 0; }
+int hipMemImportFromShareableHandle(uint64_t*, void*, int) { return 0; }
+int hipMemRetainAllocationHandle(uint64_t*, void*) { return 0; }
+int hipMemGetAddressRange(void**, size_t*, void*) { return 0; }
+int hipDeviceSynchronize() { return 0; }
+int hipMemcpy(void*, const void*, size_t, int) { return 0; }
+int hipGetDevice(int* d) { if (d) *d = 0; return 0; }
+int hipSetDevice(int) { return 0; }
+int hipMalloc(void**, size_t) { return 0; }
+int hipFree(void*) { return 0; }
+int hipHostMalloc(void**, size_t, unsigned int) { return 0; }
+int hipMemsetAsync(void*, int, size_t, void*) { return 0; }
+int hipStreamCreateWithFlags(void**, unsigned int) { return 0; }
+int hipStreamDestroy(void*) { return 0; }
+int hipStreamSynchronize(void*) { return 0; }
+int hipThreadExchangeStreamCaptureMode(int*) { return 0; }
+int hipDeviceGetAttribute(int* v, int, int) { if (v) *v = 0; return 0; }
+int hipExtMallocWithFlags(void**, size_t, unsigned int) { return 0; }
+int hipDeviceGet(int* d, int) { if (d) *d = 0; return 0; }
+}
+
+// RCCL internal stubs
+ncclResult_t CommCheck(ncclComm*, const char*, const char*) { return ncclSuccess; }
+ncclResult_t ncclCommEnsureReady(ncclComm*) { return ncclSuccess; }
+ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
+struct ncclSimInfo_v22200;
+ncclResult_t ncclGroupEndInternal(ncclSimInfo_v22200*) { return ncclSuccess; }
+
+thread_local int ncclGroupDepth = 0;
+thread_local ncclResult_t ncclGroupError = ncclSuccess;
+thread_local ncclComm* ncclGroupCommHead[2] = {};
+thread_local int ncclGroupBlocking = 0;
+
+ncclResult_t bootstrapBarrier(void*, int, int, int) { return ncclSuccess; }
+ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclSuccess; }
+ncclResult_t bootstrapSend(void*, int, int, void*, int) { return ncclSuccess; }
+ncclResult_t bootstrapRecv(void*, int, int, void*, int) { return ncclSuccess; }
+ncclResult_t ncclProxyClientGetFdBlocking(ncclComm*, int, void*, int*) { return ncclSuccess; }
+
+int ncclCuMemEnable() { return 0; }
+int ncclCuMemHandleType = 0;
+ncclResult_t getBusId(int, int64_t* busId) { if (busId) *busId = 0; return ncclSuccess; }
+
+// roctx_scoped_range_in, ncclMemoryStack::allocateSpilled, ncclCommMemStats,
+// and ncclCommGetAsyncError are compiled via hipcc in mem_manager_src_wrapper.cc
+// because they need real RCCL class/struct layouts for correct C++ name mangling.
