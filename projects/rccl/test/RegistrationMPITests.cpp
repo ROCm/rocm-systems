@@ -103,6 +103,20 @@ public:
         return hasPattern("failed to NET register");
     }
 
+    // Direct AllGather path selection (requires NCCL_DEBUG_SUBSYS to include TUNING for
+    // the "used" marker and INIT for the "disabled" markers).
+    bool usedDirectAllGather() const
+    {
+        return hasPattern("RCCL DIRECT ALLGATHER count");
+    }
+
+    bool directAllGatherDisabled() const
+    {
+        return hasPattern("RCCL DIRECT ALLGATHER has been disabled") ||
+               hasPattern("RCCL DIRECT ALLGATHER disabled") ||
+               hasPattern("Direct AllGather disabled");
+    }
+
     std::string getSummary() const
     {
         std::ostringstream ss;
@@ -113,6 +127,8 @@ public:
         if (hasNETRegistration()) ss << "[NET-REG] ";
         if (hasIPCFailure()) ss << "[IPC-FAIL] ";
         if (hasNETFailure()) ss << "[NET-FAIL] ";
+        if (usedDirectAllGather()) ss << "[DIRECT-AG] ";
+        if (directAllGatherDisabled()) ss << "[DIRECT-AG-OFF] ";
         if (!hasAnyRegistrationSuccess() && !hasIPCFailure() && !hasNETFailure()) ss << "[NO-REG]";
         return ss.str();
     }
@@ -145,7 +161,8 @@ protected:
         RegInfo info;
         info.size = size;
 
-        if (hipMalloc(&info.buffer, size) != hipSuccess) {
+        // VMM-aware so registration exercises the cuMem path when cuMem is on.
+        if (allocateDeviceBuffer(&info.buffer, size) != ncclSuccess) {
             return info;
         }
 
@@ -163,7 +180,7 @@ protected:
             info.handle = nullptr;
         }
         if (info.buffer) {
-            (void)hipFree(info.buffer);
+            (void)freeDeviceBuffer(info.buffer);
             info.buffer = nullptr;
         }
         info.registered = false;
@@ -367,12 +384,102 @@ TEST_F(UBR_AllGather, OutOfPlace_MultiNode)
     ASSERT_TRUE(verifyAllGatherResult<T>(recvInfo.buffer, countPerRank, nRanks));
 }
 
+// GDR flush over cuMem/DMA-BUF (regression guard). The NET/IB GDR flush fences
+// relaxed-ordering writes with a RO=0 GPU scratchpad. The pre-fix code also issued
+// an RDMA_WRITE into that scratchpad; on a dma-buf-backed scratchpad (cuMem/UBR)
+// amdgpu can't resolve it as a writable RDMA target, so mlx5 faults the QP
+// ("invalid request local work queue error") and the collective hangs. The fix
+// removes the WRITE and keeps the RO=0 READ fence, so it completes cleanly.
+// Requires NCCL_CUMEM_ENABLE=1 cross-node; if GDR is absent the flush is a no-op.
+class GdrFlush_CuMem : public RegistrationTestBase {};
+
+TEST_F(GdrFlush_CuMem, AllGatherUnregistered_MultiNode)
+{
+    if (!setupMultiNode(RegTestConfig::MIN_RANKS_DEFAULT, RegTestConfig::MIN_NODES_MULTINODE)) {
+        GTEST_SKIP() << "Requires 2+ nodes (cross-node NET/IB GDR path)";
+    }
+
+    ASSERT_TRUE(isCuMemEnabled())
+        << "NCCL_CUMEM_ENABLE must be set to 1 (exercises the cuMem GDR flush path)";
+
+    using T = RegTestConfig::DefaultType;
+
+    int rank, nRanks;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    // The GDR flush only runs on the SIMPLE protocol (large messages); LL/LL128 used
+    // for small messages skips it. Sweep up to a few MB per rank so the cross-node
+    // recv takes the SIMPLE + GDR-flush path where the pre-fix fault occurs.
+    const std::vector<size_t> countsPerRank = {
+        RegTestConfig::SMALL_COUNT,        // ~2 KB  (LL)
+        RegTestConfig::MEDIUM_COUNT,       // ~512 KB (LL128/SIMPLE)
+        RegTestConfig::LARGE_COUNT,        // ~2 MB  (SIMPLE)
+        4 * RegTestConfig::LARGE_COUNT     // ~8 MB  (SIMPLE)
+    };
+
+    for (size_t countPerRank : countsPerRank) {
+        // Plain (unregistered) device buffers so the transfer takes the base GDR
+        // recv+flush path, independent of user-buffer registration.
+        void* sendBuf = nullptr;
+        void* recvBuf = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&sendBuf, countPerRank * sizeof(T)));
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&recvBuf, countPerRank * nRanks * sizeof(T)));
+        auto cleanup = makeScopeGuard([&]() {
+            if (sendBuf) (void)freeDeviceBuffer(sendBuf);
+            if (recvBuf) (void)freeDeviceBuffer(recvBuf);
+        });
+
+        initSendBuffer<T>(sendBuf, countPerRank, rank);
+
+        ncclResult_t result = ncclAllGather(sendBuf, recvBuf, countPerRank,
+                                            getNcclDataType<T>(),
+                                            getActiveCommunicator(), getActiveStream());
+        ASSERT_MPI_EQ(ncclSuccess, result);
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        ASSERT_TRUE(verifyAllGatherResult<T>(recvBuf, countPerRank, nRanks))
+            << "AllGather data incorrect over cuMem GDR path (countPerRank=" << countPerRank << ")";
+    }
+}
+
 // Direct AllGather + UBR coexistence: Direct AllGather stays default under
 // NCCL_LOCAL_REGISTER; P2P registration is gated per-op on ncclTaskP2p::allowUB.
 class UBR_DirectAllGather : public RegistrationTestBase
 {
 protected:
     using T = RegTestConfig::DefaultType;
+
+    // Direct AllGather is pinned only when the launcher/config sets NCCL_LAUNCH_ORDER_IMPLICIT=1
+    // and RCCL_DIRECT_ALLGATHER_THRESHOLD past every swept size; verified below (GTEST_SKIP if not).
+    static constexpr unsigned long long kMinDirectAllGatherThreshold = 2147483648ULL;
+
+    void SetUp() override
+    {
+        RegistrationTestBase::SetUp();
+        if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) {
+            return;
+        }
+
+        const char* launchOrder = getenv("NCCL_LAUNCH_ORDER_IMPLICIT");
+        if (!launchOrder || std::string(launchOrder) != "1") {
+            GTEST_SKIP() << "Requires NCCL_LAUNCH_ORDER_IMPLICIT=1 so the DDA "
+                            "fast-path is disabled and rcclSelectAllGatherAlgo() "
+                            "can select the Direct AllGather path under test. Set "
+                            "it in the test config env_variables.";
+        }
+
+        const char* threshold = getenv("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        const unsigned long long thresholdVal =
+            threshold ? std::strtoull(threshold, nullptr, 10) : 0ULL;
+        if (thresholdVal < kMinDirectAllGatherThreshold) {
+            GTEST_SKIP() << "Requires RCCL_DIRECT_ALLGATHER_THRESHOLD >= "
+                         << kMinDirectAllGatherThreshold << " (raised past every "
+                            "swept size) so Direct AllGather is selected and the "
+                            "user-threshold flag bypasses arch auto-gating. Set it "
+                            "in the test config env_variables.";
+        }
+    }
 
     // Counts straddle the P2P LL<->SIMPLE boundary and the Direct AllGather
     // threshold, exercising the registered path on both sides of the transition.
@@ -386,18 +493,19 @@ protected:
     void runAllGatherOnce(size_t countPerRank, bool registered)
     {
         int rank = 0, nRanks = 0;
-        RCCL_TEST_CHECK_GTEST_FAIL(ncclCommUserRank(getActiveCommunicator(), &rank));
-        RCCL_TEST_CHECK_GTEST_FAIL(ncclCommCount(getActiveCommunicator(), &nRanks));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
 
         const size_t sendBytes = countPerRank * sizeof(T);
         const size_t recvBytes = countPerRank * static_cast<size_t>(nRanks) * sizeof(T);
 
+        // VMM-aware so registration exercises the cuMem path when cuMem is on.
         void* sendBuf = nullptr;
         void* recvBuf = nullptr;
-        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&sendBuf, sendBytes));
-        auto sendBufGuard = makeDeviceBufferAutoGuard(sendBuf);
-        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recvBuf, recvBytes));
-        auto recvBufGuard = makeDeviceBufferAutoGuard(recvBuf);
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&sendBuf, sendBytes));
+        auto sendBufGuard = makeHipMemBufferAutoGuard(sendBuf);
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&recvBuf, recvBytes));
+        auto recvBufGuard = makeHipMemBufferAutoGuard(recvBuf);
 
         // Declared after buffer guards so they destruct first; null handle is a
         // no-op in the deleter, so these stay empty on the baseline path.
@@ -406,9 +514,9 @@ protected:
         if (registered) {
             void* sendH = nullptr;
             void* recvH = nullptr;
-            RCCL_TEST_CHECK_GTEST_FAIL(
+            ASSERT_MPI_EQ(ncclSuccess,
                 ncclCommRegister(getActiveCommunicator(), sendBuf, sendBytes, &sendH));
-            RCCL_TEST_CHECK_GTEST_FAIL(
+            ASSERT_MPI_EQ(ncclSuccess,
                 ncclCommRegister(getActiveCommunicator(), recvBuf, recvBytes, &recvH));
             ASSERT_MPI_NE(sendH, nullptr);
             ASSERT_MPI_NE(recvH, nullptr);
@@ -417,16 +525,40 @@ protected:
         }
 
         initSendBuffer<T>(sendBuf, countPerRank, rank);
-        HIP_TEST_CHECK_GTEST_FAIL(hipMemset(recvBuf, 0, recvBytes));
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, recvBytes));
 
-        RCCL_TEST_CHECK_GTEST_FAIL(
+        ASSERT_MPI_EQ(ncclSuccess,
             ncclAllGather(sendBuf, recvBuf, countPerRank, getNcclDataType<T>(),
                           getActiveCommunicator(), getActiveStream()));
-        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
         EXPECT_TRUE(verifyAllGatherResult<T>(recvBuf, countPerRank, nRanks))
             << "AllGather data incorrect (registered=" << registered
             << ", countPerRank=" << countPerRank << ")";
+    }
+
+    // Assert the registered Direct AllGather path was selected and engaged IPC (and
+    // NET when expectNetReg) UBR registration. No-op unless per-rank logging is on.
+    void expectDirectAllGatherRegistered(const char* label, bool expectNetReg)
+    {
+        if (!isPerRankLoggingEnabled()) return;
+
+        REGLogChecker checker = getLogChecker();
+        TEST_INFO("%s: %s (log size: %zu bytes)", label,
+                  checker.getSummary().c_str(), checker.getContentLength());
+
+        EXPECT_TRUE(checker.usedDirectAllGather())
+            << label << ": Direct AllGather was not selected, so the registered "
+               "Direct AllGather path is unverified (needs 8 ranks/node and "
+               "NCCL_DEBUG_SUBSYS to include TUNING)";
+        if (expectNetReg) {
+            EXPECT_TRUE(checker.hasNETRegistration())
+                << label << ": expected inter-node P2P NET UBR registration to "
+                   "engage across nodes for the registered Direct AllGather";
+        }
+        EXPECT_TRUE(checker.hasIPCRegistration())
+            << label << ": expected intra-node P2P IPC UBR registration to engage "
+               "for the registered Direct AllGather under NCCL_LOCAL_REGISTER=1";
     }
 };
 
@@ -445,14 +577,7 @@ TEST_F(UBR_DirectAllGather, UbrSizeSweep)
         runAllGatherOnce(count, /*registered=*/true);
     }
 
-    if (isPerRankLoggingEnabled()) {
-        REGLogChecker checker = getLogChecker();
-        TEST_INFO("UbrSizeSweep: %s (log size: %zu bytes)",
-                  checker.getSummary().c_str(), checker.getContentLength());
-        EXPECT_TRUE(checker.hasAnyRegistrationSuccess())
-            << "Expected the UBR registration path to engage for the registered "
-               "Direct AllGather under NCCL_LOCAL_REGISTER=1";
-    }
+    expectDirectAllGatherRegistered("UbrSizeSweep", /*expectNetReg=*/false);
 }
 
 // Same sweep across nodes (exercises the net/DMA-buf registration path).
@@ -468,11 +593,7 @@ TEST_F(UBR_DirectAllGather, UbrSizeSweep_MultiNode)
         runAllGatherOnce(count, /*registered=*/true);
     }
 
-    if (isPerRankLoggingEnabled()) {
-        REGLogChecker checker = getLogChecker();
-        TEST_INFO("UbrSizeSweep_MultiNode: %s (log size: %zu bytes)",
-                  checker.getSummary().c_str(), checker.getContentLength());
-    }
+    expectDirectAllGatherRegistered("UbrSizeSweep_MultiNode", /*expectNetReg=*/true);
 }
 
 // Before/after in one process: unregistered (allowUB=false) then registered
@@ -493,18 +614,7 @@ TEST_F(UBR_DirectAllGather, BaselineVsUbrEquivalence)
     // AFTER: registered (UBR path).
     runAllGatherOnce(countPerRank, /*registered=*/true);
 
-    if (isPerRankLoggingEnabled()) {
-        // Registration engagement is advisory here: on a single node at this size
-        // the AllGather may take the CE path (no P2P UBR reg), which is expected.
-        REGLogChecker checker = getLogChecker();
-        TEST_INFO("BaselineVsUbrEquivalence: %s (log size: %zu bytes)",
-                  checker.getSummary().c_str(), checker.getContentLength());
-        if (!checker.hasAnyRegistrationSuccess()) {
-            TEST_INFO("BaselineVsUbrEquivalence: no P2P UBR registration marker at "
-                      "countPerRank=%zu (CE path likely used); equivalence still verified",
-                      countPerRank);
-        }
-    }
+    expectDirectAllGatherRegistered("BaselineVsUbrEquivalence", /*expectNetReg=*/false);
 }
 
 class UBR_ReduceScatter : public RegistrationTestBase {};
@@ -1407,8 +1517,8 @@ protected:
         size_t bufSize = countPerBuffer * sizeof(T);
 
         for (int i = 0; i < nPeers; i++) {
-            // Allocate SEPARATE buffer for each peer
-            if (hipMalloc(&info.buffers[i], bufSize) != hipSuccess) {
+            // Allocate SEPARATE buffer for each peer (VMM-aware for cuMem builds)
+            if (allocateDeviceBuffer(&info.buffers[i], bufSize) != ncclSuccess) {
                 cleanupMultiBuffers(info);
                 return info;
             }
@@ -1434,7 +1544,7 @@ protected:
                 info.handles[i] = nullptr;
             }
             if (info.buffers[i]) {
-                (void)hipFree(info.buffers[i]);
+                (void)freeDeviceBuffer(info.buffers[i]);
                 info.buffers[i] = nullptr;
             }
         }
@@ -1460,8 +1570,8 @@ protected:
 
         size_t totalSize = countPerView * nViews * sizeof(T);
 
-        // Allocate ONE contiguous buffer
-        if (hipMalloc(&info.contiguousBuffer, totalSize) != hipSuccess) {
+        // Allocate ONE contiguous buffer (VMM-aware for cuMem builds)
+        if (allocateDeviceBuffer(&info.contiguousBuffer, totalSize) != ncclSuccess) {
             return info;
         }
 
@@ -1470,7 +1580,7 @@ protected:
                                                 info.contiguousBuffer, totalSize,
                                                 &info.handle);
         if (result != ncclSuccess) {
-            (void)hipFree(info.contiguousBuffer);
+            (void)freeDeviceBuffer(info.contiguousBuffer);
             info.contiguousBuffer = nullptr;
             return info;
         }
@@ -1492,7 +1602,7 @@ protected:
             info.handle = nullptr;
         }
         if (info.contiguousBuffer) {
-            (void)hipFree(info.contiguousBuffer);
+            (void)freeDeviceBuffer(info.contiguousBuffer);
             info.contiguousBuffer = nullptr;
         }
         info.views.clear();
@@ -1943,14 +2053,14 @@ TEST_F(UBR_ConcurrentRegHang, SeparateBuffers_NoRegistration_SHOULD_WORK)
 
     auto cleanup = makeScopeGuard([&]() {
         for (int i = 0; i < nRanks; i++) {
-            if (sendBufs[i]) (void)hipFree(sendBufs[i]);
-            if (recvBufs[i]) (void)hipFree(recvBufs[i]);
+            if (sendBufs[i]) (void)freeDeviceBuffer(sendBufs[i]);
+            if (recvBufs[i]) (void)freeDeviceBuffer(recvBufs[i]);
         }
     });
 
     for (int i = 0; i < nRanks; i++) {
-        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBufs[i], bufSize));
-        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBufs[i], bufSize));
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&sendBufs[i], bufSize));
+        ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&recvBufs[i], bufSize));
     }
 
     // Initialize
@@ -2020,12 +2130,12 @@ TEST_F(GraphCapture_AllToAll, MultiNode)
     void* sendBuf = nullptr;
     void* recvBuf = nullptr;
 
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bufSize));
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bufSize));
+    ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&sendBuf, bufSize));
+    ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&recvBuf, bufSize));
 
     auto bufCleanup = makeScopeGuard([&]() {
-        if (sendBuf) (void)hipFree(sendBuf);
-        if (recvBuf) (void)hipFree(recvBuf);
+        if (sendBuf) (void)freeDeviceBuffer(sendBuf);
+        if (recvBuf) (void)freeDeviceBuffer(recvBuf);
     });
 
     ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(sendBuf, totalCount,
@@ -2107,12 +2217,12 @@ TEST_F(GraphCapture_AllReduce, MultiNode)
     void* sendBuf = nullptr;
     void* recvBuf = nullptr;
 
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bufSize));
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bufSize));
+    ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&sendBuf, bufSize));
+    ASSERT_MPI_EQ(ncclSuccess, allocateDeviceBuffer(&recvBuf, bufSize));
 
     auto bufCleanup = makeScopeGuard([&]() {
-        if (sendBuf) (void)hipFree(sendBuf);
-        if (recvBuf) (void)hipFree(recvBuf);
+        if (sendBuf) (void)freeDeviceBuffer(sendBuf);
+        if (recvBuf) (void)freeDeviceBuffer(recvBuf);
     });
 
     initSendBuffer<T>(sendBuf, count, rank);
@@ -2212,9 +2322,9 @@ protected:
     {
         sendInfo.size = recvInfo.size = size;
 
-        if (hipMalloc(&sendInfo.buffer, size) != hipSuccess) return false;
-        if (hipMalloc(&recvInfo.buffer, size) != hipSuccess) {
-            (void)hipFree(sendInfo.buffer);
+        if (allocateDeviceBuffer(&sendInfo.buffer, size) != ncclSuccess) return false;
+        if (allocateDeviceBuffer(&recvInfo.buffer, size) != ncclSuccess) {
+            (void)freeDeviceBuffer(sendInfo.buffer);
             sendInfo.buffer = nullptr;
             return false;
         }
@@ -2231,7 +2341,7 @@ protected:
     {
         auto cleanup = [&](RegInfo& info) {
             if (info.handle) { ncclCommDeregister(comm, info.handle); info.handle = nullptr; }
-            if (info.buffer) { (void)hipFree(info.buffer); info.buffer = nullptr; }
+            if (info.buffer) { (void)freeDeviceBuffer(info.buffer); info.buffer = nullptr; }
             info.registered = false;
         };
         cleanup(sendInfo);
