@@ -5,6 +5,10 @@
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 namespace rocjitsu {
 namespace {
@@ -81,6 +85,116 @@ TEST(ConSanMoi, WorkgroupSourceRequiresExactlyOneOperandKind) {
   EXPECT_FALSE(ambiguous.has_value());
   EXPECT_FALSE(ambiguous.is_well_formed());
   EXPECT_FALSE(ambiguous.operand());
+}
+
+TEST(ConSanMoi, DynamicRecordAddressExecutesExactStrideOnEveryTarget) {
+  constexpr uint16_t kAddressVgpr = 40u;
+  constexpr uint16_t kSlotVgpr = 42u;
+  constexpr std::array<uint16_t, 3> kUnrelatedVgprs = {43u, 44u, 45u};
+  constexpr std::array<uint32_t, 3> kUnrelatedValues = {0x12345678u, 0x90abcdefu, 0x55aa55aau};
+  // Real record strides plus 64, the power-of-two case where no accumulation
+  // add is needed.
+  constexpr std::array<uint32_t, 5> kStrideBytes = {
+      sizeof(ConSanMoiBarrierRecord), sizeof(ConSanMoiFenceRecord),      64u,
+      sizeof(ConSanMoiAccessRecord),  sizeof(ConSanMoiDiagnosticRecord),
+  };
+  constexpr std::array<uint32_t, 4> kSlots = {0u, 1u, 3u, 1000u};
+  constexpr std::array<uint64_t, 3> kFieldAddresses = {
+      0x1234567800000010ull,
+      0x00000000ffffff00ull,
+      0x12345678fffffff0ull,
+  };
+  constexpr std::array kArchitectures = {
+      ROCJITSU_CODE_ARCH_CDNA3,
+      ROCJITSU_CODE_ARCH_CDNA4,
+      ROCJITSU_CODE_ARCH_RDNA4,
+      ROCJITSU_CODE_ARCH_GFX1250,
+  };
+
+  size_t case_index = 0;
+  for (rj_code_arch_t arch : kArchitectures) {
+    for (uint32_t stride_bytes : kStrideBytes) {
+      for (uint32_t slot : kSlots) {
+        for (uint64_t field_address : kFieldAddresses) {
+          SCOPED_TRACE("arch=" + std::to_string(static_cast<uint32_t>(arch)) +
+                       " stride=" + std::to_string(stride_bytes) + " slot=" + std::to_string(slot) +
+                       " base=" + std::to_string(field_address));
+          std::vector<uint32_t> words;
+          ASSERT_TRUE(consan_detail::append_dynamic_record_address(
+              words, field_address, stride_bytes, kAddressVgpr, kSlotVgpr, arch));
+
+          const std::string component =
+              "consan_dynamic_record_address_" + std::to_string(case_index++);
+          amdgpu::GpuMemory memory(component + "_memory");
+          amdgpu::L2Cache cache(component + "_cache");
+          cache.set_backing_memory(&memory);
+          amdgpu::ComputeUnitCore::Config config{};
+          config.arch = arch;
+          config.num_wf_slots = 1;
+          config.sgprs_per_wf = 128;
+          config.vgprs_per_wf = 256;
+          config.lds_size_kb = 64;
+          auto compute_unit = amdgpu::ComputeUnitCore::create(component, config, &memory, &cache);
+          ASSERT_NE(compute_unit, nullptr);
+          amdgpu::Wavefront *wave =
+              compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+          ASSERT_NE(wave, nullptr);
+          for (size_t index = 0; index < words.size(); ++index)
+            memory.write32(index * sizeof(uint32_t), words[index]);
+          wave->pc = 0u;
+          wave->set_exec(1u);
+          const uint32_t vgpr_base = wave->vgpr_alloc().base;
+          compute_unit->write_vgpr(vgpr_base + kSlotVgpr, 0u, slot);
+          for (size_t index = 0; index < kUnrelatedVgprs.size(); ++index)
+            compute_unit->write_vgpr(vgpr_base + kUnrelatedVgprs[index], 0u,
+                                     kUnrelatedValues[index]);
+
+          size_t steps = 0;
+          while (wave->pc < words.size() * sizeof(uint32_t)) {
+            ASSERT_LT(steps, words.size());
+            ++steps;
+            compute_unit->step();
+          }
+
+          const uint64_t expected = field_address + static_cast<uint64_t>(slot) * stride_bytes;
+          const uint64_t actual =
+              (static_cast<uint64_t>(compute_unit->read_vgpr(vgpr_base + kAddressVgpr + 1u, 0u))
+               << 32u) |
+              compute_unit->read_vgpr(vgpr_base + kAddressVgpr, 0u);
+          EXPECT_EQ(actual, expected);
+          EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + kSlotVgpr, 0u), slot);
+          for (size_t index = 0; index < kUnrelatedVgprs.size(); ++index) {
+            EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + kUnrelatedVgprs[index], 0u),
+                      kUnrelatedValues[index]);
+          }
+          if (!wave->is_halted())
+            wave->halt();
+        }
+      }
+    }
+  }
+}
+
+TEST(ConSanMoi, DynamicRecordAddressRejectsInvalidRegistersWithoutPartialOutput) {
+  constexpr uint64_t kFieldAddress = 0x1234567800000010ull;
+  constexpr uint16_t kAddressVgpr = 40u;
+  constexpr uint16_t kSlotVgpr = 42u;
+  constexpr uint32_t kStrideBytes = sizeof(ConSanMoiAccessRecord);
+  const auto rejects_without_appending = [&](uint32_t stride_bytes, uint16_t address_vgpr,
+                                             uint16_t slot_vgpr, rj_code_arch_t arch) {
+    std::vector<uint32_t> words = {0x12345678u};
+    EXPECT_FALSE(consan_detail::append_dynamic_record_address(words, kFieldAddress, stride_bytes,
+                                                              address_vgpr, slot_vgpr, arch));
+    EXPECT_EQ(words, std::vector<uint32_t>{0x12345678u});
+  };
+
+  rejects_without_appending(0u, kAddressVgpr, kSlotVgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  rejects_without_appending(kStrideBytes, kAddressVgpr, kAddressVgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  rejects_without_appending(kStrideBytes, kAddressVgpr, static_cast<uint16_t>(kAddressVgpr + 1u),
+                            ROCJITSU_CODE_ARCH_RDNA4);
+  rejects_without_appending(kStrideBytes, 255u, kSlotVgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  rejects_without_appending(kStrideBytes, kAddressVgpr, 256u, ROCJITSU_CODE_ARCH_RDNA4);
+  rejects_without_appending(kStrideBytes, kAddressVgpr, kSlotVgpr, ROCJITSU_CODE_ARCH_INVALID);
 }
 
 TEST(ConSanMoi, PrivateWorkgroupSourceAppliesPackedCoordinateExtraction) {
@@ -1827,6 +1941,20 @@ TEST(ConSanMoi, WarnsWhenReportBufferIsSmallerThanHeader) {
     saw_small_buffer_warning |=
         warning.find("smaller than the report ABI header") != std::string::npos;
   EXPECT_TRUE(saw_small_buffer_warning);
+}
+
+TEST(ConSanMoi, RejectsReportBufferLargerThanDynamicRecordOffsetWindow) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanOptions options = moi_options();
+  options.moi_report_buffer_address = 0x1000;
+  options.moi_report_buffer_size = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1u;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  EXPECT_FALSE(consan_patch_succeeded(result));
+  EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+    return error.find("32-bit dynamic record-offset window") != std::string::npos;
+  }));
 }
 
 TEST(ConSanMoi, InventorySkipsUnsupportedNativeLdsSites) {

@@ -305,6 +305,54 @@ build_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr, rj_code
                                  high[1]};
 }
 
+/// @brief Add an unsigned 64-bit literal to an in-place RDNA4-family address pair.
+/// @details VCC is clobbered and must be saved by the caller.
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
+build_v_add_u64_literal(uint16_t address_vgpr, uint64_t literal, rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch) || address_vgpr >= 255)
+    return std::nullopt;
+  constexpr uint16_t kVccLo = 106;
+  const auto pack_vop3 = [](uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t src2,
+                            uint16_t sdst) {
+    const uint32_t w0 =
+        (vdst & 0xffu) | ((sdst & 0x7fu) << 8u) | ((op & 0x3ffu) << 16u) | (0x35u << 26u);
+    const uint32_t w1 = (src0 & 0x1ffu) | ((src1 & 0x1ffu) << 9u) | ((src2 & 0x1ffu) << 18u);
+    return std::array<uint32_t, 2>{w0, w1};
+  };
+
+  const uint32_t low_literal = static_cast<uint32_t>(literal);
+  const uint16_t low_src = low_literal <= 64u
+                               ? scalar_positive_inline_u32(static_cast<uint16_t>(low_literal))
+                               : kVopLiteralSource;
+  const auto low =
+      arch == ROCJITSU_CODE_ARCH_GFX1250
+          ? gfx1250::build_vop3_sdst_enc(gfx1250::kVAddCoU32Vop3SdstEnc,
+                                         {.vdst = static_cast<uint8_t>(address_vgpr),
+                                          .sdst = kVccLo,
+                                          .src0 = low_src,
+                                          .src1 = vector_source_vgpr(address_vgpr),
+                                          .src2 = scalar_positive_inline_u32(0)})
+          : pack_vop3(rdna4::kVAddCoU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr), low_src,
+                      vector_source_vgpr(address_vgpr), scalar_positive_inline_u32(0), kVccLo);
+
+  const uint32_t high_literal = static_cast<uint32_t>(literal >> 32u);
+  const uint16_t high_src = high_literal <= 64u
+                                ? scalar_positive_inline_u32(static_cast<uint16_t>(high_literal))
+                                : kVopLiteralSource;
+  const uint16_t high_op =
+      arch == ROCJITSU_CODE_ARCH_GFX1250 ? gfx1250::kVAddCoCiU32Vop2 : rdna4::kVAddCoCiU32Vop2;
+
+  std::vector<uint32_t> words = {low[0], low[1]};
+  if (low_src == kVopLiteralSource)
+    words.push_back(low_literal);
+  words.push_back(pack_sopp(rdna4::kSWaitAlu, 0xfffdu));
+  words.push_back(pack_vop2(high_op, static_cast<uint16_t>(address_vgpr + 1u), high_src,
+                            static_cast<uint16_t>(address_vgpr + 1u)));
+  if (high_src == kVopLiteralSource)
+    words.push_back(high_literal);
+  return words;
+}
+
 /// @brief Encode an RDNA4 64-bit VGPR add of a signed 24-bit displacement.
 /// @details Produces `v_add_co_u32`/`v_add_co_ci_u32`, including the literal
 /// low dword, sign-extended high dword, and required gfx12 ALU dependency

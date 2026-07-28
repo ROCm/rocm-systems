@@ -63,6 +63,51 @@ std::optional<uint16_t> ConSanMoiWorkgroupSource::operand() const {
   return scalar_src ? *scalar_src : vector_source_vgpr(*vector_src);
 }
 
+bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
+                                                  uint64_t field_address, uint32_t stride_bytes,
+                                                  uint16_t address_vgpr, uint16_t slot_vgpr,
+                                                  rj_code_arch_t arch) {
+  if (stride_bytes == 0u || address_vgpr > 254u || slot_vgpr > 255u || slot_vgpr == address_vgpr ||
+      slot_vgpr == static_cast<uint16_t>(address_vgpr + 1u)) {
+    return false;
+  }
+
+  const size_t original_size = words.size();
+  const auto reject = [&]() {
+    words.resize(original_size);
+    return false;
+  };
+  const uint32_t highest_bit = std::bit_width(stride_bytes) - 1u;
+  const auto scale_highest = instrumentation::build_v_lshlrev_b32(
+      address_vgpr, scalar_positive_inline_u32(highest_bit), slot_vgpr, arch);
+  if (!scale_highest)
+    return reject();
+  words.push_back(*scale_highest);
+
+  uint32_t remaining_bits = stride_bytes & ~(uint32_t{1} << highest_bit);
+  while (remaining_bits != 0u) {
+    const uint32_t bit = std::bit_width(remaining_bits) - 1u;
+    const auto scale_term = instrumentation::build_v_lshlrev_b32(
+        static_cast<uint16_t>(address_vgpr + 1u), scalar_positive_inline_u32(bit), slot_vgpr, arch);
+    const auto add_term =
+        instrumentation::build_v_add_u32(address_vgpr, vector_source_vgpr(address_vgpr),
+                                         static_cast<uint16_t>(address_vgpr + 1u), arch);
+    if (!scale_term || !add_term)
+      return reject();
+    words.push_back(*scale_term);
+    words.insert(words.end(), add_term->begin(), add_term->end());
+    remaining_bits &= ~(uint32_t{1} << bit);
+  }
+
+  words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(address_vgpr + 1u),
+                                      scalar_positive_inline_u32(0), arch));
+  const auto add_base = instrumentation::build_v_add_u64_literal(address_vgpr, field_address, arch);
+  if (!add_base)
+    return reject();
+  words.insert(words.end(), add_base->begin(), add_base->end());
+  return true;
+}
+
 std::optional<consan_detail::ScalarOwnerContextResolution>
 consan_detail::resolve_scalar_owner_contexts(bool planning_state_valid,
                                              std::span<const ScalarOwnerContextSummary> contexts,
@@ -671,6 +716,11 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (effective_options.moi_report_buffer_address &&
       effective_options.moi_report_buffer_size < sizeof(ConSanMoiReportHeader)) {
     result.warnings.emplace_back("ConSan MOI report buffer is smaller than the report ABI header");
+  }
+  if (effective_options.moi_report_buffer_address &&
+      effective_options.moi_report_buffer_size > std::numeric_limits<uint32_t>::max()) {
+    result.errors.emplace_back(
+        "ConSan MOI report buffer exceeds the 32-bit dynamic record-offset window");
   }
   bool owner_epoch_prologue_applied_early = false;
   const bool has_usable_atomic_plan =

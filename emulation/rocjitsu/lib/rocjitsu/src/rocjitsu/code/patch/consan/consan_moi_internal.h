@@ -171,5 +171,18 @@ resolve_scalar_owner_contexts(bool planning_state_valid,
                                                  const ConSanMoiWorkgroupSource &source,
                                                  uint16_t value_vgpr, rj_code_arch_t arch);
 
+/// Append a dynamic-record address materialization for
+/// `field_address + slot * stride_bytes`.
+///
+/// The address occupies `address_vgpr:address_vgpr+1`. The slot and offset
+/// must be distinct from that pair. The report-layout validator guarantees
+/// that `slot * stride_bytes` fits in 32 bits. The emitted plan uses only the
+/// address pair as temporary storage, preserves the slot, and clobbers VCC;
+/// production callers save and restore VCC around dynamic publication.
+[[nodiscard]] bool append_dynamic_record_address(std::vector<uint32_t> &words,
+                                                 uint64_t field_address, uint32_t stride_bytes,
+                                                 uint16_t address_vgpr, uint16_t slot_vgpr,
+                                                 rj_code_arch_t arch);
+
 } // namespace consan_detail
 } // namespace rocjitsu

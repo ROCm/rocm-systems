@@ -281,6 +281,37 @@ build_cdna3_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr,
                          .vdst = static_cast<uint8_t>(address_vgpr + 1u)})[0]};
 }
 
+/// @brief Add an unsigned 64-bit literal to an in-place CDNA3 address pair.
+/// @details VCC is clobbered and must be saved by the caller.
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
+build_cdna3_v_add_u64_literal(uint16_t address_vgpr, uint64_t literal, rj_code_arch_t arch) {
+  if (!is_cdna3_arch(arch) || address_vgpr >= 255)
+    return std::nullopt;
+
+  std::vector<uint32_t> words;
+  words.reserve(4);
+  const uint32_t low = static_cast<uint32_t>(literal);
+  const uint16_t low_src =
+      low <= 64u ? scalar_positive_inline_u32(static_cast<uint16_t>(low)) : kVopLiteralSource;
+  words.push_back(
+      cdna3::build_vop2(cdna3::kVAddCoU32Vop2, {.src0 = low_src,
+                                                .vsrc1 = static_cast<uint8_t>(address_vgpr),
+                                                .vdst = static_cast<uint8_t>(address_vgpr)})[0]);
+  if (low_src == kVopLiteralSource)
+    words.push_back(low);
+
+  const uint32_t high = static_cast<uint32_t>(literal >> 32u);
+  const uint16_t high_src =
+      high <= 64u ? scalar_positive_inline_u32(static_cast<uint16_t>(high)) : kVopLiteralSource;
+  words.push_back(cdna3::build_vop2(cdna3::kVAddcCoU32Vop2,
+                                    {.src0 = high_src,
+                                     .vsrc1 = static_cast<uint8_t>(address_vgpr + 1u),
+                                     .vdst = static_cast<uint8_t>(address_vgpr + 1u)})[0]);
+  if (high_src == kVopLiteralSource)
+    words.push_back(high);
+  return words;
+}
+
 /// @brief Add one sign-extended 32-bit VGPR offset to a 64-bit CDNA3 address pair.
 /// @details @p sign_vgpr is a scratch VGPR distinct from the address pair and offset.
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>

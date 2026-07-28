@@ -3182,23 +3182,6 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
                                              expected_slot_reservation.end());
   EXPECT_TRUE(contains_subsequence(text_words, expected_wave_coalesced_reservation));
 
-  const auto slot_times_8 = build_v_lshlrev_b32_e32(
-      /*vdst=*/9, scalar_positive_inline_u32(3), /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto slot_times_16 = build_v_lshlrev_b32_e32(
-      /*vdst=*/8, scalar_positive_inline_u32(4), /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto slot_times_sum = build_v_add_nc_u32_e32(
-      /*vdst=*/9, vector_source_vgpr(8), /*vsrc1=*/9, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto slot_times_64 = build_v_lshlrev_b32_e32(
-      /*vdst=*/8, scalar_positive_inline_u32(6), /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(slot_times_8);
-  ASSERT_TRUE(slot_times_16);
-  ASSERT_TRUE(slot_times_sum);
-  ASSERT_TRUE(slot_times_64);
-  const std::array<uint32_t, 5> expected_slot_stride = {
-      *slot_times_8, *slot_times_16, *slot_times_sum, *slot_times_64, *slot_times_sum,
-  };
-  EXPECT_TRUE(contains_subsequence(text_words, expected_slot_stride));
-
   const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, /*ssrc0=*/38, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_scc = build_rdna4_s_cmp_lg_u32(
       /*ssrc0=*/40, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);

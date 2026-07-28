@@ -504,6 +504,15 @@ build_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr, rj_code
 }
 
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
+build_v_add_u64_literal(uint16_t address_vgpr, uint64_t literal, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return build_cdna3_v_add_u64_literal(address_vgpr, literal, arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return build_cdna4_v_add_u64_literal(address_vgpr, literal, arch);
+  return rocjitsu::build_v_add_u64_literal(address_vgpr, literal, arch);
+}
+
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_v_add_u64_signed_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr, uint16_t sign_vgpr,
                                    rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
