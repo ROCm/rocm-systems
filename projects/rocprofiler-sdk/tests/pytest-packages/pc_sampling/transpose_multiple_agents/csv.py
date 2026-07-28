@@ -25,6 +25,7 @@ from __future__ import absolute_import
 
 import pandas as pd
 
+
 def validate_all_agents_are_sampled(
     input_samples_csv: pd.DataFrame,
     input_kernel_trace_csv: pd.DataFrame,
@@ -54,9 +55,9 @@ def validate_all_agents_are_sampled(
         .map(dispatch_agents)
         .str.extract(r"(\d+)$", expand=False)
     )
-    assert agent_ids.notna().all(), (
-        "at least one sampled dispatch is missing from the kernel trace"
-    )
+    assert (
+        agent_ids.notna().all()
+    ), "at least one sampled dispatch is missing from the kernel trace"
     samples_df["Agent_Id"] = agent_ids.astype("uint64")
 
     sampled_agents = set(samples_df["Agent_Id"].unique())
@@ -75,9 +76,9 @@ def validate_all_agents_are_sampled(
     )
     transpose_samples_df = samples_df[transpose_lines.notna()].copy()
     transpose_samples_df["Source_Line_Num"] = transpose_lines.dropna().astype(int)
-    assert set(transpose_samples_df["Agent_Id"].unique()) == sampled_agents, (
-        "not every sampled agent has a decoded transpose.cpp instruction"
-    )
-    assert transpose_samples_df["Source_Line_Num"].between(192, 202).all(), (
-        "transpose.cpp samples map outside the transpose kernel"
-    )
+    assert (
+        set(transpose_samples_df["Agent_Id"].unique()) == sampled_agents
+    ), "not every sampled agent has a decoded transpose.cpp instruction"
+    assert (
+        transpose_samples_df["Source_Line_Num"].between(192, 202).all()
+    ), "transpose.cpp samples map outside the transpose kernel"
