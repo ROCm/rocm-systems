@@ -90,13 +90,6 @@ ncclResult_t ncclIbCastFaultOpsSetPollCqError(void* comm, int qpIdx, int wcStatu
 /* Clear all ops-overload fault config on the connection (shims stay installed). */
 ncclResult_t ncclIbCastFaultOpsClear(void* comm);
 
-/* ── base net_ib flush path (src/transport/net_ib/p2p.cc) ── */
-
-/* Force ncclIbIflush to re-issue the pre-fix scratchpad RDMA_WRITE before the
- * flush READ, reproducing the dma-buf QP async-fatal for the regression test;
- * enable=false restores shipped read-only behaviour. Toggle is process-global. */
-ncclResult_t ncclIbFlushFaultForceScratchpadWrite(void* recvComm, bool enable);
-
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
