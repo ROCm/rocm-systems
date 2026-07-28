@@ -61,6 +61,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable note about this build configuration (not interpreted by the runner)"
+        },
         "install_flags": {
           "type": "array",
           "items": { "type": "string" },
