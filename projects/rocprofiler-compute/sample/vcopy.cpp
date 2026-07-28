@@ -85,8 +85,6 @@ int main(int argc, char* argv[]) {
   int devId = 0;
   int numIter = 1;
 
-  hipError_t hip_status;
-
   for (int i = 0; i < argc; i++){
     std::string arg = argv[i];
     if ((arg == "--blockSize" || arg == "-b") && i+1 < argc)
@@ -225,5 +223,5 @@ int main(int argc, char* argv[]) {
   free(h_b);
   free(h_c);
 
-  return 0;
+  return numErrors > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }
