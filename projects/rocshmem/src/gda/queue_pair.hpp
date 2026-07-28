@@ -108,7 +108,7 @@ public:
   }
 
   /* Initialize freelist with iterators in range [first, std::next(first, count)) */
-  iterator_freelist(Iter first, difference_type count)
+  iterator_freelist(Iter first, size_type count)
     : iterator_freelist{first, std::next(first, count)} { }
 
   bool empty() const {
@@ -145,7 +145,7 @@ public:
     init(first, last);
   }
 
-  void reset(Iter first, difference_type count) {
+  void reset(Iter first, size_type count) {
     reset(first, std::next(first, count));
   }
 };
@@ -346,8 +346,10 @@ namespace QueuePairOption {
   /* forward declaration */
   template <typename... Options> struct PostOpt;
 
-  /* deduction guide, required before C++20 */
-  template <typename... Options> __host__ __device__ PostOpt(Options...) -> PostOpt<Options...>;
+  /* deduction guide, required before C++20
+   * see https://clang.llvm.org/docs/HIPSupport.html#deduction-guides
+   * for why this isn't marked __host__ __device__ */
+  template <typename... Options> PostOpt(Options...) -> PostOpt<Options...>;
 
   /* Base case with all options defined */
   template <bool ring_db, bool thread_safe, bool check_sq, UpdateThread update_cq>

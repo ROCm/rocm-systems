@@ -162,7 +162,8 @@ public:
    * @return {laddr, lkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned LKey value is ProviderEndianness.
    */
-  __device__ __forceinline__ std::tuple<uintptr_t, uint32_t> get_laddr_info(const void *addr) const;
+  __device__ __forceinline__
+  std::tuple<uintptr_t, uint32_t> get_laddr_info(const void *addr, bool inlined = false) const;
 
   /**
    * @brief Resolve the remote (target) virtual address and RKey of a symmetric address.
@@ -176,7 +177,8 @@ public:
    * @return {raddr, rkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned RKey value is ProviderEndianness.
    */
-  __device__ __forceinline__ std::tuple<uintptr_t, uint32_t> get_raddr_info(const void *addr) const;
+  __device__ __forceinline__
+  std::tuple<uintptr_t, uint32_t> get_raddr_info(const void *addr) const;
 
   /*
    * @brief Query whether data can be inlined into a WQE.
@@ -424,20 +426,20 @@ __device__ __forceinline__ void QueuePairMux::quiet_single() {
   }
 }
 
-__device__ __forceinline__
-std::tuple<uintptr_t, uint32_t> QueuePairMux::get_laddr_info(const void *addr) const {
+__device__ __forceinline__ std::tuple<uintptr_t, uint32_t>
+QueuePairMux::get_laddr_info(const void *addr, bool inlined) const {
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return qp.ionic.get_laddr_info(addr);
+    return qp.ionic.get_laddr_info(addr, inlined);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return qp.bnxt.get_laddr_info(addr);
+    return qp.bnxt.get_laddr_info(addr, inlined);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return qp.mlx5.get_laddr_info(addr);
+    return qp.mlx5.get_laddr_info(addr, inlined);
 #endif
   default:
     assert(false /* invalid GDAProvider */);

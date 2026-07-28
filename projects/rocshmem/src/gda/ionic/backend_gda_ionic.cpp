@@ -104,8 +104,8 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   uintptr_t heap_laddr = reinterpret_cast<uintptr_t>(heap.get_local_heap_base());
   uintptr_t heap_raddr = reinterpret_cast<uintptr_t>(heap.get_heap_bases()[pe]);
   size_t    heap_size  = heap.get_size();
-  uint32_t  heap_lkey  = nic.heap_mr->lkey;
-  uint32_t  heap_rkey  = heap_rkey[flat_pe_nic_idx(pe, nic_idx)];
+  uint32_t  lkey       = nic.heap_mr->lkey;
+  uint32_t  rkey       = heap_rkey[flat_pe_nic_idx(pe, nic_idx)];
   ibv_pd*   pd         = nic.pd_orig;
 
   const QpSymmEntry *symm_entries = get_symm_entries_slice(pe, nic_idx);
@@ -124,8 +124,7 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   /* QueuePair is either QueuePairIONIC or QueuePairMux
    * both have a constructor that accepts rvalue reference QueuePairIONIC&&,
    * so just use that instead of trying to figure out which one we're using */
-  new (gpu_qp) QueuePair{QueuePairIONIC{qpn, heap_laddr, heap_lkey,
-                                        heap_raddr, heap_rkey, heap_size,
+  new (gpu_qp) QueuePair{QueuePairIONIC{qpn, heap_laddr, lkey, heap_raddr, rkey, heap_size,
                                         symm_entries, symm_count, pd,
                                         ionic_device_sq{sq_buf, sq_dbreg, sq_dbval, sq_mask},
                                         ionic_device_cq{cq_buf, cq_dbreg, cq_dbval, cq_mask}}};

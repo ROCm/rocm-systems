@@ -210,7 +210,7 @@ class GDABackend : public Backend {
   }
 
   size_t flat_pe_nic_idx(int pe, int nic_idx) const {
-    return static_cast<size_t>(pe) * static_cast<size_t>(num_nics) + static_cast<size_t>(nic_idx);
+    return static_cast<size_t>(pe) * static_cast<size_t>(num_nics_) + static_cast<size_t>(nic_idx);
   }
 
   const QpSymmEntry * get_symm_entries_slice(int pe, int nic_idx) const {
