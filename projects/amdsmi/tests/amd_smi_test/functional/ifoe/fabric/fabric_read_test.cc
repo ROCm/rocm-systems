@@ -147,8 +147,8 @@ void TestFabricRead::Run(void) {
                        "(no UALoE sysfs content); BDF may still be valid"
                     << std::endl;
         }
-        const auto& v1 = fabric_info.info.fabric_version.v1;
-        std::cout << "\t\tversion:        " << fabric_info.info.version << "\n"
+        const auto& v1 = fabric_info.fabric_info.v1;
+        std::cout << "\t\tversion:        " << fabric_info.fabric_version << "\n"
                   << "\t\taccelerator_id: " << v1.accelerator_id << "\n"
                   << "\t\tfabric_type:    " << v1.fabric_type << "\n"
                   << "\t\tbandwidth:      " << v1.bandwidth << " Mb/s" << "\n"
