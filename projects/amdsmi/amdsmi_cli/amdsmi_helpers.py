@@ -394,6 +394,19 @@ class AMDSMIHelpers:
             outputformat = "csv"
         return outputformat
 
+    def get_gpu_cuid_or_uuid(self, device_handle):
+        """Return the device CUID when available, falling back to the UUID."""
+        try:
+            identifier = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
+        except amdsmi_exception.AmdSmiLibraryException:
+            identifier = "N/A"
+        if identifier == "N/A":
+            try:
+                identifier = amdsmi_interface.amdsmi_get_gpu_device_uuid(device_handle)
+            except amdsmi_exception.AmdSmiLibraryException:
+                identifier = "N/A"
+        return identifier
+
     def get_gpu_choices(self):
         """Return dictionary of possible GPU choices and string of the output:
             Dictionary will be in format: gpus[ID] : (BDF, UUID, Device Handle)
@@ -432,15 +445,7 @@ class AMDSMIHelpers:
 
             for gpu_id, device_handle in enumerate(device_handles):
                 bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
-                try:
-                    uuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
-                except amdsmi_exception.AmdSmiLibraryException:
-                    uuid = "N/A"
-                if uuid == "N/A":
-                    try:
-                        uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(device_handle)
-                    except amdsmi_exception.AmdSmiLibraryException:
-                        uuid = "N/A"
+                uuid = self.get_gpu_cuid_or_uuid(device_handle)
                 gpu_choices[str(gpu_id)] = {
                     "bdf": bdf,
                     "UUID": uuid,

@@ -1329,12 +1329,12 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
 
 amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_handle,
                                            unsigned int* cuid_length, char* cuid) {
-#ifdef BUILD_CUID
   AMDSMI_CHECK_INIT();
 
   if (cuid_length == nullptr || cuid == nullptr || *cuid_length < AMDSMI_GPU_CUID_SIZE) {
     return AMDSMI_STATUS_INVAL;
   }
+#ifdef BUILD_CUID
   amdsmi_status_t smi_status;
   amdcuid_status_t cuid_status;
 
