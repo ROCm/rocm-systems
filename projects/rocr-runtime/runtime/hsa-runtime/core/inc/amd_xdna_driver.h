@@ -69,8 +69,6 @@ class XdnaDriver final : public core::Driver {
     uint32_t handle = 0;
     /// Size in bytes.
     size_t size = 0;
-    /// True if @ref vaddr needs to be unmapped.
-    bool unmap_vaddr = false;
 
     constexpr BOHandle() = default;
     constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
@@ -199,10 +197,10 @@ public:
   /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
 
-  /// @brief Allocate device accessible heap space.
+  /// @brief Allocate device accessible heap (dev heap) space.
   hsa_status_t InitDeviceHeap();
 
-  /// @brief Free device accessible heap space.
+  /// @brief Free device accessible heap (dev heap) space.
   hsa_status_t FreeDeviceHeap();
 
   /// @brief Creates a command BO and returns it to @p bo_info.
@@ -211,26 +209,28 @@ public:
   /// @param[out] bo_info allocated BO
   hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
 
-  /// @brief Returns true if @p vaddr lies within the shared device-heap mapping.
+  /// @brief Returns true if @p vaddr lies within the dev heap mapping.
   ///
-  /// Dev-SVM BOs carve their VA out of the device heap and borrow its mapping, so
+  /// Dev heap BOs carve their VA out of the device heap and borrow its mapping, so
   /// FreeMemory must not unmap them. This lets FreeMemory distinguish those from
-  /// share BOs (which own an independent mmap) by the VA alone, without the caller
+  /// BO_SHAREs (which own an independent mmap) by the VA alone, without the caller
   /// tracking mapping ownership.
   bool IsDevHeapVA(const void* vaddr) const;
 
-  /// @brief Virtual address range allocated for the device heap.
+  /// @brief Device heap BO.
   ///
-  /// Allocate a large enough space so we can carve out the device heap in
-  /// this range and ensure it is aligned to 64MB. Currently, npu1 supports
-  /// 64MB device heap and it must be aligned to 64MB.
-  BOHandle dev_heap_handle;
+  /// Its mapping is @ref dev_heap_vaddr, which BO_DEV allocations carve their VA out of.
+  uint32_t dev_heap_bo = 0;
 
-  /// @brief The aligned device heap.
-  void *dev_heap_aligned = nullptr;
+  /// @brief The aligned device heap mapping, of size @ref dev_heap_size and alignment
+  /// @ref dev_heap_alignment.
+  void* dev_heap_vaddr = nullptr;
 
+  /// @brief Device heap size in bytes.
   static constexpr size_t dev_heap_size = 64 * 1024 * 1024;
-  static constexpr size_t dev_heap_align = 64 * 1024 * 1024;
+
+  /// @brief Device heap alignment in bytes.
+  static constexpr size_t dev_heap_alignment = 64 * 1024 * 1024;
 };
 
 } // namespace AMD
