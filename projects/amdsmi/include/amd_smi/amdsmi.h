@@ -225,10 +225,10 @@ typedef enum {
 
 //! Major version should be changed for every header change that breaks ABI
 //! Such as adding/deleting APIs, changing names, fields of structures, etc.
-#define AMDSMI_LIB_VERSION_MAJOR 26
+#define AMDSMI_LIB_VERSION_MAJOR 27
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 5
+#define AMDSMI_LIB_VERSION_MINOR 0
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
@@ -2381,8 +2381,8 @@ typedef struct {
   /*
    * v1.1 additions
    */
-  uint32_t gfx_activity_acc;                           //!< new in v1
-  uint32_t mem_activity_acc;                           //!< new in v1
+  uint64_t gfx_activity_acc;                           //!< new in v1
+  uint64_t mem_activity_acc;                           //!< new in v1
   uint16_t temperature_hbm[AMDSMI_NUM_HBM_INSTANCES];  //!< new in v1
 
   /*
@@ -2435,8 +2435,8 @@ typedef struct {
    * @brief v1.5 additions
    */
   uint16_t jpeg_activity[AMDSMI_MAX_NUM_JPEG];  //!< JPEG activity percent (encode/decode)
-  uint32_t pcie_nak_sent_count_acc;             //!< PCIE NAK sent accumulated count
-  uint32_t pcie_nak_rcvd_count_acc;             //!< PCIE NAK received accumulated count
+  uint64_t pcie_nak_sent_count_acc;             //!< PCIE NAK sent accumulated count
+  uint64_t pcie_nak_rcvd_count_acc;             //!< PCIE NAK received accumulated count
 
   /**
    * @brief v1.6 additions
@@ -2489,7 +2489,7 @@ typedef struct {
   amdsmi_gpu_xcp_metrics_t xcp_stats[AMDSMI_MAX_NUM_XCP]; /**< XCP (Graphic Cluster Partitions)
                                                                metrics stats */
 
-  uint32_t pcie_lc_perf_other_end_recovery;  //!< PCIE other end recovery counter
+  uint64_t pcie_lc_perf_other_end_recovery;  //!< PCIE other end recovery counter
 
   /**
    * @brief v1.7 additions
