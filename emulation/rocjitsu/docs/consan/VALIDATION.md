@@ -346,6 +346,38 @@ An instrumented clean row is accepted only when:
   emitted under the distinct `coverage-output` phase instead; and
 - every repeated process satisfies the same coverage gate.
 
+Every Record/Replay process also carries a structured
+`coverage.diagnostics` verdict in `result.json`, including the selected clean
+or coverage-output policy, normalized reader summaries, and normalized
+diagnostic records. Before applying workload policy, the validator requires
+the producer's pre-replay report, replay summary, and diagnostic-detail
+identities to agree. It also checks code-object identity across those records,
+contiguous retained diagnostic indices, the fixed replay-detail capacity,
+conflict and metadata flags, and resolved provenance accounting. A zero-
+diagnostic clean row therefore cannot pass with a missing or malformed replay
+summary. A report with no visible access or synchronization evidence
+legitimately has no replay summary and is still represented by the structural
+verdict. A replay skipped because its required shadow exceeds the producer's
+bounded allocation remains an incomplete structural result and fails with one
+explicit skip reason.
+
+The Record/Replay log parser classifies object-independent diagnostic
+signatures into a normalized model of records, counts, source fingerprints,
+and structural reasons. Replay-only capacity, metadata, provenance, and
+producer-degradation checks stay inside that profile parser. One mechanical
+policy evaluator then applies either the ordinary zero-output contract or an
+explicitly declared coverage-output contract. Workload-specific maximum
+counts, allowed signatures, code-object fingerprints, and instruction groups
+remain policy data; they are not embedded in the log grammar. No Sampled or
+Inline Shadow coverage-output contract is admitted until that profile has a
+complete producer parser and producer-shaped fixtures.
+
+`coverage.diagnostics` is an additive validation artifact introduced under
+top-level result schema version 2. Its nested representation is descriptive
+rather than a separately versioned interchange schema; consumers should use
+the normalized policy, counts, reasons, source summaries, and records by field
+name instead of depending on an older internal value type.
+
 No clean profile currently has a workload-specific tuning exception. In
 particular, Qwen Sampled relies on the ordinary `standard-v1` runtime profile:
 stride 16,384 and offset zero are automatic runtime defaults, not environment

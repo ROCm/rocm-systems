@@ -2055,111 +2055,322 @@ def _source_identities(workspace: Path, workload: Workload) -> list[dict | None]
     return [git_identity(root) for root in roots]
 
 
-def _coverage_output_diagnostic_summary(
-    log_text: str, contract: CoverageOutputContract
-) -> dict:
-    def unsigned(fields: dict[str, str], name: str) -> int | None:
-        try:
-            value = int(fields[name], 0)
-        except (KeyError, TypeError, ValueError):
-            return None
-        return value if value >= 0 else None
+ReplayIdentity = tuple[int, int]
 
-    def lds_range(value: str | None) -> tuple[int, int] | None:
-        if value is None:
-            return None
-        match = re.fullmatch(r"\[(\d+),(\d+)\)", value)
-        if match is None:
-            return None
-        begin, end = int(match.group(1)), int(match.group(2))
-        return (begin, end) if begin < end else None
 
-    def code_object_fingerprint(fields: dict[str, str]) -> str | None:
-        value = fields.get("code_object")
-        return (
-            value
-            if value is not None
-            and re.fullmatch(r"fnv1a64:[0-9a-f]{16}", value) is not None
-            else None
+@dataclass(frozen=True)
+class _ReplayDiagnosticRecord:
+    signature: str
+    reader: int | None
+    report_generation: int | None
+    generation: int | None
+    code_object_fingerprint: str | None
+    index: int | None
+    kind: int | None
+    first_owner: int | None
+    second_owner: int | None
+    first_instruction: int | None
+    second_instruction: int | None
+    first_instruction_raw: str | None
+    second_instruction_raw: str | None
+    first_lds: str | None
+    second_lds: str | None
+    first_access_kind: int | None
+    second_access_kind: int | None
+
+    @property
+    def report_identity(self) -> ReplayIdentity | None:
+        if self.reader is None or self.report_generation is None:
+            return None
+        return self.reader, self.report_generation
+
+
+@dataclass(frozen=True)
+class DiagnosticRecord:
+    signature: str
+    source_identity: str | None
+    code_object_fingerprint: str | None
+    first_instruction: int | None
+    second_instruction: int | None
+    first_instruction_raw: str | None
+    second_instruction_raw: str | None
+    artifact_fields: tuple[tuple[str, object], ...]
+
+
+@dataclass(frozen=True)
+class DiagnosticSourceSummary:
+    identity: str
+    diagnostic_count: int
+    record_count: int
+    code_object_fingerprint: str
+    artifact_fields: tuple[tuple[str, object], ...]
+
+
+@dataclass(frozen=True)
+class ParsedDiagnosticOutput:
+    profile: str
+    sources: tuple[DiagnosticSourceSummary, ...]
+    records: tuple[DiagnosticRecord, ...]
+    diagnostic_count: int
+    pre_output_count: int
+    structural_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DiagnosticPolicy:
+    diagnostics: tuple[str, ...]
+    max_diagnostics: int
+    kind: str = "clean"
+    instruction_groups: tuple[tuple[int, ...], ...] = ()
+    code_object_fingerprint: str | None = None
+    contract: CoverageOutputContract | None = None
+
+    @classmethod
+    def clean(cls) -> DiagnosticPolicy:
+        return cls(diagnostics=(), max_diagnostics=0)
+
+    @classmethod
+    def from_contract(cls, contract: CoverageOutputContract) -> DiagnosticPolicy:
+        return cls(
+            kind="coverage-output",
+            diagnostics=contract.diagnostics,
+            max_diagnostics=contract.max_diagnostics,
+            instruction_groups=contract.instruction_groups,
+            code_object_fingerprint=contract.code_object_fingerprint,
+            contract=contract,
         )
 
-    def replay_diagnostic_record(line: str) -> dict:
-        fields = dict(re.findall(r"\b([a-z_]+)=([^ ]+)", line))
-        try:
-            kind = int(fields["kind"], 0)
-        except (KeyError, ValueError):
-            kind = None
-        first_lds = lds_range(fields.get("first_lds"))
-        second_lds = lds_range(fields.get("second_lds"))
-        first_owner = unsigned(fields, "first_owner")
-        second_owner = unsigned(fields, "second_owner")
-        generation = unsigned(fields, "generation")
-        signature = (
-            "exact-lds-write-write"
-            if (
-                kind == 1
-                and generation is not None
-                and fields.get("first_lds_known") == "true"
-                and first_lds is not None
-                and first_lds == second_lds
-                and first_owner is not None
-                and second_owner is not None
-                and first_owner != second_owner
-                and fields.get("first_kind") == str(MOI_SHADOW_ACCESS_WRITE)
-                and fields.get("second_kind") == str(MOI_SHADOW_ACCESS_WRITE)
+
+@dataclass(frozen=True)
+class _ReplayReport:
+    identity: ReplayIdentity
+    code_object_fingerprint: str
+    reported: int
+    sampled_conflicts: int
+    replay_required: bool
+
+
+@dataclass(frozen=True)
+class _ReplaySummary:
+    identity: ReplayIdentity
+    code_object_fingerprint: str
+    reported: int
+    diagnostic_capacity_exhausted: bool | None
+    diagnostic_capacity: int | None
+    conflict: bool | None
+    metadata_full: bool | None
+    provenance_repaired: int
+    provenance_unresolved: int | None
+
+
+@dataclass(frozen=True)
+class _ReplaySkipped:
+    identity: ReplayIdentity
+    code_object_fingerprint: str
+    required_shadow_entries: int
+    limit: int
+
+
+class _DiagnosticFieldsError(ValueError):
+    pass
+
+
+def _log_fields(payload: str, context: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for token in payload.split():
+        if "=" not in token:
+            raise _DiagnosticFieldsError(
+                f"malformed {context}: malformed field {token!r}"
             )
-            else (
-                "malformed"
-                if kind is None
-                else MOI_DIAGNOSTIC_KINDS.get(kind, f"unknown-{kind}")
+        key, value = token.split("=", 1)
+        if re.fullmatch(r"[a-z_]+", key) is None or not value:
+            raise _DiagnosticFieldsError(
+                f"malformed {context}: malformed field {token!r}"
             )
+        if key in fields:
+            raise _DiagnosticFieldsError(
+                f"malformed {context}: duplicate field {key!r}"
+            )
+        fields[key] = value
+    return fields
+
+
+def _parse_log_fields(
+    line: str, marker: str, context: str, reasons: list[str]
+) -> dict[str, str] | None:
+    try:
+        return _log_fields(line.split(marker, 1)[1], context)
+    except (IndexError, _DiagnosticFieldsError) as error:
+        reasons.append(str(error) or f"malformed {context}")
+        return None
+
+
+def _unsigned(fields: dict[str, str], name: str) -> int | None:
+    try:
+        value = int(fields[name], 0)
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def _boolean(fields: dict[str, str], name: str) -> bool | None:
+    value = fields.get(name)
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    return None
+
+
+def _code_object_fingerprint(fields: dict[str, str]) -> str | None:
+    value = fields.get("code_object")
+    if value is None or re.fullmatch(r"fnv1a64:[0-9a-f]{16}", value) is None:
+        return None
+    return value
+
+
+def _lds_range(value: str | None) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    match = re.fullmatch(r"\[(\d+),(\d+)\)", value)
+    if match is None:
+        return None
+    begin, end = int(match.group(1)), int(match.group(2))
+    return (begin, end) if begin < end else None
+
+
+def _replay_identity(
+    fields: dict[str, str], generation_field: str = "generation"
+) -> ReplayIdentity | None:
+    reader = _unsigned(fields, "reader")
+    generation = _unsigned(fields, generation_field)
+    if reader is None or generation is None:
+        return None
+    return reader, generation
+
+
+def _identity_label(identity: ReplayIdentity) -> str:
+    return f"reader={identity[0]},generation={identity[1]}"
+
+
+def _replay_diagnostic_record(fields: dict[str, str]) -> _ReplayDiagnosticRecord:
+    kind = _unsigned(fields, "kind")
+    first_lds = _lds_range(fields.get("first_lds"))
+    second_lds = _lds_range(fields.get("second_lds"))
+    first_owner = _unsigned(fields, "first_owner")
+    second_owner = _unsigned(fields, "second_owner")
+    generation = _unsigned(fields, "generation")
+    first_access_kind = _unsigned(fields, "first_kind")
+    second_access_kind = _unsigned(fields, "second_kind")
+    signature = (
+        "exact-lds-write-write"
+        if (
+            kind == 1
+            and generation is not None
+            and fields.get("first_lds_known") == "true"
+            and first_lds is not None
+            and first_lds == second_lds
+            and first_owner is not None
+            and second_owner is not None
+            and first_owner != second_owner
+            and first_access_kind == MOI_SHADOW_ACCESS_WRITE
+            and second_access_kind == MOI_SHADOW_ACCESS_WRITE
         )
-        return {
-            "signature": signature,
-            "reader": fields.get("reader"),
-            "report_generation": fields.get("report_generation"),
-            "generation": generation,
-            "code_object_fingerprint": code_object_fingerprint(fields),
-            "index": unsigned(fields, "index"),
-            "kind": kind,
-            "first_owner": first_owner,
-            "second_owner": second_owner,
-            "first_instruction": fields.get("first_inst"),
-            "second_instruction": fields.get("second_inst"),
-            "first_lds": fields.get("first_lds"),
-            "second_lds": fields.get("second_lds"),
-            "first_access_kind": fields.get("first_kind"),
-            "second_access_kind": fields.get("second_kind"),
-        }
+        else (
+            "malformed"
+            if kind is None
+            else MOI_DIAGNOSTIC_KINDS.get(kind, f"unknown-{kind}")
+        )
+    )
+    return _ReplayDiagnosticRecord(
+        signature=signature,
+        reader=_unsigned(fields, "reader"),
+        report_generation=_unsigned(fields, "report_generation"),
+        generation=generation,
+        code_object_fingerprint=_code_object_fingerprint(fields),
+        index=_unsigned(fields, "index"),
+        kind=kind,
+        first_owner=first_owner,
+        second_owner=second_owner,
+        first_instruction=_unsigned(fields, "first_inst"),
+        second_instruction=_unsigned(fields, "second_inst"),
+        first_instruction_raw=fields.get("first_inst"),
+        second_instruction_raw=fields.get("second_inst"),
+        first_lds=fields.get("first_lds"),
+        second_lds=fields.get("second_lds"),
+        first_access_kind=first_access_kind,
+        second_access_kind=second_access_kind,
+    )
 
-    def explicit_identity(
-        fields: dict[str, str],
-    ) -> tuple[str, int] | None:
-        reader = fields.get("reader")
-        generation = unsigned(fields, "generation")
-        if reader is None or generation is None:
-            return None
-        return reader, generation
 
-    def identity_label(identity: tuple[str, int]) -> str:
-        return f"reader={identity[0]},generation={identity[1]}"
+def _bool_label(value: bool | None) -> str:
+    if value is None:
+        return "missing"
+    return "true" if value else "false"
 
-    runtime_by_identity: dict[tuple[str, int], dict] = {}
-    replay_by_identity: dict[tuple[str, int], dict] = {}
-    replay_diagnostics = []
-    reasons = []
+
+def _instruction_label(value: int | None) -> str:
+    return f"0x{value:x}" if value is not None else "missing"
+
+
+def _parse_record_replay_diagnostic_output(log_text: str) -> ParsedDiagnosticOutput:
+    reports: dict[ReplayIdentity, _ReplayReport] = {}
+    replays: dict[ReplayIdentity, _ReplaySummary] = {}
+    skipped_replays: dict[ReplayIdentity, _ReplaySkipped] = {}
+    replay_records: list[_ReplayDiagnosticRecord] = []
+    reasons: list[str] = []
+
     for line in log_text.splitlines():
         if "ConSan MOI auto report reader=" in line:
-            fields = dict(re.findall(r"\b([a-z_]+)=([^ ]+)", line))
-            identity = explicit_identity(fields)
-            fingerprint = code_object_fingerprint(fields)
-            diagnostics = unsigned(fields, "diagnostics")
+            reader_match = re.search(r"\breader=(\d+)", line)
+            reader_label = (
+                f"reader={reader_match.group(1)}"
+                if reader_match is not None
+                else "reader=missing"
+            )
+            if " needs hsa_memory_copy for coarse-grained summary" in line:
+                reasons.append(
+                    "pre-replay report requires hsa_memory_copy: " + reader_label
+                )
+                continue
+            if " hsa_memory_copy failed status=" in line:
+                status_match = re.search(r"\bstatus=([^ ]+)", line)
+                status = (
+                    status_match.group(1) if status_match is not None else "missing"
+                )
+                reasons.append(
+                    "pre-replay hsa_memory_copy failed: "
+                    f"{reader_label}, status={status}"
+                )
+                continue
+            if " has invalid header magic=" in line:
+                reasons.append("pre-replay report header invalid: " + reader_label)
+                continue
+            if " has inconsistent ABI-v" in line:
+                reasons.append("pre-replay report layout inconsistent: " + reader_label)
+                continue
+            if " addr=" not in line or " bytes=" not in line:
+                reasons.append("malformed pre-replay diagnostic summary")
+                continue
+            fields = _parse_log_fields(
+                line,
+                "ConSan MOI auto report ",
+                "pre-replay diagnostic summary",
+                reasons,
+            )
+            if fields is None:
+                continue
+            identity = _replay_identity(fields)
+            fingerprint = _code_object_fingerprint(fields)
+            diagnostics = _unsigned(fields, "diagnostics")
+            address = _unsigned(fields, "addr")
+            byte_count = _unsigned(fields, "bytes")
             sampled_counts = tuple(
-                unsigned(fields, name)
+                _unsigned(fields, name)
                 for name in ("sampled_conflicts", "sampled_immediate_conflicts")
             )
             visible_counts = tuple(
-                unsigned(fields, name)
+                _unsigned(fields, name)
                 for name in (
                     "visible_records",
                     "visible_barriers",
@@ -2171,30 +2382,58 @@ def _coverage_output_diagnostic_summary(
                 identity is None
                 or fingerprint is None
                 or diagnostics is None
+                or address is None
+                or byte_count is None
                 or any(count is None for count in sampled_counts)
                 or any(count is None for count in visible_counts)
             ):
                 reasons.append("malformed pre-replay diagnostic summary")
-            elif identity in runtime_by_identity:
+            elif identity in reports:
                 reasons.append(
-                    f"duplicate pre-replay summary {identity_label(identity)}"
+                    f"duplicate pre-replay summary {_identity_label(identity)}"
                 )
             else:
-                runtime_by_identity[identity] = {
-                    "reported": diagnostics,
-                    "code_object_fingerprint": fingerprint,
-                    "sampled_conflicts": sum(sampled_counts),
-                    "replay_required": any(visible_counts),
-                }
+                reports[identity] = _ReplayReport(
+                    identity=identity,
+                    code_object_fingerprint=fingerprint,
+                    reported=diagnostics,
+                    sampled_conflicts=sum(
+                        count for count in sampled_counts if count is not None
+                    ),
+                    replay_required=any(
+                        count for count in visible_counts if count is not None
+                    ),
+                )
         elif "ConSan MOI auto replay diagnostic reader=" in line:
-            replay_diagnostics.append(replay_diagnostic_record(line))
+            fields = _parse_log_fields(
+                line,
+                "ConSan MOI auto replay diagnostic ",
+                "replay diagnostic detail",
+                reasons,
+            )
+            if fields is not None:
+                replay_records.append(_replay_diagnostic_record(fields))
         elif "ConSan MOI auto replay reader=" in line:
-            fields = dict(re.findall(r"\b([a-z_]+)=([^ ]+)", line))
-            identity = explicit_identity(fields)
-            fingerprint = code_object_fingerprint(fields)
+            payload_line = line
             if " skipped " in f" {line} ":
-                required = unsigned(fields, "required_shadow_entries")
-                limit = unsigned(fields, "limit")
+                payload_line = line.replace(" skipped ", " ", 1)
+            fields = _parse_log_fields(
+                payload_line,
+                "ConSan MOI auto replay ",
+                (
+                    "replay-skipped summary"
+                    if payload_line != line
+                    else "replay diagnostic summary"
+                ),
+                reasons,
+            )
+            if fields is None:
+                continue
+            identity = _replay_identity(fields)
+            fingerprint = _code_object_fingerprint(fields)
+            if payload_line != line:
+                required = _unsigned(fields, "required_shadow_entries")
+                limit = _unsigned(fields, "limit")
                 if (
                     identity is None
                     or fingerprint is None
@@ -2202,14 +2441,20 @@ def _coverage_output_diagnostic_summary(
                     or limit is None
                 ):
                     reasons.append("malformed replay-skipped summary")
-                else:
+                elif identity in skipped_replays:
                     reasons.append(
-                        f"replay skipped: {identity_label(identity)}, "
-                        f"required_shadow_entries={required}, limit={limit}"
+                        f"duplicate replay-skipped summary {_identity_label(identity)}"
+                    )
+                else:
+                    skipped_replays[identity] = _ReplaySkipped(
+                        identity=identity,
+                        code_object_fingerprint=fingerprint,
+                        required_shadow_entries=required,
+                        limit=limit,
                     )
                 continue
-            diagnostics = unsigned(fields, "diagnostics")
-            provenance_repaired = unsigned(fields, "provenance_repaired")
+            diagnostics = _unsigned(fields, "diagnostics")
+            provenance_repaired = _unsigned(fields, "provenance_repaired")
             if (
                 identity is None
                 or fingerprint is None
@@ -2217,94 +2462,99 @@ def _coverage_output_diagnostic_summary(
                 or provenance_repaired is None
             ):
                 reasons.append("malformed replay diagnostic summary")
-            elif identity in replay_by_identity:
-                reasons.append(f"duplicate replay summary {identity_label(identity)}")
+            elif identity in replays:
+                reasons.append(f"duplicate replay summary {_identity_label(identity)}")
             else:
-                replay_by_identity[identity] = {
-                    "reported": diagnostics,
-                    "code_object_fingerprint": fingerprint,
-                    "diagnostic_capacity_exhausted": fields.get(
-                        "diagnostic_capacity_exhausted"
+                replays[identity] = _ReplaySummary(
+                    identity=identity,
+                    code_object_fingerprint=fingerprint,
+                    reported=diagnostics,
+                    diagnostic_capacity_exhausted=_boolean(
+                        fields, "diagnostic_capacity_exhausted"
                     ),
-                    "diagnostic_capacity": unsigned(fields, "diagnostic_capacity"),
-                    "conflict": fields.get("conflict"),
-                    "metadata_full": fields.get("metadata_full"),
-                    "provenance_repaired": provenance_repaired,
-                    "provenance_unresolved": unsigned(fields, "provenance_unresolved"),
-                }
+                    diagnostic_capacity=_unsigned(fields, "diagnostic_capacity"),
+                    conflict=_boolean(fields, "conflict"),
+                    metadata_full=_boolean(fields, "metadata_full"),
+                    provenance_repaired=provenance_repaired,
+                    provenance_unresolved=_unsigned(fields, "provenance_unresolved"),
+                )
 
-    details_by_identity: dict[tuple[str, int] | None, list[dict]] = {}
-    for record in replay_diagnostics:
-        if record["generation"] is None:
+    details_by_identity: dict[ReplayIdentity | None, list[_ReplayDiagnosticRecord]] = {}
+    for record in replay_records:
+        if record.generation is None:
             reasons.append("replay diagnostic detail has malformed generation")
-        fields = {
-            "reader": record["reader"],
-            "generation": record["report_generation"],
-        }
-        identity = explicit_identity(fields)
-        details_by_identity.setdefault(identity, []).append(record)
-    if not runtime_by_identity:
+        details_by_identity.setdefault(record.report_identity, []).append(record)
+
+    if not reports:
         reasons.append("missing pre-replay report summary")
-    if not replay_by_identity:
-        reasons.append("missing replay diagnostic summary")
+    # This is the exact producer guard around automatic replay: a report needs
+    # replay only when it contains a visible access or synchronization record.
     required_replay = {
-        identity
-        for identity, summary in runtime_by_identity.items()
-        if summary["replay_required"]
+        identity for identity, summary in reports.items() if summary.replay_required
     }
-    missing_replay = sorted(required_replay - set(replay_by_identity))
-    unexpected_replay = sorted(set(replay_by_identity) - set(runtime_by_identity))
+    skipped_identities = set(skipped_replays)
+    missing_replay = sorted(required_replay - set(replays) - skipped_identities)
+    unexpected_replay = sorted(set(replays) - required_replay)
+    unexpected_skipped = sorted(skipped_identities - required_replay)
+    for identity in sorted(skipped_identities & required_replay):
+        skipped = skipped_replays[identity]
+        reasons.append(
+            f"replay skipped: {_identity_label(identity)}, "
+            f"required_shadow_entries={skipped.required_shadow_entries}, "
+            f"limit={skipped.limit}"
+        )
     if missing_replay:
         reasons.append(
             "missing replay summaries: "
-            + ", ".join(identity_label(identity) for identity in missing_replay)
+            + ", ".join(_identity_label(identity) for identity in missing_replay)
         )
     if unexpected_replay:
         reasons.append(
             "unexpected replay summaries: "
-            + ", ".join(identity_label(identity) for identity in unexpected_replay)
+            + ", ".join(_identity_label(identity) for identity in unexpected_replay)
         )
-    for identity, summary in replay_by_identity.items():
+    if unexpected_skipped:
+        reasons.append(
+            "unexpected replay-skipped summaries: "
+            + ", ".join(_identity_label(identity) for identity in unexpected_skipped)
+        )
+    conflicting_replay = sorted(set(replays) & skipped_identities)
+    if conflicting_replay:
+        reasons.append(
+            "replay both skipped and summarized: "
+            + ", ".join(_identity_label(identity) for identity in conflicting_replay)
+        )
+
+    source_summaries = []
+    for identity, summary in sorted(replays.items()):
         details = details_by_identity.get(identity, ())
         detailed = len(details)
-        summary["detailed"] = detailed
-        runtime_summary = runtime_by_identity.get(identity)
-        runtime_fingerprint = (
-            runtime_summary["code_object_fingerprint"]
-            if runtime_summary is not None
-            else None
+        report = reports.get(identity)
+        report_fingerprint = (
+            report.code_object_fingerprint if report is not None else None
         )
-        if runtime_fingerprint != summary["code_object_fingerprint"]:
+        if report_fingerprint != summary.code_object_fingerprint:
             reasons.append(
                 "replay code-object fingerprint mismatch: "
-                f"{identity_label(identity)}, "
-                f"pre_report={runtime_fingerprint or 'missing'}, "
-                f"replay={summary['code_object_fingerprint'] or 'missing'}"
+                f"{_identity_label(identity)}, "
+                f"pre_report={report_fingerprint or 'missing'}, "
+                f"replay={summary.code_object_fingerprint}"
             )
-        detail_fingerprints = {record["code_object_fingerprint"] for record in details}
-        if detail_fingerprints != {summary["code_object_fingerprint"]} and details:
+        detail_fingerprints = {record.code_object_fingerprint for record in details}
+        if details and detail_fingerprints != {summary.code_object_fingerprint}:
             reasons.append(
                 "replay diagnostic code-object fingerprint mismatch: "
-                f"{identity_label(identity)}"
+                f"{_identity_label(identity)}"
             )
-        if (summary["reported"] != 0 or details) and summary[
-            "code_object_fingerprint"
-        ] != contract.code_object_fingerprint:
-            reasons.append(
-                "diagnostic code-object fingerprint does not match contract: "
-                f"{identity_label(identity)}, "
-                f"observed={summary['code_object_fingerprint']}, "
-                f"contract={contract.code_object_fingerprint}"
-            )
-        if summary["reported"] != detailed:
+        if summary.reported != detailed:
             reasons.append(
                 "replay diagnostic inventory incomplete: "
-                f"{identity_label(identity)}, "
-                f"reported={summary['reported']}, detailed={detailed}"
+                f"{_identity_label(identity)}, "
+                f"reported={summary.reported}, detailed={detailed}"
             )
-        if summary["reported"] <= contract.max_diagnostics:
-            indices = [record["index"] for record in details]
-            expected_indices = list(range(summary["reported"]))
+        if summary.reported <= MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY:
+            indices = [record.index for record in details]
+            expected_indices = list(range(summary.reported))
             if (
                 any(index is None for index in indices)
                 or len(set(indices)) != len(indices)
@@ -2316,131 +2566,283 @@ def _coverage_output_diagnostic_summary(
                 )
                 reasons.append(
                     "replay diagnostic indices invalid: "
-                    f"{identity_label(identity)}, "
+                    f"{_identity_label(identity)}, "
                     f"expected={','.join(map(str, expected_indices)) or 'none'}, "
                     f"actual={actual_indices or 'none'}"
                 )
-        if summary["diagnostic_capacity_exhausted"] != "false":
-            reasons.append(
-                "replay diagnostic capacity status invalid: "
-                f"{identity_label(identity)}, "
-                f"value={summary['diagnostic_capacity_exhausted'] or 'missing'}"
-            )
-        if summary["diagnostic_capacity"] != MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY:
+        if summary.diagnostic_capacity != MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY:
             reasons.append(
                 "replay diagnostic capacity mismatch: "
-                f"{identity_label(identity)}, "
-                f"value={summary['diagnostic_capacity']}, "
+                f"{_identity_label(identity)}, "
+                f"value={summary.diagnostic_capacity}, "
                 "producer=kAutoReplayDiagnosticCapacity, "
                 "consumer=MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY="
                 f"{MOI_AUTO_REPLAY_DIAGNOSTIC_CAPACITY}"
             )
-        expected_conflict = "true" if summary["reported"] else "false"
-        if summary["conflict"] != expected_conflict:
+        expected_conflict = summary.reported != 0
+        if summary.conflict is not expected_conflict:
             reasons.append(
-                f"replay conflict status invalid: {identity_label(identity)}, "
-                f"value={summary['conflict'] or 'missing'}, "
-                f"expected={expected_conflict}"
+                f"replay conflict status invalid: {_identity_label(identity)}, "
+                f"value={_bool_label(summary.conflict)}, "
+                f"expected={_bool_label(expected_conflict)}"
             )
-        if summary["metadata_full"] != "false":
+        if summary.diagnostic_capacity_exhausted is not False:
             reasons.append(
-                f"replay metadata status invalid: {identity_label(identity)}, "
-                f"value={summary['metadata_full'] or 'missing'}"
+                "replay diagnostic capacity status invalid: "
+                f"{_identity_label(identity)}, "
+                f"value={_bool_label(summary.diagnostic_capacity_exhausted)}"
             )
-        if summary["provenance_unresolved"] != 0:
+        if summary.metadata_full is not False:
             reasons.append(
-                f"replay provenance unresolved: {identity_label(identity)}, "
-                f"count={summary['provenance_unresolved']}"
+                f"replay metadata status invalid: {_identity_label(identity)}, "
+                f"value={_bool_label(summary.metadata_full)}"
             )
-        if summary["provenance_repaired"] > summary["reported"]:
+        if summary.provenance_unresolved != 0:
             reasons.append(
-                f"replay provenance repaired exceeds diagnostics: "
-                f"{identity_label(identity)}, "
-                f"repaired={summary['provenance_repaired']}, "
-                f"diagnostics={summary['reported']}"
+                f"replay provenance unresolved: {_identity_label(identity)}, "
+                f"count={summary.provenance_unresolved}"
             )
-    if not any(
-        summary["code_object_fingerprint"] == contract.code_object_fingerprint
-        for summary in replay_by_identity.values()
-    ):
-        reasons.append(
-            "contract code-object fingerprint missing from replay summaries: "
-            f"expected={contract.code_object_fingerprint}"
+        if summary.provenance_repaired > summary.reported:
+            reasons.append(
+                "replay provenance repaired exceeds diagnostics: "
+                f"{_identity_label(identity)}, "
+                f"repaired={summary.provenance_repaired}, "
+                f"diagnostics={summary.reported}"
+            )
+        source_summaries.append(
+            DiagnosticSourceSummary(
+                identity=_identity_label(identity),
+                diagnostic_count=summary.reported,
+                record_count=detailed,
+                code_object_fingerprint=summary.code_object_fingerprint,
+                artifact_fields=(
+                    (
+                        "diagnostic_capacity_exhausted",
+                        summary.diagnostic_capacity_exhausted,
+                    ),
+                    ("diagnostic_capacity", summary.diagnostic_capacity),
+                    ("conflict", summary.conflict),
+                    ("metadata_full", summary.metadata_full),
+                    ("provenance_repaired", summary.provenance_repaired),
+                    ("provenance_unresolved", summary.provenance_unresolved),
+                ),
+            )
         )
+
     for identity in details_by_identity:
         if identity is None:
             reasons.append("replay diagnostic detail has malformed identity")
-        elif identity not in replay_by_identity:
+        elif identity not in replays:
             reasons.append(
                 "replay diagnostic detail has no summary: "
-                f"{identity_label(identity)}"
+                f"{_identity_label(identity)}"
             )
 
-    runtime_count = sum(summary["reported"] for summary in runtime_by_identity.values())
+    pre_output_count = sum(summary.reported for summary in reports.values())
     sampled_conflict_count = sum(
-        summary["sampled_conflicts"] for summary in runtime_by_identity.values()
+        summary.sampled_conflicts for summary in reports.values()
     )
-    replay_count = sum(summary["reported"] for summary in replay_by_identity.values())
-    observed_signatures = {record["signature"] for record in replay_diagnostics}
-    unexpected = sorted(observed_signatures - set(contract.diagnostics))
-    if runtime_count:
-        reasons.append(f"pre-replay diagnostics={runtime_count}")
+    if pre_output_count:
+        reasons.append(f"pre-replay diagnostics={pre_output_count}")
     if sampled_conflict_count:
         reasons.append(f"pre-replay sampled conflicts={sampled_conflict_count}")
-    if replay_count > contract.max_diagnostics:
+    records = tuple(
+        DiagnosticRecord(
+            signature=record.signature,
+            source_identity=(
+                _identity_label(record.report_identity)
+                if record.report_identity is not None
+                else None
+            ),
+            code_object_fingerprint=record.code_object_fingerprint,
+            first_instruction=record.first_instruction,
+            second_instruction=record.second_instruction,
+            first_instruction_raw=record.first_instruction_raw,
+            second_instruction_raw=record.second_instruction_raw,
+            artifact_fields=(
+                ("reader", record.reader),
+                ("report_generation", record.report_generation),
+                ("generation", record.generation),
+                ("index", record.index),
+                ("kind", record.kind),
+                ("first_owner", record.first_owner),
+                ("second_owner", record.second_owner),
+                ("first_lds", record.first_lds),
+                ("second_lds", record.second_lds),
+                ("first_access_kind", record.first_access_kind),
+                ("second_access_kind", record.second_access_kind),
+            ),
+        )
+        for record in replay_records
+    )
+    return ParsedDiagnosticOutput(
+        profile="record-replay",
+        sources=tuple(source_summaries),
+        records=records,
+        diagnostic_count=sum(source.diagnostic_count for source in source_summaries),
+        pre_output_count=pre_output_count,
+        structural_reasons=tuple(reasons),
+    )
+
+
+DIAGNOSTIC_OUTPUT_PARSERS = {
+    "record-replay": _parse_record_replay_diagnostic_output,
+}
+
+
+def _diagnostic_record_result(record: DiagnosticRecord) -> dict:
+    result = {
+        "signature": record.signature,
+        "source_identity": record.source_identity,
+        "code_object_fingerprint": record.code_object_fingerprint,
+        "first_instruction": (
+            _instruction_label(record.first_instruction)
+            if record.first_instruction is not None
+            else None
+        ),
+        "second_instruction": (
+            _instruction_label(record.second_instruction)
+            if record.second_instruction is not None
+            else None
+        ),
+        "first_instruction_raw": record.first_instruction_raw,
+        "second_instruction_raw": record.second_instruction_raw,
+    }
+    result.update(record.artifact_fields)
+    return result
+
+
+def _diagnostic_source_result(summary: DiagnosticSourceSummary) -> dict:
+    result = {
+        "reported": summary.diagnostic_count,
+        "detailed": summary.record_count,
+        "code_object_fingerprint": summary.code_object_fingerprint,
+    }
+    result.update(summary.artifact_fields)
+    return result
+
+
+def _evaluate_diagnostic_output(
+    output: ParsedDiagnosticOutput,
+    policy: DiagnosticPolicy,
+) -> dict:
+    reasons = list(output.structural_reasons)
+    if policy.diagnostics and not policy.instruction_groups:
         reasons.append(
-            f"replay diagnostics exceed declared maximum: "
-            f"observed={replay_count}, maximum={contract.max_diagnostics}"
+            "policy declares diagnostics without qualified instruction groups"
+        )
+    observed_signatures = {record.signature for record in output.records}
+    unexpected = sorted(observed_signatures - set(policy.diagnostics))
+    if output.diagnostic_count > policy.max_diagnostics:
+        reasons.append(
+            "replay diagnostics exceed declared maximum: "
+            f"observed={output.diagnostic_count}, maximum={policy.max_diagnostics}"
         )
     if unexpected:
         reasons.append(f"unexpected diagnostics={','.join(unexpected)}")
+
+    if policy.code_object_fingerprint is not None:
+        for source in output.sources:
+            if (
+                source.diagnostic_count != 0 or source.record_count != 0
+            ) and source.code_object_fingerprint != policy.code_object_fingerprint:
+                reasons.append(
+                    "diagnostic code-object fingerprint does not match contract: "
+                    f"{source.identity}, "
+                    f"observed={source.code_object_fingerprint}, "
+                    f"contract={policy.code_object_fingerprint}"
+                )
+        if not any(
+            source.code_object_fingerprint == policy.code_object_fingerprint
+            for source in output.sources
+        ):
+            reasons.append(
+                "contract code-object fingerprint missing from diagnostic summaries: "
+                f"expected={policy.code_object_fingerprint}"
+            )
+
     unexpected_sites = []
-    for record in replay_diagnostics:
-        try:
-            first_instruction = int(record["first_instruction"], 0)
-            second_instruction = int(record["second_instruction"], 0)
-        except (TypeError, ValueError):
-            first_instruction = None
-            second_instruction = None
-        same_qualified_group = (
-            first_instruction is not None
-            and second_instruction is not None
-            and any(
-                first_instruction in group and second_instruction in group
-                for group in contract.instruction_groups
+    if policy.instruction_groups:
+        for record in output.records:
+            same_qualified_group = (
+                record.first_instruction is not None
+                and record.second_instruction is not None
+                and any(
+                    record.first_instruction in group
+                    and record.second_instruction in group
+                    for group in policy.instruction_groups
+                )
             )
-        )
-        if not same_qualified_group:
-            unexpected_sites.append(
-                f"{record['reader'] or 'missing'}:"
-                f"{record['first_instruction'] or 'missing'}->"
-                f"{record['second_instruction'] or 'missing'}"
-            )
+            if not same_qualified_group:
+                unexpected_sites.append(
+                    f"{record.source_identity or 'missing'}:"
+                    f"{_instruction_label(record.first_instruction)}->"
+                    f"{_instruction_label(record.second_instruction)}"
+                )
     if unexpected_sites:
         reasons.append(f"unexpected diagnostic sites={','.join(unexpected_sites)}")
+
     return {
         "accepted": not reasons,
         "reasons": reasons,
-        "contract": asdict(contract),
+        "profile": output.profile,
+        "policy": {
+            "kind": policy.kind,
+            "diagnostics": list(policy.diagnostics),
+            "max_diagnostics": policy.max_diagnostics,
+            "code_object_fingerprint": policy.code_object_fingerprint,
+            "instruction_groups": [list(group) for group in policy.instruction_groups],
+        },
+        "contract": asdict(policy.contract) if policy.contract is not None else None,
         "observed_signatures": sorted(observed_signatures),
         "observed_code_object_fingerprints": sorted(
-            {
-                summary["code_object_fingerprint"]
-                for summary in replay_by_identity.values()
-            }
+            {source.code_object_fingerprint for source in output.sources}
         ),
-        "replay_count": replay_count,
-        "pre_replay_count": runtime_count,
+        "diagnostic_count": output.diagnostic_count,
+        "replay_count": output.diagnostic_count,
+        "pre_replay_count": output.pre_output_count,
         "readers": {
-            identity_label(identity): replay_by_identity[identity]
-            for identity in sorted(replay_by_identity)
+            source.identity: _diagnostic_source_result(source)
+            for source in output.sources
         },
-        "records": replay_diagnostics,
+        "records": [_diagnostic_record_result(record) for record in output.records],
     }
 
 
+def _diagnostic_output_summary(
+    log_text: str,
+    profile: str,
+    contract: CoverageOutputContract | None = None,
+) -> dict:
+    parser = DIAGNOSTIC_OUTPUT_PARSERS.get(profile)
+    if parser is None:
+        raise ValidationError(
+            f"no complete diagnostic-output parser for profile: {profile}"
+        )
+    if contract is not None and contract.profile != profile:
+        raise ValidationError(
+            "diagnostic-output contract profile mismatch: "
+            f"run={profile}, contract={contract.profile}"
+        )
+    output = parser(log_text)
+    policy = (
+        DiagnosticPolicy.clean()
+        if contract is None
+        else DiagnosticPolicy.from_contract(contract)
+    )
+    return _evaluate_diagnostic_output(output, policy)
+
+
+def _coverage_output_diagnostic_summary(
+    log_text: str, contract: CoverageOutputContract
+) -> dict:
+    return _diagnostic_output_summary(log_text, contract.profile, contract)
+
+
 def _coverage_summary(
-    log_text: str, coverage_output_contract: CoverageOutputContract | None = None
+    log_text: str,
+    profile: str | None = None,
+    coverage_output_contract: CoverageOutputContract | None = None,
 ) -> dict:
     try:
         evidence = parse_coverage_evidence(log_text)
@@ -2488,9 +2890,13 @@ def _coverage_summary(
         },
         "dynamic_incomplete": verdict.counts["dynamic_incomplete"],
     }
-    if coverage_output_contract is not None:
-        diagnostics = _coverage_output_diagnostic_summary(
-            log_text, coverage_output_contract
+    if coverage_output_contract is not None or profile in DIAGNOSTIC_OUTPUT_PARSERS:
+        if profile is None:
+            raise ValidationError(
+                "diagnostic-output contract requires an explicit run profile"
+            )
+        diagnostics = _diagnostic_output_summary(
+            log_text, profile, coverage_output_contract
         )
         summary["diagnostics"] = diagnostics
         summary["reasons"].extend(diagnostics["reasons"])
@@ -2724,7 +3130,14 @@ def _run_profile(
     coverage_runs = None
     if profile is not None and logs:
         coverage_contract = _coverage_contract_for_profile(workload, profile)
-        coverage_runs = [_coverage_summary(log, coverage_contract) for log in logs]
+        coverage_runs = [
+            _coverage_summary(
+                log,
+                profile=profile,
+                coverage_output_contract=coverage_contract,
+            )
+            for log in logs
+        ]
         coverage = coverage_runs[-1]
     result = {
         "schema_version": SCHEMA_VERSION,

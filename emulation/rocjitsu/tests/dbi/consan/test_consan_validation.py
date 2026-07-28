@@ -35,7 +35,8 @@ def moi_auto_report(
     code_object_fingerprint: str = RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
 ) -> str:
     return (
-        f"ConSan MOI auto report reader={reader} generation={generation} "
+        f"ConSan MOI auto report reader={reader} addr=0x1000 bytes=4096 "
+        f"generation={generation} "
         f"code_object={code_object_fingerprint} "
         f"diagnostics={diagnostics} visible_records={visible_records} "
         "visible_barriers=0 visible_atomics=0 visible_fences=0 "
@@ -307,7 +308,7 @@ class ConSanValidationTest(unittest.TestCase):
             ),
             "missing replay summary": (
                 "\n".join((pre_report, *details)),
-                "missing replay diagnostic summary",
+                "missing replay summaries",
             ),
             "capacity exhausted": (
                 fixture.replace(
@@ -535,7 +536,7 @@ class ConSanValidationTest(unittest.TestCase):
         )
         self.assertFalse(summary["accepted"])
         self.assertIn(
-            "contract code-object fingerprint missing from replay summaries: "
+            "contract code-object fingerprint missing from diagnostic summaries: "
             f"expected={RETIRED_TOPK_CODE_OBJECT_FINGERPRINT}",
             summary["reasons"],
         )
@@ -611,7 +612,7 @@ class ConSanValidationTest(unittest.TestCase):
             contract,
         )
         self.assertTrue(summary["accepted"], summary["reasons"])
-        self.assertEqual(summary["records"][0]["report_generation"], "1")
+        self.assertEqual(summary["records"][0]["report_generation"], 1)
         self.assertEqual(summary["records"][0]["generation"], 99)
 
     def test_coverage_output_rejects_replay_without_matching_report(
@@ -714,7 +715,312 @@ class ConSanValidationTest(unittest.TestCase):
             summary["reasons"],
         )
 
-    def test_coverage_summary_integrates_only_declared_diagnostic_contract(
+    def test_record_replay_parser_normalizes_producer_output(self) -> None:
+        parsed = validation._parse_record_replay_diagnostic_output(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_replay(7, 1, 1, provenance_repaired=1),
+                    moi_auto_replay_diagnostic(7, 1, 99, 0),
+                )
+            )
+        )
+
+        self.assertEqual(parsed.profile, "record-replay")
+        self.assertEqual(parsed.structural_reasons, ())
+        self.assertEqual(parsed.diagnostic_count, 1)
+        self.assertEqual(parsed.sources[0].identity, "reader=7,generation=1")
+        self.assertEqual(
+            dict(parsed.sources[0].artifact_fields)["provenance_repaired"], 1
+        )
+        self.assertEqual(parsed.records[0].signature, "exact-lds-write-write")
+        self.assertEqual(parsed.records[0].first_instruction, 0xFE96C)
+        self.assertEqual(parsed.records[0].second_instruction, 0xFE974)
+        self.assertEqual(parsed.records[0].first_instruction_raw, "0xfe96c")
+        self.assertEqual(parsed.records[0].second_instruction_raw, "0xfe974")
+        self.assertEqual(dict(parsed.records[0].artifact_fields)["generation"], 99)
+
+    def test_diagnostic_output_dispatch_fails_closed(self) -> None:
+        with self.assertRaisesRegex(
+            validation.ValidationError,
+            "no complete diagnostic-output parser for profile: sampled",
+        ):
+            validation._diagnostic_output_summary("", "sampled")
+        with self.assertRaisesRegex(
+            validation.ValidationError,
+            "diagnostic-output contract profile mismatch",
+        ):
+            validation._diagnostic_output_summary(
+                "",
+                "record-replay",
+                replace(
+                    RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT,
+                    profile="sampled",
+                ),
+            )
+
+    def test_shared_diagnostic_evaluator_applies_clean_or_contract_policy(
+        self,
+    ) -> None:
+        contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
+        parsed = validation._parse_record_replay_diagnostic_output(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_replay(7, 1, 1, provenance_repaired=1),
+                    moi_auto_replay_diagnostic(7, 1, 99, 0),
+                )
+            )
+        )
+
+        clean = validation._evaluate_diagnostic_output(
+            parsed,
+            validation.DiagnosticPolicy.clean(),
+        )
+        declared = validation._evaluate_diagnostic_output(
+            parsed,
+            validation.DiagnosticPolicy.from_contract(contract),
+        )
+
+        self.assertFalse(clean["accepted"])
+        self.assertIn(
+            "replay diagnostics exceed declared maximum: observed=1, maximum=0",
+            clean["reasons"],
+        )
+        self.assertTrue(declared["accepted"], declared["reasons"])
+
+    def test_shared_diagnostic_evaluator_owns_provenance_policy(self) -> None:
+        parsed = validation._parse_record_replay_diagnostic_output(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_replay(7, 1, 0, provenance_unresolved=1),
+                )
+            )
+        )
+
+        self.assertIn(
+            "replay provenance unresolved: reader=7,generation=1, count=1",
+            parsed.structural_reasons,
+        )
+        summary = validation._evaluate_diagnostic_output(
+            parsed,
+            validation.DiagnosticPolicy.clean(),
+        )
+        self.assertFalse(summary["accepted"])
+        self.assertIn(
+            "replay provenance unresolved: reader=7,generation=1, count=1",
+            summary["reasons"],
+        )
+
+    def test_ordinary_record_replay_validates_zero_diagnostic_structure(
+        self,
+    ) -> None:
+        valid_log = complete_coverage_log(moi_auto_replay(7, 1, 0))
+        valid = validation._coverage_summary(
+            valid_log,
+            profile="record-replay",
+        )
+        malformed = validation._coverage_summary(
+            valid_log.replace("diagnostic_capacity=4 ", "", 1),
+            profile="record-replay",
+        )
+
+        self.assertTrue(valid["accepted"], valid["reasons"])
+        self.assertEqual(valid["diagnostics"]["policy"]["kind"], "clean")
+        self.assertEqual(valid["diagnostics"]["replay_count"], 0)
+        self.assertFalse(malformed["accepted"])
+        self.assertTrue(
+            any(
+                "replay diagnostic capacity mismatch" in reason
+                for reason in malformed["reasons"]
+            ),
+            malformed["reasons"],
+        )
+
+    def test_ordinary_record_replay_allows_an_empty_report_without_replay(
+        self,
+    ) -> None:
+        summary = validation._coverage_summary(
+            complete_coverage_log().replace("visible_records=1", "visible_records=0"),
+            profile="record-replay",
+        )
+
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertEqual(summary["diagnostics"]["readers"], {})
+
+    def test_ordinary_record_replay_rejects_replay_for_an_empty_report(
+        self,
+    ) -> None:
+        summary = validation._coverage_summary(
+            complete_coverage_log(moi_auto_replay(7, 1, 0)).replace(
+                "visible_records=1", "visible_records=0"
+            ),
+            profile="record-replay",
+        )
+
+        self.assertFalse(summary["accepted"])
+        self.assertIn(
+            "unexpected replay summaries: reader=7,generation=1",
+            summary["reasons"],
+        )
+
+    def test_record_replay_rejects_duplicate_summary_fields(self) -> None:
+        log = complete_coverage_log(moi_auto_replay(7, 1, 0))
+        for duplicated in (
+            log.replace("diagnostics=0 ", "diagnostics=999 diagnostics=0 ", 1),
+            log.replace(
+                "diagnostics=0 conflict=false",
+                "diagnostics=999 diagnostics=0 conflict=false",
+                1,
+            ),
+        ):
+            with self.subTest(line=duplicated.splitlines()[-1]):
+                summary = validation._coverage_summary(
+                    duplicated, profile="record-replay"
+                )
+                self.assertFalse(summary["accepted"])
+                self.assertTrue(
+                    any(
+                        "duplicate field 'diagnostics'" in reason
+                        for reason in summary["reasons"]
+                    ),
+                    summary["reasons"],
+                )
+
+    def test_record_replay_classifies_report_degradation_messages(self) -> None:
+        messages = {
+            "needs hsa_memory_copy for coarse-grained summary": (
+                "pre-replay report requires hsa_memory_copy: reader=7"
+            ),
+            "hsa_memory_copy failed status=1": (
+                "pre-replay hsa_memory_copy failed: reader=7, status=1"
+            ),
+            "has invalid header magic=0x0 abi=1 header_size=2": (
+                "pre-replay report header invalid: reader=7"
+            ),
+            "has inconsistent ABI-v2 layout": (
+                "pre-replay report layout inconsistent: reader=7"
+            ),
+        }
+        for suffix, expected in messages.items():
+            with self.subTest(suffix=suffix):
+                parsed = validation._parse_record_replay_diagnostic_output(
+                    f"ConSan MOI auto report reader=7 {suffix}"
+                )
+                self.assertIn(expected, parsed.structural_reasons)
+                self.assertNotIn(
+                    "malformed pre-replay diagnostic summary",
+                    parsed.structural_reasons,
+                )
+
+    def test_record_replay_skip_is_one_precise_structural_failure(self) -> None:
+        fixture = (
+            Path(__file__).with_name("fixtures")
+            / "gfx1201_topk_record_replay_current_runtime.log"
+        ).read_text(encoding="utf-8")
+        assert_current_replay_log(self, fixture)
+        replay_line = next(
+            line
+            for line in fixture.splitlines()
+            if "ConSan MOI auto replay reader=" in line
+        )
+        skipped = (
+            "[rocjitsu-dbi-hooks] ConSan MOI auto replay "
+            "reader=725954112 generation=3 "
+            f"code_object={RETIRED_TOPK_CODE_OBJECT_FINGERPRINT} skipped "
+            "required_shadow_entries=1048577 limit=1048576"
+        )
+        summary = validation._diagnostic_output_summary(
+            fixture.replace(replay_line, skipped),
+            "record-replay",
+        )
+
+        self.assertFalse(summary["accepted"])
+        replay_reasons = [reason for reason in summary["reasons"] if "replay" in reason]
+        self.assertEqual(
+            replay_reasons,
+            [
+                "replay skipped: reader=725954112,generation=3, "
+                "required_shadow_entries=1048577, limit=1048576"
+            ],
+        )
+
+    def test_record_replay_preserves_malformed_instruction_tokens(self) -> None:
+        parsed = validation._parse_record_replay_diagnostic_output(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_replay(7, 1, 1),
+                    moi_auto_replay_diagnostic(7, 1, 1, 0).replace(
+                        "first_inst=0xfe96c", "first_inst=not-an-offset"
+                    ),
+                )
+            )
+        )
+
+        record = validation._diagnostic_record_result(parsed.records[0])
+        self.assertIsNone(record["first_instruction"])
+        self.assertEqual(record["first_instruction_raw"], "not-an-offset")
+
+    def test_non_replay_profiles_do_not_consume_replay_grammar(self) -> None:
+        summary = validation._coverage_summary(
+            complete_coverage_log(),
+            profile="sampled",
+        )
+
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertNotIn("diagnostics", summary)
+
+    def test_coverage_summary_dispatches_through_diagnostic_registry(self) -> None:
+        parsed = validation.ParsedDiagnosticOutput(
+            profile="sampled",
+            sources=(),
+            records=(),
+            diagnostic_count=0,
+            pre_output_count=0,
+            structural_reasons=(),
+        )
+        parser = mock.Mock(return_value=parsed)
+        with mock.patch.dict(
+            validation.DIAGNOSTIC_OUTPUT_PARSERS,
+            {"sampled": parser},
+            clear=False,
+        ):
+            summary = validation._coverage_summary(
+                complete_coverage_log(),
+                profile="sampled",
+            )
+
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertIn("diagnostics", summary)
+        parser.assert_called_once()
+
+    def test_diagnostic_policy_requires_qualified_sites(self) -> None:
+        parsed = validation._parse_record_replay_diagnostic_output(
+            "\n".join(
+                (
+                    moi_auto_report(7, 1),
+                    moi_auto_replay(7, 1, 1),
+                    moi_auto_replay_diagnostic(7, 1, 1, 0),
+                )
+            )
+        )
+        summary = validation._evaluate_diagnostic_output(
+            parsed,
+            validation.DiagnosticPolicy(
+                diagnostics=("exact-lds-write-write",),
+                max_diagnostics=1,
+            ),
+        )
+
+        self.assertFalse(summary["accepted"])
+        self.assertIn(
+            "policy declares diagnostics without qualified instruction groups",
+            summary["reasons"],
+        )
+
+    def test_coverage_summary_applies_clean_or_declared_diagnostic_policy(
         self,
     ) -> None:
         contract = RETIRED_COVERAGE_OUTPUT_PARSER_CONTRACT
@@ -722,11 +1028,15 @@ class ConSanValidationTest(unittest.TestCase):
             moi_auto_replay(7, 1, 1),
             moi_auto_replay_diagnostic(7, 1, 1, 0).replace("kind=1", "kind=3", 1),
         )
-        normal = validation._coverage_summary(log)
-        coverage_output = validation._coverage_summary(log, contract)
+        normal = validation._coverage_summary(log, profile="record-replay")
+        coverage_output = validation._coverage_summary(
+            log,
+            profile="record-replay",
+            coverage_output_contract=contract,
+        )
 
-        self.assertTrue(normal["accepted"])
-        self.assertNotIn("diagnostics", normal)
+        self.assertFalse(normal["accepted"])
+        self.assertIn("diagnostics", normal)
         self.assertFalse(coverage_output["accepted"])
         self.assertEqual(
             coverage_output["diagnostics"]["observed_signatures"],
@@ -734,7 +1044,8 @@ class ConSanValidationTest(unittest.TestCase):
         )
         incomplete = validation._coverage_summary(
             log.replace("static_complete=true", "static_complete=false"),
-            contract,
+            profile="record-replay",
+            coverage_output_contract=contract,
         )
         self.assertIn("static coverage incomplete", incomplete["reasons"])
         self.assertTrue(
@@ -1862,7 +2173,77 @@ class ConSanValidationTest(unittest.TestCase):
                 )
 
         self.assertTrue(result["accepted"])
-        coverage_summary.assert_called_once_with("runtime output", contract)
+        coverage_summary.assert_called_once_with(
+            "runtime output",
+            profile="record-replay",
+            coverage_output_contract=contract,
+        )
+
+    def test_ordinary_record_replay_run_persists_structural_verdict(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
+        valid_log = complete_coverage_log(moi_auto_replay(7, 1, 0))
+        cases = (
+            ("valid", valid_log, True),
+            (
+                "malformed",
+                valid_log.replace("provenance_unresolved=0", "provenance_state=0"),
+                False,
+            ),
+        )
+        for name, log, expected in cases:
+            with self.subTest(name=name), temporary_root() as root:
+                artifact_root = root / "artifacts"
+                hook = root / "hook.so"
+                hook.write_bytes(b"hook")
+                with (
+                    mock.patch.object(validation, "_hook_path", return_value=hook),
+                    mock.patch.object(
+                        validation,
+                        "_workload_command",
+                        return_value=["/bin/true"],
+                    ),
+                    mock.patch.object(
+                        validation,
+                        "_run_process",
+                        return_value=(0, 0.1, log),
+                    ),
+                    mock.patch.object(
+                        validation,
+                        "_source_identities",
+                        return_value=[],
+                    ),
+                ):
+                    result = validation._run_profile(
+                        root,
+                        "gfx1201",
+                        workload,
+                        "record-replay",
+                        "clean",
+                        artifact_root,
+                        30,
+                    )
+
+                persisted = json.loads(
+                    (
+                        artifact_root
+                        / workload.id
+                        / "clean"
+                        / "record-replay"
+                        / "result.json"
+                    ).read_text(encoding="utf-8")
+                )
+                self.assertEqual(result["accepted"], expected)
+                self.assertEqual(persisted["accepted"], expected)
+                self.assertEqual(
+                    persisted["coverage"]["diagnostics"]["policy"]["kind"],
+                    "clean",
+                )
+                if name == "malformed":
+                    self.assertIn(
+                        "replay provenance unresolved: "
+                        "reader=7,generation=1, count=None",
+                        persisted["coverage"]["diagnostics"]["reasons"],
+                    )
 
     def test_coverage_output_profile_does_not_relax_not_detected_faults(
         self,
@@ -2137,6 +2518,39 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertIn(
             "malformed replay diagnostic summary",
             drifted_summary["reasons"],
+        )
+
+    def test_ordinary_record_replay_accepts_current_physical_runtime_fixture(
+        self,
+    ) -> None:
+        fixture = (
+            Path(__file__).with_name("fixtures")
+            / "gfx1201_topk_record_replay_current_runtime.log"
+        ).read_text(encoding="utf-8")
+        assert_current_replay_log(self, fixture)
+
+        summary = validation._diagnostic_output_summary(fixture, "record-replay")
+
+        self.assertTrue(summary["accepted"], summary["reasons"])
+        self.assertEqual(summary["diagnostic_count"], 0)
+        self.assertEqual(summary["records"], [])
+
+    def test_ordinary_record_replay_rejects_physical_diagnostic_fixture(
+        self,
+    ) -> None:
+        fixture = (
+            Path(__file__).with_name("fixtures")
+            / "gfx1201_topk_record_replay_current_diagnostics.log"
+        ).read_text(encoding="utf-8")
+        assert_current_replay_log(self, fixture)
+
+        summary = validation._diagnostic_output_summary(fixture, "record-replay")
+
+        self.assertFalse(summary["accepted"])
+        self.assertEqual(summary["diagnostic_count"], 3)
+        self.assertIn(
+            "unexpected diagnostics=exact-lds-write-write",
+            summary["reasons"],
         )
 
     def test_coverage_output_contract_accepts_current_physical_diagnostic_fixture(
