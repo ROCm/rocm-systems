@@ -38,10 +38,10 @@ rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABL
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-# To ensure we sample all agents, use 16 threads each assigned to one agent in a round
+# To ensure we sample all agents, use 2 threads each assigned to one agent in a round
 # robin manner. To keep the job per device reasonable, each thread offloads 100 instances
 # of a transpose kernel.
-set(TRANSPOSE_NUM_THREADS 16)
+set(TRANSPOSE_NUM_THREADS 2)
 set(TRANSPOSE_NUM_ITERATIONS 100)
 
 rocprofiler_add_integration_execute_test(

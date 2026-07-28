@@ -111,7 +111,8 @@ classify(std::string_view inst);
 constexpr bool
 is_gfx1250(uint32_t gfx_target_version)
 {
-    return gfx_target_version >= 125000u && gfx_target_version < 125100u;
+    // return gfx_target_version >= 125000u && gfx_target_version < 125100u;
+    return gfx_target_version >= 120500u;
 }
 
 /**
