@@ -9,7 +9,7 @@
 #include "common.h"
 
 void ReduceScatterGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
-  size_t base = (count/nranks) & -(16/eltSize);
+  size_t base = (count/nranks) & ~(16/eltSize - 1);
   *sendcount = base*nranks;
   *recvcount = base;
   *sendInplaceOffset = 0;
@@ -47,7 +47,7 @@ testResult_t  ReduceScatterGetSymkInfo(ncclComm_t comm, size_t count, ncclDataTy
   return testSuccess;
 }
 
-void ReduceScatterGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void ReduceScatterGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize * nranks) / 1.0E9 / sec;
 
   *algBw = baseBw;
@@ -121,7 +121,7 @@ if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_op
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  .getBuffSize = ReduceScatterGetBuffSize,
-  .runTest = ReduceScatterRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ ReduceScatterGetBuffSize,
+  /* .runTest = */ ReduceScatterRunTest
 };

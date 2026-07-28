@@ -16,7 +16,11 @@ DECLARE_RCCL_PFN(ncclAllReduceWithBias);
 static pthread_once_t initOnceControl = PTHREAD_ONCE_INIT;
 
 static void initOnceFunc() {
-  void *librccl = dlopen("librccl.so", RTLD_NOLOAD);
+  void *librccl = dlopen("librccl.so", RTLD_LAZY | RTLD_LOCAL);
+  if (!librccl) {
+    fprintf(stderr, "dlopen failed: %s\n", dlerror());
+    return;
+  }
   pfn_ncclAllReduceWithBias = (PFN_ncclAllReduceWithBias) dlsym(librccl, "ncclAllReduceWithBias");
 }
 
@@ -48,7 +52,7 @@ testResult_t AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncc
   return testSuccess;
 }
 
-void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
+void AllReduceGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
 
   *algBw = baseBw;
@@ -57,6 +61,7 @@ void AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, doubl
 }
 
 testResult_t AllReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
+  if (deviceImpl != 0) return testNotImplemented;
   char* sptr = (char*)sendbuff + sendoffset;
   char* rptr = (char*)recvbuff + recvoffset;
   
@@ -74,6 +79,7 @@ struct testColl allReduceTest = {
   AllReduceInitData,
   AllReduceGetBw,
   AllReduceRunColl,
+  NULL,
   NULL
 };
 
@@ -121,7 +127,10 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  .getBuffSize = AllReduceGetBuffSize,
-  .runTest = AllReduceRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ AllReduceGetBuffSize,
+  /* .runTest = */ AllReduceRunTest,
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+  /* .initCommConfig = */ nullptr,
+#endif
 };

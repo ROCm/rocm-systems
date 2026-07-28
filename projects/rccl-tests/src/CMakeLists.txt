@@ -82,8 +82,6 @@ set(COMMON_FILES
   timer.cc
   util.h
   util.cu
-  ../verifiable/verifiable.h
-  ../verifiable/verifiable.cu
 )
 
 # Hipify common files (copy of source generated into hipify directory)
@@ -133,7 +131,7 @@ add_custom_target(git_version_check
 add_custom_target(hipify DEPENDS ${HIP_COMMON_SOURCES})
 add_library(rccl_common OBJECT ${HIP_COMMON_SOURCES})
 add_dependencies(rccl_common hipify git_version_check)
-target_link_libraries(rccl_common roc::rccl hip::device Threads::Threads dl)
+target_link_libraries(rccl_common roc::rccl hip::device Threads::Threads dl nccl_test_os nccl_tests_options verifiable)
 if(USE_MPI)
   target_link_libraries(rccl_common MPI::MPI_CXX)
 endif()

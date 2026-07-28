@@ -1,267 +1,690 @@
 /*************************************************************************
- * Copyright (c) 2016-2020, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
 
+/*
+ * AlltoAllv Performance Test
+ * ==========================
+ *
+ * This test benchmarks irregular alltoall (alltoallv) communication patterns,
+ * where each rank sends different amounts of data to different peers.
+ *
+ * USAGE
+ * -----
+ *
+ * The test integrates with the standard NCCL perf test harness and accepts
+ * all standard perf test command-line arguments.
+ *
+ * The test supports two modes for specifying traffic patterns:
+ *
+ * 1. Generated Pattern Mode
+ *    RCCL defaults to its deterministic sparse pattern. Setting
+ *    NCCL_TESTS_ALLTOALLV_SPREAD explicitly selects upstream's generated
+ *    distribution, where more distant ranks (in rank ID space) receive
+ *    proportionally more traffic than nearby ranks. In both generated modes,
+ *    each rank sends and receives the same total amount of data.
+ *
+ *    Environment variable settings:
+ *    - NCCL_TESTS_ALLTOALLV_SPREAD: Controls the distance-weighted spread factor.
+ *      Range: 0.0 to 1.0. Default: 1.0
+ *        * 0.0 = uniform distribution (equal traffic to all peers)
+ *        * 1.0 = fully distance-weighted (more traffic to distant ranks)
+ *        * Intermediate values blend uniform and distance-weighted distributions
+ *
+ *    Impact of spread on traffic distribution (example: rank 0 sending to 4 ranks):
+
+ *      spread=0.0 (uniform):       spread=1.0 (distance-weighted):
+ *      rank 0 -> rank 0: ###       rank 0 -> rank 0: (none)
+ *      rank 0 -> rank 1: ###       rank 0 -> rank 1: ##
+ *      rank 0 -> rank 2: ###       rank 0 -> rank 2: ####
+ *      rank 0 -> rank 3: ###       rank 0 -> rank 3: ######
+ *
+ *    Data size sweeps:
+ *    The -b/-e/-f parameters control the sweep bounds and step size. Each
+ *    message size in the sweep represents the total amount each rank sends to
+ *    all peers combined, with the spread factor controlling how this total is
+ *    distributed among peers.
+ *
+ * 2. Matrix File Mode
+ *    When NCCL_TESTS_ALLTOALLV_MATRIX_FILE is provided, the test reads an explicit
+ *    traffic matrix file that defines the exact byte counts for each
+ *    rank-to-rank communication.
+ *
+ *    Environment variable settings:
+ *    - NCCL_TESTS_ALLTOALLV_MATRIX_FILE: Path to a whitespace-separated matrix file.
+ *      Required for matrix mode. The file must contain a square matrix where
+ *      cell [i][j] represents bytes sent from rank i to rank j.
+ *
+ *    - NCCL_TESTS_ALLTOALLV_MATRIX_SCALE: Scale factor applied to all matrix values.
+ *      Default: 1.0 (no scaling). Useful for testing different traffic
+ *      volumes with the same pattern.
+ *
+ *    Matrix file format:
+ *    - Whitespace-separated numeric values, interpreted as bytes
+ *    - Must be square (rows == cols)
+ *    - Matrix dimension must be >= number of ranks
+ *    - Only the first nranks rows/cols are used if matrix is larger
+ *    - All values are aligned to 16-byte boundaries automatically
+ *
+ *    Example matrix file (3 ranks):
+ *      100  200  150
+ *      50   100  75
+ *      300  150  200
+ *
+ *    IMPORTANT caveats for matrix mode:
+ *    1. -b and -e must be equal. Sweeps are not supported since per-peer sizes
+ *       come directly from the matrix file, not from the -b/-e parameters.
+ *    2. -e must be at least the maximum total send or receive bytes across all
+ *       ranks in the matrix. The test harness allocates buffers for all ranks
+ *       based on the -e value, so it must accommodate the largest workload.
+ *
+ * OUTPUT AND ANALYSIS
+ * -------------------
+ *
+ * The test outputs standard NCCL perf test metrics (algorithmic and bus
+ * bandwidth), but these are based on the rank with the most send/recv bytes
+ * and the maximum time across ranks. This approach is most representative of
+ * collective performance in imbalanced workloads. Use the -a 3 option to report
+ * max time across ranks rather than the default average time, which can be skewed
+ * by inactive ranks.
+ *
+ * Optional per-rank bandwidth summary:
+ *   Set NCCL_TESTS_ALLTOALLV_PRINT_SUMMARY=1 to print detailed per-rank statistics
+ *   including send_bytes, recv_bytes, alg_bw, and bus_bw for each rank.
+ *   Useful for analyzing imbalanced workloads.
+ *
+ * EXAMPLE RUNS
+ * ------------
+ *
+ * Generated pattern with distance-weighted distribution:
+ *   NCCL_TESTS_ALLTOALLV_SPREAD=1.0 alltoallv_perf -b 1M -e 32M -f 2
+ *   Tests imbalanced alltoall where distant ranks receive more traffic.
+ *
+ * Generated pattern with uniform distribution:
+ *   NCCL_TESTS_ALLTOALLV_SPREAD=0.0 alltoallv_perf -b 1M -e 32M -f 2
+ *   Tests balanced alltoall where all peers receive equal traffic.
+ *
+ * Matrix file mode with explicit traffic pattern:
+ *   NCCL_TESTS_ALLTOALLV_MATRIX_FILE=traffic.txt alltoallv_perf -b 32M -e 32M -f 2
+ *   Tests arbitrary communication pattern defined in traffic.txt.
+ *
+ */
+
 #include "cuda_runtime.h"
 #include "common.h"
-
+#include <stdio.h>
+#include <ctype.h>
+#include <errno.h>
+#include <atomic>
+#include <mutex>
 #include <vector>
 #include <random>
 #include <cmath>
-#include <cstdlib>
+#include <stdint.h>
+#include <stdlib.h>
 
+#define PRINT if (is_main_thread) printf
+
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define USE_RCCL_GATHER_SCATTER
 
-// Build a deterministic sparse "send-size" matrix M[i][j] (sender i -> receiver j),
-// identical on every rank, where every row and every column sums to exactly `total`.
-//
-// Method (Birkhoff--von Neumann): a doubly-stochastic matrix is a weighted sum of
-// permutation matrices. Each random permutation contributes its weight to exactly one
-// cell per row and per column, so all row/column sums equal the sum of the weights.
-// Using integer weights that sum to `total` makes every row/column sum exactly `total`,
-// which keeps the send/recv buffers exactly filled.
-//
-// Two tuning knobs (overridable via environment, but defaulted so all ranks agree):
-//   RCCL_TESTS_A2AV_SPARSITY   fraction of (i,j) pairs forced to zero  [default 0.5]
-//   RCCL_TESTS_A2AV_SIZESPREAD max/min ratio knob for nonzero weights  [default 3.0]
-//   RCCL_TESTS_A2AV_SEED       shared RNG seed                         [default 2602]
-//   RCCL_TESTS_A2AV_VERBOSE    if set, rank 0 prints the size matrix once
-static void AlltoAllvGenSizeMatrix(int nranks, int rank, size_t total, std::vector<size_t>& M) {
-  M.assign((size_t)nranks * nranks, 0);
+static int alltoallv_use_generated_pattern = 0;
+static int alltoallv_print_summary = 0;
+static char* traffic_matrix_file = NULL;
+static size_t* traffic_matrix_data = NULL;
+static int traffic_matrix_dim = 0;
+static double traffic_matrix_scale = 1.0; // scale factor applied to traffic matrix values
+static double distance_weighted_spread = 1.0; // 0.0 => uniform, 1.0 => fully distance-weighted (default)
+static int alltoallv_use_rccl_sparse_pattern = 0;
+
+static std::mutex alltoallv_lock;
+static int alltoallv_inited = 0;
+
+// atomics used for error flag, since init can be multi-threaded
+static std::atomic<int> alltoallv_error_set{0};
+static inline int AlltoAllvHasError() {
+  return alltoallv_error_set.load(std::memory_order_relaxed);
+}
+static inline void AlltoAllvSetError() {
+  alltoallv_error_set.store(1, std::memory_order_relaxed);
+}
+
+static void AlltoAllvParseEnv() {
+  const char* matrix_file_env = getenv("NCCL_TESTS_ALLTOALLV_MATRIX_FILE");
+  if (matrix_file_env) traffic_matrix_file = (char*)matrix_file_env;
+  const char* print_summary_env = getenv("NCCL_TESTS_ALLTOALLV_PRINT_SUMMARY");
+  if (print_summary_env) alltoallv_print_summary = atoi(print_summary_env) != 0;
+  const char* spread_env = getenv("NCCL_TESTS_ALLTOALLV_SPREAD");
+  // Preserve RCCL's sparse default. Setting upstream SPREAD explicitly selects
+  // the upstream distance-weighted generated pattern; MATRIX_FILE selects matrix mode.
+  if (!traffic_matrix_file && !spread_env) alltoallv_use_rccl_sparse_pattern = 1;
+  if (spread_env) {
+    errno = 0;
+    char* end = NULL;
+    double v = strtod(spread_env, &end);
+    if (errno != ERANGE && end != spread_env && *end == '\0') distance_weighted_spread = v;
+  }
+  if (distance_weighted_spread < 0.0) distance_weighted_spread = 0.0;
+  if (distance_weighted_spread > 1.0) distance_weighted_spread = 1.0;
+  const char* scale_env = getenv("NCCL_TESTS_ALLTOALLV_MATRIX_SCALE");
+  if (scale_env) {
+    errno = 0;
+    char* end = NULL;
+    double v = strtod(scale_env, &end);
+    if (errno != ERANGE && end != scale_env && *end == '\0') traffic_matrix_scale = v;
+  }
+  if (traffic_matrix_scale < 0.0) traffic_matrix_scale = 0.0;
+}
+
+// Preserve RCCL's deterministic doubly-stochastic sparse mode when a legacy
+// RCCL_TESTS_A2AV_* control is present.
+static void AlltoAllvGenRcclSizeMatrix(int nranks, size_t total, std::vector<size_t>& matrix) {
+  matrix.assign((size_t)nranks * nranks, 0);
   if (nranks <= 0 || total == 0) return;
-  if (nranks == 1) { M[0] = total; return; }
+  if (nranks == 1) {
+    matrix[0] = total;
+    return;
+  }
 
   double sparsity = 0.5;
   double sizeSpread = 3.0;
   unsigned long seed = 2602;
-  const char* s;
-  if ((s = getenv("RCCL_TESTS_A2AV_SPARSITY")))   sparsity   = atof(s);
-  if ((s = getenv("RCCL_TESTS_A2AV_SIZESPREAD"))) sizeSpread = atof(s);
-  if ((s = getenv("RCCL_TESTS_A2AV_SEED")))       seed       = strtoul(s, NULL, 0);
+  const char* value;
+  if ((value = getenv("RCCL_TESTS_A2AV_SPARSITY"))) sparsity = atof(value);
+  if ((value = getenv("RCCL_TESTS_A2AV_SIZESPREAD"))) sizeSpread = atof(value);
+  if ((value = getenv("RCCL_TESTS_A2AV_SEED"))) seed = strtoul(value, NULL, 0);
+  sparsity = std::max(0.0, std::min(0.95, sparsity));
+  sizeSpread = std::max(1.0, sizeSpread);
 
-  if (sparsity < 0.0)  sparsity = 0.0;
-  if (sparsity > 0.95) sparsity = 0.95;
-  if (sizeSpread < 1.0) sizeSpread = 1.0;
-
-  // Number of permutation terms controls density. With k independent random
-  // permutations, the expected fraction of zero cells is (1 - 1/N)^k, so
-  // k ~= ln(sparsity) / ln(1 - 1/N) hits the requested sparsity.
-  int k;
-  if (sparsity > 0.0) {
-    k = (int)std::lround(std::log(sparsity) / std::log(1.0 - 1.0 / nranks));
-  } else {
-    k = 4 * nranks; // effectively dense
-  }
-  if (k < 1) k = 1;
+  int terms = sparsity > 0.0
+      ? (int)std::lround(std::log(sparsity) / std::log(1.0 - 1.0 / nranks))
+      : 4 * nranks;
+  terms = std::max(1, terms);
 
   std::mt19937_64 rng(seed);
-
-  // Raw weights spread geometrically so max/min ~= sizeSpread.
-  std::vector<double> raw(k);
+  std::uniform_real_distribution<double> uniform(0.0, 1.0);
+  std::vector<double> raw(terms);
   double rawSum = 0.0;
-  std::uniform_real_distribution<double> uni(0.0, 1.0);
-  for (int t = 0; t < k; t++) {
-    raw[t] = std::pow(sizeSpread, uni(rng)); // in [1, sizeSpread]
+  for (int t = 0; t < terms; t++) {
+    raw[t] = std::pow(sizeSpread, uniform(rng));
     rawSum += raw[t];
   }
 
-  // Integer weights summing exactly to `total`.
-  std::vector<size_t> w(k, 0);
+  std::vector<size_t> weights(terms, 0);
   size_t assigned = 0;
-  for (int t = 0; t < k; t++) {
-    w[t] = (size_t)std::floor(raw[t] / rawSum * (double)total);
-    assigned += w[t];
+  for (int t = 0; t < terms; t++) {
+    weights[t] = (size_t)std::floor(raw[t] / rawSum * (double)total);
+    assigned += weights[t];
   }
-  for (size_t rem = total - assigned, t = 0; rem > 0; rem--, t = (t + 1) % k) w[t] += 1;
-
-  // Accumulate weighted random permutation matrices.
-  std::vector<int> perm(nranks);
-  for (int i = 0; i < nranks; i++) perm[i] = i;
-  for (int t = 0; t < k; t++) {
-    for (int i = nranks - 1; i > 0; i--) { // Fisher-Yates
-      std::uniform_int_distribution<int> d(0, i);
-      std::swap(perm[i], perm[d(rng)]);
-    }
-    for (int i = 0; i < nranks; i++) M[(size_t)i * nranks + perm[i]] += w[t];
+  for (size_t remaining = total - assigned, t = 0; remaining > 0;
+       remaining--, t = (t + 1) % terms) {
+    weights[t]++;
   }
 
-  if (rank == 0 && getenv("RCCL_TESTS_A2AV_VERBOSE")) {
-    static bool printed = false;
-    if (!printed) {
-      printed = true;
-      size_t nz = 0, mn = (size_t)-1, mx = 0;
-      for (size_t e = 0; e < M.size(); e++) {
-        if (M[e]) { nz++; if (M[e] < mn) mn = M[e]; if (M[e] > mx) mx = M[e]; }
-      }
-      if (mn == (size_t)-1) mn = 0;
-      printf("AlltoAllv size matrix (rows=sender, cols=receiver):\n");
-      printf("config:    total=%zu  requestedSparsity=%.1f%%  sizeSpread=%.2f  N=%d  seed=%lu\n",
-             total, 100.0 * sparsity, sizeSpread, nranks, seed);
-      printf("realized:  sparsity=%.1f%%  sizeSpreadRatio(max/min)=%.2f  nonzero[min..max]=[%zu..%zu]  terms=%d\n",
-             100.0 * (1.0 - (double)nz / M.size()),
-             mn ? (double)mx / (double)mn : 0.0, mn, mx, k);
-      for (int i = 0; i < nranks; i++) {
-        for (int j = 0; j < nranks; j++) printf("%10zu", M[(size_t)i * nranks + j]);
-        printf("\n");
+  std::vector<int> permutation(nranks);
+  for (int i = 0; i < nranks; i++) permutation[i] = i;
+  for (int t = 0; t < terms; t++) {
+    for (int i = nranks - 1; i > 0; i--) {
+      std::uniform_int_distribution<int> pick(0, i);
+      std::swap(permutation[i], permutation[pick(rng)]);
+    }
+    for (int i = 0; i < nranks; i++)
+      matrix[(size_t)i * nranks + permutation[i]] += weights[t];
+  }
+
+  static std::atomic<bool> printed{false};
+  if (is_main_proc && getenv("RCCL_TESTS_A2AV_VERBOSE") && !printed.exchange(true)) {
+    size_t nonzero = 0, minValue = (size_t)-1, maxValue = 0;
+    for (size_t element : matrix) {
+      if (element) {
+        nonzero++;
+        minValue = std::min(minValue, element);
+        maxValue = std::max(maxValue, element);
       }
     }
+    if (minValue == (size_t)-1) minValue = 0;
+    printf("AlltoAllv size matrix (rows=sender, cols=receiver):\n");
+    printf("config: total=%zu requestedSparsity=%.1f%% sizeSpread=%.2f N=%d seed=%lu\n",
+           total, 100.0 * sparsity, sizeSpread, nranks, seed);
+    printf("realized: sparsity=%.1f%% sizeSpreadRatio(max/min)=%.2f nonzero[min..max]=[%zu..%zu] terms=%d\n",
+           100.0 * (1.0 - (double)nonzero / matrix.size()),
+           minValue ? (double)maxValue / (double)minValue : 0.0,
+           minValue, maxValue, terms);
+    for (int i = 0; i < nranks; i++) {
+      for (int j = 0; j < nranks; j++)
+        printf("%10zu", matrix[(size_t)i * nranks + j]);
+      printf("\n");
+    }
+  }
+}
+
+// read traffic matrix from file, return 0 on success, 1 on error
+static int AlltoAllvReadTrafficMatrix() {
+  FILE* f = NULL;
+  char* buf = NULL;
+  size_t* tmp_matrix_data = NULL;
+  size_t fileLen = 0;
+  char* p = NULL;
+  char* end = NULL;
+  double v = 0.0;
+  long double scaled = 0.0;
+  size_t rows = 0, cols = 0, tmp_cols = 0;
+  size_t n_elts = 0;
+  size_t k = 0;
+  long pos = 0;
+  int rc = 1;
+
+  f = fopen(traffic_matrix_file, "rb");
+  if (!f) {
+    PRINT("Unable to open alltoallv traffic matrix file %s.\n", traffic_matrix_file);
+    goto exit;
+  }
+
+  if (fseek(f, 0, SEEK_END) != 0) {
+    PRINT("Unable to seek alltoallv traffic matrix file %s.\n", traffic_matrix_file);
+    goto exit;
+  }
+  pos = ftell(f);
+  if (pos < 0) {
+    PRINT("Unable to tell alltoallv traffic matrix file size %s.\n", traffic_matrix_file);
+    goto exit;
+  }
+  fileLen = (size_t)pos;
+  if (fseek(f, 0, SEEK_SET) != 0) {
+    PRINT("Unable to rewind alltoallv traffic matrix file %s.\n", traffic_matrix_file);
+    goto exit;
+  }
+
+  buf = (char*)malloc(fileLen + 1);
+  if (!buf) {
+    goto exit;
+  }
+  if (fread(buf, 1, fileLen, f) != fileLen) {
+    PRINT("Unable to read alltoallv traffic matrix file %s.\n", traffic_matrix_file);
+    goto exit;
+  }
+  buf[fileLen] = '\0';
+
+  // ---------- First pass: count rows/cols ----------
+  p = buf;
+  while (*p) {
+    if (isspace((unsigned char)*p)) {
+      if (*p == '\n' && tmp_cols > 0) {
+        if (rows == 0) cols = tmp_cols;
+        else if (tmp_cols != cols) {
+          PRINT("Invalid alltoallv traffic matrix column count in file %s row %zu. Expected %zu columns, got %zu.\n", traffic_matrix_file, rows, cols, tmp_cols);
+          goto exit;
+        }
+        tmp_cols = 0;
+        rows++;
+      }
+      p++;
+      continue;
+    }
+
+    errno = 0;
+    end = NULL;
+    v = strtod(p, &end);
+    if (end == p || errno == ERANGE) {
+      PRINT("Invalid alltoallv traffic matrix value at row %zu col %zu in file %s.\n", rows, tmp_cols, traffic_matrix_file);
+      goto exit;
+    }
+    if (*end && !isspace((unsigned char)*end)) {
+      PRINT("Invalid alltoallv traffic matrix value at row %zu col %zu in file %s.\n", rows, tmp_cols, traffic_matrix_file);
+      goto exit;
+    }
+    if (v < 0.0) {
+      PRINT("Invalid alltoallv traffic matrix value at row %zu col %zu in file %s. Value must be non-negative.\n", rows, tmp_cols, traffic_matrix_file);
+      goto exit;
+    }
+    scaled = (long double)v * (long double)traffic_matrix_scale;
+    if (scaled > (long double)SIZE_MAX) {
+      PRINT("Invalid alltoallv traffic matrix value at row %zu col %zu in file %s. Value overflow (value=%g scale=%g).\n",
+            rows, tmp_cols, traffic_matrix_file, v, traffic_matrix_scale);
+      goto exit;
+    }
+
+    tmp_cols++;
+    p = end;
+  }
+  if (tmp_cols > 0) {
+    if (rows == 0) cols = tmp_cols;
+    else if (tmp_cols != cols) {
+      PRINT("Invalid alltoallv traffic matrix column count in file %s row %zu. Expected %zu columns, got %zu.\n", traffic_matrix_file, rows, cols, tmp_cols);
+      goto exit;
+    }
+    rows++;
+  }
+
+  if (rows == 0) {
+    PRINT("Invalid alltoallv traffic matrix, file %s is empty.\n", traffic_matrix_file);
+    goto exit;
+  }
+  if (rows != cols) {
+    PRINT("Invalid alltoallv traffic matrix, file %s must be square (got %zux%zu).\n", traffic_matrix_file, rows, cols);
+    goto exit;
+  }
+  n_elts = rows * cols;
+
+  tmp_matrix_data = (size_t*)malloc(n_elts * sizeof(*tmp_matrix_data));
+  if (!tmp_matrix_data) {
+    goto exit;
+  }
+
+  // ---------- Second pass: parse values ----------
+  p = buf;
+  k = 0;
+  while (*p) {
+    if (isspace((unsigned char)*p)) {
+      p++;
+      continue;
+    }
+    if (k >= n_elts) {
+      PRINT("Invalid alltoallv traffic matrix, file %s has too many values.\n", traffic_matrix_file);
+      goto exit;
+    }
+
+    end = NULL;
+    v = strtod(p, &end);
+    scaled = (long double)v * (long double)traffic_matrix_scale;
+    if (end == p) {
+      PRINT("Invalid alltoallv traffic matrix value at idx=%zu in file %s.\n", k, traffic_matrix_file);
+      goto exit;
+    }
+
+    // align per-peer traffic to 16-byte boundary for consistency with other perf tests
+    tmp_matrix_data[k++] = ((size_t)scaled) & ~(size_t)15;
+    p = end;
+  }
+  if (k != n_elts) {
+    PRINT("Invalid alltoallv traffic matrix, file %s has too few values (got %zu, expected %zu).\n",
+          traffic_matrix_file, k, n_elts);
+    goto exit;
+  }
+
+  // success
+  traffic_matrix_dim = (int)rows;
+  traffic_matrix_data = tmp_matrix_data;
+  tmp_matrix_data = NULL; // don't free on success, transfer ownership to global variable
+  rc = 0;
+
+exit:
+  if (f) fclose(f);
+  free(buf);
+  free(tmp_matrix_data);
+  return rc;
+}
+
+static void AlltoAllvInit(int nranks) {
+  std::lock_guard<std::mutex> lock(alltoallv_lock);
+
+  if (!alltoallv_inited) {
+    AlltoAllvParseEnv();
+    if (traffic_matrix_file) {
+      alltoallv_use_generated_pattern = 0;
+      if (AlltoAllvReadTrafficMatrix()) AlltoAllvSetError();
+    } else {
+      alltoallv_use_generated_pattern = 1;
+    }
+    alltoallv_inited = 1;
+  }
+
+  // If matrix mode is active and initialization succeeded, ensure this comm size fits.
+  if (traffic_matrix_file && !AlltoAllvHasError() && nranks > traffic_matrix_dim) {
+    PRINT("Invalid alltoallv traffic matrix, requested nranks (%d) is larger than matrix size (%d) in file %s.\n",
+          nranks, traffic_matrix_dim, traffic_matrix_file);
+    AlltoAllvSetError();
+  }
+
+}
+
+// get peer-to-peer bytes from traffic matrix
+static inline size_t AlltoAllvGetPeerBytesFromMatrix(int i, int j) {
+  return traffic_matrix_data[i * traffic_matrix_dim + j];
+}
+
+// get peer-to-peer bytes using distance-weighted formula
+static inline size_t AlltoAllvGetPeerBytesDistanceWeighted(int i, int j, int nranks, size_t total_bytes) {
+  if (nranks == 1) return total_bytes & ~(size_t)15;
+  int distance = (j - i + nranks) % nranks;
+  size_t sum_distances = (size_t)nranks * (nranks - 1) / 2;
+  double uniform = (double)total_bytes / (double)nranks;
+  double dist = (double)distance * (double)total_bytes / (double)sum_distances;
+  double bytes = (1.0 - distance_weighted_spread) * uniform + distance_weighted_spread * dist;
+  // align to per-peer chunk size to 16-byte boundary as in other tests
+  return (size_t)bytes & ~(size_t)15;
+}
+
+static inline size_t AlltoAllvGetGeneratedPeerBytes(
+    int i, int j, int nranks, size_t total_bytes, size_t eltSize) {
+  if (!alltoallv_use_rccl_sparse_pattern)
+    return AlltoAllvGetPeerBytesDistanceWeighted(i, j, nranks, total_bytes);
+
+  thread_local std::vector<size_t> matrix;
+  thread_local int cachedRanks = -1;
+  thread_local size_t cachedTotalElements = (size_t)-1;
+  size_t totalElements = total_bytes / eltSize;
+  if (cachedRanks != nranks || cachedTotalElements != totalElements) {
+    AlltoAllvGenRcclSizeMatrix(nranks, totalElements, matrix);
+    cachedRanks = nranks;
+    cachedTotalElements = totalElements;
+  }
+  return matrix[(size_t)i * nranks + j] * eltSize;
+}
+
+static void AlltoAllvComputeMaxCounts(size_t *maxSendCount, size_t *maxRecvCount, size_t eltSize, int nranks, size_t total_bytes) {
+  if (alltoallv_use_generated_pattern) {
+    // Generated patterns are symmetric & balanced: compute one rank's total (O(N))
+    size_t rank_total = 0;
+    for (int j = 0; j < nranks; j++) {
+      rank_total += AlltoAllvGetGeneratedPeerBytes(0, j, nranks, total_bytes, eltSize) / eltSize;
+    }
+    *maxSendCount = *maxRecvCount = rank_total;
+  } else {
+    // File-based patterns: scan all ranks for max (O(N²))
+    size_t max_s = 0, max_r = 0;
+    for (int i = 0; i < nranks; i++) {
+      size_t rank_s = 0, rank_r = 0;
+      for (int j = 0; j < nranks; j++) {
+        rank_s += AlltoAllvGetPeerBytesFromMatrix(i, j) / eltSize;
+        rank_r += AlltoAllvGetPeerBytesFromMatrix(j, i) / eltSize;
+      }
+      max_s = MAX(max_s, rank_s);
+      max_r = MAX(max_r, rank_r);
+    }
+    *maxSendCount = max_s;
+    *maxRecvCount = max_r;
   }
 }
 
 void AlltoAllvGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
-  if (count < nranks*nranks/2) {
-    *sendcount = 0;
-    *recvcount = 0;
-    *sendInplaceOffset = 0;
-    *recvInplaceOffset = 0;
-    *paramcount = 0;
-  } else {
-    *paramcount = (count/nranks) & -(16/eltSize);
-    *sendcount = nranks*(*paramcount);
-    *recvcount = *sendcount;
-    *sendInplaceOffset = 0;
-    *recvInplaceOffset = 0;
-  }
+  *paramcount = alltoallv_use_generated_pattern ? (count / nranks) & ~(16/eltSize - 1) : 0;
+  size_t total_bytes = (*paramcount) * nranks * eltSize;
+  AlltoAllvComputeMaxCounts(sendcount, recvcount, eltSize, nranks, total_bytes);
+  *sendInplaceOffset = 0;
+  *recvInplaceOffset = 0;
 }
 
 testResult_t AlltoAllvInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
-  size_t sendcount = args->sendBytes / wordSize(type);
-  size_t recvcount = args->expectedBytes / wordSize(type);
-  int nranks = args->nProcs*args->nThreads*args->nGpus;
+  size_t sendcount;
+  size_t recvcount;
+  size_t elt_size = wordSize(type);
+  int nranks, rank;
+  void* data;
 
   for (int i=0; i<args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
-    int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
+    NCCLCHECK(ncclCommUserRank(args->comms[i], &rank));
+    NCCLCHECK(ncclCommCount(args->comms[i], &nranks));
+    // args->nbytes is per-peer bytes (from paramcount), so we reconstruct total_bytes by multiplying by nranks.
+    // in generated_mode, this total_bytes is needed to calculate the distance-weighted pattern.
+    size_t total_bytes = alltoallv_use_generated_pattern ? args->nbytes * nranks : 0;
+
+    // zero out full recv and expected buffers, as expectedBytes is based on max across
+    // ranks (not this rank's exact value) and unused tails must ultimately compare equal
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
-    void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
-    TESTCHECK(InitData(data, sendcount, 0, type, ncclSum, 33*rep+rank, 1, 0));
+    CUDACHECK(cudaMemset(args->expected[i], 0, args->expectedBytes));
 
-#if 0
-    int *dataHost = (int *)malloc(args->sendBytes);
-    cudaMemcpy(dataHost, data, args->sendBytes, cudaMemcpyDeviceToHost);
-    printf(" Rank [%d] Original: ", rank);
-    for(int j=0; j<sendcount; j++) {
-	    printf("%d:%d ", j, dataHost[j]);
+    // prepare this rank's send buffer
+    sendcount = 0;
+    for (int dst = 0; dst < nranks; dst++) {
+      size_t peer_bytes = alltoallv_use_generated_pattern ?
+        AlltoAllvGetGeneratedPeerBytes(rank, dst, nranks, total_bytes, elt_size) :
+        AlltoAllvGetPeerBytesFromMatrix(rank, dst);
+      sendcount += peer_bytes / elt_size;
     }
-    printf("\n");
-    free(dataHost);
-#endif
+    if (sendcount > 0) {
+      data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
+      TESTCHECK(InitData(data, sendcount, 0, type, ncclSum, 33*rep + rank, 1, 0));
+    }
 
-    // Shared sparse size matrix: M[j][r] = bytes sender j sends to receiver r.
-    // `expected` for this rank is column `rank`, concatenated in sender order.
-    std::vector<size_t> M;
-    AlltoAllvGenSizeMatrix(nranks, rank, sendcount, M);
-
-    size_t rdisp = 0;
-    for (int j=0; j<nranks; j++) {
-      size_t rcount = M[(size_t)j*nranks + rank];
-      // Displacement of this chunk inside sender j's send buffer (prefix sum of row j).
-      size_t sdisp = 0;
-      for (int d=0; d<rank; d++) sdisp += M[(size_t)j*nranks + d];
-      TESTCHECK(InitData(((char*)args->expected[i])+rdisp*wordSize(type), rcount, sdisp, type, ncclSum, 33*rep+j, 1, 0));
-      rdisp += rcount;
+    // prepare this rank's expected buffer, which is a concatenation of variable-length
+    // segments received from each source in rank order
+    size_t recvoffset = 0;
+    for (int src = 0; src < nranks; src++) {
+      size_t peer_bytes = alltoallv_use_generated_pattern ?
+        AlltoAllvGetGeneratedPeerBytes(src, rank, nranks, total_bytes, elt_size) :
+        AlltoAllvGetPeerBytesFromMatrix(src, rank);
+      recvcount = peer_bytes / elt_size;
+      if (recvcount == 0) continue;
+      // offset within the source's send stream where my segment begins (in elements)
+      size_t src_offset = 0;
+      for (int k = 0; k < rank; k++) {
+        size_t prior_bytes = alltoallv_use_generated_pattern ?
+          AlltoAllvGetGeneratedPeerBytes(src, k, nranks, total_bytes, elt_size) :
+          AlltoAllvGetPeerBytesFromMatrix(src, k);
+        src_offset += prior_bytes / elt_size;
+      }
+      TESTCHECK(InitData((char*)args->expected[i] + recvoffset, recvcount, src_offset, type, ncclSum, 33*rep + src, 1, 0));
+      recvoffset += recvcount * elt_size;
     }
     CUDACHECK(cudaDeviceSynchronize());
   }
-  // We don't support in-place alltoall
+
+  // We don't support in-place alltoallv
   args->reportErrors = in_place ? 0 : 1;
   return testSuccess;
 }
 
-void AlltoAllvGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
-  double baseBw = (double)(count * nranks * typesize) / 1.0E9 / sec;
+static void AlltoAllvPrintRankBandwidths(int nranks, size_t total_bytes, size_t eltSize, double sec) {
+  if (alltoallv_use_generated_pattern) {
+    if (alltoallv_use_rccl_sparse_pattern) {
+      printf("# NCCL_TESTS_ALLTOALLV_PRINT_SUMMARY: mode=rccl-sparse nranks=%d total_bytes=%zu time_usec=%.2f\n",
+             nranks, total_bytes, sec * 1.0E6);
+    } else {
+      printf("# NCCL_TESTS_ALLTOALLV_PRINT_SUMMARY: mode=generated nranks=%d total_bytes=%zu spread=%.3f time_usec=%.2f\n",
+             nranks, total_bytes, distance_weighted_spread, sec * 1.0E6);
+    }
+  } else {
+    printf("# NCCL_TESTS_ALLTOALLV_PRINT_SUMMARY: mode=matrix nranks=%d matrix_dim=%d scale=%.3f time_usec=%.2f\n",
+           nranks, traffic_matrix_dim, traffic_matrix_scale, sec * 1.0E6);
+  }
+
+  for (int rank = 0; rank < nranks; rank++) {
+    size_t rank_send_bytes = 0, rank_recv_bytes = 0;
+    for (int peer = 0; peer < nranks; peer++) {
+      if (alltoallv_use_generated_pattern) {
+        rank_send_bytes += AlltoAllvGetGeneratedPeerBytes(rank, peer, nranks, total_bytes, eltSize);
+        rank_recv_bytes += AlltoAllvGetGeneratedPeerBytes(peer, rank, nranks, total_bytes, eltSize);
+      } else {
+        rank_send_bytes += AlltoAllvGetPeerBytesFromMatrix(rank, peer);
+        rank_recv_bytes += AlltoAllvGetPeerBytesFromMatrix(peer, rank);
+      }
+    }
+
+    size_t rank_max_bytes = MAX(rank_send_bytes, rank_recv_bytes);
+    double rank_alg_bw = (double)rank_max_bytes / 1.0E9 / sec;
+    double factor = ((double)(nranks-1))/((double)(nranks));
+    double rank_bus_bw = rank_alg_bw * factor;
+
+    printf("#   rank=%d send_bytes=%zu recv_bytes=%zu alg_bw=%.2f bus_bw=%.2f\n",
+          rank, rank_send_bytes, rank_recv_bytes, rank_alg_bw, rank_bus_bw);
+  }
+}
+
+void AlltoAllvGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
+  size_t total_bytes = count * nranks * typesize;
+  size_t max_sendcount, max_recvcount;
+  AlltoAllvComputeMaxCounts(&max_sendcount, &max_recvcount, typesize, nranks, total_bytes);
+  size_t max_bytes = MAX(max_sendcount, max_recvcount) * typesize;
+  double baseBw = (double)max_bytes / 1.0E9 / sec;
 
   *algBw = baseBw;
   double factor = ((double)(nranks-1))/((double)(nranks));
   *busBw = baseBw * factor;
+
+  if (alltoallv_print_summary && is_main_thread) {
+    // print per-rank bandwidth summary (rank 0 computes and prints all ranks)
+    AlltoAllvPrintRankBandwidths(nranks, total_bytes, typesize, sec);
+  }
 }
 
 testResult_t AlltoAllvRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
+  if (deviceImpl != 0) return testNotImplemented;
+
   char* sptr = (char*)sendbuff + sendoffset;
   char* rptr = (char*)recvbuff + recvoffset;
-  
-  int nranks;
-  NCCLCHECK(ncclCommCount(comm, &nranks));
-  int rank;
-  NCCLCHECK(ncclCommUserRank(comm, &rank));
+  int nRanks, ncclRank;
+  NCCLCHECK(ncclCommCount(comm, &nRanks));
+  NCCLCHECK(ncclCommUserRank(comm, &ncclRank));
 
-  if (count == 0) return testSuccess;
-
-  std::vector<size_t> sendcounts, recvcounts, sdispls, rdispls;
-  try {
-    sendcounts = std::vector<size_t>(nranks * nranks);
-    recvcounts = std::vector<size_t>(nranks * nranks);
-    sdispls = std::vector<size_t>(nranks * nranks);
-    rdispls = std::vector<size_t>(nranks * nranks);
-  } catch (const std::bad_alloc&) {
-    printf("failed to allocate buffers for alltoallv\n");
-    return testNcclError;
+  size_t eltSize = wordSize(type);
+  size_t totalBytes = alltoallv_use_generated_pattern ? count * nRanks * eltSize : 0;
+  std::vector<size_t> sendCounts(nRanks), recvCounts(nRanks);
+  std::vector<size_t> sendDisplacements(nRanks), recvDisplacements(nRanks);
+  size_t sendOffset = 0, recvOffset = 0;
+  for (int peer = 0; peer < nRanks; peer++) {
+    size_t sendBytes = alltoallv_use_generated_pattern
+        ? AlltoAllvGetGeneratedPeerBytes(ncclRank, peer, nRanks, totalBytes, eltSize)
+        : AlltoAllvGetPeerBytesFromMatrix(ncclRank, peer);
+    size_t recvBytes = alltoallv_use_generated_pattern
+        ? AlltoAllvGetGeneratedPeerBytes(peer, ncclRank, nRanks, totalBytes, eltSize)
+        : AlltoAllvGetPeerBytesFromMatrix(peer, ncclRank);
+    sendCounts[peer] = sendBytes / eltSize;
+    recvCounts[peer] = recvBytes / eltSize;
+    sendDisplacements[peer] = sendOffset;
+    recvDisplacements[peer] = recvOffset;
+    sendOffset += sendCounts[peer];
+    recvOffset += recvCounts[peer];
   }
 
-  // Shared sparse size matrix: row `rank` = what we send, column `rank` = what we recv.
-  std::vector<size_t> M;
-  AlltoAllvGenSizeMatrix(nranks, rank, count*nranks, M);
-
-  size_t sdisp = 0, rdisp = 0;
-  for (int i = 0; i < nranks; i++) {
-      size_t scount = M[(size_t)rank*nranks + i]; // rank -> i
-      size_t rcount = M[(size_t)i*nranks + rank]; // i -> rank
-      sendcounts[i+rank*nranks] = scount;
-      recvcounts[i+rank*nranks] = rcount;
-      sdispls[i+rank*nranks] = sdisp;
-      rdispls[i+rank*nranks] = rdisp;
-      sdisp += scount;
-      rdisp += rcount;
-      //printf("%d->%d: send %zu @ %zu, recv %zu @ %zu\n", rank, i, scount, sdispls[i+rank*nranks], rcount, rdispls[i+rank*nranks]);
-  }
-
-#if NCCL_MAJOR < 2 || NCCL_MINOR < 7
-  printf("NCCL 2.7 or later is needed for alltoallv. This test was compiled with %d.%d.\n", NCCL_MAJOR, NCCL_MINOR);
-  return testNcclError;
-#else
 #if defined(RCCL_ALLTOALLV) && defined(USE_RCCL_GATHER_SCATTER) && NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
   if (test_ncclVersion >= NCCL_VERSION(2,28,0)) {
-    NCCLCHECK(ncclAlltoAllv(sptr, sendcounts.data()+rank*nranks, sdispls.data()+rank*nranks, rptr, recvcounts.data()+rank*nranks, rdispls.data()+rank*nranks, type, comm, stream));
+    NCCLCHECK(ncclAlltoAllv(sptr, sendCounts.data(), sendDisplacements.data(),
+                            rptr, recvCounts.data(), recvDisplacements.data(),
+                            type, comm, stream));
     return testSuccess;
   }
   if (test_ncclVersion >= NCCL_VERSION(2,19,0)) {
-    NCCLCHECK(ncclAllToAllv(sptr, sendcounts.data()+rank*nranks, sdispls.data()+rank*nranks, rptr, recvcounts.data()+rank*nranks, rdispls.data()+rank*nranks, type, comm, stream));
+    NCCLCHECK(ncclAllToAllv(sptr, sendCounts.data(), sendDisplacements.data(),
+                            rptr, recvCounts.data(), recvDisplacements.data(),
+                            type, comm, stream));
     return testSuccess;
   }
-  printf("RCCL 2.19 or later is needed for RCCL_ALLTOALLV. This test was compiled with %d.%d, but is running with RCCL %d.\n", NCCL_MAJOR, NCCL_MINOR, test_ncclVersion);
-  return testNcclError;
-#else
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,7,0)
   NCCLCHECK(ncclGroupStart());
-  for (int r=0; r<nranks; r++) {
-    if (sendcounts[r+rank*nranks] != 0) {
-      NCCLCHECK(ncclSend(
-          sptr + sdispls[r+rank*nranks] * wordSize(type),
-          sendcounts[r+rank*nranks],
-          type,
-          r,
-          comm,
-          stream));
-    }
-    if (recvcounts[r+rank*nranks] != 0) {
-      NCCLCHECK(ncclRecv(
-          rptr + rdispls[r+rank*nranks] * wordSize(type),
-          recvcounts[r+rank*nranks],
-          type,
-          r,
-          comm,
-          stream));
-    }
+  for (int peer = 0; peer < nRanks; peer++) {
+    if (sendCounts[peer])
+      NCCLCHECK(ncclSend(sptr + sendDisplacements[peer] * eltSize,
+                         sendCounts[peer], type, peer, comm, stream));
+    if (recvCounts[peer])
+      NCCLCHECK(ncclRecv(rptr + recvDisplacements[peer] * eltSize,
+                         recvCounts[peer], type, peer, comm, stream));
   }
   NCCLCHECK(ncclGroupEnd());
-#endif
+#else
+  PRINT("NCCL 2.7 or later is needed for alltoallv. This test was compiled with %d.%d.\n", NCCL_MAJOR, NCCL_MINOR);
+  return testNcclError;
 #endif
   return testSuccess;
 }
 
-struct testColl alltoAllTest = {
+struct testColl alltoAllvTest = {
   "AlltoAllv",
   AlltoAllvGetCollByteCount,
   AlltoAllvInitData,
@@ -272,33 +695,68 @@ struct testColl alltoAllTest = {
 };
 
 void AlltoAllvGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
+  *sendcount = *recvcount = 0;
+
+  AlltoAllvInit(nranks);
+  if (AlltoAllvHasError()) return;
+
   size_t paramcount, sendInplaceOffset, recvInplaceOffset;
   AlltoAllvGetCollByteCount(sendcount, recvcount, &paramcount, &sendInplaceOffset, &recvInplaceOffset, count, /*eltSize=*/1, nranks);
+
+  if (!alltoallv_use_generated_pattern) {
+    // if using traffic matrix, validate that the max buffer size is large enough
+    size_t total_bytes_req = MAX(*sendcount, *recvcount);
+    if (count < total_bytes_req) {
+      std::lock_guard<std::mutex> lock(alltoallv_lock);
+      if (!AlltoAllvHasError()) {
+        if (is_main_proc)
+          printf("maxBytes (-e) must be at least %zu bytes as required by traffic matrix file %s (got %zu). Increase -e.\n",
+                 total_bytes_req, traffic_matrix_file, count);
+        AlltoAllvSetError();
+      }
+      *sendcount = *recvcount = 0;
+      return;
+    }
+  }
 }
 
 testResult_t AlltoAllvRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
-  args->collTest = &alltoAllTest;
+  args->collTest = &alltoAllvTest;
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;
+
+  if (!alltoallv_use_generated_pattern) {
+    if (AlltoAllvHasError()) {
+      // this catches any potential errors that occurred earlier while loading the traffic matrix
+      return testInternalError;
+    }
+    if (args->minbytes != args->maxbytes) {
+      PRINT("-b and -e options must be set to the same value (e.g., -b 32M -e 32M) when using alltoallv traffic matrix mode.\n");
+      return testInternalError;
+    }
+  }
 
   if ((int)type != -1) {
     type_count = 1;
     run_types = &type;
     run_typenames = &typeName;
   } else {
-    type_count = ncclNumTypes;
+    type_count = test_typenum;
     run_types = test_types;
     run_typenames = test_typenames;
   }
 
   for (int i=0; i<type_count; i++) {
-      TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], (ncclRedOp_t)0, "none", -1));
+    TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], (ncclRedOp_t)0, "none", -1));
   }
   return testSuccess;
 }
 
-struct testEngine ncclTestEngine = {
-  .getBuffSize = AlltoAllvGetBuffSize,
-  .runTest = AlltoAllvRunTest
+NCCL_WEAK struct testEngine ncclTestEngine = {
+  /* .getBuffSize = */ AlltoAllvGetBuffSize,
+  /* .runTest = */ AlltoAllvRunTest,
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+  /* .initCommConfig = */ nullptr,
+#endif
 };

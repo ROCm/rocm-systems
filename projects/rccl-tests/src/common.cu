@@ -11,23 +11,35 @@
 #include "rccl_float8.h"
 #include <hip/hip_bfloat16.h>
 #include "common.h"
-#include <pthread.h>
+#include <algorithm>
 #include <cstdio>
 #include <type_traits>
 #include <limits>
-#include <getopt.h>
-#include <libgen.h>
 #include <string.h>
 #include <ctype.h>
-#include "cuda.h"
+#include <mutex>
+#include <condition_variable>
+#include <thread>
 #include <vector>
+#include "cuda.h"
 #include <utility>
-#include <errno.h>     /* program_invocation_short_name */
 #include <dlfcn.h>
 //#define DEBUG_PRINT
 
 #include "verifiable.h"
 #include "util.h"
+
+#if defined(NCCL_OS_LINUX)
+extern char **environ;
+#endif
+
+#if defined(NCCL_OS_LINUX)
+#pragma weak ncclCommWindowRegister
+#pragma weak ncclCommWindowDeregister
+#pragma weak ncclDevCommCreate
+#pragma weak ncclDevCommDestroy
+#pragma weak ncclCommQueryProperties
+#endif
 
 #define DIVUP(x, y) \
     (((x)+(y)-1)/(y))
@@ -107,12 +119,17 @@ bool IsArchMatch(char const* arch, char const* target) {
 const char *test_memorytypes[nccl_NUM_MTYPES] = {"coarse", "fine", "host", "managed"};
 
 // For libnccl's < 2.13
+#if defined(NCCL_OS_LINUX)
 extern "C" __attribute__((weak)) char const* ncclGetLastError(ncclComm_t comm) {
   return "";
 }
+#elif defined(NCCL_OS_WINDOWS)
+extern "C" char const* ncclGetLastError(ncclComm_t comm);
+#endif
 
 int is_main_proc = 0;
 thread_local int is_main_thread = 0;
+static const char* programName = nullptr;
 
 // Command line parameter defaults
 int nThreads = 1;
@@ -131,6 +148,8 @@ static int nccltype = ncclFloat;
 static int ncclroot = 0;
 int parallel_init = 0;
 int blocking_coll = 0;
+int per_iter_timing = 0;
+int per_iter_skip = 0;
 static int streamnull = 0;
 static int timeout = 0;
 int cudaGraphLaunches = 0;
@@ -342,7 +361,7 @@ static const char *getExtension(const char *path) {
 
 static output_file_type_t classifyOutputFile(const char *filename) {
   const char *extension = getExtension(filename);
-  if (extension != nullptr && strcasecmp(extension, "json") == 0) {
+  if (extension != nullptr && ncclTestStrcasecmp(extension, "json") == 0) {
     return JSON_FILE_OUTPUT;
   }
 
@@ -492,28 +511,28 @@ testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataTyp
 
 void Barrier(struct threadArgs *args) {
   thread_local int epoch = 0;
-  static pthread_mutex_t lock[2] = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
-  static pthread_cond_t cond[2] = {PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER};
+  static std::mutex lock[2];
+  static std::condition_variable cond[2];
   static int counter[2] = {0, 0};
 
-  pthread_mutex_lock(&lock[epoch]);
+  std::unique_lock<std::mutex> ul(lock[epoch]);
   if(++counter[epoch] == args->nThreads)
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
 
   if(args->thread+1 == args->nThreads) {
     while(counter[epoch] != args->nThreads)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
     #ifdef MPI_SUPPORT
       MPI_Barrier(MPI_COMM_WORLD);
     #endif
     counter[epoch] = 0;
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
   }
   else {
     while(counter[epoch] != 0)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
   }
-  pthread_mutex_unlock(&lock[epoch]);
+  ul.unlock();
   epoch ^= 1;
 }
 
@@ -523,12 +542,12 @@ void Barrier(struct threadArgs *args) {
 template<typename T>
 void Allreduce(struct threadArgs* args, T* value, int average) {
   thread_local int epoch = 0;
-  static pthread_mutex_t lock[2] = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
-  static pthread_cond_t cond[2] = {PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER};
+  static std::mutex lock[2];
+  static std::condition_variable cond[2];
   static T accumulator[2];
   static int counter[2] = {0, 0};
 
-  pthread_mutex_lock(&lock[epoch]);
+  std::unique_lock<std::mutex> ul(lock[epoch]);
   if(counter[epoch] == 0) {
     if(average != 0 || args->thread == 0) accumulator[epoch] = *value;
   } else {
@@ -542,11 +561,11 @@ void Allreduce(struct threadArgs* args, T* value, int average) {
   }
 
   if(++counter[epoch] == args->nThreads)
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
 
   if(args->thread+1 == args->nThreads) {
     while(counter[epoch] != args->nThreads)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
 
     #ifdef MPI_SUPPORT
     if(average != 0) {
@@ -564,16 +583,86 @@ void Allreduce(struct threadArgs* args, T* value, int average) {
 
     if(average == 1) accumulator[epoch] /= args->totalProcs*args->nThreads;
     counter[epoch] = 0;
-    pthread_cond_broadcast(&cond[epoch]);
+    cond[epoch].notify_all();
   }
   else {
     while(counter[epoch] != 0)
-      pthread_cond_wait(&cond[epoch], &lock[epoch]);
+      cond[epoch].wait(ul);
   }
-  pthread_mutex_unlock(&lock[epoch]);
+  ul.unlock();
 
   *value = accumulator[epoch];
   epoch ^= 1;
+}
+
+// Reduce per-thread iteration times to a process-local max, then gather one row
+// per MPI process.
+void GatherProcessMaxIterTimes(struct threadArgs* args, double* localTimes, int nIters, double* recvBuf) {
+  thread_local int epoch = 0;
+  static std::mutex lock[2];
+  static std::condition_variable cond[2];
+  static double* sendBuf[2] = {NULL, NULL};
+  static int sendBufIters[2] = {0, 0};
+  static double* recvPtr[2];
+  static int counter[2] = {0, 0};
+
+  std::unique_lock<std::mutex> ul(lock[epoch]);
+
+  if (sendBufIters[epoch] < nIters) {
+    sendBuf[epoch] = (double*)realloc(sendBuf[epoch], nIters * sizeof(double));
+    sendBufIters[epoch] = nIters;
+  }
+
+  if (counter[epoch] == 0) {
+    memcpy(sendBuf[epoch], localTimes, nIters * sizeof(double));
+  } else {
+    for (int i = 0; i < nIters; i++)
+      sendBuf[epoch][i] = std::max(sendBuf[epoch][i], localTimes[i]);
+  }
+
+  if (args->thread == 0) {
+    recvPtr[epoch] = recvBuf;
+  }
+
+  if(++counter[epoch] == args->nThreads)
+    cond[epoch].notify_all();
+
+  if(args->thread+1 == args->nThreads) {
+    while(counter[epoch] != args->nThreads)
+      cond[epoch].wait(ul);
+
+    #ifdef MPI_SUPPORT
+    if (args->totalProcs > 1) {
+      MPI_Gather(sendBuf[epoch], nIters, MPI_DOUBLE,
+                 recvPtr[epoch], nIters, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD);
+    }
+    #else
+    if (recvPtr[epoch])
+      memcpy(recvPtr[epoch], sendBuf[epoch], nIters * sizeof(double));
+    #endif
+
+    memcpy(localTimes, sendBuf[epoch], nIters * sizeof(double));
+    counter[epoch] = 0;
+    cond[epoch].notify_all();
+  }
+  else {
+    while(counter[epoch] != 0)
+      cond[epoch].wait(ul);
+    memcpy(localTimes, sendBuf[epoch], nIters * sizeof(double));
+  }
+  ul.unlock();
+  epoch ^= 1;
+}
+
+void ReduceProcessMaxIterTimes(double* iterTimes, const double* allProcessTimes,
+                               int nProcs, int nIters) {
+  for (int i = 0; i < nIters; i++) {
+    double maxSec = allProcessTimes[i];
+    for (int p = 1; p < nProcs; p++)
+      maxSec = std::max(maxSec, allProcessTimes[p * nIters + i]);
+    iterTimes[i] = maxSec;
+  }
 }
 
 testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, int64_t *wrongElts) {
@@ -675,7 +764,7 @@ testResult_t testStreamSynchronize(int ngpus, cudaStream_t* streams, ncclComm_t*
    }
 
    // We might want to let other threads (including NCCL threads) use the CPU.
-   if (idle) sched_yield();
+   if (idle) std::this_thread::yield();
   }
   free(done);
   return testSuccess;
@@ -703,7 +792,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
     char* recvBuff = ((char*)args->recvbuffs[i]) + shift;
     char* sendBuff = ((char*)args->sendbuffs[i]) + shift;
-    char* bias = ((char*)args->bias[i]) + shift;
+    char* bias = test_bias ? ((char*)args->bias[i]) + shift : nullptr;
     ncclRedOp_t op;
 
     if(opIndex < ncclNumOps) {
@@ -782,9 +871,67 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 }
 
 testResult_t completeColl(struct threadArgs* args) {
-  if (blocking_coll) return testSuccess;
+  if (blocking_coll && agg_iters <= 1) return testSuccess;
 
   TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+  return testSuccess;
+}
+
+static int getEventCount(int eventIters) {
+  return blocking_coll == 3 ? eventIters*2 : eventIters + 1;
+}
+
+testResult_t getElapsedTimes(struct threadArgs* args, int eventIters, int aggIters) {
+  args->ms = (float*) malloc(sizeof(float)*args->nGpus*eventIters);
+  int pairedEvents = blocking_coll == 3;
+  int eventCount = getEventCount(eventIters);
+  // Get timings
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    for (int j = 0; j < eventIters; j++) {
+      int startEvent = pairedEvents ? 2*j : j;
+      int stopEvent = pairedEvents ? 2*j + 1 : j + 1;
+      CUDACHECK(cudaEventElapsedTime(&args->ms[i*(eventIters) + j], args->events[i*eventCount + startEvent], args->events[i*eventCount + stopEvent]));
+
+      // This elapsed time is for iterations equal to agg_iters.
+      // We need to divide by aggIters
+      args->ms[i*(eventIters)+j] /= aggIters;
+    }
+  }
+  return testSuccess;
+}
+
+testResult_t recordEvents(struct threadArgs* args, int iterations, int iteration, int stopEvent = 0) {
+  int pairedEvents = blocking_coll == 3;
+  int eventCount = getEventCount(iterations);
+  int eventIndex = pairedEvents ? 2*iteration + stopEvent : iteration;
+  for(int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    CUDACHECK(cudaEventRecord(args->events[i*eventCount + eventIndex], args->streams[i]));
+  }
+  return testSuccess;
+}
+
+testResult_t initEvents(struct threadArgs* args, int eventIters) {
+  int eventCount = getEventCount(eventIters);
+  // Normal timing shares boundary events; z3 uses start/stop pairs to exclude barriers.
+  args->events = (cudaEvent_t*) malloc(sizeof(cudaEvent_t)*args->nGpus*eventCount);
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    for (int j = 0; j < eventCount; j++) {
+      CUDACHECK(cudaEventCreate(&args->events[(i*eventCount + j)]));
+    }
+  }
+  return testSuccess;
+}
+
+testResult_t destroyEvents(struct threadArgs* args, int eventIters) {
+  int eventCount = getEventCount(eventIters);
+  for (int i = 0; i < args->nGpus; i++) {
+    for (int j = 0; j < eventCount; j++)
+      CUDACHECK(cudaEventDestroy(args->events[i*eventCount+j]));
+  }
+  free(args->events);
   return testSuccess;
 }
 
@@ -818,15 +965,29 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
+  int record = per_iter_timing;
+  if (record) TESTCHECK(initEvents(args, iters));
+
   // Performance Benchmark
+  double collOnlySec = 0;
+  int pairedEvents = record && blocking_coll == 3;
   timer tim;
   for (int iter = 0; iter < iters; iter++) {
+    double t0 = tim.elapsed();
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
+    if (record) TESTCHECK(recordEvents(args, iters, iter));
     for (int aiter = 0; aiter < agg_iters; aiter++) {
       TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
     }
     if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
+    if (blocking_coll == 3) {
+      TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+      if (pairedEvents) TESTCHECK(recordEvents(args, iters, iter, 1));
+      collOnlySec += tim.elapsed() - t0;
+      Barrier(args);
+    }
   }
+  if (record && !pairedEvents) TESTCHECK(recordEvents(args, iters, iters));
 
 #if HIP_VERSION >= 50221310
   if (cudaGraphLaunches >= 1) {
@@ -884,12 +1045,22 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
-  double cputimeSec = tim.elapsed()/(iters*agg_iters);
+  double cputimeSec = blocking_coll == 3 ? collOnlySec : tim.elapsed();
+  cputimeSec /= iters*agg_iters;
   TESTCHECK(completeColl(args));
 
-  double deltaSec = tim.elapsed();
-  deltaSec = deltaSec/(iters*agg_iters);
+  // Exclude per-iteration result processing from the reported time.
+  double deltaSec = (blocking_coll == 3 ? collOnlySec : tim.elapsed())/(iters*agg_iters);
   if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
+
+  if (record) {
+    // completeColl skips the stream sync in blocking mode with a single aggregated iteration.
+    if (blocking_coll && agg_iters <= 1)
+      TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
+    TESTCHECK(getElapsedTimes(args, iters, agg_iters));
+    TESTCHECK(destroyEvents(args, iters));
+  }
+
   Allreduce(args, &deltaSec, average);
 
 #if HIP_VERSION >= 50221310
@@ -911,7 +1082,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   Barrier(args);
 
   int64_t wrongElts = 0;
-  static __thread int rep = 0;
+  static thread_local int rep = 0;
   rep++;
   for (int c = 0; c < datacheck; c++) {
       // Initialize sendbuffs, recvbuffs and expected
@@ -990,6 +1161,40 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     } else {
       args->reporter->addResult((args->nThreads * args->nGpus), args->nProcs, args->totalProcs, largestMessageSize, in_place, timeUsec, algBw, busBw);
     }
+  }
+
+  if (record && args->ms) {
+    // Extract max-across-GPUs per iteration (convert ms to seconds)
+    double* iterTimes = (double*)calloc(iters, sizeof(double));
+    for (int iter = 0; iter < iters; iter++) {
+      double maxSec = 0;
+      for (int i = 0; i < args->nGpus; i++) {
+        double sec = (double)args->ms[i * iters + iter] * 1e-3;
+        if (sec > maxSec) maxSec = sec;
+      }
+      iterTimes[iter] = maxSec;
+    }
+
+    double* allProcessTimes = NULL;
+    int nProcessRows = args->totalProcs;
+    if (nProcessRows > 1) {
+      if (is_main_thread)
+        allProcessTimes = (double*)malloc(nProcessRows * iters * sizeof(double));
+    }
+    GatherProcessMaxIterTimes(args, iterTimes, iters, allProcessTimes);
+    if (allProcessTimes && nProcessRows > 1)
+      ReduceProcessMaxIterTimes(iterTimes, allProcessTimes, nProcessRows, iters);
+
+    int summaryIters = iters - per_iter_skip;
+    struct IterStats stats;
+    computeIterStats(iterTimes + per_iter_skip, summaryIters, &stats);
+    writePerIterReport(&stats, iterTimes, iters, per_iter_skip, in_place==0, allProcessTimes, nProcessRows);
+
+    if (in_place && report_timestamps) writeTimestamp();
+
+    free(allProcessTimes);
+    free(iterTimes);
+    free(args->ms);
   }
 
   args->bw[0] += busBw;
@@ -1111,8 +1316,8 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           const char* algoName = NULL;
           const char* protoName = NULL;
           bool fromSymk = false;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
-          if (test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER && ctaPolicy != NCCL_CTA_POLICY_ZERO && rcclTestsGetSymkInfo) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+          if (test_ncclVersion >= NCCL_VERSION(2,28,0) && local_register == SYMMETRIC_REGISTER && ctaPolicy != NCCL_CTA_POLICY_ZERO && rcclTestsGetSymkInfo) {
             if (args->collTest->getSymkInfo) {
               TESTCHECK(args->collTest->getSymkInfo(args->comms[0], args->nbytes / wordSize(type), type, op, &algo, &proto, &nchannels));
               fromSymk = true;
@@ -1363,7 +1568,7 @@ testResult_t threadInit(struct threadArgs* args) {
   for (int g = 0; g < args->nGpus; ++g) {
     CUDACHECK(cudaSetDevice(args->gpus[g]));
     getGPUMemoryInfo(nullptr, &initFreeGpuMem[g + args->nGpus*2]);
-    args->bufferMemory[args->thread] = std::max(args->bufferMemory[args->thread], initFreeGpuMem[g + args->nGpus] - initFreeGpuMem[g + args->nGpus*2]);
+    *args->bufferMemory = std::max(*args->bufferMemory, initFreeGpuMem[g + args->nGpus] - initFreeGpuMem[g + args->nGpus*2]);
   }
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   /* Create device communicators based on test-specific requirements */
@@ -1381,9 +1586,7 @@ testResult_t threadInit(struct threadArgs* args) {
       fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
       return testNotImplemented;
     }
-    ncclCommProperties commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
-    NCCLCHECK(ncclCommQueryProperties(args->comms[0], &commProperties));
-    TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, &commProperties));
+    TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, args->comms[0]));
 #else
     if (test_ncclVersion >= NCCL_VERSION(2,29,0)) {
       fprintf(stderr, "Incompatible NCCL versions. nccl-tests was compiled with NCCL 2.28, but is running with NCCL %d. "
@@ -1445,13 +1648,11 @@ testResult_t threadInit(struct threadArgs* args) {
   return testSuccess;
 }
 
-void* threadLauncher(void* thread_) {
-  struct testThread* thread = (struct testThread*)thread_;
+static void threadLauncher(struct testThread* thread) {
   thread->ret = thread->func(&thread->args);
-  return NULL;
 }
 testResult_t threadLaunch(struct testThread* thread) {
-  pthread_create(&thread->thread, NULL, threadLauncher, thread);
+  thread->thread = std::thread(threadLauncher, thread);
   return testSuccess;
 }
 
@@ -1520,7 +1721,18 @@ testResult_t run(); // Main function
 
 int main(int argc, char* argv[], char **envp) {
   // Make sure everyline is flushed so that we see the progress of the test
-  setlinebuf(stdout);
+  ncclTestSetlinebuf(stdout);
+  const char* slash = strrchr(argv[0], '/');
+  const char* backslash = strrchr(argv[0], '\\');
+  const char* sep = nullptr;
+  if (slash && backslash) {
+    sep = slash > backslash ? slash : backslash;
+  } else if (slash) {
+    sep = slash;
+  } else {
+    sep = backslash;
+  }
+  programName = sep ? sep + 1 : argv[0];
 
   #if NCCL_VERSION_CODE >= NCCL_VERSION(2,4,0)
     ncclGetVersion(&test_ncclVersion);
@@ -1582,7 +1794,8 @@ int main(int argc, char* argv[], char **envp) {
     {"cta_policy", required_argument, 0, 'x'},
     {"device_implementation", required_argument, 0, 'D'},
     {"device_cta_count", required_argument, 0, 'V'},
-    {"memory_report", required_argument, 0, 'M'},
+    {"memory", required_argument, 0, 'M'},
+    {"memory_report", required_argument, 0, 'M'},                   // Backward-compatible RCCL alias
     {"unalign", required_argument, 0, 'u'},
     {"memory_type", required_argument, 0, 'Y'},                     //RCCL
     {"cumask", required_argument, 0, 'U'},                          //RCCL
@@ -1593,13 +1806,15 @@ int main(int argc, char* argv[], char **envp) {
     {"rccl_output_format", required_argument, 0, 'Z'},              //RCCL
     {"rccl_output_file", required_argument, 0, 'X'},                //RCCL (output file for Reporter class)
     {"output_algo_proto_channels", required_argument, 0, 'A'},      //RCCL (changed from M)
+    {"per_iter_timing", required_argument, 0, 'I'},
+    {"per_iter_skip", required_argument, 0, 'K'},
     {"help", no_argument, 0, 'h'},
     {}
   };
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:Y:U:O:q:F:E:Z:X:A:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:I:K:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:Y:U:O:q:F:E:Z:X:A:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -1751,6 +1966,12 @@ int main(int argc, char* argv[], char **envp) {
       case 'M':
         memory_report = (int)strtol(optarg, NULL, 0);
         break;
+      case 'I':
+        per_iter_timing = (int)strtol(optarg, NULL, 0);
+        break;
+      case 'K':
+        per_iter_skip = (int)strtol(optarg, NULL, 0);
+        break;
       case 'x':
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
         ctaPolicy = (int)strtol(optarg, NULL, 0);
@@ -1811,7 +2032,7 @@ int main(int argc, char* argv[], char **envp) {
 #endif
             "[-d,--datatype <nccltype/all>] \n\t"
             "[-r,--root <root/all>] \n\t"
-            "[-z,--blocking <0/1/2> 0=non-blocking (default), 1=wait for completion and barrier, 2=wait without barrier] \n\t"
+            "[-z,--blocking <0/1/2/3> 1=barrier after each inner iter (-m), 2=no barrier, 3=wait and barrier after each outer iter (-n)] \n\t"
             "[-y,--stream_null <0/1>] \n\t"
             "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
@@ -1823,7 +2044,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-x,--cta_policy <0/1/2> set CTA policy (NCCL_CTA_POLICY_DEFAULT (0), NCCL_CTA_POLICY_EFFICIENCY (1), NCCL_CTA_POLICY_ZERO (2)) (default: do not set)] \n\t"
             "[-D,--device_implementation <implementation number> enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0)] \n\t"
             "[-V,--device_cta_count <number> set number of CTAs for device implementation (default: 16)] \n\t"
-            "[-M,--memory_report <0/1> enable memory usage report (default: 0)] \n\t"
+            "[-M,--memory <0/1> enable memory usage report (default: 0)] \n\t"
             "[-u,--unalign <index of first element> Misalign source and destination buffers (default: 0)] \n\t"
             "[-Y,--memory_type <coarse/fine/host/managed>] \n\t"                                                    //RCCL
             "[-U,--cumask <d0,d1,d2,d3>] \n\t"                                                                      //RCCL
@@ -1834,8 +2055,13 @@ int main(int argc, char* argv[], char **envp) {
             "[-Z,--rccl_output_format <output format <csv|json>] \n\t"                                              //RCCL
             "[-X,--rccl_output_file <file> RCCL Reporter output file for csv/json (used with -Z)] \n\t"             //RCCL
             "[-A,--output_algo_proto_channels <0/1> enable algorithm/protocol/channels output (default: 0)] \n\t"   //RCCL
+            "[-I,--per_iter_timing <0/1> per-iteration HIP event timing\n\t"
+            "    (best with -z 0, -z 2, or -z 3; with -z 1 includes barrier wait;\n\t"
+            "    i_p99 uses nearest-rank percentile and may equal i_max\n\t"
+            "    with <100 samples) (default: 0)] \n\t"
+            "[-K,--per_iter_skip <count> exclude leading samples from -I summary stats (default: 0)] \n\t"
             "[-h,--help]\n",
-          basename(argv[0]));
+          programName);
         return 0;
     }
   }
@@ -1884,13 +2110,37 @@ int main(int argc, char* argv[], char **envp) {
     fprintf(stderr, "device implementation (-D > 0) requires enabling symmetric memory registration (-R 2)\n");
     return -1;
   }
+  if (per_iter_timing != 0 && per_iter_timing != 1) {
+    fprintf(stderr, "per-iteration timing (-I) only supports 0=off or 1=on. Disabling.\n");
+    per_iter_timing = 0;
+  }
+  if (per_iter_timing && cudaGraphLaunches >= 1) {
+    fprintf(stderr, "per-iteration timing (-I) is incompatible with HIP graph mode (-G). Disabling.\n");
+    per_iter_timing = 0;
+  }
+  if (blocking_coll == 3 && cudaGraphLaunches >= 1) {
+    fprintf(stderr, "blocking mode (-z 3) is incompatible with HIP graph mode (-G). Disabling.\n");
+    blocking_coll = 0;
+  }
+  if (per_iter_skip < 0 || per_iter_skip >= iters) {
+    fprintf(stderr, "per-iteration skip (-K) must be between 0 and %d. Disabling.\n", iters - 1);
+    per_iter_skip = 0;
+  }
+  if (per_iter_skip && !per_iter_timing) {
+    fprintf(stderr, "per-iteration skip (-K) requires per-iteration timing (-I 1). Disabling.\n");
+    per_iter_skip = 0;
+  }
 
 #ifdef MPI_SUPPORT
   MPI_Init(&argc, &argv);
 #endif
 
   const output_file_type_t output_file_type = classifyOutputFile(output_file);
-  outputFileInit(output_file_type, output_file, argc, argv, envp);
+  char **output_envp = envp;
+#if defined(NCCL_OS_LINUX)
+  output_envp = environ;
+#endif
+  outputFileInit(output_file_type, output_file, argc, argv, output_envp);
 
   if(output_file) {
     free(output_file);
@@ -1915,7 +2165,7 @@ static bool parseInt(char *s, int *num) {
   while (*s && isspace(*s)) ++s;
   if (!*s) return false;
 
-  if (strncasecmp(s, "0b", 2) == 0)
+  if (ncclTestStrncasecmp(s, "0b", 2) == 0)
     *num = (int)strtoul(s + 2, &p, 2);
   else
     *num = (int)strtoul(s, &p, 0);
@@ -1956,23 +2206,23 @@ testResult_t run() {
     color = proc & strtoul(splitMaskEnv, NULL, 16);
   } else if ((splitMaskEnv = getenv("NCCL_TESTS_SPLIT"))) {
     if (
-      (strncasecmp(splitMaskEnv, "AND", strlen("AND")) == 0 && parseInt(splitMaskEnv + strlen("AND"), &color)) ||
-      (strncasecmp(splitMaskEnv, "&", strlen("&")) == 0 && parseInt(splitMaskEnv + strlen("&"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "AND", strlen("AND")) == 0 && parseInt(splitMaskEnv + strlen("AND"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "&", strlen("&")) == 0 && parseInt(splitMaskEnv + strlen("&"), &color))
     )
         color = proc & color;
     if (
-      (strncasecmp(splitMaskEnv, "OR", strlen("OR")) == 0 && parseInt(splitMaskEnv + strlen("OR"), &color)) ||
-      (strncasecmp(splitMaskEnv, "|", strlen("|")) == 0 && parseInt(splitMaskEnv + strlen("|"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "OR", strlen("OR")) == 0 && parseInt(splitMaskEnv + strlen("OR"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "|", strlen("|")) == 0 && parseInt(splitMaskEnv + strlen("|"), &color))
     )
         color = proc | color;
     if (
-      (strncasecmp(splitMaskEnv, "MOD", strlen("MOD")) == 0 && parseInt(splitMaskEnv + strlen("MOD"), &color)) ||
-      (strncasecmp(splitMaskEnv, "%", strlen("%")) == 0 && parseInt(splitMaskEnv + strlen("%"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "MOD", strlen("MOD")) == 0 && parseInt(splitMaskEnv + strlen("MOD"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "%", strlen("%")) == 0 && parseInt(splitMaskEnv + strlen("%"), &color))
     )
         color = proc % color;
     if (
-      (strncasecmp(splitMaskEnv, "DIV", strlen("DIV")) == 0 && parseInt(splitMaskEnv + strlen("DIV"), &color)) ||
-      (strncasecmp(splitMaskEnv, "/", strlen("/")) == 0 && parseInt(splitMaskEnv + strlen("/"), &color))
+      (ncclTestStrncasecmp(splitMaskEnv, "DIV", strlen("DIV")) == 0 && parseInt(splitMaskEnv + strlen("DIV"), &color)) ||
+      (ncclTestStrncasecmp(splitMaskEnv, "/", strlen("/")) == 0 && parseInt(splitMaskEnv + strlen("/"), &color))
     )
         color = proc / color;
   }
@@ -1996,7 +2246,7 @@ testResult_t run() {
   jsonIdentifyWriter(is_main_thread);
 
   size_t maxMem = ~0;
-  testResult_t report_result = writeDeviceReport(&maxMem, localRank, proc, totalProcs, color, hostname, program_invocation_short_name);
+  testResult_t report_result = writeDeviceReport(&maxMem, localRank, proc, totalProcs, color, hostname, programName);
   if(report_result != testSuccess) {
     return report_result;
   }
@@ -2005,7 +2255,7 @@ testResult_t run() {
   const size_t GB = (1ULL << 30);
   size_t reserveMem =  std::min(DIVUP(maxMem, 16*GB) * 1*GB, 4*GB);
   // If the program is all_reduce_bias, enable bias
-  if (strcmp(program_invocation_short_name, "all_reduce_bias_perf") == 0) test_bias = 1;
+  if (strcmp(programName, "all_reduce_bias_perf") == 0) test_bias = 1;
   // We need sendbuff, recvbuff, expected (when datacheck enabled), bias (when bias enabled), plus 1G for the rest.
   size_t memMaxBytes = (maxMem - reserveMem - 1*GB) / (datacheck ? (test_bias ? 4 : 3) : (test_bias ? 3 : 2));
   if (maxBytes > memMaxBytes) {
@@ -2022,7 +2272,6 @@ testResult_t run() {
   MPI_Bcast(&ncclId, sizeof(ncclId), MPI_BYTE, 0, mpi_comm);
   MPI_Barrier(MPI_COMM_WORLD); // Ensure Bcast is complete for HCOLL
 #endif
-
   std::vector<int> gpus(nGpus*nThreads);
   std::vector<cudaStream_t> streams(nGpus*nThreads);
   std::vector<void*> sendbuffs(nGpus*nThreads);
@@ -2038,13 +2287,6 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = ((gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i)%numDevices;
     CUDACHECK(cudaSetDevice(gpus[i]));
-    if (parallel_init) {
-      if (test_bias) {
-        TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, bias.data()+i));
-      } else {
-        TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, NULL));
-      }
-    }
     if (streamnull) {
       streams[i] = NULL;
     }
@@ -2157,9 +2399,7 @@ testResult_t run() {
         fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
         return testNotImplemented;
       }
-      ncclCommProperties commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
-      NCCLCHECK(ncclCommQueryProperties(comms[0], &commProperties));
-      TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, &commProperties));
+      TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, comms[0]));
 #else
       if (test_ncclVersion >= NCCL_VERSION(2,29,0)) {
         fprintf(stderr, "Incompatible NCCL versions. nccl-tests was compiled with NCCL 2.28, but is running with NCCL %d. "
@@ -2197,8 +2437,6 @@ testResult_t run() {
   std::vector<int> errors(nThreads);
   std::vector<double> bw(nThreads);
   std::vector<int64_t> devMemUsed(nThreads);
-  double* delta;
-  CUDACHECK(hipHostMalloc(&delta, sizeof(double)*nThreads*NUM_BLOCKS, cudaHostAllocPortable | cudaHostAllocMapped));
   std::vector<int> bw_count(nThreads);
   for (int t=0; t<nThreads; t++) {
     bw[t] = 0.0;
@@ -2215,7 +2453,6 @@ testResult_t run() {
   Reporter reporter(rccl_output_file, rccl_output_format);
 
   std::vector<testThread> threads(nThreads);
-  memset(threads.data(), 0, sizeof(struct testThread)*nThreads);
 
   for (int t=nThreads-1; t>=0; t--) {
     threads[t].args.minbytes=minBytes;
@@ -2269,7 +2506,7 @@ testResult_t run() {
 
   // Wait for other threads and accumulate stats and errors
   for (int t=nThreads-1; t>=0; t--) {
-    if (t) pthread_join(threads[t].thread, NULL);
+    if (t) threads[t].thread.join();
     TESTCHECK(threads[t].ret);
     if (t) {
       errors[0] += errors[t];
@@ -2327,12 +2564,11 @@ testResult_t run() {
     if (datacheck) CUDACHECK(cudaFree(expected[i]));
 #endif
   }
-  CUDACHECK(cudaFreeHost(delta));
   envstr = getenv("NCCL_TESTS_MIN_BW");
   const double check_avg_bw = envstr ? atof(envstr) : -1;
   bw[0] /= bw_count[0];
 
-  writeResultFooter(errors.data(), bw.data(), check_avg_bw, program_invocation_short_name);
+  writeResultFooter(errors.data(), bw.data(), check_avg_bw, programName);
   if (memory_report) {
     memInfo_t memInfos[3];
     memInfos[0] = { initGpuMem[0], "Initialization" };
