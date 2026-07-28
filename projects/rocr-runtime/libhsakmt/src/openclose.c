@@ -209,9 +209,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 		model_init_env_vars();
 
 		if (hsakmt_primary_kfd_ctx.fd < 0 && !hsakmt_use_model) {
-			do {
-				fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
-			} while (fd == -1 && errno == EINTR);
+			fd = hsakmt_open(kfd_device_name, O_RDWR | O_CLOEXEC);
 
 			if (fd == -1) {
 				result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
@@ -341,10 +339,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSecondaryKFDCtx(HsaKFDContext **pCtx)
 	CHECK_KFD_OPEN();
 	pthread_mutex_lock(&hsakmt_mutex);
 
-	do {
-		kfd_fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
-	} while (kfd_fd == -1 && errno == EINTR);
-
+	kfd_fd = hsakmt_open(kfd_device_name, O_RDWR | O_CLOEXEC);
 	if (kfd_fd < 0) {
 		result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
 	} else {

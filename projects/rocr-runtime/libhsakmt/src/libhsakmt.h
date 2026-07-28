@@ -254,6 +254,7 @@ void hsakmt_destroy_counter_props(HsaKFDContext *ctx);
 uint32_t *hsakmt_convert_queue_ids(HSAuint32 NumQueues, HSA_QUEUEID *Queues);
 
 extern int hsakmt_ioctl(int fd, unsigned long request, void *arg);
+extern int hsakmt_open(const char *path, int flags);
 
 /* Void pointer arithmetic (or remove -Wpointer-arith to allow void pointers arithmetic) */
 #define VOID_PTR_ADD32(ptr,n) (void*)((uint32_t*)(ptr) + n)/*ptr + offset*/
