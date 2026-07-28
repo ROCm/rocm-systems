@@ -5717,10 +5717,10 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
             gpu_metrics.pcie_link_speed, MaxUIntegerTypes.UINT16_T
         ),
         "gfx_activity_acc": _validate_if_max_uint(
-            gpu_metrics.gfx_activity_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.gfx_activity_acc, MaxUIntegerTypes.UINT64_T
         ),
         "mem_activity_acc": _validate_if_max_uint(
-            gpu_metrics.mem_activity_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.mem_activity_acc, MaxUIntegerTypes.UINT64_T
         ),
         "temperature_hbm": _validate_if_max_uint(
             list(gpu_metrics.temperature_hbm), MaxUIntegerTypes.UINT16_T
@@ -5786,10 +5786,10 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
             list(gpu_metrics.jpeg_activity), MaxUIntegerTypes.UINT16_T, isActivity=True
         ),
         "pcie_nak_sent_count_acc": _validate_if_max_uint(
-            gpu_metrics.pcie_nak_sent_count_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_nak_sent_count_acc, MaxUIntegerTypes.UINT64_T
         ),
         "pcie_nak_rcvd_count_acc": _validate_if_max_uint(
-            gpu_metrics.pcie_nak_rcvd_count_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_nak_rcvd_count_acc, MaxUIntegerTypes.UINT64_T
         ),
         "accumulation_counter": _validate_if_max_uint(
             gpu_metrics.accumulation_counter, MaxUIntegerTypes.UINT64_T
@@ -5823,7 +5823,7 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
         "xcp_stats.gfx_below_host_limit_total_acc": list(gpu_metrics.xcp_stats),
         "xcp_stats.temperature_xcd": list(gpu_metrics.xcp_stats),
         "pcie_lc_perf_other_end_recovery": _validate_if_max_uint(
-            gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT64_T
         ),
         "vram_max_bandwidth": _validate_if_max_uint(
             gpu_metrics.vram_max_bandwidth, MaxUIntegerTypes.UINT64_T
@@ -6053,10 +6053,10 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
             gpu_metrics.pcie_link_speed, MaxUIntegerTypes.UINT16_T
         ),
         "gfx_activity_acc": _validate_if_max_uint(
-            gpu_metrics.gfx_activity_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.gfx_activity_acc, MaxUIntegerTypes.UINT64_T
         ),
         "mem_activity_acc": _validate_if_max_uint(
-            gpu_metrics.mem_activity_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.mem_activity_acc, MaxUIntegerTypes.UINT64_T
         ),
         "temperature_hbm": _validate_if_max_uint(
             list(gpu_metrics.temperature_hbm), MaxUIntegerTypes.UINT16_T
@@ -6122,10 +6122,10 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
             list(gpu_metrics.jpeg_activity), MaxUIntegerTypes.UINT16_T, isActivity=True
         ),
         "pcie_nak_sent_count_acc": _validate_if_max_uint(
-            gpu_metrics.pcie_nak_sent_count_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_nak_sent_count_acc, MaxUIntegerTypes.UINT64_T
         ),
         "pcie_nak_rcvd_count_acc": _validate_if_max_uint(
-            gpu_metrics.pcie_nak_rcvd_count_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_nak_rcvd_count_acc, MaxUIntegerTypes.UINT64_T
         ),
         "accumulation_counter": _validate_if_max_uint(
             gpu_metrics.accumulation_counter, MaxUIntegerTypes.UINT64_T
@@ -6159,7 +6159,7 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
         "xcp_stats.gfx_below_host_limit_total_acc": list(gpu_metrics.xcp_stats),
         "xcp_stats.temperature_xcd": list(gpu_metrics.xcp_stats),
         "pcie_lc_perf_other_end_recovery": _validate_if_max_uint(
-            gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT64_T
         ),
         "vram_max_bandwidth": _validate_if_max_uint(
             gpu_metrics.vram_max_bandwidth, MaxUIntegerTypes.UINT64_T
