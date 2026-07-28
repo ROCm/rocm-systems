@@ -99,9 +99,9 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
 
   // A0 trap/CWSR recovery requires every low-precision F8F6F4 WMMA to carry its
   // load-scale prefix, even when the requested scale is 1.0. Standalone input
-  // is therefore wrapped with inline-zero neutral scales. Scale16, regular
-  // Scale, and B0-only M=32 forms have separate encoding and scale-source
-  // translations.
+  // is therefore wrapped with inline-zero neutral E8M0 scales. Scale16,
+  // regular Scale, and B0-only M=32 forms have separate encoding and
+  // scale-source translations.
   if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4" || mnemonic.starts_with("v_wmma_scale"))
     return true;
 
