@@ -54,9 +54,9 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-    Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0, isNetOffload> prims(
-      tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex,
-      work->connIndex, work, nullptr, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
+    Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0, isNetOffload, RCCL_METADATA_EMPTY, 0, 0, UserRegMode>
+      prims(tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex,
+            work->connIndex, work, nullptr, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
 
     for (size_t elemOffset = 0; elemOffset < partCount; elemOffset += chunkCount) {
         /////////////// begin AllGather steps ///////////////
@@ -153,7 +153,9 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
 template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runRing<T, RedOp, ProtoLL128>(tid, nthreads, work);
+    // LL128 is generated as separate registered/non-registered kernels; the
+    // compile-time UserRegMode is forwarded by cmake/scripts/add_unroll.sh.
+    runAGRingLL128<T, RedOp>(tid, nthreads, work);
   }
 };
 
