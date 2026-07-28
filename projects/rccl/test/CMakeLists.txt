@@ -197,6 +197,7 @@ if(BUILD_TESTS)
     DdaIpcTests.cpp
     NetPluginReloadTests.cpp
     plugin/net_reload_plugin.cpp
+    CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     common/main.cpp
