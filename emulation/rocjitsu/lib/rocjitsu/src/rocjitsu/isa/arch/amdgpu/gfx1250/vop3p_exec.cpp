@@ -4980,14 +4980,16 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
   const bool scale16 = scale_inst_.op == 0x3a;
 
-  auto scale0 = [&](uint32_t lane) -> uint64_t {
-    return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(scale_src0, lane)
-                   : amdgpu::RegisterAccess(wf).read_lane(scale_src0, lane);
+  auto scale_word = [&](const Operand &operand, uint32_t lane) -> uint64_t {
+    // For regular scaled WMMA, the inline integer-zero encoding
+    // selects a neutral E8M0 word rather than the numerical value 0.
+    if (!scale16 && operand.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN)
+      return 0x7f7f7f7fu;
+    return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(operand, lane)
+                   : amdgpu::RegisterAccess(wf).read_lane(operand, lane);
   };
-  auto scale1 = [&](uint32_t lane) -> uint64_t {
-    return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(scale_src1, lane)
-                   : amdgpu::RegisterAccess(wf).read_lane(scale_src1, lane);
-  };
+  auto scale0 = [&](uint32_t lane) -> uint64_t { return scale_word(scale_src0, lane); };
+  auto scale1 = [&](uint32_t lane) -> uint64_t { return scale_word(scale_src1, lane); };
 
   bool dispatched = false;
   if (inst_.op == 0x88) {
