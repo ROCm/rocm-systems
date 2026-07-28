@@ -44,13 +44,13 @@ cmake --build <build_dir>
 
 ```bash
 cmake -B <build_dir> -S <project_root>/examples/
-cmake --build <build_dir> --target rocshmem
+cmake --build <build_dir> --target rocshmem-test
 ```
 
 ## Running
 
 ```bash
-mpirun -np 2 ./rocshmem
+mpirun -np 2 ./rocshmem-test
 ```
 
 Expected output:
@@ -63,22 +63,23 @@ Expected output:
 ## Profiling with rocprofiler-systems
 
 ```bash
-mpirun -np 2 rocprof-sys-run -- ./rocshmem
+mpirun -np 2 rocprof-sys-run -- ./rocshmem-test
 ```
 
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
 | --- | --- | --- |
-| `ROCPROFSYS_ROCM_DOMAINS` | `rocshmem_api` | Enable rocSHMEM host-stream API tracing |
-| `ROCPROFSYS_USE_ROCPD` | `ON` | Generate rocpd database |
-| `ROCPROFSYS_USE_SAMPLING` | `OFF` | Disable statistical sampling (use instrumentation only) |
+| `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,rocshmem_api` | Enable HIP runtime API, kernel dispatch, and rocSHMEM API tracing |
+| `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace as output |
+| `ROCPROFSYS_ROCPD` | `true` | Generate rocpd database as output |
 
 ```bash
+ROCPROFSYS_ROCM_DOMAINS="hip_runtime_api,kernel_dispatch,rocshmem_api" \
+ROCPROFSYS_TRACE=true \
+ROCPROFSYS_ROCPD=true \
 mpirun -np 2 rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,rocshmem_api \
-    -e ROCPROFSYS_USE_ROCPD=ON \
-    -- ./rocshmem
+    -- ./rocshmem-test
 ```
 
 The resulting rocpd database will contain `rocm_rocshmem_api` spans for each of

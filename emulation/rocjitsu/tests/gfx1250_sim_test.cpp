@@ -8,7 +8,9 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vglobal.h"
@@ -23,9 +25,11 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/except.h"
@@ -44,18 +48,34 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <optional>
 #include <set>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
+
+namespace rocjitsu::amdgpu {
+
+class WriterPreferredAccessGateTestAccess {
+public:
+  static bool has_waiting_writer(WriterPreferredAccessGate &gate) {
+    std::lock_guard lock(gate.mutex_);
+    return gate.waiting_writers_ != 0;
+  }
+};
+
+} // namespace rocjitsu::amdgpu
 
 namespace {
 
@@ -3408,6 +3428,55 @@ TEST(Gfx1250DecodeTest, WmmaScaleF4_32x16x128ConsumesVop3px2Pair) {
             "v_wmma_scale_f32_32x16x128_f4 v[0:15], v[16:31], v[32:39], 0, v40, v41");
 }
 
+TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0xffffffffu);
+
+  constexpr uint16_t kVgprEncoding = 256;
+  constexpr auto scalar_prefix =
+      gfx1250::build_vop3p(0x35, {.src0 = 0, .src1 = 1, .src2 = kVgprEncoding});
+  constexpr auto inline_prefix =
+      gfx1250::build_vop3p(0x35, {.src0 = 128, .src1 = 128, .src2 = kVgprEncoding});
+  constexpr auto scalar_matrix = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+      {.vdst = 32, .src0 = kVgprEncoding, .src1 = kVgprEncoding + 16, .src2 = kVgprEncoding + 32});
+  constexpr auto inline_matrix = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+      {.vdst = 40, .src0 = kVgprEncoding, .src1 = kVgprEncoding + 16, .src2 = kVgprEncoding + 40});
+  const std::array<uint32_t, 4> scalar_words = {scalar_prefix[0], scalar_prefix[1],
+                                                scalar_matrix[0], scalar_matrix[1]};
+  const std::array<uint32_t, 4> inline_words = {inline_prefix[0], inline_prefix[1],
+                                                inline_matrix[0], inline_matrix[1]};
+
+  write_wave_sgpr(*cu, *wf, 0, 0x7f7f7f7fu);
+  write_wave_sgpr(*cu, *wf, 1, 0x7f7f7f7fu);
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  for (uint32_t reg = 0; reg < 32; ++reg)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      cu->write_vgpr(vgpr_base + reg, lane, 0x38383838u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> scalar_inst(decoder->decode(scalar_words.data()));
+  std::unique_ptr<Instruction> inline_inst(decoder->decode(inline_words.data()));
+  ASSERT_NE(scalar_inst, nullptr);
+  ASSERT_NE(inline_inst, nullptr);
+  cu->execute_instruction(scalar_inst.get(), *wf);
+  cu->execute_instruction(inline_inst.get(), *wf);
+
+  for (uint32_t reg = 0; reg < 8; ++reg)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      const uint32_t scalar_result = cu->read_vgpr(vgpr_base + 32 + reg, lane);
+      EXPECT_EQ(scalar_result, std::bit_cast<uint32_t>(128.0f))
+          << "reg " << reg << ", lane " << lane;
+      EXPECT_EQ(cu->read_vgpr(vgpr_base + 40 + reg, lane), scalar_result)
+          << "reg " << reg << ", lane " << lane;
+    }
+}
+
 TEST(Gfx1250DecodeTest, SwmmacPrintsIndexKeyAndReuseModifiers) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
@@ -4715,6 +4784,181 @@ TEST(Gfx1250SimulationTest, DsStore2addrUsesSrc2HighBank) {
   EXPECT_EQ(actual1, kExpected1);
 }
 
+TEST(Gfx1250SimulationTest, DsStorexchg2addrB64ExchangesBothAddresses) {
+  Gfx1250Sim sim;
+  auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  auto &cu = *sim.cu();
+  wf->set_lds_base(cu.allocate_lds(256));
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData0 = 2;
+  constexpr uint32_t kData1 = 4;
+  constexpr uint32_t kDst = 6;
+  constexpr uint32_t kAddress = 0x20;
+  constexpr uint64_t kOld0 = 0x1122334455667788ull;
+  constexpr uint64_t kOld1 = 0x99AABBCCDDEEFF00ull;
+  constexpr uint64_t kNew0 = 0x0123456789ABCDEFull;
+  constexpr uint64_t kNew1 = 0xFEDCBA9876543210ull;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_vgpr(vb + kAddr, 0, kAddress);
+  cu.write_vgpr(vb + kData0, 0, static_cast<uint32_t>(kNew0));
+  cu.write_vgpr(vb + kData0 + 1, 0, static_cast<uint32_t>(kNew0 >> 32));
+  cu.write_vgpr(vb + kData1, 0, static_cast<uint32_t>(kNew1));
+  cu.write_vgpr(vb + kData1 + 1, 0, static_cast<uint32_t>(kNew1 >> 32));
+  cu.lds().write64(wf->lds_base() + kAddress + 8, kOld0);
+  cu.lds().write64(wf->lds_base() + kAddress + 24, kOld1);
+
+  gfx1250::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData0;
+  raw.data1 = kData1;
+  raw.vdst = kDst;
+  raw.offset0 = 1;
+  raw.offset1 = 3;
+  auto *inst =
+      new gfx1250::DsStorexchg2addrRtnB64Vds(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst->execute_impl(*wf);
+
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->wf_size, wf->wf_size());
+  EXPECT_EQ(state->per_lane_addr[0], wf->lds_base() + kAddress + 8);
+  EXPECT_EQ(state->ds2_per_lane_addr[0], wf->lds_base() + kAddress + 24);
+
+  amdgpu::LocalMemPipeline local_pipeline;
+  local_pipeline.issue(inst, *wf);
+
+  EXPECT_EQ(cu.lds().read64(wf->lds_base() + kAddress + 8), kNew0);
+  EXPECT_EQ(cu.lds().read64(wf->lds_base() + kAddress + 24), kNew1);
+  const uint64_t returned0 =
+      cu.read_vgpr(vb + kDst, 0) | (static_cast<uint64_t>(cu.read_vgpr(vb + kDst + 1, 0)) << 32);
+  const uint64_t returned1 = cu.read_vgpr(vb + kDst + 2, 0) |
+                             (static_cast<uint64_t>(cu.read_vgpr(vb + kDst + 3, 0)) << 32);
+  EXPECT_EQ(returned0, kOld0);
+  EXPECT_EQ(returned1, kOld1);
+}
+
+TEST(Gfx1250SimulationTest, DsStorexchg2addrStride64B32UsesScaledOffsetsForActiveLanes) {
+  Gfx1250Sim sim;
+  auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x5u);
+
+  auto &cu = *sim.cu();
+  wf->set_lds_base(cu.allocate_lds(1024));
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData0 = 2;
+  constexpr uint32_t kData1 = 3;
+  constexpr uint32_t kDst = 4;
+  constexpr uint32_t kLane0Address = 0x20;
+  constexpr uint32_t kLane2Address = 0x40;
+  constexpr uint32_t kOffset0 = 256;
+  constexpr uint32_t kOffset1 = 768;
+  constexpr uint32_t kLane0New0 = 0x01020304;
+  constexpr uint32_t kLane0New1 = 0x11121314;
+  constexpr uint32_t kLane2New0 = 0x21222324;
+  constexpr uint32_t kLane2New1 = 0x31323334;
+  constexpr uint32_t kLane0Old0 = 0x41424344;
+  constexpr uint32_t kLane0Old1 = 0x51525354;
+  constexpr uint32_t kLane2Old0 = 0x61626364;
+  constexpr uint32_t kLane2Old1 = 0x71727374;
+  constexpr uint32_t kInactiveSentinel = 0xDEADBEEF;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_vgpr(vb + kAddr, 0, kLane0Address);
+  cu.write_vgpr(vb + kAddr, 2, kLane2Address);
+  cu.write_vgpr(vb + kData0, 0, kLane0New0);
+  cu.write_vgpr(vb + kData1, 0, kLane0New1);
+  cu.write_vgpr(vb + kData0, 2, kLane2New0);
+  cu.write_vgpr(vb + kData1, 2, kLane2New1);
+  cu.write_vgpr(vb + kDst, 1, kInactiveSentinel);
+  cu.write_vgpr(vb + kDst + 1, 1, kInactiveSentinel);
+
+  const uint32_t lane0_addr0 = wf->lds_base() + kLane0Address + kOffset0;
+  const uint32_t lane0_addr1 = wf->lds_base() + kLane0Address + kOffset1;
+  const uint32_t lane2_addr0 = wf->lds_base() + kLane2Address + kOffset0;
+  const uint32_t lane2_addr1 = wf->lds_base() + kLane2Address + kOffset1;
+  cu.lds().write32(lane0_addr0, kLane0Old0);
+  cu.lds().write32(lane0_addr1, kLane0Old1);
+  cu.lds().write32(lane2_addr0, kLane2Old0);
+  cu.lds().write32(lane2_addr1, kLane2Old1);
+
+  gfx1250::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData0;
+  raw.data1 = kData1;
+  raw.vdst = kDst;
+  raw.offset0 = 1;
+  raw.offset1 = 3;
+  auto *inst = new gfx1250::DsStorexchg2addrStride64RtnB32Vds(
+      reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst->execute_impl(*wf);
+
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_EQ(state->per_lane_addr[0], lane0_addr0);
+  EXPECT_EQ(state->ds2_per_lane_addr[0], lane0_addr1);
+  EXPECT_EQ(state->per_lane_addr[2], lane2_addr0);
+  EXPECT_EQ(state->ds2_per_lane_addr[2], lane2_addr1);
+
+  amdgpu::LocalMemPipeline local_pipeline;
+  local_pipeline.issue(inst, *wf);
+
+  EXPECT_EQ(cu.lds().read32(lane0_addr0), kLane0New0);
+  EXPECT_EQ(cu.lds().read32(lane0_addr1), kLane0New1);
+  EXPECT_EQ(cu.lds().read32(lane2_addr0), kLane2New0);
+  EXPECT_EQ(cu.lds().read32(lane2_addr1), kLane2New1);
+  EXPECT_EQ(cu.read_vgpr(vb + kDst, 0), kLane0Old0);
+  EXPECT_EQ(cu.read_vgpr(vb + kDst + 1, 0), kLane0Old1);
+  EXPECT_EQ(cu.read_vgpr(vb + kDst, 2), kLane2Old0);
+  EXPECT_EQ(cu.read_vgpr(vb + kDst + 1, 2), kLane2Old1);
+  EXPECT_EQ(cu.read_vgpr(vb + kDst, 1), kInactiveSentinel);
+  EXPECT_EQ(cu.read_vgpr(vb + kDst + 1, 1), kInactiveSentinel);
+}
+
+TEST(Gfx1250SimulationTest, DsStorexchg2addrSameAddressAppliesBothExchangesInOrder) {
+  Gfx1250Sim sim;
+  auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  auto &cu = *sim.cu();
+  wf->set_lds_base(cu.allocate_lds(64));
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData0 = 2;
+  constexpr uint32_t kData1 = 3;
+  constexpr uint32_t kDst = 4;
+  constexpr uint32_t kAddress = 0x20;
+  constexpr uint32_t kOld = 0x11223344;
+  constexpr uint32_t kNew0 = 0x55667788;
+  constexpr uint32_t kNew1 = 0x99AABBCC;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_vgpr(vb + kAddr, 0, kAddress);
+  cu.write_vgpr(vb + kData0, 0, kNew0);
+  cu.write_vgpr(vb + kData1, 0, kNew1);
+  cu.lds().write32(wf->lds_base() + kAddress, kOld);
+
+  gfx1250::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData0;
+  raw.data1 = kData1;
+  raw.vdst = kDst;
+  auto *inst =
+      new gfx1250::DsStorexchg2addrRtnB32Vds(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  inst->execute_impl(*wf);
+
+  amdgpu::LocalMemPipeline local_pipeline;
+  local_pipeline.issue(inst, *wf);
+
+  EXPECT_EQ(cu.read_vgpr(vb + kDst, 0), kOld);
+  EXPECT_EQ(cu.read_vgpr(vb + kDst + 1, 0), kNew0);
+  EXPECT_EQ(cu.lds().read32(wf->lds_base() + kAddress), kNew1);
+}
+
 TEST(Gfx1250SimulationTest, DsTransposeLoadUsesHighDestinationBank) {
   Gfx1250Sim sim;
   // Resident wave: these tests inject instructions directly (execute_impl) and read
@@ -4919,6 +5163,71 @@ TEST(Gfx1250SimulationTest, AddtidStoresUseSrc1HighBank) {
   EXPECT_EQ(global_value, kExpected);
 }
 
+TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
+  Gfx1250Sim sim;
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+
+  auto &cu = *sim.cu();
+  wf->set_lds_base(cu.allocate_lds(0x4000));
+  constexpr uint32_t kM0ByteBase = 0x1000;
+  wf->set_m0(kM0ByteBase);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kLane0Data = 0x12345678u;
+  constexpr uint32_t kLane1Data = 0x9ABCDEF0u;
+  cu.write_vgpr(vb + 5, 0, kLane0Data);
+  cu.write_vgpr(vb + 5, 1, kLane1Data);
+  const uint32_t expected0 = wf->lds_base() + kM0ByteBase + 0x1234;
+  const uint32_t expected1 = expected0 + sizeof(uint32_t);
+
+  const uint32_t store_words[] = {0xDAC01234u, 0x00000500u};
+  std::unique_ptr<Instruction> store(decoder->decode(store_words));
+  ASSERT_NE(store, nullptr);
+  ASSERT_EQ(std::string_view(store->mnemonic()), "ds_store_addtid_b32");
+  cu.execute_instruction(store.get(), *wf);
+  auto *store_state = store->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(store_state, nullptr);
+  EXPECT_EQ(store_state->per_lane_addr[0], expected0);
+  EXPECT_EQ(store_state->per_lane_addr[1], expected1);
+  uint32_t lane0_data = 0;
+  uint32_t lane1_data = 0;
+  std::memcpy(&lane0_data, &store_state->store_data[0], sizeof(lane0_data));
+  std::memcpy(&lane1_data, &store_state->store_data[4], sizeof(lane1_data));
+  EXPECT_EQ(lane0_data, kLane0Data);
+  EXPECT_EQ(lane1_data, kLane1Data);
+  amdgpu::LocalMemPipeline local_pipeline;
+  local_pipeline.issue(store.release(), *wf);
+  EXPECT_EQ(cu.lds().read32(expected0), kLane0Data);
+  EXPECT_EQ(cu.lds().read32(expected1), kLane1Data);
+
+  const uint32_t load_words[] = {0xDAC41234u, 0x08000000u};
+  std::unique_ptr<Instruction> load(decoder->decode(load_words));
+  ASSERT_NE(load, nullptr);
+  ASSERT_EQ(std::string_view(load->mnemonic()), "ds_load_addtid_b32");
+  cu.execute_instruction(load.get(), *wf);
+  auto *load_state = load->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(load_state, nullptr);
+  EXPECT_EQ(load_state->per_lane_addr[0], expected0);
+  EXPECT_EQ(load_state->per_lane_addr[1], expected1);
+  const uint32_t load_dst_base = load_state->dst_reg_base;
+  local_pipeline.issue(load.release(), *wf);
+  EXPECT_EQ(cu.read_vgpr(load_dst_base, 0), kLane0Data);
+  EXPECT_EQ(cu.read_vgpr(load_dst_base, 1), kLane1Data);
+
+  wf->set_m0(0);
+  std::unique_ptr<Instruction> default_m0_store(decoder->decode(store_words));
+  ASSERT_NE(default_m0_store, nullptr);
+  cu.execute_instruction(default_m0_store.get(), *wf);
+  auto *default_m0_state = default_m0_store->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(default_m0_state, nullptr);
+  EXPECT_EQ(default_m0_state->per_lane_addr[0], wf->lds_base() + 0x1234);
+  EXPECT_EQ(default_m0_state->per_lane_addr[1], wf->lds_base() + 0x1238);
+}
+
 TEST(Gfx1250SimulationTest, VMovrelsReadsM0RelativeVgpr) {
   const uint32_t code[] = {
       0xBEFD0082u, // s_mov_b32 m0, 2
@@ -5117,6 +5426,124 @@ TEST(Gfx1250SimulationTest, BufferStoreUsesM0Soffset) {
     EXPECT_EQ(sim.memory->read32(output_addr + lane * 32), 0u) << "lane " << lane;
     EXPECT_EQ(sim.memory->read32(output_addr + 16 + lane * 32), 7u) << "lane " << lane;
   }
+}
+
+TEST(Gfx1250SimulationTest, MemorySideCacheFlushSerializesConcurrentAccess) {
+  constexpr uint64_t output_addr = 0x2000;
+  constexpr uint32_t iterations = 32;
+
+  Gfx1250Sim sim;
+  auto *msc = sim.soc->iod(0)->msc();
+  std::barrier start(3);
+
+  std::thread writer([&] {
+    start.arrive_and_wait();
+    for (uint32_t value = 1; value <= iterations; ++value) {
+      msc->write(output_addr, reinterpret_cast<const uint8_t *>(&value), sizeof(value));
+      std::this_thread::yield();
+    }
+  });
+  std::thread reader([&] {
+    start.arrive_and_wait();
+    for (uint32_t i = 0; i < iterations; ++i) {
+      uint32_t value = 0;
+      msc->read(output_addr, reinterpret_cast<uint8_t *>(&value), sizeof(value));
+      EXPECT_LE(value, iterations);
+      std::this_thread::yield();
+    }
+  });
+  std::thread flusher([&] {
+    start.arrive_and_wait();
+    for (uint32_t i = 0; i < iterations; ++i) {
+      msc->flush_all();
+      std::this_thread::yield();
+    }
+  });
+
+  writer.join();
+  reader.join();
+  flusher.join();
+  msc->flush_all();
+
+  EXPECT_EQ(sim.memory->read32(output_addr), iterations);
+}
+
+TEST(WriterPreferredAccessGateTest, WaitingWriterBlocksLateSharedEntrant) {
+  amdgpu::WriterPreferredAccessGate gate;
+  std::shared_lock active_reader(gate);
+  bool writer_acquired = false;
+  std::thread writer([&] {
+    std::unique_lock waiting_writer(gate);
+    writer_acquired = true;
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (!amdgpu::WriterPreferredAccessGateTestAccess::has_waiting_writer(gate) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+
+  const bool writer_waiting = amdgpu::WriterPreferredAccessGateTestAccess::has_waiting_writer(gate);
+  EXPECT_TRUE(writer_waiting);
+  if (writer_waiting) {
+    const bool late_reader_acquired = gate.try_lock_shared();
+    EXPECT_FALSE(late_reader_acquired);
+    if (late_reader_acquired)
+      gate.unlock_shared();
+  }
+
+  active_reader.unlock();
+  writer.join();
+  EXPECT_TRUE(writer_acquired);
+}
+
+TEST(Gfx1250SimulationTest, MemorySideCacheFlushMakesProgressUnderContinuousReads) {
+  constexpr uint64_t output_addr = 0x2000;
+  constexpr uint32_t reader_count = 4;
+
+  Gfx1250Sim sim;
+  auto *msc = sim.soc->iod(0)->msc();
+  std::barrier start(reader_count + 1);
+  std::atomic<bool> stop_readers = false;
+  std::atomic<uint32_t> readers_started = 0;
+  std::vector<std::thread> readers;
+  readers.reserve(reader_count);
+  for (uint32_t i = 0; i < reader_count; ++i) {
+    readers.emplace_back([&] {
+      start.arrive_and_wait();
+      bool first_read = true;
+      while (!stop_readers.load(std::memory_order_acquire)) {
+        uint32_t value = 0;
+        msc->read(output_addr, reinterpret_cast<uint8_t *>(&value), sizeof(value));
+        if (first_read) {
+          readers_started.fetch_add(1, std::memory_order_release);
+          first_read = false;
+        }
+      }
+    });
+  }
+
+  start.arrive_and_wait();
+  while (readers_started.load(std::memory_order_acquire) < reader_count)
+    std::this_thread::yield();
+
+  std::atomic<bool> flush_completed = false;
+  std::thread flusher([&] {
+    msc->flush_all();
+    flush_completed.store(true, std::memory_order_release);
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (!flush_completed.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  const bool completed_while_readers_active = flush_completed.load(std::memory_order_acquire);
+
+  stop_readers.store(true, std::memory_order_release);
+  for (auto &reader : readers)
+    reader.join();
+  flusher.join();
+
+  EXPECT_TRUE(completed_while_readers_active);
 }
 
 } // namespace

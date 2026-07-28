@@ -3368,11 +3368,20 @@ class CodeGenerator:
               const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
               const bool scale16 = scale_inst_.op == 0x3a;
 
+              auto scale_word = [&](const Operand &operand, uint32_t lane) -> uint64_t {
+                // For regular scaled WMMA, the inline integer-zero encoding
+                // selects a neutral E8M0 word rather than the numerical value 0.
+                if (!scale16 &&
+                    operand.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN)
+                  return 0x7f7f7f7fu;
+                return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(operand, lane)
+                               : amdgpu::RegisterAccess(wf).read_lane(operand, lane);
+              };
               auto scale0 = [&](uint32_t lane) -> uint64_t {
-                return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(scale_src0, lane) : amdgpu::RegisterAccess(wf).read_lane(scale_src0, lane);
+                return scale_word(scale_src0, lane);
               };
               auto scale1 = [&](uint32_t lane) -> uint64_t {
-                return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(scale_src1, lane) : amdgpu::RegisterAccess(wf).read_lane(scale_src1, lane);
+                return scale_word(scale_src1, lane);
               };
 
               bool dispatched = false;
@@ -4511,13 +4520,15 @@ class CodeGenerator:
         if cls == 'buffer_atomic':
             return self._gen_buffer_atomic(dst_ops, src_ops, sem)
 
-        if cls == 'ds_atomic':
+        if cls in ('ds_atomic', 'ds_atomic2'):
             gds_guard = ''
             if self._enc_has_field('gds'):
                 gds_guard = (
                     '  if (inst_.gds)\n'
                     '    throw util::UnimplementedInst(mnemonic());\n'
                 )
+            if cls == 'ds_atomic2':
+                return gds_guard + self._gen_ds_atomic2(dst_ops, src_ops, sem)
             return gds_guard + self._gen_ds_atomic(dst_ops, src_ops, sem)
 
         if cls in ('ds_mskor', 'ds_append_consume', 'ds_barrier_arrive'):
@@ -4925,6 +4936,11 @@ class CodeGenerator:
                 else 'amdgpu::WaitCounterType::LGKMCNT'
             ),
             'ds_atomic': (
+                'amdgpu::WaitCounterType::DSCNT'
+                if is_gfx11_plus
+                else 'amdgpu::WaitCounterType::LGKMCNT'
+            ),
+            'ds_atomic2': (
                 'amdgpu::WaitCounterType::DSCNT'
                 if is_gfx11_plus
                 else 'amdgpu::WaitCounterType::LGKMCNT'
@@ -5429,6 +5445,80 @@ class CodeGenerator:
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
+    def _gen_ds_atomic2(
+        self, dst: list[str], src: list[str], sem: InstructionSemantics
+    ) -> str:
+        """Generate a returning two-address LDS exchange."""
+        esz = sem.elem_size or 4
+        dwords_per_access = esz // 4
+        is_stride64 = 'stride64' in sem.name.lower()
+        stride_scale = f'{esz * 64}U' if is_stride64 else f'{esz}U'
+
+        L = []
+        L.append('  auto &cu = wf.cu();')
+        L.append('  uint64_t exec = wf.exec();')
+        L.append(
+            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+        )
+        L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
+        L.append(f'  d->elem_size = {esz};')
+        L.append('  d->num_elems = 1;')
+        L.append('  d->is_load = true;')
+        L.append('  d->atomic_op = amdgpu::AtomicOp::SWAP;')
+        self._append_wait_counter_type(L, 'ds_atomic2')
+        L.append('  d->exec_mask = exec;')
+        L.append('  d->lane_mask = exec;')
+        L.append('  d->wf_size = wf.wf_size();')
+        L.append('  d->ds2_active = true;')
+        L.append(
+            f"  d->ds2_dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')} + "
+            f'{dwords_per_access};'
+        )
+        L.append(f'  d->store_data.resize(wf.wf_size() * {esz});')
+        L.append(f'  d->ds2_store_data.resize(wf.wf_size() * {esz});')
+        L.append(
+            f"  uint32_t addr_base = {self._vgpr_base_expr('addr', use_acc=False)};"
+        )
+        L.append(
+            f"  uint32_t data0_base = {self._vgpr_base_expr('data0', role='Src1')};"
+        )
+        L.append(
+            f"  uint32_t data1_base = {self._vgpr_base_expr('data1', role='Src2')};"
+        )
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        L.append(
+            '    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);'
+        )
+        L.append(
+            f'    d->per_lane_addr[lane] = base + '
+            f'static_cast<uint32_t>(inst_.offset0) * {stride_scale} + wf.lds_base();'
+        )
+        L.append(
+            f'    d->ds2_per_lane_addr[lane] = base + '
+            f'static_cast<uint32_t>(inst_.offset1) * {stride_scale} + wf.lds_base();'
+        )
+        for i in range(dwords_per_access):
+            L.append(
+                f'    uint32_t val0_{i} = '
+                f'amdgpu::RegisterAccess(cu).read_vgpr(data0_base + {i}, lane);'
+            )
+            L.append(
+                f'    std::memcpy(&d->store_data[lane * {esz} + {i * 4}], '
+                f'&val0_{i}, 4);'
+            )
+            L.append(
+                f'    uint32_t val1_{i} = '
+                f'amdgpu::RegisterAccess(cu).read_vgpr(data1_base + {i}, lane);'
+            )
+            L.append(
+                f'    std::memcpy(&d->ds2_store_data[lane * {esz} + {i * 4}], '
+                f'&val1_{i}, 4);'
+            )
+        L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
     def _gen_ds_mskor(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
@@ -5704,10 +5794,38 @@ class CodeGenerator:
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
+    def _append_ds_addtid_addresses(self, lines: list[str]) -> None:
+        """Emit the profile-specific DS ADDTID per-lane address calculation."""
+        lines.append('  {')
+        lines.append('    uint64_t exec = wf.exec();')
+        lines.append('    d->lane_mask = exec; d->exec_mask = exec;')
+        lines.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
+        lines.append('    d->cu_path = wf.cu().full_path();')
+        lines.append(
+            '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
+        )
+        lines.append('    uint32_t m0 = wf.m0();')
+        if self.isa_spec.profile.ds_addtid_uses_m0_byte_base:
+            lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            lines.append('      if (!(exec & (1ULL << lane))) continue;')
+            lines.append('      uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;')
+            lines.append(
+                '      d->per_lane_addr[lane] = lane_offset + offset + wf.lds_base();'
+            )
+        else:
+            lines.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
+            lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            lines.append('      if (!(exec & (1ULL << lane))) continue;')
+            lines.append(
+                '      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();'
+            )
+        lines.append('    }')
+        lines.append('  }')
+
     def _gen_ds_read_addtid(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
-        """ds_read_addtid_b32: addr = thread_id * M0[24:16] * 4 + offset."""
+        """Generate profile-specific DS ADDTID load addressing."""
         L = []
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
@@ -5717,30 +5835,14 @@ class CodeGenerator:
         L.append(f'  d->num_elems = {sem.num_elems};')
         L.append('  d->is_load = true;')
         self._append_wait_counter_type(L, 'ds_read_addtid')
-        L.append('  {')
-        L.append('    uint64_t exec = wf.exec();')
-        L.append('    d->lane_mask = exec; d->exec_mask = exec;')
-        L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
-        L.append('    d->cu_path = wf.cu().full_path();')
-        L.append(
-            '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
-        )
-        L.append('    uint32_t m0 = wf.m0();')
-        L.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
-        L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('      if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            '      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();'
-        )
-        L.append('    }')
-        L.append('  }')
+        self._append_ds_addtid_addresses(L)
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
     def _gen_ds_write_addtid(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
-        """ds_write_addtid_b32: addr = thread_id * M0[24:16] * 4 + offset."""
+        """Generate profile-specific DS ADDTID store addressing."""
         L = []
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
@@ -5749,23 +5851,7 @@ class CodeGenerator:
         L.append(f'  d->num_elems = {sem.num_elems};')
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, 'ds_write_addtid')
-        L.append('  {')
-        L.append('    uint64_t exec = wf.exec();')
-        L.append('    d->lane_mask = exec; d->exec_mask = exec;')
-        L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
-        L.append('    d->cu_path = wf.cu().full_path();')
-        L.append(
-            '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
-        )
-        L.append('    uint32_t m0 = wf.m0();')
-        L.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
-        L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('      if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            '      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();'
-        )
-        L.append('    }')
-        L.append('  }')
+        self._append_ds_addtid_addresses(L)
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('data0')};")
@@ -6055,6 +6141,7 @@ class CodeGenerator:
             'ds_write',
             'ds_write2',
             'ds_atomic',
+            'ds_atomic2',
             'ds_mskor',
             'ds_append_consume',
             'ds_barrier_arrive',
@@ -6831,6 +6918,7 @@ class CodeGenerator:
                             'ds_write',
                             'ds_write2',
                             'ds_atomic',
+                            'ds_atomic2',
                             'ds_mskor',
                             'ds_append_consume',
                             'ds_barrier_arrive',
