@@ -430,10 +430,9 @@ Example: trace only activity inside a region named ``Compute``:
 
 .. code-block:: shell
 
-   rocprof-sys-run \
-       -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
-       -e ROCPROFSYS_SELECTED_REGIONS=Compute \
-       -- ./my_app
+   ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
+   ROCPROFSYS_SELECTED_REGIONS=Compute \
+   rocprof-sys-run -- ./my_app
 
 rocprof-sys-avail examples
 -----------------------------------

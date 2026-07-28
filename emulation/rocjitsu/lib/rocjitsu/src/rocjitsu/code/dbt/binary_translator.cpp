@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/dbt/binary_translator_internal.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
@@ -40,6 +41,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <sstream>
 #include <string>
@@ -320,6 +322,153 @@ build_block_position_index(const std::vector<std::unique_ptr<BasicBlock>> &block
   return block;
 }
 
+/// @brief Assemble a scope's hardware-entry offsets and run the external-entry
+///        soundness gate (internal::scope_roots_are_entry_state).
+///
+/// @details Thin wrapper over the pure gate so translate() can pass a
+/// KernelTranslationScope; the full soundness argument lives at the pure
+/// function's definition below.
+[[nodiscard]] bool
+scope_incomplete_roots_are_entry_state(const KernelTranslationScope &scope,
+                                       const std::unordered_set<uint64_t> &table_callee_offsets) {
+  // Only the ordinary kernel scope entry is a safe root: hardware/ABI initializes
+  // its SGPRs (dispatch pointer, kernarg pointer, workgroup ids), never a caller-
+  // chosen code address.
+  //
+  // The kernarg-preload firmware entry (+256) is deliberately NOT a safe root.
+  // Before control reaches it the command processor copies caller-controlled
+  // kernarg words straight into user SGPRs (see command_processor.cpp,
+  // KERNARG_PRELOAD_SPEC_LENGTH handling), so a preloaded user SGPR can hold an
+  // original, unrelocated .text pointer that no in-scope builder or relocation
+  // rewrites. An incomplete consumer rooted at that entry could therefore read a
+  // stale code pointer, so it must fail closed.
+  const std::unordered_set<uint64_t> hardware_entry_offsets{scope.entry->start_offset()};
+
+  return internal::scope_roots_are_entry_state(scope.blocks, hardware_entry_offsets,
+                                               table_callee_offsets);
+}
+
+/// @brief Prove that no stale PC-derived value can exist in one kernel scope.
+///
+/// @details The translator's usual model is "prove the target of every dynamic
+/// transfer, or refuse". This helper establishes the complementary — and
+/// strictly stronger — property: every value in this scope that was derived from
+/// an `s_getpc_b64` is rewritten to hold its RELOCATED address. A consumer whose
+/// dataflow fact is incomplete is then still safe, because whatever the
+/// unconstrained path delivers can only be one of:
+///   * a value this scope built from a getpc, which is now relocation-correct;
+///   * an architectural return PC from s_call/s_swap_pc, which hardware writes
+///     from the already-relocated program counter;
+///   * a code address loaded from data, whose ELF relocation the code-object
+///     patcher rewrites through the same final offset map (and refuses to
+///     translate when it cannot).
+/// No path can therefore carry an original, unrelocated `.text` address.
+///
+/// The proof obligation is discharged per producer and fails closed:
+///   * a producer the analysis could not follow leaves an unknown value;
+///   * a producer whose value is not a block start emitted by this scope cannot
+///     be rewritten to a relocated address (it points at data, into the middle
+///     of an instruction, or outside the emitted scope);
+///   * a bare producer that is the last instruction of its block is the shape
+///     whose delta add lives in a successor, so its chain is not proven closed.
+/// Any of those returns nullopt, which keeps the caller's existing refusal.
+///
+/// The recorded value is the one the pair holds at its block's exit, so a later
+/// unmodeled write inside the SAME block already leaves the producer unresolved.
+/// The residual modeling assumption is that a closed chain is not extended by
+/// unmodeled PC arithmetic in a SUCCESSOR block. Within one function that case
+/// is refused elsewhere: the extension is a KILL transfer, a killed lattice fact
+/// yields no fixup at all, and an indirect consumer with no fixup fails closed
+/// as unrecovered. Escaping it would need an interprocedural chain (partial
+/// build in a caller, completion after a call boundary) whose intermediate value
+/// also lands exactly on an emitted block start. AMDGPU materializes a function
+/// address with one indivisible getpc+add expansion, so no such chain exists.
+///
+/// @returns Builder rewrites that must all be applied, or nullopt when the
+///          scope cannot be made free of stale PC-derived values.
+[[nodiscard]] std::optional<std::vector<IndirectCallFixup>>
+scope_relocatable_pc_builders(std::span<BasicBlock *const> blocks) {
+  std::unordered_set<uint64_t> block_starts;
+  block_starts.reserve(blocks.size());
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      return std::nullopt;
+    block_starts.insert(block->start_offset());
+  }
+
+  std::vector<IndirectCallFixup> builder_fixups;
+  // The instruction-start set is rebuilt per owning block rather than pooled
+  // across the whole scope. patch_recovered_builder_fixups NOPs the entire
+  // [begin, end) interval of a builder as one contiguous run, so that interval
+  // must lie inside a single block. Discovery may add a recovered leader in a
+  // later round that splits the analysis block a builder was recorded on; a
+  // scope-wide instruction-start pool would still accept a range that now
+  // straddles that split, and the patcher would overwrite the bytes inserted
+  // between the final blocks. Bounding each builder to its owning block's
+  // [start_offset, end_offset) and validating its range against only that
+  // block's instruction starts fails the proof closed for any cross-block range.
+  for (BasicBlock *block : blocks) {
+    if (block->static_pc_address_builders().empty())
+      continue;
+
+    std::unordered_set<uint64_t> block_instruction_starts;
+    block_instruction_starts.insert(block->end_offset());
+    for (const Instruction &inst : block->instructions())
+      block_instruction_starts.insert(inst.src_loc());
+
+    const auto in_owning_block = [&](uint64_t offset) {
+      return offset >= block->start_offset() && offset <= block->end_offset() &&
+             block_instruction_starts.contains(offset);
+    };
+
+    for (const PcAddressBuilder &builder : block->static_pc_address_builders()) {
+      if (!builder.resolved)
+        return std::nullopt;
+      // A non-contiguous range holds an unrelated instruction between builder
+      // steps. patch_recovered_builder_fixups NOPs the whole range, so rewriting
+      // it would erase that instruction. Fail the proof closed instead.
+      if (!builder.contiguous)
+        return std::nullopt;
+      if (builder.source_target_offset < 0)
+        return std::nullopt;
+      const auto target = static_cast<uint64_t>(builder.source_target_offset);
+      // patch_recovered_builder_fixups resolves the relocated target through
+      // block placements, so only a block start has a defined new address.
+      if (!block_starts.contains(target))
+        return std::nullopt;
+      // The getpc and its whole recovery range must be instruction starts inside
+      // the block that owns the getpc, so the NOP-and-rewrite stays contiguous.
+      if (!in_owning_block(builder.source_getpc_offset) ||
+          !in_owning_block(builder.source_recovery_begin_offset) ||
+          !in_owning_block(builder.source_recovery_end_offset)) {
+        return std::nullopt;
+      }
+      if (builder.source_recovery_begin_offset == builder.source_recovery_end_offset) {
+        // A bare getpc has no delta to rewrite: hardware already supplies the
+        // relocated PC. Accept it only when its recorded value really is "the
+        // instruction after the getpc" and at least one more instruction of the
+        // same block follows without consuming it into a delta. A getpc that is
+        // the last instruction of its block is the shape whose add lives in a
+        // successor, where an unmodeled write would leave the original delta.
+        if (target != builder.source_recovery_begin_offset)
+          return std::nullopt;
+        if (builder.source_recovery_end_offset >= block->end_offset())
+          return std::nullopt;
+        continue;
+      }
+
+      builder_fixups.push_back(
+          IndirectCallFixup{.source_getpc_offset = builder.source_getpc_offset,
+                            .source_recovery_begin_offset = builder.source_recovery_begin_offset,
+                            .source_recovery_end_offset = builder.source_recovery_end_offset,
+                            .source_call_offset = builder.source_getpc_offset,
+                            .source_target_offset = target,
+                            .source_call_sreg = builder.source_sreg});
+    }
+  }
+  return builder_fixups;
+}
+
 [[nodiscard]] std::unordered_set<uint64_t>
 attach_relocation_table_call_edges(const BlockOffsetIndex &block_index,
                                    std::span<const RelocationFunctionTable> tables,
@@ -496,34 +645,58 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
 /// edge from the callee back to every possible continuation. The same helper
 /// block can be entered by multiple kernels or multiple call sites, and the
 /// correct continuation is the one selected by the return SGPR written at that
-/// call site. This walk therefore stays inside @p allowed_blocks, follows only
-/// ordinary successors within the callee body, and reports terminators that
-/// return through @p return_sreg. The caller then pairs each return with the
-/// specific continuation from the call edge being analyzed.
+/// call site. This walk therefore stays inside @p allowed_blocks and mirrors
+/// call-return classification: nested callees are visited with their own return
+/// SGPR as a stopping condition, while their continuations retain the enclosing
+/// condition. This exposes paths that return directly through an enclosing pair
+/// without mistaking a nested callee's normal return for the enclosing return.
+/// The caller then pairs each reported return with the specific continuation
+/// from the call edge being analyzed.
 [[nodiscard]] std::vector<BasicBlock *>
 function_return_blocks(BasicBlock &callee, uint16_t return_sreg, std::span<const uint8_t> text,
                        const std::unordered_set<BasicBlock *> &allowed_blocks) {
+  struct WalkPoint {
+    BasicBlock *block = nullptr;
+    std::optional<uint16_t> terminal_return_sreg;
+  };
+
   std::vector<BasicBlock *> returns;
-  std::vector<BasicBlock *> stack{&callee};
-  std::unordered_set<BasicBlock *> visited;
+  std::unordered_set<BasicBlock *> return_set;
+  std::vector<WalkPoint> stack{{.block = &callee, .terminal_return_sreg = std::nullopt}};
+  std::set<std::pair<BasicBlock *, std::optional<uint16_t>>> visited;
 
   while (!stack.empty()) {
-    BasicBlock *block = stack.back();
+    const WalkPoint point = stack.back();
     stack.pop_back();
+    BasicBlock *block = point.block;
     assert(block != nullptr && "return-block walk stack should contain only decoded blocks");
-    if (!allowed_blocks.contains(block) || !visited.insert(block).second)
+    if (!allowed_blocks.contains(block) ||
+        !visited.insert({block, point.terminal_return_sreg}).second)
       continue;
 
     const Instruction *term = block->terminator();
     assert(term != nullptr && "decoded BasicBlock should contain at least one instruction");
+    if (point.terminal_return_sreg && s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()),
+                                                        *point.terminal_return_sreg)) {
+      continue;
+    }
     if (s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()), return_sreg)) {
-      returns.push_back(block);
+      if (return_set.insert(block).second)
+        returns.push_back(block);
       continue;
     }
 
     for (BasicBlock *succ : block->successors()) {
       assert(succ != nullptr && "BasicBlock successors should never be null");
-      stack.push_back(succ);
+      stack.push_back({.block = succ, .terminal_return_sreg = point.terminal_return_sreg});
+    }
+    for (const BasicBlock::CallEdge &call : block->call_edges()) {
+      assert(call.callee != nullptr && "BasicBlock call edges should always have a callee");
+      assert(call.continuation != nullptr &&
+             "BasicBlock call edges should always have a continuation");
+      stack.push_back({.block = call.callee, .terminal_return_sreg = call.return_sreg});
+      stack.push_back(
+          {.block = call.continuation, .terminal_return_sreg = point.terminal_return_sreg});
     }
   }
 
@@ -815,6 +988,86 @@ scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const 
 
 } // namespace
 
+namespace internal {
+
+/// @brief Prove that every external entry into an incomplete-consumer scope is
+///        an entry-state root that cannot carry an original `.text` pointer.
+///
+/// @details scope_relocatable_pc_builders proves every getpc-derived value in a
+/// scope is relocated, but that proof only covers values this scope PRODUCES. An
+/// incomplete consumer is also reachable along a path that enters the scope
+/// carrying an SGPR value from OUTSIDE it. The whole-scope proof is sound only
+/// when every such external entry is a root whose incoming SGPRs are
+/// architecturally defined, never a raw original code address:
+///   * a hardware kernel entry passed in @p hardware_entry_offsets — the caller
+///     supplies only entries whose live-in SGPRs are ABI-initialized (dispatch
+///     pointer, kernarg pointer, workgroup ids). The kernarg-preload firmware
+///     entry is deliberately excluded there, because caller-controlled kernarg
+///     words are copied into user SGPRs before it runs;
+///   * a getpc-recovered in-scope call target (callee of a proven direct or
+///     swappc call edge) — it is entered only through that call, so its live-in
+///     PC pair is the architected return PC hardware wrote from the already-
+///     relocated program counter, or a value the caller built in-scope from a
+///     getpc (now relocated).
+///
+/// A relocation-table-dispatched callee is NOT such a safe root, even though it
+/// has an in-scope CallEdge: the dispatch selects a callee dynamically and its
+/// live-in scalar registers are arbitrary caller-supplied arguments, which can
+/// include an original, unrelocated `.text` pointer. A call edge constrains
+/// control flow, not the SGPR arguments delivered along it, so a table-dispatched
+/// callee that itself holds an incomplete consumer could still receive a stale
+/// code pointer on one path. Those callees are treated as unconstrained roots.
+///
+/// A block reachable within the scope has an in-scope predecessor (an ordinary
+/// CFG edge) or is a non-table call-edge callee; any other block — one with no
+/// in-scope predecessor and no proven getpc-recovered call edge — is entered from
+/// outside the scope. Such an external-entry block is an unconstrained root:
+/// control can arrive there holding a caller-supplied function pointer that is an
+/// original, unrelocated `.text` address. The producer scan cannot rewrite that
+/// value, so the incomplete consumer downstream could jump to stale bytes. This
+/// gate fails closed for such a scope, which keeps the caller's original refusal.
+/// Empirically every incomplete-consumer scope in the gfx1250 hotswap corpus
+/// roots only at the kernel entry and at getpc-recovered call targets.
+bool scope_roots_are_entry_state(std::span<BasicBlock *const> blocks,
+                                 const std::unordered_set<uint64_t> &hardware_entry_offsets,
+                                 const std::unordered_set<uint64_t> &table_callee_offsets) {
+  std::unordered_set<const BasicBlock *> in_scope(blocks.begin(), blocks.end());
+  std::unordered_set<const BasicBlock *> call_targets;
+  for (const BasicBlock *block : blocks) {
+    if (block == nullptr)
+      return false;
+    for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+      if (in_scope.contains(edge.callee))
+        call_targets.insert(edge.callee);
+    }
+  }
+
+  for (const BasicBlock *block : blocks) {
+    const bool has_in_scope_predecessor = std::ranges::any_of(
+        block->predecessors(), [&](const BasicBlock *pred) { return in_scope.contains(pred); });
+    if (has_in_scope_predecessor)
+      continue;
+    // A block with no in-scope predecessor is an external entry (it has no
+    // ordinary CFG edge from within the scope, even if it is reached by a call
+    // edge or has predecessors outside the scope).
+    //
+    // A relocation-table-dispatched callee delivers unconstrained caller-supplied
+    // SGPR arguments, so it is never a safe root regardless of its CallEdge; fail
+    // closed for it even if it is also a getpc-recovered call target.
+    if (table_callee_offsets.contains(block->start_offset()))
+      return false;
+    // Otherwise accept a hardware kernel entry or a getpc-recovered in-scope call
+    // target; any other root is an unconstrained external entry that may deliver a
+    // stale code pointer.
+    if (hardware_entry_offsets.contains(block->start_offset()) || call_targets.contains(block))
+      continue;
+    return false;
+  }
+  return true;
+}
+
+} // namespace internal
+
 BinaryTranslator::~BinaryTranslator() = default;
 
 BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
@@ -966,13 +1219,32 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // helper block, Phase 3 emits that helper into both relocated bodies so every
   // branch or call target can be resolved through the current kernel's placement
   // map without borrowing another kernel's return continuation.
-  auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders);
+  auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders,
+                                  ExternalEntryPolicy::ExplicitOnly);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
   const auto relocation_table_dispatches =
       discover_relocation_table_dispatches(blocks, relocation_function_tables, text_vaddr);
   const auto relocation_table_calls = attach_relocation_table_call_edges(
       block_index, relocation_function_tables, relocation_table_dispatches);
+
+  // Callees reached through a relocation-table dispatch are explicit analysis
+  // roots whose live-in SGPRs are caller-supplied, not architected: a dispatched
+  // callee can be entered with an original .text pointer in a scalar argument.
+  // The whole-scope stale-PC proof must therefore treat such a callee as an
+  // unconstrained external entry rather than a safe entry-state root, even though
+  // it has an in-scope CallEdge. Collect their block-start offsets so the gate
+  // can fail closed for them (see scope_incomplete_roots_are_entry_state).
+  std::unordered_set<uint64_t> relocation_table_callee_offsets;
+  for (const RelocationTableDispatch &dispatch : relocation_table_dispatches) {
+    if (dispatch.table_index >= relocation_function_tables.size())
+      continue;
+    if (!relocation_table_calls.contains(dispatch.source_call_offset))
+      continue;
+    for (const RelocationFunctionPointer &entry :
+         relocation_function_tables[dispatch.table_index].entries)
+      relocation_table_callee_offsets.insert(entry.target_text_offset);
+  }
   auto scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations);
 
   if (can_emit_sidecar_descriptors) {
@@ -1433,6 +1705,22 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       }
     }
 
+    // An incomplete consumer is only translatable when this scope can be proven
+    // free of stale PC-derived values (see scope_relocatable_pc_builders). That
+    // proof is expensive and only ever needed when such a consumer exists, so
+    // establish it lazily; scopes without one keep byte-identical output.
+    const bool has_incomplete_consumer =
+        std::ranges::any_of(recovered_indirect_by_call, [](const auto &entry) {
+          return std::ranges::any_of(entry.second.fixups, [](const IndirectCallFixup &fixup) {
+            return fixup.source_incomplete;
+          });
+        });
+    std::optional<std::vector<IndirectCallFixup>> whole_scope_builder_fixups;
+    if (has_incomplete_consumer &&
+        scope_incomplete_roots_are_entry_state(scope, relocation_table_callee_offsets))
+      whole_scope_builder_fixups = scope_relocatable_pc_builders(scope.blocks);
+    const bool no_stale_pc_values_in_scope = whole_scope_builder_fixups.has_value();
+
     std::vector<IndirectCallFixup> pending_builder_fixups;
     for (auto &[source_call_offset, consumer] : recovered_indirect_by_call) {
       if (consumer.fixups.empty())
@@ -1466,12 +1754,12 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       // yet its runtime SGPR pair may hold an original .text address; after DBT
       // relocates .text, the retained dynamic transfer would jump to stale or moved
       // bytes, and the unknown target block may be absent from the emitted scope.
-      // We cannot prove the unconstrained path is free of a relocatable text
-      // address, so fail closed for the whole consumer rather than relocate only
-      // the known builders.
+      // Unless this scope was proven to contain no stale PC-derived value at all,
+      // we cannot rule that out, so fail closed for the whole consumer rather
+      // than relocate only the known builders.
       const bool any_incomplete = std::ranges::any_of(
           consumer.fixups, [](const IndirectCallFixup &fixup) { return fixup.source_incomplete; });
-      if (any_incomplete) {
+      if (any_incomplete && !no_stale_pc_values_in_scope) {
         auto failure = make_kernel_failure(
             DiagnosticKind::Legalization,
             "recovered indirect branch has an unconstrained predecessor path that cannot be "
@@ -1483,6 +1771,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           break;
         }
         return leave_unchanged();
+      }
+
+      if (any_incomplete) {
+        // The unconstrained path can still deliver a value this consumer never
+        // reaches through a recovered builder, so a direct transfer window would
+        // redirect it. Keep the dynamic transfer; every PC value it can observe
+        // is relocation-correct under the whole-scope proof.
+        continue;
       }
 
       // A complete consumer with one effective target can become a direct window.
@@ -1498,6 +1794,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
     if (skip_scope)
       continue;
+
+    // Discharging the proof requires actually performing every rewrite it
+    // assumes. Append it after the consumer-driven fixups so a builder that both
+    // paths cover keeps the bytes the consumer path already produced today;
+    // patch_recovered_builder_fixups collapses the duplicate range.
+    if (no_stale_pc_values_in_scope) {
+      pending_builder_fixups.insert(pending_builder_fixups.end(),
+                                    whole_scope_builder_fixups->begin(),
+                                    whole_scope_builder_fixups->end());
+    }
 
     std::vector<uint8_t> kernel_text;
     std::vector<PendingTrace> pending_traces;
@@ -1812,6 +2118,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       }
       if (skip_scope)
         break;
+      if (block->has_implicit_terminator()) {
+        // Materialize the CFG boundary as part of the translated block. Like
+        // any other target-side expansion, the terminator belongs in relocated
+        // function extents. Without an architectural terminator, ordinary text
+        // materialization can turn this unreachable stub into a fallthrough.
+        const uint32_t endpgm = build_s_endpgm(host_arch_);
+        append_words(kernel_text, std::span<const uint32_t>(&endpgm, 1));
+      }
       placement.target_end = kernel_text.size();
       layout.blocks.push_back(placement);
       target_offset_by_source_offset.emplace(block->end_offset(), kernel_text.size());
