@@ -3,23 +3,14 @@
 **Date:** 2026-07-28
 **Compiler:** g++ 13.3.0 + hipcc --offload-host-only (optional)
 **GTest:** 1.14.0 (system)
-**Result:** 312 tests across 53 suites; 284 pass, 28 expected failures
+**Result:** 285 tests across 41 suites; all pass
 
 ## What This Is
 
 A standalone test binary that compiles with g++ and hipcc `--offload-host-only`
-(no GPU codegen) and runs on CPU-only nodes. It contains two categories of tests:
-
-1. **Functional tests** (~285 tests) — compile and call real RCCL production
-   source. Migrated from GPU-dependent test binaries where they were trapped
-   behind `hip::device` link dependencies.
-
-2. **Known-defect tests** (~27 tests) — reproduce known buggy code patterns
-   in isolation using local types. These document and assert the presence of
-   specific defects. They do NOT compile production RCCL source, so they will
-   not automatically pass when a fix lands. When a fix is applied, the
-   corresponding test should be updated or removed. 19 of these are expected
-   to fail.
+(no GPU codegen) and runs on CPU-only nodes. It contains functional tests that
+compile and call real RCCL production source, migrated from GPU-dependent test
+binaries where they were trapped behind `hip::device` link dependencies.
 
 ## Runtime Dependencies
 
@@ -30,33 +21,31 @@ libstdc++.so.6, libm.so.6, libgcc_s.so.1, libc.so.6
 
 ## Test Suites
 
-### Functional tests (compile real RCCL source)
+### Compiling real RCCL `.cc` source (142 tests)
 
 | Source File | Suite | Tests | Real RCCL source compiled |
 |-------------|-------|-------|---------------------------|
-| BitOpsTests.cpp | BitOps* | 106 | — |
 | AltRsmiTests.cpp | AltRsmiTest | 44 | alt_rsmi.cc (g++) |
 | MemManagerTests.cpp | MemManager* | 68 | mem_manager.cc (hipcc) |
-| BootstrapBidirTests.cpp | BootstrapBidir | 16 | — (stub reimplementation) |
-| TimeoutTests.cpp | TimeoutTests | 8 | — |
 | VersionInfoTests.cpp | VersionInfoTests | 7 | kernel_config.cc (g++) |
-| IommuPassthrough_test.cpp | IommuPassthroughTest | 6 | — |
-| DdaCollCommonTests.cpp | DdaCollCommon | 6 | — |
 | NullParentTests.cpp | NullParentTest | 6 | paths.cc, search.cc (hipcc) |
 | EnqueueCountTests.cpp | EnqueueCountTests | 4 | kernel_config.cc (g++) |
 | RomeTopoConsensusTests.cpp | RomeTopoConsensus | 4 | rome_topo_consensus.cc (g++) |
-| MiscTests.cpp | MiscTests | 1 | — |
+| IommuPassthrough_test.cpp | IommuPassthroughTest | 6 | kernel_config.cc (shared) |
 
-### Known-defect tests (local pattern reproduction, do not compile RCCL source)
+### Header-only, no real `.cc` source (143 tests)
 
-| Source File | Suites | Tests | Expected failures |
-|-------------|--------|-------|-------------------|
-| NetIbCastTests.cpp | IbCastFifo, IbCastCompletion, IbWrIdPacking, IbCastRemDevIdx | 9 | 5 |
-| TransportBoundsTests.cpp | CollNetSizeGuard, PatConnectMask, TransportConstants | 4 | 4 |
-| ChannelGroupTests.cpp | ChannelBatchSize, GroupTaskQueue | 2 | 2 |
-| BufferBoundsTests.cpp | CollTraceBuffer, GdrSupportMatrix, AllocatorResize | 3 | 3 |
-| PipeReadTests.cpp | PipeRead | 2 | 1 |
-| SyncRegressionTests.cpp | IbWcStatusHint, PatPreconnect, SocketMagic | 7 | 4 |
+These test files existed in `rccl-UnitTestsFixtures` / `rccl-UnitTestsFixturesDebug`
+but were trapped behind `hip::device` link dependencies. They only `#include`
+RCCL headers (inline, constexpr, template functions) resolved via stub headers.
+
+| Source File | Suite | Tests | Headers tested |
+|-------------|-------|-------|----------------|
+| BitOpsTests.cpp | BitOps* | 106 | bitops.h |
+| BootstrapBidirTests.cpp | BootstrapBidir | 16 | bootstrap.h (via hand-rolled stub) |
+| TimeoutTests.cpp | TimeoutTests | 8 | comm.h |
+| DdaCollCommonTests.cpp | DdaCollCommon | 6 | CollCommon.h |
+| MiscTests.cpp | MiscTests | 1 | comm.h |
 
 ## How It Works
 
