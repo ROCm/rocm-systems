@@ -141,6 +141,14 @@ public:
   LivenessAnalysis(LivenessAnalysis &&) noexcept;
   LivenessAnalysis &operator=(LivenessAnalysis &&) noexcept;
 
+  /// @brief Create a fail-closed sentinel for a scope that does not need liveness.
+  ///
+  /// @details BinaryTranslator uses this when every matching semantic expansion
+  /// rule is marked liveness-free. Any query on the returned object throws
+  /// std::logic_error so an incorrectly classified rule cannot silently use
+  /// missing liveness data.
+  [[nodiscard]] static LivenessAnalysis unavailable();
+
   /// @brief Block liveness by block object.
   [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
 
@@ -180,9 +188,20 @@ public:
                                                        uint16_t search_start = 0) const;
 
 private:
+  /// @brief Tag selecting the unavailable sentinel constructor.
+  struct UnavailableTag {};
+
+  /// @brief Construct an unavailable sentinel without running dataflow.
+  explicit LivenessAnalysis(UnavailableTag);
+
+  /// @brief Reject a query when this object is the unavailable sentinel.
+  /// @throws std::logic_error if liveness data was intentionally not built.
+  void require_available() const;
+
   void analyze(KernelBlockScope blocks, const LivenessAnalysisOptions &options,
                std::span<const ScopedCfgEdge> extra_edges);
 
+  bool available_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
   std::unique_ptr<Gfx1250VgprMsbAnalysis> gfx1250_vgpr_msb_;

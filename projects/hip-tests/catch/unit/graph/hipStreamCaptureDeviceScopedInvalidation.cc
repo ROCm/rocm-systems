@@ -274,7 +274,7 @@ TEST_CASE("Global_DifferentDevice_SyncDoesNotInvalidate",
           "[graph][capture][multithreaded][multi_device]") {
   const int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Global_DifferentDevice_SyncDoesNotInvalidate requires at least 2 GPUs - skipping.");
     return;
   }
@@ -360,7 +360,7 @@ TEST_CASE("ThreadLocal_DifferentDevice_SyncDoesNotInvalidate",
           "[graph][capture][multithreaded][multi_device]") {
   const int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "ThreadLocal_DifferentDevice_SyncDoesNotInvalidate requires at least 2 GPUs - skipping.");
     return;
   }
@@ -440,7 +440,7 @@ TEST_CASE("Relaxed_DifferentDevice_SyncDoesNotInvalidate",
           "[graph][capture][multithreaded][multi_device]") {
   const int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Relaxed_DifferentDevice_SyncDoesNotInvalidate requires at least 2 GPUs - skipping.");
     return;
   }
@@ -524,7 +524,7 @@ TEST_CASE("ThreadLocal_GraphLaunch_DifferentDevice",
           "[graph][capture][multithreaded][multi_device]") {
   const int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "ThreadLocal_GraphLaunch_DifferentDevice requires at least 2 GPUs - skipping.");
     return;
   }

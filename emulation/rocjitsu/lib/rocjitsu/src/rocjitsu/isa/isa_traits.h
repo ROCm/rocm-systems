@@ -41,6 +41,7 @@ template <rj_code_arch_t Arch> struct IsaTrait;
 ///   - `MAX_ACC_VGPRS_PER_WF`  — maximum accumulator VGPRs (0 if absent).
 ///   - `WAITCNT_LGKMCNT_MASK`  — lgkmcnt field mask in S_WAITCNT (0 if no
 ///                               monolithic S_WAITCNT — RDNA4 only).
+///   - `MODE_HAS_GPR_IDX_EN`   — true when MODE bit 27 controls VGPR indexing.
 ///   - `Context`               — wavefront execution context type.
 ///   - `OperandType`           — per-ISA operand classification enum.
 ///   - `StatusReg`             — STATUS register bitfield type.
@@ -52,6 +53,7 @@ concept GpuIsa = requires {
   { Isa::MAX_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::MAX_ACC_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::WAITCNT_LGKMCNT_MASK } -> std::convertible_to<uint32_t>;
+  { Isa::MODE_HAS_GPR_IDX_EN } -> std::convertible_to<bool>;
   typename Isa::Context;
   typename Isa::OperandType;
   typename Isa::StatusReg;

@@ -374,9 +374,8 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
 }
 
 TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
-  // gfx1250 A0/B0 share an ELF machine ID, so the silicon revision is carried in
-  // the DBT guest config out of band. A same-target B0->A0 load selects the A0
-  // workarounds from these fields.
+  // gfx1250 A0 and B0 share an ELF machine ID, so the configured revisions
+  // select the B0-to-A0 translation profile.
   const auto file = write_temp_config(R"({
       "dbt_guest": {
         "enabled": true,
@@ -891,6 +890,63 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_EQ(restored_wf->exec(), 0xFULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
+}
+
+TEST(CheckpointTest, SaveAndRestoreHwregState) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"gfx1250"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint32_t kStatus = 0xA5A55A5Au;
+  constexpr uint32_t kWaveSchedMode = 0x5A5AA5A5u;
+  wf->set_status_raw(kStatus);
+  wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
+  wf->set_wave_sched_mode_raw(kWaveSchedMode);
+  ASSERT_TRUE(wf->fp16_ovfl());
+
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
+  ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
+
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_vm = dynamic_cast<VirtualMachine *>(restored.build_result.root.get());
+  ASSERT_NE(restored_vm, nullptr);
+  auto *restored_wf = restored_vm->soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->status_raw(), kStatus);
+  EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
+  EXPECT_EQ(restored_wf->wave_sched_mode_raw(), kWaveSchedMode);
+  EXPECT_TRUE(restored_wf->fp16_ovfl());
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {

@@ -68,6 +68,7 @@ struct CliOptions {
   bool saw_output_target = false;
   bool saw_input_revision = false;
   bool saw_output_revision = false;
+  bool show_all_translations = false;
 };
 
 void print_supported_targets(std::ostream &os) {
@@ -92,9 +93,12 @@ void print_help() {
       << "  --debug-conservative-liveness N Only allocate free VGPR scratch at or above N\n"
       << "  --debug-continue-after-failure Continue collecting diagnostics after failures\n"
       << "  --skip-failed-kernels          Preserve failed kernels and continue other kernels\n"
+      << "  --verify-idempotence           Require a same-architecture second pass to be "
+         "unchanged\n"
+      << "  --show-all-translations         Include unchanged identity mappings in diff output\n"
       << "  --list-code-objects             List extractable code objects and exit\n"
       << "  --help                          Show this help\n\n"
-      << "Note: gfx1250 b0-to-a0 applies the errata policy; equal revisions are identity.\n\n"
+      << "Note: gfx1250 b0-to-a0 selects its translation profile; equal revisions are identity.\n\n"
       << "Supported target names: ";
   print_supported_targets(std::cout);
   std::cout << ".\n";
@@ -193,6 +197,10 @@ void print_help() {
       options.translate.skip_failed_kernels = true;
       continue;
     }
+    if (arg == "--verify-idempotence") {
+      options.translate.verify_idempotence = true;
+      continue;
+    }
 
     if (arg == "--input-target") {
       if (!require_value(argc, argv, i, arg, value))
@@ -254,6 +262,8 @@ void print_help() {
         return false;
       }
       options.output_mode = *mode;
+    } else if (arg == "--show-all-translations") {
+      options.show_all_translations = true;
     } else {
       if (!arg.empty() && arg.front() != '-') {
         if (options.saw_input) {
@@ -334,7 +344,10 @@ struct ReportTotals {
   return "unknown";
 }
 
-void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic) {
+void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
+                      std::string_view prefix = {}) {
+  if (!prefix.empty())
+    os << prefix << ' ';
   os << diagnostic_severity_name(diagnostic.severity) << ": "
      << diagnostic_kind_name(diagnostic.kind);
   if (diagnostic.guest_offset)
@@ -342,8 +355,12 @@ void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic)
   if (!diagnostic.mnemonic.empty())
     os << " " << diagnostic.mnemonic;
   os << ": " << diagnostic.message << "\n";
-  for (const auto &item : diagnostic.required_work)
-    os << "  required: " << item << "\n";
+  for (const auto &item : diagnostic.required_work) {
+    os << "  ";
+    if (!prefix.empty())
+      os << prefix << ' ';
+    os << "required: " << item << "\n";
+  }
 }
 
 [[nodiscard]] const char *legalization_action_name(Action action) {
@@ -454,14 +471,15 @@ void print_code_object_report(std::ostream &os, std::string_view label,
   }
 }
 
-void print_instruction_translation_report(std::ostream &os, const TranslateOutput &output) {
+void print_instruction_translation_report(std::ostream &os, const TranslateOutput &output,
+                                          bool show_all_translations) {
   const auto &translations = output.instruction_translations;
   size_t shown = 0;
   size_t changed = 0;
   for (const auto &translation : translations) {
     if (translation.changed)
       ++changed;
-    if (should_show_translation(translation))
+    if (show_all_translations || should_show_translation(translation))
       ++shown;
   }
 
@@ -477,7 +495,7 @@ void print_instruction_translation_report(std::ostream &os, const TranslateOutpu
      << " semantic=" << count_semantic_lowerings(translations) << "\n";
 
   for (const auto &translation : translations) {
-    if (!should_show_translation(translation))
+    if (!show_all_translations && !should_show_translation(translation))
       continue;
 
     os << "  " << hex_offset(translation.source_offset) << " "
@@ -506,12 +524,19 @@ void print_text_report(std::ostream &os, const CliOptions &options,
   if (options.saw_output_revision)
     os << "output_revision: " << revision_name(output.output_revision) << "\n";
   os << "output_elf_bytes: " << output.elf_bytes.size() << "\n";
+  if (options.translate.verify_idempotence) {
+    const std::string_view status = !output.idempotence_checked   ? "not-checked"
+                                    : output.idempotence_verified ? "verified"
+                                                                  : "not-verified";
+    os << "idempotence: " << status << "\n";
+  }
 
   print_code_object_report(os, "source", output.source_report);
   print_code_object_report(os, "translated", output.translated_report);
-  print_instruction_translation_report(os, output);
+  print_instruction_translation_report(os, output, options.show_all_translations);
 
   os << "\ndiagnostics: " << output.diagnostics.size() << "\n";
+  os << "idempotence_diagnostics: " << output.idempotence_diagnostics.size() << "\n";
   os << "errors: " << result.errors.size() << "\n";
 }
 
@@ -566,6 +591,11 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  if (options.list_code_objects && options.translate.verify_idempotence) {
+    std::cerr << "--verify-idempotence cannot be combined with --list-code-objects\n";
+    return kUsageError;
+  }
+
   if (options.list_code_objects)
     return list_code_objects(options);
 
@@ -575,27 +605,9 @@ int main(int argc, char **argv) {
     return kUsageError;
   }
 
-  if (options.translate.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.saw_input_revision) {
-    std::cerr << "--input-revision is required when --input-target is gfx1250\n";
-    return kUsageError;
-  }
-  if (options.translate.guest_arch != ROCJITSU_CODE_ARCH_GFX1250 && options.saw_input_revision) {
-    std::cerr << "--input-revision is only valid when --input-target is gfx1250\n";
-    return kUsageError;
-  }
-  if (options.translate.host_arch == ROCJITSU_CODE_ARCH_GFX1250 && !options.saw_output_revision) {
-    std::cerr << "--output-revision is required when --output-target is gfx1250\n";
-    return kUsageError;
-  }
-  if (options.translate.host_arch != ROCJITSU_CODE_ARCH_GFX1250 && options.saw_output_revision) {
-    std::cerr << "--output-revision is only valid when --output-target is gfx1250\n";
-    return kUsageError;
-  }
-  if (options.translate.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.translate.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.translate.input_revision == ProcessorRevision::Gfx1250A0 &&
-      options.translate.output_revision == ProcessorRevision::Gfx1250B0) {
-    std::cerr << "gfx1250 A0-to-B0 translation is not supported\n";
+  if (const std::optional<std::string_view> request_error =
+          translation_request_error(options.translate)) {
+    std::cerr << *request_error << "\n";
     return kUsageError;
   }
 
@@ -608,6 +620,8 @@ int main(int argc, char **argv) {
 
   for (const auto &diagnostic : result.value.diagnostics)
     print_diagnostic(std::cerr, diagnostic);
+  for (const auto &diagnostic : result.value.idempotence_diagnostics)
+    print_diagnostic(std::cerr, diagnostic, "idempotence");
 
   if (options.output_mode == OutputMode::Diff)
     print_text_report(std::cout, options, result);
