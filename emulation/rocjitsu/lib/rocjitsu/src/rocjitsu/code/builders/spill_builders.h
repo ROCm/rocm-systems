@@ -70,9 +70,10 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
 ///   ordinary VGPR, so the store reads its data from the accumulator file. AGPRs
 ///   exist only on CDNA; requesting @p acc on an arch without them is rejected.
 /// @note CDNA offset is 12-bit (0..4095); RDNA is 24-bit. 2 words on CDNA, 3 on RDNA.
-[[nodiscard]] inline std::vector<uint32_t>
-build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t arch,
-                          bool acc = false) {
+[[nodiscard]] inline std::vector<uint32_t> build_scratch_store_dword(uint16_t vdata,
+                                                                     uint32_t byte_offset,
+                                                                     rj_code_arch_t arch,
+                                                                     bool acc = false) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3: {
     const auto w = cdna3::build_flat(cdna3::kFlatStoreDwordFlat,
@@ -110,9 +111,10 @@ build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t a
 ///   ordinary VGPR, so the load writes its result into the accumulator file. AGPRs
 ///   exist only on CDNA; requesting @p acc on an arch without them is rejected.
 /// @note A build_wait_loads_complete() must precede any use of @p vdst.
-[[nodiscard]] inline std::vector<uint32_t>
-build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch,
-                         bool acc = false) {
+[[nodiscard]] inline std::vector<uint32_t> build_scratch_load_dword(uint16_t vdst,
+                                                                    uint32_t byte_offset,
+                                                                    rj_code_arch_t arch,
+                                                                    bool acc = false) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3: {
     const auto w = cdna3::build_flat(cdna3::kFlatLoadDwordFlat,

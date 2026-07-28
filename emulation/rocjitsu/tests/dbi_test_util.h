@@ -46,6 +46,8 @@ inline constexpr uint32_t kMovV3S8 = 0x7E060208u;   // v_mov_b32 v3, s8 -> reads
 inline constexpr uint32_t kMovS8Zero = 0xbe880080u; // s_mov_b32 s8, 0  -> clobbers s8.
 inline constexpr uint32_t kMovV4S9 = 0x7E080209u;   // v_mov_b32 v4, s9 -> reads s9 (s9 live).
 inline constexpr uint32_t kMovS9Zero = 0xbe890080u; // s_mov_b32 s9, 0  -> clobbers s9.
+inline constexpr uint32_t kMovV5V2 = 0x7E0A0302u;   // v_mov_b32 v5, v2 -> reads v2 into v5.
+inline constexpr uint32_t kMovV6S8 = 0x7E0C0208u;   // v_mov_b32 v6, s8 -> reads s8 into v6.
 
 // v_mov_b32 v2, <inline const K> for K in [0, 64]. Inline constant 0 is encoded
 // as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
@@ -58,6 +60,9 @@ inline constexpr uint32_t kMovS9Zero = 0xbe890080u; // s_mov_b32 s9, 0  -> clobb
 // v_accvgpr_read_b32 v3, a0  -> reads acc0 (acc0 live before the anchor).
 inline constexpr uint32_t kAccReadV3A0Lo = 0xD3D84003u;
 inline constexpr uint32_t kAccReadV3A0Hi = 0x18000100u;
+// v_accvgpr_read_b32 v7, a0  -> reads acc0 into v7.
+inline constexpr uint32_t kAccReadV7A0Lo = 0xD3D84007u;
+inline constexpr uint32_t kAccReadV7A0Hi = 0x18000100u;
 // v_accvgpr_write_b32 a0, 0  -> clobbers acc0.
 inline constexpr uint32_t kAccWriteA0ZeroLo = 0xD3D94000u;
 inline constexpr uint32_t kAccWriteA0ZeroHi = 0x18000080u;

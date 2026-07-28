@@ -2514,9 +2514,10 @@ TEST_F(Cdna4ProbeSpill, MultiKernelSpillFailsClosed) {
 // the descriptor grows to cover all three -> 76.
 TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgprSgprAndAccVgpr) {
   // Anchor reads v2; the next two instructions read s8 then a0, so v2, s8, and acc0 are
-  // all live at the anchor and all clobbered by the probe.
+  // all live at the anchor and all clobbered by the probe. Distinct readback dests
+  // (v5/v6/v7) so the sim e2e can share this exact kernel shape.
   const Caved caved = patch_spill(
-      {kMovV3V2, kMovV3S8, kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()},
+      {kMovV5V2, kMovV6S8, kAccReadV7A0Lo, kAccReadV7A0Hi, endpgm()},
       {kMovV2Zero, kMovS8Zero, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64);
   const std::vector<uint32_t> &cave = caved.cave;
 

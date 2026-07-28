@@ -72,6 +72,8 @@ namespace {
 
 using test::kAccReadV3A0Hi;
 using test::kAccReadV3A0Lo;
+using test::kAccReadV7A0Hi;
+using test::kAccReadV7A0Lo;
 using test::kAccWriteA0ZeroHi;
 using test::kAccWriteA0ZeroLo;
 using test::kMovS8Zero;
@@ -80,6 +82,8 @@ using test::kMovV2Zero;
 using test::kMovV3S8;
 using test::kMovV3V2;
 using test::kMovV4S9;
+using test::kMovV5V2;
+using test::kMovV6S8;
 
 constexpr uint32_t kWaveSize = 64;
 constexpr uint32_t kSentinel = 7;  // Inline-const value placed into the spilled reg (1..64).
@@ -665,6 +669,145 @@ TEST_F(DbiCdna4AccVgprSpillSimFixture, SpilledAccVgprSurvivesClobberingProbe) {
 }
 TEST_F(DbiCdna4AccVgprSpillSimFixture, MissingRestoreLeavesAccVgprClobbered) {
   expect_missing_restore_clobbers_accvgpr();
+}
+
+//==============================================================================
+// Combined VGPR + SGPR + AccVGPR spill in a single bracket, on CDNA3 and CDNA4.
+// Proves the three spill paths (direct VGPR scratch, SGPR bridge, direct acc-bit
+// scratch) coexist in one trampoline and all round-trip. AGPR is CDNA-only, so no
+// RDNA4 variant. Shares the kernel/probe shape with the static
+// InstrumentorProbeSpill.Cdna4SpillsLiveClobberedVgprSgprAndAccVgpr.
+//==============================================================================
+
+// Kernel inits v2, s8, acc0 to the sentinel; the anchor reads v2 and the two
+// following instructions read s8 then acc0 into distinct dests (v5/v6/v7), so all
+// three are live at the anchor. The probe clobbers all three, forcing a combined
+// spill; after it returns the reads copy the restored values out for observation.
+class DbiCombinedSpillSimBase : public ::testing::Test {
+protected:
+  explicit DbiCombinedSpillSimBase(const SpillSimArch &a) : a_(a) {}
+
+  void SetUp() override {
+    const uint32_t endpgm = build_s_endpgm(a_.arch);
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    const uint32_t mov_s8_k =
+        build_s_mov_b32(kSpilledSgpr, static_cast<uint16_t>(128 + kSentinel), a_.arch);
+    const uint32_t mov_s8_0 = build_s_mov_b32(kSpilledSgpr, 128, a_.arch);
+    // v_mov v2,K ; s_mov s8,K ; v_accvgpr_write a0,K ; (ANCHOR at offset 16)
+    // v_mov v5,v2 ; v_mov v6,s8 ; v_accvgpr_read v7,a0 ; s_endpgm.
+    auto target = test::make_amdgpu_kernel_elf(
+        {test::make_mov_v2_inline(kSentinel), mov_s8_k, kAccWriteA0ZeroLo,
+         test::make_accvgpr_write_a0_inline_hi(kSentinel), kMovV5V2, kMovV6S8, kAccReadV7A0Lo,
+         kAccReadV7A0Hi, endpgm},
+        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    auto probe = test::make_amdgpu_probe_elf(
+        "rj_test_probe", {kMovV2Zero, mov_s8_0, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc},
+        a_.e_flags);
+
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+    ASSERT_TRUE(obj.is_valid());
+    ASSERT_TRUE(probe_obj.is_valid());
+
+    Instrumentor instr(obj, a_.arch);
+    InstrumentationPoint pt;
+    pt.anchor_offset = 16; // v_mov v5, v2 -> reads v2 (v2, s8, acc0 all live here).
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    ASSERT_TRUE(result.errors.empty())
+        << (result.errors.empty() ? std::string{} : result.errors.front());
+    ASSERT_EQ(result.patches.size(), 1u);
+    ASSERT_TRUE(result.patches[0].is_probe_call);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    patched_text_ = test::section_words(patched, ".text");
+    ASSERT_FALSE(patched_text_.empty());
+    patched_scratch_ = test::patched_private_segment_size(patched);
+  }
+
+  // All three restored values (v5<-v2, v6<-s8, v7<-acc0) equal the sentinel on
+  // every active lane, and the descriptor grew to cover three slots (64 -> 76).
+  void expect_all_survive() {
+    EXPECT_EQ(patched_scratch_, 76u) << "descriptor scratch must cover three spill slots";
+    DbiSim sim(a_.sim_arch, a_.wave_size);
+    // One dispatch per reg: the harness snapshots a fresh run each call, which is
+    // fine here since the kernel is deterministic.
+    for (const auto &[reg, src] :
+         {std::pair{uint32_t{5}, "v2"}, {uint32_t{6}, "s8"}, {uint32_t{7}, "acc0"}}) {
+      const std::vector<uint32_t> v = sim.run_and_read_vgpr(patched_text_, patched_scratch_, reg);
+      ASSERT_EQ(v.size(), a_.wave_size) << "kernel did not run to completion";
+      for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+        EXPECT_EQ(v[lane], kSentinel)
+            << "lane " << lane << ": " << src << " was not restored after the probe clobbered it";
+    }
+  }
+
+  // Negative control: nop all three restores (VGPR scratch load, SGPR readlane,
+  // acc scratch load) so every value stays clobbered (0); confirm the intact text
+  // restores all three.
+  void expect_missing_restores_clobber_all() {
+    const std::vector<uint32_t> vload = build_scratch_load_dword(2, 64, a_.arch);
+    const std::array<uint32_t, 2> readlane =
+        build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    const std::vector<uint32_t> aload =
+        build_scratch_load_dword(/*acc0=*/0, 72, a_.arch, /*acc=*/true);
+    const uint32_t nop = build_s_nop(0, a_.arch);
+
+    std::vector<uint32_t> sabotaged = patched_text_;
+    const auto nop_seq = [&](const auto &seq, const char *what) {
+      auto it = std::search(sabotaged.begin(), sabotaged.end(), seq.begin(), seq.end());
+      ASSERT_NE(it, sabotaged.end()) << "restore not found: " << what;
+      for (size_t i = 0; i < seq.size(); ++i)
+        *(it + static_cast<std::ptrdiff_t>(i)) = nop;
+    };
+    nop_seq(vload, "VGPR scratch load");
+    nop_seq(readlane, "SGPR readlane");
+    nop_seq(aload, "acc scratch load");
+
+    DbiSim broken(a_.sim_arch, a_.wave_size);
+    for (uint32_t reg : {5u, 6u, 7u}) {
+      const std::vector<uint32_t> v = broken.run_and_read_vgpr(sabotaged, patched_scratch_, reg);
+      ASSERT_EQ(v.size(), a_.wave_size);
+      for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+        EXPECT_EQ(v[lane], 0u) << "lane " << lane << ": v" << reg << " should read the clobbered 0";
+    }
+
+    DbiSim intact(a_.sim_arch, a_.wave_size);
+    for (uint32_t reg : {5u, 6u, 7u}) {
+      const std::vector<uint32_t> v =
+          intact.run_and_read_vgpr(patched_text_, patched_scratch_, reg);
+      ASSERT_EQ(v.size(), a_.wave_size);
+      for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+        EXPECT_EQ(v[lane], kSentinel)
+            << "lane " << lane << ": intact restore should recover v" << reg;
+    }
+  }
+
+  SpillSimArch a_;
+  std::vector<uint32_t> patched_text_;
+  uint32_t patched_scratch_ = 0;
+};
+
+class DbiCdna3CombinedSpillSimFixture : public DbiCombinedSpillSimBase {
+protected:
+  DbiCdna3CombinedSpillSimFixture() : DbiCombinedSpillSimBase(kCdna3SpillArch) {}
+};
+class DbiCdna4CombinedSpillSimFixture : public DbiCombinedSpillSimBase {
+protected:
+  DbiCdna4CombinedSpillSimFixture() : DbiCombinedSpillSimBase(kCdna4SpillArch) {}
+};
+
+TEST_F(DbiCdna3CombinedSpillSimFixture, AllClassesSurviveClobberingProbe) { expect_all_survive(); }
+TEST_F(DbiCdna3CombinedSpillSimFixture, MissingRestoresLeaveAllClobbered) {
+  expect_missing_restores_clobber_all();
+}
+TEST_F(DbiCdna4CombinedSpillSimFixture, AllClassesSurviveClobberingProbe) { expect_all_survive(); }
+TEST_F(DbiCdna4CombinedSpillSimFixture, MissingRestoresLeaveAllClobbered) {
+  expect_missing_restores_clobber_all();
 }
 
 //==============================================================================

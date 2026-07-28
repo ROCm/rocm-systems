@@ -377,9 +377,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Literal-constant scalar source code; the 32-bit literal follows the word.
   constexpr uint16_t kLiteralConstant = 0xFF;
 
-  const SpillBracket spill =
-      build_spill_bracket(plan.vgpr_spills, plan.sgpr_spills, plan.acc_spills,
-                          plan.spill_bridge_vgpr, plan.arch);
+  const SpillBracket spill = build_spill_bracket(
+      plan.vgpr_spills, plan.sgpr_spills, plan.acc_spills, plan.spill_bridge_vgpr, plan.arch);
 
   std::vector<uint32_t> env;
 
