@@ -3,11 +3,13 @@ myst:
     html_meta:
         "description": "How to select, edit, and use a JSON configuration file to define a simulated GPU topology in rocJITsu, including multi-GPU setups and C API usage."
         "keywords": "rocJITsu, ROCm, GPU topology, JSON configuration, simulation, rj_vm_create, multi-GPU, CDNA, RDNA"
----# Configure a simulated GPU topology
+---
+
+# Configure a simulated GPU topology
 
 rocJITsu uses a declarative JSON configuration file to describe the simulated GPU hardware: the component hierarchy, link connectivity, simulation parameters, and device properties exposed through the emulated sysfs topology. This page explains how to choose a configuration, adjust its key fields, build a multi-GPU configuration, and create a virtual machine from C code.
 
-For a full description of the JSON schema and its FlatBuffers validation, see [json-configuration](/conceptual/json-configuration.md).
+For a full description of the JSON schema and its FlatBuffers validation, see [JSON topology configuration](/conceptual/json-configuration.md).
 
 ## Select a configuration file
 
@@ -107,4 +109,4 @@ rj_vm_t *vm = NULL;
 rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &vm);
 ```
 
-For the complete VM lifecycle API --- stepping, checkpointing, device commands, and memory mapping --- see [api-vm](/reference/api-vm.md).
+For the complete VM lifecycle API --- stepping, checkpointing, device commands, and memory mapping --- see [API reference: virtual machine](/reference/api-vm.md).

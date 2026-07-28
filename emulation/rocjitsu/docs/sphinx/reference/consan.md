@@ -3,11 +3,13 @@ myst:
     html_meta:
         "description": "ConSan GPU LDS sanitizer reference for rocJITsu, covering enabling, output format, supported race classes, limitations, and known edge cases."
         "keywords": "rocJITsu, ConSan, LDS, sanitizer, race detection, shared memory, AMD, ROCm, GPU, DBI"
----# ConSan GPU LDS sanitizer reference
+---
+
+# ConSan GPU LDS sanitizer reference
 
 ConSan instruments AMD LDS (shared-memory) behavior by intercepting HSA code-object loads, inspecting final native machine code, and loading a patched replacement when instrumentation is possible. ConSan does not translate code objects between GPU architectures; it patches the final code object for the architecture that executes the kernel. Current live implementation and validation target RDNA4 / gfx1201.
 
-For a hands-on walkthrough, see [consan-detect-lds-race](/tutorials/consan-detect-lds-race.md). For background on how ConSan fits into the rocJITsu plugin system, see [execution-plugins](/conceptual/execution-plugins.md).
+For a hands-on walkthrough, see [Detect an LDS data race with ConSan](/tutorials/consan-detect-lds-race.md). For background on how ConSan fits into the rocJITsu plugin system, see [Execution plugin system](/conceptual/execution-plugins.md).
 
 ## Enabling ConSan
 
@@ -225,5 +227,3 @@ Flat support is in scope because compiled HIP helper code can access LDS through
 
 `RJ_CONSAN_FLAT_PROVENANCE=likely` (the default) admits both `Group` and `MaybeGroup`. `strict` admits only `Group`.
 
-writer-flags
--   RDNA4-only validation: the docs/consan/STATUS_RDNA4.md status table is exclusively gfx1201; other targets have no measured evidence yet.

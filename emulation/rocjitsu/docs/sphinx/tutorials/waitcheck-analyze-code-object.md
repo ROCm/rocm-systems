@@ -160,9 +160,9 @@ reported to stderr and the kernel is submitted normally.
 
 ## Next steps
 
--   See [waitcheck](../reference/waitcheck.md) for the
+-   See [waitcheck hazard analyzer reference](../reference/waitcheck.md) for the
     full CLI option reference, environment variables, exit codes, and
     runtime tool configuration.
--   See [inspect-code-object](inspect-code-object.md)
+-   See [Inspect and disassemble a code object with the C API](inspect-code-object.md)
     for loading and disassembling code objects through the rocJITsu C
     API.

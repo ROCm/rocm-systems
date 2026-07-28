@@ -196,6 +196,6 @@ rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json -- \
 ```
 
 For additional information about the `rocjitsu` CLI modes, see
-[rocjitsu-cli](../reference/rocjitsu-cli.md). For JSON
+[rocjitsu CLI reference](../reference/rocjitsu-cli.md). For JSON
 topology configuration, see
-[json-configuration](../conceptual/json-configuration.md).
+[JSON topology configuration](../conceptual/json-configuration.md).

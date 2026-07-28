@@ -16,9 +16,9 @@ hierarchy, and load any program binaries before returning a ready-to-run
 virtual machine handle.
 
 For CMake-level build options that affect the configuration subsystem,
-see [install](../install/install.md). For a step-by-step
+see [Install and build rocJITsu](../install/install.md). For a step-by-step
 guide to writing or modifying a topology file, see
-[configure-topology](../how-to/configure-topology.md).
+[Configure a simulated GPU topology](../how-to/configure-topology.md).
 
 ## Top-level fields
 
@@ -114,7 +114,7 @@ values must be consistent with the component hierarchy defined in
 `topology`.
 
 The fields in this section correspond to the members of
-`rj_vm_gpu_info_t` documented in [api-vm](../reference/api-vm.md). When `rj_vm_gpu_info` is called, the returned structure
+`rj_vm_gpu_info_t` documented in [API reference: virtual machine](../reference/api-vm.md). When `rj_vm_gpu_info` is called, the returned structure
 reflects the device section values from the active configuration.
 
 ## FlatBuffers schema validation
@@ -125,7 +125,7 @@ in the `schemas/` directory of the repository:
 -   `simulation_config.fbs` --- Covers topology and simulation
     parameters.
 -   `checkpoint.fbs` --- Covers simulation state checkpointing (see
-    [checkpoint-restore](../how-to/checkpoint-restore.md)).
+    [Save and restore a simulation checkpoint](../how-to/checkpoint-restore.md)).
 
 Validation occurs at VM creation time. If the JSON does not conform to
 the schema, `rj_vm_create` returns `ROCJITSU_STATUS_ERROR`. Common
@@ -163,6 +163,3 @@ manages all GPUs and routes KFD ioctls to the correct device based on
 `gpu_id`. The `amdgpu_cdna4_kmd_2gpu.json` config provides a working
 two-GPU configuration used with RCCL collective tests.
 
-\- The actual JSON schema fields for `vm.gpu.device` are not enumerated
-in the source material; the docs list only that the section exists and
-matches `rj_vm_gpu_info_t`.

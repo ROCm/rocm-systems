@@ -31,7 +31,7 @@ can choose when to save state.
 The checkpoint file uses a FlatBuffers schema located at
 `schemas/checkpoint.fbs` in the rocJITsu source tree. For details on the
 JSON configuration that creates the VM in the first place, see
-[json-configuration](../conceptual/json-configuration.md).
+[JSON topology configuration](../conceptual/json-configuration.md).
 
 ## Save a checkpoint
 
@@ -136,5 +136,5 @@ Both checkpoint functions return `rj_status_t`. The relevant codes are:
 
 
 For the full list of status codes, see
-[api-status](../reference/api-status.md). For the complete
-VM API reference, see [api-vm](../reference/api-vm.md).
+[API reference: status codes](../reference/api-status.md). For the complete
+VM API reference, see [API reference: virtual machine](../reference/api-vm.md).

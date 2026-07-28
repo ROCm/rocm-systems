@@ -15,7 +15,7 @@ the `rj_vm_step` C API.
 
 ## Prerequisites
 
--   rocJITsu built from source (see [install](../install/install.md)).
+-   rocJITsu built from source (see [Install and build rocJITsu](../install/install.md)).
 -   A ROCm toolchain that provides `hipcc` (needed to compile the kernel
     for `--offload-arch=gfx950`).
 
@@ -55,7 +55,7 @@ build/tools/rocjitsu/rocjitsu \
 The `--config` flag points to a JSON topology file that describes the
 simulated GPU. The `--` separator marks the start of the application
 command line. For details on the JSON format, see
-[json-configuration](../conceptual/json-configuration.md).
+[JSON topology configuration](../conceptual/json-configuration.md).
 
 ## What happens inside
 
@@ -86,7 +86,7 @@ The following sequence occurs when the CLI launches the application:
     results.
 
 For a deeper look at the GPU hardware model and simulation architecture,
-see [gpu-vm-design](../conceptual/gpu-vm-design.md).
+see [GPU virtual machine design](../conceptual/gpu-vm-design.md).
 
 ## Enable VM logging
 
@@ -147,19 +147,19 @@ uint64_t ticks = 0;
 rj_vm_run(vm, &ticks);
 ```
 
-See [api-vm](../reference/api-vm.md) for the full
+See [API reference: virtual machine](../reference/api-vm.md) for the full
 virtual machine API reference.
 
 ## Next steps
 
--   [inspect-code-object](inspect-code-object.md) ---
+-   [Inspect and disassemble a code object with the C API](inspect-code-object.md) ---
     decode and disassemble the kernel\'s code object with the rocJITsu
     code object API.
--   [translate-cdna4-to-rdna4](translate-cdna4-to-rdna4.md)
+-   [Translate a CDNA4 kernel to RDNA4 using rj_dbt_translate](translate-cdna4-to-rdna4.md)
     --- translate the gfx950 code object to RDNA4 using the dynamic
     binary translator.
--   [configure-topology](../how-to/configure-topology.md) ---
+-   [Configure a simulated GPU topology](../how-to/configure-topology.md) ---
     customize the simulated GPU topology with your own JSON
     configuration.
--   [checkpoint-restore](../how-to/checkpoint-restore.md) --- save
+-   [Save and restore a simulation checkpoint](../how-to/checkpoint-restore.md) --- save
     and restore simulation state.

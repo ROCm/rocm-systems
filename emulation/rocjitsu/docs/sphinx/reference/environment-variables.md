@@ -11,9 +11,9 @@ plugins, diagnostic output, and path resolution. This page documents
 each variable, its default value, allowed values, and effect.
 
 For details on how plugins use these variables, see
-[execution-plugins](../conceptual/execution-plugins.md). For
+[Execution plugin system](../conceptual/execution-plugins.md). For
 command-line options that interact with these variables, see
-[rocjitsu-cli](rocjitsu-cli.md).
+[rocjitsu CLI reference](rocjitsu-cli.md).
 
 ## Execution plugins
 

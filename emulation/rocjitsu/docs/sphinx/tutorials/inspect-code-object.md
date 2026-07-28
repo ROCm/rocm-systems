@@ -20,7 +20,7 @@ integration, or debugging a dynamic binary translation pipeline.
 
 The code shown below is derived from the example in the rocJITsu
 `docs/architecture.md` *Code* section. See
-[api-code-object](../reference/api-code-object.md) for the full
+[API reference: code object](../reference/api-code-object.md) for the full
 API reference.
 
 ## Load the executable
@@ -66,7 +66,7 @@ if (st != ROCJITSU_STATUS_SUCCESS) {
 targets such as `ROCJITSU_CODE_TARGET_GFX950` and
 `ROCJITSU_CODE_TARGET_GFX1200` are available --- see the
 `rj_code_target_id_t` enumeration in
-[api-code-object](../reference/api-code-object.md).
+[API reference: code object](../reference/api-code-object.md).
 
 ## Build the basic block list
 
@@ -155,11 +155,11 @@ reference count of one, so you need both the destroy and the release.
 ## Next steps
 
 -   To translate a code object between GPU architectures, see
-    [translate-cdna4-to-rdna4](translate-cdna4-to-rdna4.md),
+    [Translate a CDNA4 kernel to RDNA4 using rj_dbt_translate](translate-cdna4-to-rdna4.md),
     which uses `rj_code_translate`.
 -   To analyze a code object for wait-count hazards, see
-    [waitcheck-analyze-code-object](waitcheck-analyze-code-object.md).
+    [Analyze a code object for wait hazards with waitcheck](waitcheck-analyze-code-object.md).
 -   For the full code object and instruction API reference, see
-    [api-code-object](../reference/api-code-object.md).
+    [API reference: code object](../reference/api-code-object.md).
 -   For an overview of how the code layer fits into the rocJITsu
-    architecture, see [architecture](../conceptual/architecture.md).
+    architecture, see [Architecture and component layers](../conceptual/architecture.md).

@@ -141,8 +141,8 @@ Reports are written to `/tmp/output/race.log`.
 ## Next steps
 
 -   Learn how the execution plugin system and sink configuration work in
-    [execution-plugins](../conceptual/execution-plugins.md).
+    [Execution plugin system](../conceptual/execution-plugins.md).
 -   Analyze final GPU code objects for missing wait instructions with
-    [waitcheck](../reference/waitcheck.md).
+    [waitcheck hazard analyzer reference](../reference/waitcheck.md).
 -   Detect LDS data races on physical hardware using the ConSan DBI
-    sanitizer described in [consan](../reference/consan.md).
+    sanitizer described in [ConSan GPU LDS sanitizer reference](../reference/consan.md).

@@ -29,7 +29,7 @@ ConSan does **not** detect global-memory races. Selected atomics and
 fences provide ordering evidence for LDS communication, but they are not
 general global-memory race instrumentation. For details on ConSan\'s
 scope and the four instrumentation profiles, see
-[consan](../reference/consan.md).
+[ConSan GPU LDS sanitizer reference](../reference/consan.md).
 
 ## Write a kernel with a missing barrier
 
@@ -189,10 +189,10 @@ patched sites and zero diagnostics.
 
 ## Next steps
 
--   Read [consan](../reference/consan.md) for the full
+-   Read [ConSan GPU LDS sanitizer reference](../reference/consan.md) for the full
     set of environment variables, profile descriptions, and coverage
     signals.
--   See [execution-plugins](../conceptual/execution-plugins.md)
+-   See [Execution plugin system](../conceptual/execution-plugins.md)
     for an overview of rocJITsu\'s plugin architecture and how ConSan
     fits into the DBI hooks system.
 -   Explore the other instrumentation profiles (Record/Replay, Sampled)

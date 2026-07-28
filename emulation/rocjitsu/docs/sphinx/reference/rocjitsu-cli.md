@@ -3,11 +3,13 @@ myst:
     html_meta:
         "description": "rocjitsu CLI reference covering command-line options, execution modes, environment variables, socket path resolution, RPC opcodes, and daemon lifecycle."
         "keywords": "rocJITsu, CLI, ROCm, daemon, attach, local, RPC, environment variables, socket, GPU emulation"
----# rocjitsu CLI reference
+---
+
+# rocjitsu CLI reference
 
 The `rocjitsu` command is the primary entry point for running applications on a simulated GPU. It supports three execution modes---local, daemon, and attach---and manages the simulation engine, interposer setup, and RPC transport on your behalf.
 
-For details on how KMD emulation and the interposer layer work, see [gpu-vm-design](/conceptual/gpu-vm-design.md).
+For details on how KMD emulation and the interposer layer work, see [GPU virtual machine design](/conceptual/gpu-vm-design.md).
 
 ## Command-line options
 
@@ -77,7 +79,7 @@ When `--attach` is used or when the interposer connects to a daemon, the socket 
 2.  `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`
 3.  `/tmp/rocjitsu-<uid>/daemon.sock` (fallback)
 
-For additional environment variables that control simulation plugins, see [environment-variables](/reference/environment-variables.md).
+For additional environment variables that control simulation plugins, see [Environment variable reference](/reference/environment-variables.md).
 
 ## RPC protocol
 
@@ -131,5 +133,3 @@ File descriptors (`memfd` handles) are passed via `sendmsg()`/`recvmsg()` with `
 5.  The client\'s `RemoteDriver` sends `RPC_CLOSE` to the daemon.
 6.  The daemon closes the client connection and, when all clients have disconnected, shuts down the simulation engine.
 
-writer-flags
--   The RPC protocol trust model assumes version-matched, trusted clients. Untrusted clients are out of scope per the source material.

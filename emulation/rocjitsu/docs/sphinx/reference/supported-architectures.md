@@ -3,7 +3,9 @@ myst:
     html_meta:
         "description": "Supported GPU architectures for rocJITsu, including GFX target IDs, ISA families, and architecture enum mappings."
         "keywords": "rocJITsu, ROCm, GPU architecture, CDNA, RDNA, RISC-V, GFX target, ISA, simulation, DBT, DBI"
----# Supported GPU architectures
+---
+
+# Supported GPU architectures
 
 rocJITsu supports simulation, dynamic binary translation (DBT), and dynamic binary instrumentation (DBI) across multiple AMD GPU architecture generations and a RISC-V target. The tables below list every supported target together with its public API enum values and ISA family grouping.
 
@@ -31,11 +33,11 @@ Note
 The full per-architecture simulation, DBT, and DBI status columns referenced in the README could not be included because the README content is not available in the current source material. When the README is available, this table should be expanded with those columns.
 ## Architecture enum
 
-The `rj_code_arch_e` enumeration identifies an ISA architecture throughout the rocJITsu C API. Use these values when creating decoders, specifying translation options, or querying architecture properties. For the full enumeration and the rest of the code object and instruction API, see [api-code-object](/reference/api-code-object.md).
+The `rj_code_arch_e` enumeration identifies an ISA architecture throughout the rocJITsu C API. Use these values when creating decoders, specifying translation options, or querying architecture properties. For the full enumeration and the rest of the code object and instruction API, see [API reference: code object](/reference/api-code-object.md).
 
 ## Target ID enum
 
-The `rj_code_target_id_t` enumeration identifies a specific GPU target within an architecture. Use these values when filtering code objects inside an executable or creating instruction lists. For the full enumeration, see [api-code-object](/reference/api-code-object.md).
+The `rj_code_target_id_t` enumeration identifies a specific GPU target within an architecture. Use these values when filtering code objects inside an executable or creating instruction lists. For the full enumeration, see [API reference: code object](/reference/api-code-object.md).
 
 ## ISA family groupings
 

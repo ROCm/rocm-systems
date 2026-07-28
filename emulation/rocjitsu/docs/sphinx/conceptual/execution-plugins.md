@@ -88,7 +88,7 @@ that multiple sinks can be active at the same time. For example,
 
 
 For a full reference of all rocJITsu environment variables, see
-[environment-variables](../reference/environment-variables.md).
+[Environment variable reference](../reference/environment-variables.md).
 
 ## Built-in plugins
 
@@ -123,7 +123,7 @@ RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
 ```
 
 The plugin name for file sinks is `race`. For a hands-on walkthrough,
-see [race-detection-walkthrough](../tutorials/race-detection-walkthrough.md).
+see [Detect a missing barrier with the race detector](../tutorials/race-detection-walkthrough.md).
 
 ### Kernel logging
 
@@ -166,10 +166,10 @@ RJ_RACE=1 RJ_SINKS=stderr,file RJ_SINK_DIR=/tmp/output \
 
 ## Related pages
 
--   [race-detection-walkthrough](../tutorials/race-detection-walkthrough.md) --- step-by-step race detection tutorial
--   [waitcheck](../reference/waitcheck.md) --- static
+-   [Detect a missing barrier with the race detector](../tutorials/race-detection-walkthrough.md) --- step-by-step race detection tutorial
+-   [waitcheck hazard analyzer reference](../reference/waitcheck.md) --- static
     wait-hazard checker for AMDGPU code objects
--   [consan](../reference/consan.md) --- DBI-based LDS
+-   [ConSan GPU LDS sanitizer reference](../reference/consan.md) --- DBI-based LDS
     data race sanitizer
--   [api-vm](../reference/api-vm.md) --- virtual
+-   [API reference: virtual machine](../reference/api-vm.md) --- virtual
     machine C API reference

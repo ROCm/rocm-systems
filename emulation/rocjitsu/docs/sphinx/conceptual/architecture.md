@@ -58,7 +58,7 @@ FlatBuffers schemas. Range expansion (for example, `xcd[0:8]`) and
 pattern-based link wiring allow compact multi-GPU configurations. The
 configuration layer builds the full component hierarchy from a single
 JSON file. For details on the JSON format, see
-[json-configuration](json-configuration.md).
+[JSON topology configuration](json-configuration.md).
 
 ### Code layer
 
@@ -110,10 +110,10 @@ Models the GPU hardware pipeline as simdojo components:
 -   **Cache hierarchy** --- L1 vector cache, L1 scalar cache, L2 cache,
     and memory-side cache with MTYPE awareness.
 -   **Execution plugins** --- Pluggable hooks for runtime analysis. See
-    [execution-plugins](execution-plugins.md).
+    [Execution plugin system](execution-plugins.md).
 
 For a deeper discussion of the hardware model, see
-[gpu-vm-design](gpu-vm-design.md).
+[GPU virtual machine design](gpu-vm-design.md).
 
 ### KMD emulation
 

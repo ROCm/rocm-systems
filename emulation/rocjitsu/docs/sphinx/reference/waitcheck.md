@@ -3,11 +3,13 @@ myst:
     html_meta:
         "description": "Reference for the rocJITsu waitcheck hazard analyzer, covering CLI invocation, supported architectures, hazard classes, report format, exit codes, and limitations."
         "keywords": "rocJITsu, waitcheck, hazard, s_waitcnt, wait counter, AMD, ROCm, GPU, code object, static analysis"
----# waitcheck hazard analyzer reference
+---
+
+# waitcheck hazard analyzer reference
 
 waitcheck is a static object-code checker for AMDGPU wait hazards, distributed with rocJITsu. It analyzes final HSA code objects and reports missing or too-weak waits in the encoded instruction stream. waitcheck operates at the ISA level: the encoded instructions plus target features are the source of truth.
 
-For a guided walkthrough, see [waitcheck-analyze-code-object](/tutorials/waitcheck-analyze-code-object.md).
+For a guided walkthrough, see [Analyze a code object for wait hazards with waitcheck](/tutorials/waitcheck-analyze-code-object.md).
 
 ## Offline CLI
 
@@ -95,7 +97,7 @@ waitcheck supports the following targets:
 -   `gfx1201` (RDNA4)
 -   `gfx1250`
 
-See [supported-architectures](/reference/supported-architectures.md) for the full list of architectures supported by rocJITsu.
+See [Supported GPU architectures](/reference/supported-architectures.md) for the full list of architectures supported by rocJITsu.
 
 ## Hazard classes
 
