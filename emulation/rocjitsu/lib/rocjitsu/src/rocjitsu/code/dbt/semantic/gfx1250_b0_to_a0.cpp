@@ -1061,7 +1061,11 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
                                                            .src2 = gfx1250_inline_u32(20)}));
 
   if (is_store) {
-    const uint8_t ds_mode = static_cast<uint8_t>(*src0_bank << 2);
+    // The emitted ds_store_b32 keeps the original store-data VGPR in data0, and
+    // data0 is a Src1-role operand in both ds_store_addtid_b32 and ds_store_b32,
+    // so its high bank is src1_bank. The address VGPR is a fresh low-bank
+    // scratch, so only the Src1 field needs the original store-data bank.
+    const uint8_t ds_mode = static_cast<uint8_t>(*src1_bank << 2);
     append_gfx1250_vgpr_msb_transition(words, current_mode, ds_mode);
     append_words(words, gfx1250::build_vds(gfx1250::kDsStoreB32Vds,
                                            {.offset0 = static_cast<uint8_t>(source.offset0),
