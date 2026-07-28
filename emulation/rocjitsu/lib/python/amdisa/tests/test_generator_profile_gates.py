@@ -116,6 +116,99 @@ def _generated_method_body(cpp: str, class_name: str, next_class_name: str) -> s
     return cpp[start:end]
 
 
+def test_gfx1250_addtid_uses_m0_byte_base_addresses(
+    gfx1250_generated_root: Path,
+) -> None:
+    vds = (gfx1250_generated_root / 'vds_exec.cpp').read_text()
+    store_body = _generated_method_body(
+        vds, 'DsStoreAddtidB32Vds', 'DsLoadAddtidB32Vds'
+    )
+    load_body = _generated_method_body(vds, 'DsLoadAddtidB32Vds', 'DsPermuteB32Vds')
+    for body in (store_body, load_body):
+        assert 'uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;' in body
+        assert 'lane_offset + offset + wf.lds_base()' in body
+        assert 'ds_stride_bytes' not in body
+
+
+def test_gfx1250_returning_two_address_exchange_b32_uses_dual_atomic_state(
+    gfx1250_generated_root: Path,
+) -> None:
+    vds = (gfx1250_generated_root / 'vds_exec.cpp').read_text()
+    body = _generated_method_body(
+        vds,
+        'DsStorexchg2addrRtnB32Vds',
+        'DsStorexchg2addrStride64RtnB32Vds',
+    )
+    assert 'd->wf_size = wf.wf_size();' in body
+    assert 'd->ds2_active = true;' in body
+    assert 'd->ds2_per_lane_addr[lane]' in body
+    assert 'd->ds2_store_data' in body
+    assert 'd->ds2_dst_reg_base' in body
+
+
+def test_gfx1250_profile_scopes_special_ds_semantics() -> None:
+    names = (
+        'DS_STORE_ADDTID_B32',
+        'DS_STOREXCHG_2ADDR_RTN_B32',
+        'DS_STOREXCHG_2ADDR_RTN_B64',
+        'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32',
+        'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64',
+    )
+
+    def semantics_for(profile):
+        spec = SimpleNamespace(
+            profile=profile,
+            inst_encodings=[
+                SimpleNamespace(
+                    enc_name='ENC_VDS',
+                    insts=[SimpleNamespace(name=name) for name in names],
+                )
+            ],
+        )
+        return derive_all_semantics(spec)
+
+    gfx1250 = semantics_for(Gfx1250Profile())
+    assert Gfx1250Profile().ds_addtid_uses_m0_byte_base
+    assert gfx1250['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write_addtid'
+    for name in names[1:]:
+        assert gfx1250[name].semantic_class == 'ds_atomic2'
+        assert gfx1250[name].operation == 'swap'
+
+    rdna4 = semantics_for(Rdna4Profile())
+    assert not Rdna4Profile().ds_addtid_uses_m0_byte_base
+    assert rdna4['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write'
+    for name in names[1:]:
+        assert rdna4[name].semantic_class == 'ds_atomic'
+
+
+@pytest.mark.parametrize(
+    ('name', 'elem_size', 'scale', 'dst_dwords'),
+    [
+        ('DS_STOREXCHG_2ADDR_RTN_B32', 4, '4U', 1),
+        ('DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32', 4, '256U', 1),
+        ('DS_STOREXCHG_2ADDR_RTN_B64', 8, '8U', 2),
+        ('DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64', 8, '512U', 2),
+    ],
+)
+def test_gfx1250_dual_atomic_generator_covers_each_variant(
+    name: str, elem_size: int, scale: str, dst_dwords: int
+) -> None:
+    codegen = object.__new__(CodeGenerator)
+    codegen._vgpr_base_expr = lambda operand, **_kwargs: operand
+    codegen._append_wait_counter_type = lambda lines, _semantic_class: lines.append(
+        '  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;'
+    )
+    sem = InstructionSemantics(
+        name, 'ds_atomic2', operation='swap', elem_size=elem_size, num_elems=1
+    )
+    body = codegen._gen_ds_atomic2([], [], sem)
+    assert f'inst_.offset0) * {scale}' in body
+    assert f'inst_.offset1) * {scale}' in body
+    assert f'd->ds2_dst_reg_base = vdst + {dst_dwords};' in body
+    assert 'd->ds2_active = true;' in body
+    assert 'd->ds2_store_data' in body
+
+
 def _generated_constructor_body(cpp: str, class_name: str) -> str:
     start = cpp.index(f'{class_name}::{class_name}(')
     end = cpp.index('\n\n', start)
