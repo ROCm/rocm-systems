@@ -83,13 +83,13 @@ def test_max_addressable_vgprs_per_wf(profile, expected):
 @pytest.mark.parametrize(
     ('profile', 'expected_wave32', 'expected_wave64'),
     [
-        (Cdna1Profile(), 4, 4),
-        (Cdna2Profile(), 4, 4),
-        (CdnaProfile(), 8, 8),
+        (Cdna1Profile(), 0, 4),
+        (Cdna2Profile(), 0, 4),
+        (CdnaProfile(), 0, 8),
         (Rdna1Profile(), 8, 4),
         (Rdna3Profile(), 8, 4),
         (Rdna4Profile(), 8, 4),
-        (Gfx1250Profile(), 16, 16),
+        (Gfx1250Profile(), 16, 0),
     ],
 )
 def test_descriptor_vgpr_count_granule(profile, expected_wave32, expected_wave64):
@@ -151,8 +151,10 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     output = emit_isa_properties(str(tmp_path), specs).read_text()
 
     assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
-    assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 4;' in output
-    assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 4;' in output
+    assert 'uint32_t wave_size = 0;' in output
+    assert 'uint32_t wave_size_max = 0;' in output
+    assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 0;' in output
+    assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 0;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
     assert (
         'case ROCJITSU_CODE_ARCH_CDNA3:\n'
@@ -161,8 +163,10 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .wave_size = 64,\n'
+        '        .wave_size_max = 64,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
-        '        .descriptor_vgpr_count_granule_wave32 = 8,\n'
+        '        .descriptor_vgpr_count_granule_wave32 = 0,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 8,\n'
         '    };'
     ) in output
@@ -173,6 +177,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .wave_size = 32,\n'
+        '        .wave_size_max = 64,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 8,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 4,\n'
@@ -185,9 +191,11 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
+        '        .wave_size = 32,\n'
+        '        .wave_size_max = 32,\n'
         '        .max_addressable_vgprs_per_wf = 1024,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 16,\n'
-        '        .descriptor_vgpr_count_granule_wave64 = 16,\n'
+        '        .descriptor_vgpr_count_granule_wave64 = 0,\n'
         '    };'
     ) in output
 

@@ -469,11 +469,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   // If/when occupancy modeling needs the physical allocation block size, add a
   // separate helper for that policy. Reusing this descriptor helper for
   // occupancy would mix two different hardware contracts.
-  const auto properties = isa_properties(arch);
-  if (properties.max_addressable_vgprs_per_wf == 0)
-    return 1;
-  return wavefront_size == 32 ? properties.descriptor_vgpr_count_granule_wave32
-                              : properties.descriptor_vgpr_count_granule_wave64;
+  return descriptor_vgpr_count_granule_for_wavefront(arch, wavefront_size);
 }
 
 [[nodiscard]] uint32_t granulated_count_to_registers(uint32_t granulated, uint32_t granularity) {

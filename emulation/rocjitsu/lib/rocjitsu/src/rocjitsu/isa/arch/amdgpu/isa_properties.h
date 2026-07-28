@@ -9,6 +9,7 @@
 
 #include "rocjitsu/base/api.h"
 
+#include <cassert>
 #include <cstdint>
 
 namespace rocjitsu {
@@ -18,9 +19,11 @@ struct IsaProperties {
   bool descriptor_sgpr_count_encoded = true;
   bool uses_ttmp_workgroup_ids = false;
   bool uses_cluster_ttmp_workgroup_ids = false;
+  uint32_t wave_size = 0;
+  uint32_t wave_size_max = 0;
   uint32_t max_addressable_vgprs_per_wf = 0;
-  uint32_t descriptor_vgpr_count_granule_wave32 = 4;
-  uint32_t descriptor_vgpr_count_granule_wave64 = 4;
+  uint32_t descriptor_vgpr_count_granule_wave32 = 0;
+  uint32_t descriptor_vgpr_count_granule_wave64 = 0;
 };
 
 inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
@@ -33,8 +36,10 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_size = 64,
+        .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule_wave32 = 4,
+        .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 4,
     };
   case ROCJITSU_CODE_ARCH_CDNA2:
@@ -43,8 +48,10 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_size = 64,
+        .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule_wave32 = 4,
+        .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 4,
     };
   case ROCJITSU_CODE_ARCH_CDNA3:
@@ -53,8 +60,10 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_size = 64,
+        .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule_wave32 = 8,
+        .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 8,
     };
   case ROCJITSU_CODE_ARCH_CDNA4:
@@ -63,8 +72,10 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_size = 64,
+        .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule_wave32 = 8,
+        .descriptor_vgpr_count_granule_wave32 = 0,
         .descriptor_vgpr_count_granule_wave64 = 8,
     };
   case ROCJITSU_CODE_ARCH_RDNA1:
@@ -73,6 +84,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_size = 32,
+        .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
@@ -83,6 +96,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_size = 32,
+        .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
@@ -93,6 +108,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_size = 32,
+        .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
@@ -103,6 +120,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_size = 32,
+        .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
@@ -113,6 +132,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_size = 32,
+        .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
@@ -123,13 +144,27 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = true,
+        .wave_size = 32,
+        .wave_size_max = 32,
         .max_addressable_vgprs_per_wf = 1024,
         .descriptor_vgpr_count_granule_wave32 = 16,
-        .descriptor_vgpr_count_granule_wave64 = 16,
+        .descriptor_vgpr_count_granule_wave64 = 0,
     };
   default:
     return {};
   }
+}
+
+[[nodiscard]] inline uint32_t descriptor_vgpr_count_granule_for_wavefront(rj_code_arch_t arch,
+                                                                          uint32_t wavefront_size) {
+  const auto properties = isa_properties(arch);
+  uint32_t granule = 0;
+  if (wavefront_size == 32)
+    granule = properties.descriptor_vgpr_count_granule_wave32;
+  else if (wavefront_size == 64)
+    granule = properties.descriptor_vgpr_count_granule_wave64;
+  assert(granule != 0 && "unsupported wavefront size for VGPR descriptor granule");
+  return granule;
 }
 
 } // namespace rocjitsu

@@ -847,7 +847,7 @@ class _AmdgpuProfileBase(IsaProfile):
     @property
     def descriptor_vgpr_count_granule_wave32(self) -> int:
         """Wave32 VGPR count granule encoded in compute descriptors."""
-        return 4
+        return 0
 
     @property
     def descriptor_vgpr_count_granule_wave64(self) -> int:
@@ -1088,7 +1088,7 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     @property
     def descriptor_vgpr_count_granule_wave32(self) -> int:
-        return 8
+        return 0
 
     @property
     def descriptor_vgpr_count_granule_wave64(self) -> int:
@@ -1134,7 +1134,7 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def descriptor_vgpr_count_granule_wave32(self) -> int:
-        return 4
+        return 0
 
     @property
     def descriptor_vgpr_count_granule_wave64(self) -> int:
@@ -1185,7 +1185,7 @@ class Cdna2Profile(CdnaProfile):
 
     @property
     def descriptor_vgpr_count_granule_wave32(self) -> int:
-        return 4
+        return 0
 
     @property
     def descriptor_vgpr_count_granule_wave64(self) -> int:
@@ -1749,7 +1749,7 @@ class Gfx1250Profile(Rdna4Profile):
 
     @property
     def descriptor_vgpr_count_granule_wave64(self) -> int:
-        return 16
+        return 0
 
     @property
     def has_vopd3(self) -> bool:
