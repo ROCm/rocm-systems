@@ -1921,6 +1921,7 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDupSerializedReopenUnderContentionRemote
             DaemonTest.InterposerDupKeepsRoutingAfterPrimaryCloseRemote
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
+            DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
         )
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
             rj_add_test(

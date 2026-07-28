@@ -66,6 +66,25 @@ private:
   pid_t pid_;
 };
 
+int daemon_debug_enable(rocjitsu::SimulatedKfd &daemon, uint32_t debugger,
+                        kfd_ioctl_dbg_trap_args &args) {
+  const std::string proc_path = std::format("/proc/{}", args.pid);
+  const int proc_fd = ::open(proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (proc_fd < 0)
+    return -errno;
+  int mem_fd = ::openat(proc_fd, "mem", O_RDWR | O_CLOEXEC);
+  if (mem_fd < 0) {
+    const int open_errno = errno;
+    ::close(proc_fd);
+    return -open_errno;
+  }
+  const int result = daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &args, &mem_fd, proc_fd);
+  if (mem_fd >= 0)
+    ::close(mem_fd);
+  ::close(proc_fd);
+  return result;
+}
+
 uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
   auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
   auto root = loaded.take_root();
@@ -1008,7 +1027,9 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
   std::jthread server([&, server_fd = sv[1]] {
     for (;;) {
       rocjitsu::RpcHeader hdr{};
-      if (!rocjitsu::rpc_recv_exact(server_fd, &hdr, sizeof(hdr)))
+      int in_fds[3] = {-1, -1, -1};
+      size_t num_in = 3;
+      if (rocjitsu::rpc_recv_msg(server_fd, &hdr, sizeof(hdr), in_fds, &num_in) <= 0)
         break;
       if (hdr.opcode != rocjitsu::RPC_IOCTL) {
         rocjitsu::RpcHeader resp{};
@@ -1033,7 +1054,15 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
           dbg->enable.rinfo_ptr = reinterpret_cast<uint64_t>(buf + arg_size);
       }
 
-      const int result = daemon_driver.ioctl(process_id, cmd, buf);
+      int mem_fd = num_in > 1 ? in_fds[1] : -1;
+      const int proc_fd = num_in > 2 ? in_fds[2] : -1;
+      const int result = daemon_driver.ioctl(process_id, cmd, buf, &mem_fd, proc_fd);
+      if (num_in > 0 && in_fds[0] >= 0)
+        ::close(in_fds[0]);
+      if (mem_fd >= 0)
+        ::close(mem_fd);
+      if (proc_fd >= 0)
+        ::close(proc_fd);
 
       rocjitsu::RpcHeader resp{};
       resp.opcode = rocjitsu::RPC_IOCTL;
@@ -1139,7 +1168,26 @@ protected:
     cmd.buf_size = buf_size;
     cmd.shared_handle = -1;
     cmd.in_handle = in_handle;
+    cmd.in_mem_handle = -1;
+    cmd.in_proc_handle = -1;
+    if (cmd_id == AMDKFD_IOC_DBG_TRAP && in_handle >= 0) {
+      auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(buf);
+      if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE) {
+        cmd.in_proc_handle = ::open("/proc/self", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (cmd.in_proc_handle < 0)
+          return -errno;
+        cmd.in_mem_handle = ::open("/proc/self/mem", O_RDWR | O_CLOEXEC);
+        if (cmd.in_mem_handle < 0) {
+          ::close(cmd.in_proc_handle);
+          return -errno;
+        }
+      }
+    }
     rj_vm_execute_as(vm_, process_id_, &cmd);
+    if (cmd.in_mem_handle >= 0)
+      ::close(cmd.in_mem_handle);
+    if (cmd.in_proc_handle >= 0)
+      ::close(cmd.in_proc_handle);
     if (in_handle_out != nullptr)
       *in_handle_out = cmd.in_handle;
     return cmd.result;
@@ -1255,6 +1303,8 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
 
   constexpr uint64_t kSentinel = 0x0102030405060708ULL;
+  constexpr uint64_t kMemorySentinel = 0x8877665544332211ULL;
+  uint64_t target_memory = 0;
   std::atomic<int> fds_received{0};
   std::atomic<int> in_handle_after{-2};
   std::atomic<int> notifier_cloexec{-1};
@@ -1267,11 +1317,13 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
   std::jthread server([&, server_fd = sv[1]] {
     for (;;) {
       rocjitsu::RpcHeader hdr{};
-      int in_fds[1] = {-1};
-      size_t num_in = 1;
+      int in_fds[3] = {-1, -1, -1};
+      size_t num_in = 3;
       if (rocjitsu::rpc_recv_msg(server_fd, &hdr, sizeof(hdr), in_fds, &num_in) <= 0)
         break;
       int in_fd = (num_in > 0) ? in_fds[0] : -1;
+      int in_mem_fd = (num_in > 1) ? in_fds[1] : -1;
+      int in_proc_fd = (num_in > 2) ? in_fds[2] : -1;
 
       if (hdr.opcode == rocjitsu::RPC_CLOSE) {
         rocjitsu::RpcHeader resp{};
@@ -1279,6 +1331,10 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
         rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
         if (in_fd >= 0)
           ::close(in_fd);
+        if (in_mem_fd >= 0)
+          ::close(in_mem_fd);
+        if (in_proc_fd >= 0)
+          ::close(in_proc_fd);
         break;
       }
       if (hdr.opcode != rocjitsu::RPC_IOCTL) {
@@ -1287,6 +1343,10 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
         rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
         if (in_fd >= 0)
           ::close(in_fd);
+        if (in_mem_fd >= 0)
+          ::close(in_mem_fd);
+        if (in_proc_fd >= 0)
+          ::close(in_proc_fd);
         continue;
       }
 
@@ -1294,6 +1354,10 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
       if (!rocjitsu::rpc_recv_exact(server_fd, payload.data(), hdr.payload_bytes)) {
         if (in_fd >= 0)
           ::close(in_fd);
+        if (in_mem_fd >= 0)
+          ::close(in_mem_fd);
+        if (in_proc_fd >= 0)
+          ::close(in_proc_fd);
         break;
       }
       auto *ireq = reinterpret_cast<rocjitsu::RpcIoctlRequest *>(payload.data());
@@ -1301,13 +1365,18 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
       // Prove the received descriptor is live and aliases the client's eventfd
       // by writing a sentinel through it before the handler adopts it.
       if (in_fd >= 0) {
-        fds_received.fetch_add(1);
+        fds_received.store(static_cast<int>(num_in));
         // rpc_recv_msg passes MSG_CMSG_CLOEXEC, so the transferred notifier must
         // arrive close-on-exec and cannot leak through a later exec.
         int fd_flags = ::fcntl(in_fd, F_GETFD);
         notifier_cloexec.store((fd_flags >= 0 && (fd_flags & FD_CLOEXEC)) ? 1 : 0);
         uint64_t s = kSentinel;
         [[maybe_unused]] ssize_t w = ::write(in_fd, &s, sizeof(s));
+      }
+      if (in_mem_fd >= 0) {
+        [[maybe_unused]] ssize_t w =
+            ::pwrite(in_mem_fd, &kMemorySentinel, sizeof(kMemorySentinel),
+                     static_cast<off_t>(reinterpret_cast<uintptr_t>(&target_memory)));
       }
 
       rj_vm_cmd_t cmd{};
@@ -1316,10 +1385,16 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
       cmd.buf_size = ireq->args_bytes;
       cmd.shared_handle = -1;
       cmd.in_handle = in_fd;
+      cmd.in_mem_handle = in_mem_fd;
+      cmd.in_proc_handle = in_proc_fd;
       rj_vm_execute_as(vm_, process_id_, &cmd);
       in_handle_after.store(cmd.in_handle);
       if (cmd.in_handle >= 0)
         ::close(cmd.in_handle);
+      if (cmd.in_mem_handle >= 0)
+        ::close(cmd.in_mem_handle);
+      if (cmd.in_proc_handle >= 0)
+        ::close(cmd.in_proc_handle);
 
       rocjitsu::RpcHeader resp{};
       resp.opcode = rocjitsu::RPC_IOCTL;
@@ -1346,8 +1421,9 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
   en.enable.dbg_fd = static_cast<uint32_t>(notifier);
   ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
 
-  // The client sent exactly one fd via SCM_RIGHTS and the session adopted it.
-  EXPECT_EQ(fds_received.load(), 1);
+  // The client sent the notifier, target memory and pinned proc directory; the
+  // session adopted the first two and the transport reclaimed the identity fd.
+  EXPECT_EQ(fds_received.load(), 3);
   EXPECT_EQ(in_handle_after.load(), -1);
   // The transferred notifier was received close-on-exec (MSG_CMSG_CLOEXEC), so
   // it cannot leak through a later exec in the daemon.
@@ -1359,6 +1435,7 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
   ASSERT_EQ(::read(notifier, &got, sizeof(got)), static_cast<ssize_t>(sizeof(got)))
       << "notifier fd was not transferred: " << strerror(errno);
   EXPECT_EQ(got, kSentinel);
+  EXPECT_EQ(target_memory, kMemorySentinel);
 
   // Release the adopted fd through the transport for symmetry.
   kfd_ioctl_dbg_trap_args dis{};
@@ -1878,7 +1955,7 @@ TEST(RemoteDriverDbgEnableTest, FailedEnableLeavesCallerRuntimeInfoUntouched) {
   ASSERT_GE(notifier_fd, 0);
 
   kfd_ioctl_dbg_trap_args en{};
-  en.pid = 4242;
+  en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = static_cast<uint32_t>(notifier_fd);
   en.enable.rinfo_size = static_cast<uint32_t>(kRinfoSize);
@@ -2569,7 +2646,7 @@ TEST_F(KfdIoctlTest, DbgTrapCrossProcessEnableAuthorizedByPtrace) {
   en.pid = static_cast<uint32_t>(child);
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
-  const int enable_result = daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en);
+  const int enable_result = daemon_debug_enable(daemon, debugger, en);
   if (enable_result != 0)
     close(dbg_fd);
   ASSERT_EQ(enable_result, 0);
@@ -2616,7 +2693,7 @@ TEST_F(KfdIoctlTest, DbgTrapExitedTargetDisableReturnsESRCHAndReleasesSession) {
   en.pid = static_cast<uint32_t>(child);
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
-  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en), 0);
+  ASSERT_EQ(daemon_debug_enable(daemon, debugger, en), 0);
 
   ASSERT_EQ(kill(child, SIGKILL), 0);
   ASSERT_EQ(waitpid(child, &status, 0), child);
@@ -2694,7 +2771,7 @@ TEST_F(KfdIoctlTest, DbgTrapExitedTargetReturnsESRCHBeforePtraceAuthorization) {
   en.pid = static_cast<uint32_t>(child);
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
-  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en), 0);
+  ASSERT_EQ(daemon_debug_enable(daemon, debugger, en), 0);
 
   ASSERT_EQ(kill(child, SIGKILL), 0);
   ASSERT_EQ(waitpid(child, &status, 0), child);
@@ -2736,7 +2813,7 @@ TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesTargetKfdConnectionClose) {
   en.pid = static_cast<uint32_t>(child);
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
-  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en), 0);
+  ASSERT_EQ(daemon_debug_enable(daemon, debugger, en), 0);
 
   ASSERT_EQ(daemon.close(inferior), 0);
   kfd_ioctl_dbg_trap_args op{};
@@ -2749,6 +2826,68 @@ TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesTargetKfdConnectionClose) {
   dis.op = KFD_IOC_DBG_TRAP_DISABLE;
   EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &dis), 0);
   EXPECT_EQ(ptrace(PTRACE_DETACH, child, nullptr, nullptr), 0);
+  daemon.close(debugger);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapDisableAfterTargetKfdCloseAndExitReturnsESRCH) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;)
+      pause();
+  }
+  ChildProcessGuard child_guard(child);
+
+  rocjitsu::SimulatedKfd daemon(*soc_, /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(getpid());
+  uint32_t inferior = daemon.open_process(child);
+  ASSERT_NE(debugger, 0u);
+  ASSERT_NE(inferior, 0u);
+
+  ASSERT_EQ(ptrace(PTRACE_ATTACH, child, nullptr, nullptr), 0) << strerror(errno);
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+
+  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(dbg_fd, 0);
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(child);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
+  ASSERT_EQ(daemon_debug_enable(daemon, debugger, en), 0);
+
+  ASSERT_EQ(daemon.close(inferior), 0);
+  ASSERT_EQ(kill(child, SIGKILL), 0);
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(child);
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &dis), -ESRCH);
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &dis), -ESRCH);
+  daemon.close(debugger);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapDisableWithoutSessionReportsZombieAsExited) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0)
+    _exit(0);
+
+  siginfo_t info{};
+  ASSERT_EQ(waitid(P_PID, child, &info, WEXITED | WNOWAIT), 0);
+
+  rocjitsu::SimulatedKfd daemon(*soc_, /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(getpid());
+  ASSERT_NE(debugger, 0u);
+
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(child);
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &dis), -ESRCH);
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
   daemon.close(debugger);
 }
 
@@ -2775,7 +2914,7 @@ TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesDebuggerKfdConnectionClose) {
   en.pid = static_cast<uint32_t>(child);
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
-  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en), 0);
+  ASSERT_EQ(daemon_debug_enable(daemon, debugger, en), 0);
 
   ASSERT_EQ(daemon.close(debugger), 0);
   debugger = daemon.open_process(getpid());
@@ -2860,7 +2999,7 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
   first_enable.pid = static_cast<uint32_t>(target_pid);
   first_enable.op = KFD_IOC_DBG_TRAP_ENABLE;
   first_enable.enable.dbg_fd = static_cast<uint32_t>(first_notifier);
-  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &first_enable), 0);
+  ASSERT_EQ(daemon_debug_enable(daemon, debugger, first_enable), 0);
 
   ASSERT_EQ(kill(debugger_pid, SIGKILL), 0);
   int status = 0;
@@ -2886,7 +3025,7 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
   replacement_enable.pid = static_cast<uint32_t>(target_pid);
   replacement_enable.op = KFD_IOC_DBG_TRAP_ENABLE;
   replacement_enable.enable.dbg_fd = static_cast<uint32_t>(replacement_notifier);
-  EXPECT_EQ(daemon.ioctl(replacement_debugger, AMDKFD_IOC_DBG_TRAP, &replacement_enable), 0);
+  EXPECT_EQ(daemon_debug_enable(daemon, replacement_debugger, replacement_enable), 0);
 
   kfd_ioctl_dbg_trap_args dis{};
   dis.pid = static_cast<uint32_t>(target_pid);

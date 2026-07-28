@@ -348,6 +348,11 @@ TEST_F(DaemonTest, InterposerDup2OverPrimaryInvalidatesRemote) {
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
+TEST_F(DaemonTest, InterposerProcMapsNamesRemoteKfdMarker) {
+  auto r = run_hip_test(interposer_dup_bin(), "InterposerDupTest.ProcMapsNamesRemoteKfdMarker");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
 // --- RCCL collective tests (2-GPU daemon) ---
 
 class RcclDaemonTest : public ::testing::Test {

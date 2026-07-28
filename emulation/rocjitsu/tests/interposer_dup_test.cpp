@@ -28,6 +28,8 @@ RJ_DIAGNOSTIC_POP
 #include <cerrno>
 #include <chrono>
 #include <fcntl.h>
+#include <fstream>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <thread>
@@ -64,6 +66,22 @@ TEST(InterposerDupTest, DupKeepsKfdRoutingAfterPrimaryClose) {
   EXPECT_TRUE(kfd_version_ok(dup_fd));
 
   EXPECT_EQ(close(dup_fd), 0);
+}
+
+TEST(InterposerDupTest, ProcMapsNamesRemoteKfdMarker) {
+  if (getenv("ROCJITSU_INVOCATION_DIR") == nullptr)
+    GTEST_SKIP() << "remote backend required";
+
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+
+  std::ifstream maps("/proc/self/maps");
+  ASSERT_TRUE(maps.is_open());
+  std::string contents((std::istreambuf_iterator<char>(maps)), std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("/dev/kfd"), std::string::npos);
+  EXPECT_EQ(contents.find("rocjitsu_remote_kfd"), std::string::npos);
+
+  EXPECT_EQ(close(kfd), 0);
 }
 
 // fcntl(F_DUPFD_CLOEXEC) is the dup path libdrm uses; it must also preserve KFD

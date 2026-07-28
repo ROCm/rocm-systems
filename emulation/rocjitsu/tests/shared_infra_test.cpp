@@ -1261,6 +1261,33 @@ TEST(GpuMemoryTest, CopyBlockTransfersPageableClientMemoryAcrossPageBoundaries) 
   EXPECT_TRUE(std::equal(source.begin(), source.end(), destination.begin()));
 }
 
+TEST(GpuMemoryTest, AuthorizedProcMemAccessesAnonymousTargetMemory) {
+  amdgpu::GpuMemory mem("test_mem");
+  constexpr uint32_t kVmid = 11;
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+
+  const int target_mem_fd = ::open("/proc/self/mem", O_RDWR | O_CLOEXEC);
+  ASSERT_GE(target_mem_fd, 0);
+  mem.set_process_mem_fd(kVmid, target_mem_fd);
+  ::close(target_mem_fd);
+
+  std::array<uint8_t, 16> target = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+                                    0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  const uint64_t address = reinterpret_cast<uint64_t>(target.data());
+  EXPECT_TRUE(mem.is_fetchable(address, kVmid));
+
+  std::array<uint8_t, target.size()> readback{};
+  mem.read_block(address, std::span<uint8_t>(readback), kVmid);
+  EXPECT_EQ(readback, target);
+
+  std::array<uint8_t, target.size()> replacement{};
+  std::ranges::fill(replacement, 0xA5);
+  mem.write_block(address, std::span<const uint8_t>(replacement), kVmid);
+  EXPECT_EQ(target, replacement);
+}
+
 TEST(L1VectorCacheTest, UcDwordx4RoundTripPreservesVectorTransaction) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");

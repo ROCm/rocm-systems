@@ -129,6 +129,8 @@ private:
   bool has_gpu_info_ = false;        ///< True when gpu_info_ is valid.
   std::atomic<bool> closing_{false}; ///< Set by close() to break WAIT_EVENTS loops.
   int shutdown_efd_ = -1;            ///< eventfd written by close() to wake WAIT_EVENTS pollers.
+  void *kfd_marker_ = nullptr;       ///< Non-readable mapping identifying /dev/kfd in proc maps.
+  size_t kfd_marker_size_ = 0;
 
   /// @brief Serializes all RPC send+recv pairs on sock_.
   /// @details ROCR is multithreaded — concurrent ioctl/mmap calls interleave

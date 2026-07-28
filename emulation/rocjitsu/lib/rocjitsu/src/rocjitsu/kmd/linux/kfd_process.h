@@ -215,6 +215,11 @@ public:
     /// descriptor and is not owned here. RAII replaces an explicit close.
     UniqueFd owned_dbg_fd;
 
+    /// @brief Debugger-authorized access to the target's address space.
+    /// @details The ptrace parent opens /proc/<target>/mem and transfers it to
+    /// the daemon, which cannot use process_vm_readv/process_vm_writev itself.
+    UniqueFd target_mem_fd;
+
     /// @brief Pins the target process identity and reports target exit.
     /// @details Prevents a stale session from being mistaken for a later process
     /// that reuses the same numeric pid.
@@ -228,6 +233,11 @@ public:
     /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
     /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.
     pid_t debugger_pid = 0;
+
+    /// @brief Target exit was observed and owned resources were released.
+    /// @details Keeps the pinned pidfd identity until a racing DISABLE consumes
+    /// the session, so numeric PID reuse cannot turn process exit into EINVAL.
+    bool target_exited = false;
 
     /// @brief Pins the debugger process identity and reports debugger exit.
     /// @details Mirrors the kernel's debugger-process notifier: the session is

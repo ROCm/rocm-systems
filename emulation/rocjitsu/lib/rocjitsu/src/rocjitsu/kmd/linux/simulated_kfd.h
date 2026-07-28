@@ -116,7 +116,8 @@ public:
   uint32_t open_process(pid_t client_pid = 0);
   void set_process_client_pid(uint32_t process_id, pid_t client_pid);
 
-  int ioctl(uint32_t process_id, unsigned long request, void *arg);
+  int ioctl(uint32_t process_id, unsigned long request, void *arg, int *target_mem_fd = nullptr,
+            int target_proc_fd = -1);
   void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);
   int munmap(uint32_t process_id, void *addr, size_t length);
   int close(uint32_t process_id);
@@ -240,7 +241,8 @@ private:
 
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
 
-  int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg);
+  int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
+                     int *target_mem_fd = nullptr, int target_proc_fd = -1);
   void *dispatch_mmap(KfdProcess &proc, void *addr, size_t length, int prot, int flags,
                       off_t offset);
   int dispatch_munmap(KfdProcess &proc, void *addr, size_t length);
@@ -275,7 +277,7 @@ private:
   int ipc_import_handle_ioctl(KfdProcess &proc, void *arg);
   int svm_ioctl(KfdProcess &proc, void *arg);
   int runtime_enable_ioctl(KfdProcess &proc, void *arg);
-  int debug_trap_ioctl(KfdProcess &caller, void *arg);
+  int debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_mem_fd, int target_proc_fd);
   void reap_exited_debug_sessions(std::stop_token stop);
   int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
   int debug_queue_snapshot(KfdProcess *target, kfd_ioctl_dbg_trap_queue_snapshot_args &args);
@@ -324,6 +326,9 @@ private:
 
   /// @brief Toggle per-access debugger checks on every compute unit.
   void set_debug_active_on_all_cus(bool active);
+
+  /// @brief Duplicate the authorized target-memory fd for lock-free I/O.
+  UniqueFd duplicate_debug_target_mem(pid_t target_pid) const;
 
   /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
   bool serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,

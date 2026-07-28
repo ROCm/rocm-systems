@@ -367,7 +367,7 @@ fn handle_client(fd: RawFd, shared: &Shared) {
 
     loop {
         let mut header = [0u8; RPC_HEADER_LEN];
-        let (ok, mut in_fd) = recv_header_with_fd(fd, &mut header);
+        let (ok, mut in_fds) = recv_header_with_fds(fd, &mut header);
         if !ok {
             break;
         }
@@ -479,7 +479,9 @@ fn handle_client(fd: RawFd, shared: &Shared) {
                             buf_size: args_bytes as usize,
                             result: 0,
                             shared_handle: -1,
-                            in_handle: in_fd,
+                            in_handle: in_fds[0],
+                            in_mem_handle: in_fds[1],
+                            in_proc_handle: in_fds[2],
                         };
                         unsafe { lib.vm_execute_as(vm, process_id, &mut cmd) };
                         // The debug session adopts the notifier fd on success
@@ -487,7 +489,13 @@ fn handle_client(fd: RawFd, shared: &Shared) {
                         if cmd.in_handle >= 0 {
                             unsafe { libc::close(cmd.in_handle) };
                         }
-                        in_fd = -1;
+                        if cmd.in_mem_handle >= 0 {
+                            unsafe { libc::close(cmd.in_mem_handle) };
+                        }
+                        if cmd.in_proc_handle >= 0 {
+                            unsafe { libc::close(cmd.in_proc_handle) };
+                        }
+                        in_fds = [-1; 3];
                         // `buf_size` is updated in place; clamp the slice
                         // we read back to what the payload actually holds.
                         let out_len = cmd.buf_size.min(payload.len().saturating_sub(8));
@@ -512,8 +520,10 @@ fn handle_client(fd: RawFd, shared: &Shared) {
 
         // Reclaim any notifier fd attached to a non-ioctl message (the client
         // only sends one on DBG_TRAP ENABLE; this is a safety net).
-        if in_fd >= 0 {
-            unsafe { libc::close(in_fd) };
+        for in_fd in in_fds {
+            if in_fd >= 0 {
+                unsafe { libc::close(in_fd) };
+            }
         }
 
         if !keep_going {
@@ -579,13 +589,14 @@ fn recv_exact(fd: RawFd, buf: &mut [u8]) -> bool {
 /// ENABLE). Returns `(ok, fd)`, where `fd` is `-1` if none was received. Any
 /// received fd is close-on-exec and belongs to the caller, which must close it
 /// if unused.
-fn recv_header_with_fd(fd: RawFd, buf: &mut [u8]) -> (bool, RawFd) {
+fn recv_header_with_fds(fd: RawFd, buf: &mut [u8]) -> (bool, [RawFd; 3]) {
     let mut iov = libc::iovec {
         iov_base: buf.as_mut_ptr() as *mut c_void,
         iov_len: buf.len(),
     };
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
-    let cmsg_space = unsafe { libc::CMSG_SPACE(std::mem::size_of::<RawFd>() as u32) } as usize;
+    let cmsg_space =
+        unsafe { libc::CMSG_SPACE((3 * std::mem::size_of::<RawFd>()) as u32) } as usize;
     let mut cmsg_buf = vec![0u8; cmsg_space];
     msg.msg_iov = &mut iov;
     msg.msg_iovlen = 1;
@@ -604,20 +615,29 @@ fn recv_header_with_fd(fd: RawFd, buf: &mut [u8]) -> (bool, RawFd) {
         break r;
     };
     if n <= 0 {
-        return (false, -1);
+        return (false, [-1; 3]);
     }
 
     // Extract an fd if the client attached one as SCM_RIGHTS ancillary data.
-    let mut recv_fd: RawFd = -1;
+    let mut recv_fds = [-1; 3];
+    let mut recv_count = 0;
     unsafe {
         let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
         while !cmsg.is_null() {
             if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS {
-                std::ptr::copy_nonoverlapping(
-                    libc::CMSG_DATA(cmsg),
-                    &mut recv_fd as *mut RawFd as *mut u8,
-                    std::mem::size_of::<RawFd>(),
-                );
+                let data_len = (*cmsg).cmsg_len as usize
+                    - libc::CMSG_LEN(0) as usize;
+                let fd_count = data_len / std::mem::size_of::<RawFd>();
+                let received = libc::CMSG_DATA(cmsg) as *const RawFd;
+                for index in 0..fd_count {
+                    let received_fd = *received.add(index);
+                    if recv_count < recv_fds.len() {
+                        recv_fds[recv_count] = received_fd;
+                        recv_count += 1;
+                    } else {
+                        libc::close(received_fd);
+                    }
+                }
             }
             cmsg = libc::CMSG_NXTHDR(&msg, cmsg);
         }
@@ -627,14 +647,16 @@ fn recv_header_with_fd(fd: RawFd, buf: &mut [u8]) -> (bool, RawFd) {
     // short header with a plain recv.
     let read = n as usize;
     if read < buf.len() && !recv_exact(fd, &mut buf[read..]) {
-        if recv_fd >= 0 {
-            unsafe {
-                libc::close(recv_fd);
+        for recv_fd in recv_fds {
+            if recv_fd >= 0 {
+                unsafe {
+                    libc::close(recv_fd);
+                }
             }
         }
-        return (false, -1);
+        return (false, [-1; 3]);
     }
-    (true, recv_fd)
+    (true, recv_fds)
 }
 
 /// Write exactly `buf.len()` bytes, handling partial writes. Returns

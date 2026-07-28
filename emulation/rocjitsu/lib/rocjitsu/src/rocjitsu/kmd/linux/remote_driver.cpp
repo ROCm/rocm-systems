@@ -159,6 +159,8 @@ RemoteDriver::~RemoteDriver() {
     if (fd >= 0)
       syscall(SYS_close, fd);
   }
+  if (kfd_marker_ != nullptr)
+    syscall(SYS_munmap, kfd_marker_, kfd_marker_size_);
   if (sock_ >= 0)
     syscall(SYS_close, sock_);
   if (shutdown_efd_ >= 0)
@@ -237,6 +239,17 @@ int RemoteDriver::reissue_synthetic_kfd_fd() {
   auto raw_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_remote_kfd", MFD_CLOEXEC));
   if (raw_fd < 0)
     return -1;
+  if (kfd_marker_ == nullptr) {
+    constexpr size_t kMarkerSize = 4096;
+    if (syscall(SYS_ftruncate, raw_fd, kMarkerSize) == 0) {
+      void *marker = reinterpret_cast<void *>(
+          syscall(SYS_mmap, nullptr, kMarkerSize, PROT_NONE, MAP_SHARED, raw_fd, 0));
+      if (marker != MAP_FAILED) {
+        kfd_marker_ = marker;
+        kfd_marker_size_ = kMarkerSize;
+      }
+    }
+  }
   // Use the raw syscall, not fcntl(): this shared object exports an interposed
   // fcntl with default visibility, so an unqualified call would re-enter the
   // shim (reserve_dup_backend/untrack_dup, fd_mutex_) for a plain memfd dup.
@@ -531,19 +544,40 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // dbg_fd so the driver can wake the debugger when a wave stops — the same fd
   // the real kernel would receive through the ioctl. KFD_INVALID_FD (0xffffffff)
   // casts to -1 and is not sent.
-  int send_fd = -1;
+  int send_fds[3] = {-1, -1, -1};
+  size_t num_send_fds = 0;
+  int target_mem_fd = -1;
+  int target_proc_fd = -1;
   if (request == AMDKFD_IOC_DBG_TRAP) {
     auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
-    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0)
-      send_fd = static_cast<int>(dbg->enable.dbg_fd);
+    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0) {
+      if (::fcntl(static_cast<int>(dbg->enable.dbg_fd), F_GETFD) < 0)
+        return -errno;
+      const std::string proc_path = std::format("/proc/{}", dbg->pid);
+      target_proc_fd = ::open(proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+      if (target_proc_fd < 0)
+        return -errno;
+      target_mem_fd = ::openat(target_proc_fd, "mem", O_RDWR | O_CLOEXEC);
+      const int open_errno = errno;
+      if (target_mem_fd < 0) {
+        ::close(target_proc_fd);
+        return -open_errno;
+      }
+      send_fds[num_send_fds++] = static_cast<int>(dbg->enable.dbg_fd);
+      send_fds[num_send_fds++] = target_mem_fd;
+      send_fds[num_send_fds++] = target_proc_fd;
+    }
   }
-  if (send_fd >= 0) {
-    if (rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1) <= 0) {
+  if (num_send_fds > 0) {
+    const ssize_t sent = rpc_send_msg(sock_, buf.data(), buf.size(), send_fds, num_send_fds);
+    const int send_errno = errno;
+    ::close(target_mem_fd);
+    ::close(target_proc_fd);
+    if (sent <= 0) {
       // Preserve the transport errno — e.g. EBADF when the client handed us a
       // closed notifier fd for SCM_RIGHTS — instead of a bare -1, which the
       // interposer would surface as EPERM (-EPERM == -1).
-      int err = errno;
-      return err > 0 ? -err : -1;
+      return send_errno > 0 ? -send_errno : -1;
     }
   } else if (!rpc_send_exact(sock_, buf.data(), buf.size())) {
     int err = errno;

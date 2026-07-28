@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <fcntl.h>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -59,7 +60,7 @@ public:
     util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec, " pt_size=", pt->size());
     std::unique_lock lk(vmid_mutex_);
-    vmid_table_[pid] = {pt, mu};
+    vmid_table_[pid] = {.page_table = pt, .mutex = mu, .client_pid = 0, .client_mem_fd = {}};
   }
 
   /// @brief Unregister a process from the VMID table.
@@ -75,6 +76,15 @@ public:
     auto it = vmid_table_.find(pid);
     if (it != vmid_table_.end())
       it->second.client_pid = client_pid;
+  }
+
+  void set_process_mem_fd(uint32_t pid, int mem_fd) {
+    std::unique_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(pid);
+    if (it == vmid_table_.end())
+      return;
+    const int duplicate = mem_fd >= 0 ? ::fcntl(mem_fd, F_DUPFD_CLOEXEC, 0) : -1;
+    it->second.client_mem_fd.reset(duplicate);
   }
 
   /// @brief Enable passthrough for unmapped addresses (local/user-mode only).
@@ -124,10 +134,12 @@ public:
   bool is_fetchable(uint64_t addr, uint32_t vmid = 0) const {
     if (is_mapped(addr, vmid) || simdojo::SparseMemory::has_page(addr))
       return true;
+    uint8_t byte = 0;
+    if (UniqueFd mem_fd = duplicate_client_mem_fd(vmid); mem_fd.get() >= 0)
+      return pread(mem_fd.get(), &byte, sizeof(byte), static_cast<off_t>(addr)) == sizeof(byte);
     pid_t pid = client_pid_for_vmid(vmid);
     if (pid <= 0)
       return false;
-    uint8_t byte = 0;
     iovec local{&byte, sizeof(byte)};
     iovec remote{reinterpret_cast<void *>(addr), sizeof(byte)};
     return process_vm_readv(pid, &local, 1, &remote, 1, 0) == sizeof(byte);
@@ -372,6 +384,7 @@ private:
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
     pid_t client_pid = 0;
+    UniqueFd client_mem_fd;
   };
 
   uint8_t *translate(uint64_t addr, uint32_t vmid) const {
@@ -400,7 +413,20 @@ private:
     return (it != vmid_table_.end()) ? it->second.client_pid : 0;
   }
 
+  UniqueFd duplicate_client_mem_fd(uint32_t vmid) const {
+    std::shared_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(vmid);
+    if (it == vmid_table_.end() || it->second.client_mem_fd.get() < 0)
+      return {};
+    return UniqueFd(::fcntl(it->second.client_mem_fd.get(), F_DUPFD_CLOEXEC, 0));
+  }
+
   bool read_client_memory(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
+    if (UniqueFd mem_fd = duplicate_client_mem_fd(vmid); mem_fd.get() >= 0) {
+      const ssize_t rc = pread(mem_fd.get(), dst, len, static_cast<off_t>(addr));
+      if (rc == static_cast<ssize_t>(len))
+        return true;
+    }
     pid_t pid = client_pid_for_vmid(vmid);
     if (pid <= 0)
       return false;
@@ -416,6 +442,11 @@ private:
   }
 
   bool write_client_memory(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
+    if (UniqueFd mem_fd = duplicate_client_mem_fd(vmid); mem_fd.get() >= 0) {
+      const ssize_t rc = pwrite(mem_fd.get(), src, len, static_cast<off_t>(addr));
+      if (rc == static_cast<ssize_t>(len))
+        return true;
+    }
     pid_t pid = client_pid_for_vmid(vmid);
     if (pid <= 0)
       return false;

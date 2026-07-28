@@ -81,6 +81,10 @@ pub struct RjVmCmd {
     /// In daemon mode the VM substitutes it into DBG_TRAP ENABLE and, on
     /// adoption, clears it to -1 so the caller does not close it.
     pub in_handle: RjHandle,
+    /// `[in/out]` Debugger-authorized target `/proc/pid/mem` fd, or -1.
+    pub in_mem_handle: RjHandle,
+    /// `[in]` Pinned target `/proc/pid` directory fd, or -1.
+    pub in_proc_handle: RjHandle,
 }
 
 /// Device memory mapping descriptor (`rj_vm_map_t`).
@@ -489,7 +493,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<RjVmUnmap>(), 16);
         // rj_vm_cmd_t: u32 + (pad) + ptr + usize + i32 + i32 + i32 + (pad)
         // on 64-bit.
-        assert_eq!(std::mem::size_of::<RjVmCmd>(), 40);
+        assert_eq!(std::mem::size_of::<RjVmCmd>(), 48);
         assert_eq!(RjVmMode::Daemon as i32, 2);
         // rj_vm_gpu_info_t — must match the 312-byte RpcGpuInfo the
         // daemon handshake embeds (static_assert in rpc.h).

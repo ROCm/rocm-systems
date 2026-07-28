@@ -68,18 +68,28 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
     // debugger notifier pipe on DBG_TRAP ENABLE). A received fd is owned here
     // and must be closed if not adopted by the debug session.
     int in_fd = -1;
+    int in_mem_fd = -1;
+    int in_proc_fd = -1;
     {
-      int in_fds[1] = {-1};
-      size_t num_in_fds = 1;
+      int in_fds[3] = {-1, -1, -1};
+      size_t num_in_fds = 3;
       ssize_t hdr_bytes = rpc_recv_msg(client_fd, &hdr, sizeof(hdr), in_fds, &num_in_fds);
       if (num_in_fds > 0)
         in_fd = in_fds[0];
+      if (num_in_fds > 1)
+        in_mem_fd = in_fds[1];
+      if (num_in_fds > 2)
+        in_proc_fd = in_fds[2];
       // A short read means the peer truncated the header (or closed); drop the
       // connection instead of acting on a partial header, reclaiming any fd that
       // arrived with it. (rpc_recv_exact did this implicitly; recvmsg does not.)
       if (hdr_bytes != static_cast<ssize_t>(sizeof(hdr))) {
         if (in_fd >= 0)
           ::close(in_fd);
+        if (in_mem_fd >= 0)
+          ::close(in_mem_fd);
+        if (in_proc_fd >= 0)
+          ::close(in_proc_fd);
         break;
       }
     }
@@ -232,12 +242,20 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       cmd.buf_size = ioctl_request->args_bytes;
       cmd.shared_handle = -1;
       cmd.in_handle = in_fd;
+      cmd.in_mem_handle = in_mem_fd;
+      cmd.in_proc_handle = in_proc_fd;
       in_fd = -1; // ownership passes to cmd; execute clears it on adoption
+      in_mem_fd = -1;
+      in_proc_fd = -1;
       rj_vm_execute_as(vm, process_id, &cmd);
       // The debug session adopts the notifier fd on success (in_handle cleared);
       // reclaim it otherwise.
       if (cmd.in_handle >= 0)
         ::close(cmd.in_handle);
+      if (cmd.in_mem_handle >= 0)
+        ::close(cmd.in_mem_handle);
+      if (cmd.in_proc_handle >= 0)
+        ::close(cmd.in_proc_handle);
 
       RpcHeader resp{};
       resp.opcode = hdr.opcode;
@@ -269,6 +287,10 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
     // client only sends one on DBG_TRAP ENABLE).
     if (in_fd >= 0)
       ::close(in_fd);
+    if (in_mem_fd >= 0)
+      ::close(in_mem_fd);
+    if (in_proc_fd >= 0)
+      ::close(in_proc_fd);
   }
 
   if (process_id != 0)

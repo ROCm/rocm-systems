@@ -124,6 +124,23 @@ int pidfd_is_exited(int pidfd) {
   return rc == 1 && (pfd.revents & (POLLIN | POLLHUP)) ? 1 : 0;
 }
 
+int procfd_is_zombie(int procfd) {
+  const int stat_fd = ::openat(procfd, "stat", O_RDONLY | O_CLOEXEC);
+  if (stat_fd < 0)
+    return errno == ENOENT ? 1 : -errno;
+  char buffer[4096];
+  const ssize_t bytes = ::read(stat_fd, buffer, sizeof(buffer) - 1);
+  const int read_error = errno;
+  ::close(stat_fd);
+  if (bytes < 0)
+    return -read_error;
+  buffer[bytes] = '\0';
+  const char *name_end = std::strrchr(buffer, ')');
+  if (name_end == nullptr || name_end[1] != ' ' || name_end[2] == '\0')
+    return -EIO;
+  return name_end[2] == 'Z' || name_end[2] == 'X';
+}
+
 int pin_process_identity(pid_t pid, UniqueFd &pidfd, UniqueFd &procfd) {
   const int raw_pidfd = static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
   if (raw_pidfd < 0)
@@ -340,11 +357,25 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
     if (stop.stop_requested())
       break;
     for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
-      if (pidfd_is_exited(it->second.target_pidfd.get()) == 1 ||
-          pidfd_is_exited(it->second.debugger_pidfd.get()) == 1)
+      if (pidfd_is_exited(it->second.debugger_pidfd.get()) == 1) {
         it = debug_sessions_.erase(it);
-      else
+      } else if (pidfd_is_exited(it->second.target_pidfd.get()) == 1) {
+        if (!it->second.target_exited) {
+          if (auto target = find_process_by_client_pid(it->first)) {
+            for (auto &g : gpus_)
+              if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+                mem->set_process_mem_fd(target->process_id(), -1);
+          }
+          it->second.owned_dbg_fd.reset();
+          it->second.target_mem_fd.reset();
+          it->second.dbg_fd = -1;
+          it->second.enabled = false;
+          it->second.target_exited = true;
+        }
         ++it;
+      } else {
+        ++it;
+      }
     }
   }
 }
@@ -601,6 +632,16 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     init_command_processors_locked();
   }
 
+  if (client_pid > 0) {
+    std::lock_guard<std::mutex> debug_lock(debug_sessions_mutex_);
+    auto session = debug_sessions_.find(client_pid);
+    if (session != debug_sessions_.end() && session->second.target_mem_fd.get() >= 0) {
+      for (auto &g : gpus_)
+        if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+          mem->set_process_mem_fd(pid, session->second.target_mem_fd.get());
+    }
+  }
+
   return pid;
 }
 
@@ -718,11 +759,23 @@ int SimulatedKfd::close(uint32_t process_id) {
   {
     std::lock_guard<std::mutex> debug_lock(debug_sessions_mutex_);
     for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
-      if (pidfd_is_exited(it->second.target_pidfd.get()) == 1 ||
-          pidfd_is_exited(it->second.debugger_pidfd.get()) == 1)
+      if (pidfd_is_exited(it->second.debugger_pidfd.get()) == 1) {
         it = debug_sessions_.erase(it);
-      else
+      } else if (pidfd_is_exited(it->second.target_pidfd.get()) == 1) {
+        if (auto target = find_process_by_client_pid(it->first)) {
+          for (auto &g : gpus_)
+            if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+              mem->set_process_mem_fd(target->process_id(), -1);
+        }
+        it->second.owned_dbg_fd.reset();
+        it->second.target_mem_fd.reset();
+        it->second.dbg_fd = -1;
+        it->second.enabled = false;
+        it->second.target_exited = true;
         ++it;
+      } else {
+        ++it;
+      }
     }
   }
 
@@ -857,14 +910,16 @@ int SimulatedKfd::ioctl(unsigned long request, void *arg) {
   return ioctl(local_process_id_, request, arg);
 }
 
-int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg) {
+int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg, int *target_mem_fd,
+                        int target_proc_fd) {
   auto proc = find_process(process_id);
   if (!proc)
     return -ESRCH;
-  return dispatch_ioctl(*proc, request, arg);
+  return dispatch_ioctl(*proc, request, arg, target_mem_fd, target_proc_fd);
 }
 
-int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg) {
+int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
+                                 int *target_mem_fd, int target_proc_fd) {
   util::Logger::driver("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
 
   unsigned long dispatch_request = canonical_ioctl_request(request);
@@ -928,7 +983,7 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
     case AMDKFD_IOC_RUNTIME_ENABLE:
       return runtime_enable_ioctl(proc, arg);
     case AMDKFD_IOC_DBG_TRAP:
-      return debug_trap_ioctl(proc, arg);
+      return debug_trap_ioctl(proc, arg, target_mem_fd, target_proc_fd);
     case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: {
       auto *a = static_cast<kfd_ioctl_set_scratch_backing_va_args *>(arg);
       uint32_t ord = gpu_ordinal(a->gpu_id);
@@ -2374,19 +2429,32 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
       waves[index].lds.clear();
   }
   auto *memory = gpu->soc->memory();
+  auto proc = find_process(process_id);
+  if (!proc)
+    return false;
+  UniqueFd target_mem = duplicate_debug_target_mem(proc->client_pid());
+  bool publish_ok = true;
   const auto layout = kmd::serialize_queue_cwsr_bulk(
       ctx_base, ctx_size, waves, [&](uint64_t address, std::span<const uint8_t> bytes) {
-        memory->write_block(address, bytes, process_id);
+        if (target_mem.get() < 0) {
+          memory->write_block(address, bytes, process_id);
+          return;
+        }
+        const ssize_t written =
+            pwrite(target_mem.get(), bytes.data(), bytes.size(), static_cast<off_t>(address));
+        if (written != static_cast<ssize_t>(bytes.size())) {
+          publish_ok = false;
+          util::Logger::warn("CWSR target write failed: addr=0x", std::hex, address,
+                             " pid=", std::dec, proc->client_pid(), " rc=", written,
+                             " errno=", errno);
+        }
       });
-  if (!layout.ok)
+  if (!layout.ok || !publish_ok)
     return false;
 
   uint64_t oldest_packet = UINT64_MAX;
   for (const auto &wave : waves)
     oldest_packet = std::min<uint64_t>(oldest_packet, wave.queue_packet_id);
-  auto proc = find_process(process_id);
-  if (!proc)
-    return false;
   uint64_t read_pointer = 0;
   uint64_t write_pointer = 0;
   {
@@ -2709,6 +2777,14 @@ void SimulatedKfd::set_debug_active_on_all_cus(bool active) {
   }
 }
 
+UniqueFd SimulatedKfd::duplicate_debug_target_mem(pid_t target_pid) const {
+  std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+  auto session = debug_sessions_.find(target_pid);
+  if (session == debug_sessions_.end() || session->second.target_mem_fd.get() < 0)
+    return {};
+  return UniqueFd(safe_fcntl(session->second.target_mem_fd.get(), F_DUPFD_CLOEXEC, 0));
+}
+
 void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWaveState &state) {
   constexpr uint32_t kModeDebugEnMask = 1u << 11;
   constexpr uint32_t kStatusHaltMask = 1u << 13;
@@ -2824,10 +2900,25 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
           states[index].lds.clear();
       }
       auto *memory = gpu->soc->memory();
+      UniqueFd target_mem = duplicate_debug_target_mem(proc->client_pid());
+      bool read_ok = true;
       restored = kmd::deserialize_queue_cwsr_bulk(
           context.base, context.size, states, [&](uint64_t address, std::span<uint8_t> bytes) {
-            memory->read_block(address, bytes, proc->process_id());
+            if (target_mem.get() < 0) {
+              memory->read_block(address, bytes, proc->process_id());
+              return;
+            }
+            const ssize_t bytes_read =
+                pread(target_mem.get(), bytes.data(), bytes.size(), static_cast<off_t>(address));
+            if (bytes_read != static_cast<ssize_t>(bytes.size())) {
+              read_ok = false;
+              std::fill(bytes.begin(), bytes.end(), 0);
+              util::Logger::warn("CWSR target read failed: addr=0x", std::hex, address,
+                                 " pid=", std::dec, proc->client_pid(), " rc=", bytes_read,
+                                 " errno=", errno);
+            }
           });
+      restored = restored && read_ok;
     }
     std::unordered_set<amdgpu::ComputeUnitCore *> wake;
     if (restored) {
@@ -3117,7 +3208,8 @@ int SimulatedKfd::debug_query_exception_info(pid_t target_pid,
 }
 
 // in real kernel, amd/amdkfd/kfd_chardev.c kfd_ioctl_set_debug_trap
-int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
+int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_mem_fd,
+                                   int target_proc_fd) {
   auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
   util::Logger::driver("DBG_TRAP pid=", args->pid, " op=", args->op);
   // rocjitsu always models hardware scheduling, so the driver's
@@ -3139,17 +3231,33 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   std::unique_lock<std::mutex> lk(debug_sessions_mutex_);
   auto session_it = debug_sessions_.find(target_pid);
   if (session_it != debug_sessions_.end()) {
+    if (session_it->second.target_exited) {
+      if (args->op != KFD_IOC_DBG_TRAP_ENABLE)
+        return -ESRCH;
+      debug_sessions_.erase(session_it);
+      session_it = debug_sessions_.end();
+    }
+  }
+  if (session_it != debug_sessions_.end()) {
     const int target_exited = pidfd_is_exited(session_it->second.target_pidfd.get());
     if (target_exited < 0)
       return target_exited;
     const int debugger_exited = pidfd_is_exited(session_it->second.debugger_pidfd.get());
     if (debugger_exited < 0)
       return debugger_exited;
-    if (target_exited == 1 || debugger_exited == 1) {
+    if (target_exited == 1) {
+      session_it->second.owned_dbg_fd.reset();
+      session_it->second.target_mem_fd.reset();
+      session_it->second.dbg_fd = -1;
+      session_it->second.enabled = false;
+      session_it->second.target_exited = true;
+      if (args->op != KFD_IOC_DBG_TRAP_ENABLE)
+        return -ESRCH;
       debug_sessions_.erase(session_it);
       session_it = debug_sessions_.end();
-      if (target_exited == 1 && args->op != KFD_IOC_DBG_TRAP_ENABLE)
-        return -ESRCH;
+    } else if (debugger_exited == 1) {
+      debug_sessions_.erase(session_it);
+      session_it = debug_sessions_.end();
     }
   }
   const bool enabled = session_it != debug_sessions_.end();
@@ -3163,6 +3271,9 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
       return -ESRCH;
     if (probe_result != 0)
       return probe_result;
+    const int zombie = procfd_is_zombie(probe_procfd.get());
+    if (zombie != 0)
+      return zombie == 1 ? -ESRCH : zombie;
     return -EINVAL;
   }
 
@@ -3285,6 +3396,21 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     const int fl = safe_fcntl(dbg_fd, F_GETFL);
     if (fl == -1 || (fl & O_ACCMODE) == O_RDONLY)
       return -EBADF;
+    if (daemon_mode_) {
+      if (target_mem_fd == nullptr || *target_mem_fd < 0 || target_proc_fd < 0)
+        return -EBADF;
+      const int mem_fl = safe_fcntl(*target_mem_fd, F_GETFL);
+      if (mem_fl == -1 || (mem_fl & O_ACCMODE) != O_RDWR)
+        return -EBADF;
+      struct stat daemon_proc_stat {};
+      struct stat client_proc_stat {};
+      if (fstat(target_procfd->get(), &daemon_proc_stat) != 0 ||
+          fstat(target_proc_fd, &client_proc_stat) != 0)
+        return -errno;
+      if (daemon_proc_stat.st_dev != client_proc_stat.st_dev ||
+          daemon_proc_stat.st_ino != client_proc_stat.st_ino)
+        return -ESRCH;
+    }
 
     KfdProcess::DebugSession sess{};
     sess.target_pidfd = std::move(new_target_pidfd);
@@ -3329,7 +3455,16 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     // debugger's own descriptor, left for the debugger to close.
     if (daemon_mode_)
       sess.owned_dbg_fd = UniqueFd(dbg_fd);
-    debug_sessions_.emplace(target_pid, std::move(sess));
+    if (daemon_mode_) {
+      sess.target_mem_fd = UniqueFd(*target_mem_fd);
+      *target_mem_fd = -1;
+    }
+    auto [inserted, _] = debug_sessions_.emplace(target_pid, std::move(sess));
+    if (target_proc != nullptr && inserted->second.target_mem_fd.get() >= 0) {
+      for (auto &g : gpus_)
+        if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+          mem->set_process_mem_fd(target_proc->process_id(), inserted->second.target_mem_fd.get());
+    }
     set_debug_active_on_all_cus(true);
     debug_sessions_cv_.notify_one();
     return 0;
@@ -3373,6 +3508,11 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
             cu->schedule_work_async();
         }
       });
+    }
+    if (target_proc != nullptr) {
+      for (auto &g : gpus_)
+        if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+          mem->set_process_mem_fd(target_proc->process_id(), -1);
     }
     debug_sessions_.erase(target_pid);
     if (debug_sessions_.empty())
