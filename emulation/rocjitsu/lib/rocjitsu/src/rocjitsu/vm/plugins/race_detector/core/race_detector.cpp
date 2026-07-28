@@ -126,8 +126,7 @@ void RaceDetector::adjustByteCounts(const IntervalSet &ivs, std::vector<int> &co
 }
 
 std::string
-RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc,
-                                WaveRaceState * /*waveRaceState*/, int numSourceLines,
+RaceDetector::decorateException(const RaceViolation &e, uint64_t wavePc, int numSourceLines,
                                 std::function<std::string_view(int)> getSourceLine) const {
 
   auto printCodeBlock = [&](std::ostringstream &oss, int64_t startLine, int64_t endLine,

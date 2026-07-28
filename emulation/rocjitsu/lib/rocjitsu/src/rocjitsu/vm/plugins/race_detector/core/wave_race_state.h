@@ -21,7 +21,7 @@ class RaceDetector;
 /// event allocation and lifecycle transitions.
 class WaveRaceState {
 public:
-  WaveRaceState(int vgprCount, int sgprCount, WaveId waveId, RaceDetector *detector);
+  WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *);
 
   /// Register an in-flight memory event that does not involve LDS.
   /// \param pc The PC of the instruction that produced the event.
@@ -58,10 +58,10 @@ public:
   void sWaitCntLgkmcnt(int lgkmcnt);
 
   /// Dispatch a pending memory event produced by an instruction executor.
-  void dispatch(PendingMemoryEvent event);
+  void dispatch(PendingMemoryEvent);
 
   /// Dispatch a pending wait count produced by an s_waitcnt executor.
-  void dispatch(PendingWaitCount waitCount);
+  void dispatch(PendingWaitCount);
 
   /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
   void flushBarrierPendingEvents();
@@ -108,9 +108,8 @@ public:
   WaveId getWaveId() const { return waveId; }
 
 private:
-  void registerEventWithIntervals(uint64_t pc, MemoryEventType type,
-                                  std::vector<uint32_t> registers, uint64_t execMask,
-                                  uint8_t byteMask, IntervalSet ldsIntervals);
+  void registerEventWithIntervals(uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
+                                  uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals);
   void retireEventRegisters(EventId);
 
   template <typename Pred> void resolveWaitCnt(int limit, Pred isTargetType);

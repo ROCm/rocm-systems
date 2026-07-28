@@ -1506,7 +1506,7 @@ TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), second};
   std::vector<std::string> source_lines(64, "instruction");
   std::string report = detector.decorateException(
-      violation, /*wavePc=*/30, /*waveRaceState=*/nullptr, static_cast<int>(source_lines.size()),
+      violation, /*wavePc=*/30, static_cast<int>(source_lines.size()),
       [&](int line) -> std::string_view { return source_lines.at(static_cast<size_t>(line)); });
 
   EXPECT_NE(report.find("20 --> |"), std::string::npos);

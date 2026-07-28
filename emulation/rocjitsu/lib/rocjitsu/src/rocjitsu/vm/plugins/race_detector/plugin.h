@@ -43,8 +43,8 @@ template <typename T, size_t N> struct RingBuffer {
   size_t size() const { return len; }
 };
 
-/// Return the memory instruction recorded as the exact conflict for @p v.
-MarkedPc findConflict(const RaceViolation &v, RaceDetector &detector);
+/// Return the memory instruction recorded as the exact conflict.
+MarkedPc findConflict(const RaceViolation &, RaceDetector &);
 
 /// Format a trace with ==> markers and wave/lane annotations.
 std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
