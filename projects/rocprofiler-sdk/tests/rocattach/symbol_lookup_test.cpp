@@ -33,6 +33,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -247,23 +248,82 @@ expect_malformed_mapped_elf_fails()
     munmap(mapping, contents.size());
     std::filesystem::remove(path_buffer);
 }
+
+void
+expect_root_fallback_validates_build_id(const loaded_library& source,
+                                        const loaded_library& different_build,
+                                        const loaded_library& no_build_id)
+{
+    auto path = std::filesystem::temp_directory_path() /
+                "librocprofiler-register.so.rocattach-replaced-XXXXXX";
+    auto path_buffer = path.string();
+    auto fd          = mkstemp(path_buffer.data());
+    if(fd < 0)
+    {
+        std::cerr << "mkstemp failed for replaced ELF fixture\n";
+        std::exit(1);
+    }
+    close(fd);
+
+    std::filesystem::copy_file(
+        source.path, path_buffer, std::filesystem::copy_options::overwrite_existing);
+    auto mapped = load_library(path_buffer.c_str());
+
+    // Keep the original inode mapped, but replace its pathname with an
+    // identical ELF on a different inode. This models the identity mismatch
+    // seen when maps exposes an OverlayFS backing file.
+    std::filesystem::remove(path_buffer);
+    std::filesystem::copy_file(source.path, path_buffer);
+
+    setenv("ROCATTACH_TEST_DISABLE_MAP_FILES", "1", 1);
+    expect_resolves_to_dlsym(mapped);
+
+    // A layout-compatible pathname replacement with another Build ID must not
+    // be used to resolve a symbol from the still-mapped original.
+    auto replacement = path_buffer + ".replacement";
+    std::filesystem::copy_file(
+        different_build.path, replacement, std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::rename(replacement, path_buffer);
+
+    void* resolved = nullptr;
+    if(rocprofiler::rocattach::find_symbol(getpid(), resolved, mapped.path, ATTACH_SYMBOL_NAME))
+    {
+        std::cerr << "find_symbol unexpectedly accepted a replacement ELF with a different "
+                     "Build ID\n";
+        std::exit(1);
+    }
+
+    std::filesystem::copy_file(
+        no_build_id.path, replacement, std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::rename(replacement, path_buffer);
+    resolved = nullptr;
+    if(rocprofiler::rocattach::find_symbol(getpid(), resolved, mapped.path, ATTACH_SYMBOL_NAME))
+    {
+        std::cerr << "find_symbol unexpectedly accepted a replacement ELF without a Build ID\n";
+        std::exit(1);
+    }
+    unsetenv("ROCATTACH_TEST_DISABLE_MAP_FILES");
+
+    cleanup_loaded_library(mapped);
+    std::filesystem::remove(path_buffer);
+}
 }  // namespace
 
 int
 main(int argc, char** argv)
 {
-    if(argc != 7)
+    if(argc != 8)
     {
         std::cerr << "Usage: " << argv[0]
                   << " <normal-lib> <gnu-hash-lib> <sysv-hash-lib> <shifted-lib> "
-                     "<ambiguous-a> <ambiguous-b>\n";
+                     "<no-build-id-lib> <ambiguous-a> <ambiguous-b>\n";
         return 1;
     }
 
     auto libraries = std::vector<loaded_library>{};
-    libraries.reserve(6);
+    libraries.reserve(7);
     for(auto* path :
-        std::array<const char*, 6>{argv[1], argv[2], argv[3], argv[4], argv[5], argv[6]})
+        std::array<const char*, 7>{argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]})
     {
         libraries.emplace_back(load_library(path));
     }
@@ -288,6 +348,7 @@ main(int argc, char** argv)
     }
     expect_ambiguous_basename_fails();
     expect_malformed_mapped_elf_fails();
+    expect_root_fallback_validates_build_id(libraries.at(0), libraries.at(3), libraries.at(4));
 
     std::cout << "Test PASSED: target ELF resolver resolved exact mapped libraries and rejected "
                  "ambiguous and malformed mappings\n";

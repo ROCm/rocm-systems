@@ -73,6 +73,7 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
         target_sources(${NAME} PRIVATE symbol_lookup_fixture.cpp)
         target_compile_definitions(${NAME} PRIVATE ROCATTACH_FIXTURE_VALUE=${VALUE})
         target_link_libraries(${NAME} PRIVATE rocprofiler-sdk::tests-build-flags)
+        target_link_options(${NAME} PRIVATE "LINKER:--build-id")
         set_target_properties(${NAME} PROPERTIES OUTPUT_NAME
                                                  "rocprofiler-register.so.${NAME}")
         if(HASH_STYLE)
@@ -86,6 +87,9 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-shifted 6 "")
     target_compile_definitions(rocattach-symbol-lookup-fixture-shifted
                                PRIVATE ROCATTACH_FIXTURE_PADDED=1)
+    rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-no-build-id 7 "")
+    set_property(TARGET rocattach-symbol-lookup-fixture-no-build-id
+                 PROPERTY LINK_OPTIONS "LINKER:--build-id=none")
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-a 4 "")
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-b 5 "")
 
@@ -96,6 +100,8 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
         rocattach-symbol-lookup-test
         PRIVATE "${ROCATTACH_SYMBOL_LOOKUP_SOURCE_ROOT}"
                 "${ROCATTACH_SYMBOL_LOOKUP_SOURCE_ROOT}/lib/rocprofiler-sdk-rocattach")
+    target_compile_definitions(rocattach-symbol-lookup-test
+                               PRIVATE ROCPROFILER_ROCATTACH_TESTING=1)
     target_link_libraries(
         rocattach-symbol-lookup-test
         PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
@@ -109,6 +115,7 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
         rocattach-symbol-lookup-fixture-gnu
         rocattach-symbol-lookup-fixture-sysv
         rocattach-symbol-lookup-fixture-shifted
+        rocattach-symbol-lookup-fixture-no-build-id
         rocattach-symbol-lookup-fixture-ambiguous-a
         rocattach-symbol-lookup-fixture-ambiguous-b)
 
@@ -119,6 +126,7 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
              $<TARGET_FILE:rocattach-symbol-lookup-fixture-gnu>
              $<TARGET_FILE:rocattach-symbol-lookup-fixture-sysv>
              $<TARGET_FILE:rocattach-symbol-lookup-fixture-shifted>
+             $<TARGET_FILE:rocattach-symbol-lookup-fixture-no-build-id>
              $<TARGET_FILE:rocattach-symbol-lookup-fixture-ambiguous-a>
              $<TARGET_FILE:rocattach-symbol-lookup-fixture-ambiguous-b>
         TIMEOUT 30
