@@ -1812,7 +1812,7 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
 
     constexpr int kMaxDevsPerNic = NCCL_NET_MAX_DEVS_PER_NIC;
 
-    // --- Collect all device properties and identify physical (non-merged) devices ---
+    // --- Collect all device properties and identify the physical devices ---
     std::vector<ncclNetProperties_t> allProps(ndev);
     std::vector<int> physicalDevices;
 
@@ -1829,7 +1829,7 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
     }
 
     if (physicalDevices.empty()) {
-        GTEST_SKIP() << "No physical (non-merged) IB devices found";
+        GTEST_SKIP() << "No physical IB devices found";
     }
 
     // --- Take up to kMaxDevsPerNic physical devices sharing one speed ---
