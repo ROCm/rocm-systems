@@ -25,6 +25,7 @@ external_projects_current_project = "rocjitsu"
 extensions = [
     "rocm_docs",
     "sphinx_design",
+    "sphinxcontrib.mermaid",
     "breathe",
 ]
 exclude_patterns = ["README.md"]

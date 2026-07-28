@@ -27,10 +27,13 @@ compute units (CUs).
 
 ```mermaid
 flowchart LR
-
-:   SoC \--\> XCD SoC \--\> IOD SoC \--\> GpuMemory XCD \--\>
-    CP\[CommandProcessor\] XCD \--\> SE\[ShaderEngine\] XCD \--\> L2\[L2
-    Cache\] SE \--\> CU\[ComputeUnit\]
+  SoC --> XCD
+  SoC --> IOD
+  SoC --> GpuMemory
+  XCD --> CP[CommandProcessor]
+  XCD --> SE[ShaderEngine]
+  XCD --> L2[L2 Cache]
+  SE --> CU[ComputeUnit]
 ```
 The JSON configuration defines this hierarchy declaratively. Range
 expansion syntax (for example, `xcd[0:8]`) creates multiple instances,

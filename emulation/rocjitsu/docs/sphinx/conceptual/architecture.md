@@ -20,11 +20,12 @@ infrastructure) to top (unmodified user binaries).
 
 ```mermaid
 flowchart
-
-:   A\["HIP / ROCR / RCCL"\] \--\> B\["KMD emulation"\] B \--\>
-    C\["VM / hardware model"\] C \--\> D\["ISA layer"\] D \--\>
-    E\["Code layer"\] E \--\> F\["Configuration"\] F \--\>
-    G\["simdojo PDES engine"\]
+   A["HIP / ROCR / RCCL"] --> B["KMD emulation"]
+   B --> C["VM / hardware model"]
+   C --> D["ISA layer"]
+   D --> E["Code layer"]
+   E --> F["Configuration"]
+   F --> G["simdojo PDES engine"]
 ```
 Each layer in the stack depends on the layers below it, with the
 configuration and simulation engine providing the foundation.
