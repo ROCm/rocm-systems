@@ -11,7 +11,9 @@
 
 #include <limits>
 
-namespace amd { class Device; }  // forward declaration — full type in device/device.hpp
+namespace amd {
+class Device;
+}  // namespace amd
 
 namespace amd {
 
@@ -23,8 +25,7 @@ namespace amd {
  */
 
 //! A fixed 3-element typed index space (no dimension tracking — NDRangeContainer owns dims).
-template <typename T = size_t>
-class NDRange : public EmbeddedObject {
+template <typename T = size_t> class NDRange : public EmbeddedObject {
  private:
   T data_[3];  //!< indexes array
 
@@ -39,10 +40,8 @@ class NDRange : public EmbeddedObject {
   NDRange(const NDRange& space) { *this = space; }
 
   //! Converting copy constructor — widens or narrows element type.
-  template <typename U>
-  NDRange(const NDRange<U>& space) {
-    for (size_t i = 0; i < 3; ++i)
-      data_[i] = static_cast<T>(space[i]);
+  template <typename U> NDRange(const NDRange<U>& space) {
+    for (size_t i = 0; i < 3; ++i) data_[i] = static_cast<T>(space[i]);
   }
 
   //! Copy operator.
@@ -75,23 +74,22 @@ class NDRange : public EmbeddedObject {
 
 using NDRange32 = NDRange<uint32_t>;  //!< AQL grid_size_{x,y,z}
 using NDRange16 = NDRange<uint16_t>;  //!< AQL workgroup_size_{x,y,z}
-using NDRange8  = NDRange<uint8_t>;   //!< AQL cluster_size_{x,y,z}
+using NDRange8 = NDRange<uint8_t>;    //!< AQL cluster_size_{x,y,z}
 
 //! Stucture to store launch parameters.
 struct LaunchParams {
   NDRange32 global_;         //!< Total number of work-items in N-dims (matches AQL grid_size)
   NDRange16 local_;          //!< Number of work-items per workgroup (matches AQL workgroup_size)
-  NDRange8  cluster_;        //!< Cluster dims (matches AQL cluster_size, max 255)
+  NDRange8 cluster_;         //!< Cluster dims (matches AQL cluster_size, max 255)
   NDRange32 grid_;           //!< Total number of workgroups in grid in N-dims
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
   bool hipParams_;           //!< If this is launched through hipParams_
   bool validConfig_;         //!< Flag will be set to false when config is not correct.
 
-  LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX,
-               uint32_t localY, uint32_t localZ, uint32_t sharedMemBytes, const Device& device,
+  LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX, uint32_t localY,
+               uint32_t localZ, uint32_t sharedMemBytes, const Device& device,
                uint32_t clusterX = 1, uint32_t clusterY = 1, uint32_t clusterZ = 1,
-               uint32_t gridX = 1, uint32_t gridY = 1, uint32_t gridZ = 1,
-               bool hipParams = false)
+               uint32_t gridX = 1, uint32_t gridY = 1, uint32_t gridZ = 1, bool hipParams = false)
       : global_(static_cast<uint32_t>(globalX), static_cast<uint32_t>(globalY),
                 static_cast<uint32_t>(globalZ)),
         local_(static_cast<uint16_t>(localX), static_cast<uint16_t>(localY),
@@ -100,14 +98,14 @@ struct LaunchParams {
                  static_cast<uint8_t>(clusterZ)),
         grid_(gridX, gridY, gridZ),
         sharedMemBytes_(sharedMemBytes),
-        hipParams_(hipParams), validConfig_(true) {
-
+        hipParams_(hipParams),
+        validConfig_(true) {
     if (hipParams_) {
       // Check that the size_t globals fit in uint32_t before the narrowing cast above.
-      if (globalX > std::numeric_limits<uint32_t>::max()
-          || globalY > std::numeric_limits<uint32_t>::max()
-          || globalZ > std::numeric_limits<uint32_t>::max()) {
-          validConfig_ = false;
+      if (globalX > std::numeric_limits<uint32_t>::max() ||
+          globalY > std::numeric_limits<uint32_t>::max() ||
+          globalZ > std::numeric_limits<uint32_t>::max()) {
+        validConfig_ = false;
       }
     } else {
       // Non HIPLaunchParams, App directly calculated the global and local size,
@@ -175,22 +173,25 @@ struct HIPLaunchParams : public LaunchParams {
 //! A container for the local and global worksizes.
 class NDRangeContainer {
  private:
-  NDRange<> offset_;      //!< Global work-item offset (size_t — passed as-is to hidden args).
-  NDRange32 global_;      //!< Total number of work-items in N-dims (AQL grid_size).
-  NDRange16 local_;       //!< Number of work-items per workgroup (AQL workgroup_size).
-  NDRange8  cluster_;     //!< Cluster dims (AQL cluster_size, max 255 per dim).
-  uint16_t  dimensions_;  //!< Number of dimensions.
+  NDRange<> offset_;     //!< Global work-item offset (size_t — passed as-is to hidden args).
+  NDRange32 global_;     //!< Total number of work-items in N-dims (AQL grid_size).
+  NDRange16 local_;      //!< Number of work-items per workgroup (AQL workgroup_size).
+  NDRange8 cluster_;     //!< Cluster dims (AQL cluster_size, max 255 per dim).
+  uint16_t dimensions_;  //!< Number of dimensions.
 
  public:
   //! From size_t arrays (blit, OCL, devprogram callers — no cluster).
-  NDRangeContainer(size_t dimensions, const size_t* globalWorkOffset,
-                   const size_t* globalWorkSize, const size_t* localWorkSize)
-      : offset_(0, 0, 0), global_(1, 1, 1), local_(1, 1, 1), cluster_(1, 1, 1),
+  NDRangeContainer(size_t dimensions, const size_t* globalWorkOffset, const size_t* globalWorkSize,
+                   const size_t* localWorkSize)
+      : offset_(0, 0, 0),
+        global_(1, 1, 1),
+        local_(1, 1, 1),
+        cluster_(1, 1, 1),
         dimensions_(static_cast<uint16_t>(dimensions)) {
     for (size_t i = 0; i < dimensions; ++i) {
       offset_[i] = globalWorkOffset != nullptr ? globalWorkOffset[i] : 0;
       global_[i] = static_cast<uint32_t>(globalWorkSize[i]);
-      local_[i]  = static_cast<uint16_t>(localWorkSize[i]);
+      local_[i] = static_cast<uint16_t>(localWorkSize[i]);
     }
   }
 
@@ -198,12 +199,15 @@ class NDRangeContainer {
   NDRangeContainer(size_t dimensions, const size_t* globalWorkOffset,
                    const uint32_t* globalWorkSize, const uint16_t* localWorkSize,
                    const uint8_t* clusterWorkSize)
-      : offset_(0, 0, 0), global_(1, 1, 1), local_(1, 1, 1), cluster_(1, 1, 1),
+      : offset_(0, 0, 0),
+        global_(1, 1, 1),
+        local_(1, 1, 1),
+        cluster_(1, 1, 1),
         dimensions_(static_cast<uint16_t>(dimensions)) {
     for (size_t i = 0; i < dimensions; ++i) {
       offset_[i] = globalWorkOffset != nullptr ? globalWorkOffset[i] : 0;
       global_[i] = globalWorkSize[i];
-      local_[i]  = localWorkSize[i];
+      local_[i] = localWorkSize[i];
       cluster_[i] = clusterWorkSize[i];
     }
   }
@@ -211,10 +215,10 @@ class NDRangeContainer {
   //! Return the number of dimensions.
   size_t dimensions() const { return dimensions_; }
 
-  const NDRange<>& offset()  const { return offset_;  }
-  const NDRange32& global()  const { return global_;  }
-  const NDRange16& local()   const { return local_;   }
-  const NDRange8&  cluster() const { return cluster_; }
+  const NDRange<>& offset() const { return offset_; }
+  const NDRange32& global() const { return global_; }
+  const NDRange16& local() const { return local_; }
+  const NDRange8& cluster() const { return cluster_; }
 };
 
 static_assert(sizeof(NDRangeContainer) <= 64,
