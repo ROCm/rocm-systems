@@ -1284,7 +1284,12 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
           (dst_agent.device_type() == core::Agent::kAmdGpuDevice)) &&
          ("Both devices are CPU agents which is not expected"));
 
-  if (engine_offset > num_h2d_d2h_engines_ + num_p2p_engines_) {
+  // engine_offset is an index into blits_, not an SDMA engine count. blits_ is
+  // always sized DefaultBlitCount + num_p2p_engines_, so BlitHostToDev(1) and
+  // BlitDevToHost(2) are valid everywhere regardless of how many SDMA engines
+  // engines it has. Limiting against the engine count instead rejected BlitDevToHost
+  // whenever NumSdmaEngines == 1 (e.g. gfx1151).
+  if (engine_offset < 0 || engine_offset >= static_cast<int>(blits_.size())) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 

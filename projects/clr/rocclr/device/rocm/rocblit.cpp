@@ -2933,6 +2933,29 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
 }
 
 // ================================================================================================
+bool KernelBlitManager::ShaderCopyPinnedBatch(
+    const std::vector<amd::BatchCopyOp>& pinned_ops, bool needs_system_scope,
+    bool attach_signal) const {
+  std::vector<BatchRawCopyOp> raw_copy_ops;
+  raw_copy_ops.reserve(pinned_ops.size());
+
+  for (const amd::BatchCopyOp& op : pinned_ops) {
+    Memory* src_memory = dev().getRocMemory(op.srcMemory);
+    Memory* dst_memory = dev().getRocMemory(op.dstMemory);
+    if (src_memory == nullptr || dst_memory == nullptr) {
+      LogError("KernelBlitManager::ShaderCopyPinnedBatch: Invalid memory objects!");
+      return false;
+    }
+
+    raw_copy_ops.push_back({src_memory->getDeviceMemory() + op.srcOffset,
+                            dst_memory->getDeviceMemory() + op.dstOffset, op.size, op.metadata,
+                            needs_system_scope, attach_signal});
+  }
+
+  return ShaderCopyBufferBatchRaw(raw_copy_ops);
+}
+
+// ================================================================================================
 bool KernelBlitManager::WriteBufferBatch(
     const std::vector<amd::BatchWriteMemoryOp>& write_ops) const {
   for (const amd::BatchWriteMemoryOp& op : write_ops) {
@@ -3006,9 +3029,18 @@ bool KernelBlitManager::WriteBufferBatch(
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
-      gpu().releaseGpuMemoryFence();
-      gpu().command()->ReleasePinnedMemory();
-      return false;
+      LogWarning(
+          "KernelBlitManager::WriteBufferBatch: SDMA batch copy failed, falling back to shader "
+          "copy");
+      // System scope so the dispatch observes the application's writes
+      // to the pinned source.
+      constexpr bool kNeedsSystemScope = true;
+      constexpr bool kAttachSignal = false;
+      if (!ShaderCopyPinnedBatch(pinned_copy_ops, kNeedsSystemScope, kAttachSignal)) {
+        gpu().releaseGpuMemoryFence();
+        gpu().command()->ReleasePinnedMemory();
+        return false;
+      }
     }
     pinned_copy_ops.clear();
   }
@@ -3103,9 +3135,18 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
-      gpu().releaseGpuMemoryFence();
-      gpu().command()->ReleasePinnedMemory();
-      return false;
+      LogWarning(
+          "KernelBlitManager::ReadBufferBatch: SDMA batch copy failed, falling back to shader "
+          "copy");
+      // The shader writes to pinned application memory that the host
+      // reads once this command completes, so it needs a system scope release.
+      constexpr bool kNeedsSystemScope = true;
+      constexpr bool kAttachSignal = true;
+      if (!ShaderCopyPinnedBatch(pinned_copy_ops, kNeedsSystemScope, kAttachSignal)) {
+        gpu().releaseGpuMemoryFence();
+        gpu().command()->ReleasePinnedMemory();
+        return false;
+      }
     }
     pinned_copy_ops.clear();
   }
