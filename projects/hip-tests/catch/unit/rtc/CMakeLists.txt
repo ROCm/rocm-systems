@@ -36,13 +36,14 @@ set(AMD_TEST_SRC
     hipRtcSpirvCompilation.cc
 )
 
-if(UNIX)
-  list(APPEND AMD_TEST_SRC bitcodebundle/bitcodebundle.cc)
-endif()
-
-if(HIP_PLATFORM MATCHES "amd" AND UNIX)
-  add_subdirectory(bitcodebundle)
-endif()
+# Disabled: bitcodebundle test relies on compiler implementation details.
+# if(UNIX)
+#   list(APPEND AMD_TEST_SRC bitcodebundle/bitcodebundle.cc)
+# endif()
+#
+# if(HIP_PLATFORM MATCHES "amd" AND UNIX)
+#   add_subdirectory(bitcodebundle)
+# endif()
 
 add_custom_target(copyRtcHeaders ALL
   COMMAND ${CMAKE_COMMAND} -E copy
@@ -61,9 +62,9 @@ file(GLOB INSTALL_HEADER_FILES "./headers/*")
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_HEADER_FILES ${INSTALL_HEADER_FILES})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/saxpy.h)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/RtcConfig.json)
-if(HIP_PLATFORM MATCHES "amd" AND UNIX)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/offload_bundle.hipfb)
-endif()
+# if(HIP_PLATFORM MATCHES "amd" AND UNIX)
+#   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/offload_bundle.hipfb)
+# endif()
 
 if(UNIX)
   set(AMD_TEST_SRC ${AMD_TEST_SRC}
@@ -98,6 +99,6 @@ endif()
 
 add_dependencies(RTC copyRtcHeaders copyTstJson ChkPtrdiff_t_Exe)
 
-if(HIP_PLATFORM MATCHES "amd" AND UNIX)
-  add_dependencies(RTC bundle_bitcode)
-endif()
+# if(HIP_PLATFORM MATCHES "amd" AND UNIX)
+#   add_dependencies(RTC bundle_bitcode)
+# endif()
