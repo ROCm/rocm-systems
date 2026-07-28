@@ -1369,13 +1369,21 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	HSAuint64 aligned_addr = (HSAuint64)address - page_offset;
 	HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	uint32_t num_gpus = fmm_ctx->all_gpu_id_array_size / sizeof(uint32_t);
+	uint32_t i;
 	HSAKMT_STATUS ret;
 
 	if (!fmm_ctx->first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 
-	/* s_attr is a compile-time constant (16 bytes); no overflow possible */
-	s_attr = 2 * sizeof(struct kfd_ioctl_svm_attribute);
+	/* Re-grant ACCESS_IN_PLACE on all GPUs along with the coherency flags.
+	 * A prior deregister leaves NO_ACCESS on the range, and allocators like
+	 * jemalloc reuse the VA without munmap so that attribute sticks in the
+	 * kernel. If we don't clear it here the GPU faults on the re-registered
+	 * buffer. Must be ACCESS_IN_PLACE, not ACCESS: userptr memory can't
+	 * migrate, so ACCESS would fail the restore path and still fault.
+	 */
+	s_attr = (num_gpus + 2) * sizeof(struct kfd_ioctl_svm_attribute);
 	args = malloc(sizeof(*args) + s_attr);
 	if (!args)
 		return HSAKMT_STATUS_NO_MEMORY;
@@ -1383,13 +1391,17 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	args->start_addr = aligned_addr;
 	args->size = aligned_size;
 	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
-	args->nattr = 2;
-	args->attrs[0].type = flags.ui32.CoarseGrain ?
+	args->nattr = num_gpus + 2;
+	for (i = 0; i < num_gpus; i++) {
+		args->attrs[i].type = HSA_SVM_ATTR_ACCESS_IN_PLACE;
+		args->attrs[i].value = fmm_ctx->all_gpu_id_array[i];
+	}
+	args->attrs[num_gpus].type = flags.ui32.CoarseGrain ?
 			      HSA_SVM_ATTR_CLR_FLAGS : HSA_SVM_ATTR_SET_FLAGS;
-	args->attrs[0].value = HSA_SVM_FLAG_COHERENT;
-	args->attrs[1].type = flags.ui32.ExtendedCoherent ?
+	args->attrs[num_gpus].value = HSA_SVM_FLAG_COHERENT;
+	args->attrs[num_gpus + 1].type = flags.ui32.ExtendedCoherent ?
 							HSA_SVM_ATTR_SET_FLAGS : HSA_SVM_ATTR_CLR_FLAGS;
-	args->attrs[1].value = HSA_SVM_FLAG_EXT_COHERENT;
+	args->attrs[num_gpus + 1].value = HSA_SVM_FLAG_EXT_COHERENT;
 	/* Validate and reserve the tracking entry before touching kernel state,
 	 * so a same-base re-registration with a mismatched size is rejected
 	 * (INVALID_PARAMETER) without issuing a stray SET_ATTR - deregister is
