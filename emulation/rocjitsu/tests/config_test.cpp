@@ -374,9 +374,8 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
 }
 
 TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
-  // gfx1250 A0/B0 share an ELF machine ID, so the silicon revision is carried in
-  // the DBT guest config out of band. A same-target B0->A0 load selects the A0
-  // workarounds from these fields.
+  // gfx1250 A0 and B0 share an ELF machine ID, so the configured revisions
+  // select the B0-to-A0 translation profile.
   const auto file = write_temp_config(R"({
       "dbt_guest": {
         "enabled": true,
