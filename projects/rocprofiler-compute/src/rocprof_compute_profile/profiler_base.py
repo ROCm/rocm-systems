@@ -302,10 +302,7 @@ class RocProfCompute_Base:
             # Override filter_blocks when writing profiling config yaml
             args_dict["filter_blocks"] = self._filter_blocks
             args_dict["config_dir"] = str(args_dict["config_dir"])
-            # --format-rocprof-output is gone; stamp the format so analyze can
-            # tell this workload apart from one written by a removed backend.
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
-            # Deprecated and unread; do not persist it into new workloads.
             args_dict.pop("join_type", None)
             yaml.dump(args_dict, f)
 

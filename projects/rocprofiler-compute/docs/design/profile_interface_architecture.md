@@ -1,6 +1,6 @@
 # Profile Interface Architecture
 
-Status: proposal (Phase A implemented; Phases A-2 onward not started)
+Status: proposal (Phase A implemented)
 
 This document describes the architecture for profile data storage and access in
 rocprofiler-compute, and records the decisions made in the design review so the
@@ -319,12 +319,7 @@ Intentionally **kept** in this phase:
   rocpd path, `sysinfo.csv`, and marker-trace augmentation. It is removed as csv intermediates are eliminated in later phases.
 
 Note: the MI350 `no_roof` and `vcopy` golden workloads stored csv intermediates,
-having been generated before rocpd support was added. Phase A regenerated them so
-that every golden workload carries rocpd intermediates.
-
-Pre-rocpd golden workloads for older architectures stay as they are: they ship an
-already-joined wide `pmc_perf.csv` and no `profiling_config.yaml`, which analyze
-still reads. Only the removed backend's per-counter csv shape is unsupported.
+having been generated before rocpd support was added. They are regenerated in this phase so that every golden workload carries rocpd intermediates.
 
 ### Phase A-2: Remove the now-dead `--join-type` option
 
