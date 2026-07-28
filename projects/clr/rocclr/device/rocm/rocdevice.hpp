@@ -471,10 +471,6 @@ class Device : public NullDevice {
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
-  //! Whether host-resident NUMA VMM allocation is supported on the system.
-  //! Queries HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED; returns
-  //! false against a ROCr that predates the query (graceful degrade).
-
   //! Allocate a host-resident VMM handle on a CPU NUMA pool. numaNode < 0 resolves
   //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
