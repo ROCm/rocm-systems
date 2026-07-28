@@ -512,11 +512,12 @@ the architecture default, which matches the device's ``smCoscheduledAlignment``.
 To see the value that was chosen, read the ``groupParams`` entry back after a
 successful call.
 
-Adding a work queue resource
+Step 2.1 (optional): Add a work queue resource
 -------------------------------------------------------------------------------
 
-To configure work queues alongside CUs, fill in a work queue configuration
-resource yourself and place it next to the CU resources you plan to bundle:
+This step is optional. To configure work queues alongside CUs, fill in a work
+queue configuration resource yourself and place it next to the CU resources you
+plan to bundle:
 
 .. code-block:: cpp
 
