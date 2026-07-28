@@ -92,7 +92,8 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
   // but not A0, so they require semantic expansion. The common f32 K=128 forms
   // use one neutral regular-Scale mixed-format operation. Source fields with no
   // meaning for these opcodes are discarded while constructing the target.
-  // The f16 and standalone 32x16 FP4 forms still fail closed.
+  // The standalone 32x16 FP4 form splits into two scaled M=16 halves; the f16
+  // K=128 forms still fail closed in their semantic rule.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
