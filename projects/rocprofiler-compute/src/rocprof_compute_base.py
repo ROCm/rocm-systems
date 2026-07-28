@@ -624,28 +624,21 @@ class RocProfCompute:
 
     def _resolve_pc_sampling_interval(self) -> None:
         """Apply the method-aware default for --pc-sampling-interval and
-        validate a user-supplied value against the limits the GPU reports.
-
-        An out-of-range interval deadlocks the SDK, which calls exit() from
-        inside its own initialization critical section, so it has to be
-        rejected here.
-        """
+        validate a user-supplied value against the limits the GPU reports."""
         args = self.__args
         if not getattr(args, "pc_sampling", False):
             return
 
         method = args.pc_sampling_method
+        if args.pc_sampling_interval is None:
+            args.pc_sampling_interval = PC_SAMPLING_DEFAULT_INTERVALS[method]
+            return
+
         limits = pc_sampling_interval_limits(
             method, getattr(args, "rocprofiler_sdk_tool_path", None)
         )
         min_interval = limits["min_interval"]
         max_interval = limits["max_interval"]
-
-        if args.pc_sampling_interval is None:
-            args.pc_sampling_interval = min(
-                PC_SAMPLING_DEFAULT_INTERVALS[method], max_interval
-            )
-            return
 
         interval = args.pc_sampling_interval
         if interval < min_interval or interval > max_interval:

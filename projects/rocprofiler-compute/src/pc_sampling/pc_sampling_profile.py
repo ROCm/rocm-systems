@@ -19,186 +19,123 @@ from utils.utils_common import (
 )
 from utils.utils_profile import ProfilerOptions, is_live_attach
 
-AVAIL_LIBRARY_NAME = "librocprofv3-list-avail.so"
-
-# The avail library reports no PC sampling configurations unless the beta gate
-# is set before it initializes, the same way rocprofv3-avail sets it.
-PC_SAMPLING_BETA_ENV = "ROCPROFILER_PC_SAMPLING_BETA_ENABLED"
-
-# Enum values from rocprofiler_pc_sampling_method_t and
-# rocprofiler_pc_sampling_unit_t in rocprofiler-sdk/pc_sampling.h.
-PC_SAMPLING_METHOD_IDS = {1: "stochastic", 2: "host_trap"}
-PC_SAMPLING_METHOD_UNIT_IDS = {"stochastic": 2, "host_trap": 3}
-PC_SAMPLING_FLAG_INTERVAL_POW2 = 1
-
+# Interval defaults: cycles for stochastic, microseconds for host_trap.
 PC_SAMPLING_DEFAULT_INTERVALS = {"stochastic": 1048576, "host_trap": 512}
-
-# Used when the GPU cannot be queried. The ceiling mirrors the 1 MB clamp the
-# SDK applies to the driver-reported maximum.
-PC_SAMPLING_STATIC_INTERVAL_LIMITS = {
-    "stochastic": {
-        "min_interval": 65536,
-        "max_interval": 1048576,
-        "interval_pow2": True,
-    },
-    "host_trap": {
-        "min_interval": 1,
-        "max_interval": 1048576,
-        "interval_pow2": False,
-    },
-}
-
-
-def query_pc_sampling_configs(
-    sdk_tool_path: Optional[str] = None,
-) -> dict[str, dict[str, int]]:
-    """Return the PC sampling interval limits reported by the local GPUs,
-    keyed by sampling method.
-
-    Mirrors `rocprofv3-avail info --pc-sampling` by loading
-    librocprofv3-list-avail.so and walking each agent's configurations.
-    Returns an empty dict when no GPU agent can be queried.
-    """
-    previous_beta_gate = os.environ.get(PC_SAMPLING_BETA_ENV)
-    os.environ[PC_SAMPLING_BETA_ENV] = "on"
-    try:
-        library = _load_avail_library(sdk_tool_path)
-        if library is None:
-            return {}
-        return _merge_agent_interval_limits(library)
-    except (AttributeError, OSError, ValueError) as err:
-        console_debug(f"PC sampling configuration query failed: {err}")
-        return {}
-    finally:
-        if previous_beta_gate is None:
-            os.environ.pop(PC_SAMPLING_BETA_ENV, None)
-        else:
-            os.environ[PC_SAMPLING_BETA_ENV] = previous_beta_gate
 
 
 def pc_sampling_interval_limits(
     method: str,
     sdk_tool_path: Optional[str] = None,
 ) -> dict[str, int]:
-    """Return the interval limits for one sampling method, falling back to
-    static limits when the GPU cannot be queried."""
-    queried = query_pc_sampling_configs(sdk_tool_path).get(method)
-    if queried is not None:
-        return queried
+    """Return the interval limits the GPUs report for one sampling method.
 
-    console_debug(f"PC sampling: using static interval limits for {method}")
-    return PC_SAMPLING_STATIC_INTERVAL_LIMITS[method]
+    Mirrors `rocprofv3-avail info --pc-sampling`.
+    """
+    # Limits rocprofiler-sdk falls back to, see its
+    # source/lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.cpp
+    fallback = {
+        "min_interval": 1,
+        "max_interval": 1048576,
+        "interval_pow2": method == "stochastic",
+    }
 
+    library = _load_avail_library(sdk_tool_path)
+    if library is None:
+        return fallback
 
-def _resolve_avail_library_path(sdk_tool_path: Optional[str]) -> Optional[str]:
-    """Locate the avail library next to the SDK tool, or under ROCM_PATH."""
-    if sdk_tool_path:
-        candidate = Path(sdk_tool_path).parent / AVAIL_LIBRARY_NAME
-    else:
-        candidate = (
-            Path(os.getenv("ROCM_PATH", "/opt/rocm"))
-            / "lib/rocprofiler-sdk"
-            / AVAIL_LIBRARY_NAME
-        )
-    return resolve_rocm_library_path(str(candidate))
+    try:
+        return _query_agent_interval_limits(library).get(method, fallback)
+    except (AttributeError, OSError, ValueError) as err:
+        console_debug(f"PC sampling interval limit query failed: {err}")
+        return fallback
 
 
 def _load_avail_library(sdk_tool_path: Optional[str]) -> Optional[ctypes.CDLL]:
-    """Load the avail library, returning None when it is unusable."""
-    library_path = _resolve_avail_library_path(sdk_tool_path)
-    if not library_path or not Path(library_path).exists():
-        console_debug(f"PC sampling: {AVAIL_LIBRARY_NAME} not found")
+    """Load the avail library sitting beside the rocprofiler-sdk tool.
+
+    The library reports no PC sampling configuration unless the beta gate is
+    set before it initializes, so it is warmed up while the gate is in place.
+    """
+    if not sdk_tool_path:
         return None
 
+    library_path = resolve_rocm_library_path(
+        str(Path(sdk_tool_path).parent / "librocprofv3-list-avail.so")
+    )
+    if not library_path or not Path(library_path).exists():
+        console_debug("PC sampling: librocprofv3-list-avail.so not found")
+        return None
+
+    beta_gate = "ROCPROFILER_PC_SAMPLING_BETA_ENABLED"
+    previous_gate = os.environ.get(beta_gate)
+    os.environ[beta_gate] = "on"
     try:
-        return ctypes.CDLL(library_path)
+        library = ctypes.CDLL(library_path)
+        library.get_number_of_agents.restype = ctypes.c_ulong
+        library.get_number_of_pc_sample_configs.restype = ctypes.c_ulong
+        library.pc_sample_config.argtypes = [ctypes.c_ulong, ctypes.c_ulong] + [
+            ctypes.POINTER(ctypes.c_ulong)
+        ] * 5
+        library.get_number_of_agents()
+        return library
     except OSError as err:
         console_debug(f"PC sampling: unable to load {library_path}: {err}")
         return None
+    finally:
+        if previous_gate is None:
+            os.environ.pop(beta_gate, None)
+        else:
+            os.environ[beta_gate] = previous_gate
 
 
-def _query_agent_handles(library: ctypes.CDLL) -> list[int]:
-    """Return the handles of every agent the avail library reports."""
-    library.get_number_of_agents.restype = ctypes.c_ulong
-    agent_count = library.get_number_of_agents()
-    if agent_count == 0:
-        return []
-
-    library.agent_handles.argtypes = [ctypes.c_ulong * agent_count, ctypes.c_ulong]
-    agent_handles = (ctypes.c_ulong * agent_count)()
-    library.agent_handles(agent_handles, agent_count)
-    return list(agent_handles)
-
-
-def _query_agent_pc_sampling_configs(
+def _query_agent_configs(
     library: ctypes.CDLL,
     agent_handle: int,
-) -> list[dict[str, int]]:
-    """Return every PC sampling configuration supported by one agent."""
-    library.get_number_of_pc_sample_configs.argtypes = [ctypes.c_ulong]
-    library.get_number_of_pc_sample_configs.restype = ctypes.c_ulong
-    config_count = library.get_number_of_pc_sample_configs(agent_handle)
-    if config_count == 0:
-        return []
-
-    library.pc_sample_config.argtypes = [ctypes.c_ulong, ctypes.c_ulong] + [
-        ctypes.POINTER(ctypes.c_ulong)
-    ] * 5
-
+) -> list[tuple[int, ...]]:
+    """Return (method, unit, min, max, flags) for each config of one agent."""
     configs = []
-    for config_index in range(config_count):
-        method = ctypes.c_ulong()
-        unit = ctypes.c_ulong()
-        min_interval = ctypes.c_ulong()
-        max_interval = ctypes.c_ulong()
-        flags = ctypes.c_ulong()
+    for config_index in range(library.get_number_of_pc_sample_configs(agent_handle)):
+        fields = [ctypes.c_ulong() for _ in range(5)]
         library.pc_sample_config(
-            agent_handle,
-            config_index,
-            ctypes.byref(method),
-            ctypes.byref(unit),
-            ctypes.byref(min_interval),
-            ctypes.byref(max_interval),
-            ctypes.byref(flags),
+            agent_handle, config_index, *(ctypes.byref(field) for field in fields)
         )
-        configs.append({
-            "method": method.value,
-            "unit": unit.value,
-            "min_interval": min_interval.value,
-            "max_interval": max_interval.value,
-            "flags": flags.value,
-        })
+        configs.append(tuple(field.value for field in fields))
     return configs
 
 
-def _merge_agent_interval_limits(library: ctypes.CDLL) -> dict[str, dict[str, int]]:
-    """Widen the interval range across agents and keep the strictest flags.
+def _query_agent_interval_limits(library: ctypes.CDLL) -> dict[str, dict[str, int]]:
+    """Merge every agent's configurations into per-method interval limits.
 
-    The SDK configures PC sampling when any single agent supports the
-    requested configuration, so the accepted range is the union across agents.
+    The SDK configures PC sampling when any single agent supports the request,
+    so the accepted range is the union across agents.
     """
+    agent_count = library.get_number_of_agents()
+    library.agent_handles.argtypes = [ctypes.c_ulong * agent_count, ctypes.c_ulong]
+    agent_handles = (ctypes.c_ulong * agent_count)()
+    library.agent_handles(agent_handles, agent_count)
+
+    # (method, unit) ids from rocprofiler-sdk/pc_sampling.h
+    supported = {(1, 2): "stochastic", (2, 3): "host_trap"}
     limits: dict[str, dict[str, int]] = {}
-    for agent_handle in _query_agent_handles(library):
-        for config in _query_agent_pc_sampling_configs(library, agent_handle):
-            method = PC_SAMPLING_METHOD_IDS.get(config["method"])
+    for agent_handle in agent_handles:
+        for method_id, unit, minimum, maximum, flags in _query_agent_configs(
+            library, agent_handle
+        ):
+            method = supported.get((method_id, unit))
             if method is None:
                 continue
-            if config["unit"] != PC_SAMPLING_METHOD_UNIT_IDS[method]:
-                continue
-
-            requires_pow2 = bool(config["flags"] & PC_SAMPLING_FLAG_INTERVAL_POW2)
-            known = limits.get(method)
-            if known is None:
-                limits[method] = {
-                    "min_interval": config["min_interval"],
-                    "max_interval": config["max_interval"],
-                    "interval_pow2": requires_pow2,
-                }
-                continue
-
-            known["min_interval"] = min(known["min_interval"], config["min_interval"])
-            known["max_interval"] = max(known["max_interval"], config["max_interval"])
-            known["interval_pow2"] = known["interval_pow2"] or requires_pow2
+            known = limits.setdefault(
+                method,
+                {
+                    "min_interval": minimum,
+                    "max_interval": maximum,
+                    "interval_pow2": False,
+                },
+            )
+            known["min_interval"] = min(known["min_interval"], minimum)
+            known["max_interval"] = max(known["max_interval"], maximum)
+            # INTERVAL_POW2 is bit 0 of the configuration flags.
+            known["interval_pow2"] = known["interval_pow2"] or bool(flags & 1)
     return limits
 
 

@@ -555,6 +555,15 @@ def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
     return instance
 
 
+def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> dict:
+    """Stub of the device query, using the limits a gfx950 reports."""
+    return {
+        "min_interval": 256 if method == "stochastic" else 1,
+        "max_interval": 1048576,
+        "interval_pow2": method == "stochastic",
+    }
+
+
 @pytest.mark.parametrize(
     "args, expect_error, expected_filter_blocks",
     [
@@ -759,21 +768,6 @@ def test_run_profiling_pc_sampling_gating(
     assert multirank_warned is expect_multirank_warning
 
 
-# Limits a gfx950 reports via 'rocprofv3-avail info --pc-sampling'.
-_FAKE_PC_SAMPLING_LIMITS = {
-    "stochastic": {
-        "min_interval": 256,
-        "max_interval": 1048576,
-        "interval_pow2": True,
-    },
-    "host_trap": {
-        "min_interval": 1,
-        "max_interval": 1048576,
-        "interval_pow2": False,
-    },
-}
-
-
 @pytest.mark.parametrize(
     "method, interval, expect_error, expected_interval",
     [
@@ -801,7 +795,7 @@ def test_sanitize_pc_sampling_interval(
     """
     monkeypatch.setattr(
         "rocprof_compute_base.pc_sampling_interval_limits",
-        lambda method, _sdk_tool_path=None: _FAKE_PC_SAMPLING_LIMITS[method],
+        _fake_pc_sampling_limits,
     )
     args = _make_rpc_args(
         pc_sampling=True,
@@ -817,28 +811,6 @@ def test_sanitize_pc_sampling_interval(
     else:
         instance.sanitize()
         assert args.pc_sampling_interval == expected_interval
-
-
-def test_sanitize_pc_sampling_interval_default_clamped_to_device_max(monkeypatch):
-    """The default is lowered when the device reports a smaller maximum."""
-    monkeypatch.setattr(
-        "rocprof_compute_base.pc_sampling_interval_limits",
-        lambda _method, _sdk_tool_path=None: {
-            "min_interval": 256,
-            "max_interval": 65536,
-            "interval_pow2": True,
-        },
-    )
-    args = _make_rpc_args(
-        pc_sampling=True,
-        experimental=True,
-        filter_blocks=[],
-        pc_sampling_method="stochastic",
-        pc_sampling_interval=None,
-    )
-    _make_rpc_with_args(args).sanitize()
-
-    assert args.pc_sampling_interval == 65536
 
 
 # ---------------------------------------------------------------------------

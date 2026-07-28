@@ -3,18 +3,22 @@
 
 from unittest.mock import Mock
 
+import pytest
 from common import patch_console
 
 from pc_sampling.pc_sampling_profile import (
-    PC_SAMPLING_STATIC_INTERVAL_LIMITS,
     PCSamplingProfile,
-    _merge_agent_interval_limits,
-    _resolve_avail_library_path,
     pc_sampling_interval_limits,
-    query_pc_sampling_configs,
 )
 
 MODULE = "pc_sampling.pc_sampling_profile"
+
+# Limits pc_sampling_interval_limits() reports when no agent can be queried.
+STOCHASTIC_FALLBACK = {
+    "min_interval": 1,
+    "max_interval": 1048576,
+    "interval_pow2": True,
+}
 
 
 class MockArgs:
@@ -28,6 +32,27 @@ def _make_pc_sampling_profile(profiler="rocprofiler-sdk", filter_blocks=("21",))
     return PCSamplingProfile(
         args=MockArgs(filter_blocks=list(filter_blocks)),
         profiler=profiler,
+    )
+
+
+def _patch_avail_library(monkeypatch, configs_by_agent):
+    """Stub the avail library with canned per-agent configurations.
+
+    Each config is (method, unit, min_interval, max_interval, flags) as
+    pc_sample_config() reports it.
+    """
+    library = Mock()
+    library.get_number_of_agents.return_value = len(configs_by_agent)
+
+    def fill_handles(handles, _count):
+        for index, handle in enumerate(configs_by_agent):
+            handles[index] = handle
+
+    library.agent_handles.side_effect = fill_handles
+    monkeypatch.setattr(f"{MODULE}._load_avail_library", lambda _path: library)
+    monkeypatch.setattr(
+        f"{MODULE}._query_agent_configs",
+        lambda _library, handle: configs_by_agent[handle],
     )
 
 
@@ -191,125 +216,48 @@ def test_run_launches_and_logs(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# device interval limit query
+# device interval limits
 # ---------------------------------------------------------------------------
-def make_config(method, unit, min_interval, max_interval, flags=0):
-    """Build one agent config as _query_agent_pc_sampling_configs returns it."""
-    return {
-        "method": method,
-        "unit": unit,
-        "min_interval": min_interval,
-        "max_interval": max_interval,
-        "flags": flags,
-    }
+@pytest.mark.parametrize(
+    "configs_by_agent, method, expected",
+    [
+        pytest.param(
+            {0: [(1, 2, 256, 1048576, 1)]},
+            "stochastic",
+            {"min_interval": 256, "max_interval": 1048576, "interval_pow2": True},
+            id="stochastic_cycles_decoded",
+        ),
+        pytest.param(
+            {0: [(2, 3, 1, 1048576, 0)]},
+            "host_trap",
+            {"min_interval": 1, "max_interval": 1048576, "interval_pow2": False},
+            id="host_trap_time_decoded",
+        ),
+        pytest.param(
+            {0: [(1, 2, 512, 65536, 1)], 1: [(1, 2, 256, 1048576, 0)]},
+            "stochastic",
+            {"min_interval": 256, "max_interval": 1048576, "interval_pow2": True},
+            id="range_unioned_across_agents",
+        ),
+        pytest.param(
+            {0: [(1, 3, 256, 4096, 0)]},
+            "stochastic",
+            STOCHASTIC_FALLBACK,
+            id="mismatched_unit_ignored",
+        ),
+    ],
+)
+def test_interval_limits_from_agent_configs(
+    monkeypatch, configs_by_agent, method, expected
+):
+    """Agent configurations are decoded and merged into per-method limits."""
+    _patch_avail_library(monkeypatch, configs_by_agent)
+
+    assert pc_sampling_interval_limits(method) == expected
 
 
-def patch_agent_configs(monkeypatch, configs_by_agent):
-    """Stub the per-agent ctypes queries with canned configurations."""
-    monkeypatch.setattr(
-        f"{MODULE}._query_agent_handles",
-        lambda _library: list(configs_by_agent),
-    )
-    monkeypatch.setattr(
-        f"{MODULE}._query_agent_pc_sampling_configs",
-        lambda _library, agent_handle: configs_by_agent[agent_handle],
-    )
-
-
-def test_merge_agent_interval_limits_decodes_both_methods(monkeypatch):
-    """Stochastic and host_trap configs are decoded with their pow2 flag."""
-    patch_agent_configs(
-        monkeypatch,
-        {
-            0: [
-                make_config(1, 2, 256, 1048576, flags=1),
-                make_config(2, 3, 1, 1048576),
-            ]
-        },
-    )
-
-    limits = _merge_agent_interval_limits(Mock())
-
-    assert limits["stochastic"] == {
-        "min_interval": 256,
-        "max_interval": 1048576,
-        "interval_pow2": True,
-    }
-    assert limits["host_trap"] == {
-        "min_interval": 1,
-        "max_interval": 1048576,
-        "interval_pow2": False,
-    }
-
-
-def test_merge_agent_interval_limits_widens_range_across_agents(monkeypatch):
-    """The range is the union across agents; pow2 sticks if any agent needs it."""
-    patch_agent_configs(
-        monkeypatch,
-        {
-            0: [make_config(1, 2, 512, 65536, flags=1)],
-            1: [make_config(1, 2, 256, 1048576)],
-        },
-    )
-
-    limits = _merge_agent_interval_limits(Mock())
-
-    assert limits["stochastic"] == {
-        "min_interval": 256,
-        "max_interval": 1048576,
-        "interval_pow2": True,
-    }
-
-
-def test_merge_agent_interval_limits_skips_mismatched_unit(monkeypatch):
-    """A stochastic config reported in time units is not a cycles config."""
-    patch_agent_configs(monkeypatch, {0: [make_config(1, 3, 256, 1048576)]})
-
-    assert _merge_agent_interval_limits(Mock()) == {}
-
-
-def test_query_returns_empty_when_library_missing(monkeypatch):
-    """A missing avail library yields no limits rather than an error."""
+def test_interval_limits_fall_back_without_avail_library(monkeypatch):
+    """An unloadable avail library yields the SDK fallback limits."""
     monkeypatch.setattr(f"{MODULE}._load_avail_library", lambda _path: None)
 
-    assert query_pc_sampling_configs("/nonexistent/tool.so") == {}
-
-
-def test_interval_limits_falls_back_to_static_limits(monkeypatch):
-    """An unqueryable device falls back to the static limits."""
-    monkeypatch.setattr(f"{MODULE}.query_pc_sampling_configs", lambda _path: {})
-
-    limits = pc_sampling_interval_limits("stochastic")
-
-    assert limits == PC_SAMPLING_STATIC_INTERVAL_LIMITS["stochastic"]
-    assert limits["max_interval"] == 1048576
-
-
-def test_interval_limits_prefers_queried_limits(monkeypatch):
-    """A queried device wins over the static limits."""
-    queried = {"min_interval": 256, "max_interval": 4096, "interval_pow2": True}
-    monkeypatch.setattr(
-        f"{MODULE}.query_pc_sampling_configs",
-        lambda _path: {"stochastic": queried},
-    )
-
-    assert pc_sampling_interval_limits("stochastic") == queried
-
-
-def test_avail_library_resolved_next_to_sdk_tool(monkeypatch):
-    """The avail library is looked up beside the configured SDK tool."""
-    monkeypatch.setattr(f"{MODULE}.resolve_rocm_library_path", lambda path: path)
-
-    resolved = _resolve_avail_library_path("/opt/rocm/lib/rocprofiler-sdk/tool.so")
-
-    assert resolved == ("/opt/rocm/lib/rocprofiler-sdk/librocprofv3-list-avail.so")
-
-
-def test_avail_library_falls_back_to_rocm_path(monkeypatch):
-    """Without an SDK tool path, ROCM_PATH locates the avail library."""
-    monkeypatch.setattr(f"{MODULE}.resolve_rocm_library_path", lambda path: path)
-    monkeypatch.setenv("ROCM_PATH", "/custom/rocm")
-
-    resolved = _resolve_avail_library_path(None)
-
-    assert resolved == "/custom/rocm/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
+    assert pc_sampling_interval_limits("stochastic") == STOCHASTIC_FALLBACK
