@@ -80,6 +80,10 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "support/elf_test_support.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -9936,9 +9940,9 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
           gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p,
       (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
           gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF3232x16x128F4Vop3p,
   };
+  // The standalone 32x16 FP4 rule is deliberately absent: its split borrows the
+  // VGPR-MSB banks of the source operands, so it queries liveness.
   EXPECT_EQ(liveness_free_rules, expected);
 
   rocjitsu::SemanticTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250,
@@ -12592,14 +12596,45 @@ TEST(BinaryTranslatorE2E, Gfx1250Scale16M32IgnoresUnavailableScratchSpillSpace) 
                                                           : result.diagnostics.front().message);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnStandalone32x16Fp4ForA0) {
-  // The standalone 32x16 FP4 A0 split is deferred. Each M=16 half needs its own
-  // neutral regular-scale prefix; emitting bare matrix bodies from a semantic
-  // expansion would bypass recursive legalization. Until that direct lowering
-  // exists, the source instruction must fail closed.
+// The standalone form produces floating-point results, so it carries the same
+// control requirement as the scaled entry points. A malformed encoding must be
+// refused rather than split.
+TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4RejectsNonZeroClampForA0) {
+  constexpr auto matrix = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3232x16x128F4Vop3p,
+      {.vdst = 96, .clamp = 1, .src0 = 256 + 16, .src1 = 256 + 40, .src2 = 256 + 64});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {matrix[0], matrix[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::ExpandFailed,
+      "Input is malformed, CLAMP \"must be set to zero\" for WMMA/SWMMAC producing "
+      "floating-point results"));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250SplitsStandalone32x16Fp4IntoScaledHalvesForA0) {
+  // A0 has no M=32 FP4 matrix opcode, and it cannot resume an unprefixed
+  // low-precision matrix body after a trap. The lowering is therefore two M=16
+  // halves, each carrying a neutral inline-zero scale prefix.
+  constexpr uint16_t kMatrixA = 16;
+  constexpr uint16_t kMatrixB = 40;
+  constexpr uint16_t kMatrixC = 64;
+  constexpr uint8_t kDestination = 96;
+  constexpr uint16_t kHalfDwords = 8;
   constexpr auto matrix =
-      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
-                           {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 40, .src2 = 256 + 64});
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p, {.vdst = kDestination,
+                                                                .src0 = 256 + kMatrixA,
+                                                                .src1 = 256 + kMatrixB,
+                                                                .src2 = 256 + kMatrixC});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
       {matrix[0], matrix[1], kGfx1250SEndpgm});
@@ -12610,8 +12645,366 @@ TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnStandalone32x16Fp4ForA0) {
       gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
   auto result = translator.translate(source);
-  EXPECT_FALSE(result.ok());
-  EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  // The B0-only M=32 opcode must be gone, replaced by two scaled M=16 forms.
+  EXPECT_EQ(
+      std::ranges::count_if(
+          decoded, [](const auto &inst) { return inst->mnemonic() == "v_wmma_f32_32x16x128_f4"; }),
+      0);
+  EXPECT_EQ(std::ranges::count_if(decoded,
+                                  [](const auto &inst) {
+                                    return inst->mnemonic() == "v_wmma_scale_f32_16x16x128_f8f6f4";
+                                  }),
+            2);
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  constexpr uint32_t kScalePrefixOp = 0x35;
+  std::vector<size_t> pass_offsets;
+  for (size_t i = 0; i < target_word_count; ++i) {
+    if (((target_words[i] >> 16) & 0xffu) == kScalePrefixOp)
+      pass_offsets.push_back(i);
+  }
+  ASSERT_EQ(pass_offsets.size(), 2u) << "each half must carry its own scale prefix";
+
+  constexpr uint16_t kInlineZero = 128;
+  constexpr uint16_t kVgpr0 = 256;
+  for (size_t half = 0; half < pass_offsets.size(); ++half) {
+    const size_t prefix = pass_offsets[half];
+    ASSERT_LT(prefix + 3, target_word_count);
+    // Inline integer zero in a scale source reads as the E8M0 value for 1.0.
+    EXPECT_EQ(target_words[prefix + 1] & 0x1ffu, kInlineZero) << "matrix A scale must be neutral";
+    EXPECT_EQ((target_words[prefix + 1] >> 9) & 0x1ffu, kInlineZero)
+        << "matrix B scale must be neutral";
+    EXPECT_EQ((target_words[prefix + 1] >> 18) & 0x1ffu, kVgpr0)
+        << "the unused scale SRC2 must encode VGPR0";
+
+    // The matrix body is the A0 M=16 operation with both formats forced to FP4
+    // and A, C, and D sliced by eight dwords while B is shared. Read it back as
+    // the encoding struct so the whole matrix-B format is checked: the high bit
+    // alone leaves opsel_hi free to select formats 5 through 7.
+    gfx1250::Vop3pMachineInst body{};
+    std::memcpy(&body, &target_words[prefix + 2], sizeof(body));
+    EXPECT_EQ(body.op, gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p);
+    EXPECT_EQ(body.opsel, 4u) << "matrix A format must be FP4";
+    EXPECT_EQ(body.pad_14, 1u) << "matrix B format must be FP4";
+    EXPECT_EQ(body.opsel_hi, 0u) << "matrix B format must be exactly FP4";
+
+    const uint16_t delta = static_cast<uint16_t>(half * kHalfDwords);
+    EXPECT_EQ(body.vdst, kDestination + delta);
+    EXPECT_EQ(body.src0, 256u + kMatrixA + delta);
+    EXPECT_EQ(body.src1, 256u + kMatrixB) << "matrix B is shared by both halves";
+    EXPECT_EQ(body.src2, 256u + kMatrixC + delta);
+  }
+}
+
+// The upper half slices eight dwords off matrix A, so a base near the top of a
+// bank makes the split cross into the next one. That must produce a bank
+// transition and restore the entry mode afterwards.
+TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4AdjustsUpperABank) {
+  constexpr auto matrix =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
+                           {.vdst = 96, .src0 = 256 + 252, .src1 = 256 + 32, .src2 = 256 + 48});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {matrix[0], matrix[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *words = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  std::vector<size_t> pass_offsets;
+  for (size_t i = 0; i < word_count; ++i) {
+    if (((words[i] >> 16) & 0xffu) == 0x35u)
+      pass_offsets.push_back(i);
+  }
+  ASSERT_EQ(pass_offsets.size(), 2u);
+  // 252 + 8 wraps to 4 in the next bank.
+  gfx1250::Vop3pMachineInst upper{};
+  std::memcpy(&upper, words + pass_offsets[1] + 2, sizeof(upper));
+  EXPECT_EQ(upper.src0, 256u + 4u);
+  EXPECT_EQ(upper.src1, 256u + 32u) << "matrix B is not sliced and keeps its bank";
+
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  std::vector<uint8_t> modes;
+  for (size_t index = 0; index < decoded.size(); ++index) {
+    if (decoded[index]->mnemonic() != "s_set_vgpr_msb")
+      continue;
+    ASSERT_NE(decoded[index]->raw_encoding(), nullptr);
+    modes.push_back(static_cast<uint8_t>(decoded[index]->raw_encoding()[0] & 0xffu));
+    ASSERT_GT(index, 0u);
+    EXPECT_EQ(decoded[index - 1]->mnemonic(), "s_wait_xcnt")
+        << "each bank change must be preceded by a drain";
+  }
+  ASSERT_GE(modes.size(), 2u) << "the crossing must emit a transition and a restore";
+  EXPECT_EQ(modes.front(), 0x01u) << "the upper half selects the next Src0 bank";
+  EXPECT_EQ(modes.back(), 0x00u) << "the entry mode must be restored";
+}
+
+// Matrix A and B must be register ranges; the standalone form has no lowering
+// for anything else and must leave the object untouched.
+TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnStandalone32x16Fp4NonVgprMatrixForA0) {
+  constexpr uint16_t kInlineZero = 128;
+  const std::vector<std::pair<const char *, std::array<uint32_t, 2>>> cases = {
+      {"matrix A",
+       gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
+                            {.vdst = 96, .src0 = kInlineZero, .src1 = 256 + 32, .src2 = 256 + 48})},
+      {"matrix B",
+       gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
+                            {.vdst = 96, .src0 = 256 + 16, .src1 = kInlineZero, .src2 = 256 + 48})},
+  };
+  for (const auto &[name, matrix] : cases) {
+    SCOPED_TRACE(name);
+    constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {matrix[0], matrix[1], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    const auto result = translator.translate(source);
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.elf_bytes, image)
+        << "a fail-closed translation must leave the object unchanged";
+    // Matched in full rather than by its tail: the scaled caller reports a
+    // message of the same shape, so a suffix would not notice this rule
+    // adopting the other caller's wording.
+    EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
+                                               "gfx1250 32x16 FP4 operands are not VGPR ranges"));
+  }
+}
+
+// An inline C operand names no register range, so neither half may slice it.
+TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4PreservesInlineMatrixCForA0) {
+  constexpr uint16_t kInlineZero = 128;
+  constexpr auto matrix =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
+                           {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = kInlineZero});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {matrix[0], matrix[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto *words = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  std::vector<size_t> pass_offsets;
+  for (size_t i = 0; i < word_count; ++i) {
+    if (((words[i] >> 16) & 0xffu) == 0x35u)
+      pass_offsets.push_back(i);
+  }
+  ASSERT_EQ(pass_offsets.size(), 2u);
+  for (const size_t prefix : pass_offsets) {
+    gfx1250::Vop3pMachineInst body{};
+    std::memcpy(&body, words + prefix + 2, sizeof(body));
+    EXPECT_EQ(body.src2, kInlineZero) << "an inline C operand must be copied to both halves";
+  }
+}
+
+// Numerical evidence that the M=32 FP4 split preserves values. The encoding
+// tests above only prove the right bits are emitted; this one runs both the
+// original B0-only M=32 instruction and the translated pair of scaled M=16
+// halves on the instruction simulator over identical inputs and requires
+// bit-identical destination registers. The two paths dispatch through
+// different execution kernels (exec_wmma_f32 versus
+// exec_wmma_f32_scaled_mixed, the latter substituting the neutral E8M0 word
+// for the inline-zero scale operands), so the comparison is a real
+// differential rather than a tautology.
+TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution) {
+  // Every operand range stays inside VGPR bank 0 so the lowering needs no
+  // s_set_vgpr_msb transitions and the translated body is exactly two pairs.
+  constexpr uint16_t kMatrixA = 16; // A occupies 16 dwords, halves at +0/+8.
+  constexpr uint16_t kMatrixB = 32; // B occupies 8 dwords and is shared.
+  constexpr uint16_t kMatrixC = 48; // C occupies 16 dwords, halves at +0/+8.
+  constexpr uint8_t kDestination = 64;
+  constexpr uint32_t kMatrixARegs = 16;
+  constexpr uint32_t kMatrixBRegs = 8;
+  constexpr uint32_t kMatrixCRegs = 16;
+  constexpr uint32_t kDestinationRegs = 16;
+
+  constexpr auto matrix =
+      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p, {.vdst = kDestination,
+                                                                .src0 = 256 + kMatrixA,
+                                                                .src1 = 256 + kMatrixB,
+                                                                .src2 = 256 + kMatrixC});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {matrix[0], matrix[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *text_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t text_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  // Collect the translated body, stopping at the terminator.
+  std::vector<uint32_t> body_words;
+  for (size_t offset = 0; offset < text_word_count;) {
+    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(text_words + offset));
+    ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
+    if (std::string_view(inst->mnemonic()) == "s_endpgm")
+      break;
+    EXPECT_NE(std::string_view(inst->mnemonic()), "s_set_vgpr_msb")
+        << "bank-0 operands must not need a mode transition";
+    const size_t words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
+    ASSERT_GT(words, 0u);
+    body_words.insert(body_words.end(), text_words + offset, text_words + offset + words);
+    offset += words;
+  }
+  ASSERT_EQ(body_words.size(), 8u) << "expected two four-word VOP3PX2 pairs";
+
+  rocjitsu::amdgpu::GpuMemory gpu_mem("gfx1250_fp4_split_diff_mem");
+  rocjitsu::amdgpu::L2Cache l2("gfx1250_fp4_split_diff_l2");
+  rocjitsu::amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = rocjitsu::amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t lanes = wf->wf_size();
+
+  // Deterministic inputs. A and B are packed FP4, so raw pseudo-random dwords
+  // are all valid. C holds FP32 accumulators, so the exponent is confined to a
+  // wide but finite range and the interesting encodings are injected by hand.
+  auto fill_inputs = [&] {
+    uint32_t state = 0x1234abcdu;
+    auto next = [&state] {
+      state = state * 1664525u + 1013904223u;
+      return state;
+    };
+    for (uint32_t reg = 0; reg < kMatrixARegs; ++reg)
+      for (uint32_t lane = 0; lane < lanes; ++lane)
+        cu->write_vgpr(vb + kMatrixA + reg, lane, next());
+    for (uint32_t reg = 0; reg < kMatrixBRegs; ++reg)
+      for (uint32_t lane = 0; lane < lanes; ++lane)
+        cu->write_vgpr(vb + kMatrixB + reg, lane, next());
+    for (uint32_t reg = 0; reg < kMatrixCRegs; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
+        const uint32_t bits = next();
+        const uint32_t exponent = ((bits >> 23u) % 60u) + 100u;
+        cu->write_vgpr(vb + kMatrixC + reg, lane, (bits & 0x807fffffu) | (exponent << 23u));
+      }
+    }
+    // qNaN, -Inf, +Inf, smallest denormal, -0.0, +0.0.
+    static constexpr std::array<uint32_t, 6> kSpecials = {0x7fc00000u, 0xff800000u, 0x7f800000u,
+                                                          0x00000001u, 0x80000000u, 0x00000000u};
+    // Placed in both halves of C. Each half is accumulated by a different
+    // instruction in the translated form, so confining these to one half would
+    // leave the other never seeing them.
+    for (uint32_t i = 0; i < kSpecials.size(); ++i) {
+      cu->write_vgpr(vb + kMatrixC + i, i * 5u, kSpecials[i]);
+      cu->write_vgpr(vb + kMatrixC + 8u + i, i * 5u, kSpecials[i]);
+    }
+  };
+
+  auto zero_destination = [&] {
+    for (uint32_t reg = 0; reg < kDestinationRegs; ++reg)
+      for (uint32_t lane = 0; lane < lanes; ++lane)
+        cu->write_vgpr(vb + kDestination + reg, lane, 0u);
+  };
+
+  auto snapshot_destination = [&] {
+    std::vector<uint32_t> out;
+    out.reserve(kDestinationRegs * lanes);
+    for (uint32_t reg = 0; reg < kDestinationRegs; ++reg)
+      for (uint32_t lane = 0; lane < lanes; ++lane)
+        out.push_back(cu->read_vgpr(vb + kDestination + reg, lane));
+    return out;
+  };
+
+  // Run A: the untranslated B0 M=32 instruction.
+  fill_inputs();
+  zero_destination();
+  {
+    const std::array<uint32_t, 2> words = {matrix[0], matrix[1]};
+    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_wmma_f32_32x16x128_f4");
+    cu->execute_instruction(inst.get(), *wf);
+  }
+  const std::vector<uint32_t> run_a = snapshot_destination();
+
+  // Both halves of the destination must have been written, or a split that
+  // silently dropped one of them would still compare equal.
+  const size_t half_size = 8u * lanes;
+  ASSERT_TRUE(std::ranges::any_of(run_a.begin(), run_a.begin() + half_size, [](uint32_t v) {
+    return v != 0u;
+  })) << "the unsplit run left the lower destination half empty";
+  ASSERT_TRUE(std::ranges::any_of(run_a.begin() + half_size, run_a.end(), [](uint32_t v) {
+    return v != 0u;
+  })) << "the unsplit run left the upper destination half empty";
+
+  // Run B: the translated pair of scaled M=16 halves over the same inputs.
+  fill_inputs();
+  zero_destination();
+  size_t executed = 0;
+  for (size_t offset = 0; offset < body_words.size();) {
+    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(body_words.data() + offset));
+    ASSERT_NE(inst, nullptr);
+    cu->execute_instruction(inst.get(), *wf);
+    offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
+    ++executed;
+  }
+  EXPECT_EQ(executed, 2u);
+  const std::vector<uint32_t> run_b = snapshot_destination();
+
+  EXPECT_EQ(run_a, run_b);
+  if (run_a != run_b) {
+    for (size_t i = 0; i < run_a.size(); ++i) {
+      if (run_a[i] == run_b[i])
+        continue;
+      ADD_FAILURE() << "first divergence at D reg " << (i / lanes) << " lane " << (i % lanes)
+                    << ": unsplit=0x" << std::hex << run_a[i] << " split=0x" << run_b[i]
+                    << std::dec;
+      break;
+    }
+  }
+
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250RecoversAddNcU64PcBuilder) {
