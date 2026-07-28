@@ -54,7 +54,7 @@ struct BlockHandle {
 };
 
 class DefaultBlockHandleProxy {
-  using ProxyT = DeviceProxy<HIPDefaultFinegrainedAllocator, BlockHandle>;
+  using ProxyT = DeviceProxy<BlockHandle>;
 
  public:
   DefaultBlockHandleProxy() = default;
@@ -64,9 +64,9 @@ class DefaultBlockHandleProxy {
                           AWF_Queue_statusT *default_ctx_status,
                           AWF_Queue_ret_buffT *default_ctx_g_ret,
                           AWF_Queue_ret_buffT *default_ctx_atomic_ret,
-                          [[maybe_unused]] const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator(),
+                          const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator(),
                           size_t num_elems = 1)
-    : proxy_{num_elems} {
+    : alloc_{alloc}, proxy_{num_elems, alloc_} {
 
     // TODO(bpotter): create a default queue for this queue descriptor
     auto queue_descriptor{queue->descriptor(0)};
@@ -97,19 +97,20 @@ class DefaultBlockHandleProxy {
   __host__ __device__ BlockHandle *get() { return proxy_.get(); }
 
  private:
+  HIPDefaultFinegrainedAllocator alloc_{};
   ProxyT proxy_{};
 };
 
 class BlockHandleProxy {
-  using ProxyT = DeviceProxy<HIPDefaultFinegrainedAllocator, BlockHandle>;
+  using ProxyT = DeviceProxy<BlockHandle>;
 
  public:
   BlockHandleProxy() = default;
 
   BlockHandleProxy(void *g_ret, void *atomic_ret, Queue *queue, size_t offset,
                    volatile char *status, size_t max_blocks,
-                   [[maybe_unused]] const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator())
-    : proxy_{max_blocks} {
+                   const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator())
+    : alloc_{alloc}, proxy_{max_blocks, alloc_} {
 
     for (size_t i{0}; i < max_blocks; i++) {
       auto queue_descriptor{queue->descriptor(i)};
@@ -140,6 +141,7 @@ class BlockHandleProxy {
   __host__ __device__ BlockHandle *get() { return proxy_.get(); }
 
  private:
+  HIPDefaultFinegrainedAllocator alloc_{};
   ProxyT proxy_{};
 };
 
