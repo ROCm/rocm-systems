@@ -306,7 +306,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                     const auto eq_pos = entry.find('=');
                     if(eq_pos == std::string::npos || eq_pos == 0)
                     {
-                        throw std::runtime_error(fmt::format(
+                        throw exception<std::runtime_error>(fmt::format(
                             "Error! --env value '{}' is not in form VARIABLE=VALUE",
                             entry));
                     }
