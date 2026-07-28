@@ -219,7 +219,6 @@ if __name__ == "__main__":
         help=(
             "When set, --counter-names checks only that matching counter tracks exist "
             "in the trace; it does NOT require their values to be non-zero. "
-            "Used for AI NIC tests where RDMA counters may legitimately be 0."
         ),
     )
 

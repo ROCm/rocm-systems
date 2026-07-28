@@ -192,6 +192,8 @@ class TestAINIC(RocprofsysTest):
         self.assert_regex(result)
 
         # Validate Perfetto .proto: all 10 AI NIC counter track substrings must match
+        # We are only validating the presence: in this test, RDMA counters may
+        # legitimately be 0.
         self.assert_perfetto(
             result,
             counter_names=AINIC_PERFETTO_COUNTER_NAMES,
