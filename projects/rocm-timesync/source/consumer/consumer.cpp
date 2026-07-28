@@ -3,7 +3,7 @@
 #include <cassert>
 #include <variant>
 
-#ifdef TIMESYNC_BUILD_INFLUXDB
+#ifdef ROCM_TIMESYNC_BUILD_INFLUXDB
 #include <curl/curl.h>
 #endif
 
@@ -39,7 +39,7 @@ static timesync_db* ts_client = nullptr;
 static int _db_init(const ts_config_t& cfg)
 {
     if (std::holds_alternative<ts_db_influx_t>(cfg.db_config)) {
-#ifdef TIMESYNC_BUILD_INFLUXDB
+#ifdef ROCM_TIMESYNC_BUILD_INFLUXDB
         const auto& influx = std::get<ts_db_influx_t>(cfg.db_config);
         ts_client = new influx_client(
             influx.host,
@@ -59,7 +59,7 @@ int timesync_init(const ts_config_t& cfg)
 {
     int status;
 
-#ifdef TIMESYNC_BUILD_INFLUXDB
+#ifdef ROCM_TIMESYNC_BUILD_INFLUXDB
     curl_global_init(CURL_GLOBAL_DEFAULT);
 #endif
 
@@ -99,7 +99,7 @@ int timesync_deinit()
 
     ipc::detach(channel);
 
-#ifdef TIMESYNC_BUILD_INFLUXDB
+#ifdef ROCM_TIMESYNC_BUILD_INFLUXDB
     curl_global_cleanup();
 #endif
 

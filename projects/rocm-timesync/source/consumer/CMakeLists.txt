@@ -1,11 +1,12 @@
-option(ROCM_TIMESYNC_BUILD_SHARED "Build shared library" ON)
-option(ROCM_TIMESYNC_BUILD_STATIC "Build static library" ON)
+option(BUILD_SHARED "Build shared library" ON)
+option(BUILD_STATIC "Build static library" ON)
+option(BUILD_INFLUXDB "Build InfluxDB support" OFF)
 
 set(ROCM_TIMESYNC_SOURCES
   consumer.cpp
 )
 
-if(ROCM_TIMESYNC_BUILD_INFLUXDB)
+if(BUILD_INFLUXDB)
   list(APPEND ROCM_TIMESYNC_SOURCES influx_client.cpp)
 endif()
 
@@ -15,7 +16,7 @@ function(rocm_timesync_configure_target target_name)
     PUBLIC rocm-timesync-headers
   )
 
-  if(ROCM_TIMESYNC_BUILD_INFLUXDB)
+  if(BUILD_INFLUXDB)
     find_package(CURL REQUIRED)
     find_package(nlohmann_json REQUIRED)
 
@@ -26,13 +27,13 @@ function(rocm_timesync_configure_target target_name)
     )
 
     target_compile_definitions(${target_name}
-      PRIVATE TIMESYNC_BUILD_INFLUXDB=1
+      PRIVATE ROCM_TIMESYNC_BUILD_INFLUXDB=1
     )
   endif()
 endfunction()
 
 # Shared library
-if(ROCM_TIMESYNC_BUILD_SHARED)
+if(BUILD_SHARED)
   add_library(rocm-timesync SHARED ${ROCM_TIMESYNC_SOURCES} $<TARGET_OBJECTS:rocm-timesync-core>)
 
   rocm_timesync_configure_target(rocm-timesync)
@@ -50,7 +51,7 @@ if(ROCM_TIMESYNC_BUILD_SHARED)
 endif()
 
 # Static library
-if(ROCM_TIMESYNC_BUILD_STATIC)
+if(BUILD_STATIC)
   add_library(rocm-timesync-static STATIC ${ROCM_TIMESYNC_SOURCES} $<TARGET_OBJECTS:rocm-timesync-core>)
 
   rocm_timesync_configure_target(rocm-timesync-static)
