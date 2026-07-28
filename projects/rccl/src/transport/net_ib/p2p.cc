@@ -11,7 +11,7 @@
 #include "p2p_resiliency.h"
 
 #ifdef ENABLE_FAULT_INJECTION
-#include "net_ib_fault_inject.h"
+#include "net_ib_flush_fault_inject.h"
 // Test-only: when armed, ncclIbIflush re-issues the pre-fix scratchpad
 // RDMA_WRITE so a regression test can prove the write is what faults.
 static bool ncclIbFlushForceScratchpadWrite = false;
