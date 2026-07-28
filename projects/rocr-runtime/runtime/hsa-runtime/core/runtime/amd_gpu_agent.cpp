@@ -908,10 +908,10 @@ void GpuAgent::InitDma() {
     return queue;
   };
 
-  // Enable profiling on the internal blit copy queues right after creation so that
-  // copy completion timestamps are always available regardless of when async-copy
-  // profiling is later turned on (e.g. a profiler attaching after copies have run).
-  // Dedicated compute queue for host-to-device blits.
+  // Enable profiling on the internal blit copy queues right after creation to avoid
+  // having to unmap and remap the queue for CP FW to re-read the queue properties when
+  // profiling is later turned on. If profiling is disabled later on these queues, then
+  // the queue unmap and remap will be triggered.
   queues_[QueueBlitOnly].reset([queue_lambda]() {
     auto queue = queue_lambda();
     queue->SetProfiling(true);
