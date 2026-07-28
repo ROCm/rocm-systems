@@ -22,12 +22,12 @@ THE SOFTWARE.
 
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
-#include <catch2/catch_test_case_info.hpp>
 #include <catch2/interfaces/catch_interfaces_config.hpp>
 #include <hip_test_params.hh>
 #include <hip_test_context.hh>
 #include <regex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <cstdlib>
 #include <cstdio>
@@ -56,10 +56,18 @@ THE SOFTWARE.
  * misconfiguration and aborts the run rather than silently testing with the
  * wrong parameters.
  *
- * Both the command-line filter and HIP_TEST_LEVEL accept multiple levels using
- * the Catch2 tag format (e.g. "[level_1],[level_2]"); when more than one is
- * given the highest level wins. HIP_TEST_LEVEL additionally accepts the bare
- * form without brackets (e.g. "level_2" or "level_1,level_2").
+ * Both sources are parsed with the same rules, following the Catch2 test spec
+ * grammar: a comma separated list of filters that are OR'd, each filter a
+ * sequence of AND'd patterns that may be negated with '~'. A pattern counts
+ * only if it reads exactly "level_N", so a malformed tag ("[level_2x]") is
+ * ignored, while an exclusion ("~[level_2]") removes that level from the set
+ * that can still run. Of the levels that remain, the highest wins:
+ *   "[level_1],[level_2]"    -> level_2
+ *   "~[level_3]~[level_4]"   -> level_2 (highest functional level left)
+ *   "[level_0]~[level_0]"    -> no level (nothing left to run)
+ * The single exception between the two sources is that HIP_TEST_LEVEL also
+ * accepts the bare form without brackets ("level_2", "level_1,level_2",
+ * "~level_4").
  */
 class HipTestParameterListener : public Catch::EventListenerBase {
 public:
@@ -86,23 +94,91 @@ private:
     }
 
     /**
-     * @brief Collect all level numbers appearing in a string.
-     * @return Distinct level numbers found, sorted ascending (empty if none).
+     * @brief Collect every level a tag expression can select.
+     *
+     * The expression is read the way Catch2 reads a test spec: a comma
+     * separated list of filters OR'd together, each filter a sequence of
+     * patterns AND'd together, each pattern optionally negated with '~'.
+     * Patterns that do not read exactly "level_N" (test names, other tags, and
+     * malformed tags such as "[level_2x]") place no constraint on the level and
+     * are ignored.
+     *
+     * A filter naming levels contributes those levels, minus the ones it
+     * excludes; a filter that only excludes levels contributes every supported
+     * level except the excluded ones; a filter mentioning no level at all
+     * contributes nothing. Note that filters are OR'd, so "[level_1],~[level_2]"
+     * also runs level_3 and level_4 tests, exactly as Catch2 would select them.
+     *
+     * @param allowBareTags when true, a pattern may also be written without the
+     *        surrounding brackets ("level_2", "~level_2"), which HIP_TEST_LEVEL
+     *        accepts. Brackets, when present, must still be balanced.
+     * @return Distinct level numbers selectable, sorted ascending (empty if the
+     *         expression places no constraint on the level).
      */
-    std::set<int> collectLevels(const std::string& text, bool requireBrackets) {
-        const std::regex levelRegex(requireBrackets ? "\\[level_(\\d+)\\]"
-                                                    : "\\[?level_(\\d+)\\]?");
+    static std::set<int> collectLevels(const std::string& text, bool allowBareTags) {
+        static const std::regex bracketedPattern("(~?)\\[([^\\[\\]]*)\\]");
+        static const std::regex barePattern("\\s*(~?)\\s*([^\\s]+)\\s*");
+
+        // Level named by a pattern, or -1 when it does not name one. Anything
+        // but an exact "level_N" is rejected; the digit count is bounded so
+        // that the conversion cannot overflow.
+        const auto parseLevel = [](const std::string& tag) {
+            static const std::regex levelRegex("level_([0-9]{1,9})");
+            std::smatch match;
+            return std::regex_match(tag, match, levelRegex) ? std::stoi(match[1].str()) : -1;
+        };
+
         std::set<int> levels;
-        for (auto it = std::sregex_iterator(text.begin(), text.end(), levelRegex);
-             it != std::sregex_iterator(); ++it) {
-            levels.insert(std::stoi((*it)[1].str()));
+        std::stringstream stream(text);
+        std::string filter;
+        while (std::getline(stream, filter, ',')) {
+            std::set<int> included, excluded;
+
+            // Sort this filter's level patterns into included and excluded.
+            const auto sortPattern = [&](const std::string& negation, const std::string& tag) {
+                const int level = parseLevel(tag);
+                if (level >= 0) {
+                    (negation.empty() ? included : excluded).insert(level);
+                }
+            };
+
+            bool bracketed = false;
+            for (auto it = std::sregex_iterator(filter.begin(), filter.end(), bracketedPattern);
+                 it != std::sregex_iterator(); ++it) {
+                bracketed = true;
+                sortPattern((*it)[1].str(), (*it)[2].str());
+            }
+            if (!bracketed && allowBareTags) {
+                std::smatch match;
+                if (std::regex_match(filter, match, barePattern)) {
+                    sortPattern(match[1].str(), match[2].str());
+                }
+            }
+
+            if (included.empty()) {
+                if (excluded.empty()) {
+                    continue;  // filter says nothing about the level
+                }
+                // Exclusion only: everything the suite supports is still in play.
+                for (const char* supported : kSupportedLevels) {
+                    const int level = parseLevel(supported);
+                    if (level >= 0) {
+                        included.insert(level);
+                    }
+                }
+            }
+            for (const int level : included) {
+                if (excluded.count(level) == 0) {
+                    levels.insert(level);
+                }
+            }
         }
         return levels;
     }
 
     /**
      * @brief Reduce a set of levels to a single level string ("level_N").
-     * Picks the highest level and warns when more than one was requested.
+     * Picks the highest level and warns when more than one can be selected.
      * @return "level_N" for the highest level, or "" if the set is empty.
      */
     std::string highestLevel(const std::set<int>& levels, const char* source) {
@@ -110,7 +186,7 @@ private:
             return "";
         }
         if (levels.size() > 1) {
-            LogPrintf("[Level Filter] Multiple levels requested via %s; using highest (level_%d)\n",
+            LogPrintf("[Level Filter] Multiple levels selected via %s; using highest (level_%d)\n",
                       source, *levels.rbegin());
         }
         return "level_" + std::to_string(*levels.rbegin());
@@ -124,7 +200,7 @@ private:
         if (m_config != nullptr) {
             std::set<int> cliLevels;
             for (const auto& arg : m_config->getTestsOrTags()) {
-                const auto found = collectLevels(arg, true);
+                const auto found = collectLevels(arg, false);
                 cliLevels.insert(found.begin(), found.end());
             }
             std::string level = highestLevel(cliLevels, "command line");
@@ -136,7 +212,7 @@ private:
 
         // Priority 2: HIP_TEST_LEVEL environment variable.
         if (const char* envLevel = std::getenv("HIP_TEST_LEVEL")) {
-            std::string level = highestLevel(collectLevels(envLevel, false),
+            std::string level = highestLevel(collectLevels(envLevel, true),
                                              "HIP_TEST_LEVEL");
             if (!level.empty()) {
                 LogPrintf("[Level Filter] Detected from HIP_TEST_LEVEL: %s\n", level.c_str());
