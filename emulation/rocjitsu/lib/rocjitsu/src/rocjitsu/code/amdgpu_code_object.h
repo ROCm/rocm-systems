@@ -39,11 +39,13 @@ inline constexpr uint64_t kAmdGpuCodeObjectMetadataParseWorkImageUnits = 4;
 /// Conservative image-sized ownership units retained by one parsed object.
 ///
 /// The bound covers the backing image, up to two units for section objects and
-/// their vector slots, one copied-payload unit, one copied-section-name unit,
-/// and up to three bounded symbol- and metadata-derived units for names and
-/// fixed entry state.
+/// their vector slots, one copied-section-name unit, and up to three bounded
+/// symbol- and metadata-derived units for names and fixed entry state. Section
+/// payloads are immutable views into the backing image. Measurement charges
+/// actual backing-vector capacity; any allocator capacity slack remains
+/// covered by the multi-unit headroom.
 inline constexpr uint64_t kAmdGpuCodeObjectRetainedMajorImageUnits =
-    5 + kAmdGpuCodeObjectRetainedDerivedStateImageUnits;
+    4 + kAmdGpuCodeObjectRetainedDerivedStateImageUnits;
 
 struct AmdGpuKernelInfo {
   std::string name;
@@ -278,6 +280,7 @@ public:
   [[nodiscard]] std::optional<uint32_t> min_kernel_sgpr_count(rj_code_arch_t arch) const;
 
 private:
+  void initialize_image_parser();
   void load_sections();
 
   rj_code_target_id_t target_id_ = ROCJITSU_CODE_TARGET_INVALID;

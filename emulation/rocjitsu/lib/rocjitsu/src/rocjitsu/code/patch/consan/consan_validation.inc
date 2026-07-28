@@ -3609,6 +3609,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     if (requirement.required_private_bytes == 0)
       continue;
     std::vector<uint8_t> descriptor_probe(result.elf_bytes);
+    const major_image_ownership::ScopedOwner descriptor_probe_owner(
+        major_image_ownership::OwnerKind::DescriptorProbe, descriptor_probe);
     const SpillDescriptorUpdate descriptor_update = update_kernel_descriptor_for_spills(
         descriptor_probe, replacement_it->descriptor_file_offset,
         requirement.required_private_bytes);
@@ -3625,6 +3627,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
 
 [[nodiscard]] std::vector<std::string>
 validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanResult &result) {
+  const major_image_ownership::ScopedPhase validation_phase(
+      major_image_ownership::Phase::FinalValidation, /*only_if_none=*/true);
   std::vector<std::string> errors;
   AmdGpuCodeObject original(original_bytes.data(), original_bytes.size());
   AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
@@ -3738,6 +3742,8 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
 
 [[nodiscard]] ConSanResult finalize_consan_result(ConSanResult result,
                                                   std::span<const uint8_t> original_bytes) {
+  const major_image_ownership::ScopedOwner result_owner(
+      major_image_ownership::OwnerKind::ResultImage, result.elf_bytes);
   if (has_rejected_kernel(result)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.modified = false;

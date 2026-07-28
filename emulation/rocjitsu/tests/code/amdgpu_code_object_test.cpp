@@ -8,6 +8,8 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/amdgpu_kernel_metadata.h"
+#include "rocjitsu/code/major_image_ownership.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 
@@ -21,9 +23,11 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -32,6 +36,46 @@ namespace {
 
 namespace kd = rocr::llvm::amdhsa;
 using KD = kd::kernel_descriptor_t;
+
+struct AllocationCounter {
+  uint64_t live_bytes = 0;
+  uint64_t peak_bytes = 0;
+};
+
+template <typename T> class CountingAllocator {
+public:
+  using value_type = T;
+
+  explicit CountingAllocator(AllocationCounter *counter = nullptr) : counter_(counter) {}
+
+  template <typename U>
+  CountingAllocator(const CountingAllocator<U> &other) : counter_(other.counter()) {}
+
+  [[nodiscard]] T *allocate(size_t count) {
+    T *allocation = std::allocator<T>{}.allocate(count);
+    if (counter_ != nullptr) {
+      const uint64_t bytes = count * sizeof(T);
+      counter_->live_bytes += bytes;
+      counter_->peak_bytes = std::max(counter_->peak_bytes, counter_->live_bytes);
+    }
+    return allocation;
+  }
+
+  void deallocate(T *allocation, size_t count) {
+    if (counter_ != nullptr)
+      counter_->live_bytes -= count * sizeof(T);
+    std::allocator<T>{}.deallocate(allocation, count);
+  }
+
+  [[nodiscard]] AllocationCounter *counter() const { return counter_; }
+
+  template <typename U> bool operator==(const CountingAllocator<U> &other) const {
+    return counter_ == other.counter();
+  }
+
+private:
+  AllocationCounter *counter_ = nullptr;
+};
 
 constexpr uint16_t kKernelMetadataFixtureSectionCount = 2;
 constexpr uint16_t kDerivedStateFixtureSectionCount = 6;
@@ -480,7 +524,7 @@ make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels) 
   return image;
 }
 
-bool set_aggregate_copied_section_bytes(std::vector<uint8_t> &image, uint64_t aggregate_bytes) {
+bool set_aggregate_viewed_section_bytes(std::vector<uint8_t> &image, uint64_t aggregate_bytes) {
   Elf64_Ehdr header{};
   std::memcpy(&header, image.data(), sizeof(header));
   if (header.e_shnum <= 1)
@@ -857,6 +901,97 @@ TEST(AmdGpuCodeObjectAccounting, SymbolRoleChargeCombinesAllRoleCosts) {
                 kAmdGpuCodeObjectTransientSymbolEntryChargeBytes);
 }
 
+TEST(AmdGpuCodeObjectAccounting, AssociativeEntryChargeCoversMeasuredStandardLibraryAllocations) {
+  using Value = std::pair<const std::string_view, uint64_t>;
+  using Map = std::unordered_map<std::string_view, uint64_t, std::hash<std::string_view>,
+                                 std::equal_to<std::string_view>, CountingAllocator<Value>>;
+  constexpr size_t kEntryCount = 256;
+  AllocationCounter counter;
+  std::vector<std::string> names;
+  names.reserve(kEntryCount);
+  for (size_t index = 0; index < kEntryCount; ++index)
+    names.push_back("kernel_" + std::to_string(index));
+
+  {
+    Map entries(0, std::hash<std::string_view>{}, std::equal_to<std::string_view>{},
+                CountingAllocator<Value>(&counter));
+    entries.reserve(kEntryCount);
+    for (size_t index = 0; index < kEntryCount; ++index)
+      entries.emplace(names[index], index);
+
+    const uint64_t charged_bytes =
+        kEntryCount *
+        (sizeof(Value) + amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes);
+    EXPECT_LE(counter.peak_bytes, charged_bytes)
+        << "update the parser's associative bookkeeping charge for this standard library";
+  }
+  EXPECT_EQ(counter.live_bytes, 0u);
+}
+
+TEST(AmdGpuCodeObjectAccounting, ParserMeasurementFitsReducedRetainedOwnershipBound) {
+  const auto image = make_elf_with_kds({{"kernel", 0}});
+  major_image_ownership::ScopedMeasurement measurement;
+  {
+    const major_image_ownership::ScopedPhase phase(major_image_ownership::Phase::IncrementalPatch);
+    AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_FALSE(object.text_sections().empty());
+    const Section *text = object.text_sections().front();
+    EXPECT_EQ(text->data(), object.image_data() + text->sectionOffset())
+        << "parsed sections must view the parser's immutable backing image";
+
+    AmdGpuCodeObject moved(std::move(object));
+    ASSERT_TRUE(moved.is_valid());
+    ASSERT_FALSE(moved.text_sections().empty());
+    EXPECT_EQ(moved.text_sections().front()->data(),
+              moved.image_data() + moved.text_sections().front()->sectionOffset());
+  }
+  const major_image_ownership::Measurement observed = measurement.snapshot();
+  const auto &incremental = observed.phase(major_image_ownership::Phase::IncrementalPatch);
+  EXPECT_FALSE(observed.overflowed);
+  EXPECT_FALSE(observed.bookkeeping_error);
+  EXPECT_GT(incremental.peak_bytes, 0u);
+  EXPECT_LE(incremental.peak_bytes, kAmdGpuCodeObjectRetainedMajorImageUnits * image.size());
+}
+
+TEST(AmdGpuCodeObjectAccounting, ManyKernelParserMeasurementFitsReducedRetainedOwnershipBound) {
+  std::vector<std::pair<std::string, uint32_t>> kernels;
+  kernels.reserve(64);
+  for (size_t index = 0; index < 64; ++index)
+    kernels.emplace_back("kernel_" + std::to_string(index), index % 8);
+  const auto image = make_elf_with_kds(kernels);
+
+  major_image_ownership::ScopedMeasurement measurement;
+  const major_image_ownership::ScopedPhase phase(major_image_ownership::Phase::IncrementalPatch);
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  EXPECT_EQ(object.kernels().size(), kernels.size());
+
+  const major_image_ownership::Measurement observed = measurement.snapshot();
+  const auto &incremental = observed.phase(major_image_ownership::Phase::IncrementalPatch);
+  EXPECT_FALSE(observed.overflowed);
+  EXPECT_FALSE(observed.bookkeeping_error);
+  EXPECT_GT(incremental.peak_bytes, 0u);
+  EXPECT_LE(incremental.peak_bytes, kAmdGpuCodeObjectRetainedMajorImageUnits * image.size());
+}
+
+TEST(AmdGpuCodeObjectAccounting, MovedPatcherMeasuresDestinationImage) {
+  const auto image = make_elf_with_kds({{"kernel", 0}});
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  major_image_ownership::ScopedMeasurement measurement;
+  CodeObjectPatcher patcher(object);
+  CodeObjectPatcher moved(std::move(patcher));
+  const major_image_ownership::ScopedPhase phase(major_image_ownership::Phase::IncrementalPatch);
+  const major_image_ownership::Measurement observed = measurement.snapshot();
+  const auto &incremental = observed.phase(major_image_ownership::Phase::IncrementalPatch);
+  EXPECT_FALSE(observed.bookkeeping_error);
+  EXPECT_GE(incremental
+                .bytes_at_peak[static_cast<size_t>(major_image_ownership::OwnerKind::PatcherImage)],
+            moved.image_bytes().size());
+}
+
 TEST(AmdGpuCodeObjectAccounting, SectionClassificationCrossesWordBoundaries) {
   std::array<uint64_t, 2> words{};
   for (const uint64_t index : {1u, 63u, 64u, 70u})
@@ -1221,7 +1356,7 @@ TEST(AmdGpuKernelMetadataPayload, RetainsFirstKernelArrayForDuplicateRootKeys) {
   EXPECT_EQ(names, std::vector<std::string>{"a"});
 }
 
-TEST(AmdGpuCodeObjectValidation, RejectsAggregateCopiedSectionsLargerThanImage) {
+TEST(AmdGpuCodeObjectValidation, RejectsAggregateViewedSectionBytesLargerThanImage) {
   auto image = make_elf_with_kds({{"k", 0}});
   Elf64_Ehdr header{};
   std::memcpy(&header, image.data(), sizeof(header));
@@ -1241,21 +1376,30 @@ TEST(AmdGpuCodeObjectValidation, RejectsAggregateCopiedSectionsLargerThanImage) 
   EXPECT_FALSE(obj.is_valid());
 }
 
-TEST(AmdGpuCodeObjectValidation, AcceptsAggregateCopiedSectionsEqualToImage) {
+TEST(AmdGpuCodeObjectValidation, AcceptsAggregateViewedSectionBytesEqualToImage) {
   auto image = make_elf_with_kds({{"k", 0}});
-  ASSERT_TRUE(set_aggregate_copied_section_bytes(image, image.size()));
+  ASSERT_TRUE(set_aggregate_viewed_section_bytes(image, image.size()));
 
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_TRUE(obj.is_valid());
   EXPECT_EQ(obj.malformed_kernel_metadata_note_count(), 0u);
 }
 
-TEST(AmdGpuCodeObjectValidation, RejectsAggregateCopiedSectionsOneByteOverImage) {
+TEST(AmdGpuCodeObjectValidation, RejectsAggregateViewedSectionBytesOneByteOverImage) {
   auto image = make_elf_with_kds({{"k", 0}});
-  ASSERT_TRUE(set_aggregate_copied_section_bytes(image, image.size() + 1));
+  ASSERT_TRUE(set_aggregate_viewed_section_bytes(image, image.size() + 1));
 
+  major_image_ownership::ScopedMeasurement measurement;
+  const major_image_ownership::ScopedPhase phase(major_image_ownership::Phase::IncrementalPatch);
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_FALSE(obj.is_valid());
+  const major_image_ownership::Measurement observed = measurement.snapshot();
+  const auto &incremental = observed.phase(major_image_ownership::Phase::IncrementalPatch);
+  EXPECT_FALSE(observed.bookkeeping_error);
+  EXPECT_GT(incremental.peak_bytes, 0u);
+  EXPECT_NE(incremental.observed_owner_mask &
+                (uint64_t{1} << static_cast<size_t>(major_image_ownership::OwnerKind::Parser)),
+            0u);
 }
 
 TEST(AmdGpuCodeObjectValidation, RejectsAggregateSectionNameAmplificationBeforeAllocation) {

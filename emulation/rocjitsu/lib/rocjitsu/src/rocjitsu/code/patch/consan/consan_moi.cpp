@@ -8,6 +8,7 @@
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
@@ -350,6 +351,8 @@ bool consan_moi_supports_native_lds_mnemonic(std::string_view mnemonic, rj_code_
 
 ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &options,
                                   std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch) {
+  const major_image_ownership::ScopedOwner result_owner(
+      major_image_ownership::OwnerKind::ResultImage, result.elf_bytes);
   if (result.moi_stage_warning_begin <= result.warnings.size())
     result.warnings.resize(result.moi_stage_warning_begin);
   else

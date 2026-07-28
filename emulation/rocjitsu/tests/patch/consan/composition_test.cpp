@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
 
 namespace rocjitsu {
 namespace {
 
-TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
-  const std::vector<uint8_t> bytes = make_rdna4_release_wait_no_return_bitwise_code_object();
+[[nodiscard]] constexpr uint64_t ownership_mask(major_image_ownership::OwnerKind kind) {
+  return uint64_t{1} << static_cast<size_t>(kind);
+}
+
+[[nodiscard]] ConSanOptions release_last_record_replay_options(bool with_atomic_fault) {
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
@@ -16,10 +20,15 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
   options.moi_epoch_vgpr = 16;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
-  options.fault_atomic_wrong_address = true;
+  options.fault_atomic_wrong_address = with_atomic_fault;
   options.fault_atomic_address_delta = 4;
-  options.fault_require_exactly_one = true;
+  options.fault_require_exactly_one = with_atomic_fault;
+  return options;
+}
 
+TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
+  const std::vector<uint8_t> bytes = make_rdna4_release_wait_no_return_bitwise_code_object();
+  const ConSanOptions options = release_last_record_replay_options(/*with_atomic_fault=*/true);
   const ConSanResult valid = try_patch_consan(bytes, options);
 
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
@@ -28,24 +37,6 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
   EXPECT_TRUE(valid.final_validation_passed);
   EXPECT_EQ(valid.applied_fault_mutations, 1u);
   ASSERT_GE(valid.elf_bytes.size(), bytes.size());
-  const ConSanPatchedImageGrowthLimit exact_growth = {
-      .kind = ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
-      .absolute_bytes = valid.elf_bytes.size() - bytes.size(),
-  };
-  const auto ownership_estimate =
-      consan_hook::consan_transform_major_image_reservation(bytes.size(), exact_growth);
-  ASSERT_TRUE(ownership_estimate);
-  const auto composite_phase =
-      std::ranges::find(consan_hook::kConSanTransformOwnershipPhases,
-                        consan_hook::ConSanTransformOwnershipPhase::CompositeIncrementalPatch,
-                        &consan_hook::ConSanTransformOwnership::phase);
-  ASSERT_NE(composite_phase, consan_hook::kConSanTransformOwnershipPhases.end());
-  const auto composite_reservation = consan_hook::consan_transform_phase_reservation_bytes(
-      *composite_phase, bytes.size(), valid.elf_bytes.size());
-  ASSERT_TRUE(composite_reservation);
-  EXPECT_EQ(*composite_reservation, bytes.size() + 13u * valid.elf_bytes.size())
-      << "modified composite transforms must retain their explicit parser-complete phase";
-  EXPECT_GE(ownership_estimate->reservation_bytes, *composite_reservation);
   const auto mutation = std::ranges::find(
       valid.patches, ConSanPatchKind::InlineAtomicAddressRewrite, &ConSanPatchInfo::kind);
   const auto record = std::ranges::find(valid.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
@@ -77,6 +68,135 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
     return error.find("mutation proof found the wrong atomic address displacement") !=
            std::string::npos;
   })) << testing::PrintToString(errors);
+}
+
+TEST(ConSanOwnership, CompositePeakFitsAdmissionAcrossAllPhases) {
+  const std::vector<uint8_t> bytes = make_rdna4_release_wait_no_return_bitwise_code_object();
+  const ConSanOptions options = release_last_record_replay_options(/*with_atomic_fault=*/true);
+
+  major_image_ownership::ScopedMeasurement measurement;
+  const ConSanResult result = try_patch_consan(bytes, options);
+  const major_image_ownership::Measurement observed = measurement.snapshot();
+
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+  ASSERT_GE(result.elf_bytes.size(), bytes.size());
+  const ConSanPatchedImageGrowthLimit exact_growth = {
+      .kind = ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+      .absolute_bytes = result.elf_bytes.size() - bytes.size(),
+  };
+  const auto ownership_estimate =
+      consan_hook::consan_transform_major_image_reservation(bytes.size(), exact_growth);
+  ASSERT_TRUE(ownership_estimate);
+  const auto composite_phase =
+      std::ranges::find(consan_hook::kConSanTransformOwnershipPhases,
+                        consan_hook::ConSanTransformOwnershipPhase::CompositeIncrementalPatch,
+                        &consan_hook::ConSanTransformOwnership::phase);
+  ASSERT_NE(composite_phase, consan_hook::kConSanTransformOwnershipPhases.end());
+  const auto composite_reservation = consan_hook::consan_transform_phase_reservation_bytes(
+      *composite_phase, bytes.size(), result.elf_bytes.size());
+  ASSERT_TRUE(composite_reservation);
+  EXPECT_EQ(*composite_reservation, bytes.size() + 12u * result.elf_bytes.size())
+      << "modified composite transforms must retain their explicit parser-complete phase";
+  EXPECT_GE(ownership_estimate->reservation_bytes, *composite_reservation);
+
+  struct MeasuredPhase {
+    major_image_ownership::Phase measured;
+    consan_hook::ConSanTransformOwnershipPhase admitted;
+  };
+  constexpr std::array measured_phases{
+      MeasuredPhase{major_image_ownership::Phase::IncrementalPatch,
+                    consan_hook::ConSanTransformOwnershipPhase::IncrementalPatch},
+      MeasuredPhase{major_image_ownership::Phase::CompositeIncrementalPatch,
+                    consan_hook::ConSanTransformOwnershipPhase::CompositeIncrementalPatch},
+      MeasuredPhase{major_image_ownership::Phase::FinalValidation,
+                    consan_hook::ConSanTransformOwnershipPhase::FinalValidation},
+  };
+  EXPECT_FALSE(observed.overflowed);
+  EXPECT_FALSE(observed.bookkeeping_error);
+  // Admission is a conservative all-input upper bound, not a fixture-specific
+  // utilization target. Record the representative peaks without imposing a
+  // lower-bound ratio that would couple production coefficients to this ELF.
+  for (const MeasuredPhase &phase : measured_phases) {
+    const auto admitted =
+        std::ranges::find(consan_hook::kConSanTransformOwnershipPhases, phase.admitted,
+                          &consan_hook::ConSanTransformOwnership::phase);
+    ASSERT_NE(admitted, consan_hook::kConSanTransformOwnershipPhases.end());
+    const auto reservation = consan_hook::consan_transform_phase_reservation_bytes(
+        *admitted, bytes.size(), result.elf_bytes.size());
+    ASSERT_TRUE(reservation);
+    const auto &observation = observed.phase(phase.measured);
+    EXPECT_GT(observation.peak_bytes, 0u);
+    EXPECT_LE(observation.peak_bytes, *reservation)
+        << consan_hook::consan_transform_ownership_phase_name(phase.admitted);
+    EXPECT_NE(observation.observed_owner_mask &
+                  ownership_mask(major_image_ownership::OwnerKind::Parser),
+              0u);
+  }
+  const auto &incremental = observed.phase(major_image_ownership::Phase::IncrementalPatch);
+  EXPECT_NE(incremental.observed_owner_mask &
+                ownership_mask(major_image_ownership::OwnerKind::PatcherImage),
+            0u);
+  const auto &composite = observed.phase(major_image_ownership::Phase::CompositeIncrementalPatch);
+  EXPECT_NE(composite.observed_owner_mask &
+                ownership_mask(major_image_ownership::OwnerKind::CompositeImage),
+            0u);
+  EXPECT_NE(composite.observed_owner_mask &
+                ownership_mask(major_image_ownership::OwnerKind::CompactIndex),
+            0u);
+  EXPECT_NE(composite.observed_owner_mask &
+                ownership_mask(major_image_ownership::OwnerKind::ReplacementBytes),
+            0u);
+  EXPECT_NE(composite.observed_owner_mask &
+                ownership_mask(major_image_ownership::OwnerKind::TransactionImage),
+            0u);
+  const auto &validation = observed.phase(major_image_ownership::Phase::FinalValidation);
+  EXPECT_NE(validation.observed_owner_mask &
+                ownership_mask(major_image_ownership::OwnerKind::ResultImage),
+            0u);
+  RecordProperty("composite_peak_bytes", composite.peak_bytes);
+  RecordProperty("final_validation_peak_bytes", validation.peak_bytes);
+  RecordProperty("input_image_bytes", bytes.size());
+  RecordProperty("replacement_image_bytes", result.elf_bytes.size());
+}
+
+TEST(ConSanOwnership, OrdinaryIncrementalPeakFitsAdmission) {
+  const std::vector<uint8_t> bytes = make_rdna4_release_wait_no_return_bitwise_code_object();
+  const ConSanOptions options = release_last_record_replay_options(/*with_atomic_fault=*/false);
+
+  major_image_ownership::ScopedMeasurement measurement;
+  const ConSanResult result = try_patch_consan(bytes, options);
+  const major_image_ownership::Measurement observed = measurement.snapshot();
+
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+  const auto phase = std::ranges::find(consan_hook::kConSanTransformOwnershipPhases,
+                                       consan_hook::ConSanTransformOwnershipPhase::IncrementalPatch,
+                                       &consan_hook::ConSanTransformOwnership::phase);
+  ASSERT_NE(phase, consan_hook::kConSanTransformOwnershipPhases.end());
+  const auto reservation = consan_hook::consan_transform_phase_reservation_bytes(
+      *phase, bytes.size(), result.elf_bytes.size());
+  ASSERT_TRUE(reservation);
+  const auto &incremental = observed.phase(major_image_ownership::Phase::IncrementalPatch);
+  EXPECT_FALSE(observed.overflowed);
+  EXPECT_FALSE(observed.bookkeeping_error);
+  EXPECT_GT(incremental.peak_bytes, 0u);
+  EXPECT_LE(incremental.peak_bytes, *reservation);
+  for (const major_image_ownership::OwnerKind kind : {
+           major_image_ownership::OwnerKind::InputImage,
+           major_image_ownership::OwnerKind::Parser,
+           major_image_ownership::OwnerKind::ResultImage,
+           major_image_ownership::OwnerKind::PatcherImage,
+           major_image_ownership::OwnerKind::ReplacementBytes,
+           major_image_ownership::OwnerKind::TransactionImage,
+       }) {
+    EXPECT_NE(incremental.observed_owner_mask & ownership_mask(kind), 0u)
+        << static_cast<unsigned>(kind);
+  }
+  EXPECT_EQ(observed.phase(major_image_ownership::Phase::CompositeIncrementalPatch).peak_bytes, 0u);
+  RecordProperty("incremental_peak_bytes", incremental.peak_bytes);
+  RecordProperty("input_image_bytes", bytes.size());
+  RecordProperty("replacement_image_bytes", result.elf_bytes.size());
 }
 
 TEST(ConSanMoi, AtomicWrongAddressComposesWithRetainedInlineShadowProbe) {

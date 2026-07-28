@@ -64,26 +64,28 @@ consan_transform_ownership_phase_name(ConSanTransformOwnershipPhase phase) {
 /// IncrementalPatch owns the hook's pristine staging image, the previous
 /// result, a parser's exported ownership units, the patcher image, replacement
 /// text, and the transactional grown image. Each parser owns its image, section
-/// objects and vector slots, bounded payload, bounded section names, and
-/// conservatively charged symbol- and metadata-derived state. Section headers,
+/// objects and vector slots, bounded section names, and conservatively charged
+/// symbol- and metadata-derived state. Section payloads, section headers,
 /// transient symbol-name characters, and metadata names are views into the
 /// parser image.
 ///
 /// The composite variant additionally retains the independently validated
 /// mutation image while instrumenting it. That extra phase exists because the
-/// SuperCollider flat tail currently overlaps its outer parser with the parser
-/// for the mutated image; reducing both sides to compact name/descriptor maps
-/// would be the place to remove it. FinalValidation owns pristine staging plus
+/// SuperCollider's staged mutation image remains live while independently
+/// parsing and instrumenting that image. Descriptor normalization sequences its
+/// pristine and staged parsers and retains only compact name/offset maps between
+/// them. FinalValidation owns pristine staging plus
 /// the original parser's `kAmdGpuCodeObjectRetainedMajorImageUnits` units, and
 /// the result plus the replacement parser's units and a descriptor probe.
 /// ConSan releases its outer inventory parser before entering the incremental
 /// MOI pipeline, and every patch stage moves its emitted image.
 ///
-/// AmdGpuCodeObject rejects aggregate copied section payload or section names
-/// larger than its backing image and symbol- and metadata-derived state larger
-/// than its exported multi-unit budget. Allocator bookkeeping is not
-/// represented by these major-image units. The non-parser terms below keep the
-/// phase table mechanically coupled to the parser's exported ownership bound.
+/// AmdGpuCodeObject rejects aggregate viewed section payload extents or copied
+/// section names larger than its backing image and symbol- and
+/// metadata-derived state larger than its exported multi-unit budget.
+/// Allocator bookkeeping is not represented by these major-image units. The
+/// non-parser terms below keep the phase table mechanically coupled to the
+/// parser's exported ownership bound.
 inline constexpr uint64_t kConSanIncrementalNonParserMaximumImageUnits = 4;
 inline constexpr uint64_t kConSanCompositeNonParserMaximumImageUnits = 5;
 inline constexpr uint64_t kConSanFinalOriginalNonParserInputImageUnits = 1;

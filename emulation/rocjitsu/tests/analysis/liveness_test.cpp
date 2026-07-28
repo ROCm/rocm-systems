@@ -109,13 +109,15 @@ private:
 class TestTextSection : public Section {
 public:
   TestTextSection(std::unique_ptr<char[]> data, std::size_t size)
-      : Section(".text", std::move(data)), size_(size) {}
+      : Section(".text"), data_(std::move(data)), size_(size) {}
 
   std::size_t size() const override { return size_; }
+  const char *data() const override { return data_.get(); }
   uint32_t sectionHeaderNameIdx() const override { return 0; }
   uint64_t sectionOffset() const override { return 0; }
 
 private:
+  std::unique_ptr<char[]> data_;
   std::size_t size_;
 };
 

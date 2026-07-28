@@ -48,11 +48,9 @@ public:
 /// @brief Abstract base class for ELF sections.
 class Section {
 public:
-  /// @brief Construct a section with the given name and raw data.
+  /// @brief Construct a section with the given name.
   /// @param[in] name Section name (e.g. ".text", ".rodata").
-  /// @param[in] data Owned buffer holding the section contents.
-  Section(std::string name, std::unique_ptr<char[]> data)
-      : name_(std::move(name)), data_(std::move(data)) {}
+  explicit Section(std::string name) : name_(std::move(name)) {}
   virtual ~Section() = default;
 
   /// @brief Section name (e.g. ".text", ".rodata").
@@ -72,8 +70,9 @@ public:
   virtual uint64_t flags() const { return 0; }
 
   /// @brief Raw section data.
-  /// @returns Pointer to the section contents, or nullptr if empty.
-  const char *data() const { return data_.get(); }
+  /// @returns Pointer valid for reading `size()` bytes while this code object
+  /// remains alive. Empty-section pointer values are implementation-defined.
+  virtual const char *data() const = 0;
 
   /// @brief Index into the section header string table for this section's name.
   /// @returns String table index.
@@ -85,7 +84,6 @@ public:
 
 protected:
   std::string name_;
-  std::unique_ptr<char[]> data_;
 };
 
 /// @brief Base class for code objects containing machine code and metadata.

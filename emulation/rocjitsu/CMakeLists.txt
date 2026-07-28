@@ -330,6 +330,7 @@ set(_rj_waitcheck_sources
     ${ROCJITSU_SRC_DIR}/rocjitsu/code/basic_block.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/code/file_io.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/code/kernel_symbol.cpp
+    ${ROCJITSU_SRC_DIR}/rocjitsu/code/major_image_ownership.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/isa/operand.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/isa/register_set.cpp
     ${ROCJITSU_SRC_DIR}/rocjitsu/isa/waitcheck_decoder.cpp

@@ -418,6 +418,7 @@ add_executable(
     patch/error_report_test.cpp
     code/code_object_target_id_test.cpp
     code/amdgpu_code_object_test.cpp
+    code/major_image_ownership_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
     dbt/virtual_lds_dispatch_rewrite_test.cpp

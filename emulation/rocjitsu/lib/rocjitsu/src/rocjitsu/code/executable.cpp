@@ -43,14 +43,16 @@ private:
 class HsaSection : public Section {
 public:
   HsaSection(std::string name, std::unique_ptr<char[]> data, const Elf64_Shdr &shdr)
-      : Section(std::move(name), std::move(data)), shdr_(shdr) {}
+      : Section(std::move(name)), data_(std::move(data)), shdr_(shdr) {}
 
   std::size_t size() const override { return shdr_.sh_size; }
   uint64_t flags() const override { return shdr_.sh_flags; }
+  const char *data() const override { return data_.get(); }
   uint32_t sectionHeaderNameIdx() const override { return shdr_.sh_name; }
   uint64_t sectionOffset() const override { return shdr_.sh_offset; }
 
 private:
+  std::unique_ptr<char[]> data_;
   Elf64_Shdr shdr_;
 };
 

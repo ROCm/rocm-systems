@@ -7,6 +7,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
+#include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "util/bit.h"
 
@@ -34,6 +35,10 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 namespace {
+
+[[nodiscard]] uint64_t measure_byte_vector_capacity(const void *context) noexcept {
+  return static_cast<const std::vector<uint8_t> *>(context)->capacity();
+}
 
 static_assert(sizeof(size_t) >= sizeof(uint64_t),
               "CodeObjectPatcher requires a 64-bit host address space");
@@ -722,7 +727,18 @@ CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
     text_size_ = text_secs[0]->size();
     text_vaddr_ = text_secs[0]->vaddr();
   }
+  major_image_ownership::register_owner(this, major_image_ownership::OwnerKind::PatcherImage,
+                                        &image_, measure_byte_vector_capacity);
 }
+
+CodeObjectPatcher::CodeObjectPatcher(CodeObjectPatcher &&other) noexcept
+    : image_(std::move(other.image_)), text_offset_(other.text_offset_),
+      text_size_(other.text_size_), text_vaddr_(other.text_vaddr_),
+      text_tail_size_(other.text_tail_size_) {
+  major_image_ownership::transfer_owner(&other, this, &image_);
+}
+
+CodeObjectPatcher::~CodeObjectPatcher() { major_image_ownership::unregister_owner(this); }
 
 std::span<uint8_t> CodeObjectPatcher::text_bytes() {
   return {image_.data() + text_offset_, text_size_};
@@ -886,6 +902,8 @@ bool CodeObjectPatcher::has_relocation_to_text_symbol() const {
 
 TextReplacementResult CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
                                                       size_t max_file_growth) noexcept {
+  const major_image_ownership::ScopedOwner replacement_owner(
+      major_image_ownership::OwnerKind::ReplacementBytes, new_text.size());
   try {
     return replace_text_impl(new_text, max_file_growth);
   } catch (const std::bad_alloc &) {
@@ -929,6 +947,8 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
   auto shdrs = std::move(*maybe_shdrs);
   auto phdrs = std::move(*maybe_phdrs);
   std::vector<uint8_t> image;
+  const major_image_ownership::ScopedOwner transaction_owner(
+      major_image_ownership::OwnerKind::TransactionImage, image);
 
   const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
   if (!text_index) {
@@ -1002,6 +1022,7 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
 
       const FileInsertionOutcome insertion = insert_zero_file_bytes(
           image, header, shdrs, phdrs, old_text_end_file, *padded_file_delta, *text_index, true);
+      transaction_owner.checkpoint();
       if (insertion == FileInsertionOutcome::AllocationFailure)
         return TextReplacementResult::allocation_failure(required_file_growth);
       if (insertion != FileInsertionOutcome::Success)
@@ -1072,6 +1093,7 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
 
   commit_replacement(image);
   image_ = std::move(image);
+  transaction_owner.checkpoint();
   text_size_ = new_text.size();
   return TextReplacementResult::success(required_file_growth.value_or(0));
 }
@@ -1164,6 +1186,8 @@ SidecarDescriptorAppendResult CodeObjectPatcher::append_sidecar_descriptor_trans
     return SidecarDescriptorAppendResult::malformed_input();
 
   std::vector<uint8_t> inserted;
+  const major_image_ownership::ScopedOwner inserted_owner(
+      major_image_ownership::OwnerKind::ReplacementBytes, inserted);
   std::vector<AppendedSidecarDescriptor> appended;
   appended.reserve(translations.size());
   uint64_t cursor_vaddr = *insertion_vaddr;
@@ -1215,6 +1239,7 @@ SidecarDescriptorAppendResult CodeObjectPatcher::append_sidecar_descriptor_trans
   if (!maybe_padded_size || *maybe_padded_size > inserted.max_size())
     return SidecarDescriptorAppendResult::allocation_failure();
   inserted.resize(*maybe_padded_size, 0);
+  inserted_owner.checkpoint();
 
   std::vector<bool> shift_section_vaddr(shdrs.size(), false);
   for (size_t i = 0; i < shdrs.size(); ++i) {
@@ -1249,8 +1274,11 @@ SidecarDescriptorAppendResult CodeObjectPatcher::append_sidecar_descriptor_trans
     return SidecarDescriptorAppendResult::allocation_failure();
 
   std::vector<uint8_t> image;
+  const major_image_ownership::ScopedOwner transaction_owner(
+      major_image_ownership::OwnerKind::TransactionImage, image);
   image.reserve(*committed_image_size);
   image.assign(image_.begin(), image_.end());
+  transaction_owner.checkpoint();
   const FileInsertionOutcome insertion = insert_file_bytes(
       image, header, shdrs, phdrs, *insertion_file_offset, inserted, std::nullopt, true);
   if (insertion == FileInsertionOutcome::AllocationFailure)
@@ -1297,6 +1325,7 @@ SidecarDescriptorAppendResult CodeObjectPatcher::append_sidecar_descriptor_trans
 
   write_elf_tables(image, header, shdrs, phdrs);
   image_ = std::move(image);
+  transaction_owner.checkpoint();
   text_tail_size_ = *committed_tail_size;
   assert(appended.size() == translations.size() &&
          "a successful sidecar append must materialize every descriptor");
@@ -1359,6 +1388,8 @@ CodeObjectPatchResult CodeObjectPatcher::append_nonalloc_section_impl(
   std::vector<uint8_t> new_shstrtab(
       image_.begin() + static_cast<std::ptrdiff_t>(shstrtab.sh_offset),
       image_.begin() + static_cast<std::ptrdiff_t>(shstrtab.sh_offset + shstrtab.sh_size));
+  const major_image_ownership::ScopedOwner replacement_owner(
+      major_image_ownership::OwnerKind::ReplacementBytes, new_shstrtab);
   const uint32_t section_name_offset = static_cast<uint32_t>(new_shstrtab.size());
   new_shstrtab.insert(new_shstrtab.end(), name.begin(), name.end());
   new_shstrtab.push_back('\0');
@@ -1401,6 +1432,8 @@ CodeObjectPatchResult CodeObjectPatcher::append_nonalloc_section_impl(
     return CodeObjectPatchResult::allocation_failure();
 
   std::vector<uint8_t> image;
+  const major_image_ownership::ScopedOwner transaction_owner(
+      major_image_ownership::OwnerKind::TransactionImage, image);
   image.reserve(*final_size);
   image.assign(image_.begin(), image_.end());
   image.resize(*maybe_payload_offset, 0);
@@ -1408,8 +1441,10 @@ CodeObjectPatchResult CodeObjectPatcher::append_nonalloc_section_impl(
   image.insert(image.end(), new_shstrtab.begin(), new_shstrtab.end());
   image.resize(new_shoff, 0);
   image.resize(*final_size, 0);
+  transaction_owner.checkpoint();
   write_elf_tables(image, header, shdrs, phdrs);
   image_ = std::move(image);
+  transaction_owner.checkpoint();
   return CodeObjectPatchResult::success();
 }
 

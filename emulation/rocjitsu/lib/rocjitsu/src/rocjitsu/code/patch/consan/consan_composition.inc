@@ -10,6 +10,28 @@ struct ConSanTransformStage {
   std::optional<std::string> applied_fault_logical_identity;
 };
 
+using ConSanDescriptorNameIndex = std::unordered_map<std::string, uint64_t>;
+using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
+
+[[nodiscard]] uint64_t measure_descriptor_name_index(const void *context) noexcept {
+  const auto &index = *static_cast<const ConSanDescriptorNameIndex *>(context);
+  uint64_t bytes = byte_accounting::saturating_multiply(
+      index.size(), sizeof(ConSanDescriptorNameIndex::value_type) +
+                        amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes);
+  for (const auto &[name, offset] : index) {
+    (void)offset;
+    bytes = byte_accounting::saturating_add(bytes, name.capacity() + 1u);
+  }
+  return bytes;
+}
+
+[[nodiscard]] uint64_t measure_descriptor_owner_index(const void *context) noexcept {
+  const auto &index = *static_cast<const ConSanDescriptorOwnerIndex *>(context);
+  return byte_accounting::saturating_multiply(
+      index.size(), sizeof(ConSanDescriptorOwnerIndex::value_type) +
+                        amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes);
+}
+
 [[nodiscard]] ConSanResult finalize_consan_result(ConSanResult result,
                                                   std::span<const uint8_t> original_bytes);
 
@@ -307,6 +329,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 [[nodiscard]] ConSanResult
 try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                       std::span<const CarriedPerturbationPlan> carried_plans = {}) {
+  const major_image_ownership::ScopedPhase incremental_phase(
+      major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   const bool has_fault =
       options.fault_drop_barrier || options.fault_move_barrier ||
       options.fault_mutate_barrier_id_scope || options.fault_mutate_barrier_participants ||
@@ -401,6 +425,10 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
       return fault_result;
     ConSanTransformStage mutation_stage = take_modified_stage(fault_result);
+    const major_image_ownership::ScopedOwner mutation_image_owner(
+        major_image_ownership::OwnerKind::CompositeImage, mutation_stage.image);
+    const major_image_ownership::ScopedPhase composite_phase(
+        major_image_ownership::Phase::CompositeIncrementalPatch);
 
     ConSanOptions instrument_options = options;
     instrument_options.fault_drop_barrier = false;
@@ -460,20 +488,36 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     ConSanResult instrument_result = finalize_consan_result(
         try_patch_consan_impl(mutation_stage.image, instrument_options, instrument_carried),
         mutation_stage.image);
+    const major_image_ownership::ScopedOwner instrument_result_owner(
+        major_image_ownership::OwnerKind::ResultImage, instrument_result.elf_bytes);
     // Resource ownership is a logical kernel identity, but instrumentation of
     // a staged mutation records descriptor offsets in the mutation image.
     // Normalize those offsets before merging stages: an intermediate offset
     // can otherwise collide with a different pristine kernel descriptor.
-    AmdGpuCodeObject pristine_code_object(code_object_bytes.data(), code_object_bytes.size());
-    AmdGpuCodeObject staged_code_object(mutation_stage.image.data(), mutation_stage.image.size());
-    std::unordered_map<uint64_t, uint64_t> pristine_owner_offsets;
-    for (const AmdGpuKernelInfo &staged_kernel : staged_code_object.kernels()) {
-      const auto pristine_kernel = std::ranges::find(pristine_code_object.kernels(),
-                                                     staged_kernel.name, &AmdGpuKernelInfo::name);
-      if (pristine_kernel != pristine_code_object.kernels().end()) {
-        pristine_owner_offsets.emplace(staged_kernel.descriptor_file_offset,
-                                       pristine_kernel->descriptor_file_offset);
+    ConSanDescriptorNameIndex pristine_descriptor_offsets;
+    const major_image_ownership::ScopedOwner pristine_index_owner(
+        major_image_ownership::OwnerKind::CompactIndex, &pristine_descriptor_offsets,
+        measure_descriptor_name_index);
+    {
+      AmdGpuCodeObject pristine_code_object(code_object_bytes.data(), code_object_bytes.size());
+      pristine_descriptor_offsets.reserve(pristine_code_object.kernels().size());
+      for (const AmdGpuKernelInfo &kernel : pristine_code_object.kernels())
+        pristine_descriptor_offsets.emplace(kernel.name, kernel.descriptor_file_offset);
+      pristine_index_owner.checkpoint();
+    }
+    ConSanDescriptorOwnerIndex pristine_owner_offsets;
+    const major_image_ownership::ScopedOwner owner_index_owner(
+        major_image_ownership::OwnerKind::CompactIndex, &pristine_owner_offsets,
+        measure_descriptor_owner_index);
+    {
+      AmdGpuCodeObject staged_code_object(mutation_stage.image.data(), mutation_stage.image.size());
+      for (const AmdGpuKernelInfo &staged_kernel : staged_code_object.kernels()) {
+        const auto pristine = pristine_descriptor_offsets.find(staged_kernel.name);
+        if (pristine != pristine_descriptor_offsets.end()) {
+          pristine_owner_offsets.emplace(staged_kernel.descriptor_file_offset, pristine->second);
+        }
       }
+      owner_index_owner.checkpoint();
     }
     const auto normalize_owner_offsets = [&](std::vector<uint64_t> &offsets) {
       for (uint64_t &offset : offsets) {
@@ -566,6 +610,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   }
 
   ConSanResult result;
+  const major_image_ownership::ScopedOwner result_owner(
+      major_image_ownership::OwnerKind::ResultImage, result.elf_bytes);
   result.visited_code_object = true;
   result.flavor = options.flavor;
   result.moi_engine = options.moi_engine;
@@ -696,8 +742,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (needs_semantic_inventory) {
     build_fault_site_inventory(code_object_bytes, arch, result);
     build_sync_event_inventory(code_object_bytes, result);
-    if (options.flavor == ConSanFlavor::Moi &&
-        !canonicalize_sync_events_by_physical_site(result))
+    if (options.flavor == ConSanFlavor::Moi && !canonicalize_sync_events_by_physical_site(result))
       return result;
     const SyncEventIdentityIndex sync_events = build_sync_event_identity_index(result);
     const auto sync_blocks = build_sync_basic_blocks(*code_object, *decoder, arch, result);
@@ -743,9 +788,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     result.moi_stage_warning_begin = result.warnings.size();
     result.moi_inventory_options = options;
     // Incremental MOI passes reparse their current result. Release the
-    // pristine inventory parser before entering them so its image and copied
-    // sections cannot overlap every stage's parser, patcher, text, and
-    // transaction.
+    // pristine inventory parser before entering them so its backing image,
+    // section objects and names, and derived state cannot overlap every
+    // stage's parser, patcher, text, and transaction.
     code_object.reset();
     return try_patch_consan_moi(std::move(result), options, code_object_bytes, arch);
   }

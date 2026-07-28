@@ -8,6 +8,7 @@
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
@@ -436,6 +437,9 @@ validated_composite_proof(const ConSanResult &dry_run, const ConSanResult &valid
 ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
                                                    const ConSanMoiReportRetryConfig &report,
                                                    std::span<const uint8_t> code_object_bytes) {
+  const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
+                                                       code_object_bytes.data(),
+                                                       code_object_bytes.size());
   const ConSanMoiEngine inventory_engine = inventory.moi_engine;
   try {
     if (!inventory.moi_inventory_options)
@@ -518,6 +522,9 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
 
 ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
                               const ConSanOptions &options) {
+  const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
+                                                       code_object_bytes.data(),
+                                                       code_object_bytes.size());
   try {
     ConSanOptions effective_options = options;
     effective_options.patched_image_growth_input_bytes = code_object_bytes.size();

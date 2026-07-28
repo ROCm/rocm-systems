@@ -178,6 +178,11 @@ private:
 class CodeObjectPatcher {
 public:
   explicit CodeObjectPatcher(const AmdGpuCodeObject &obj);
+  CodeObjectPatcher(const CodeObjectPatcher &) = delete;
+  CodeObjectPatcher &operator=(const CodeObjectPatcher &) = delete;
+  CodeObjectPatcher(CodeObjectPatcher &&other) noexcept;
+  CodeObjectPatcher &operator=(CodeObjectPatcher &&) = delete;
+  ~CodeObjectPatcher();
 
   std::span<uint8_t> text_bytes();
   std::span<const uint8_t> text_bytes() const;

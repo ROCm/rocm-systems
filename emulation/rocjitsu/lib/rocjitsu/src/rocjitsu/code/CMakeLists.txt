@@ -8,6 +8,7 @@ rj_add_object_library(rocjitsu_code
     executable.cpp
     file_io.cpp
     kernel_symbol.cpp
+    major_image_ownership.cpp
     rj_code.cpp
     dbt/binary_translator.cpp
     dbt/rj_code_translate.cpp

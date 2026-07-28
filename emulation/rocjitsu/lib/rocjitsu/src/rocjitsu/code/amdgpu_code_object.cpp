@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/amdgpu_kernel_metadata.h"
 #include "rocjitsu/code/file_io.h"
+#include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 
 #include "hsa/AMDHSAKernelDescriptor.h" // Check SGPR allocation
@@ -43,16 +44,18 @@ private:
 
 class HsaSection : public Section {
 public:
-  HsaSection(std::string name, std::unique_ptr<char[]> data, const Elf64_Shdr &shdr)
-      : Section(std::move(name), std::move(data)), shdr_(shdr) {}
+  HsaSection(std::string name, const char *data, const Elf64_Shdr &shdr)
+      : Section(std::move(name)), data_(data), shdr_(shdr) {}
 
   std::size_t size() const override { return shdr_.sh_size; }
   uint64_t flags() const override { return shdr_.sh_flags; }
   uint64_t vaddr() const override { return shdr_.sh_addr; }
+  const char *data() const override { return data_; }
   uint32_t sectionHeaderNameIdx() const override { return shdr_.sh_name; }
   uint64_t sectionOffset() const override { return shdr_.sh_offset; }
 
 private:
+  const char *data_ = nullptr;
   Elf64_Shdr shdr_;
 };
 
@@ -284,6 +287,7 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   functions_ = std::move(other.functions_);
   malformed_kernel_metadata_note_count_ = other.malformed_kernel_metadata_note_count_;
   kernel_metadata_scan_complete_ = other.kernel_metadata_scan_complete_;
+  major_image_ownership::transfer_owner(&other, this);
 }
 
 AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
@@ -293,26 +297,9 @@ AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
     is_valid_ = false;
     return;
   }
-
-  if (image_.size() < sizeof(Elf64_Ehdr)) {
-    is_valid_ = false;
-    return;
-  }
-
-  Elf64_Ehdr ehdr;
-  std::memcpy(&ehdr, image_.data(), sizeof(Elf64_Ehdr));
-
-  if (!is_elf(ehdr) || ehdr.e_ident[EI_CLASS] != ELFCLASS64 ||
-      ehdr.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA) {
-    is_valid_ = false;
-    return;
-  }
-
-  header_ = std::make_unique<HsaHeader>(ehdr);
-  load_sections();
-  if (!is_valid_)
-    return;
-  target_id_ = target_from_machine_flags(header_->flags());
+  initialize_image_parser();
+  if (is_valid_)
+    target_id_ = target_from_machine_flags(header_->flags());
 }
 
 AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size) {
@@ -323,21 +310,9 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size) {
 
   image_.assign(reinterpret_cast<const char *>(elf_bytes),
                 reinterpret_cast<const char *>(elf_bytes) + elf_size);
-
-  Elf64_Ehdr ehdr;
-  std::memcpy(&ehdr, image_.data(), sizeof(Elf64_Ehdr));
-
-  if (!is_elf(ehdr) || ehdr.e_ident[EI_CLASS] != ELFCLASS64 ||
-      ehdr.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA) {
-    is_valid_ = false;
-    return;
-  }
-
-  header_ = std::make_unique<HsaHeader>(ehdr);
-  load_sections();
-  if (!is_valid_)
-    return;
-  target_id_ = target_from_machine_flags(header_->flags());
+  initialize_image_parser();
+  if (is_valid_)
+    target_id_ = target_from_machine_flags(header_->flags());
 }
 
 AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size,
@@ -350,24 +325,40 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size,
 
   image_.assign(reinterpret_cast<const char *>(elf_bytes),
                 reinterpret_cast<const char *>(elf_bytes) + elf_size);
-
-  Elf64_Ehdr ehdr;
-  std::memcpy(&ehdr, image_.data(), sizeof(Elf64_Ehdr));
-
-  if (!is_elf(ehdr) || ehdr.e_ident[EI_CLASS] != ELFCLASS64 ||
-      ehdr.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA) {
-    is_valid_ = false;
-    return;
-  }
-
-  header_ = std::make_unique<HsaHeader>(ehdr);
-  load_sections();
-  if (!is_valid_)
-    return;
-  target_id_ = target_from_triple(target_triple_);
+  initialize_image_parser();
+  if (is_valid_)
+    target_id_ = target_from_triple(target_triple_);
 }
 
-AmdGpuCodeObject::~AmdGpuCodeObject() = default;
+AmdGpuCodeObject::~AmdGpuCodeObject() { major_image_ownership::unregister_owner(this); }
+
+void AmdGpuCodeObject::initialize_image_parser() {
+  major_image_ownership::register_owner(this, major_image_ownership::OwnerKind::Parser,
+                                        image_.capacity());
+
+  try {
+    if (image_.size() < sizeof(Elf64_Ehdr)) {
+      is_valid_ = false;
+      return;
+    }
+
+    Elf64_Ehdr ehdr;
+    std::memcpy(&ehdr, image_.data(), sizeof(Elf64_Ehdr));
+
+    if (!is_elf(ehdr) || ehdr.e_ident[EI_CLASS] != ELFCLASS64 ||
+        ehdr.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA) {
+      is_valid_ = false;
+      return;
+    }
+
+    header_ = std::make_unique<HsaHeader>(ehdr);
+    major_image_ownership::add_owner_bytes(this, sizeof(HsaHeader));
+    load_sections();
+  } catch (...) {
+    major_image_ownership::unregister_owner(this);
+    throw;
+  }
+}
 
 void AmdGpuCodeObject::load_sections() {
   const auto shoff = header_->sectionHeaderOff();
@@ -419,6 +410,7 @@ void AmdGpuCodeObject::load_sections() {
       is_valid_ = false;
       return false;
     }
+    major_image_ownership::add_owner_bytes(this, charge);
     return true;
   };
 
@@ -434,11 +426,12 @@ void AmdGpuCodeObject::load_sections() {
     }
     copied_section_name_bytes += name_len;
   }
+  major_image_ownership::add_owner_bytes(this, copied_section_name_bytes);
 
-  // Section payloads are copied into owning Section objects. Bound their
-  // aggregate before allocating so duplicate or overlapping headers cannot
-  // amplify one input image into an unbounded parser working set.
-  uint64_t copied_section_bytes = 0;
+  // Section payloads remain immutable views into image_. Bound their aggregate
+  // before materializing section objects so duplicate or overlapping headers
+  // cannot amplify the amount of payload exposed by one parser.
+  uint64_t viewed_section_bytes = 0;
   size_t materialized_section_count = 0;
   size_t text_section_count = 0;
   size_t rodata_section_count = 0;
@@ -464,11 +457,11 @@ void AmdGpuCodeObject::load_sections() {
       continue;
     }
     if (!fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size()) ||
-        shdr.sh_size > image_.size() - copied_section_bytes) {
+        shdr.sh_size > image_.size() - viewed_section_bytes) {
       is_valid_ = false;
       return;
     }
-    copied_section_bytes += shdr.sh_size;
+    viewed_section_bytes += shdr.sh_size;
     // Only materialized, in-image sections participate in text classification.
     // NOBITS has no file bytes and cannot provide patchable function ranges.
     if (sec_name == ".text" &&
@@ -506,6 +499,7 @@ void AmdGpuCodeObject::load_sections() {
     is_valid_ = false;
     return;
   }
+  major_image_ownership::add_owner_bytes(this, section_collections.used_bytes());
 
   for (size_t i = 0; i < section_count; ++i) {
     const Elf64_Shdr shdr = *section_header(i);
@@ -515,10 +509,8 @@ void AmdGpuCodeObject::load_sections() {
     if (sec_name.empty())
       continue;
 
-    auto sec_data = std::make_unique<char[]>(shdr.sh_size);
-    std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
     sections_.emplace_back(
-        std::make_unique<HsaSection>(std::string(sec_name), std::move(sec_data), shdr));
+        std::make_unique<HsaSection>(std::string(sec_name), image_.data() + shdr.sh_offset, shdr));
 
     if (sec_name == ".text") {
       text_sections_.push_back(sections_.back().get());
