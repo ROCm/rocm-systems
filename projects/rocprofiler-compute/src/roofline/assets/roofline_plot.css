@@ -18,52 +18,21 @@
   --roofline-plot-area: #ffffff;
   --roofline-plot-grid: rgba(0, 0, 0, 0.08);
   --roofline-marker-outline: #000000;
-
-  /* Dark mode. */
-  --roofline-dark-border: #363c45;
-  --roofline-dark-bg-soft: #16191e;
-  --roofline-dark-surface: #0a0b0d;
-  --roofline-dark-accent: #58a6ff;
-  --roofline-dark-text: #e6e9ef;
-  --roofline-dark-muted: #9aa4b2;
-  --roofline-dark-selected-bg: rgba(88, 166, 255, 0.18);
-  --roofline-dark-swatch-border: rgba(255, 255, 255, 0.35);
-  --roofline-dark-plot-area: #000000;
-  --roofline-dark-plot-grid: rgba(255, 255, 255, 0.14);
-  --roofline-dark-marker-outline: rgba(255, 255, 255, 0.7);
 }
 
-/* Dark reading. */
 :root.roofline-theme-dark {
   color-scheme: dark;
-  --roofline-border: var(--roofline-dark-border);
-  --roofline-bg-soft: var(--roofline-dark-bg-soft);
-  --roofline-surface: var(--roofline-dark-surface);
-  --roofline-accent: var(--roofline-dark-accent);
-  --roofline-text: var(--roofline-dark-text);
-  --roofline-muted: var(--roofline-dark-muted);
-  --roofline-selected-bg: var(--roofline-dark-selected-bg);
-  --roofline-swatch-border: var(--roofline-dark-swatch-border);
-  --roofline-plot-area: var(--roofline-dark-plot-area);
-  --roofline-plot-grid: var(--roofline-dark-plot-grid);
-  --roofline-marker-outline: var(--roofline-dark-marker-outline);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not(.roofline-theme-light) {
-    color-scheme: dark;
-    --roofline-border: var(--roofline-dark-border);
-    --roofline-bg-soft: var(--roofline-dark-bg-soft);
-    --roofline-surface: var(--roofline-dark-surface);
-    --roofline-accent: var(--roofline-dark-accent);
-    --roofline-text: var(--roofline-dark-text);
-    --roofline-muted: var(--roofline-dark-muted);
-    --roofline-selected-bg: var(--roofline-dark-selected-bg);
-    --roofline-swatch-border: var(--roofline-dark-swatch-border);
-    --roofline-plot-area: var(--roofline-dark-plot-area);
-    --roofline-plot-grid: var(--roofline-dark-plot-grid);
-    --roofline-marker-outline: var(--roofline-dark-marker-outline);
-  }
+  --roofline-border: #363c45;
+  --roofline-bg-soft: #16191e;
+  --roofline-surface: #0a0b0d;
+  --roofline-accent: #58a6ff;
+  --roofline-text: #e6e9ef;
+  --roofline-muted: #9aa4b2;
+  --roofline-selected-bg: rgba(88, 166, 255, 0.18);
+  --roofline-swatch-border: rgba(255, 255, 255, 0.35);
+  --roofline-plot-area: #000000;
+  --roofline-plot-grid: rgba(255, 255, 255, 0.14);
+  --roofline-marker-outline: rgba(255, 255, 255, 0.7);
 }
 
 *,

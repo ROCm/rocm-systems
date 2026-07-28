@@ -23,15 +23,20 @@ from typing import Any, Optional
 
 import plotly.graph_objects as go
 
+from roofline.roofline_frame import (
+    FRAME_MIN_DECADES,
+    FRAME_PAD,
+    FRAME_SLOPE_SKEW,
+)
+
 KERNEL_NAME_FONT_FAMILY = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
 ALL_PEAKS_VALUE = "all"
 
-FRAME_PAD = 1.6
-FRAME_MIN_DECADES = 2.5
-FRAME_SLOPE_SKEW = 2.0
-
 ROOF_EXTRAP_MAX_AI = 1e150
+
+# Id Plotly renders the graph div under and the controller finds it by.
+_PLOT_DIV_ID = "roofline-plot"
 
 _PAGE_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -42,6 +47,11 @@ _PAGE_TEMPLATE = """<!DOCTYPE html>
 <style>
 __CSS__
 </style>
+<script>
+if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+  document.documentElement.classList.add("roofline-theme-dark");
+}
+</script>
 </head>
 <body>
 <div class="roofline-app">
@@ -127,7 +137,7 @@ def build_interactive_document(
     fragment = figure.to_html(
         full_html=False,
         include_plotlyjs=True,
-        div_id=view_model.div_id,
+        div_id=_PLOT_DIV_ID,
         config={
             "displayModeBar": False,
             "responsive": True,
@@ -211,15 +221,17 @@ class RooflineViewModel:
         kernel_trace_indices: Indices into figure.data of the per-kernel
             scatter traces, in the same order as kernels.
         roofline_traces: Bandwidth-roof (memory-level) line traces, each
-            {"level", "traceIndex", "bandwidth"}. Clicking a roofline panel row
-            isolates the matching trace.
+            {"level", "traceIndex", "bandwidth", "kneeAi", "kneePerf"}. Clicking
+            a roofline panel row isolates the matching trace. The knee is where
+            the diagonal turns over into the compute ceiling capping it, carried
+            here because the client frames on it; it is None when the figure has
+            no compute roof and the diagonal is drawn open-ended.
         compute_traces: Horizontal compute-ceiling traces (VALU/matrix), each
             {"traceIndex", "label", "peakPerf"}.
         compute_overlay_traces: One hidden highlight trace per compute ceiling,
             each {"traceIndex", "peakPerf"}. While roofs are isolated the base
             ceiling dims and its overlay carries the bright cap from the
             isolated slope rightward.
-        div_id: Id of the Plotly graph div.
     """
 
     peaks: list[str] = field(default_factory=list)
@@ -230,12 +242,11 @@ class RooflineViewModel:
     roofline_traces: list[dict[str, Any]] = field(default_factory=list)
     compute_traces: list[dict[str, Any]] = field(default_factory=list)
     compute_overlay_traces: list[dict[str, Any]] = field(default_factory=list)
-    div_id: str = "roofline-plot"
 
     def to_json(self) -> str:
         """Serialize the model for embedding in a <script> tag."""
         payload = {
-            "divId": self.div_id,
+            "divId": _PLOT_DIV_ID,
             "peaks": self.peaks,
             "peakColors": self.peak_colors,
             "defaultPeak": self.default_peak,
@@ -246,11 +257,6 @@ class RooflineViewModel:
             "computeOverlayTraces": self.compute_overlay_traces,
             "roofExtremeMaxAi": ROOF_EXTRAP_MAX_AI,
             "allPeaksValue": ALL_PEAKS_VALUE,
-            "allPeaksLabel": "All peaks",
-            # Marker color for a level or kernel with no assigned color.
-            "fallbackColor": "#888888",
-            # Opacity of the non-isolated roofs and ceilings while isolating.
-            "plotDimOpacity": 0.15,
             "framePad": FRAME_PAD,
             "frameMinDecades": FRAME_MIN_DECADES,
             "frameSlopeSkew": FRAME_SLOPE_SKEW,

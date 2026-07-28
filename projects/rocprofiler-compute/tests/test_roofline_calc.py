@@ -133,26 +133,37 @@ def test_calc_ai_analyze_replaces_inf_with_zero(
     assert result["ai_lds"][1] == [100.0]
 
 
-def test_calc_ai_analyze_replaces_none_with_zero(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    "unusable",
+    [None, "N/A", "", np.nan, np.inf, -np.inf],
+    ids=["none", "na", "empty", "nan", "inf", "-inf"],
+)
+def test_calc_ai_analyze_reports_an_unusable_ai_as_zero(
+    monkeypatch: pytest.MonkeyPatch, unusable: object
 ) -> None:
-    """None metric values are replaced with 0 and still included in plot points."""
+    """An AI that cannot be plotted is reported as 0 rather than dropped, so
+    every level's AI and performance list stays parallel with kernelNames. The
+    result also has to stay JSON-safe: the browser's JSON.parse rejects a bare
+    NaN outright, taking the whole page with it.
+    """
     result = run_calc_ai_analyze_with_values(
         monkeypatch,
         {
-            "ai_hbm": None,
-            "ai_l2": None,
-            "ai_l1": None,
-            "ai_lds": None,
-            "performance": 50.0,
+            "ai_hbm": unusable,
+            "ai_l2": unusable,
+            "ai_l1": 2.0,
+            "ai_lds": unusable,
+            "performance": 100.0,
         },
     )
 
     assert result["kernelNames"] == ["test_kernel"]
-    assert result["ai_hbm"][0] == [0], "None should be replaced with 0"
-    assert result["ai_l2"][0] == [0], "None should be replaced with 0"
-    assert result["ai_l1"][0] == [0], "None should be replaced with 0"
-    assert result["ai_lds"][0] == [0], "None should be replaced with 0"
+    for level in ("ai_hbm", "ai_l2", "ai_lds"):
+        assert result[level][0] == [0], f"{level} should report an unusable AI as 0"
+        assert result[level][1] == [100.0], f"{level} performance list desynced"
+    assert result["ai_l1"][0] == [2.0], "a usable AI alongside must pass through"
+    # allow_nan=False is what the browser's JSON.parse effectively enforces.
+    json.dumps(result, allow_nan=False)
 
 
 def test_calc_ai_analyze_valid_values_pass_through(
@@ -181,100 +192,35 @@ def test_calc_ai_analyze_valid_values_pass_through(
     assert result["ai_lds"][1] == [100.0]
 
 
-def test_calc_ai_analyze_na_and_empty_replaced(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Sentinel values 'N/A' and '' are replaced with 0."""
-    result = run_calc_ai_analyze_with_values(
-        monkeypatch,
-        {
-            "ai_hbm": "N/A",
-            "ai_l2": "",
-            "ai_l1": "N/A",
-            "ai_lds": "",
-            "performance": 75.0,
-        },
-    )
-
-    assert result["kernelNames"] == ["test_kernel"]
-    assert result["ai_hbm"][0] == [0], "'N/A' should be replaced with 0"
-    assert result["ai_l2"][0] == [0], "'' should be replaced with 0"
-    assert result["ai_l1"][0] == [0], "'N/A' should be replaced with 0"
-    assert result["ai_lds"][0] == [0], "'' should be replaced with 0"
-
-
-def test_calc_ai_analyze_nan_is_zeroed_and_stays_json_safe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A NaN AI is zeroed so the per-level lists stay aligned and JSON-safe.
-
-    Each level's AI and performance list must stay parallel with
-    kernelNames, and the result must not carry a bare NaN, which the
-    browser's JSON.parse rejects outright.
-    """
-    result = run_calc_ai_analyze_with_values(
-        monkeypatch,
-        {
-            "ai_hbm": np.nan,
-            "ai_l2": float("nan"),
-            "ai_l1": 2.0,
-            "ai_lds": np.nan,
-            "performance": 100.0,
-        },
-    )
-
-    kernel_count = len(result["kernelNames"])
-    for level in ("ai_hbm", "ai_l2", "ai_l1", "ai_lds"):
-        assert len(result[level][0]) == kernel_count, f"{level} AI list desynced"
-        assert len(result[level][1]) == kernel_count, f"{level} perf list desynced"
-    assert result["ai_hbm"][0] == [0], "NaN should be replaced with 0"
-    assert result["ai_l2"][0] == [0], "NaN should be replaced with 0"
-    assert result["ai_l1"][0] == [2.0], "valid float should pass through"
-    # allow_nan=False is what the browser's JSON.parse effectively enforces.
-    json.dumps(result, allow_nan=False)
-
-
 def test_calc_ai_analyze_joins_per_kernel_stats(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Dispatch count, aggregate time, and percent runtime join onto each kernel."""
-    result = run_calc_ai_analyze_with_values(
+    """Dispatch count, aggregate time, and percent runtime join onto each kernel
+    when the top-kernels table carries them, and read None when it does not,
+    which the tooltip renders as N/A."""
+    ai_values: dict[str, object] = {
+        "ai_hbm": 2.0,
+        "ai_l2": 2.0,
+        "ai_l1": 2.0,
+        "ai_lds": 2.0,
+        "performance": 100.0,
+    }
+
+    joined = run_calc_ai_analyze_with_values(
         monkeypatch,
-        {
-            "ai_hbm": 2.0,
-            "ai_l2": 2.0,
-            "ai_l1": 2.0,
-            "ai_lds": 2.0,
-            "performance": 100.0,
-        },
+        ai_values,
         top_stats={"Count": 128, "Sum(ns)": 154000.0, "Percent": 12.4},
     )
+    assert joined["counts"] == [128]
+    assert joined["totalTime"] == [154000.0]
+    assert joined["pctRuntime"] == [12.4]
+    assert joined["timeUnit"] == "ns", "the unit is only recoverable from the column"
 
-    assert result["counts"] == [128]
-    assert result["totalTime"] == [154000.0]
-    assert result["pctRuntime"] == [12.4]
-    assert result["timeUnit"] == "ns", "unit is only recoverable from the column name"
-
-
-def test_calc_ai_analyze_missing_stats_are_none(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Absent stat columns yield None, which the tooltip renders as N/A."""
-    result = run_calc_ai_analyze_with_values(
-        monkeypatch,
-        {
-            "ai_hbm": 2.0,
-            "ai_l2": 2.0,
-            "ai_l1": 2.0,
-            "ai_lds": 2.0,
-            "performance": 100.0,
-        },
-    )
-
-    assert result["counts"] == [None]
-    assert result["totalTime"] == [None]
-    assert result["pctRuntime"] == [None]
-    assert result["timeUnit"] == ""
+    missing = run_calc_ai_analyze_with_values(monkeypatch, ai_values)
+    assert missing["counts"] == [None]
+    assert missing["totalTime"] == [None]
+    assert missing["pctRuntime"] == [None]
+    assert missing["timeUnit"] == ""
 
 
 def test_sanitize_ai_value_replaces_invalid_values_with_zero() -> None:
