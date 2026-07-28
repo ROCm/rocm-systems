@@ -1813,6 +1813,145 @@ TEST(CodeObjectPatcher, PreservesExactGrowthWhenAlignedAllocationThrows) {
 
 static_assert(noexcept(std::declval<CodeObjectPatcher &>().replace_text(
     std::declval<std::span<const uint8_t>>(), size_t{})));
+static_assert(noexcept(std::declval<CodeObjectPatcher &>().append_sidecar_descriptor_translations(
+    std::declval<std::span<const KdTranslation>>(), ROCJITSU_CODE_ARCH_CDNA3, uint64_t{})));
+static_assert(noexcept(std::declval<CodeObjectPatcher &>().append_nonalloc_section(
+    std::declval<std::string_view>(), std::declval<std::span<const uint8_t>>(), uint64_t{})));
+
+void expect_sidecar_append_rejected_without_mutation(std::vector<uint8_t> image,
+                                                     CodeObjectPatchOutcome expected_outcome,
+                                                     uint64_t alignment = 64) {
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+  KdTranslation translation{};
+  translation.target_wave_size = 64;
+  const std::array translations{translation};
+
+  CodeObjectPatcher patcher(code_object);
+  const SidecarDescriptorAppendResult result = patcher.append_sidecar_descriptor_translations(
+      translations, ROCJITSU_CODE_ARCH_CDNA3, alignment);
+  EXPECT_FALSE(result.succeeded());
+  EXPECT_EQ(result.outcome(), expected_outcome);
+  EXPECT_TRUE(result.descriptors().empty());
+  EXPECT_EQ(patcher.emit(), image);
+}
+
+TEST(CodeObjectPatcher, SidecarDescriptorAppendIsTypedAndTransactional) {
+  KdTranslation translation{};
+  translation.target_wave_size = 64;
+  const std::array translations{translation};
+
+  expect_sidecar_append_rejected_without_mutation(make_minimal_amdgpu_elf_with_load_segments(),
+                                                  CodeObjectPatchOutcome::MalformedInput, 3);
+
+  {
+    auto image = make_minimal_amdgpu_elf_with_load_segments();
+    const auto header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, header.e_shoff, header.e_shnum);
+    ASSERT_GE(shdrs.size(), 4u);
+    auto symbols = read_elf_array_for_test<Elf64_Sym>(image, shdrs[3].sh_offset,
+                                                      shdrs[3].sh_size / sizeof(Elf64_Sym));
+    ASSERT_GE(symbols.size(), 2u);
+    symbols[1].st_value = std::numeric_limits<uint64_t>::max();
+    write_bytes_for_test(image, shdrs[3].sh_offset, symbols.data(),
+                         symbols.size() * sizeof(Elf64_Sym));
+
+    expect_sidecar_append_rejected_without_mutation(std::move(image),
+                                                    CodeObjectPatchOutcome::MalformedInput);
+  }
+
+  expect_sidecar_append_rejected_without_mutation(make_minimal_amdgpu_elf_with_load_segments(),
+                                                  CodeObjectPatchOutcome::AllocationFailure,
+                                                  uint64_t{1} << 63u);
+
+  {
+    const auto image = make_minimal_amdgpu_elf_with_load_segments();
+    AmdGpuCodeObject code_object(image.data(), image.size());
+    ASSERT_TRUE(code_object.is_valid());
+    CodeObjectPatcher patcher(code_object);
+    SidecarDescriptorAppendResult result =
+        patcher.append_sidecar_descriptor_translations(translations, ROCJITSU_CODE_ARCH_CDNA3, 64);
+    ASSERT_TRUE(result);
+    ASSERT_EQ(result.descriptors().size(), 1u);
+    EXPECT_GE(result.descriptors().front().file_offset,
+              code_object.text_sections()[0]->sectionOffset() +
+                  code_object.text_sections()[0]->size());
+    const auto descriptors = std::move(result).take_descriptors();
+    EXPECT_EQ(descriptors.size(), translations.size());
+    const auto patched = std::move(patcher).emit();
+    // The ownership model intentionally qualifies supported standard-library
+    // implementations: reserve() rounding must update the model rather than
+    // weaken this check.
+    EXPECT_EQ(patched.capacity(), patched.size())
+        << "the sidecar transaction must allocate its exact final image once";
+    AmdGpuCodeObject patched_object(patched.data(), patched.size());
+    EXPECT_TRUE(patched_object.is_valid());
+  }
+}
+
+TEST(CodeObjectPatcher, SidecarAppendRejectsShiftAddressOverflowWithoutMutation) {
+  enum class OverflowField {
+    SectionAddress,
+    ProgramVaddr,
+    ProgramPaddr,
+  };
+  constexpr std::array cases{
+      OverflowField::SectionAddress,
+      OverflowField::ProgramVaddr,
+      OverflowField::ProgramPaddr,
+  };
+
+  for (const OverflowField field : cases) {
+    SCOPED_TRACE(static_cast<int>(field));
+    auto image = make_minimal_amdgpu_elf_with_load_segments();
+    const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    if (field == OverflowField::SectionAddress) {
+      auto shdrs = read_elf_array_for_test<Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+      ASSERT_GE(shdrs.size(), 3u);
+      shdrs[2].sh_addr = std::numeric_limits<uint64_t>::max();
+      write_bytes_for_test(image, ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+    } else {
+      auto phdrs = read_elf_array_for_test<Elf64_Phdr>(image, ehdr.e_phoff, ehdr.e_phnum);
+      ASSERT_GE(phdrs.size(), 2u);
+      if (field == OverflowField::ProgramVaddr)
+        phdrs[1].p_vaddr = std::numeric_limits<uint64_t>::max();
+      else
+        phdrs[1].p_paddr = std::numeric_limits<uint64_t>::max();
+      write_bytes_for_test(image, ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
+    }
+    expect_sidecar_append_rejected_without_mutation(std::move(image),
+                                                    CodeObjectPatchOutcome::MalformedInput);
+  }
+}
+
+TEST(CodeObjectPatcher, DescriptorTranslationFailureIsTransactional) {
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+  const Section *rodata = find_section(code_object, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+
+  KdTranslation translation{};
+  translation.descriptor_file_offset = rodata->sectionOffset();
+  translation.entry_text_offset = 0;
+  translation.target_entry_text_offset = std::numeric_limits<uint64_t>::max();
+  translation.target_wave_size = 64;
+
+  {
+    CodeObjectPatcher patcher(code_object);
+    EXPECT_FALSE(
+        patcher.apply_kernel_descriptor_translation(translation, ROCJITSU_CODE_ARCH_CDNA3));
+    EXPECT_EQ(patcher.emit(), image)
+        << "resource-field changes must not commit when entry redirection is unrepresentable";
+  }
+  {
+    CodeObjectPatcher patcher(code_object);
+    EXPECT_FALSE(patcher.redirect_kernel_entry(translation.descriptor_file_offset,
+                                               translation.entry_text_offset,
+                                               translation.target_entry_text_offset));
+    EXPECT_EQ(patcher.emit(), image);
+  }
+}
 
 TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
   using namespace rocr::llvm::amdhsa;
@@ -2007,9 +2146,16 @@ TEST(CodeObjectPatcher, AppendsNonAllocSectionWithoutMovingLoadableSegments) {
 
   CodeObjectPatcher patcher(co);
   const std::array<uint8_t, 8> payload = {'R', 'J', 'L', 'D', 'S', 1, 2, 3};
-  ASSERT_TRUE(patcher.append_nonalloc_section(".rocjitsu.lds", payload, 8));
+  const CodeObjectPatchResult append = patcher.append_nonalloc_section(".rocjitsu.lds", payload, 8);
+  ASSERT_TRUE(append);
+  EXPECT_EQ(append.outcome(), CodeObjectPatchOutcome::Success);
 
-  const auto patched_bytes = patcher.emit();
+  const auto patched_bytes = std::move(patcher).emit();
+  // The ownership model intentionally qualifies supported standard-library
+  // implementations: reserve() rounding must update the model rather than
+  // weaken this check.
+  EXPECT_EQ(patched_bytes.capacity(), patched_bytes.size())
+      << "the non-alloc section transaction must allocate its exact final image once";
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
   ASSERT_TRUE(patched.is_valid());
 
@@ -2027,6 +2173,67 @@ TEST(CodeObjectPatcher, AppendsNonAllocSectionWithoutMovingLoadableSegments) {
   EXPECT_EQ(patched_text->vaddr(), original_text_vaddr);
   EXPECT_EQ(patched_rodata->sectionOffset(), original_rodata_offset);
   EXPECT_EQ(patched_rodata->vaddr(), original_rodata_vaddr);
+}
+
+TEST(CodeObjectPatcher, ComposesSidecarAndRepeatedNonAllocSectionAppends) {
+  const auto image = make_minimal_amdgpu_elf_with_load_segments();
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+
+  KdTranslation translation{};
+  translation.target_wave_size = 64;
+  const std::array translations{translation};
+  CodeObjectPatcher patcher(code_object);
+  ASSERT_TRUE(
+      patcher.append_sidecar_descriptor_translations(translations, ROCJITSU_CODE_ARCH_CDNA3, 64));
+
+  struct MetadataPayload {
+    std::string_view section_name;
+    std::array<uint8_t, 3> bytes;
+  };
+  const std::array payloads{
+      MetadataPayload{".rocjitsu.sidecar", {1, 2, 3}},
+      MetadataPayload{".rocjitsu.kernarg", {4, 5, 6}},
+      MetadataPayload{".rocjitsu.lds", {7, 8, 9}},
+  };
+  for (const MetadataPayload &payload : payloads) {
+    ASSERT_TRUE(patcher.append_nonalloc_section(payload.section_name, payload.bytes, 8))
+        << payload.section_name;
+  }
+
+  const auto patched_bytes = std::move(patcher).emit();
+  AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const MetadataPayload &payload : payloads) {
+    const Section *section = find_section(patched, payload.section_name);
+    ASSERT_NE(section, nullptr) << payload.section_name;
+    ASSERT_EQ(section->size(), payload.bytes.size()) << payload.section_name;
+    EXPECT_EQ(std::memcmp(section->data(), payload.bytes.data(), payload.bytes.size()), 0)
+        << payload.section_name;
+  }
+}
+
+TEST(CodeObjectPatcher, NonAllocSectionAppendReportsFailuresWithoutMutation) {
+  const auto image = make_minimal_amdgpu_elf_with_load_segments();
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+  const std::array<uint8_t, 1> payload = {1u};
+
+  {
+    CodeObjectPatcher patcher(code_object);
+    const CodeObjectPatchResult result =
+        patcher.append_nonalloc_section(".rocjitsu.invalid", payload, 3);
+    EXPECT_EQ(result.outcome(), CodeObjectPatchOutcome::MalformedInput);
+    EXPECT_EQ(patcher.emit(), image);
+  }
+
+  {
+    CodeObjectPatcher patcher(code_object);
+    const CodeObjectPatchResult result =
+        patcher.append_nonalloc_section(".rocjitsu.too-large", payload, uint64_t{1} << 63u);
+    EXPECT_EQ(result.outcome(), CodeObjectPatchOutcome::AllocationFailure);
+    EXPECT_EQ(patcher.emit(), image);
+  }
 }
 
 TEST(CodeObjectPatcher, ReplaceTextPreservesMovedKernelDescriptorEntryAddress) {

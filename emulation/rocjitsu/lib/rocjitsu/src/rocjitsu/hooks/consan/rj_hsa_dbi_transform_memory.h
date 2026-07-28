@@ -135,17 +135,20 @@ consan_transform_major_image_reservation(
                 "ConSan process admission requires a 64-bit size_t");
   const std::optional<size_t> maximum_growth =
       rocjitsu::consan_patched_image_growth_limit_bytes(growth_policy, input_image_bytes);
-  if (!maximum_growth || *maximum_growth > std::numeric_limits<size_t>::max() - input_image_bytes)
+  if (!maximum_growth)
     return std::nullopt;
-  const uint64_t maximum_image_bytes = static_cast<uint64_t>(input_image_bytes + *maximum_growth);
+  const auto maximum_image_bytes = util::checked_add(input_image_bytes, *maximum_growth);
+  if (!maximum_image_bytes)
+    return std::nullopt;
   ConSanTransformReservationEstimate peak = {
       .ownership = std::nullopt,
-      .maximum_image_bytes = maximum_image_bytes,
+      .maximum_image_bytes = static_cast<uint64_t>(*maximum_image_bytes),
       .reservation_bytes = 0,
   };
   for (const ConSanTransformOwnership &ownership : kConSanTransformOwnershipPhases) {
     const std::optional<uint64_t> phase_reservation = consan_transform_phase_reservation_bytes(
-        ownership, static_cast<uint64_t>(input_image_bytes), maximum_image_bytes);
+        ownership, static_cast<uint64_t>(input_image_bytes),
+        static_cast<uint64_t>(*maximum_image_bytes));
     if (!phase_reservation)
       return std::nullopt;
     if (*phase_reservation > peak.reservation_bytes) {

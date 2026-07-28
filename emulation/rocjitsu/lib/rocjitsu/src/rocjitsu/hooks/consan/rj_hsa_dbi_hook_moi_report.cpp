@@ -3,6 +3,7 @@
 
 #include "hsa/hsa_api_trace_minimal.h"
 
+#include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
@@ -450,10 +451,7 @@ private:
 
   void record_allocation_attempt(uint64_t required_size) {
     std::lock_guard lock(mutex_);
-    if (required_size > std::numeric_limits<uint64_t>::max() - required_report_bytes_)
-      required_report_bytes_ = std::numeric_limits<uint64_t>::max();
-    else
-      required_report_bytes_ += required_size;
+    required_report_bytes_ = byte_accounting::saturating_add(required_report_bytes_, required_size);
   }
 
   void record_allocation_failure(uint64_t, bool capacity_failure) {

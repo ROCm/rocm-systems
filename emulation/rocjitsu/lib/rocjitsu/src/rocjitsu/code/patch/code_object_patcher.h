@@ -10,6 +10,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -21,6 +22,91 @@ struct KdTranslation;
 struct AppendedSidecarDescriptor {
   uint64_t file_offset = 0;
   uint64_t vaddr = 0;
+};
+
+enum class CodeObjectPatchOutcome : uint8_t {
+  Success,
+  MalformedInput,
+  AllocationFailure,
+};
+
+[[nodiscard]] constexpr std::string_view
+code_object_patch_outcome_name(CodeObjectPatchOutcome outcome) {
+  switch (outcome) {
+  case CodeObjectPatchOutcome::Success:
+    return "success";
+  case CodeObjectPatchOutcome::MalformedInput:
+    return "malformed input";
+  case CodeObjectPatchOutcome::AllocationFailure:
+    return "allocation failure";
+  }
+  return "unknown";
+}
+
+static_assert(code_object_patch_outcome_name(CodeObjectPatchOutcome::Success) == "success");
+static_assert(code_object_patch_outcome_name(CodeObjectPatchOutcome::MalformedInput) ==
+              "malformed input");
+static_assert(code_object_patch_outcome_name(CodeObjectPatchOutcome::AllocationFailure) ==
+              "allocation failure");
+static_assert(code_object_patch_outcome_name(static_cast<CodeObjectPatchOutcome>(0xff)) ==
+              "unknown");
+
+/// Typed result of a transactional patch operation without a return payload.
+class CodeObjectPatchResult {
+public:
+  [[nodiscard]] static constexpr CodeObjectPatchResult success() {
+    return CodeObjectPatchOutcome::Success;
+  }
+  [[nodiscard]] static constexpr CodeObjectPatchResult malformed_input() {
+    return CodeObjectPatchOutcome::MalformedInput;
+  }
+  [[nodiscard]] static constexpr CodeObjectPatchResult allocation_failure() {
+    return CodeObjectPatchOutcome::AllocationFailure;
+  }
+
+  [[nodiscard]] constexpr CodeObjectPatchOutcome outcome() const { return outcome_; }
+  [[nodiscard]] constexpr bool succeeded() const {
+    return outcome_ == CodeObjectPatchOutcome::Success;
+  }
+  [[nodiscard]] constexpr explicit operator bool() const { return succeeded(); }
+
+private:
+  constexpr CodeObjectPatchResult(CodeObjectPatchOutcome outcome) : outcome_(outcome) {}
+
+  CodeObjectPatchOutcome outcome_;
+};
+
+/// Typed result of appending one batch of loaded sidecar descriptors.
+class SidecarDescriptorAppendResult {
+public:
+  [[nodiscard]] static SidecarDescriptorAppendResult
+  success(std::vector<AppendedSidecarDescriptor> descriptors) {
+    return {CodeObjectPatchOutcome::Success, std::move(descriptors)};
+  }
+  [[nodiscard]] static SidecarDescriptorAppendResult malformed_input() {
+    return {CodeObjectPatchOutcome::MalformedInput, {}};
+  }
+  [[nodiscard]] static SidecarDescriptorAppendResult allocation_failure() {
+    return {CodeObjectPatchOutcome::AllocationFailure, {}};
+  }
+
+  [[nodiscard]] CodeObjectPatchOutcome outcome() const { return outcome_; }
+  [[nodiscard]] bool succeeded() const { return outcome_ == CodeObjectPatchOutcome::Success; }
+  [[nodiscard]] explicit operator bool() const { return succeeded(); }
+  [[nodiscard]] const std::vector<AppendedSidecarDescriptor> &descriptors() const {
+    return descriptors_;
+  }
+  [[nodiscard]] std::vector<AppendedSidecarDescriptor> take_descriptors() && {
+    return std::move(descriptors_);
+  }
+
+private:
+  SidecarDescriptorAppendResult(CodeObjectPatchOutcome outcome,
+                                std::vector<AppendedSidecarDescriptor> descriptors)
+      : outcome_(outcome), descriptors_(std::move(descriptors)) {}
+
+  CodeObjectPatchOutcome outcome_;
+  std::vector<AppendedSidecarDescriptor> descriptors_;
 };
 
 enum class TextReplacementOutcome : uint8_t {
@@ -154,7 +240,7 @@ public:
   /// KernelDescriptorTranslator owns the resource/ABI decision. BinaryTranslator
   /// owns text relocation and any local prologue layout. The patcher only
   /// mutates descriptor bytes and redirects the descriptor to the already-known
-  /// relocated entry offset.
+  /// relocated entry offset. Failure leaves this patcher unchanged.
   [[nodiscard]] bool apply_kernel_descriptor_translation(const KdTranslation &translation,
                                                          rj_code_arch_t target_arch);
 
@@ -165,9 +251,12 @@ public:
   /// therefore places descriptor bytes in the executable LOAD tail immediately
   /// after the translated .text payload, without growing the .text section
   /// itself. Runtime metadata records the returned virtual addresses.
-  [[nodiscard]] std::optional<std::vector<AppendedSidecarDescriptor>>
+  /// @returns A typed transactional result. Every failure leaves this patcher
+  /// unchanged.
+  [[nodiscard]] SidecarDescriptorAppendResult
   append_sidecar_descriptor_translations(std::span<const KdTranslation> translations,
-                                         rj_code_arch_t target_arch, uint64_t alignment = 64);
+                                         rj_code_arch_t target_arch,
+                                         uint64_t alignment = 64) noexcept;
 
   /// @brief Append a named, non-allocated ELF section without moving loadable bytes.
   ///
@@ -177,16 +266,19 @@ public:
   /// section-header table at EOF. Program headers and allocated sections are
   /// left untouched, so the new section is available to tools and rocjitsu's
   /// own loader-side metadata parser but is not mapped into GPU code memory.
-  [[nodiscard]] bool append_nonalloc_section(std::string_view name,
-                                             std::span<const uint8_t> contents,
-                                             uint64_t alignment = 1);
+  /// @returns A typed transactional result. Every failure leaves this patcher
+  /// unchanged.
+  [[nodiscard]] CodeObjectPatchResult append_nonalloc_section(std::string_view name,
+                                                              std::span<const uint8_t> contents,
+                                                              uint64_t alignment = 1) noexcept;
 
   /// @brief Redirect one kernel descriptor from @p old_entry_text_offset to @p
   /// new_entry_text_offset.
   ///
   /// AMDHSA stores the entry as a signed KD-relative byte offset. The
   /// text-offset delta is the same delta in KD-relative coordinates, so the
-  /// patcher does not need symbol virtual addresses here.
+  /// patcher does not need symbol virtual addresses here. Failure leaves this
+  /// patcher unchanged.
   [[nodiscard]] bool redirect_kernel_entry(uint64_t descriptor_file_offset,
                                            uint64_t old_entry_text_offset,
                                            uint64_t new_entry_text_offset);
@@ -197,6 +289,12 @@ public:
 private:
   [[nodiscard]] TextReplacementResult replace_text_impl(std::span<const uint8_t> new_text,
                                                         size_t max_file_growth);
+  [[nodiscard]] SidecarDescriptorAppendResult
+  append_sidecar_descriptor_translations_impl(std::span<const KdTranslation> translations,
+                                              rj_code_arch_t target_arch, uint64_t alignment);
+  [[nodiscard]] CodeObjectPatchResult
+  append_nonalloc_section_impl(std::string_view name, std::span<const uint8_t> contents,
+                               uint64_t alignment);
 
   std::vector<uint8_t> image_;
   uint64_t text_offset_;

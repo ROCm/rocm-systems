@@ -3,10 +3,12 @@
 
 #include "rocjitsu/code/patch/code_object_patcher.h"
 
+#include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
+#include "util/bit.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -38,6 +40,36 @@ static_assert(sizeof(size_t) >= sizeof(uint64_t),
 
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
+
+[[nodiscard]] bool redirect_kernel_entry_offset(KD &descriptor, uint64_t old_entry_text_offset,
+                                                uint64_t new_entry_text_offset) {
+  constexpr uint64_t kNonnegativeBias = uint64_t{std::numeric_limits<int64_t>::max()} + uint64_t{1};
+  const int64_t original = descriptor.kernel_code_entry_byte_offset;
+  uint64_t signed_position =
+      original < 0 ? static_cast<uint64_t>(original - std::numeric_limits<int64_t>::min())
+                   : kNonnegativeBias + static_cast<uint64_t>(original);
+
+  if (new_entry_text_offset >= old_entry_text_offset) {
+    const auto redirected =
+        util::checked_add(signed_position, new_entry_text_offset - old_entry_text_offset);
+    if (!redirected)
+      return false;
+    signed_position = *redirected;
+  } else {
+    const uint64_t delta = old_entry_text_offset - new_entry_text_offset;
+    if (delta > signed_position)
+      return false;
+    signed_position -= delta;
+  }
+
+  // The descriptor field is signed because the entry point may be before or
+  // after the descriptor in virtual address order.
+  descriptor.kernel_code_entry_byte_offset =
+      signed_position < kNonnegativeBias
+          ? std::numeric_limits<int64_t>::min() + static_cast<int64_t>(signed_position)
+          : static_cast<int64_t>(signed_position - kNonnegativeBias);
+  return true;
+}
 
 [[nodiscard]] std::optional<std::vector<Elf64_Shdr>>
 read_section_headers(const std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr) {
@@ -90,7 +122,7 @@ void write_elf_tables(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
 }
 
 [[nodiscard]] bool can_add_u64(uint64_t value, uint64_t delta) {
-  return value <= std::numeric_limits<uint64_t>::max() - delta;
+  return util::checked_add(value, delta).has_value();
 }
 
 enum class FileInsertionOutcome : uint8_t {
@@ -217,19 +249,7 @@ insert_zero_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   const uint64_t gcd = std::gcd(lhs, rhs);
   if (gcd == 0)
     return std::nullopt;
-  if (lhs / gcd > std::numeric_limits<uint64_t>::max() / rhs)
-    return std::nullopt;
-  return (lhs / gcd) * rhs;
-}
-
-[[nodiscard]] std::optional<uint64_t> checked_align_up(uint64_t value, uint64_t alignment) {
-  if (alignment <= 1)
-    return value;
-  const uint64_t remainder = value % alignment;
-  const uint64_t padding = remainder == 0 ? 0 : alignment - remainder;
-  if (value > std::numeric_limits<uint64_t>::max() - padding)
-    return std::nullopt;
-  return value + padding;
+  return util::checked_mul(lhs / gcd, rhs);
 }
 
 [[nodiscard]] std::optional<uint64_t>
@@ -953,7 +973,7 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
     const auto file_delta_alignment = checked_lcm_u64(*load_alignment, shifted_section_alignment);
     if (!file_delta_alignment)
       return malformed();
-    const auto padded_file_delta = checked_align_up(growth, *file_delta_alignment);
+    const auto padded_file_delta = util::checked_align_up(growth, *file_delta_alignment);
     if (!padded_file_delta || *padded_file_delta < growth)
       return malformed();
     required_file_growth = static_cast<size_t>(*padded_file_delta);
@@ -1079,65 +1099,85 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
   KD desc;
   std::memcpy(&desc, image_.data() + translation.descriptor_file_offset, sizeof(desc));
   apply_kernel_descriptor_resource_translation(desc, translation, target_arch);
-
-  std::memcpy(image_.data() + translation.descriptor_file_offset, &desc, sizeof(desc));
-  if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
-                             translation.target_entry_text_offset))
+  if (!redirect_kernel_entry_offset(desc, translation.entry_text_offset,
+                                    translation.target_entry_text_offset)) {
     return false;
+  }
+  std::memcpy(image_.data() + translation.descriptor_file_offset, &desc, sizeof(desc));
   return true;
 }
 
-std::optional<std::vector<AppendedSidecarDescriptor>>
-CodeObjectPatcher::append_sidecar_descriptor_translations(
+SidecarDescriptorAppendResult CodeObjectPatcher::append_sidecar_descriptor_translations(
+    std::span<const KdTranslation> translations, rj_code_arch_t target_arch,
+    uint64_t alignment) noexcept {
+  try {
+    return append_sidecar_descriptor_translations_impl(translations, target_arch, alignment);
+  } catch (const std::bad_alloc &) {
+    return SidecarDescriptorAppendResult::allocation_failure();
+  } catch (const std::length_error &) {
+    return SidecarDescriptorAppendResult::allocation_failure();
+  }
+}
+
+SidecarDescriptorAppendResult CodeObjectPatcher::append_sidecar_descriptor_translations_impl(
     std::span<const KdTranslation> translations, rj_code_arch_t target_arch, uint64_t alignment) {
   if (translations.empty())
-    return std::vector<AppendedSidecarDescriptor>{};
+    return SidecarDescriptorAppendResult::success({});
   if (alignment == 0 || (alignment & (alignment - 1)) != 0)
-    return std::nullopt;
+    return SidecarDescriptorAppendResult::malformed_input();
   if (text_size_ == 0 || text_vaddr_ == 0)
-    return std::nullopt;
+    return SidecarDescriptorAppendResult::malformed_input();
   if (image_.size() < sizeof(Elf64_Ehdr))
-    return std::nullopt;
+    return SidecarDescriptorAppendResult::malformed_input();
 
   auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
   auto maybe_shdrs = read_section_headers(image_, header);
   auto maybe_phdrs = read_program_headers(image_, header);
   if (!maybe_shdrs || !maybe_phdrs)
-    return std::nullopt;
+    return SidecarDescriptorAppendResult::malformed_input();
   auto shdrs = std::move(*maybe_shdrs);
   auto phdrs = std::move(*maybe_phdrs);
 
   const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
   if (!text_index)
-    return std::nullopt;
+    return SidecarDescriptorAppendResult::malformed_input();
 
-  const uint64_t insertion_file_offset = text_offset_ + text_size_ + text_tail_size_;
-  const uint64_t insertion_vaddr = text_vaddr_ + text_size_ + text_tail_size_;
-  if (insertion_file_offset > image_.size())
-    return std::nullopt;
+  const auto text_file_end = util::checked_add(text_offset_, text_size_);
+  const auto insertion_file_offset =
+      text_file_end ? util::checked_add(*text_file_end, text_tail_size_) : std::nullopt;
+  const auto text_vaddr_end = util::checked_add(text_vaddr_, text_size_);
+  const auto insertion_vaddr =
+      text_vaddr_end ? util::checked_add(*text_vaddr_end, text_tail_size_) : std::nullopt;
+  if (!insertion_file_offset || !insertion_vaddr)
+    return SidecarDescriptorAppendResult::malformed_input();
+  if (*insertion_file_offset > image_.size())
+    return SidecarDescriptorAppendResult::malformed_input();
 
   const bool insertion_is_loaded = std::ranges::any_of(phdrs, [&](const Elf64_Phdr &phdr) {
     if (phdr.p_type != PT_LOAD)
       return false;
-    const uint64_t segment_end = phdr.p_offset + phdr.p_filesz;
-    return phdr.p_offset <= insertion_file_offset && insertion_file_offset <= segment_end;
+    const auto segment_end = util::checked_add(phdr.p_offset, phdr.p_filesz);
+    return segment_end && phdr.p_offset <= *insertion_file_offset &&
+           *insertion_file_offset <= *segment_end;
   });
   if (!insertion_is_loaded)
-    return std::nullopt;
+    return SidecarDescriptorAppendResult::malformed_input();
 
   std::vector<uint8_t> inserted;
   std::vector<AppendedSidecarDescriptor> appended;
   appended.reserve(translations.size());
-  uint64_t cursor_vaddr = insertion_vaddr;
+  uint64_t cursor_vaddr = *insertion_vaddr;
   for (const KdTranslation &translation : translations) {
-    const auto maybe_descriptor_vaddr = checked_align_up(cursor_vaddr, alignment);
+    const auto maybe_descriptor_vaddr = util::checked_align_up(cursor_vaddr, alignment);
     if (!maybe_descriptor_vaddr)
-      return std::nullopt;
+      return SidecarDescriptorAppendResult::malformed_input();
     const uint64_t descriptor_vaddr = *maybe_descriptor_vaddr;
     const uint64_t padding = descriptor_vaddr - cursor_vaddr;
-    if (padding > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) - inserted.size())
-      return std::nullopt;
-    inserted.resize(inserted.size() + static_cast<size_t>(padding), 0);
+    const auto padded_inserted_size =
+        util::checked_add(inserted.size(), static_cast<size_t>(padding));
+    if (!padded_inserted_size || *padded_inserted_size > inserted.max_size())
+      return SidecarDescriptorAppendResult::allocation_failure();
+    inserted.resize(*padded_inserted_size, 0);
 
     // Copy the sidecar template from the source-descriptor snapshot, NOT from
     // translation.descriptor_file_offset: this runs after .text growth, which
@@ -1149,48 +1189,75 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
     apply_kernel_descriptor_resource_translation(desc, translation, target_arch);
     if (!set_kernel_entry_from_vaddr(desc, descriptor_vaddr, text_vaddr_,
                                      translation.target_entry_text_offset))
-      return std::nullopt;
+      return SidecarDescriptorAppendResult::malformed_input();
 
-    const uint64_t descriptor_file_offset = insertion_file_offset + inserted.size();
+    const auto descriptor_file_offset =
+        util::checked_add(*insertion_file_offset, static_cast<uint64_t>(inserted.size()));
+    if (!descriptor_file_offset)
+      return SidecarDescriptorAppendResult::malformed_input();
     const auto *descriptor_bytes = reinterpret_cast<const uint8_t *>(&desc);
     inserted.insert(inserted.end(), descriptor_bytes, descriptor_bytes + sizeof(desc));
-    appended.push_back({.file_offset = descriptor_file_offset, .vaddr = descriptor_vaddr});
-    cursor_vaddr = descriptor_vaddr + sizeof(desc);
+    appended.push_back({.file_offset = *descriptor_file_offset, .vaddr = descriptor_vaddr});
+    const auto next_cursor = util::checked_add(descriptor_vaddr, uint64_t{sizeof(desc)});
+    if (!next_cursor)
+      return SidecarDescriptorAppendResult::malformed_input();
+    cursor_vaddr = *next_cursor;
   }
 
   // Later LOAD segments remain valid only if the file shift preserves their
   // p_offset/p_vaddr congruence. Any padding after the descriptor payload is
   // intentionally unsectioned loaded data; runtime metadata points only at the
   // descriptor starts recorded above.
-  const auto file_delta_alignment = shifted_load_delta_alignment(phdrs, insertion_file_offset);
+  const auto file_delta_alignment = shifted_load_delta_alignment(phdrs, *insertion_file_offset);
   if (!file_delta_alignment)
-    return std::nullopt;
-  const auto maybe_padded_size = checked_align_up(inserted.size(), *file_delta_alignment);
-  if (!maybe_padded_size ||
-      *maybe_padded_size > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
-    return std::nullopt;
-  const uint64_t padded_size = *maybe_padded_size;
-  inserted.resize(static_cast<size_t>(padded_size), 0);
+    return SidecarDescriptorAppendResult::malformed_input();
+  const auto maybe_padded_size = util::checked_align_up(inserted.size(), *file_delta_alignment);
+  if (!maybe_padded_size || *maybe_padded_size > inserted.max_size())
+    return SidecarDescriptorAppendResult::allocation_failure();
+  inserted.resize(*maybe_padded_size, 0);
 
   std::vector<bool> shift_section_vaddr(shdrs.size(), false);
   for (size_t i = 0; i < shdrs.size(); ++i) {
     if (i == *text_index || shdrs[i].sh_type == SHT_NULL)
       continue;
-    if ((shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= insertion_vaddr)
+    if ((shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= *insertion_vaddr)
       shift_section_vaddr[i] = true;
   }
 
   std::vector<bool> shift_segment_vaddr(phdrs.size(), false);
   for (size_t i = 0; i < phdrs.size(); ++i) {
-    if (phdrs[i].p_vaddr >= insertion_vaddr && phdrs[i].p_offset >= insertion_file_offset)
+    if (phdrs[i].p_vaddr >= *insertion_vaddr && phdrs[i].p_offset >= *insertion_file_offset)
       shift_segment_vaddr[i] = true;
   }
 
-  if (insert_file_bytes(image_, header, shdrs, phdrs, insertion_file_offset, inserted, std::nullopt,
-                        true) != FileInsertionOutcome::Success)
-    return std::nullopt;
-
   const uint64_t delta = inserted.size();
+  for (size_t i = 0; i < shdrs.size(); ++i) {
+    if (shift_section_vaddr[i] && !can_add_u64(shdrs[i].sh_addr, delta))
+      return SidecarDescriptorAppendResult::malformed_input();
+  }
+  for (size_t i = 0; i < phdrs.size(); ++i) {
+    if (shift_segment_vaddr[i] &&
+        (!can_add_u64(phdrs[i].p_vaddr, delta) || !can_add_u64(phdrs[i].p_paddr, delta))) {
+      return SidecarDescriptorAppendResult::malformed_input();
+    }
+  }
+  const auto committed_tail_size = util::checked_add(text_tail_size_, delta);
+  if (!committed_tail_size)
+    return SidecarDescriptorAppendResult::malformed_input();
+  const auto committed_image_size = util::checked_add(image_.size(), inserted.size());
+  if (!committed_image_size || *committed_image_size > image_.max_size())
+    return SidecarDescriptorAppendResult::allocation_failure();
+
+  std::vector<uint8_t> image;
+  image.reserve(*committed_image_size);
+  image.assign(image_.begin(), image_.end());
+  const FileInsertionOutcome insertion = insert_file_bytes(
+      image, header, shdrs, phdrs, *insertion_file_offset, inserted, std::nullopt, true);
+  if (insertion == FileInsertionOutcome::AllocationFailure)
+    return SidecarDescriptorAppendResult::allocation_failure();
+  if (insertion != FileInsertionOutcome::Success)
+    return SidecarDescriptorAppendResult::malformed_input();
+
   for (size_t i = 0; i < shdrs.size(); ++i) {
     if (!shift_section_vaddr[i])
       continue;
@@ -1201,13 +1268,13 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
            "shifted allocated section lost its address alignment residue");
   }
 
-  if (!shift_symbols_in_moved_sections(image_, header, shdrs, shift_section_vaddr, delta))
-    return std::nullopt;
-  if (!shift_relocation_offsets_in_moved_sections(image_, header, shdrs, shift_section_vaddr,
+  if (!shift_symbols_in_moved_sections(image, header, shdrs, shift_section_vaddr, delta))
+    return SidecarDescriptorAppendResult::malformed_input();
+  if (!shift_relocation_offsets_in_moved_sections(image, header, shdrs, shift_section_vaddr,
                                                   delta) ||
-      !adjust_kernel_descriptor_entry_offsets_in_moved_sections(image_, shdrs, shift_section_vaddr,
+      !adjust_kernel_descriptor_entry_offsets_in_moved_sections(image, shdrs, shift_section_vaddr,
                                                                 delta))
-    return std::nullopt;
+    return SidecarDescriptorAppendResult::malformed_input();
 
   for (size_t i = 0; i < phdrs.size(); ++i) {
     if (!shift_segment_vaddr[i])
@@ -1228,47 +1295,66 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
            "patched LOAD lost file/virtual address congruence");
   }
 
-  text_tail_size_ += delta;
-  write_elf_tables(image_, header, shdrs, phdrs);
-  return appended;
+  write_elf_tables(image, header, shdrs, phdrs);
+  image_ = std::move(image);
+  text_tail_size_ = *committed_tail_size;
+  assert(appended.size() == translations.size() &&
+         "a successful sidecar append must materialize every descriptor");
+  return SidecarDescriptorAppendResult::success(std::move(appended));
 }
 
-bool CodeObjectPatcher::append_nonalloc_section(std::string_view name,
-                                                std::span<const uint8_t> contents,
-                                                uint64_t alignment) {
+CodeObjectPatchResult CodeObjectPatcher::append_nonalloc_section(std::string_view name,
+                                                                 std::span<const uint8_t> contents,
+                                                                 uint64_t alignment) noexcept {
+  try {
+    return append_nonalloc_section_impl(name, contents, alignment);
+  } catch (const std::bad_alloc &) {
+    return CodeObjectPatchResult::allocation_failure();
+  } catch (const std::length_error &) {
+    return CodeObjectPatchResult::allocation_failure();
+  }
+}
+
+CodeObjectPatchResult CodeObjectPatcher::append_nonalloc_section_impl(
+    std::string_view name, std::span<const uint8_t> contents, uint64_t alignment) {
   if (name.empty() || contents.empty())
-    return false;
+    return CodeObjectPatchResult::malformed_input();
   if (alignment == 0 || (alignment & (alignment - 1)) != 0)
-    return false;
+    return CodeObjectPatchResult::malformed_input();
   if (image_.size() < sizeof(Elf64_Ehdr))
-    return false;
+    return CodeObjectPatchResult::malformed_input();
 
   auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
   if (header.e_shoff == 0 || header.e_shentsize != sizeof(Elf64_Shdr) || header.e_shnum == 0)
-    return false;
+    return CodeObjectPatchResult::malformed_input();
   if (header.e_shstrndx == SHN_UNDEF || header.e_shstrndx >= header.e_shnum)
-    return false;
-  if (!image_contains_range(image_.size(), header.e_shoff,
-                            static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr)))
-    return false;
+    return CodeObjectPatchResult::malformed_input();
+  const auto section_table_bytes =
+      util::checked_mul(static_cast<uint64_t>(header.e_shnum), uint64_t{sizeof(Elf64_Shdr)});
+  if (!section_table_bytes ||
+      !image_contains_range(image_.size(), header.e_shoff, *section_table_bytes))
+    return CodeObjectPatchResult::malformed_input();
 
   auto maybe_shdrs = read_section_headers(image_, header);
   auto maybe_phdrs = read_program_headers(image_, header);
   if (!maybe_shdrs || !maybe_phdrs)
-    return false;
+    return CodeObjectPatchResult::malformed_input();
   auto shdrs = std::move(*maybe_shdrs);
   auto phdrs = std::move(*maybe_phdrs);
   Elf64_Shdr &shstrtab = shdrs[header.e_shstrndx];
   if (shstrtab.sh_type != SHT_STRTAB)
-    return false;
+    return CodeObjectPatchResult::malformed_input();
   if (!image_contains_range(image_.size(), shstrtab.sh_offset, shstrtab.sh_size))
-    return false;
+    return CodeObjectPatchResult::malformed_input();
   if (shstrtab.sh_size > std::numeric_limits<uint32_t>::max())
-    return false;
-  if (name.size() > std::numeric_limits<uint32_t>::max() - shstrtab.sh_size - 1)
-    return false;
+    return CodeObjectPatchResult::malformed_input();
+  const auto name_end = util::checked_add(shstrtab.sh_size, static_cast<uint64_t>(name.size()));
+  const auto terminated_name_end =
+      name_end ? util::checked_add(*name_end, uint64_t{1}) : std::nullopt;
+  if (!terminated_name_end || *terminated_name_end > std::numeric_limits<uint32_t>::max())
+    return CodeObjectPatchResult::malformed_input();
   if (shdrs.size() >= std::numeric_limits<uint16_t>::max())
-    return false;
+    return CodeObjectPatchResult::malformed_input();
 
   std::vector<uint8_t> new_shstrtab(
       image_.begin() + static_cast<std::ptrdiff_t>(shstrtab.sh_offset),
@@ -1277,26 +1363,23 @@ bool CodeObjectPatcher::append_nonalloc_section(std::string_view name,
   new_shstrtab.insert(new_shstrtab.end(), name.begin(), name.end());
   new_shstrtab.push_back('\0');
 
-  const auto maybe_payload_offset = checked_align_up(image_.size(), alignment);
-  if (!maybe_payload_offset ||
-      *maybe_payload_offset > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
-    return false;
-  const uint64_t payload_offset = *maybe_payload_offset;
-  image_.resize(static_cast<size_t>(payload_offset), 0);
-  image_.insert(image_.end(), contents.begin(), contents.end());
-
-  const uint64_t shstrtab_offset = image_.size();
-  image_.insert(image_.end(), new_shstrtab.begin(), new_shstrtab.end());
+  const auto maybe_payload_offset = util::checked_align_up(image_.size(), alignment);
+  if (!maybe_payload_offset || *maybe_payload_offset > image_.max_size())
+    return CodeObjectPatchResult::allocation_failure();
+  const auto payload_end = util::checked_add(*maybe_payload_offset, contents.size());
+  if (!payload_end || *payload_end > image_.max_size())
+    return CodeObjectPatchResult::allocation_failure();
+  const auto shstrtab_end = util::checked_add(*payload_end, new_shstrtab.size());
+  if (!shstrtab_end || *shstrtab_end > image_.max_size())
+    return CodeObjectPatchResult::allocation_failure();
 
   constexpr uint64_t kSectionHeaderAlignment = 8;
-  const auto maybe_new_shoff = checked_align_up(image_.size(), kSectionHeaderAlignment);
-  if (!maybe_new_shoff ||
-      *maybe_new_shoff > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
-    return false;
+  const auto maybe_new_shoff = util::checked_align_up(*shstrtab_end, kSectionHeaderAlignment);
+  if (!maybe_new_shoff || *maybe_new_shoff > image_.max_size())
+    return CodeObjectPatchResult::allocation_failure();
   const uint64_t new_shoff = *maybe_new_shoff;
-  image_.resize(static_cast<size_t>(new_shoff), 0);
 
-  shstrtab.sh_offset = shstrtab_offset;
+  shstrtab.sh_offset = *payload_end;
   shstrtab.sh_size = new_shstrtab.size();
   shstrtab.sh_addralign = 1;
 
@@ -1305,20 +1388,29 @@ bool CodeObjectPatcher::append_nonalloc_section(std::string_view name,
   metadata_section.sh_type = SHT_PROGBITS;
   metadata_section.sh_flags = 0;
   metadata_section.sh_addr = 0;
-  metadata_section.sh_offset = payload_offset;
+  metadata_section.sh_offset = *maybe_payload_offset;
   metadata_section.sh_size = contents.size();
   metadata_section.sh_addralign = alignment;
   shdrs.push_back(metadata_section);
 
   header.e_shoff = new_shoff;
   header.e_shnum = static_cast<uint16_t>(shdrs.size());
-  const uint64_t table_size = shdrs.size() * sizeof(Elf64_Shdr);
-  if (new_shoff > std::numeric_limits<uint64_t>::max() - table_size ||
-      new_shoff + table_size > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
-    return false;
-  image_.resize(static_cast<size_t>(new_shoff + table_size), 0);
-  write_elf_tables(image_, header, shdrs, phdrs);
-  return true;
+  const auto final_size =
+      byte_accounting::checked_allocation_charge(new_shoff, shdrs.size(), sizeof(Elf64_Shdr));
+  if (!final_size || *final_size > image_.max_size())
+    return CodeObjectPatchResult::allocation_failure();
+
+  std::vector<uint8_t> image;
+  image.reserve(*final_size);
+  image.assign(image_.begin(), image_.end());
+  image.resize(*maybe_payload_offset, 0);
+  image.insert(image.end(), contents.begin(), contents.end());
+  image.insert(image.end(), new_shstrtab.begin(), new_shstrtab.end());
+  image.resize(new_shoff, 0);
+  image.resize(*final_size, 0);
+  write_elf_tables(image, header, shdrs, phdrs);
+  image_ = std::move(image);
+  return CodeObjectPatchResult::success();
 }
 
 bool CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
@@ -1329,13 +1421,8 @@ bool CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
 
   KD desc;
   std::memcpy(&desc, image_.data() + descriptor_file_offset, sizeof(desc));
-  const int64_t delta =
-      static_cast<int64_t>(new_entry_text_offset) - static_cast<int64_t>(old_entry_text_offset);
-  const int64_t redirected = static_cast<int64_t>(desc.kernel_code_entry_byte_offset) + delta;
-  // The descriptor field is signed because the entry point may be before or
-  // after the descriptor in virtual address order. Preserve that signed value
-  // when applying the text-relative delta.
-  desc.kernel_code_entry_byte_offset = redirected;
+  if (!redirect_kernel_entry_offset(desc, old_entry_text_offset, new_entry_text_offset))
+    return false;
   std::memcpy(image_.data() + descriptor_file_offset, &desc, sizeof(desc));
   return true;
 }

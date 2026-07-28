@@ -290,6 +290,20 @@ constexpr inline std::optional<T> checked_mul(T lhs, T rhs) {
   return lhs * rhs;
 }
 
+/// @brief Add two unsigned integers, saturating at the type maximum.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline T saturating_add(T lhs, T rhs) {
+  return checked_add(lhs, rhs).value_or(std::numeric_limits<T>::max());
+}
+
+/// @brief Multiply two unsigned integers, saturating at the type maximum.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline T saturating_mul(T lhs, T rhs) {
+  return checked_mul(lhs, rhs).value_or(std::numeric_limits<T>::max());
+}
+
 /// @brief Round @p val up to an arbitrary nonzero alignment when representable.
 template <typename T>
   requires metaprogramming::IsUnsignedInt<T>

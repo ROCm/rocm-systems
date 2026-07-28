@@ -13,6 +13,7 @@
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
 
 #include "rocjitsu/analysis/waitcheck.h"
+#include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
@@ -2769,14 +2770,15 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
       writer(packets, packet_count);
     return;
   }
-  if (packet_count > std::numeric_limits<size_t>::max() / sizeof(InterceptPacket)) {
+  const auto total_packet_bytes =
+      byte_accounting::checked_allocation_charge(0, packet_count, sizeof(InterceptPacket));
+  if (!total_packet_bytes) {
     writer(packets, packet_count);
     return;
   }
 
   std::vector<InterceptPacket> rewritten(static_cast<size_t>(packet_count));
-  std::memcpy(rewritten.data(), packets,
-              static_cast<size_t>(packet_count) * sizeof(InterceptPacket));
+  std::memcpy(rewritten.data(), packets, static_cast<size_t>(*total_packet_bytes));
   for (InterceptPacket &packet_bytes : rewritten) {
     auto *packet = reinterpret_cast<hsa_kernel_dispatch_packet_t *>(packet_bytes.bytes.data());
     const uint16_t type =

@@ -29,9 +29,14 @@ excess_capacity_charge(uint64_t capacity, uint64_t requested, uint64_t element_b
   return checked_allocation_charge(0, capacity - requested, element_bytes);
 }
 
+/// Add byte counts, saturating at UINT64_MAX instead of overflowing.
+[[nodiscard]] inline constexpr uint64_t saturating_add(uint64_t lhs, uint64_t rhs) {
+  return util::saturating_add(lhs, rhs);
+}
+
 /// Multiply byte counts, saturating at UINT64_MAX instead of overflowing.
 [[nodiscard]] inline constexpr uint64_t saturating_multiply(uint64_t lhs, uint64_t rhs) {
-  return util::checked_mul(lhs, rhs).value_or(std::numeric_limits<uint64_t>::max());
+  return util::saturating_mul(lhs, rhs);
 }
 
 enum class ChargeOutcome : uint8_t {
@@ -95,6 +100,8 @@ static_assert(checked_allocation_charge(1, 1, std::numeric_limits<uint64_t>::max
 static_assert(checked_allocation_charge(std::numeric_limits<uint64_t>::max(), 0, 8) ==
               std::numeric_limits<uint64_t>::max());
 static_assert(excess_capacity_charge(0, 0, 8) == 0);
+static_assert(saturating_add(std::numeric_limits<uint64_t>::max(), 1) ==
+              std::numeric_limits<uint64_t>::max());
 
 } // namespace rocjitsu::byte_accounting
 

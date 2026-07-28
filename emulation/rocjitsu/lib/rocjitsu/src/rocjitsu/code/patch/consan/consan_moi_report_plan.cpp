@@ -1,37 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "util/bit.h"
 
 #include <bit>
 #include <limits>
 
 namespace rocjitsu {
 namespace {
-
-[[nodiscard]] bool checked_add(uint64_t lhs, uint64_t rhs, uint64_t &result) {
-  if (rhs > std::numeric_limits<uint64_t>::max() - lhs)
-    return false;
-  result = lhs + rhs;
-  return true;
-}
-
-[[nodiscard]] bool checked_multiply(uint64_t lhs, uint64_t rhs, uint64_t &result) {
-  if (lhs != 0 && rhs > std::numeric_limits<uint64_t>::max() / lhs)
-    return false;
-  result = lhs * rhs;
-  return true;
-}
-
-[[nodiscard]] bool checked_align(uint64_t value, uint64_t alignment, uint64_t &result) {
-  if (alignment == 0 || (alignment & (alignment - 1u)) != 0)
-    return false;
-  const uint64_t mask = alignment - 1u;
-  if (value > std::numeric_limits<uint64_t>::max() - mask)
-    return false;
-  result = (value + mask) & ~mask;
-  return true;
-}
 
 [[nodiscard]] bool checked_capacity(uint64_t count, uint32_t &capacity) {
   if (count > std::numeric_limits<uint32_t>::max())
@@ -42,15 +20,16 @@ namespace {
 
 [[nodiscard]] bool append_region(uint64_t count, uint64_t element_size, uint64_t alignment,
                                  uint64_t &cursor, size_t &offset) {
-  uint64_t aligned = 0;
-  uint64_t bytes = 0;
-  uint64_t end = 0;
-  if (!checked_align(cursor, alignment, aligned) || aligned > std::numeric_limits<size_t>::max() ||
-      !checked_multiply(count, element_size, bytes) || !checked_add(aligned, bytes, end)) {
+  if (!std::has_single_bit(alignment))
     return false;
-  }
-  offset = static_cast<size_t>(aligned);
-  cursor = end;
+  const auto aligned = util::checked_align_up(cursor, alignment);
+  const auto end = aligned
+                       ? byte_accounting::checked_allocation_charge(*aligned, count, element_size)
+                       : std::nullopt;
+  if (!end || *aligned > std::numeric_limits<size_t>::max())
+    return false;
+  offset = static_cast<size_t>(*aligned);
+  cursor = *end;
   return true;
 }
 
@@ -173,15 +152,14 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
 }
 
 [[nodiscard]] bool finalize_plan(ConSanMoiAutoReportPlan &plan, uint64_t cursor) {
-  uint64_t required = 0;
-  if (!checked_align(cursor, alignof(uint64_t), required) ||
-      required > std::numeric_limits<size_t>::max()) {
+  const auto required = util::checked_align_up(cursor, uint64_t{alignof(uint64_t)});
+  if (!required || *required > std::numeric_limits<size_t>::max()) {
     plan.reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
     return false;
   }
-  plan.required_bytes = required;
-  plan.layout.required_bytes = static_cast<size_t>(required);
-  if (required > plan.ceiling_bytes) {
+  plan.required_bytes = *required;
+  plan.layout.required_bytes = static_cast<size_t>(*required);
+  if (*required > plan.ceiling_bytes) {
     plan.outcome = ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity;
     plan.reason = ConSanMoiAutoReportPlanReason::PerBufferCeiling;
     return true;
@@ -233,15 +211,23 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
     }
   }
   uint64_t access_record_count = 0;
-  if (!checked_multiply(inventory.access_range_count,
-                        layout.record_replay_access_dispatch_bank_count, access_record_count) ||
-      !checked_multiply(access_record_count, layout.record_replay_access_owner_bank_count,
-                        access_record_count) ||
-      !checked_multiply(access_record_count, kConSanMoiRecordReplayHashTableHeadroom,
-                        access_record_count)) {
+  const auto dispatch_records =
+      util::checked_mul(inventory.access_range_count,
+                        static_cast<uint64_t>(layout.record_replay_access_dispatch_bank_count));
+  const auto owner_records =
+      dispatch_records
+          ? util::checked_mul(*dispatch_records,
+                              static_cast<uint64_t>(layout.record_replay_access_owner_bank_count))
+          : std::nullopt;
+  const auto hash_records =
+      owner_records
+          ? util::checked_mul(*owner_records, uint64_t{kConSanMoiRecordReplayHashTableHeadroom})
+          : std::nullopt;
+  if (!hash_records) {
     plan.reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
     return false;
   }
+  access_record_count = *hash_records;
   if (access_record_count != 0u) {
     if (access_record_count > uint64_t{1} << 31u) {
       plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
@@ -307,13 +293,13 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
 [[nodiscard]] bool plan_inline(const ConSanMoiAutoReportInventory &inventory,
                                ConSanMoiAutoReportPlan &plan, uint64_t &cursor) {
   auto &layout = plan.layout;
-  uint64_t rounded_lds_bytes = 0;
-  if (!checked_add(inventory.inline_lds_bytes, consan_moi_exact_shadow::granule_bytes - 1u,
-                   rounded_lds_bytes)) {
+  const auto rounded_lds_bytes = util::checked_add(
+      inventory.inline_lds_bytes, uint64_t{consan_moi_exact_shadow::granule_bytes - 1u});
+  if (!rounded_lds_bytes) {
     plan.reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
     return false;
   }
-  const uint64_t exact_shadow_cells = rounded_lds_bytes / consan_moi_exact_shadow::granule_bytes;
+  const uint64_t exact_shadow_cells = *rounded_lds_bytes / consan_moi_exact_shadow::granule_bytes;
   if (exact_shadow_cells > std::numeric_limits<uint32_t>::max()) {
     plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
     return false;
@@ -325,14 +311,14 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
     plan.reason = ConSanMoiAutoReportPlanReason::PerBufferCeiling;
     return false;
   }
-  uint64_t exact_shadow_count = 0;
-  if (!checked_multiply(exact_shadow_cells, layout.inline_exact_dispatch_bank_count,
-                        exact_shadow_count)) {
+  const auto exact_shadow_count = util::checked_mul(
+      exact_shadow_cells, static_cast<uint64_t>(layout.inline_exact_dispatch_bank_count));
+  if (!exact_shadow_count) {
     plan.reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
     return false;
   }
   if (!checked_capacity(inventory.diagnostic_count, layout.diagnostic_capacity) ||
-      !checked_capacity(exact_shadow_count, layout.exact_shadow_entry_capacity) ||
+      !checked_capacity(*exact_shadow_count, layout.exact_shadow_entry_capacity) ||
       !checked_capacity(inventory.inline_atomic_release_count,
                         layout.inline_atomic_release_capacity) ||
       !checked_capacity(inventory.inline_causal_snapshot_count,
@@ -347,7 +333,7 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
   return append_region(inventory.diagnostic_count, sizeof(ConSanMoiDiagnosticRecord),
                        alignof(ConSanMoiDiagnosticRecord), cursor,
                        layout.diagnostic_records_offset) &&
-         append_region(exact_shadow_count, sizeof(ConSanMoiInlineExactShadowSlot),
+         append_region(*exact_shadow_count, sizeof(ConSanMoiInlineExactShadowSlot),
                        alignof(ConSanMoiInlineExactShadowSlot), cursor,
                        layout.exact_shadow_entries_offset) &&
          append_region(inventory.inline_atomic_release_count,
@@ -442,9 +428,7 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
   const uint64_t static_atomics = inventory.atomic_event_count;
   const uint64_t static_fences = inventory.fence_event_count;
   const auto expanded_count = [](uint64_t count, uint64_t headroom) {
-    return count > std::numeric_limits<uint64_t>::max() / headroom
-               ? std::numeric_limits<uint64_t>::max()
-               : count * headroom;
+    return util::saturating_mul(count, headroom);
   };
 
   for (;;) {
@@ -553,10 +537,11 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
     const uint64_t bank_count =
         static_cast<uint64_t>(override_layout.record_replay_access_dispatch_bank_count) *
         override_layout.record_replay_access_owner_bank_count;
-    uint64_t minimum_access_capacity = 0;
-    if (!checked_multiply(override_layout.record_replay_logical_access_range_count, bank_count,
-                          minimum_access_capacity) ||
-        minimum_access_capacity > override_layout.access_record_capacity)
+    const auto minimum_access_capacity = util::checked_mul(
+        static_cast<uint64_t>(override_layout.record_replay_logical_access_range_count),
+        bank_count);
+    if (!minimum_access_capacity ||
+        *minimum_access_capacity > override_layout.access_record_capacity)
       return {};
     inventory.access_range_count = override_layout.record_replay_logical_access_range_count;
     inventory.record_replay_dispatch_token_capacity =

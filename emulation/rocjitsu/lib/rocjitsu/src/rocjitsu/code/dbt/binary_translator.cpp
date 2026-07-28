@@ -132,7 +132,8 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
   dst.insert(dst.end(), src.begin(), src.end());
 }
 
-[[nodiscard]] DiagnosticKind text_replacement_diagnostic_kind(TextReplacementOutcome outcome) {
+[[nodiscard]] constexpr DiagnosticKind
+text_replacement_diagnostic_kind(TextReplacementOutcome outcome) {
   switch (outcome) {
   case TextReplacementOutcome::Success:
     return DiagnosticKind::MalformedCodeObject;
@@ -144,6 +145,23 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
   }
   return DiagnosticKind::MalformedCodeObject;
 }
+
+[[nodiscard]] constexpr DiagnosticKind
+code_object_patch_diagnostic_kind(CodeObjectPatchOutcome outcome) {
+  switch (outcome) {
+  case CodeObjectPatchOutcome::Success:
+  case CodeObjectPatchOutcome::MalformedInput:
+    return DiagnosticKind::MalformedCodeObject;
+  case CodeObjectPatchOutcome::AllocationFailure:
+    return DiagnosticKind::ResourceLimit;
+  }
+  return DiagnosticKind::MalformedCodeObject;
+}
+
+static_assert(code_object_patch_diagnostic_kind(CodeObjectPatchOutcome::MalformedInput) ==
+              DiagnosticKind::MalformedCodeObject);
+static_assert(code_object_patch_diagnostic_kind(CodeObjectPatchOutcome::AllocationFailure) ==
+              DiagnosticKind::ResourceLimit);
 
 /// @brief Return a human-readable kernel label for diagnostics.
 ///
@@ -389,16 +407,25 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
     sidecar_indices.push_back(i);
   }
   if (!sidecar_descriptors.empty()) {
-    auto appended =
+    const SidecarDescriptorAppendResult appended =
         patcher.append_sidecar_descriptor_translations(sidecar_descriptors, host_arch, 64);
-    if (!appended || appended->size() != sidecar_descriptors.size()) {
-      append_error(diagnostics, DiagnosticKind::ResourceLimit,
-                   "virtual LDS sidecar descriptors could not be materialized safely; leaving code "
-                   "object unchanged");
+    if (!appended) {
+      append_error(diagnostics, code_object_patch_diagnostic_kind(appended.outcome()),
+                   "virtual LDS sidecar descriptors could not be materialized: " +
+                       std::string(code_object_patch_outcome_name(appended.outcome())) +
+                       "; leaving code object unchanged");
       return std::nullopt;
     }
-    for (size_t i = 0; i < appended->size(); ++i)
-      sidecar_descriptor_vaddrs[sidecar_indices[i]] = (*appended)[i].vaddr;
+    if (appended.descriptors().size() != sidecar_descriptors.size()) {
+      append_error(diagnostics, DiagnosticKind::MalformedCodeObject,
+                   "virtual LDS sidecar descriptor append materialized " +
+                       std::to_string(appended.descriptors().size()) + " of " +
+                       std::to_string(sidecar_descriptors.size()) +
+                       " descriptors; leaving code object unchanged");
+      return std::nullopt;
+    }
+    for (size_t i = 0; i < appended.descriptors().size(); ++i)
+      sidecar_descriptor_vaddrs[sidecar_indices[i]] = appended.descriptors()[i].vaddr;
   }
 
   const auto patched_image = patcher.image_bytes();
@@ -504,35 +531,46 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
     virtual_lds_metadata.push_back(std::move(record));
   }
 
+  const auto append_metadata_section = [&](std::string_view section_name,
+                                           std::span<const uint8_t> metadata_bytes,
+                                           std::string_view description) {
+    if (metadata_bytes.empty()) {
+      append_error(diagnostics, DiagnosticKind::ResourceLimit,
+                   std::string(description) +
+                       " serialization produced no bytes; leaving code object unchanged");
+      return false;
+    }
+    const CodeObjectPatchResult append =
+        patcher.append_nonalloc_section(section_name, metadata_bytes, 8);
+    if (!append) {
+      append_error(diagnostics, code_object_patch_diagnostic_kind(append.outcome()),
+                   std::string(description) + " could not be materialized: " +
+                       std::string(code_object_patch_outcome_name(append.outcome())) +
+                       "; leaving code object unchanged");
+      return false;
+    }
+    return true;
+  };
+
   if (!sidecar_metadata.empty()) {
     const auto metadata_bytes = serialize_sidecar_metadata(sidecar_metadata);
-    if (metadata_bytes.empty() ||
-        !patcher.append_nonalloc_section(kSidecarMetadataSectionName, metadata_bytes, 8)) {
-      append_error(diagnostics, DiagnosticKind::ResourceLimit,
-                   "sidecar metadata could not be materialized safely; leaving code object "
-                   "unchanged");
+    if (!append_metadata_section(kSidecarMetadataSectionName, metadata_bytes, "sidecar metadata")) {
       return std::nullopt;
     }
   }
 
   if (!kernarg_extension_metadata.empty()) {
     const auto metadata_bytes = serialize_kernarg_extension_metadata(kernarg_extension_metadata);
-    if (metadata_bytes.empty() ||
-        !patcher.append_nonalloc_section(kKernargExtensionMetadataSectionName, metadata_bytes, 8)) {
-      append_error(diagnostics, DiagnosticKind::ResourceLimit,
-                   "kernarg extension metadata could not be materialized safely; leaving code "
-                   "object unchanged");
+    if (!append_metadata_section(kKernargExtensionMetadataSectionName, metadata_bytes,
+                                 "kernarg extension metadata")) {
       return std::nullopt;
     }
   }
 
   if (!virtual_lds_metadata.empty()) {
     const auto metadata_bytes = serialize_virtual_lds_metadata(virtual_lds_metadata);
-    if (metadata_bytes.empty() ||
-        !patcher.append_nonalloc_section(kVirtualLdsMetadataSectionName, metadata_bytes, 8)) {
-      append_error(diagnostics, DiagnosticKind::ResourceLimit,
-                   "virtual LDS metadata could not be materialized safely; leaving code object "
-                   "unchanged");
+    if (!append_metadata_section(kVirtualLdsMetadataSectionName, metadata_bytes,
+                                 "virtual LDS metadata")) {
       return std::nullopt;
     }
   }

@@ -70,9 +70,21 @@ TEST(CheckedByteBudgetTest, DistinguishesFailuresWithoutMutatingUsedBytes) {
   EXPECT_EQ(budget.used_bytes(), 26u);
 }
 
-TEST(CheckedByteBudgetTest, SaturatingMultiplicationPinsOverflow) {
+TEST(CheckedByteBudgetTest, SaturatingArithmeticPinsOverflow) {
+  using byte_accounting::saturating_add;
   using byte_accounting::saturating_multiply;
 
+  EXPECT_EQ(util::saturating_add(3u, 7u), 10u);
+  EXPECT_EQ(util::saturating_add(std::numeric_limits<unsigned>::max(), 1u),
+            std::numeric_limits<unsigned>::max());
+  EXPECT_EQ(util::saturating_mul(3u, 7u), 21u);
+  EXPECT_EQ(util::saturating_mul(2u, std::numeric_limits<unsigned>::max()),
+            std::numeric_limits<unsigned>::max());
+  EXPECT_EQ(saturating_add(3, 7), 10u);
+  EXPECT_EQ(saturating_add(std::numeric_limits<uint64_t>::max() - 1, 1),
+            std::numeric_limits<uint64_t>::max());
+  EXPECT_EQ(saturating_add(std::numeric_limits<uint64_t>::max(), 1),
+            std::numeric_limits<uint64_t>::max());
   EXPECT_EQ(saturating_multiply(3, 7), 21u);
   EXPECT_EQ(saturating_multiply(0, std::numeric_limits<uint64_t>::max()), 0u);
   EXPECT_EQ(saturating_multiply(2, std::numeric_limits<uint64_t>::max()),
