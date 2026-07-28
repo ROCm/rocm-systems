@@ -38,7 +38,7 @@ and at least one volume should be ``hipFile``-capable. If any check fails,
 resolve that issue first before investigating further.
 
 For the full list of fastpath prerequisites, how to run ``ais-check``, and how
-to interpret its output, see :doc:`/install/checking-system-compatibility`.
+to interpret its output, see :doc:`/how-to/checking-system-compatibility`.
 
 Backing Storage
 ===============

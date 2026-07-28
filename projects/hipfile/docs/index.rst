@@ -20,13 +20,13 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
       * :doc:`Install hipFile <install/install>`
       * :doc:`Build hipFile from source <install/build-from-source>`
       * :doc:`Install the hipFile Python bindings <install/python-bindings>`
-      * :doc:`Check system compatibility <install/checking-system-compatibility>`
 
 .. grid:: 2
    :gutter: 3
 
    .. grid-item-card:: How to
 
+      * :doc:`Check for fastpath compatibility <how-to/checking-system-compatibility>`
       * :doc:`Set up a local NVMe drive <how-to/setup-local-nvme>`
       * :doc:`Set up an NVMe-oF disk <how-to/setup-nvmeof>`
       * :doc:`Set up an NFSoRDMA share <how-to/setup-nfsordma>`
