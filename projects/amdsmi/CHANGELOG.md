@@ -31,6 +31,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The per-process KFD lookup rebuilt the entire KFD node topology (an expensive sysfs walk) on every call just to translate the device BDF into its KFD GPU id.
   - The caller already knows this value, so it is now passed through to `gpuvsmi_get_pid_info()`, eliminating one full topology discovery per process per refresh. Falls back to the original discovery path when the id is unavailable.
 
+### Removed
+
+- **Removed the `amdsmi_gpu_driver_reload()` API and its Python binding** (breaking).  
+  - Reload the amdgpu driver out of band with `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to apply memory partition changes instead.
+
 ### Resolved Issues
 
 - **Fixed `amd-smi set --ptl-status` silently failing to change PTL state**.  
