@@ -5,7 +5,6 @@
 
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
-#include "core/sdk-tracing-config-deps.hpp"
 #include "logger/debug.hpp"
 
 #include <cctype>
