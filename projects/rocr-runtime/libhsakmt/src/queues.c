@@ -1002,6 +1002,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfoCtx(HsaKFDContext *ctx,
 	QueueInfo->QueueDetailError = 0;
 	QueueInfo->QueueTypeExtended = 0;
 	QueueInfo->SaveAreaHeader = q->ctx_save_restore;
+	QueueInfo->SaveAreaAllocSize = q->ctx_save_restore_size;
 
 	return HSAKMT_STATUS_SUCCESS;
 }

@@ -1220,6 +1220,18 @@ class TestExecutor:
         # to exist; shlex.quote handles any spaces.
         exe = shlex.quote(test_binary_path)
 
+        # Create the gtest JSON output file up front so the command builders
+        # below can embed it directly into the program string (rather than
+        # re-parsing the assembled command). Removed in the finally block.
+        gtest_json_path = None
+        gtest_out_arg = ""
+        if is_gtest:
+            fd, gtest_json_path = tempfile.mkstemp(
+                prefix="rccl_gtest_", suffix=".json", dir=tempfile.gettempdir()
+            )
+            os.close(fd)
+            gtest_out_arg = f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
+
         # Build command based on test type
         if num_ranks == 1:
             # Non-MPI test - prepend environment variables to the command.
@@ -1231,21 +1243,22 @@ class TestExecutor:
                     env_prefix += f"{key}={value} "
             env_prefix += f"LD_LIBRARY_PATH={env['LD_LIBRARY_PATH']} "
 
-            if is_gtest:
-                # GTest-based test - use --gtest_filter syntax
-                if test_filter == "ALL" or test_filter == "*":
-                    cmd = f"{env_prefix}{exe}"
-                else:
-                    cmd = f"{env_prefix}{exe} --gtest_filter={test_filter}"
-
-                # Add custom arguments if provided
-                if custom_args:
-                    cmd += f" {custom_args}"
+            # Build the program (binary + args) as one string so the same
+            # locked-memory wrapper used on the MPI path applies here too.
+            if is_gtest and not (test_filter == "ALL" or test_filter == "*"):
+                program = f"{exe} --gtest_filter={test_filter}"
             else:
-                # Non-gtest test (perf, custom, etc.) - run binary with args
-                cmd = f"{env_prefix}{exe}"
-                if custom_args:
-                    cmd += f" {custom_args}"
+                program = exe
+            if custom_args:
+                program += f" {custom_args}"
+            program += gtest_out_arg
+
+            # RDMA QP/CQ creation pins memory and fails with "Cannot allocate
+            # memory" under SLURM's low inherited locked-memory soft limit, so
+            # raise it before exec. `set -f` keeps gtest filter globs literal.
+            # The env_prefix stays in front so bash inherits the test env vars.
+            inner = f"ulimit -l unlimited 2>/dev/null; set -f; exec {program}"
+            cmd = f"{env_prefix}bash -c {shlex.quote(inner)}"
 
         else:
             # MPI test
@@ -1333,33 +1346,40 @@ class TestExecutor:
             if ld_preload:
                 mpi_args += " " + env_fmt.format(key="LD_PRELOAD", value=ld_preload)
 
-            # Build test command based on type
-            if is_gtest:
-                # GTest-based test - use --gtest_filter syntax
-                if test_filter == "ALL" or test_filter == "*":
-                    cmd = f"{mpi_cmd} {mpi_args} {exe}"
-                else:
-                    cmd = f"{mpi_cmd} {mpi_args} {exe} --gtest_filter={test_filter}"
-
-                if custom_args:
-                    cmd += f" {custom_args}"
+            # Build the program (test binary + its arguments) that mpirun will
+            # launch as a single string, so the locked-memory wrapper below can be
+            # applied directly instead of re-parsing the assembled command.
+            if is_gtest and not (test_filter == "ALL" or test_filter == "*"):
+                program = f"{exe} --gtest_filter={test_filter}"
             else:
-                # Non-gtest test (perf, custom, etc.) - run binary with args
-                cmd = f"{mpi_cmd} {mpi_args} {exe}"
-                if custom_args:
-                    cmd += f" {custom_args}"
+                program = exe
+            if custom_args:
+                program += f" {custom_args}"
+            program += gtest_out_arg
 
-        gtest_json_path = None
-        if is_gtest:
-            fd, gtest_json_path = tempfile.mkstemp(
-                prefix="rccl_gtest_", suffix=".json", dir=tempfile.gettempdir()
-            )
-            os.close(fd)
-            cmd += f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
+            # RDMA QP/CQ creation pins memory and fails with "Cannot allocate
+            # memory" under SLURM's low inherited locked-memory soft limit, so
+            # raise it per rank before exec. `set -f` keeps gtest filter globs
+            # literal; wrapping the program (not the assembled command) means it
+            # always applies for MPI launches.
+            inner = f"ulimit -l unlimited 2>/dev/null; set -f; exec {program}"
+            wrapped_program = f"bash -c {shlex.quote(inner)}"
+            cmd = f"{mpi_cmd} {mpi_args} {wrapped_program}"
+
+        # Working directory: gtest binaries live in <build_dir>/test, but a
+        # prebuilt/custom lib dir (RCCL_BUILD_DIR / test_binary_dir override) may
+        # have no "test" subdir. cwd only needs to exist (perf binaries are invoked
+        # by absolute path), so fall back gracefully to keep prebuilt runs working.
+        run_cwd = os.path.join(self.build_dir, "test")
+        if not os.path.isdir(run_cwd):
+            if os.path.isdir(self.build_dir):
+                run_cwd = self.build_dir
+            else:
+                run_cwd = os.path.dirname(test_binary_path) or os.getcwd()
 
         if self.args.verbose:
             print(f"\n  Command: {cmd}")
-            print(f"  Working directory: {os.path.join(self.build_dir, 'test')}")
+            print(f"  Working directory: {run_cwd}")
             print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}")
             print(f"  LLVM_PROFILE_FILE: {env.get('LLVM_PROFILE_FILE', 'Not set')}\n")
 
@@ -1384,7 +1404,7 @@ class TestExecutor:
             wrapped = f"set -o pipefail; ({cmd}) 2>&1 | tee {shlex.quote(emit_log_path)}"
             proc = subprocess.Popen(
                 ["bash", "-c", wrapped],
-                cwd=os.path.join(self.build_dir, "test"),
+                cwd=run_cwd,
                 env=env,
                 start_new_session=True,
             )
@@ -1392,7 +1412,7 @@ class TestExecutor:
             proc = subprocess.Popen(
                 cmd,
                 shell=True,
-                cwd=os.path.join(self.build_dir, "test"),
+                cwd=run_cwd,
                 env=env,
                 start_new_session=True,
             )
