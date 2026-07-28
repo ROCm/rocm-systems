@@ -6,6 +6,7 @@
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/dbt/binary_translator_internal.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
@@ -411,6 +412,76 @@ TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
   EXPECT_TRUE(has_predecessor(*blocks[0], blocks[0].get()));
 }
 
+TEST(CfgAnalysis, Gfx1250ClassifiesImplicitUnreachableStubTerminator) {
+  struct Case {
+    const char *name;
+    std::vector<uint32_t> words;
+    bool has_terminator;
+    bool has_implicit_terminator;
+    bool falls_through_to_undecodable_text;
+  };
+  const std::array cases = {
+      Case{"clang unreachable stub", {0xb9800641u, 1u, 0}, true, true, false},
+      Case{"clang unreachable stub with prefetch",
+           {0xee174000u, 0x00040000u, 0, 0x7e000000u, 0xb9800641u, 1u, 0},
+           true,
+           true,
+           false},
+      Case{"section-final clang unreachable stub", {0xb9800641u, 1u}, true, true, false},
+      Case{"ordinary fallthrough",
+           {build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), 0},
+           false,
+           false,
+           true},
+      Case{"architectural terminator",
+           {build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), 0},
+           true,
+           false,
+           false},
+  };
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    TestCodeObject co(test_case.words);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+    ASSERT_EQ(blocks.size(), 1u);
+    EXPECT_EQ(blocks[0]->has_terminator(), test_case.has_terminator);
+    EXPECT_EQ(blocks[0]->has_implicit_terminator(), test_case.has_implicit_terminator);
+    EXPECT_EQ(blocks[0]->falls_through_to_undecodable_text(),
+              test_case.falls_through_to_undecodable_text);
+  }
+}
+
+TEST(CfgAnalysis, DirectCallToImplicitNonreturningTargetDropsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> words = {
+      rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_GFX1250),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x04 continuation.
+      0xb9800641u,
+      1u,
+      0, // 0x08 clang unreachable-stub target followed by padding.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *target = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, target->start_offset()));
+  EXPECT_FALSE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_FALSE(has_predecessor(*continuation, caller));
+}
 TEST(CfgAnalysis, IfElseSuccessorsAndPredecessorsAreInverse) {
   auto blocks = build_test_blocks(
       {TestOpcode::CBranchToElse, TestOpcode::BranchToJoin, TestOpcode::Nop, TestOpcode::End});
@@ -665,6 +736,190 @@ TEST(CfgAnalysis, IncompleteFactConsumerIsFlaggedIncomplete) {
       << "a consumer joined from an unconstrained path must be flagged incomplete";
 }
 
+TEST(CfgAnalysis, IncompleteSwappcTargetSetKeepsContinuation) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> words = {
+      pack_sopp(5, 5),                                     // 0x00 -> bypass at 0x18.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
+      28,                                                  // 0x0c: target at 0x24.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x1c.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: unconstrained bypass.
+      pack_sop1(0x1e, kReturnSreg, kPcSreg),               // 0x1c: joined swappc consumer.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: known non-returning target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *consumer = block_starting_at(blocks, 28);
+  auto *continuation = block_starting_at(blocks, 32);
+  auto *target = block_starting_at(blocks, 36);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(target, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups()[0].source_incomplete);
+  EXPECT_TRUE(consumer->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*consumer, continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*consumer, target->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, consumer));
+}
+
+TEST(CfgAnalysis, IncompleteRecoveredSetpcInCalleeKeepsOuterContinuation) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kOuterReturnSreg, 1),               // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x04 live continuation.
+      pack_sopp(5, 5),                                     // 0x08 -> bypass at 0x20.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x0c: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x10: s_add_u32.
+      28,                                                  // 0x14: target at 0x2c.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x18: s_addc_u32.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x1c -> consumer at 0x24.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: unconstrained bypass.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x24: joined setpc.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x28: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x2c: known target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *callee = block_starting_at(blocks, 8);
+  auto *consumer = block_starting_at(blocks, 36);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups()[0].source_incomplete);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, callee->start_offset()));
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, ReportsResolvedPcAddressBuilderForEveryProducer) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // Recovered consumers are only one use of a getpc builder. DBT also needs the
+  // producer itself so it can prove a whole kernel scope holds no unrelocated
+  // PC-derived value, so every builder is reported with the exact byte range
+  // whose delta relocation may rewrite.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      16,                                                  // 0x08: 0x04 + 16 = 0x14.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x10: consumer setpc.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x14: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *builder_block = block_starting_at(blocks, 0);
+  ASSERT_NE(builder_block, nullptr);
+  ASSERT_EQ(builder_block->static_pc_address_builders().size(), 1u);
+  const auto &builder = builder_block->static_pc_address_builders()[0];
+  EXPECT_TRUE(builder.resolved);
+  EXPECT_TRUE(builder.contiguous);
+  EXPECT_EQ(builder.source_getpc_offset, 0u);
+  EXPECT_EQ(builder.source_recovery_begin_offset, 4u);
+  EXPECT_EQ(builder.source_recovery_end_offset, 16u);
+  EXPECT_EQ(builder.source_target_offset, 20);
+  EXPECT_EQ(builder.source_sreg, kPcSreg);
+}
+
+TEST(CfgAnalysis, PcAddressBuilderWithGapInstructionIsReportedNonContiguous) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kUnrelatedSreg = 20;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // An unrelated s_mov_b32 sits between the low add and the high carry. The pass
+  // still tracks the pair across it (the move writes s20, not the pair), so the
+  // builder's recorded value is known and its recovery range spans the move. The
+  // relocation patcher NOPs that whole range, so rewriting it would erase the
+  // move. The producer must therefore be reported non-contiguous even though its
+  // final value resolved, so the whole-scope proof declines to rewrite it.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                     // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x04: s_add_u32.
+      20,                                              // 0x08: 0x04 + 20 = 0x18.
+      build_s_mov_b32(kUnrelatedSreg, 0,
+                      ROCJITSU_CODE_ARCH_CDNA4),           // 0x0c: unrelated write, in range.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                         // 0x14: consumer setpc.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *builder_block = block_starting_at(blocks, 0);
+  ASSERT_NE(builder_block, nullptr);
+  ASSERT_EQ(builder_block->static_pc_address_builders().size(), 1u);
+  const auto &builder = builder_block->static_pc_address_builders()[0];
+  EXPECT_TRUE(builder.resolved);
+  EXPECT_FALSE(builder.contiguous)
+      << "a builder range spanning an unrelated instruction must be non-contiguous";
+}
+
+TEST(CfgAnalysis, UnfollowedPcAddressBuilderIsReportedUnresolved) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kAddendSreg = 12;
+
+  // The low-half add takes a register addend the pass does not model, so the
+  // pair's final value is unknown. The producer still exists and still yields a
+  // PC-derived value at run time, so it must be reported as unresolved rather
+  // than omitted: omitting it would let a caller conclude the scope has no
+  // unrelocatable PC producer.
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                 // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kAddendSreg), // 0x04: s_add_u32 with register addend.
+      pack_sop1(0x1d, 0, kPcSreg),                 // 0x08: consumer setpc.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x0c.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *builder_block = block_starting_at(blocks, 0);
+  ASSERT_NE(builder_block, nullptr);
+  ASSERT_EQ(builder_block->static_pc_address_builders().size(), 1u);
+  EXPECT_EQ(builder_block->static_pc_address_builders()[0].source_getpc_offset, 0u);
+  EXPECT_FALSE(builder_block->static_pc_address_builders()[0].resolved)
+      << "a producer the pass cannot follow must not be reported as relocatable";
+  EXPECT_TRUE(builder_block->static_indirect_call_fixups().empty());
+}
+
 TEST(CfgAnalysis, DominatedPcBuilderRemainsCompleteAcrossCallLoopBackedge) {
   constexpr uint16_t kPcSreg = 8;
   constexpr uint16_t kReturnSreg = 30;
@@ -915,6 +1170,305 @@ TEST(CfgAnalysis, DirectCallEdgeUsesTerminatorOffset) {
   EXPECT_EQ(edge.callee, callee);
   EXPECT_EQ(edge.continuation, continuation);
   EXPECT_EQ(edge.source_call_offset, 4u);
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(BinaryTranslatorInternal, ScopeRootsRejectRelocationTableCallee) {
+  // A returning direct call makes the callee at 0x0c a call-edge target with no
+  // ordinary in-scope predecessor, i.e. an external root that the whole-scope
+  // stale-PC proof must classify. The caller (0x00) is the kernel entry.
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),         // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 continuation.
+      pack_sop1(0x1d, 0, kReturnSreg),          // 0x08 callee return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *callee = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(callee, nullptr);
+  ASSERT_EQ(caller->call_edges().size(), 1u);
+  ASSERT_EQ(caller->call_edges()[0].callee, callee);
+
+  const auto scope = block_scope(blocks);
+  const std::unordered_set<uint64_t> hardware_entries{caller->start_offset()};
+
+  // With no relocation-table roots, the callee is a getpc-recovered call target
+  // and the entry is a hardware root, so the scope is accepted.
+  EXPECT_TRUE(rocjitsu::internal::scope_roots_are_entry_state(scope, hardware_entries, {}));
+
+  // Marking the callee a relocation-table dispatch target makes it an
+  // unconstrained root: a dispatched callee receives arbitrary caller-supplied
+  // SGPR arguments, so the gate must fail closed even though it has a CallEdge.
+  const std::unordered_set<uint64_t> table_callees{callee->start_offset()};
+  EXPECT_FALSE(
+      rocjitsu::internal::scope_roots_are_entry_state(scope, hardware_entries, table_callees));
+
+  // A non-hardware, non-call, non-table external root is also rejected: drop the
+  // entry from the hardware set and the caller itself becomes unconstrained.
+  EXPECT_FALSE(rocjitsu::internal::scope_roots_are_entry_state(scope, {}, {}));
+}
+
+TEST(CfgAnalysis, DirectCallToNonreturningTargetDropsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),         // 0x00 -> target at 0x08.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4), // 0x04 unreachable padding.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x08 non-returning target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *target = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, target->start_offset()));
+  EXPECT_FALSE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_FALSE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, DirectCallWithCopiedReturnPairKeepsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kCopiedReturnSreg = 34;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),             // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),     // 0x04 live continuation.
+      pack_sop1(1, kCopiedReturnSreg, kReturnSreg), // 0x08: s_mov_b64.
+      pack_sop1(0x1d, 0, kCopiedReturnSreg),        // 0x0c: copied-pair return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *callee = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*caller, callee->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, DirectCallWithUnrecoveredTailExitKeepsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kUnknownTargetSreg = 0;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),         // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 live continuation.
+      pack_sop1(0x1d, 0, kUnknownTargetSreg),   // 0x08: unrecovered tail exit.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *callee = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*caller, callee->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, DirectCallCrossingScopeBoundaryKeepsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),            // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x04 live continuation.
+      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // 0x08 -> leader at 0x10.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x0c skipped.
+      pack_sop1(0x1d, 0, kReturnSreg),             // 0x10: return across boundary.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> extra_leaders{16};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, extra_leaders);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *callee = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  EXPECT_TRUE(caller->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*caller, callee->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, NestedReturningCallMayReturnThroughOuterPair) {
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint16_t kInnerReturnSreg = 28;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kOuterReturnSreg, 1),    // 0x00 -> outer callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 outer continuation.
+      build_s_call_b64(kInnerReturnSreg, 1),    // 0x08 -> inner callee at 0x10.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x0c inner continuation.
+      pack_sopp(5, 1),                          // 0x10 -> outer return at 0x18.
+      pack_sop1(0x1d, 0, kInnerReturnSreg),     // 0x14: normal inner return.
+      pack_sop1(0x1d, 0, kOuterReturnSreg),     // 0x18: direct outer return.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *outer = block_starting_at(blocks, 0);
+  auto *outer_continuation = block_starting_at(blocks, 4);
+  ASSERT_NE(outer, nullptr);
+  ASSERT_NE(outer_continuation, nullptr);
+
+  ASSERT_EQ(outer->call_edges().size(), 1u);
+  EXPECT_EQ(outer->call_edges()[0].continuation, outer_continuation);
+  EXPECT_TRUE(has_successor_start(*outer, outer_continuation->start_offset()));
+  EXPECT_TRUE(has_predecessor(*outer_continuation, outer));
+}
+
+TEST(CfgAnalysis, NestedNonreturningCallsDropBothFallthroughs) {
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint16_t kInnerReturnSreg = 28;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kOuterReturnSreg, 1),    // 0x00 -> outer callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 outer continuation.
+      build_s_call_b64(kInnerReturnSreg, 1),    // 0x08 -> inner target at 0x10.
+      pack_sop1(0x1d, 0, kOuterReturnSreg),     // 0x0c dead inner continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x10 non-returning target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *outer = block_starting_at(blocks, 0);
+  auto *outer_continuation = block_starting_at(blocks, 4);
+  auto *inner = block_starting_at(blocks, 8);
+  auto *inner_continuation = block_starting_at(blocks, 12);
+  auto *target = block_starting_at(blocks, 16);
+  ASSERT_NE(outer, nullptr);
+  ASSERT_NE(outer_continuation, nullptr);
+  ASSERT_NE(inner, nullptr);
+  ASSERT_NE(inner_continuation, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  EXPECT_TRUE(outer->call_edges().empty());
+  EXPECT_TRUE(inner->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*outer, inner->start_offset()));
+  EXPECT_FALSE(has_successor_start(*outer, outer_continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*inner, target->start_offset()));
+  EXPECT_FALSE(has_successor_start(*inner, inner_continuation->start_offset()));
+}
+
+TEST(CfgAnalysis, CyclicCallGraphKeepsConservativeFallthrough) {
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint16_t kRecursiveReturnSreg = 28;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kOuterReturnSreg, 1),      // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),   // 0x04 outer continuation.
+      build_s_call_b64(kRecursiveReturnSreg, -1), // 0x08 -> itself.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),   // 0x0c recursive continuation.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+
+  EXPECT_TRUE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, CallToInfiniteLoopDropsFallthrough) {
+  constexpr uint16_t kReturnSreg = 30;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 1),             // 0x00 -> callee at 0x08.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),     // 0x04 dead continuation.
+      build_s_branch(-1, ROCJITSU_CODE_ARCH_CDNA4), // 0x08 -> itself.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *continuation = block_starting_at(blocks, 4);
+  auto *callee = block_starting_at(blocks, 8);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(callee, nullptr);
+
+  EXPECT_TRUE(has_successor_start(*caller, callee->start_offset()));
+  EXPECT_FALSE(has_successor_start(*caller, continuation->start_offset()));
+  EXPECT_FALSE(has_predecessor(*continuation, caller));
+}
+
+TEST(CfgAnalysis, ZeroDeltaCallToNonreturningTargetKeepsSingleEdge) {
+  constexpr uint16_t kReturnSreg = 30;
+
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 0),         // 0x00 -> target/continuation at 0x04.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 non-returning target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *caller = block_starting_at(blocks, 0);
+  auto *target = block_starting_at(blocks, 4);
+  ASSERT_NE(caller, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  ASSERT_EQ(caller->successors().size(), 1u);
+  EXPECT_EQ(caller->successors()[0], target);
+  ASSERT_EQ(target->predecessors().size(), 1u);
+  EXPECT_EQ(target->predecessors()[0], caller);
 }
 
 TEST(CfgAnalysis, DirectCallKillsCarriedPcBuilderFacts) {
@@ -1090,6 +1644,87 @@ TEST(CfgAnalysis, KeepsDistinctBuildersReachingSameTarget) {
   std::vector<uint64_t> getpc_offsets{fixups[0].source_getpc_offset, fixups[1].source_getpc_offset};
   std::ranges::sort(getpc_offsets);
   EXPECT_EQ(getpc_offsets, (std::vector<uint64_t>{4u, 20u}));
+}
+
+TEST(CfgAnalysis, RecoveredSwappcToNonreturningTargetDropsFallthrough) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> words = {
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x00: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x04: s_add_u32.
+      20,                                                  // 0x08: target at 0x18.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c: s_addc_u32.
+      pack_sop1(0x1e, kReturnSreg, kPcSreg),               // 0x10: s_swappc_b64.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x14: dead continuation.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: terminal target.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *consumer = block_starting_at(blocks, 16);
+  auto *continuation = block_starting_at(blocks, 20);
+  auto *target = block_starting_at(blocks, 24);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(target, nullptr);
+
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_TRUE(consumer->call_edges().empty());
+  EXPECT_TRUE(has_successor_start(*consumer, target->start_offset()));
+  EXPECT_FALSE(has_successor_start(*consumer, continuation->start_offset()));
+  EXPECT_FALSE(has_predecessor(*continuation, consumer));
+}
+
+TEST(CfgAnalysis, MixedSwappcTargetsKeepSharedContinuation) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+
+  // Two paths build different finite targets for one swappc consumer. The
+  // first target returns through the saved pair; the second terminates.
+  std::vector<uint32_t> words = {
+      pack_sopp(5, 4),                                 // 0x00 -> builder B at 0x14.
+      pack_sop1(0x1c, kPcSreg, 0),                     // 0x04: builder A getpc.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x08: s_add_u32.
+      0x20u,                                           // 0x0c: target A at 0x28.
+      build_s_branch(3, ROCJITSU_CODE_ARCH_CDNA4),     // 0x10 -> consumer at 0x20.
+      pack_sop1(0x1c, kPcSreg, 0),                     // 0x14: builder B getpc.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand), // 0x18: s_add_u32.
+      0x14u,                                           // 0x1c: target B at 0x2c.
+      pack_sop1(0x1e, kReturnSreg, kPcSreg),           // 0x20: s_swappc_b64.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),        // 0x24: continuation.
+      pack_sop1(0x1d, 0, kReturnSreg),                 // 0x28: returning target A.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),        // 0x2c: non-returning target B.
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+
+  auto *consumer = block_starting_at(blocks, 32);
+  auto *continuation = block_starting_at(blocks, 36);
+  auto *returning_target = block_starting_at(blocks, 40);
+  auto *nonreturning_target = block_starting_at(blocks, 44);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_NE(continuation, nullptr);
+  ASSERT_NE(returning_target, nullptr);
+  ASSERT_NE(nonreturning_target, nullptr);
+
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 2u);
+  ASSERT_EQ(consumer->call_edges().size(), 1u);
+  EXPECT_EQ(consumer->call_edges()[0].callee, returning_target);
+  EXPECT_EQ(consumer->call_edges()[0].continuation, continuation);
+  EXPECT_TRUE(has_successor_start(*consumer, continuation->start_offset()));
+  EXPECT_TRUE(has_successor_start(*consumer, nonreturning_target->start_offset()));
+  EXPECT_FALSE(has_successor_start(*consumer, returning_target->start_offset()));
+  EXPECT_TRUE(has_predecessor(*continuation, consumer));
 }
 
 TEST(CfgAnalysis, Gfx1250RecoversSignedDeltaTemplateWithPrefetch) {
