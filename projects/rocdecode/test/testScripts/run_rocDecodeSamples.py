@@ -200,7 +200,7 @@ if sampleMode == 0:
                             /^$/{next}
                             /info: Total pictures decoded: / {totalFrames=$5; next}
                             /info: avg decoding time per picture: /{timePerFrame=$7; next}
-                            /info: avg decode FPS: / { printf("%s, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }' rocDecode_videoDecode_results/rocDecode_output.log >> rocDecode_videoDecode_results/rocDecode_test_results.csv'''
+                            /info: avg decode FPS: / { printf("%s, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }' ''' + resultsPath + '''/rocDecode_output.log >> ''' + resultsPath + '''/rocDecode_test_results.csv'''
         os.system(runAwk_csv)
 elif sampleMode == 1:
     for current_file in iter_files(filesDirPath):
@@ -236,8 +236,7 @@ elif sampleMode == 1:
                             /^$/{next}
                             /info: Total pictures decoded: / {totalFrames=$5; next}
                             /info: avg decoding time per picture: /{timePerFrame=$7; next}
-                            /info: avg decode FPS: / { printf("%s, %d, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, numThreads, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }' rocDecode_videoDecodePerf_results/rocDecode_output.log >> rocDecode_videoDecodePerf_results/rocDecode_test_results.csv'''
-        sys.stdout = orig_stdout
+                            /info: avg decode FPS: / { printf("%s, %d, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, numThreads, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }' ''' + resultsPath + '''/rocDecode_output.log >> ''' + resultsPath + '''/rocDecode_test_results.csv'''
         os.system(runAwk_csv)
 
 # get data
