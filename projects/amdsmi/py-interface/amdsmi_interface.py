@@ -2791,6 +2791,9 @@ def amdsmi_get_gpu_device_cuid(processor_handle: processor_handle_t) -> str:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
+    if not hasattr(amdsmi_wrapper, "amdsmi_get_gpu_device_cuid"):
+        raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+
     cuid = ctypes.create_string_buffer(AMDSMI_GPU_CUID_SIZE)
 
     cuid_length = ctypes.c_uint32()

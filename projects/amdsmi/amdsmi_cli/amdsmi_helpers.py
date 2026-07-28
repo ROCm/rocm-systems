@@ -445,10 +445,12 @@ class AMDSMIHelpers:
 
             for gpu_id, device_handle in enumerate(device_handles):
                 bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
-                uuid = self.get_gpu_cuid_or_uuid(device_handle)
+                uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(device_handle)
+                cuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
                 gpu_choices[str(gpu_id)] = {
                     "bdf": bdf,
                     "UUID": uuid,
+                    "CUID": cuid,
                     "Device Handle": device_handle,
                 }
 
@@ -456,7 +458,9 @@ class AMDSMIHelpers:
                     id_padding = max_padding
                 else:
                     id_padding = max_padding - int(math.log10(gpu_id))
-                gpu_choices_str += f"ID: {gpu_id}{' ' * id_padding}| BDF: {bdf} | UUID: {uuid}\n"
+                gpu_choices_str += (
+                    f"ID: {gpu_id}{' ' * id_padding}| BDF: {bdf} | UUID: {uuid} | CUID: {cuid}\n"
+                )
 
             # Add the all option to the gpu_choices
             gpu_choices["all"] = "all"
@@ -630,10 +634,15 @@ class AMDSMIHelpers:
                 bdf = gpu_info["bdf"]
                 is_bdf = True
                 uuid = gpu_info["UUID"]
+                cuid = gpu_info["CUID"]
                 device_handle = gpu_info["Device Handle"]
 
                 # Check if passed gpu is a gpu ID or UUID
-                if gpu_selection == gpu_id or gpu_selection.lower() == uuid:
+                if (
+                    gpu_selection == gpu_id
+                    or gpu_selection.lower() == uuid
+                    or gpu_selection.lower() == cuid
+                ):
                     selected_device_handles.append(device_handle)
                     valid_gpu_choice = True
                     break
