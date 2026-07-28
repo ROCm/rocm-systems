@@ -69,18 +69,26 @@ public:
   /// @returns Instruction count.
   uint32_t num_instructions() const { return num_instructions_; }
 
-  /// @brief Whether the block ends with a terminator instruction.
-  /// @retval true The last instruction is a branch or program terminator.
+  /// @brief Whether the block ends with a terminator instruction or compiler stub.
+  /// @retval true The last instruction is a branch/program terminator, or the
+  /// block is an exact gfx1250 clang unreachable-stub body followed by padding.
   /// @retval false The block falls through to the next.
   bool has_terminator() const { return has_terminator_; }
 
   /// @brief Whether sequential execution would enter undecodable source bytes.
   ///
-  /// @details Large code objects may place zero padding or opaque data between
-  /// functions in `.text`. Such gaps are harmless after a real terminator, but
-  /// a reachable non-terminating block that falls into a gap cannot be safely
-  /// relocated and must make translation fail closed.
+  /// @details Large code objects may place padding or opaque data between
+  /// functions in `.text`. Fallthrough into an undecodable gap cannot be safely
+  /// relocated and must make translation fail closed. The only exception is a
+  /// recognized gfx1250 clang unreachable-stub body followed by zero padding.
   bool falls_through_to_undecodable_text() const { return falls_through_to_undecodable_text_; }
+
+  /// @brief Whether zero padding supplies this block's implicit terminator.
+  ///
+  /// @details The recognized gfx1250 clang unreachable stub has no architectural
+  /// terminator. Its following zero-filled alignment hole establishes a CFG
+  /// boundary that relocation must materialize as an s_endpgm in target text.
+  bool has_implicit_terminator() const { return has_implicit_terminator_; }
 
   /// @brief Last instruction in the block, or nullptr for an empty block.
   [[nodiscard]] const Instruction *terminator() const;
@@ -132,19 +140,27 @@ public:
   ///
   /// @details Recovered indirect branch targets are added as block leaders before
   /// the block objects are finalized, so users never see a recovered edge whose
-  /// destination points into the middle of a larger block.
+  /// destination points into the middle of a larger block. Syntactic call
+  /// fallthroughs remain provisional until call-return classification finishes.
   /// @param[in] co Code object to analyze.
   /// @param[in] decoder Decoder for the target ISA.
   /// @param[in] arch ISA architecture used to match static PC builders.
   /// @param[in] extra_leaders Byte offsets that must start a basic block.
+  /// @param[in] entry_policy Whether predecessorless blocks are inferred to be
+  /// external function entries. Use ExplicitOnly only when extra_leaders
+  /// enumerates every externally reachable entry.
   /// @returns Ordered list of basic blocks with their decoded instructions.
   static std::vector<std::unique_ptr<BasicBlock>>
   build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-        std::span<const uint64_t> extra_leaders = {});
+        std::span<const uint64_t> extra_leaders = {},
+        ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless);
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
+  [[nodiscard]] bool is_gfx1250_clang_unreachable_stub() const;
   void add_successor(BasicBlock &successor);
+  /// Remove one proven-dead edge while preserving the inverse predecessor list.
+  [[nodiscard]] bool remove_successor(BasicBlock &successor);
   void add_static_indirect_call_fixup(IndirectCallFixup fixup);
 
   uint64_t start_offset_;
@@ -152,6 +168,7 @@ private:
   uint32_t num_instructions_ = 0;
   bool has_terminator_ = false;
   bool falls_through_to_undecodable_text_ = false;
+  bool has_implicit_terminator_ = false;
   InstructionList instructions_;
   std::vector<std::unique_ptr<Instruction>> storage_;
   std::vector<BasicBlock *> successors_;
