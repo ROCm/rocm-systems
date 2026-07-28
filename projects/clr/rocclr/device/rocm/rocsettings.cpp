@@ -87,11 +87,14 @@ Settings::Settings() {
 }
 
 // ================================================================================================
-bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
+bool Settings::create(bool fullProfile, const amd::Isa& presentedIsa,
+                      const amd::Isa& executionIsa, bool coop_groups,
                       bool isXgmi) {
-  uint32_t gfxipMajor = isa.versionMajor();
-  uint32_t gfxipMinor = isa.versionMinor();
-  uint32_t gfxStepping = isa.versionStepping();
+  const uint32_t gfxipMajor = executionIsa.versionMajor();
+  const uint32_t gfxipMinor = executionIsa.versionMinor();
+  const uint32_t gfxStepping = executionIsa.versionStepping();
+  const uint32_t presentedGfxipMajor = presentedIsa.versionMajor();
+  const uint32_t presentedGfxipMinor = presentedIsa.versionMinor();
 
   customHostAllocator_ = false;
 
@@ -103,7 +106,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   } else {
     pinnedXferSize_ = std::max(pinnedXferSize_, pinnedMinXferSize_);
   }
-  enableXNACK_ = enableXNACK;
+  enableXNACK_ = presentedIsa.xnack() == amd::Isa::Feature::Enabled;
 
   // Enable extensions
   enableExtension(ClKhrByteAddressableStore);
@@ -151,21 +154,34 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     sdma_swap_supported_ = true;
   }
 
-  setKernelArgImpl(isa, isXgmi);
+  setKernelArgImpl(executionIsa, isXgmi);
 
+  // Physical CU/WGP accounting and queue masks must match the execution ISA.
   if (gfxipMajor >= 10) {
-     enableWave32Mode_ = true;
-     // Disable wgp mode for gfx1250 and later
-     if (gfxipMajor == 12 && gfxipMinor >= 5) {
-        enableWgpMode_ = false;
-     } else {
-        enableWgpMode_ = GPU_ENABLE_WGP_MODE;
-     }
-     if (gfxipMajor == 10 && gfxipMinor == 1) {
-       // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
-       // TODO: This should be updated when ROCr support custom pitch
-       imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
-     }
+    // gfx1250 does not support WGP mode.
+    if (gfxipMajor == 12 && gfxipMinor >= 5) {
+      enableWgpMode_ = false;
+    } else {
+      enableWgpMode_ = GPU_ENABLE_WGP_MODE;
+    }
+  }
+
+  // CLR compiles code for the presented ISA. Keep its wave and CU/WGP modes
+  // separate from the physical modes that the translated code executes on.
+  if (presentedGfxipMajor >= 10) {
+    enableWave32Mode_ = true;
+    // gfx1250 does not support WGP mode.
+    if (presentedGfxipMajor == 12 && presentedGfxipMinor >= 5) {
+      lcWgpMode_ = false;
+    } else {
+      lcWgpMode_ = GPU_ENABLE_WGP_MODE;
+    }
+  }
+
+  if (gfxipMajor == 10 && gfxipMinor == 1) {
+    // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
+    // TODO: This should be updated when ROCr support custom pitch
+    imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
   }
 
   if (!flagIsDefault(GPU_ENABLE_WAVE32_MODE)) {

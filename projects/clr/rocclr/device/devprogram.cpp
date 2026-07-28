@@ -529,7 +529,7 @@ bool Program::compileImpl(const std::string& sourceCode,
   driverOptions.push_back("-mllvm");
   driverOptions.push_back("-amdgpu-prelink");
 
-  if (!device().settings().enableWgpMode_) {
+  if (!device().settings().lcWgpMode_) {
     driverOptions.push_back("-mcumode");
   }
 
@@ -862,7 +862,7 @@ bool Program::linkImpl(amd::option::Options* options) {
   codegenOptions.push_back("-mllvm");
   codegenOptions.push_back("-amdgpu-internalize-symbols");
 
-  if (!device().settings().enableWgpMode_) {
+  if (!device().settings().lcWgpMode_) {
     codegenOptions.push_back("-mcumode");
   }
 

@@ -372,7 +372,7 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
       break;
     case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: {
       int maxDynamicSharedSizeBytes = static_cast<int>(wrkGrpInfo.maxDynamicSharedSizeBytes_);
-      const int alignmentSize = device.isa().ldsAlignment();
+      const int alignmentSize = device.executionIsa().ldsAlignment();
       *pi = amd::alignDown(maxDynamicSharedSizeBytes, alignmentSize);
       break;
     }

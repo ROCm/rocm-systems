@@ -98,7 +98,7 @@ bool NullDevice::create(const amd::Isa& isa) {
 
   roc::Settings* hsaSettings = new roc::Settings();
   settings_ = hsaSettings;
-  if (!hsaSettings || !hsaSettings->create(false, isa, isa.xnack() == amd::Isa::Feature::Enabled)) {
+  if (!hsaSettings || !hsaSettings->create(false, isa, isa)) {
     LogPrintfError("Error creating settings for offline HSA device %s", isa.targetId());
     return false;
   }
@@ -606,6 +606,51 @@ bool Device::create() {
     return false;
   }
 
+  hsa_isa_t execution_isa_handle = {};
+  hsa_status_t execution_isa_status = Hsa::agent_get_info(
+      bkendDevice_,
+      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_EXECUTION_ISA),
+      &execution_isa_handle);
+  if (execution_isa_status != HSA_STATUS_SUCCESS) {
+    LogPrintfError(
+        "Unable to get physical execution ISA for HSA device %s (PCI ID %x): "
+        "HSA status %d. A ROCr runtime that implements "
+        "HSA_AMD_AGENT_INFO_EXECUTION_ISA is required",
+        agent_name, pciDeviceId_, static_cast<int>(execution_isa_status));
+    return false;
+  }
+
+  uint32_t execution_isa_name_length = 0;
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::isa_get_info_alt(execution_isa_handle, HSA_ISA_INFO_NAME_LENGTH,
+                            &execution_isa_name_length)) {
+    LogPrintfError(
+        "Unable to get physical execution ISA name length for HSA device %s "
+        "(PCI ID %x)",
+        agent_name, pciDeviceId_);
+    return false;
+  }
+
+  std::vector<char> execution_isa_name(execution_isa_name_length + 1, '\0');
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::isa_get_info_alt(execution_isa_handle, HSA_ISA_INFO_NAME,
+                            execution_isa_name.data())) {
+    LogPrintfError(
+        "Unable to get physical execution ISA name for HSA device %s (PCI ID "
+        "%x)",
+        agent_name, pciDeviceId_);
+    return false;
+  }
+
+  const amd::Isa* execution_isa =
+      amd::Isa::findIsa(execution_isa_name.data());
+  if (execution_isa == nullptr || !execution_isa->runtimeRocSupported()) {
+    LogPrintfError(
+        "Unsupported physical execution ISA %s for HSA device %s (PCI ID %x)",
+        execution_isa_name.data(), agent_name, pciDeviceId_);
+    return false;
+  }
+
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_, HSA_AGENT_INFO_PROFILE, &agent_profile_)) {
     LogPrintfError("Unable to get profile for HSA device %s (PCI ID %x)", agent_name, pciDeviceId_);
@@ -643,9 +688,9 @@ bool Device::create() {
   assert(!settings_);
   roc::Settings* hsaSettings = new roc::Settings();
   settings_ = hsaSettings;
-  if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
-                                           isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_)) {
+  if (!hsaSettings ||
+      !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
+                           *execution_isa, coop_groups, isXgmi_)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -657,7 +702,7 @@ bool Device::create() {
     return false;
   }
 
-  if (!amd::Device::create(*isa)) {
+  if (!amd::Device::create(*isa, *execution_isa)) {
     LogPrintfError("Unable to setup device for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -1098,8 +1143,9 @@ bool Device::populateOCLDeviceConstants() {
   }
 
   if (info_.globalMemCacheLineSize_ < 256 &&
-      (isa().versionMajor() >= 13 ||
-       (isa().versionMajor() == 12 && isa().versionMinor() >= 5))) {
+      (executionIsa().versionMajor() >= 13 ||
+       (executionIsa().versionMajor() == 12 &&
+        executionIsa().versionMinor() >= 5))) {
     info_.globalMemCacheLineSize_ = 256;
   }
 
@@ -1133,7 +1179,9 @@ bool Device::populateOCLDeviceConstants() {
     return false;
   }
 
-  if (!(isa().versionMajor() == 9 && isa().versionMinor() == 0 && isa().versionStepping() == 2)) {
+  if (!(executionIsa().versionMajor() == 9 &&
+        executionIsa().versionMinor() == 0 &&
+        executionIsa().versionStepping() == 2)) {
     if (info_.maxEngineClockFrequency_ <= 0) {
       LogError("maxEngineClockFrequency_ is NOT positive!");
     }
@@ -1398,7 +1446,7 @@ bool Device::populateOCLDeviceConstants() {
 
   ::strncpy(info_.driverVersion_, ss.str().c_str(), sizeof(info_.driverVersion_) - 1);
 
-  if (isa().versionMajor() >= 9) {
+  if (executionIsa().versionMajor() >= 9) {
     info_.version_ =
         "OpenCL " /*OPENCL_VERSION_STR*/
         "2.0"
@@ -1566,15 +1614,18 @@ bool Device::populateOCLDeviceConstants() {
       info_.svmCapabilities_ |= CL_DEVICE_SVM_FINE_GRAIN_SYSTEM;
     }
     if (amd::IS_HIP) {
-      if (info_.iommuv2_ || isa().versionMajor() >= 8) {
+      if (info_.iommuv2_ || executionIsa().versionMajor() >= 8) {
         info_.svmCapabilities_ |= CL_DEVICE_SVM_ATOMICS;
       }
     }
   }
 
   if (settings().checkExtension(ClAmdDeviceAttributeQuery)) {
-    info_.simdWidth_ = isa().simdWidth();
-    info_.simdInstructionWidth_ = isa().simdInstructionWidth();
+    info_.simdWidth_ = executionIsa().simdWidth();
+    info_.simdInstructionWidth_ = executionIsa().simdInstructionWidth();
+    // This is the logical wave size of code compiled for the presented ISA.
+    // CLR's kernel metadata and programming model use that wave model even
+    // when the physical execution ISA has a different native wave size.
     if (HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_, HSA_AGENT_INFO_WAVEFRONT_SIZE, &info_.wavefrontWidth_)) {
       return false;
@@ -1637,9 +1688,9 @@ bool Device::populateOCLDeviceConstants() {
     info_.l2CacheSize_ = cache_sizes[1];
     info_.timeStampFrequency_ = 1000000;
     info_.globalMemChannelBanks_ = 4;
-    info_.globalMemChannelBankWidth_ = isa().memChannelBankWidth();
-    info_.localMemSizePerCU_ = isa().localMemSizePerCU();
-    info_.localMemBanks_ = isa().localMemBanks();
+    info_.globalMemChannelBankWidth_ = executionIsa().memChannelBankWidth();
+    info_.localMemSizePerCU_ = executionIsa().localMemSizePerCU();
+    info_.localMemBanks_ = executionIsa().localMemBanks();
     info_.numAsyncQueues_ = kMaxAsyncQueues;
     info_.numRTQueues_ = info_.numAsyncQueues_;
     info_.numRTCUs_ = info_.maxComputeUnits_;
@@ -1666,7 +1717,7 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxOnDeviceEvents_ = settings().numDeviceEvents_;
 
   std::string addressableNumVGPRs, totalNumVGPRs, vGPRAllocGranule;
-  std::string isaName = isa().isaName();
+  std::string isaName = executionIsa().isaName();
   info_.availableVGPRs_ =
       amd::device::getValueFromIsaMeta(isaName, "AddressableNumVGPRs", addressableNumVGPRs)
       ? atoi(addressableNumVGPRs.c_str())
@@ -1679,6 +1730,9 @@ bool Device::populateOCLDeviceConstants() {
       ? atoi(vGPRAllocGranule.c_str())
       : 0;
 
+  // Express the physical VGPR capacity in the logical work-item units used by
+  // presented kernel metadata and HIP device properties. A transformation
+  // that changes register usage must provide corresponding kernel metadata.
   info_.availableRegistersPerCU_ = info_.vgprsPerSimd_ * info_.simdPerCU_ * info_.wavefrontWidth_;
   ClPrint(amd::LOG_INFO, amd::LOG_INIT,
           "addressableNumVGPRs=%u, totalNumVGPRs=%u, vGPRAllocGranule=%u,"
@@ -1742,7 +1796,8 @@ bool Device::populateOCLDeviceConstants() {
   }
 
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Gfx Major/Minor/Stepping: %d/%d/%d, Device ID: 0x%x",
-          isa().versionMajor(), isa().versionMinor(), isa().versionStepping(), pciDeviceId_);
+          executionIsa().versionMajor(), executionIsa().versionMinor(),
+          executionIsa().versionStepping(), pciDeviceId_);
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", settings().kernel_arg_impl_);
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HMM support: %d, XNACK: %d, Direct host access: %d",
           info_.hmmSupported_, info_.hmmCpuMemoryAccessible_, info_.hmmDirectHostAccess_);
@@ -1790,9 +1845,9 @@ bool Device::populateOCLDeviceConstants() {
   info_.gpuDirectRdmaWithHipVmmSupported_ =
       info_.virtualMemoryManagement_ && info_.dmabufSupported_;
 
-  if (isa().versionMajor() < 8) {
+  if (executionIsa().versionMajor() < 8) {
     info_.sgprsPerSimd_ = 512;
-  } else if (isa().versionMajor() < 10) {
+  } else if (executionIsa().versionMajor() < 10) {
     info_.sgprsPerSimd_ = 800;
   } else {
     info_.sgprsPerSimd_ =
@@ -2461,7 +2516,7 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags, bool a
   if (flags.executable_) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
-  if (flags.uncached_ && isa().versionMajor() == 12) {
+  if (flags.uncached_ && executionIsa().versionMajor() == 12) {
     hsa_mem_flags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 

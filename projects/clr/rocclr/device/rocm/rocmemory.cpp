@@ -1440,7 +1440,8 @@ bool Image::createInteropImage() {
 
   // Set cubemap face if GL cubemap
   if (glObj && glObj->getGLTarget() == GL_TEXTURE_CUBE_MAP) {
-    desc.setFace(glObj->getCubemapFace(), dev().isa().versionMajor());
+    desc.setFace(glObj->getCubemapFace(),
+                 dev().executionIsa().versionMajor());
   }
 
   hsa_status_t err =

@@ -133,6 +133,11 @@ if(CLR_BUILD_OCL)
     add_subdirectory(opencl)
 endif()
 
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
 #############################
 # Code formatting
 #############################

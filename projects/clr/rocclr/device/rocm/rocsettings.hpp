@@ -68,7 +68,8 @@ class Settings : public device::Settings {
   Settings();
 
   //! Creates settings
-  bool create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups = false,
+  bool create(bool fullProfile, const amd::Isa& presentedIsa,
+              const amd::Isa& executionIsa, bool coop_groups = false,
               bool isXgmi = false);
 
  private:
@@ -88,4 +89,3 @@ class Settings : public device::Settings {
 
 /*@}*/  // namespace amd::roc
 }  // namespace amd::roc
-

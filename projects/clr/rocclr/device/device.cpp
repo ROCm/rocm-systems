@@ -938,6 +938,8 @@ Device::Device()
       heap_buffer_(nullptr),
       initial_heap_buffer_(nullptr),
       arena_mem_obj_(nullptr),
+      isa_(nullptr),
+      executionIsa_(nullptr),
       vaCacheAccess_(nullptr),
       vaCacheMap_(nullptr),
       index_(0) {
@@ -997,9 +999,12 @@ size_t GetMaxStackSize(const std::string& procName) {
   }
 }
 
-bool Device::create(const Isa& isa) {
+bool Device::create(const Isa& isa) { return create(isa, isa); }
+
+bool Device::create(const Isa& presentedIsa, const Isa& executionIsa) {
   assert(!vaCacheAccess_ && !vaCacheMap_);
-  isa_ = &isa;
+  isa_ = &presentedIsa;
+  executionIsa_ = &executionIsa;
   // VA Cache Ops Lock
   vaCacheAccess_ = new std::recursive_mutex();
   if (nullptr == vaCacheAccess_) {
@@ -1013,7 +1018,7 @@ bool Device::create(const Isa& isa) {
   if (!amd::IS_HIP) {
     stack_size_ = 16 * Ki;
   }
-  maxStackSize_ = GetMaxStackSize(isa_->processorName());
+  maxStackSize_ = GetMaxStackSize(executionIsa_->processorName());
   return true;
 }
 

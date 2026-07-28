@@ -718,9 +718,9 @@ class Settings {
                                               //  that replaces generic OS allocation routines
       uint supportDepthsRGB_ : 1;             //!< Support DEPTH and sRGB channel order format
       uint singleFpDenorm_ : 1;               //!< Support Single FP Denorm
-      uint enableWgpMode_ : 1;                //!< Enable WGP mode for this device
-      uint enableWave32Mode_ : 1;             //!< Enable Wave32 mode for this device
-      uint lcWavefrontSize64_ : 1;            //!< Enable Wave64 mode for this device
+      uint enableWgpMode_ : 1;                //!< Runtime CU/WGP accounting mode
+      uint enableWave32Mode_ : 1;             //!< Compiler Wave32 mode
+      uint lcWavefrontSize64_ : 1;            //!< Compiler Wave64 mode
       uint enableXNACK_ : 1;                  //!< Enable XNACK feature
       uint enableCoopGroups_ : 1;             //!< Enable cooperative groups feature
       uint enableCoopMultiDeviceGroups_ : 1;  //!< Enable cooperative groups multi device
@@ -733,7 +733,8 @@ class Settings {
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
       uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
-      uint reserved_ : 8;
+      uint lcWgpMode_ : 1;                    //!< Compiler WGP mode
+      uint reserved_ : 7;
     };
     uint value_;
   };
@@ -1791,8 +1792,11 @@ class Device : public RuntimeObject {
   Device();
   virtual ~Device();
 
-  //! Initializes abstraction layer device object
+  //! Initializes a device whose presented and execution ISAs are identical.
   bool create(const Isa& isa);
+
+  //! Initializes a device with distinct presented and execution ISAs.
+  bool create(const Isa& presentedIsa, const Isa& executionIsa);
 
   uint retain() {
     // Overwrite the RuntimeObject::retain().
@@ -2282,10 +2286,16 @@ class Device : public RuntimeObject {
   //! Returns TRUE if the device is available for computations
   bool isOnline() const { return online_; }
 
-  //! Returns device isa.
+  //! Returns the ISA presented for code and device-library selection.
   const Isa& isa() const {
     assert(isa_);
     return *isa_;
+  }
+
+  //! Returns the physical ISA used for hardware-specific runtime policy.
+  const Isa& executionIsa() const {
+    assert(executionIsa_);
+    return *executionIsa_;
   }
 
   //! Return a non-zero uint64_t value that uniquely identifies the device.
@@ -2494,7 +2504,8 @@ class Device : public RuntimeObject {
   std::unordered_map<amd::CommandQueue*, bool> activeQueues;  //!< The set of active queues
   uint8_t group_mem_carveout_hint_{0}; //!< LDS carveout percentage (0 = no preference)
  private:
-  const Isa* isa_;  //!< Device isa
+  const Isa* isa_;           //!< Presented/code-selection ISA
+  const Isa* executionIsa_;  //!< Physical hardware execution ISA
   bool IsTypeMatching(cl_device_type type, bool offlineDevices);
 
 #if defined(WITH_HSA_DEVICE)

@@ -229,6 +229,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
       return false;
   }
 
+  lcWgpMode_ = enableWgpMode_;
+
   if (0 == palProp.engineProperties[Pal::EngineTypeDma].engineCount) {
     disableSdma_ = true;
   }
