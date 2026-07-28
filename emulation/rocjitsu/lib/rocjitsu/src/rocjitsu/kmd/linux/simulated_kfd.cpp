@@ -124,6 +124,34 @@ int pidfd_is_exited(int pidfd) {
   return rc == 1 && (pfd.revents & (POLLIN | POLLHUP)) ? 1 : 0;
 }
 
+/// @brief Report whether the process behind @p procfd has exited but not been
+/// reaped.
+///
+/// @details A pidfd stays readable for a zombie, so pidfd_is_exited() cannot
+/// tell a live debuggee from one that has already run to completion. The state
+/// character in /proc/<pid>/stat can. It sits after the last ')' because the
+/// comm field is parenthesised and may itself contain spaces and parentheses.
+///
+/// @retval 1 The target is a zombie (Z) or dead (X).
+/// @retval 0 The target is still running.
+/// @retval <0 Negative errno; the state could not be determined.
+int procfd_is_zombie(int procfd) {
+  const int stat_fd = ::openat(procfd, "stat", O_RDONLY | O_CLOEXEC);
+  if (stat_fd < 0)
+    return errno == ENOENT ? 1 : -errno;
+  char buffer[4096];
+  const ssize_t bytes = ::read(stat_fd, buffer, sizeof(buffer) - 1);
+  const int read_error = errno;
+  ::close(stat_fd);
+  if (bytes < 0)
+    return -read_error;
+  buffer[bytes] = '\0';
+  const char *name_end = std::strrchr(buffer, ')');
+  if (name_end == nullptr || name_end[1] != ' ' || name_end[2] == '\0')
+    return -EIO;
+  return name_end[2] == 'Z' || name_end[2] == 'X';
+}
+
 int pin_process_identity(pid_t pid, util::UniqueHandle &pidfd, util::UniqueHandle &procfd) {
   const int raw_pidfd = static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
   if (raw_pidfd < 0)
@@ -340,12 +368,25 @@ void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
     if (stop.stop_requested())
       break;
     for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
-      if (pidfd_is_exited(it->second.target_pidfd.get()) == 1 ||
-          pidfd_is_exited(it->second.debugger_pidfd.get()) == 1) {
-        // The session is going away and will never ack; release any inferior
+      if (pidfd_is_exited(it->second.debugger_pidfd.get()) == 1) {
+        // The debugger is gone and will never ack; release any inferior
         // blocked in the RUNTIME_ENABLE handshake for it.
         cancel_runtime_handshake(it->first);
         it = debug_sessions_.erase(it);
+      } else if (pidfd_is_exited(it->second.target_pidfd.get()) == 1) {
+        if (!it->second.target_exited) {
+          if (auto target = find_process_by_client_pid(it->first)) {
+            for (auto &g : gpus_)
+              if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+                mem->set_process_mem_fd(target->process_id(), -1);
+          }
+          it->second.owned_dbg_fd.reset();
+          it->second.target_mem_fd.reset();
+          it->second.dbg_fd = -1;
+          it->second.enabled = false;
+          it->second.target_exited = true;
+        }
+        ++it;
       } else {
         ++it;
       }
@@ -615,6 +656,16 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     init_command_processors_locked();
   }
 
+  if (client_pid > 0) {
+    std::lock_guard<std::mutex> debug_lock(debug_sessions_mutex_);
+    auto session = debug_sessions_.find(client_pid);
+    if (session != debug_sessions_.end() && session->second.target_mem_fd.get() >= 0) {
+      for (auto &g : gpus_)
+        if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+          mem->set_process_mem_fd(pid, session->second.target_mem_fd.get());
+    }
+  }
+
   return pid;
 }
 
@@ -732,12 +783,23 @@ int SimulatedKfd::close(uint32_t process_id) {
   {
     std::lock_guard<std::mutex> debug_lock(debug_sessions_mutex_);
     for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
-      if (pidfd_is_exited(it->second.target_pidfd.get()) == 1 ||
-          pidfd_is_exited(it->second.debugger_pidfd.get()) == 1) {
-        // The session is going away and will never ack; release any inferior
+      if (pidfd_is_exited(it->second.debugger_pidfd.get()) == 1) {
+        // The debugger is gone and will never ack; release any inferior
         // blocked in the RUNTIME_ENABLE handshake for it.
         cancel_runtime_handshake(it->first);
         it = debug_sessions_.erase(it);
+      } else if (pidfd_is_exited(it->second.target_pidfd.get()) == 1) {
+        if (auto target = find_process_by_client_pid(it->first)) {
+          for (auto &g : gpus_)
+            if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+              mem->set_process_mem_fd(target->process_id(), -1);
+        }
+        it->second.owned_dbg_fd.reset();
+        it->second.target_mem_fd.reset();
+        it->second.dbg_fd = -1;
+        it->second.enabled = false;
+        it->second.target_exited = true;
+        ++it;
       } else {
         ++it;
       }
@@ -875,14 +937,16 @@ int SimulatedKfd::ioctl(unsigned long request, void *arg) {
   return ioctl(local_process_id_, request, arg);
 }
 
-int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg) {
+int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg, int *target_mem_fd,
+                        int target_proc_fd) {
   auto proc = find_process(process_id);
   if (!proc)
     return -ESRCH;
-  return dispatch_ioctl(*proc, request, arg);
+  return dispatch_ioctl(*proc, request, arg, target_mem_fd, target_proc_fd);
 }
 
-int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg) {
+int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
+                                 int *target_mem_fd, int target_proc_fd) {
   util::Logger::driver("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
 
   unsigned long dispatch_request = canonical_ioctl_request(request);
@@ -954,7 +1018,7 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
     // RUNTIME_ENABLE is handled before op_mutex_ above (it blocks on the
     // debugger handshake), so it never reaches this switch.
     case AMDKFD_IOC_DBG_TRAP:
-      return debug_trap_ioctl(proc, arg);
+      return debug_trap_ioctl(proc, arg, target_mem_fd, target_proc_fd);
     case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: {
       auto *a = static_cast<kfd_ioctl_set_scratch_backing_va_args *>(arg);
       uint32_t ord = gpu_ordinal(a->gpu_id);
@@ -2246,9 +2310,30 @@ int SimulatedKfd::runtime_enable_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_runtime_enable_args *>(arg);
 
   const bool enabling = (args->mode_mask & KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK) != 0;
+  // Whether a debugger was already attached when the runtime came up, decided
+  // under the same lock that DBG_TRAP_ENABLE uses to publish a session.
+  bool notify_debugger = false;
   {
-    // Scoped so the per-process op lock is released before the handshake below.
+    // Scoped so neither lock is held across the handshake wait below.
     std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
+    // debug_sessions_mutex_ orders this against DBG_TRAP_ENABLE, which holds it
+    // while it reads runtime_state_ to fill in the runtime_info it returns.
+    // Exactly one of the two has to take responsibility for telling the
+    // debugger the runtime is up: either ENABLE observes enabled==true and
+    // reports it (rocdbgapi then calls runtime_enable() straight from its
+    // attach path, process.cpp), or this side observes the session and raises
+    // EC_PROCESS_RUNTIME. Without a common lock both can read the other's
+    // pre-state -- ENABLE reports DISABLED while this side sees no session --
+    // and NEITHER fires -- the debugger then waits for an event that is never
+    // coming and never learns the runtime came up.
+    //
+    // Closing this did NOT measurably change gdb.rocm/multi-inferior-stress.exp,
+    // which fails for a different reason (see below); it is fixed here because
+    // the window is real on its own terms, not because it cured that test.
+    // Taking it here also cannot double-report: whichever side takes the lock
+    // second observes the first, and rocdbgapi treats a runtime_state that does
+    // not toggle as a fatal "spurious runtime exception".
+    std::lock_guard<std::mutex> session_lock(debug_sessions_mutex_);
     std::lock_guard<std::mutex> lock(proc.runtime_mutex_);
     if (enabling) {
       if (proc.runtime_state_.pending)
@@ -2265,13 +2350,22 @@ int SimulatedKfd::runtime_enable_ioctl(KfdProcess &proc, void *arg) {
       proc.runtime_state_.capabilities_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
       proc.runtime_state_.r_debug = args->r_debug;
       args->capabilities_mask = proc.runtime_state_.capabilities_mask;
+      auto session = debug_sessions_.find(proc.client_pid());
+      notify_debugger = session != debug_sessions_.end() && session->second.enabled;
     } else {
+      // NOTE: deliberately silent. Real KFD notifies the debugger of the
+      // !disabled -> disabled transition, and rocdbgapi expects it, but raising
+      // EC_PROCESS_RUNTIME here means blocking the exiting inferior on an ack
+      // that a detaching debugger never sends -- every teardown then stalls on
+      // the liveness deadline and gdb.rocm/multi-inferior-stress.exp fails
+      // 10/10 (measured). Notifying disable needs a non-blocking delivery path,
+      // not the enable handshake reused.
       proc.runtime_state_ = KfdProcess::RuntimeState{};
       args->capabilities_mask = 0;
     }
   }
 
-  if (enabling)
+  if (notify_debugger)
     runtime_enable_debugger_handshake(proc.client_pid());
   return 0;
 }
@@ -2299,7 +2393,23 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   // -active/-inactive` (gdb.rocm/lane-info.exp). trap_saved_exec_ holds the
   // interrupted value for the whole handler, so un-shadow it here exactly as
   // the STATUS field below un-shadows trap_saved_status().
-  state.exec = wf.in_trap_handler() ? wf.trap_saved_exec() : wf.exec();
+  // KNOWN DEFECT, deliberately left as-is: a wave stopped inside the trap
+  // handler publishes the HANDLER's EXEC, not the application's -- the handler
+  // runs with its own mask and parks 0x80000000 (then a doorbell id) in EXEC_LO
+  // around MSG_GET_DOORBELL. The debugger then sees every lane active, which
+  // inverts `lane apply -active/-inactive` in gdb.rocm/lane-info.exp roughly one
+  // run in eight.
+  //
+  // The obvious repair -- publishing trap_saved_exec() the way the STATUS field
+  // below publishes trap_saved_status() -- was tried and reverted, under both
+  // the in_trap_handler() and trap_interrupt_sent() predicates. This record is
+  // not write-only: apply_cwsr_to_wave() feeds it straight back into the live
+  // wave on resume, so substituting the saved mask here also rewrites EXEC out
+  // from under a handler that has not finished, and the inferior never runs to
+  // exit (gdb.rocm/shared-memory.exp fails its final continue, and with the
+  // in_trap_handler() predicate hangs for 600s). Fixing this properly means
+  // separating the debugger-visible view from the restore payload.
+  state.exec = wf.exec();
   state.vcc = wf.vcc();
   state.flat_scratch = wf.scratch_base();
   state.m0 = wf.m0();
@@ -2396,19 +2506,32 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
       waves[index].lds.clear();
   }
   auto *memory = gpu->soc->memory();
+  auto proc = find_process(process_id);
+  if (!proc)
+    return false;
+  util::UniqueHandle target_mem = duplicate_debug_target_mem(proc->client_pid());
+  bool publish_ok = true;
   const auto layout = kmd::serialize_queue_cwsr_bulk(
       ctx_base, ctx_size, waves, [&](uint64_t address, std::span<const uint8_t> bytes) {
-        memory->write_block(address, bytes, process_id);
+        if (target_mem.get() < 0) {
+          memory->write_block(address, bytes, process_id);
+          return;
+        }
+        const ssize_t written =
+            pwrite(target_mem.get(), bytes.data(), bytes.size(), static_cast<off_t>(address));
+        if (written != static_cast<ssize_t>(bytes.size())) {
+          publish_ok = false;
+          util::Logger::warn("CWSR target write failed: addr=0x", std::hex, address,
+                             " pid=", std::dec, proc->client_pid(), " rc=", written,
+                             " errno=", errno);
+        }
       });
-  if (!layout.ok)
+  if (!layout.ok || !publish_ok)
     return false;
 
   uint64_t oldest_packet = UINT64_MAX;
   for (const auto &wave : waves)
     oldest_packet = std::min<uint64_t>(oldest_packet, wave.queue_packet_id);
-  auto proc = find_process(process_id);
-  if (!proc)
-    return false;
   uint64_t read_pointer = 0;
   uint64_t write_pointer = 0;
   {
@@ -2528,13 +2651,13 @@ void SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
 
   // Duplicate under the session lock so DISABLE/reaping cannot close and reuse
   // the descriptor, then perform notifier I/O without holding a driver lock.
-  UniqueFd notifier;
+  util::UniqueHandle notifier;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
     if (session != debug_sessions_.end() && session->second.dbg_fd >= 0 &&
         (session->second.exception_enable_mask & exception_mask) != 0)
-      notifier = UniqueFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+      notifier = util::UniqueHandle(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
   }
   if (notifier.get() >= 0) {
     const uint64_t one = 1;
@@ -2742,6 +2865,14 @@ void SimulatedKfd::set_debug_active_on_all_cus(bool active) {
   }
 }
 
+util::UniqueHandle SimulatedKfd::duplicate_debug_target_mem(pid_t target_pid) const {
+  std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
+  auto session = debug_sessions_.find(target_pid);
+  if (session == debug_sessions_.end() || session->second.target_mem_fd.get() < 0)
+    return {};
+  return util::UniqueHandle(safe_fcntl(session->second.target_mem_fd.get(), F_DUPFD_CLOEXEC, 0));
+}
+
 void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWaveState &state) {
   constexpr uint32_t kModeDebugEnMask = 1u << 11;
   constexpr uint32_t kStatusHaltMask = 1u << 13;
@@ -2857,10 +2988,25 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
           states[index].lds.clear();
       }
       auto *memory = gpu->soc->memory();
+      util::UniqueHandle target_mem = duplicate_debug_target_mem(proc->client_pid());
+      bool read_ok = true;
       restored = kmd::deserialize_queue_cwsr_bulk(
           context.base, context.size, states, [&](uint64_t address, std::span<uint8_t> bytes) {
-            memory->read_block(address, bytes, proc->process_id());
+            if (target_mem.get() < 0) {
+              memory->read_block(address, bytes, proc->process_id());
+              return;
+            }
+            const ssize_t bytes_read =
+                pread(target_mem.get(), bytes.data(), bytes.size(), static_cast<off_t>(address));
+            if (bytes_read != static_cast<ssize_t>(bytes.size())) {
+              read_ok = false;
+              std::fill(bytes.begin(), bytes.end(), 0);
+              util::Logger::warn("CWSR target read failed: addr=0x", std::hex, address,
+                                 " pid=", std::dec, proc->client_pid(), " rc=", bytes_read,
+                                 " errno=", errno);
+            }
           });
+      restored = restored && read_ok;
     }
     std::unordered_set<amdgpu::ComputeUnitCore *> wake;
     if (restored) {
@@ -3079,14 +3225,14 @@ int SimulatedKfd::debug_query_event(pid_t target_pid, KfdProcess *target_proc,
 }
 
 void SimulatedKfd::raise_process_debug_event(pid_t target_pid, uint64_t exception_mask) {
-  UniqueFd notifier;
+  util::UniqueHandle notifier;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
     if (session == debug_sessions_.end() || !session->second.enabled)
       return;
     if ((session->second.exception_enable_mask & exception_mask) != 0)
-      notifier = UniqueFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+      notifier = util::UniqueHandle(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
   }
   {
     std::lock_guard<std::mutex> lk(debug_events_mutex_);
@@ -3125,22 +3271,24 @@ void SimulatedKfd::cancel_runtime_handshake(pid_t target_pid) {
 /// timeout is never again mistaken for correct behaviour. A debugger that
 /// detaches or dies cancels the wait explicitly and does not pay it at all.
 void SimulatedKfd::runtime_enable_debugger_handshake(pid_t target_pid) {
+  // The caller already decided, under debug_sessions_mutex_, that a debugger is
+  // attached; re-testing here would just re-open the window it closed. Only the
+  // self-debug shape still needs distinguishing.
+  bool self_debugged = false;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
     if (session == debug_sessions_.end() || !session->second.enabled)
       return;
-    // A process debugging itself cannot answer its own handshake: the ack would
-    // have to come from a thread that is, by construction, the one blocked
-    // here. Raise the event so the state is observable and carry on rather than
-    // waiting for a reply that can never arrive. Real rocgdb is always a
-    // separate process; this is the in-process test/self-debug shape.
-    if (session->second.debugger_pid == target_pid) {
-      raise_process_debug_event(target_pid, KFD_EC_MASK(EC_PROCESS_RUNTIME));
-      return;
-    }
+    self_debugged = session->second.debugger_pid == target_pid;
   }
   raise_process_debug_event(target_pid, KFD_EC_MASK(EC_PROCESS_RUNTIME));
+  // A process debugging itself cannot answer its own handshake: the ack would
+  // have to come from the thread that is, by construction, blocked here. The
+  // event is raised so the state is observable; waiting for a reply that can
+  // never arrive would just burn the liveness deadline.
+  if (self_debugged)
+    return;
 
   constexpr auto kHandshakeDeadline = std::chrono::seconds(60);
   std::unique_lock<std::mutex> lk(runtime_handshake_mutex_);
@@ -3196,7 +3344,8 @@ int SimulatedKfd::debug_query_exception_info(pid_t target_pid,
 }
 
 // in real kernel, amd/amdkfd/kfd_chardev.c kfd_ioctl_set_debug_trap
-int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
+int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_mem_fd,
+                                   int target_proc_fd) {
   auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
   util::Logger::driver("DBG_TRAP pid=", args->pid, " op=", args->op);
   // rocjitsu always models hardware scheduling, so the driver's
@@ -3218,17 +3367,33 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   std::unique_lock<std::mutex> lk(debug_sessions_mutex_);
   auto session_it = debug_sessions_.find(target_pid);
   if (session_it != debug_sessions_.end()) {
+    if (session_it->second.target_exited) {
+      if (args->op != KFD_IOC_DBG_TRAP_ENABLE)
+        return -ESRCH;
+      debug_sessions_.erase(session_it);
+      session_it = debug_sessions_.end();
+    }
+  }
+  if (session_it != debug_sessions_.end()) {
     const int target_exited = pidfd_is_exited(session_it->second.target_pidfd.get());
     if (target_exited < 0)
       return target_exited;
     const int debugger_exited = pidfd_is_exited(session_it->second.debugger_pidfd.get());
     if (debugger_exited < 0)
       return debugger_exited;
-    if (target_exited == 1 || debugger_exited == 1) {
+    if (target_exited == 1) {
+      session_it->second.owned_dbg_fd.reset();
+      session_it->second.target_mem_fd.reset();
+      session_it->second.dbg_fd = -1;
+      session_it->second.enabled = false;
+      session_it->second.target_exited = true;
+      if (args->op != KFD_IOC_DBG_TRAP_ENABLE)
+        return -ESRCH;
       debug_sessions_.erase(session_it);
       session_it = debug_sessions_.end();
-      if (target_exited == 1 && args->op != KFD_IOC_DBG_TRAP_ENABLE)
-        return -ESRCH;
+    } else if (debugger_exited == 1) {
+      debug_sessions_.erase(session_it);
+      session_it = debug_sessions_.end();
     }
   }
   const bool enabled = session_it != debug_sessions_.end();
@@ -3242,6 +3407,9 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
       return -ESRCH;
     if (probe_result != 0)
       return probe_result;
+    const int zombie = procfd_is_zombie(probe_procfd.get());
+    if (zombie != 0)
+      return zombie == 1 ? -ESRCH : zombie;
     return -EINVAL;
   }
 
@@ -3364,6 +3532,21 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     const int fl = safe_fcntl(dbg_fd, F_GETFL);
     if (fl == -1 || (fl & O_ACCMODE) == O_RDONLY)
       return -EBADF;
+    if (daemon_mode_) {
+      if (target_mem_fd == nullptr || *target_mem_fd < 0 || target_proc_fd < 0)
+        return -EBADF;
+      const int mem_fl = safe_fcntl(*target_mem_fd, F_GETFL);
+      if (mem_fl == -1 || (mem_fl & O_ACCMODE) != O_RDWR)
+        return -EBADF;
+      struct stat daemon_proc_stat {};
+      struct stat client_proc_stat {};
+      if (fstat(target_procfd->get(), &daemon_proc_stat) != 0 ||
+          fstat(target_proc_fd, &client_proc_stat) != 0)
+        return -errno;
+      if (daemon_proc_stat.st_dev != client_proc_stat.st_dev ||
+          daemon_proc_stat.st_ino != client_proc_stat.st_ino)
+        return -ESRCH;
+    }
 
     KfdProcess::DebugSession sess{};
     sess.target_pidfd = std::move(new_target_pidfd);
@@ -3410,7 +3593,19 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     if (debugger_commit_live != 0)
       return debugger_commit_live == 1 ? -ESRCH : debugger_commit_live;
 
-    debug_sessions_.emplace(target_pid, std::move(sess));
+    // owned_dbg_fd was taken above, before the liveness checks. The authorized
+    // memory fd is adopted here because it only has to survive a successful
+    // ENABLE: on any earlier return the caller still owns it and reclaims it.
+    if (daemon_mode_) {
+      sess.target_mem_fd = util::UniqueHandle(*target_mem_fd);
+      *target_mem_fd = -1;
+    }
+    auto [inserted, _] = debug_sessions_.emplace(target_pid, std::move(sess));
+    if (target_proc != nullptr && inserted->second.target_mem_fd) {
+      for (auto &g : gpus_)
+        if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+          mem->set_process_mem_fd(target_proc->process_id(), inserted->second.target_mem_fd.get());
+    }
     set_debug_active_on_all_cus(true);
     debug_sessions_cv_.notify_one();
     return 0;
@@ -3471,6 +3666,11 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
             cu->schedule_work_async();
         }
       });
+    }
+    if (target_proc != nullptr) {
+      for (auto &g : gpus_)
+        if (auto *mem = g.soc ? g.soc->memory() : nullptr)
+          mem->set_process_mem_fd(target_proc->process_id(), -1);
     }
     // Re-take it only for the table mutation itself. The session may have been
     // reaped while the lock was dropped, so erase by key rather than through

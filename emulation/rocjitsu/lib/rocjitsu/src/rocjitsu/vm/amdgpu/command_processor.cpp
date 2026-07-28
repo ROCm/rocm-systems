@@ -624,31 +624,34 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
 }
 
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
-  // Retire the queue's waves before touching hw_queue_mutex_, and retire them
-  // with the CP completion callback suppressed.
+  // KNOWN DEFECT, deliberately left as-is: this holds hw_queue_mutex_ across
+  // with_wave_state_locked(), while a wave reaching s_endpgm takes them the
+  // other way (ComputeUnitCore::step() holds the wave-state lock and halts into
+  // release_wf() -> notify_wg_complete(), which takes hw_queue_mutex_). A
+  // DESTROY_QUEUE racing an s_endpgm can therefore deadlock the ioctl thread
+  // against the engine worker.
   //
-  // Both halves matter, because this CP is nested against the CU wave-state
-  // lock in BOTH directions elsewhere:
-  //   - handle_doorbell() holds hw_queue_mutex_ across dispatch_wf(), which
-  //     takes wave_state_mutex_          (hw_queue -> wave_state)
-  //   - a wave reaching s_endpgm halts from inside step(), which holds
-  //     wave_state_mutex_, into release_wf() -> notify_wg_complete(), which
-  //     takes hw_queue_mutex_            (wave_state -> hw_queue)
-  // Taking hw_queue_mutex_ around the loop would deadlock against the first;
-  // letting halt() notify the CP from under the wave-state lock would deadlock
-  // against the second. Suppressing the notice removes this path from the cycle
-  // entirely, and costs nothing: the queue's DispatchEntry bookkeeping is
-  // erased a few lines below anyway.
+  // Both obvious repairs are worse, and were measured:
+  //   * running the halt loop before taking hw_queue_mutex_ only moves the
+  //     cycle -- halt() itself reaches hw_queue_mutex_, and handle_doorbell()
+  //     holds hw_queue_mutex_ across dispatch_wf(), which takes the wave-state
+  //     lock, so the inversion reappears against that path instead;
+  //   * suppressing the CP completion notice to break the halt -> hw_queue edge
+  //     hangs the simulator outright: notify_wg_complete() also releases the
+  //     SPI's WGP workgroup slots and drives the completion callback, so the
+  //     queue never drains (gdb.rocm/shared-memory.exp times out at 600s).
+  // A real fix needs notify_wg_complete() to stop requiring hw_queue_mutex_, or
+  // the halt to be deferred to the engine thread that owns these waves.
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   for (auto *cu : cus_) {
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
         if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
-          wave->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+          wave->halt();
       }
     });
   }
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   for (size_t i = 0; i < hw_queues_.size(); ++i) {
     if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id) {
       hw_queues_.erase(hw_queues_.begin() + static_cast<ptrdiff_t>(i));

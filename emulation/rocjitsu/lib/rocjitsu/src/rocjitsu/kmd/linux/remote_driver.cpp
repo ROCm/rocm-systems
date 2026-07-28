@@ -7,6 +7,7 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "util/unique_handle.h"
 
 #include <algorithm>
 #include <cassert>
@@ -266,6 +267,8 @@ RemoteDriver::~RemoteDriver() {
     if (fd >= 0)
       syscall(SYS_close, fd);
   }
+  if (kfd_marker_ != nullptr)
+    syscall(SYS_munmap, kfd_marker_, kfd_marker_size_);
   if (sock_ >= 0)
     syscall(SYS_close, sock_);
   if (shutdown_efd_ >= 0)
@@ -374,9 +377,29 @@ int RemoteDriver::reissue_synthetic_kfd_fd() {
   int fd_min = static_cast<int>(rl.rlim_cur) - 64;
   if (fd_min < 256)
     fd_min = 256;
+  // NOTE: the name here is deliberately NOT "/dev/kfd". Naming it that makes
+  // /proc/<pid>/maps carry a second "/memfd:/dev/kfd (deleted)" line, which
+  // breaks gdb.rocm/core-no-read-special-files.exp -- that test parses
+  // `info proc mappings` for the one real /dev/kfd mapping and finds none once
+  // this decoy is present. InterposerDupTest.ProcMapsNamesRemoteKfdMarker
+  // asserts the opposite (that maps names /dev/kfd and never this marker); the
+  // two expectations are in direct conflict and the upstream ROCgdb test wins,
+  // so that unit test currently only passes on a daemon-backed run and needs a
+  // design decision about what the marker is actually for.
   auto raw_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_remote_kfd", MFD_CLOEXEC));
   if (raw_fd < 0)
     return -1;
+  if (kfd_marker_ == nullptr) {
+    constexpr size_t kMarkerSize = 4096;
+    if (syscall(SYS_ftruncate, raw_fd, kMarkerSize) == 0) {
+      void *marker = reinterpret_cast<void *>(
+          syscall(SYS_mmap, nullptr, kMarkerSize, PROT_NONE, MAP_SHARED, raw_fd, 0));
+      if (marker != MAP_FAILED) {
+        kfd_marker_ = marker;
+        kfd_marker_size_ = kMarkerSize;
+      }
+    }
+  }
   // Use the raw syscall, not fcntl(): this shared object exports an interposed
   // fcntl with default visibility, so an unqualified call would re-enter the
   // shim (reserve_dup_backend/untrack_dup, fd_mutex_) for a plain memfd dup.
@@ -728,11 +751,35 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // dbg_fd so the driver can wake the debugger when a wave stops — the same fd
   // the real kernel would receive through the ioctl. KFD_INVALID_FD (0xffffffff)
   // casts to -1 and is not sent.
-  int send_fd = -1;
+  int send_fds[3] = {-1, -1, -1};
+  size_t num_send_fds = 0;
+  // Owned only for the duration of the send: SCM_RIGHTS installs the daemon's
+  // own copies, so ours are released on every path out of here, including the
+  // early returns below.
+  util::UniqueHandle target_mem_fd;
+  util::UniqueHandle target_proc_fd;
   if (request == AMDKFD_IOC_DBG_TRAP) {
     auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
-    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0)
-      send_fd = static_cast<int>(dbg->enable.dbg_fd);
+    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0) {
+      if (::fcntl(static_cast<int>(dbg->enable.dbg_fd), F_GETFD) < 0)
+        return transport_errno();
+      // The daemon cannot reach the debuggee's address space on its own: it is
+      // not the ptrace parent, so process_vm_readv/writev are refused. We are,
+      // so open the target's memory here and transfer the authorization along
+      // with the notifier. The directory fd pins the identity, so the daemon
+      // can tell a target that exited from one whose pid was reused.
+      const std::string proc_path = std::format("/proc/{}", dbg->pid);
+      target_proc_fd =
+          util::UniqueHandle(::open(proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+      if (!target_proc_fd)
+        return transport_errno();
+      target_mem_fd = util::UniqueHandle(::openat(target_proc_fd.get(), "mem", O_RDWR | O_CLOEXEC));
+      if (!target_mem_fd)
+        return transport_errno();
+      send_fds[num_send_fds++] = static_cast<int>(dbg->enable.dbg_fd);
+      send_fds[num_send_fds++] = target_mem_fd.get();
+      send_fds[num_send_fds++] = target_proc_fd.get();
+    }
   }
   // A send that fails without putting a byte on the wire is recoverable: the
   // daemon never saw a frame, so the stream is still aligned and the caller just
@@ -740,11 +787,11 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // daemon is left waiting on the rest of a frame that will never arrive, and
   // will parse our next request as its tail. Those two have to be told apart,
   // hence the byte counts.
-  if (send_fd >= 0) {
+  if (num_send_fds > 0) {
     // sendmsg() on a stream socket may accept only part of the buffer; the
-    // ancillary fd rides on the first byte, so a short send is a truncated frame
-    // with the descriptor already handed over.
-    const auto sent = rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1);
+    // ancillary fds ride on the first byte, so a short send is a truncated frame
+    // with the descriptors already handed over.
+    const auto sent = rpc_send_msg(sock_, buf.data(), buf.size(), send_fds, num_send_fds);
     if (sent > 0 && static_cast<size_t>(sent) != buf.size())
       return poison_stream();
     if (sent <= 0) {
@@ -857,8 +904,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           // only the driver knows. Now that the total is back, apply the local
           // path's verdict: entries to report and nowhere to put them is
           // -EFAULT, no entries is success (SimulatedKfd::debug_queue_snapshot).
-          if (saved_dbg_op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT &&
-              saved_dbg_snapshot_ptr == 0 && saved_dbg_snapshot_count > 0 && *snap.count > 0)
+          if (saved_dbg_op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT && saved_dbg_snapshot_ptr == 0 &&
+              saved_dbg_snapshot_count > 0 && *snap.count > 0)
             resp->result = -EFAULT;
           break;
         }
@@ -956,9 +1003,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           // clamps it to the struct it actually fills, so apply the same bound
           // here: an inflated value would pull the neighbouring entries' bytes
           // into the padding the caller's wider stride leaves between entries.
-          const size_t written =
-              std::min<size_t>(std::min(*snap.entry_size, snap.struct_size),
-                               std::min(src_stride, dst_stride));
+          const size_t written = std::min<size_t>(std::min(*snap.entry_size, snap.struct_size),
+                                                  std::min(src_stride, dst_stride));
           // A zero-width entry writes nothing, so the loop has nothing to do —
           // and the `src + written > extra` bound below degenerates into a bare
           // offset test that lets a daemon-reported entry_size(OUT) of 0 spin

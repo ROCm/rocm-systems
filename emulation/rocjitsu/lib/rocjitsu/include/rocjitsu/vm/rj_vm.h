@@ -54,12 +54,14 @@ typedef enum rj_vm_mode_t {
 
 /// @brief Device command descriptor for rj_vm_execute.
 typedef struct rj_vm_cmd_t {
-  uint32_t cmd;              ///< Platform-specific command number.
-  void *buf;                 ///< Command arguments buffer (with inlined arrays).
-  size_t buf_size;           ///< Total size of the arguments buffer.
-  int32_t result;            ///< [out] Return code (0 on success, negative errno on failure).
-  rj_handle_t shared_handle; ///< [out] Borrowed backing handle, or -1; owned by the VM.
-  rj_handle_t in_handle;     ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
+  uint32_t cmd;               ///< Platform-specific command number.
+  void *buf;                  ///< Command arguments buffer (with inlined arrays).
+  size_t buf_size;            ///< Total size of the arguments buffer.
+  int32_t result;             ///< [out] Return code (0 on success, negative errno on failure).
+  rj_handle_t shared_handle;  ///< [out] Borrowed backing handle, or -1; owned by the VM.
+  rj_handle_t in_handle;      ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
+  rj_handle_t in_mem_handle;  ///< [in,out] Debugger-authorized target /proc/pid/mem fd, or -1.
+  rj_handle_t in_proc_handle; ///< [in] Pinned target /proc/pid directory fd, or -1.
 } rj_vm_cmd_t;
 
 /// @brief Device memory mapping descriptor.

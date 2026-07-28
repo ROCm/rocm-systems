@@ -28,6 +28,8 @@ RJ_DIAGNOSTIC_POP
 #include <cerrno>
 #include <chrono>
 #include <fcntl.h>
+#include <fstream>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <thread>
@@ -64,6 +66,31 @@ TEST(InterposerDupTest, DupKeepsKfdRoutingAfterPrimaryClose) {
   EXPECT_TRUE(kfd_version_ok(dup_fd));
 
   EXPECT_EQ(close(dup_fd), 0);
+}
+
+TEST(InterposerDupTest, ProcMapsNamesRemoteKfdMarker) {
+  // The marker only exists on the remote path: RemoteDriver::open() creates it,
+  // and in local mode there is no RemoteDriver at all. $ROCJITSU_INVOCATION_DIR
+  // is set for every rocjitsu-launched process regardless of backend, so gate on
+  // the daemon socket actually being there instead -- otherwise this skips
+  // nothing under a plain `rocjitsu --config ... --` run and fails for a reason
+  // that is not a defect.
+  const char *invocation_dir = getenv("ROCJITSU_INVOCATION_DIR");
+  if (invocation_dir == nullptr || *invocation_dir == '\0')
+    GTEST_SKIP() << "remote backend required";
+  if (access((std::string(invocation_dir) + "/daemon.sock").c_str(), F_OK) != 0)
+    GTEST_SKIP() << "remote backend required";
+
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+
+  std::ifstream maps("/proc/self/maps");
+  ASSERT_TRUE(maps.is_open());
+  std::string contents((std::istreambuf_iterator<char>(maps)), std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("/dev/kfd"), std::string::npos);
+  EXPECT_EQ(contents.find("rocjitsu_remote_kfd"), std::string::npos);
+
+  EXPECT_EQ(close(kfd), 0);
 }
 
 // fcntl(F_DUPFD_CLOEXEC) is the dup path libdrm uses; it must also preserve KFD
