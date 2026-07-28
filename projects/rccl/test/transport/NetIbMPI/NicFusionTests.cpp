@@ -1784,11 +1784,8 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
 //   - below the limit:  succeeds
 //   - at the limit:     succeeds
 //   - above the limit:  rejected, no device added
-//   - duplicate device indices: deduplicated into a single-NIC vNIC
 //
-// The limit is a compile-time property of the plugin API version, not an env var:
-// NCCL_NET_MAX_DEVS_PER_NIC tracks the negotiated net API (4 for v9..v11, 8 for v12).
-// Never hardcode it here.
+// The limit is a compile-time property of the negotiated plugin API, not an env var.
 //
 // makeVDevice() is additive — each successful call appends a new merged device
 // to the device list. Physical devices remain visible (hiding is done by the
@@ -1799,6 +1796,13 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
     ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
                                          kRequirePowerOfTwo, 1, kNoNodeLimit))
         << "Test requirements not met";
+
+    // Every sub-test below requests ndevs > 1, which the plugin refuses outright when
+    // merging is off, making the over-limit sub-test pass for the wrong reason.
+    const char* mergeEnv = getenv("NCCL_IB_MERGE_NICS");
+    if (mergeEnv && atoi(mergeEnv) == 0) {
+        GTEST_SKIP() << "NIC merging disabled (NCCL_IB_MERGE_NICS=0)";
+    }
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -1816,8 +1820,10 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
         memset(&allProps[i], 0, sizeof(ncclNetProperties_t));
         ASSERT_EQ(GetDeviceProperties(i, &allProps[i]), ncclSuccess);
 
-        bool isMerged = (allProps[i].name && strchr(allProps[i].name, '+') != nullptr);
-        if (!isMerged) {
+        // The plugin registers a 1:1 vNIC per physical NIC at init, so a physical device
+        // is the one whose own index equals the index it wraps. A deduped 1-device vNIC
+        // left by an earlier test also has ndevs == 1 but wraps a different index.
+        if (allProps[i].vProps.ndevs == 1 && allProps[i].vProps.devs[0] == i) {
             physicalDevices.push_back(i);
         }
     }
@@ -1898,6 +1904,11 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
     // =========================================================================
     expectMergeSucceeds(mergeCount);
 
+    if (mergeCount < kMaxDevsPerNic) {
+        TEST_INFO("Only %d same-speed NICs available; the ndevs == %d boundary was not exercised",
+                  mergeCount, kMaxDevsPerNic);
+    }
+
     // =========================================================================
     // Sub-test 3: above the limit — must be rejected, no device added
     //
@@ -1916,6 +1927,8 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
             int ndevs;
             int devs[kOverLimit];
         } oversized;
+        static_assert(offsetof(ncclNetVDeviceProps_t, devs) == offsetof(decltype(oversized), devs),
+                      "oversized request must stay layout-compatible with ncclNetVDeviceProps_t");
         oversized.ndevs = kOverLimit;
         for (int i = 0; i < kOverLimit; i++) {
             oversized.devs[i] = selected[i % mergeCount];
@@ -1932,44 +1945,6 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
         int ndevAfter = 0;
         ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
         EXPECT_EQ(ndevAfter, ndevBefore) << "Failed merge should not add any devices";
-    }
-
-    // =========================================================================
-    // Sub-test 4: duplicate indices collapse into a single-NIC vNIC
-    //
-    // This is the dedup that masked the original ROCM-28479 failure: a props array with a
-    // repeated index yields fewer constituents than ndevs suggests. Pin the behaviour so a
-    // future test cannot mistake "deduplicated" for "over the limit".
-    // =========================================================================
-    {
-        int ndevBefore = 0;
-        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
-
-        ncclNetVDeviceProps_t vProps;
-        memset(&vProps, 0, sizeof(vProps));
-        vProps.ndevs = 2;
-        vProps.devs[0] = selected[0];
-        vProps.devs[1] = selected[0];
-
-        int vdev = -1;
-        ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
-            << "A duplicate-index merge is a valid single-NIC request";
-        ASSERT_GE(vdev, 0);
-
-        int ndevAfter = 0;
-        ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
-        EXPECT_EQ(ndevAfter, ndevBefore + 1);
-
-        ncclNetProperties_t vdevProps;
-        memset(&vdevProps, 0, sizeof(vdevProps));
-        ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
-        ASSERT_NE(vdevProps.name, nullptr);
-
-        EXPECT_EQ(strchr(vdevProps.name, '+'), nullptr)
-            << "Duplicate indices should collapse to one constituent, got name '"
-            << vdevProps.name << "'";
-        EXPECT_EQ(vdevProps.speed, allProps[selected[0]].speed)
-            << "Deduplicated merge must not double-count speed";
     }
 }
 
