@@ -1320,6 +1320,16 @@ ncclResult_t ncclTopoForceMerge(struct ncclXml* xml, struct ncclTopoNetInfo* net
     ncclNetVDeviceProps_t vProps = {0};
     for (int d = 0; d < nPhysDevs; d++) {
       if (matchIfList(propsList[d].name, propsList[d].port, userIfs, nUserIfs, 1)) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+        // RCCL: a pattern given without ":port" matches every port of a multi-port NIC, so the
+        // number of matches is not bounded by nUserIfs and can overrun devs[].
+        if (vProps.ndevs == NCCL_NET_MAX_DEVS_PER_NIC) {
+          WARN("TOPO/NET : Specified fused NIC %s which matches too many devices. Max %d", semi,
+               NCCL_NET_MAX_DEVS_PER_NIC);
+          ret = ncclInvalidUsage;
+          goto fail;
+        }
+#endif
         vProps.devs[vProps.ndevs++] = d;
       }
     }

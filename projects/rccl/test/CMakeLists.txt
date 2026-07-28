@@ -359,6 +359,7 @@ if(BUILD_TESTS)
       EnqueueTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      TopoNicFusionTests.cpp
       NetSocketTests.cpp
       PluginCompatV11_test.cpp
       ProxyTests.cpp

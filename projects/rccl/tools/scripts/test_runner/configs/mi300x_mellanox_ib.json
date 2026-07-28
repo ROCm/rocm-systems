@@ -670,6 +670,11 @@
           "test_filter": "TopoTest.*"
         },
         {
+          "name": "TopoNicFusionTests",
+          "description": "NIC fusion input validation in the topology layer",
+          "test_filter": "TopoNicFusionTests.*"
+        },
+        {
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
