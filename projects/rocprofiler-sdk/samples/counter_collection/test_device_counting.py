@@ -40,6 +40,9 @@ ASYNC_RECORD_PATTERN = re.compile(
     r"user_data: (?P<user_data>\d+)\),"
 )
 UNAVAILABLE_MESSAGE = "Device counting unavailable: no hardware counters"
+# Must not be a substring of UNAVAILABLE_MESSAGE: CTest matches this against the whole
+# output via SKIP_REGULAR_EXPRESSION, and a genuine failure quotes the sample log.
+UNAVAILABLE_SKIP_SENTINEL = "device-counting-unavailable"
 EXPECTED_COUNTER_NAMES = {"GRBM_COUNT", "SQ_WAVES"}
 
 
@@ -70,9 +73,9 @@ def _skip_if_unavailable(output):
     try:
         import pytest
     except ImportError:
-        print("SKIP: {}".format(UNAVAILABLE_MESSAGE))
+        print("SKIP: {}".format(UNAVAILABLE_SKIP_SENTINEL))
         return True
-    pytest.skip(UNAVAILABLE_MESSAGE)
+    pytest.skip(UNAVAILABLE_SKIP_SENTINEL)
     return True
 
 
@@ -265,5 +268,5 @@ if __name__ == "__main__":
     async_unavailable = _validate_async_output_file()
     assert sync_unavailable == async_unavailable, "sample capability results differ"
     if sync_unavailable:
-        print("SKIP: {}".format(UNAVAILABLE_MESSAGE))
+        print("SKIP: {}".format(UNAVAILABLE_SKIP_SENTINEL))
         raise SystemExit(77)

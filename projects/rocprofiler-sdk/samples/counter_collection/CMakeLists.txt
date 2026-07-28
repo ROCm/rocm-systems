@@ -33,9 +33,10 @@ endif()
 
 find_package(rocprofiler-sdk REQUIRED)
 if(BUILD_TESTING)
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    find_program(ROCPROFILER_SAMPLE_PYTEST_EXECUTABLE NAMES pytest)
-    mark_as_advanced(ROCPROFILER_SAMPLE_PYTEST_EXECUTABLE)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        find_package(rocprofiler_sdk_pytest QUIET)
+    endif()
 endif()
 
 add_library(counter-collection-buffer-client SHARED)
@@ -269,12 +270,12 @@ set_tests_properties(
                DISABLED
                "${IS_THREAD_SANITIZER}")
 
-if(BUILD_TESTING)
+if(BUILD_TESTING AND Python3_Interpreter_FOUND)
     configure_file(test_device_counting.py test_device_counting.py COPYONLY)
 
-    if(ROCPROFILER_SAMPLE_PYTEST_EXECUTABLE)
+    if(rocprofiler_sdk_pytest_FOUND)
         set(counter-collection-device-profiling-validator
-            "${ROCPROFILER_SAMPLE_PYTEST_EXECUTABLE}" -x -v
+            "${ROCPSDK_PYTEST_EXECUTABLE}" -x -v -rs
             "${CMAKE_CURRENT_BINARY_DIR}/test_device_counting.py")
     else()
         set(counter-collection-device-profiling-validator
@@ -299,10 +300,17 @@ if(BUILD_TESTING)
             "counter-collection-device-profiling-async;counter-collection-device-profiling-sync"
             FAIL_REGULAR_EXPRESSION
             "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+            SKIP_REGULAR_EXPRESSION
+            "device-counting-unavailable"
             SKIP_RETURN_CODE
             77
             ATTACHED_FILES_ON_FAIL
             "${counter-collection-device-profiling-output};${counter-collection-device-profiling-sync-output}"
             DISABLED
             "${IS_THREAD_SANITIZER}")
+elseif(BUILD_TESTING)
+    message(
+        WARNING
+            "Python3 interpreter not found; counter-collection device-profiling validation will not be registered"
+        )
 endif()

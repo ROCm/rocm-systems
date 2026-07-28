@@ -644,7 +644,12 @@ protected:
                     EXPECT_EQ(record.agent_id.handle, configured_agent_id.handle);
                 if(options.require_positive_value && !options.sample_operation)
                 {
-                    ASSERT_FALSE(recs_local.empty()) << metric.name();
+                    if(recs_local.empty())
+                    {
+                        ADD_FAILURE() << "No counter records collected for " << metric.name();
+                        abort_focused_test = true;
+                        break;
+                    }
                     EXPECT_TRUE(
                         std::any_of(recs_local.begin(),
                                     recs_local.end(),
