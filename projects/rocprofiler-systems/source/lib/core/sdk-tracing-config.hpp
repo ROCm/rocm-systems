@@ -3,10 +3,8 @@
 
 #pragma once
 
-#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
-#include "core/sdk-tracing-config-deps.hpp"
 #include "logger/debug.hpp"
 
 #include <cctype>
@@ -53,7 +51,33 @@ concept tracing_kind_for =
     std::same_as<TracingKind, typename Wrapper::callback_tracing_kind> ||
     std::same_as<TracingKind, typename Wrapper::buffer_tracing_kind>;
 
-template <typename Wrapper, typename Externals = default_sdk_externals>
+// Constrains Externals to the dependency-injection surface sdk_tracing_config actually
+// calls (settings access, RCCLP/OMPT/unified-memory-profiling flags, ROCm domain/event
+// settings, and finalize-on-error state), so a mismatched policy fails at the class
+// declaration instead of deep inside a method body. `default_sdk_externals`
+// (sdk-tracing-config-deps.hpp) is the production implementation; tests supply a mock.
+template <typename Externals>
+concept sdk_tracing_config_externals =
+    requires(std::string_view setting_name, typename Externals::StateType state) {
+        typename Externals::Settings;
+        typename Externals::StateType;
+        {
+            Externals::StateFinalized
+        } -> std::convertible_to<typename Externals::StateType>;
+        { Externals::get_settings() } -> std::same_as<typename Externals::Settings*>;
+        { Externals::get_use_rcclp() } -> std::convertible_to<bool>;
+        { Externals::get_use_ompt() } -> std::convertible_to<bool>;
+        { Externals::get_use_unified_memory_profiling() } -> std::convertible_to<bool>;
+        { Externals::get_rocm_domains() } -> std::convertible_to<std::string>;
+        { Externals::get_rocm_events_setting() } -> std::convertible_to<std::string>;
+        {
+            Externals::get_setting_value(setting_name)
+        } -> std::same_as<std::optional<std::string>>;
+        { Externals::set_state(state) } -> std::same_as<void>;
+    };
+
+template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 class sdk_tracing_config
 {
 public:
@@ -129,8 +153,6 @@ private:
     static std::optional<typename Wrapper::buffer_name_info_t>   s_buffer_names;
 };
 
-using core_sdk = sdk_tracing_config<wrapper>;
-
 }  // namespace rocprofsys::rocprofiler_sdk
 
 // ─── Template Implementations ────────────────────────────────────────────────
@@ -141,6 +163,7 @@ namespace rocprofsys::rocprofiler_sdk
 // ─── Private helpers ─────────────────────────────────────────────────────────
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 template <typename Tp>
 std::string
 sdk_tracing_config<Wrapper, Externals>::to_lower(const Tp& value)
@@ -156,6 +179,7 @@ sdk_tracing_config<Wrapper, Externals>::to_lower(const Tp& value)
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::string
 sdk_tracing_config<Wrapper, Externals>::get_setting_name(const std::string& value)
 {
@@ -173,27 +197,33 @@ sdk_tracing_config<Wrapper, Externals>::get_setting_name(const std::string& valu
 // ─── Static data members ─────────────────────────────────────────────────────
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::unordered_map<typename Wrapper::callback_tracing_kind,
                    typename sdk_tracing_config<Wrapper, Externals>::operation_options>
     sdk_tracing_config<Wrapper, Externals>::s_callback_operation_option_names{};
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::unordered_map<typename Wrapper::buffer_tracing_kind,
                    typename sdk_tracing_config<Wrapper, Externals>::operation_options>
     sdk_tracing_config<Wrapper, Externals>::s_buffered_operation_option_names{};
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::optional<typename Wrapper::callback_name_info_t>
     sdk_tracing_config<Wrapper, Externals>::s_callback_names{};
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::optional<typename Wrapper::buffer_name_info_t>
     sdk_tracing_config<Wrapper, Externals>::s_buffer_names{};
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 version_info sdk_tracing_config<Wrapper, Externals>::s_version{};
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 void
 sdk_tracing_config<Wrapper, Externals>::finalize_and_throw(
     std::string_view message_for_exception)
@@ -204,6 +234,7 @@ sdk_tracing_config<Wrapper, Externals>::finalize_and_throw(
 
 // ─── get_operations_impl (tracing kind + optional setting) ───────────────────
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 template <typename TracingKind, typename TracingNameTable, typename LoadTracingNamesFn>
 std::unordered_set<std::int32_t>
 sdk_tracing_config<Wrapper, Externals>::operation_ids_for_tracing_kind(
@@ -279,6 +310,7 @@ sdk_tracing_config<Wrapper, Externals>::operation_ids_for_tracing_kind(
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 template <typename TracingKind>
     requires tracing_kind_for<Wrapper, TracingKind>
 std::unordered_set<std::int32_t>
@@ -300,6 +332,7 @@ sdk_tracing_config<Wrapper, Externals>::get_operations_impl(
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::vector<std::int32_t>
 sdk_tracing_config<Wrapper, Externals>::filter_operations(
     const std::unordered_set<std::int32_t>& complete_set,
@@ -330,6 +363,7 @@ sdk_tracing_config<Wrapper, Externals>::filter_operations(
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 template <typename Tp>
 auto
 sdk_tracing_config<Wrapper, Externals>::insert_config_setting(
@@ -358,6 +392,7 @@ sdk_tracing_config<Wrapper, Externals>::insert_config_setting(
 /// @brief Return the version of the rocprofiler-sdk
 /// @return The version of the rocprofiler-sdk or 0 if not initialized
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 version_info&
 sdk_tracing_config<Wrapper, Externals>::get_version()
 {
@@ -370,6 +405,7 @@ sdk_tracing_config<Wrapper, Externals>::get_version()
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 void
 sdk_tracing_config<Wrapper, Externals>::config_settings(
     const std::shared_ptr<typename Externals::Settings>& _config)
@@ -549,6 +585,7 @@ sdk_tracing_config<Wrapper, Externals>::config_settings(
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::unordered_set<typename Wrapper::callback_tracing_kind>
 sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
 {
@@ -677,6 +714,7 @@ sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::unordered_set<typename Wrapper::buffer_tracing_kind>
 sdk_tracing_config<Wrapper, Externals>::get_buffered_domains()
 {
@@ -877,6 +915,7 @@ sdk_tracing_config<Wrapper, Externals>::get_buffered_domains()
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::vector<std::string>
 sdk_tracing_config<Wrapper, Externals>::get_rocm_events()
 {
@@ -884,6 +923,7 @@ sdk_tracing_config<Wrapper, Externals>::get_rocm_events()
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::vector<std::int32_t>
 sdk_tracing_config<Wrapper, Externals>::get_operations(
     typename Wrapper::callback_tracing_kind kind)
@@ -914,6 +954,7 @@ sdk_tracing_config<Wrapper, Externals>::get_operations(
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::vector<std::int32_t>
 sdk_tracing_config<Wrapper, Externals>::get_operations(
     typename Wrapper::buffer_tracing_kind kind)
@@ -941,6 +982,7 @@ sdk_tracing_config<Wrapper, Externals>::get_operations(
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::unordered_set<std::int32_t>
 sdk_tracing_config<Wrapper, Externals>::get_backtrace_operations(
     typename Wrapper::callback_tracing_kind kind)
@@ -965,6 +1007,7 @@ sdk_tracing_config<Wrapper, Externals>::get_backtrace_operations(
 }
 
 template <typename Wrapper, typename Externals>
+    requires sdk_tracing_config_externals<Externals>
 std::unordered_set<std::int32_t>
 sdk_tracing_config<Wrapper, Externals>::get_backtrace_operations(
     typename Wrapper::buffer_tracing_kind kind)

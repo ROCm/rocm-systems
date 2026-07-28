@@ -317,7 +317,7 @@ protected:
 
 TEST_F(sdk_tracing_config_test, get_version_populates_major_minor_patch)
 {
-    using sut = sdk_tracing_config<tagged_backend<version_fields>>;
+    using sut = sdk_tracing_config<tagged_backend<version_fields>, mock_sdk_externals>;
 
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .WillOnce([](std::uint32_t* maj, std::uint32_t* min, std::uint32_t* pat) {
@@ -335,7 +335,7 @@ TEST_F(sdk_tracing_config_test, get_version_populates_major_minor_patch)
 
 TEST_F(sdk_tracing_config_test, get_version_formatted_equals_major_10000_minor_100_patch)
 {
-    using sut = sdk_tracing_config<tagged_backend<version_formatted>>;
+    using sut = sdk_tracing_config<tagged_backend<version_formatted>, mock_sdk_externals>;
 
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .WillOnce([](std::uint32_t* maj, std::uint32_t* min, std::uint32_t* pat) {
@@ -350,7 +350,7 @@ TEST_F(sdk_tracing_config_test, get_version_formatted_equals_major_10000_minor_1
 
 TEST_F(sdk_tracing_config_test, get_version_caches_result_calling_backend_exactly_once)
 {
-    using sut = sdk_tracing_config<tagged_backend<version_caching>>;
+    using sut = sdk_tracing_config<tagged_backend<version_caching>, mock_sdk_externals>;
 
     EXPECT_CALL(*g_mock_wrapper, get_version)
         .Times(1)
@@ -375,40 +375,61 @@ TEST_F(sdk_tracing_config_test, get_version_caches_result_calling_backend_exactl
 // tagged_backend<60> has an empty map — no kind was ever injected — so all
 // get_operations / get_backtrace_operations calls must throw std::runtime_error.
 // These never reach a Wrapper call (the "no options registered" check throws
-// first), so no g_mock_wrapper setup is needed.
+// first), so no g_mock_wrapper setup is needed. finalize_and_throw() does call
+// Externals::set_state() before throwing, so g_mock_externals needs a mock
+// expectation for it — hence a dedicated fixture instead of a plain TEST().
 
-using throw_sut = sdk_tracing_config<tagged_backend<ops_throw>>;
+using throw_sut = sdk_tracing_config<tagged_backend<ops_throw>, mock_sdk_externals>;
 
-TEST(sdk_tracing_config_throw, get_operations_callback_throws_when_kind_not_registered)
+class sdk_tracing_config_throw_test : public ::testing::Test
 {
+protected:
+    void SetUp() override
+    {
+        g_mock_externals = std::make_unique<gtest::StrictMock<gmock_sdk_externals>>();
+    }
+    void TearDown() override { g_mock_externals.reset(); }
+};
+
+TEST_F(sdk_tracing_config_throw_test,
+       get_operations_callback_throws_when_kind_not_registered)
+{
+    EXPECT_CALL(*g_mock_externals, set_state).Times(1);
     EXPECT_THROW(throw_sut::get_operations(
                      tagged_backend<ops_throw>::CALLBACK_TRACING_HIP_RUNTIME_API),
                  std::runtime_error);
 }
 
-TEST(sdk_tracing_config_throw, get_operations_buffer_throws_when_kind_not_registered)
+TEST_F(sdk_tracing_config_throw_test,
+       get_operations_buffer_throws_when_kind_not_registered)
 {
+    EXPECT_CALL(*g_mock_externals, set_state).Times(1);
     EXPECT_THROW(throw_sut::get_operations(
                      tagged_backend<ops_throw>::BUFFER_TRACING_KERNEL_DISPATCH),
                  std::runtime_error);
 }
 
-TEST(sdk_tracing_config_throw, get_backtrace_callback_throws_when_kind_not_registered)
+TEST_F(sdk_tracing_config_throw_test,
+       get_backtrace_callback_throws_when_kind_not_registered)
 {
+    EXPECT_CALL(*g_mock_externals, set_state).Times(1);
     EXPECT_THROW(throw_sut::get_backtrace_operations(
                      tagged_backend<ops_throw>::CALLBACK_TRACING_HIP_RUNTIME_API),
                  std::runtime_error);
 }
 
-TEST(sdk_tracing_config_throw, get_backtrace_buffer_throws_when_kind_not_registered)
+TEST_F(sdk_tracing_config_throw_test,
+       get_backtrace_buffer_throws_when_kind_not_registered)
 {
+    EXPECT_CALL(*g_mock_externals, set_state).Times(1);
     EXPECT_THROW(throw_sut::get_backtrace_operations(
                      tagged_backend<ops_throw>::BUFFER_TRACING_KERNEL_DISPATCH),
                  std::runtime_error);
 }
 
-TEST(sdk_tracing_config_throw, get_operations_error_message_contains_kind_value)
+TEST_F(sdk_tracing_config_throw_test, get_operations_error_message_contains_kind_value)
 {
+    EXPECT_CALL(*g_mock_externals, set_state).Times(1);
     try
     {
         throw_sut::get_operations(
