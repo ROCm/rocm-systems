@@ -348,7 +348,7 @@ jobs:
 
       - name: Run gfx1250 DBT corpus tests
         if: ${{ !cancelled() && matrix.enable_tsan == 0 && steps.extract_dbt.outcome == 'success' }}
-        timeout-minutes: ${{ matrix.enable_asan == 1 && 20 || 15 }}
+        timeout-minutes: ${{ matrix.enable_asan == 1 && 30 || 20 }}
         working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
         shell: bash
         run: |

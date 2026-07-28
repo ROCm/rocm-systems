@@ -40,6 +40,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <sstream>
 #include <string>
@@ -496,34 +497,58 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
 /// edge from the callee back to every possible continuation. The same helper
 /// block can be entered by multiple kernels or multiple call sites, and the
 /// correct continuation is the one selected by the return SGPR written at that
-/// call site. This walk therefore stays inside @p allowed_blocks, follows only
-/// ordinary successors within the callee body, and reports terminators that
-/// return through @p return_sreg. The caller then pairs each return with the
-/// specific continuation from the call edge being analyzed.
+/// call site. This walk therefore stays inside @p allowed_blocks and mirrors
+/// call-return classification: nested callees are visited with their own return
+/// SGPR as a stopping condition, while their continuations retain the enclosing
+/// condition. This exposes paths that return directly through an enclosing pair
+/// without mistaking a nested callee's normal return for the enclosing return.
+/// The caller then pairs each reported return with the specific continuation
+/// from the call edge being analyzed.
 [[nodiscard]] std::vector<BasicBlock *>
 function_return_blocks(BasicBlock &callee, uint16_t return_sreg, std::span<const uint8_t> text,
                        const std::unordered_set<BasicBlock *> &allowed_blocks) {
+  struct WalkPoint {
+    BasicBlock *block = nullptr;
+    std::optional<uint16_t> terminal_return_sreg;
+  };
+
   std::vector<BasicBlock *> returns;
-  std::vector<BasicBlock *> stack{&callee};
-  std::unordered_set<BasicBlock *> visited;
+  std::unordered_set<BasicBlock *> return_set;
+  std::vector<WalkPoint> stack{{.block = &callee, .terminal_return_sreg = std::nullopt}};
+  std::set<std::pair<BasicBlock *, std::optional<uint16_t>>> visited;
 
   while (!stack.empty()) {
-    BasicBlock *block = stack.back();
+    const WalkPoint point = stack.back();
     stack.pop_back();
+    BasicBlock *block = point.block;
     assert(block != nullptr && "return-block walk stack should contain only decoded blocks");
-    if (!allowed_blocks.contains(block) || !visited.insert(block).second)
+    if (!allowed_blocks.contains(block) ||
+        !visited.insert({block, point.terminal_return_sreg}).second)
       continue;
 
     const Instruction *term = block->terminator();
     assert(term != nullptr && "decoded BasicBlock should contain at least one instruction");
+    if (point.terminal_return_sreg && s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()),
+                                                        *point.terminal_return_sreg)) {
+      continue;
+    }
     if (s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()), return_sreg)) {
-      returns.push_back(block);
+      if (return_set.insert(block).second)
+        returns.push_back(block);
       continue;
     }
 
     for (BasicBlock *succ : block->successors()) {
       assert(succ != nullptr && "BasicBlock successors should never be null");
-      stack.push_back(succ);
+      stack.push_back({.block = succ, .terminal_return_sreg = point.terminal_return_sreg});
+    }
+    for (const BasicBlock::CallEdge &call : block->call_edges()) {
+      assert(call.callee != nullptr && "BasicBlock call edges should always have a callee");
+      assert(call.continuation != nullptr &&
+             "BasicBlock call edges should always have a continuation");
+      stack.push_back({.block = call.callee, .terminal_return_sreg = call.return_sreg});
+      stack.push_back(
+          {.block = call.continuation, .terminal_return_sreg = point.terminal_return_sreg});
     }
   }
 
@@ -1813,6 +1838,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       }
       if (skip_scope)
         break;
+      if (block->has_implicit_terminator()) {
+        // Materialize the CFG boundary as part of the translated block. Like
+        // any other target-side expansion, the terminator belongs in relocated
+        // function extents. Without an architectural terminator, ordinary text
+        // materialization can turn this unreachable stub into a fallthrough.
+        const uint32_t endpgm = build_s_endpgm(host_arch_);
+        append_words(kernel_text, std::span<const uint32_t>(&endpgm, 1));
+      }
       placement.target_end = kernel_text.size();
       layout.blocks.push_back(placement);
       target_offset_by_source_offset.emplace(block->end_offset(), kernel_text.size());
