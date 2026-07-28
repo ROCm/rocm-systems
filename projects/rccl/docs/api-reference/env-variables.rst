@@ -46,9 +46,11 @@ in the following table.
           which is required for ``ncclCommSuspend`` and ``ncclCommResume`` to
           release the physical GPU memory of a suspended communicator. See
           :ref:`suspend-resume` for the full prerequisites.
-      - | ``0``: Disabled (default).
-        | ``1``: Enabled.
-        | ``-2``: Auto-detect; enable when the platform supports VMM.
+      - | ``0``: Disabled.
+        | ``1``: Enabled on any architecture.
+        | ``-2``: Auto-detect (default); enable when the platform supports VMM.
+          Auto-detect is limited to gfx1250, the only architecture where the VMM
+          path is validated. Use ``1`` to force it on elsewhere.
 
     * - | ``NCCL_MIN_CTAS``
         | Minimum number of CTAs (channels) used for a collective. Overrides
