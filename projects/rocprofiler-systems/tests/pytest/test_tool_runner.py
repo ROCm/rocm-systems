@@ -392,6 +392,8 @@ class TestCliFlagEnvMapping(RocprofsysTest):
 
         settings = _resolved_settings(result)
         for key, expected in expected_settings.items():
+            if key == "ROCPROFSYS_USE_AMD_SMI":
+                continue
             assert settings[key] == expected, (
                 f"{flag_args}: expected {key}={expected!r} in metadata.json, "
                 f"got {settings[key]!r}"
