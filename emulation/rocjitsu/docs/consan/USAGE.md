@@ -165,16 +165,21 @@ acquired before semantic inventory. It is a conservative admission unit for
 major ELF and section storage, not a strict RSS limit: smaller analysis
 metadata, allocator bookkeeping, and unrelated process memory are outside the
 model. Let `I` be the original input size and `M` be `I` plus the configured
-per-object maximum growth. The modeled phases are `I + 10*M` for an ordinary
-incremental patch, `I + 11*M` while independently validated composite mutation
-storage remains live, and `7*I + 8*M` during final validation. Each parser has
-six major-image units: its image, section objects and headers, bounded payload,
-bounded section names, and up to two retained copies of bounded symbol names.
-Section headers, transient symbol names, and metadata names are views into the
-image rather than duplicate owning collections.
+per-object maximum growth. The modeled phases are `I + 11*M` for an ordinary
+incremental patch, `I + 12*M` while independently validated composite mutation
+storage remains live, and `8*I + 9*M` during final validation. Each parser has
+seven major-image units: its image, up to two units for section objects and
+their vector slots, bounded payload, bounded section names, and up to two
+retained copies of bounded symbol names. Section headers, transient symbol
+names, and metadata names are views into the image rather than duplicate owning
+collections.
 Admission uses the largest phase value and reports the governing phase and
 coefficients. The parser rejects aggregate copied section payload, section-name
-bytes, or symbol-name bytes larger than its backing image. The patcher
+bytes, or distinct retained kernel/function-name bytes larger than its backing
+image. These coefficients supersede the earlier `I + 10*M`, `I + 11*M`, and
+`7*I + 8*M` model, which did not fully account for section-object and vector-slot
+storage. Deployments with a tuned concurrent-transform ceiling should rederive
+it from the current coefficients. The patcher
 preallocates every file insertion, commits same-size rewrites directly, moves
 every emitted image, and avoids a separate padding buffer so vector growth
 cannot add an unmodelled geometric full-image allocation. The two retained-

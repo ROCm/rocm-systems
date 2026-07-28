@@ -32,9 +32,9 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
       .kind = ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = valid.elf_bytes.size() - bytes.size(),
   };
-  const auto ownership_reservation =
-      consan_hook::consan_transform_major_image_reservation_bytes(bytes.size(), exact_growth);
-  ASSERT_TRUE(ownership_reservation);
+  const auto ownership_estimate =
+      consan_hook::consan_transform_major_image_reservation(bytes.size(), exact_growth);
+  ASSERT_TRUE(ownership_estimate);
   const auto composite_phase =
       std::ranges::find(consan_hook::kConSanTransformOwnershipPhases,
                         consan_hook::ConSanTransformOwnershipPhase::CompositeIncrementalPatch,
@@ -43,9 +43,9 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
   const auto composite_reservation = consan_hook::consan_transform_phase_reservation_bytes(
       *composite_phase, bytes.size(), valid.elf_bytes.size());
   ASSERT_TRUE(composite_reservation);
-  EXPECT_EQ(*composite_reservation, bytes.size() + 11u * valid.elf_bytes.size())
+  EXPECT_EQ(*composite_reservation, bytes.size() + 12u * valid.elf_bytes.size())
       << "modified composite transforms must retain their explicit parser-complete phase";
-  EXPECT_GE(*ownership_reservation, *composite_reservation);
+  EXPECT_GE(ownership_estimate->reservation_bytes, *composite_reservation);
   const auto mutation = std::ranges::find(
       valid.patches, ConSanPatchKind::InlineAtomicAddressRewrite, &ConSanPatchInfo::kind);
   const auto record = std::ranges::find(valid.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,

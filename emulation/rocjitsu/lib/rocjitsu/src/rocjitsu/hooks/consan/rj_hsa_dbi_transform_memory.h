@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/patch/consan/consan.h"
 
 #include <array>
@@ -26,7 +27,7 @@ struct ConSanTransformOwnership {
 };
 
 struct ConSanTransformReservationEstimate {
-  ConSanTransformOwnership ownership;
+  std::optional<ConSanTransformOwnership> ownership;
   uint64_t maximum_image_bytes;
   uint64_t reservation_bytes;
 };
@@ -47,12 +48,12 @@ consan_transform_ownership_phase_name(ConSanTransformOwnershipPhase phase) {
 /// Major-image ownership at each supported transform peak.
 ///
 /// IncrementalPatch owns the hook's pristine staging image, the previous
-/// result, a parser's six units, the patcher image, replacement text, and the
+/// result, a parser's seven units, the patcher image, replacement text, and the
 /// transactional grown image. Each parser owns its image, section objects and
-/// headers, bounded payload, bounded section names, at most two retained copies
-/// of bounded symbol names. Section headers, transient symbol names, and
-/// metadata names are views into the parser image so temporary full collections
-/// do not overlap the retained representations.
+/// vector slots, bounded payload, bounded section names, and at most two
+/// retained copies of bounded symbol names. Section headers, transient symbol
+/// names, and metadata names are views into the parser image so temporary full
+/// collections do not overlap the retained representations.
 ///
 /// The composite variant additionally retains the independently validated
 /// mutation image while instrumenting it. That extra phase exists because the
@@ -67,13 +68,25 @@ consan_transform_ownership_phase_name(ConSanTransformOwnershipPhase phase) {
 /// AmdGpuCodeObject rejects aggregate copied section payload and aggregate
 /// section-name or symbol-name bytes larger than its backing image. Smaller
 /// non-string analysis metadata and allocator overhead are not represented by
-/// these major-image units.
+/// these major-image units. The non-parser terms below keep the phase table
+/// mechanically coupled to the parser's exported ownership bound.
+inline constexpr uint64_t kConSanIncrementalNonParserMaximumImageUnits = 4;
+inline constexpr uint64_t kConSanCompositeNonParserMaximumImageUnits = 5;
+inline constexpr uint64_t kConSanFinalOriginalNonParserInputImageUnits = 1;
+inline constexpr uint64_t kConSanFinalReplacementNonParserMaximumImageUnits = 2;
+
 inline constexpr std::array<ConSanTransformOwnership, 3> kConSanTransformOwnershipPhases = {{
-    {ConSanTransformOwnershipPhase::IncrementalPatch, 1, 10},
-    {ConSanTransformOwnershipPhase::CompositeIncrementalPatch, 1, 11},
-    {ConSanTransformOwnershipPhase::FinalValidation, 7, 8},
+    {ConSanTransformOwnershipPhase::IncrementalPatch, 1,
+     kAmdGpuCodeObjectRetainedMajorImageUnits + kConSanIncrementalNonParserMaximumImageUnits},
+    {ConSanTransformOwnershipPhase::CompositeIncrementalPatch, 1,
+     kAmdGpuCodeObjectRetainedMajorImageUnits + kConSanCompositeNonParserMaximumImageUnits},
+    {ConSanTransformOwnershipPhase::FinalValidation,
+     kAmdGpuCodeObjectRetainedMajorImageUnits + kConSanFinalOriginalNonParserInputImageUnits,
+     kAmdGpuCodeObjectRetainedMajorImageUnits + kConSanFinalReplacementNonParserMaximumImageUnits},
 }};
 
+/// Derived phase maxima used to place overflow-boundary tests at the table's
+/// current limits without duplicating the selection algorithm.
 [[nodiscard]] inline constexpr uint64_t consan_transform_max_maximum_image_copies() {
   uint64_t maximum = 0;
   for (const ConSanTransformOwnership &ownership : kConSanTransformOwnershipPhases)
@@ -118,7 +131,7 @@ consan_transform_major_image_reservation(
     return std::nullopt;
   const uint64_t maximum_image_bytes = static_cast<uint64_t>(input_image_bytes + *maximum_growth);
   ConSanTransformReservationEstimate peak = {
-      .ownership = kConSanTransformOwnershipPhases.front(),
+      .ownership = std::nullopt,
       .maximum_image_bytes = maximum_image_bytes,
       .reservation_bytes = 0,
   };
@@ -133,15 +146,6 @@ consan_transform_major_image_reservation(
     }
   }
   return peak;
-}
-
-[[nodiscard]] inline std::optional<uint64_t> consan_transform_major_image_reservation_bytes(
-    size_t input_image_bytes, const rocjitsu::ConSanPatchedImageGrowthLimit &growth_policy) {
-  const std::optional<ConSanTransformReservationEstimate> estimate =
-      consan_transform_major_image_reservation(input_image_bytes, growth_policy);
-  if (!estimate)
-    return std::nullopt;
-  return estimate->reservation_bytes;
 }
 
 } // namespace rocjitsu::consan_hook

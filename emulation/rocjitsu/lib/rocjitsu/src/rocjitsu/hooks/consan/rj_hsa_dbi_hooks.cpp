@@ -1161,6 +1161,47 @@ private:
   uint64_t reservation_bytes_ = 0;
 };
 
+/// Couples every load-scoped major-image owner to its admission reservation.
+///
+/// Explicit teardown makes the required lifetime relationship independent of
+/// declaration order in the load hook: image owners are always destroyed
+/// before an early-return path refunds the process reservation.
+class TransformLoadState {
+public:
+  TransformLoadState() = default;
+  TransformLoadState(const TransformLoadState &) = delete;
+  TransformLoadState &operator=(const TransformLoadState &) = delete;
+
+  ~TransformLoadState() {
+    live_fault_auto_report_capacity_inventory.reset();
+    reusable_moi_inventory.reset();
+    static_coverage_storage.reset();
+    patch_result_storage.reset();
+    replacement_storage.reset();
+    reservation_.release();
+  }
+
+  [[nodiscard]] ProcessTransformAdmissionRegistry::AdmissionResult
+  acquire(uint64_t reservation_bytes, std::optional<uint64_t> limit_bytes) {
+    return reservation_.acquire(reservation_bytes, limit_bytes);
+  }
+
+  void release() { reservation_.release(); }
+
+  void discard_image_and_release(std::vector<uint8_t> &image) {
+    reservation_.discard_image_and_release(image);
+  }
+
+  std::shared_ptr<const std::vector<uint8_t>> replacement_storage;
+  std::optional<rocjitsu::ConSanResult> patch_result_storage;
+  std::optional<ConSanStaticCoverage> static_coverage_storage;
+  std::optional<rocjitsu::ConSanResult> reusable_moi_inventory;
+  std::optional<rocjitsu::ConSanMoiAutoReportInventory> live_fault_auto_report_capacity_inventory;
+
+private:
+  ProcessTransformReservation reservation_;
+};
+
 /// Owns replacement memory for as long as the executable can expose it.
 ///
 /// HSA loaded-code-object introspection reports the original memory base and
@@ -2938,15 +2979,17 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   if (!refresh_report_config_from_env(&*config))
     return HSA_STATUS_ERROR;
 
-  // This reservation is declared before every local image owner. Reverse
-  // destruction order therefore destroys rejected transform results and local
-  // replacement storage before an RAII-only early return refunds admission.
-  ProcessTransformReservation transform_reservation;
+  TransformLoadState transform_state;
+  auto &replacement_storage = transform_state.replacement_storage;
+  auto &patch_result_storage = transform_state.patch_result_storage;
+  auto &static_coverage_storage = transform_state.static_coverage_storage;
+  auto &reusable_moi_inventory = transform_state.reusable_moi_inventory;
+  auto &live_fault_auto_report_capacity_inventory =
+      transform_state.live_fault_auto_report_capacity_inventory;
   hsa_code_object_reader_t reader_to_load = code_object_reader;
   hsa_code_object_reader_t replacement_reader{};
   bool using_replacement_reader = false;
   bool replacement_storage_retained = false;
-  std::shared_ptr<const std::vector<uint8_t>> replacement_storage;
   const auto release_replacement_storage = [&] {
     if (!replacement_storage_retained) {
       replacement_storage.reset();
@@ -2964,10 +3007,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     replacement_storage_retained = false;
   };
   rocjitsu::ConSanInstallAction install_action = rocjitsu::ConSanInstallAction::LoadOriginal;
-  std::optional<rocjitsu::ConSanResult> patch_result_storage;
-  std::optional<ConSanStaticCoverage> static_coverage_storage;
-  std::optional<rocjitsu::ConSanResult> reusable_moi_inventory;
-  std::optional<rocjitsu::ConSanMoiAutoReportInventory> live_fault_auto_report_capacity_inventory;
   ProcessFaultApplicationReservation process_fault_application_reservation;
   ProcessFaultReservationOutcome process_fault_reservation_outcome =
       ProcessFaultReservationOutcome::MutationAlreadyInstalled;
@@ -3108,27 +3147,31 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           consan_transform_major_image_reservation(size, patch_options.patched_image_growth_limit);
       const bool relative_growth = patch_options.patched_image_growth_limit.kind ==
                                    rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent;
-      log_message(
-          kLogInfo,
-          "ConSan transform admission request reader=%llu input_image=%zu reservation=%s "
-          "phase=%s phase_input_copies=%llu phase_maximum_copies=%llu "
-          "growth_policy=%s growth_value=%llu",
-          static_cast<unsigned long long>(code_object_reader.handle), size,
-          reservation ? std::to_string(reservation->reservation_bytes).c_str() : "uint64-overflow",
-          reservation ? consan_transform_ownership_phase_name(reservation->ownership.phase)
-                      : "unavailable",
-          static_cast<unsigned long long>(reservation ? reservation->ownership.input_image_copies
+      log_message(kLogInfo,
+                  "ConSan transform admission request reader=%llu input_image=%zu reservation=%s "
+                  "phase=%s phase_input_copies=%llu phase_maximum_copies=%llu "
+                  "growth_policy=%s growth_value=%llu",
+                  static_cast<unsigned long long>(code_object_reader.handle), size,
+                  reservation ? std::to_string(reservation->reservation_bytes).c_str()
+                              : "uint64-overflow",
+                  reservation && reservation->ownership
+                      ? consan_transform_ownership_phase_name(reservation->ownership->phase)
+                  : reservation ? "none"
+                                : "unavailable",
+                  static_cast<unsigned long long>(reservation && reservation->ownership
+                                                      ? reservation->ownership->input_image_copies
                                                       : 0),
-          static_cast<unsigned long long>(reservation ? reservation->ownership.maximum_image_copies
+                  static_cast<unsigned long long>(reservation && reservation->ownership
+                                                      ? reservation->ownership->maximum_image_copies
                                                       : 0),
-          relative_growth ? "input-percent" : "absolute-bytes",
-          static_cast<unsigned long long>(
-              relative_growth ? patch_options.patched_image_growth_limit.input_percent
-                              : patch_options.patched_image_growth_limit.absolute_bytes));
+                  relative_growth ? "input-percent" : "absolute-bytes",
+                  static_cast<unsigned long long>(
+                      relative_growth ? patch_options.patched_image_growth_limit.input_percent
+                                      : patch_options.patched_image_growth_limit.absolute_bytes));
       std::optional<ProcessTransformAdmissionRegistry::AdmissionResult> admission;
       if (reservation) {
-        admission = transform_reservation.acquire(reservation->reservation_bytes,
-                                                  config->process_concurrent_transform_limit_bytes);
+        admission = transform_state.acquire(reservation->reservation_bytes,
+                                            config->process_concurrent_transform_limit_bytes);
       }
       const bool accounting_overflow =
           !reservation ||
@@ -3188,9 +3231,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     "live_before=%llu required=%llu process_ceiling=%s",
                     static_cast<unsigned long long>(code_object_reader.handle), size,
                     static_cast<unsigned long long>(admission->reservation_bytes),
-                    consan_transform_ownership_phase_name(reservation->ownership.phase),
-                    static_cast<unsigned long long>(reservation->ownership.input_image_copies),
-                    static_cast<unsigned long long>(reservation->ownership.maximum_image_copies),
+                    reservation->ownership
+                        ? consan_transform_ownership_phase_name(reservation->ownership->phase)
+                        : "none",
+                    static_cast<unsigned long long>(
+                        reservation->ownership ? reservation->ownership->input_image_copies : 0),
+                    static_cast<unsigned long long>(
+                        reservation->ownership ? reservation->ownership->maximum_image_copies : 0),
                     static_cast<unsigned long long>(admission->live_bytes),
                     static_cast<unsigned long long>(*admission->required_bytes),
                     admission->limit_bytes ? std::to_string(*admission->limit_bytes).c_str()
@@ -4498,7 +4545,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       // All metadata consumers above are finished. Discard the unused final
       // image and its reservation together before invoking the original
       // loader, which may block or re-enter the hook.
-      transform_reservation.discard_image_and_release(patch_result_storage->elf_bytes);
+      transform_state.discard_image_and_release(patch_result_storage->elf_bytes);
     }
   } else {
     log_message(kLogInfo, "ConSan pass-through reader=%llu bytes=unavailable",
@@ -4609,7 +4656,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                      "[rocjitsu-dbi-hooks] failed to retain replacement code-object storage\n");
       }
       replacement_storage.reset();
-      transform_reservation.discard_image_and_release(patch_result_storage->elf_bytes);
+      transform_state.discard_image_and_release(patch_result_storage->elf_bytes);
       if (config->fail_closed) {
         record_static_coverage(false);
         return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
@@ -4622,7 +4669,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   rejection_reason, static_cast<unsigned long long>(code_object_reader.handle));
     } else {
       replacement_storage_retained = true;
-      transform_reservation.release();
+      transform_state.release();
     }
 
     const hsa_status_t reader_status =

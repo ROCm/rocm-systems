@@ -20,6 +20,13 @@
 
 namespace rocjitsu {
 
+/// Conservative image-sized ownership units retained by one parsed object.
+///
+/// The bound covers the backing image, up to two units for section objects and
+/// their vector slots, one copied-payload unit, one copied-section-name unit,
+/// and up to two retained symbol-name units.
+inline constexpr uint64_t kAmdGpuCodeObjectRetainedMajorImageUnits = 7;
+
 struct AmdGpuKernelInfo {
   std::string name;
   uint64_t descriptor_file_offset = 0;

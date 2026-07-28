@@ -570,9 +570,15 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
           "(input bytes + maximum growth bytes))\n",
           static_cast<unsigned long long>(*config.process_concurrent_transform_limit_bytes),
           static_cast<unsigned long long>(minimum_reservation->reservation_bytes),
-          consan_transform_ownership_phase_name(minimum_reservation->ownership.phase),
-          static_cast<unsigned long long>(minimum_reservation->ownership.input_image_copies),
-          static_cast<unsigned long long>(minimum_reservation->ownership.maximum_image_copies));
+          minimum_reservation->ownership
+              ? consan_transform_ownership_phase_name(minimum_reservation->ownership->phase)
+              : "none",
+          static_cast<unsigned long long>(minimum_reservation->ownership
+                                              ? minimum_reservation->ownership->input_image_copies
+                                              : 0),
+          static_cast<unsigned long long>(minimum_reservation->ownership
+                                              ? minimum_reservation->ownership->maximum_image_copies
+                                              : 0));
     }
   }
 

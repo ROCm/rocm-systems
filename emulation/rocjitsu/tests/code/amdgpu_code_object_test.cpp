@@ -186,28 +186,45 @@ bool set_aggregate_copied_section_bytes(std::vector<uint8_t> &image, uint64_t ag
   return true;
 }
 
-std::vector<uint8_t> make_elf_at_symbol_name_copy_boundary(bool one_byte_over) {
+enum class SymbolNameBudget {
+  AtBoundary,
+  OneByteOver,
+};
+
+struct SymbolBoundaryOptions {
+  SymbolNameBudget budget = SymbolNameBudget::AtBoundary;
+  uint8_t symbol_type = kElfSymbolTypeFunc;
+  uint16_t symbol_section_index = 1;
+  bool duplicate_symbol_table = false;
+  uint32_t code_section_type = SHT_PROGBITS;
+  std::string_view code_section_name = ".text";
+};
+
+std::vector<uint8_t>
+make_elf_at_symbol_name_copy_boundary(const SymbolBoundaryOptions &options = {}) {
   constexpr size_t kImageBytes = 4096;
   constexpr size_t kSymbolCount = 32;
-  constexpr size_t kStringTableBytes = 129;
+  constexpr size_t kStringTableBytes = 145;
   constexpr uint64_t kTextAddress = 0x1000;
 
   std::vector<uint8_t> shstrtab{'\0'};
-  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t text_name = add_elf_name(shstrtab, options.code_section_name);
   const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
   const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
+  const uint32_t dynsym_name = add_elf_name(shstrtab, ".dynsym");
   const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
 
-  std::array<uint8_t, kStringTableBytes> strtab{};
-  std::fill(strtab.begin() + 1, strtab.end(), static_cast<uint8_t>('x'));
-  if (one_byte_over)
-    strtab[0] = static_cast<uint8_t>('x');
+  std::array<uint8_t, kStringTableBytes> strtab;
+  strtab.fill(static_cast<uint8_t>('x'));
 
   std::array<Elf64_Sym, kSymbolCount> symbols{};
   for (size_t i = 0; i < symbols.size(); ++i) {
-    symbols[i].st_name = one_byte_over && i == 0 ? 0 : 1;
-    symbols[i].st_info = static_cast<uint8_t>((1u << 4) | kElfSymbolTypeFunc);
-    symbols[i].st_shndx = 1;
+    // The retained names are distinct suffixes. Their lengths are 97 and
+    // 114..144 bytes at the boundary, then 98 and 114..144 one byte over.
+    symbols[i].st_name = i == 0 ? (options.budget == SymbolNameBudget::OneByteOver ? 47 : 48)
+                                : static_cast<uint32_t>(i);
+    symbols[i].st_info = static_cast<uint8_t>((1u << 4) | options.symbol_type);
+    symbols[i].st_shndx = options.symbol_section_index;
     symbols[i].st_value = kTextAddress;
     symbols[i].st_size = sizeof(uint32_t);
   }
@@ -217,8 +234,9 @@ std::vector<uint8_t> make_elf_at_symbol_name_copy_boundary(bool one_byte_over) {
   const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8);
   const uint64_t shstrtab_offset = symtab_offset + sizeof(symbols);
   const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
-  constexpr uint16_t section_count = 5;
-  static_assert(kSymbolCount * (kStringTableBytes - 1) == kImageBytes);
+  constexpr uint16_t section_count = 6;
+  static_assert(97 + 31 * (114 + 144) / 2 == kImageBytes);
+  static_assert(98 + 31 * (114 + 144) / 2 == kImageBytes + 1);
   if (shoff + section_count * sizeof(Elf64_Shdr) > kImageBytes)
     return {};
 
@@ -235,7 +253,7 @@ std::vector<uint8_t> make_elf_at_symbol_name_copy_boundary(bool one_byte_over) {
   header.e_ehsize = sizeof(Elf64_Ehdr);
   header.e_shentsize = sizeof(Elf64_Shdr);
   header.e_shnum = section_count;
-  header.e_shstrndx = 4;
+  header.e_shstrndx = 5;
   std::memcpy(image.data(), &header, sizeof(header));
 
   const uint32_t text_word = 0xbf800000u;
@@ -246,10 +264,10 @@ std::vector<uint8_t> make_elf_at_symbol_name_copy_boundary(bool one_byte_over) {
 
   std::array<Elf64_Shdr, section_count> sections{};
   sections[1].sh_name = text_name;
-  sections[1].sh_type = SHT_PROGBITS;
+  sections[1].sh_type = options.code_section_type;
   sections[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
   sections[1].sh_addr = kTextAddress;
-  sections[1].sh_offset = text_offset;
+  sections[1].sh_offset = options.code_section_type == SHT_NOBITS ? image.size() + 1 : text_offset;
   sections[1].sh_size = sizeof(text_word);
   sections[1].sh_addralign = alignof(uint32_t);
 
@@ -267,11 +285,17 @@ std::vector<uint8_t> make_elf_at_symbol_name_copy_boundary(bool one_byte_over) {
   sections[3].sh_entsize = sizeof(Elf64_Sym);
   sections[3].sh_addralign = alignof(Elf64_Sym);
 
-  sections[4].sh_name = shstrtab_name;
-  sections[4].sh_type = SHT_STRTAB;
-  sections[4].sh_offset = shstrtab_offset;
-  sections[4].sh_size = shstrtab.size();
-  sections[4].sh_addralign = 1;
+  if (options.duplicate_symbol_table) {
+    sections[4] = sections[3];
+    sections[4].sh_name = dynsym_name;
+    sections[4].sh_type = SHT_DYNSYM;
+  }
+
+  sections[5].sh_name = shstrtab_name;
+  sections[5].sh_type = SHT_STRTAB;
+  sections[5].sh_offset = shstrtab_offset;
+  sections[5].sh_size = shstrtab.size();
+  sections[5].sh_addralign = 1;
   std::memcpy(image.data() + shoff, sections.data(), sizeof(sections));
   return image;
 }
@@ -390,15 +414,60 @@ TEST(AmdGpuCodeObjectValidation, RejectsAggregateSectionNameAmplificationBeforeA
 }
 
 TEST(AmdGpuCodeObjectValidation, AcceptsAggregateSymbolNamesEqualToImage) {
-  const auto image = make_elf_at_symbol_name_copy_boundary(false);
+  const auto image = make_elf_at_symbol_name_copy_boundary();
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.functions().size(), 32u);
 }
 
 TEST(AmdGpuCodeObjectValidation, RejectsAggregateSymbolNamesOneByteOverImage) {
-  const auto image = make_elf_at_symbol_name_copy_boundary(true);
+  const auto image = make_elf_at_symbol_name_copy_boundary({
+      .budget = SymbolNameBudget::OneByteOver,
+  });
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_FALSE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, IgnoresUnretainedNamesAboveRetainedNameBudget) {
+  const auto image = make_elf_at_symbol_name_copy_boundary({
+      .budget = SymbolNameBudget::OneByteOver,
+      .symbol_type = kElfSymbolTypeNone,
+      .symbol_section_index = SHN_UNDEF,
+  });
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+  EXPECT_TRUE(obj.functions().empty());
+  EXPECT_TRUE(obj.kernels().empty());
+}
+
+TEST(AmdGpuCodeObjectValidation, DeduplicatesRetainedNamesAcrossSymbolTables) {
+  const auto image = make_elf_at_symbol_name_copy_boundary({
+      .duplicate_symbol_table = true,
+  });
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.functions().size(), 32u);
+}
+
+TEST(AmdGpuCodeObjectValidation, PreservesFunctionsFromNoBitsTextSection) {
+  const auto image = make_elf_at_symbol_name_copy_boundary({
+      .code_section_type = SHT_NOBITS,
+  });
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.functions().size(), 32u);
+  EXPECT_TRUE(obj.text_sections().empty());
+}
+
+TEST(AmdGpuCodeObjectValidation, DoesNotTreatOtherNoBitsSectionAsText) {
+  const auto image = make_elf_at_symbol_name_copy_boundary({
+      .code_section_type = SHT_NOBITS,
+      .code_section_name = ".bss",
+  });
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_TRUE(obj.functions().empty());
+  EXPECT_TRUE(obj.text_sections().empty());
 }
 
 } // namespace
