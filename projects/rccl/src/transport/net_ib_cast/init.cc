@@ -529,7 +529,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     char addrline[SOCKET_NAME_MAXLEN + 1];
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, IbCastRelaxedOrderingEnabled ? "[RO]" : "",
-         IbCastIfName, ncclSocketToString(&IbCastIfAddr, addrline));
+         IbCastIfName, ncclSocketToString(&IbCastIfAddr, addrline, sizeof(addrline)));
 
     IbCastUseInline = ncclParamIbCastUseInline();
     IbCastGdrFlushDisable = ncclParamIbCastGdrFlushDisable();

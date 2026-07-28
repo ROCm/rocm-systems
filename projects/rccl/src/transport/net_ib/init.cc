@@ -562,7 +562,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     char addrline[SOCKET_NAME_MAXLEN + 1];
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
-         ncclIbIfName, ncclSocketToString(&ncclIbIfAddr, addrline));
+         ncclIbIfName, ncclSocketToString(&ncclIbIfAddr, addrline, sizeof(addrline)));
   }
 exit:
   return ret;

@@ -234,7 +234,7 @@ fail:
 void ncclOsSocketResetAccept(struct ncclSocket* sock) {
   char line[SOCKET_NAME_MAXLEN + 1];
   INFO(NCCL_NET | NCCL_INIT, "socketFinalizeAccept: didn't receive a valid magic from %s",
-       ncclSocketToString(&sock->addr, line));
+       ncclSocketToString(&sock->addr, line, sizeof(line)));
   // Ignore spurious connection and accept again
   (void)close(sock->socketDescriptor);
   sock->socketDescriptor = NCCL_INVALID_SOCKET;
@@ -276,12 +276,12 @@ static ncclResult_t socketConnectCheck(struct ncclSocket* sock, int errCode, con
       if (sock->errorRetries++ == ncclParamRetryCnt()) {
         sock->state = ncclSocketStateError;
         WARN("%s: connect to %s returned %s, exceeded error retry count after %d attempts", funcName,
-             ncclSocketToString(&sock->addr, line), strerror(errCode), sock->errorRetries);
+             ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errCode), sock->errorRetries);
         return ncclRemoteError;
       }
       unsigned int sleepTime = sock->errorRetries * ncclParamRetryTimeOut();
       INFO(NCCL_NET | NCCL_INIT, "%s: connect to %s returned %s, retrying (%d/%ld) after sleep for %u msec", funcName,
-           ncclSocketToString(&sock->addr, line), strerror(errCode), sock->errorRetries, ncclParamRetryCnt(),
+           ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errCode), sock->errorRetries, ncclParamRetryCnt(),
            sleepTime);
       std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
     }
@@ -289,7 +289,7 @@ static ncclResult_t socketConnectCheck(struct ncclSocket* sock, int errCode, con
     sock->state = ncclSocketStateConnecting;
   } else {
     sock->state = ncclSocketStateError;
-    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line), strerror(errCode));
+    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errCode));
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -315,7 +315,7 @@ ncclResult_t ncclOsSocketPollConnect(struct ncclSocket* sock) {
   if (ret == 0 || (ret < 0 && errno == EINTR)) {
     return ncclSuccess;
   } else if (ret < 0) {
-    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line), strerror(errno));
+    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errno));
     return ncclSystemError;
   }
 
@@ -348,7 +348,7 @@ ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr,
       }
       if (errno != EINTR && errno != EWOULDBLOCK && errno != EAGAIN) {
         WARN("ncclOsSocketProgressOpt: Call to %s %s failed : %s", (op == NCCL_SOCKET_RECV ? "recv from" : "send to"),
-             ncclSocketToString(&sock->addr, line), strerror(errno));
+             ncclSocketToString(&sock->addr, line, sizeof(line)), strerror(errno));
         return ncclRemoteError;
       } else {
         bytes = 0;
@@ -390,7 +390,7 @@ ncclResult_t ncclOsFindInterfaces(const char* prefixList, char* names, union ncc
     if (!(interface->ifa_flags & IFF_RUNNING)) continue;
 
     TRACE(NCCL_INIT | NCCL_NET, "Found interface %s:%s", interface->ifa_name,
-          ncclSocketToString((union ncclSocketAddress*)interface->ifa_addr, line));
+          ncclSocketToString((union ncclSocketAddress*)interface->ifa_addr, line, sizeof(line)));
 
     /* Allow the caller to force the socket family type */
     if (sock_family != -1 && family != sock_family) continue;
@@ -502,7 +502,7 @@ ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress*
     strncpy(ifName, interface->ifa_name, ifNameMaxSize);
 
     TRACE(NCCL_INIT | NCCL_NET, "NET : Found interface %s:%s in the same subnet as remote address %s",
-          interface->ifa_name, ncclSocketToString(localAddr, line), ncclSocketToString(remoteAddr, line_a));
+          interface->ifa_name, ncclSocketToString(localAddr, line, sizeof(line)), ncclSocketToString(remoteAddr, line_a, sizeof(line_a)));
     *found = 1;
   }
 

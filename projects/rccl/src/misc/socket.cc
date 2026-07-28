@@ -40,7 +40,7 @@ static ncclResult_t socketProgress(int op, struct ncclSocket* sock, void* ptr, i
     } else {
       char line[SOCKET_NAME_MAXLEN + 1];
       WARN("socketProgress: Connection closed by remote peer %s",
-           ncclSocketToString(&sock->addr, line, /*numericHostForm*/ 0));
+           ncclSocketToString(&sock->addr, line, sizeof(line), /*numericHostForm*/ 0));
       return ncclRemoteError;
     }
   }
@@ -126,7 +126,7 @@ ncclResult_t ncclSocketListen(struct ncclSocket* sock) {
 
 #ifdef ENABLE_TRACE
   char line[SOCKET_NAME_MAXLEN + 1];
-  TRACE(NCCL_INIT | NCCL_NET, "Listening on socket %s", ncclSocketToString(&sock->addr, line));
+  TRACE(NCCL_INIT | NCCL_NET, "Listening on socket %s", ncclSocketToString(&sock->addr, line, sizeof(line)));
 #endif
 
   SYSCHECK(listen(sock->socketDescriptor, 16384), "listen");
@@ -141,7 +141,7 @@ ncclResult_t ncclSocketListen(struct ncclSocket* sock) {
  *
  * Output: "IPv4/IPv6 address<port>"
  */
-const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, const int numericHostForm /*= 1*/) {
+const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, size_t bufLen, const int numericHostForm /*= 1*/) {
   const struct sockaddr* saddr = &addr->sa;
   char host[NI_MAXHOST], service[NI_MAXSERV];
   int flag = NI_NUMERICSERV | (numericHostForm ? NI_NUMERICHOST : 0);
@@ -151,7 +151,7 @@ const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, c
    * (When not set, this will still happen in case the node's name cannot be determined.)
    */
   if (getnameinfo(saddr, sizeof(union ncclSocketAddress), host, NI_MAXHOST, service, NI_MAXSERV, flag)) goto fail;
-  sprintf(buf, "%s<%s>", host, service);
+  snprintf(buf, bufLen, "%s<%s>", host, service);
   return buf;
 fail:
   if (buf) buf[0] = '\0';
@@ -347,7 +347,7 @@ static ncclResult_t socketFinalizeAccept(struct ncclSocket* sock) {
     memcpy(&type, sock->finalizeBuffer, sizeof(type));
   }
   if (type != sock->type) {
-    WARN("socketFinalizeAccept from %s: wrong type %d != %d", ncclSocketToString(&sock->addr, line), type, sock->type);
+    WARN("socketFinalizeAccept from %s: wrong type %d != %d", ncclSocketToString(&sock->addr, line, sizeof(line)), type, sock->type);
     (void)ncclSocketClose(sock);
     sock->state = ncclSocketStateError;
     return ncclInternalError;
@@ -449,7 +449,7 @@ ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
     if (sock->state == ncclSocketStateError) return ncclRemoteError;
     return ncclInternalError;
   }
-  TRACE(NCCL_INIT | NCCL_NET, "Connecting to socket %s", ncclSocketToString(&sock->addr, line));
+  TRACE(NCCL_INIT | NCCL_NET, "Connecting to socket %s", ncclSocketToString(&sock->addr, line, sizeof(line)));
 
   sock->state = ncclSocketStateConnecting;
   sock->finalizeCounter = 0;
@@ -555,7 +555,7 @@ ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddre
     if (family != AF_INET && family != AF_INET6) {
       char line[SOCKET_NAME_MAXLEN + 1];
       WARN("ncclSocketInit: connecting to address %s with family %d is neither AF_INET(%d) nor AF_INET6(%d)",
-           ncclSocketToString(&sock->addr, line), family, AF_INET, AF_INET6);
+           ncclSocketToString(&sock->addr, line, sizeof(line)), family, AF_INET, AF_INET6);
       ret = ncclInternalError;
       goto exit;
     }
