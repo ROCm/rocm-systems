@@ -139,7 +139,26 @@ TEST(ConSanTransformMemoryTest, ReservesPeakOwnershipUnderAbsoluteGrowth) {
       .absolute_bytes = 4,
   };
   EXPECT_EQ(rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(8, absolute),
-            116u);
+            152u);
+}
+
+TEST(ConSanTransformMemoryTest, ReportsGoverningFinalValidationPhase) {
+  const rocjitsu::ConSanPatchedImageGrowthLimit absolute = {
+      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+      .absolute_bytes = 4,
+  };
+  const auto estimate =
+      rocjitsu::consan_hook::consan_transform_major_image_reservation(8, absolute);
+  ASSERT_TRUE(estimate);
+  EXPECT_EQ(estimate->reservation_bytes, 152u);
+  EXPECT_EQ(estimate->maximum_image_bytes, 12u);
+  EXPECT_EQ(estimate->ownership.phase,
+            rocjitsu::consan_hook::ConSanTransformOwnershipPhase::FinalValidation);
+  EXPECT_EQ(estimate->ownership.input_image_copies, 7u);
+  EXPECT_EQ(estimate->ownership.maximum_image_copies, 8u);
+  EXPECT_STREQ(
+      rocjitsu::consan_hook::consan_transform_ownership_phase_name(estimate->ownership.phase),
+      "final-validation");
 }
 
 TEST(ConSanTransformMemoryTest, MatchesAbsoluteReservationUnderEquivalentInputPercent) {
@@ -148,7 +167,7 @@ TEST(ConSanTransformMemoryTest, MatchesAbsoluteReservationUnderEquivalentInputPe
       .input_percent = 50,
   };
   EXPECT_EQ(rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(8, relative),
-            116u);
+            152u);
 }
 
 TEST(ConSanTransformMemoryTest, PinsDefaultPolicyReservationMagnitude) {
@@ -158,7 +177,23 @@ TEST(ConSanTransformMemoryTest, PinsDefaultPolicyReservationMagnitude) {
   };
   EXPECT_EQ(
       rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(8, default_policy),
-      1811939408u);
+      2214592608u);
+}
+
+TEST(ConSanTransformMemoryTest, ReportsGoverningCompositePhaseForDefaultGrowth) {
+  const rocjitsu::ConSanPatchedImageGrowthLimit default_policy = {
+      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+      .absolute_bytes = rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes,
+  };
+  const auto estimate =
+      rocjitsu::consan_hook::consan_transform_major_image_reservation(8, default_policy);
+  ASSERT_TRUE(estimate);
+  EXPECT_EQ(estimate->ownership.phase,
+            rocjitsu::consan_hook::ConSanTransformOwnershipPhase::CompositeIncrementalPatch);
+  EXPECT_EQ(estimate->ownership.input_image_copies, 1u);
+  EXPECT_EQ(estimate->ownership.maximum_image_copies,
+            rocjitsu::consan_hook::consan_transform_max_maximum_image_copies());
+  EXPECT_EQ(rocjitsu::consan_hook::consan_transform_max_total_copies(), 15u);
 }
 
 TEST(ConSanTransformMemoryTest, RejectsInputPlusGrowthOverflow) {
@@ -173,7 +208,8 @@ TEST(ConSanTransformMemoryTest, RejectsInputPlusGrowthOverflow) {
 TEST(ConSanTransformMemoryTest, RejectsMaximumImagePhaseMultiplyOverflow) {
   const rocjitsu::ConSanPatchedImageGrowthLimit multiply_overflow = {
       .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
-      .absolute_bytes = std::numeric_limits<uint64_t>::max() / 9,
+      .absolute_bytes = std::numeric_limits<uint64_t>::max() /
+                        rocjitsu::consan_hook::consan_transform_max_maximum_image_copies(),
   };
   EXPECT_FALSE(
       rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(8, multiply_overflow));
@@ -194,8 +230,10 @@ TEST(ConSanTransformMemoryTest, RejectsPhaseReservationSumOverflow) {
       .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = 0,
   };
+  constexpr uint64_t maximum_total_copies =
+      rocjitsu::consan_hook::consan_transform_max_total_copies();
   EXPECT_FALSE(rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(
-      std::numeric_limits<uint64_t>::max() / 11 + 1, no_growth));
+      std::numeric_limits<uint64_t>::max() / maximum_total_copies + 1, no_growth));
 }
 
 TEST(ConSanTransformMemoryTest, ReturnsExactLargestNoGrowthReservation) {
@@ -203,9 +241,11 @@ TEST(ConSanTransformMemoryTest, ReturnsExactLargestNoGrowthReservation) {
       .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = 0,
   };
-  const uint64_t input = std::numeric_limits<uint64_t>::max() / 11;
+  constexpr uint64_t maximum_total_copies =
+      rocjitsu::consan_hook::consan_transform_max_total_copies();
+  const uint64_t input = std::numeric_limits<uint64_t>::max() / maximum_total_copies;
   EXPECT_EQ(rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(input, no_growth),
-            std::optional<uint64_t>(input * 11));
+            std::optional<uint64_t>(input * maximum_total_copies));
 }
 
 TEST(ConSanTransformMemoryTest, RejectsUnknownGrowthPolicyKind) {
@@ -1671,7 +1711,7 @@ TEST(HsaHooksUnitTest, ConSanAcceptsBoundaryProcessMemoryLimits) {
 TEST(HsaHooksUnitTest, ConSanWarnsWhenTransformLimitCannotAdmitAnyNonemptyObject) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "45");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "55");
   reset_code_object_observations();
 
   testing::internal::CaptureStderr();
@@ -1682,16 +1722,19 @@ TEST(HsaHooksUnitTest, ConSanWarnsWhenTransformLimitCannotAdmitAnyNonemptyObject
   }
   const std::string log = testing::internal::GetCapturedStderr();
   EXPECT_NE(log.find("cannot admit any nonempty code object; "
-                     "the smallest possible reservation is 46 bytes"),
+                     "the smallest possible reservation is 56 bytes"),
             std::string::npos)
       << log;
-  EXPECT_NE(log.find("maximum across 3 modeled ownership phases"), std::string::npos) << log;
+  EXPECT_NE(log.find("phase=composite-incremental-patch: 1 * input bytes + 11 * "
+                     "(input bytes + maximum growth bytes)"),
+            std::string::npos)
+      << log;
 }
 
 TEST(HsaHooksUnitTest, ConSanWarnsWhenRelativeGrowthTransformLimitCannotAdmitAnyObject) {
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", "37");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "10");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "14");
   reset_code_object_observations();
 
   testing::internal::CaptureStderr();
@@ -1702,7 +1745,11 @@ TEST(HsaHooksUnitTest, ConSanWarnsWhenRelativeGrowthTransformLimitCannotAdmitAny
   }
   const std::string log = testing::internal::GetCapturedStderr();
   EXPECT_NE(log.find("cannot admit any nonempty code object; "
-                     "the smallest possible reservation is 11 bytes"),
+                     "the smallest possible reservation is 15 bytes"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("phase=final-validation: 7 * input bytes + 8 * "
+                     "(input bytes + maximum growth bytes)"),
             std::string::npos)
       << log;
 }
@@ -1711,7 +1758,7 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitFailsOpenBeforeTransform) {
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "115");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "151");
 
   g_transform_override_result = process_growth_replacement_result();
 
@@ -1735,7 +1782,7 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitFailsOpenBeforeTransform) {
   EXPECT_TRUE(g_transform_override_flavors.empty());
   EXPECT_EQ(g_loaded_code_object_readers, (std::vector<uint64_t>{reader.handle}));
   EXPECT_NE(log.find("process concurrent transform limit exceeded: reader=101 input_image=8 "
-                     "live=0 reservation=116 required=116 limit=115"),
+                     "live=0 reservation=152 required=152 limit=151"),
             std::string::npos)
       << log;
   EXPECT_NE(log.find("analysis_complete=false static_complete=false "
@@ -1749,7 +1796,7 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitFailsClosedBeforeTransform)
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], true);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "115");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "151");
 
   g_transform_override_result = process_growth_replacement_result();
 
@@ -1777,7 +1824,7 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitTracksAndRefundsReservation
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "116");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "152");
 
   g_transform_override_result = process_growth_replacement_result();
   g_block_first_transform = true;
@@ -1833,9 +1880,9 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitTracksAndRefundsReservation
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{9}), HSA_STATUS_SUCCESS);
   hook.unload();
   const std::string log = testing::internal::GetCapturedStderr();
-  EXPECT_NE(log.find("live=116 reservation=116 required=232 limit=116"), std::string::npos) << log;
+  EXPECT_NE(log.find("live=152 reservation=152 required=304 limit=152"), std::string::npos) << log;
   EXPECT_NE(log.find("transform admission memory live_bytes=0 "
-                     "peak_reserved_bytes=116 process_ceiling=116"),
+                     "peak_reserved_bytes=152 process_ceiling=152"),
             std::string::npos)
       << log;
 }
@@ -1844,6 +1891,7 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformTracksUnlimitedPeak) {
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   g_transform_override_result = process_growth_replacement_result();
 
   FakeApiTable api;
@@ -1865,8 +1913,13 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformTracksUnlimitedPeak) {
   const std::string log = testing::internal::GetCapturedStderr();
 
   EXPECT_EQ(g_transform_override_flavors.size(), 1u);
+  EXPECT_NE(log.find("ConSan transform admission request reader=101 input_image=8 "
+                     "reservation=152 phase=final-validation phase_input_copies=7 "
+                     "phase_maximum_copies=8"),
+            std::string::npos)
+      << log;
   EXPECT_NE(log.find("transform admission memory live_bytes=0 "
-                     "peak_reserved_bytes=116 process_ceiling=unlimited"),
+                     "peak_reserved_bytes=152 process_ceiling=unlimited"),
             std::string::npos)
       << log;
 }
@@ -1935,7 +1988,7 @@ TEST(HsaHooksUnitTest, ConSanReleasesTransformReservationBeforeOriginalLoad) {
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "116");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "152");
   g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
   g_block_first_loader_call = true;
 
@@ -1987,7 +2040,7 @@ TEST(HsaHooksUnitTest, ConSanReleasesTransformReservationBeforeRetentionFallback
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "116");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "152");
   ScopedEnvVar process_image_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES", "0");
   g_transform_override_result = process_growth_replacement_result();
   g_block_first_loader_call = true;
@@ -2040,7 +2093,7 @@ TEST(HsaHooksUnitTest, ConSanReleasesTransformReservationOnEarlyRejection) {
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "116");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "152");
   rocjitsu::ConSanResult unresolved = process_growth_replacement_result();
   unresolved.arch = ROCJITSU_CODE_ARCH_INVALID;
   unresolved.semantic_arch_required = true;
@@ -2073,7 +2126,7 @@ TEST(HsaHooksUnitTest, ConSanPreservesLiveTransformReservationAcrossUnloadAndRel
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "116");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "152");
   g_transform_override_result = process_growth_replacement_result();
   g_block_first_transform = true;
 
@@ -2151,10 +2204,10 @@ TEST(HsaHooksUnitTest, ConSanPreservesLiveTransformReservationAcrossUnloadAndRel
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{9}), HSA_STATUS_SUCCESS);
   hook.unload();
   const std::string log = testing::internal::GetCapturedStderr();
-  EXPECT_NE(log.find("live_bytes=116 peak_reserved_bytes=116 process_ceiling=116"),
+  EXPECT_NE(log.find("live_bytes=152 peak_reserved_bytes=152 process_ceiling=152"),
             std::string::npos)
       << log;
-  EXPECT_NE(log.find("live=116 reservation=116 required=232 limit=116"), std::string::npos) << log;
+  EXPECT_NE(log.find("live=152 reservation=152 required=304 limit=152"), std::string::npos) << log;
   EXPECT_EQ(log.find("transform reservation refund exceeded the live total"), std::string::npos)
       << log;
 }

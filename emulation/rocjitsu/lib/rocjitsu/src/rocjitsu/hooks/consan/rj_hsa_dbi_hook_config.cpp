@@ -549,8 +549,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     warn_ignored_env("RJ_CONSAN_MOI_BACKEND", "RJ_CONSAN_MOI_ENGINE takes precedence");
 
   if (config.process_concurrent_transform_limit_bytes) {
-    const std::optional<uint64_t> minimum_reservation =
-        consan_transform_major_image_reservation_bytes(1, config.patched_image_growth_limit);
+    const std::optional<ConSanTransformReservationEstimate> minimum_reservation =
+        consan_transform_major_image_reservation(1, config.patched_image_growth_limit);
     if (!minimum_reservation) {
       std::fprintf(
           stderr,
@@ -559,16 +559,20 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
           "code object because the configured per-object growth policy makes the smallest "
           "major-image reservation overflow uint64\n",
           static_cast<unsigned long long>(*config.process_concurrent_transform_limit_bytes));
-    } else if (*config.process_concurrent_transform_limit_bytes < *minimum_reservation) {
+    } else if (*config.process_concurrent_transform_limit_bytes <
+               minimum_reservation->reservation_bytes) {
       std::fprintf(
           stderr,
           "[rocjitsu-dbi-hooks] warning: "
           "RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=%llu cannot admit any nonempty "
           "code object; the smallest possible reservation is %llu bytes "
-          "(maximum across %zu modeled ownership phases)\n",
+          "(phase=%s: %llu * input bytes + %llu * "
+          "(input bytes + maximum growth bytes))\n",
           static_cast<unsigned long long>(*config.process_concurrent_transform_limit_bytes),
-          static_cast<unsigned long long>(*minimum_reservation),
-          kConSanTransformOwnershipPhases.size());
+          static_cast<unsigned long long>(minimum_reservation->reservation_bytes),
+          consan_transform_ownership_phase_name(minimum_reservation->ownership.phase),
+          static_cast<unsigned long long>(minimum_reservation->ownership.input_image_copies),
+          static_cast<unsigned long long>(minimum_reservation->ownership.maximum_image_copies));
     }
   }
 

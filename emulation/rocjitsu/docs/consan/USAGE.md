@@ -165,29 +165,32 @@ acquired before semantic inventory. It is a conservative admission unit for
 major ELF and section storage, not a strict RSS limit: smaller analysis
 metadata, allocator bookkeeping, and unrelated process memory are outside the
 model. Let `I` be the original input size and `M` be `I` plus the configured
-per-object maximum growth. The modeled phases are `I + 8*M` for an ordinary
-incremental patch, `I + 9*M` while independently validated composite mutation
-storage remains live, and `5*I + 6*M` during final validation. Parser units
-cover the image, section-header storage, bounded payload, and bounded names.
-Admission uses
-the largest of those phase values. The parser rejects aggregate copied section
-payload and aggregate section-name bytes larger than its backing image. The
-patcher preallocates every file insertion, commits same-size rewrites directly,
-moves every emitted image, and avoids a separate padding buffer so vector
-growth cannot add an unmodelled geometric full-image allocation. The two
-retained-image controls are charged together after transformation, when the
-exact replacement size is known: one counts the full image and the other counts
-only its growth delta. Admission and ownership are one transaction, so failure
-of either retained budget commits neither charge. Failed replacement-reader
+per-object maximum growth. The modeled phases are `I + 10*M` for an ordinary
+incremental patch, `I + 11*M` while independently validated composite mutation
+storage remains live, and `7*I + 8*M` during final validation. Each parser has
+six major-image units: its image, section objects and headers, bounded payload,
+bounded section names, and up to two retained copies of bounded symbol names.
+Section headers, transient symbol names, and metadata names are views into the
+image rather than duplicate owning collections.
+Admission uses the largest phase value and reports the governing phase and
+coefficients. The parser rejects aggregate copied section payload, section-name
+bytes, or symbol-name bytes larger than its backing image. The patcher
+preallocates every file insertion, commits same-size rewrites directly, moves
+every emitted image, and avoids a separate padding buffer so vector growth
+cannot add an unmodelled geometric full-image allocation. The two retained-
+image controls are charged together after transformation, when the exact
+replacement size is known: one counts the full image and the other counts only
+its growth delta. Admission and ownership are one transaction, so failure of
+either retained budget commits neither charge. Failed replacement-reader
 creation or loading releases every local storage owner before refunding the
-retained charge or invoking a fallback loader. Unload starts a new
-peak-reporting interval without releasing live transform charges or retained
+retained charge or invoking a fallback loader. Unload starts a new peak-
+reporting interval without releasing live transform charges or retained
 replacement ownership; the latter remains until an executable destruction
-observed while the hook is active, or process exit. New HSA API calls made after
-the tool's `OnUnload` callback and before a synthetic reinstall are outside the
-hook lifetime and cannot be reconciled on reload. Teardown reports the live and
-peak values for all three controls, including baseline runs where the ceilings
-are unlimited.
+observed while the hook is active, or process exit. New HSA API calls made
+after the tool's `OnUnload` callback and before a synthetic reinstall are
+outside the hook lifetime and cannot be reconciled on reload. Teardown reports
+the live and peak values for all three controls, including baseline runs where
+the ceilings are unlimited.
 
 For one transition, the old `RJ_CONSAN_FLAVOR`, `RJ_CONSAN_MOI_ENGINE`, and
 `RJ_CONSAN_MOI_BACKEND` variables remain accepted with deprecation warnings.

@@ -186,6 +186,96 @@ bool set_aggregate_copied_section_bytes(std::vector<uint8_t> &image, uint64_t ag
   return true;
 }
 
+std::vector<uint8_t> make_elf_at_symbol_name_copy_boundary(bool one_byte_over) {
+  constexpr size_t kImageBytes = 4096;
+  constexpr size_t kSymbolCount = 32;
+  constexpr size_t kStringTableBytes = 129;
+  constexpr uint64_t kTextAddress = 0x1000;
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
+  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+
+  std::array<uint8_t, kStringTableBytes> strtab{};
+  std::fill(strtab.begin() + 1, strtab.end(), static_cast<uint8_t>('x'));
+  if (one_byte_over)
+    strtab[0] = static_cast<uint8_t>('x');
+
+  std::array<Elf64_Sym, kSymbolCount> symbols{};
+  for (size_t i = 0; i < symbols.size(); ++i) {
+    symbols[i].st_name = one_byte_over && i == 0 ? 0 : 1;
+    symbols[i].st_info = static_cast<uint8_t>((1u << 4) | kElfSymbolTypeFunc);
+    symbols[i].st_shndx = 1;
+    symbols[i].st_value = kTextAddress;
+    symbols[i].st_size = sizeof(uint32_t);
+  }
+
+  constexpr uint64_t text_offset = 0x100;
+  const uint64_t strtab_offset = text_offset + sizeof(uint32_t);
+  const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8);
+  const uint64_t shstrtab_offset = symtab_offset + sizeof(symbols);
+  const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t section_count = 5;
+  static_assert(kSymbolCount * (kStringTableBytes - 1) == kImageBytes);
+  if (shoff + section_count * sizeof(Elf64_Shdr) > kImageBytes)
+    return {};
+
+  std::vector<uint8_t> image(kImageBytes, 0);
+  Elf64_Ehdr header{};
+  std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  header.e_ident[EI_CLASS] = ELFCLASS64;
+  header.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  header.e_type = ET_REL;
+  header.e_machine = EM_AMDGPU;
+  header.e_version = 1;
+  header.e_shoff = shoff;
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  header.e_ehsize = sizeof(Elf64_Ehdr);
+  header.e_shentsize = sizeof(Elf64_Shdr);
+  header.e_shnum = section_count;
+  header.e_shstrndx = 4;
+  std::memcpy(image.data(), &header, sizeof(header));
+
+  const uint32_t text_word = 0xbf800000u;
+  std::memcpy(image.data() + text_offset, &text_word, sizeof(text_word));
+  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
+  std::memcpy(image.data() + symtab_offset, symbols.data(), sizeof(symbols));
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<Elf64_Shdr, section_count> sections{};
+  sections[1].sh_name = text_name;
+  sections[1].sh_type = SHT_PROGBITS;
+  sections[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  sections[1].sh_addr = kTextAddress;
+  sections[1].sh_offset = text_offset;
+  sections[1].sh_size = sizeof(text_word);
+  sections[1].sh_addralign = alignof(uint32_t);
+
+  sections[2].sh_name = strtab_name;
+  sections[2].sh_type = SHT_STRTAB;
+  sections[2].sh_offset = strtab_offset;
+  sections[2].sh_size = strtab.size();
+  sections[2].sh_addralign = 1;
+
+  sections[3].sh_name = symtab_name;
+  sections[3].sh_type = SHT_SYMTAB;
+  sections[3].sh_offset = symtab_offset;
+  sections[3].sh_size = sizeof(symbols);
+  sections[3].sh_link = 2;
+  sections[3].sh_entsize = sizeof(Elf64_Sym);
+  sections[3].sh_addralign = alignof(Elf64_Sym);
+
+  sections[4].sh_name = shstrtab_name;
+  sections[4].sh_type = SHT_STRTAB;
+  sections[4].sh_offset = shstrtab_offset;
+  sections[4].sh_size = shstrtab.size();
+  sections[4].sh_addralign = 1;
+  std::memcpy(image.data() + shoff, sections.data(), sizeof(sections));
+  return image;
+}
+
 // CDNA: a granulated field of 0 encodes a real 8-SGPR allocation.
 TEST(AmdGpuCodeObjectSgpr, CdnaGranulatedZeroIsEightSgprs) {
   const auto image = make_elf_with_kds({{"k", 0}});
@@ -295,6 +385,18 @@ TEST(AmdGpuCodeObjectValidation, RejectsAggregateSectionNameAmplificationBeforeA
     section.sh_name = 1;
   std::memcpy(image.data() + kSectionTableOffset, sections.data(), sizeof(sections));
 
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_FALSE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, AcceptsAggregateSymbolNamesEqualToImage) {
+  const auto image = make_elf_at_symbol_name_copy_boundary(false);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, RejectsAggregateSymbolNamesOneByteOverImage) {
+  const auto image = make_elf_at_symbol_name_copy_boundary(true);
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_FALSE(obj.is_valid());
 }

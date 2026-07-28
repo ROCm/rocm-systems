@@ -1518,6 +1518,9 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   EXPECT_EQ(*replacement.required_file_growth(), 2u * sizeof(uint32_t));
 
   auto patched_bytes = std::move(patcher).emit();
+  // The ownership model counts size, not unspecified allocator slack. This
+  // intentionally qualifies supported standard-library implementations:
+  // reserve() rounding must update the model rather than weaken this check.
   EXPECT_EQ(patched_bytes.capacity(), patched_bytes.size())
       << "every grown transactional image must use its exact final capacity";
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());

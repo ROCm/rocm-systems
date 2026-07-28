@@ -10,6 +10,7 @@
 #include "hsa/AMDHSAKernelDescriptor.h" // Check SGPR allocation
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -69,19 +70,6 @@ struct FunctionSymbolInfo {
   uint64_t code_size = 0;
   bool code_size_inferred_from_zero = false;
 };
-
-[[nodiscard]] std::optional<uint64_t> symbol_file_offset(const Elf64_Sym &sym,
-                                                         const std::vector<Elf64_Shdr> &shdrs) {
-  if (sym.st_shndx >= shdrs.size())
-    return std::nullopt;
-  const auto &section = shdrs[sym.st_shndx];
-  if (sym.st_value < section.sh_addr)
-    return std::nullopt;
-  const uint64_t section_delta = sym.st_value - section.sh_addr;
-  if (section_delta > section.sh_size)
-    return std::nullopt;
-  return section.sh_offset + section_delta;
-}
 
 struct MetadataCursor {
   std::span<const uint8_t> bytes;
@@ -303,9 +291,9 @@ struct KernelMetadata {
   return true;
 }
 
-[[nodiscard]] std::unordered_map<std::string, KernelMetadata>
+[[nodiscard]] std::unordered_map<std::string_view, KernelMetadata>
 parse_kernel_metadata(std::span<const uint8_t> payload) {
-  std::unordered_map<std::string, KernelMetadata> result;
+  std::unordered_map<std::string_view, KernelMetadata> result;
   MetadataCursor root{payload};
   uint32_t root_entries = 0;
   if (!read_metadata_collection_count(root, /*map=*/true, root_entries))
@@ -326,7 +314,7 @@ parse_kernel_metadata(std::span<const uint8_t> payload) {
       uint32_t kernel_entries = 0;
       if (!read_metadata_collection_count(root, /*map=*/true, kernel_entries))
         return {};
-      std::optional<std::string> name;
+      std::optional<std::string_view> name;
       KernelMetadata metadata;
       for (uint32_t kernel_entry = 0; kernel_entry < kernel_entries; ++kernel_entry) {
         std::string_view kernel_key;
@@ -385,9 +373,9 @@ parse_kernel_metadata(std::span<const uint8_t> payload) {
 
 [[nodiscard]] uint64_t align4(uint64_t value) { return (value + 3u) & ~uint64_t{3}; }
 
-[[nodiscard]] std::unordered_map<std::string, KernelMetadata>
+[[nodiscard]] std::unordered_map<std::string_view, KernelMetadata>
 read_kernel_metadata(std::span<const uint8_t> image, const Elf64_Ehdr &header) {
-  std::unordered_map<std::string, KernelMetadata> result;
+  std::unordered_map<std::string_view, KernelMetadata> result;
   if (header.e_phentsize != sizeof(Elf64_Phdr) || header.e_phoff > image.size() ||
       static_cast<uint64_t>(header.e_phnum) * sizeof(Elf64_Phdr) > image.size() - header.e_phoff) {
     return result;
@@ -417,7 +405,7 @@ read_kernel_metadata(std::span<const uint8_t> image, const Elf64_Ehdr &header) {
         continue;
       auto parsed =
           parse_kernel_metadata(image.subspan(static_cast<size_t>(desc_offset), note.n_descsz));
-      result.insert(parsed.begin(), parsed.end());
+      result.merge(parsed);
     }
   }
   return result;
@@ -577,31 +565,39 @@ void AmdGpuCodeObject::load_sections() {
     return;
   }
 
-  std::vector<Elf64_Shdr> section_hdrs(static_cast<size_t>(num_shdrs));
-  std::memcpy(section_hdrs.data(), image_.data() + shoff, section_hdrs.size() * sizeof(Elf64_Shdr));
+  const size_t section_count = static_cast<size_t>(num_shdrs);
+  const auto section_header = [&](size_t index) {
+    Elf64_Shdr shdr{};
+    assert(index < section_count);
+    std::memcpy(&shdr, image_.data() + shoff + index * sizeof(Elf64_Shdr), sizeof(shdr));
+    return shdr;
+  };
 
   int shstrndx = header_->sectionHeaderStrIdx();
-  if (shstrndx < 0 || static_cast<size_t>(shstrndx) >= section_hdrs.size()) {
+  if (shstrndx < 0 || static_cast<size_t>(shstrndx) >= section_count) {
     is_valid_ = false;
     return;
   }
 
-  auto &shstrtab = section_hdrs[shstrndx];
+  const Elf64_Shdr shstrtab = section_header(static_cast<size_t>(shstrndx));
   if (!fits_in_bounds(shstrtab.sh_offset, shstrtab.sh_size, image_.size())) {
     is_valid_ = false;
     return;
   }
   const char *shstrtab_data = image_.data() + shstrtab.sh_offset;
+  const auto section_name = [&](const Elf64_Shdr &shdr) -> std::string_view {
+    if (shdr.sh_name >= shstrtab.sh_size)
+      return {};
+    const size_t max_len = static_cast<size_t>(shstrtab.sh_size - shdr.sh_name);
+    return {shstrtab_data + shdr.sh_name, strnlen(shstrtab_data + shdr.sh_name, max_len)};
+  };
 
-  // Bound aggregate string ownership before materializing section_names.
+  // Bound aggregate string ownership before materializing HsaSection names.
   // Duplicate offsets and long unterminated suffixes must not amplify one
   // string table into a quadratic parser working set.
   uint64_t copied_section_name_bytes = 0;
-  for (const Elf64_Shdr &shdr : section_hdrs) {
-    if (shdr.sh_name >= shstrtab.sh_size)
-      continue;
-    const size_t max_len = shstrtab.sh_size - shdr.sh_name;
-    const size_t name_len = strnlen(shstrtab_data + shdr.sh_name, max_len);
+  for (size_t i = 0; i < section_count; ++i) {
+    const size_t name_len = section_name(section_header(i)).size();
     if (name_len > image_.size() - copied_section_name_bytes) {
       is_valid_ = false;
       return;
@@ -609,24 +605,16 @@ void AmdGpuCodeObject::load_sections() {
     copied_section_name_bytes += name_len;
   }
 
-  std::vector<std::string> section_names(section_hdrs.size());
-  for (size_t i = 0; i < section_hdrs.size(); ++i) {
-    const auto &shdr = section_hdrs[i];
-    if (shdr.sh_name >= shstrtab.sh_size)
-      continue;
-    size_t max_len = shstrtab.sh_size - shdr.sh_name;
-    section_names[i] =
-        std::string(shstrtab_data + shdr.sh_name, strnlen(shstrtab_data + shdr.sh_name, max_len));
-  }
-
   // Section payloads are copied into owning Section objects. Bound their
   // aggregate before allocating so duplicate or overlapping headers cannot
   // amplify one input image into an unbounded parser working set.
   uint64_t copied_section_bytes = 0;
-  for (size_t i = 0; i < section_hdrs.size(); ++i) {
-    const auto &shdr = section_hdrs[i];
-    if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS || section_names[i].empty())
+  std::vector<bool> text_section_indices(section_count, false);
+  for (size_t i = 0; i < section_count; ++i) {
+    const Elf64_Shdr shdr = section_header(i);
+    if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS || section_name(shdr).empty()) {
       continue;
+    }
     if (!fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size()) ||
         shdr.sh_size > image_.size() - copied_section_bytes) {
       is_valid_ = false;
@@ -635,81 +623,121 @@ void AmdGpuCodeObject::load_sections() {
     copied_section_bytes += shdr.sh_size;
   }
 
-  for (size_t i = 0; i < section_hdrs.size(); ++i) {
-    const auto &shdr = section_hdrs[i];
+  for (size_t i = 0; i < section_count; ++i) {
+    const Elf64_Shdr shdr = section_header(i);
     if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS)
       continue;
-    if (section_names[i].empty())
+    const std::string_view sec_name = section_name(shdr);
+    if (sec_name.empty())
       continue;
-
-    const std::string &sec_name = section_names[i];
 
     auto sec_data = std::make_unique<char[]>(shdr.sh_size);
     std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
-    sections_.emplace_back(std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr));
+    sections_.emplace_back(
+        std::make_unique<HsaSection>(std::string(sec_name), std::move(sec_data), shdr));
 
-    if (sec_name == ".text")
+    if (sec_name == ".text") {
+      text_section_indices[i] = true;
       text_sections_.push_back(sections_.back().get());
-    else if (sec_name == ".rodata")
+    } else if (sec_name == ".rodata") {
       rodata_sections_.push_back(sections_.back().get());
+    }
   }
 
   // Parse symbol table for kernel descriptor offsets.
   // Scan both SHT_SYMTAB and SHT_DYNSYM — stripped code objects may
   // only have the latter.
-  std::unordered_map<std::string, uint64_t> descriptor_file_offsets;
-  std::unordered_map<std::string, FunctionSymbolInfo> function_symbols;
-  std::unordered_map<std::string, bool> dynamic_stack_symbols;
-  for (size_t i = 0; i < section_hdrs.size(); ++i) {
-    if (section_hdrs[i].sh_type != SHT_SYMTAB && section_hdrs[i].sh_type != SHT_DYNSYM)
+  uint64_t copied_symbol_name_bytes = 0;
+  for (size_t i = 0; i < section_count; ++i) {
+    const Elf64_Shdr symtab_shdr = section_header(i);
+    if (symtab_shdr.sh_type != SHT_SYMTAB && symtab_shdr.sh_type != SHT_DYNSYM)
       continue;
-    auto &symtab_shdr = section_hdrs[i];
-    if (symtab_shdr.sh_entsize == 0)
+    if (symtab_shdr.sh_entsize < sizeof(Elf64_Sym) ||
+        !fits_in_bounds(symtab_shdr.sh_offset, symtab_shdr.sh_size, image_.size()) ||
+        symtab_shdr.sh_link >= section_count) {
       continue;
-    if (symtab_shdr.sh_entsize < sizeof(Elf64_Sym))
-      continue;
-    if (!fits_in_bounds(symtab_shdr.sh_offset, symtab_shdr.sh_size, image_.size()))
-      continue;
-
-    // Read the string table linked to this symtab.
-    if (symtab_shdr.sh_link >= section_hdrs.size())
-      continue;
-    auto &strtab_shdr = section_hdrs[symtab_shdr.sh_link];
+    }
+    const Elf64_Shdr strtab_shdr = section_header(symtab_shdr.sh_link);
     if (!fits_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image_.size()))
       continue;
     const char *sym_strtab = image_.data() + strtab_shdr.sh_offset;
+    const size_t num_syms = symtab_shdr.sh_size / symtab_shdr.sh_entsize;
+    const char *symtab_data = image_.data() + symtab_shdr.sh_offset;
+    for (size_t sym_index = 0; sym_index < num_syms; ++sym_index) {
+      const char *sym_data = symtab_data + sym_index * symtab_shdr.sh_entsize;
+      Elf64_Sym sym{};
+      std::memcpy(&sym, sym_data, sizeof(sym));
+      if (sym.st_name >= strtab_shdr.sh_size)
+        continue;
+      const size_t max_len = static_cast<size_t>(strtab_shdr.sh_size - sym.st_name);
+      const size_t name_len = strnlen(sym_strtab + sym.st_name, max_len);
+      if (name_len > image_.size() - copied_symbol_name_bytes) {
+        is_valid_ = false;
+        return;
+      }
+      copied_symbol_name_bytes += name_len;
+    }
+  }
 
-    // Read symbols.
-    size_t num_syms = symtab_shdr.sh_size / symtab_shdr.sh_entsize;
+  std::unordered_map<std::string_view, uint64_t> kernel_descriptor_offsets;
+  std::unordered_map<std::string_view, uint64_t> descriptor_file_offsets;
+  std::unordered_map<std::string_view, FunctionSymbolInfo> function_symbols;
+  std::unordered_map<std::string_view, bool> dynamic_stack_symbols;
+  const auto symbol_file_offset = [&](const Elf64_Sym &sym) -> std::optional<uint64_t> {
+    if (sym.st_shndx >= section_count)
+      return std::nullopt;
+    const Elf64_Shdr section = section_header(sym.st_shndx);
+    if (sym.st_value < section.sh_addr)
+      return std::nullopt;
+    const uint64_t section_delta = sym.st_value - section.sh_addr;
+    if (section_delta > section.sh_size)
+      return std::nullopt;
+    return section.sh_offset + section_delta;
+  };
+  for (size_t i = 0; i < section_count; ++i) {
+    const Elf64_Shdr symtab_shdr = section_header(i);
+    if (symtab_shdr.sh_type != SHT_SYMTAB && symtab_shdr.sh_type != SHT_DYNSYM)
+      continue;
+    if (symtab_shdr.sh_entsize < sizeof(Elf64_Sym) ||
+        !fits_in_bounds(symtab_shdr.sh_offset, symtab_shdr.sh_size, image_.size()) ||
+        symtab_shdr.sh_link >= section_count) {
+      continue;
+    }
+    const Elf64_Shdr strtab_shdr = section_header(symtab_shdr.sh_link);
+    if (!fits_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image_.size()))
+      continue;
+    const char *sym_strtab = image_.data() + strtab_shdr.sh_offset;
+    const size_t num_syms = symtab_shdr.sh_size / symtab_shdr.sh_entsize;
     const char *symtab_data = image_.data() + symtab_shdr.sh_offset;
 
     for (size_t sym_index = 0; sym_index < num_syms; ++sym_index) {
       const char *sym_data = symtab_data + sym_index * symtab_shdr.sh_entsize;
-      Elf64_Sym sym;
+      Elf64_Sym sym{};
       std::memcpy(&sym, sym_data, sizeof(sym));
       if (sym.st_name >= strtab_shdr.sh_size)
         continue;
-      std::string sym_name(sym_strtab + sym.st_name,
-                           strnlen(sym_strtab + sym.st_name, strtab_shdr.sh_size - sym.st_name));
+      const size_t max_len = static_cast<size_t>(strtab_shdr.sh_size - sym.st_name);
+      const std::string_view sym_name(sym_strtab + sym.st_name,
+                                      strnlen(sym_strtab + sym.st_name, max_len));
       constexpr std::string_view kDynamicStackSuffix = ".has_dyn_sized_stack";
       if (sym.st_shndx == SHN_ABS && sym_name.ends_with(kDynamicStackSuffix)) {
-        const std::string kernel_name =
+        const std::string_view kernel_name =
             sym_name.substr(0, sym_name.size() - kDynamicStackSuffix.size());
         dynamic_stack_symbols[kernel_name] = sym.st_value != 0;
         continue;
       }
       // AMDHSA kernel descriptors have a ".kd" suffix symbol.
-      if (sym_name.size() > 3 && sym_name.substr(sym_name.size() - 3) == ".kd") {
-        std::string kernel_name = sym_name.substr(0, sym_name.size() - 3);
-        kd_offsets_[kernel_name] = sym.st_value;
-        if (auto file_offset = symbol_file_offset(sym, section_hdrs))
+      if (sym_name.size() > 3 && sym_name.ends_with(".kd")) {
+        const std::string_view kernel_name = sym_name.substr(0, sym_name.size() - 3);
+        kernel_descriptor_offsets[kernel_name] = sym.st_value;
+        if (auto file_offset = symbol_file_offset(sym))
           descriptor_file_offsets[kernel_name] = *file_offset;
         continue;
       }
 
       if (elf_symbol_type(sym.st_info) == kElfSymbolTypeFunc &&
-          sym.st_shndx < section_hdrs.size() && section_names[sym.st_shndx] == ".text") {
-        const auto &text = section_hdrs[sym.st_shndx];
+          sym.st_shndx < text_section_indices.size() && text_section_indices[sym.st_shndx]) {
+        const Elf64_Shdr text = section_header(sym.st_shndx);
         if (sym.st_value >= text.sh_addr && sym.st_value - text.sh_addr <= text.sh_size) {
           FunctionSymbolInfo info;
           info.entry_text_offset = sym.st_value - text.sh_addr;
@@ -776,11 +804,12 @@ void AmdGpuCodeObject::load_sections() {
       elf_header);
 
   kernels_.clear();
-  kernels_.reserve(kd_offsets_.size());
-  for (const auto &entry : kd_offsets_) {
-    const std::string &kernel_name = entry.first;
+  kernels_.reserve(kernel_descriptor_offsets.size());
+  for (const auto &entry : kernel_descriptor_offsets) {
+    const std::string_view kernel_name = entry.first;
     AmdGpuKernelInfo kernel;
     kernel.name = kernel_name;
+    kd_offsets_[kernel.name] = entry.second;
     if (auto file_offset = descriptor_file_offsets.find(kernel_name);
         file_offset != descriptor_file_offsets.end())
       kernel.descriptor_file_offset = file_offset->second;
@@ -796,7 +825,8 @@ void AmdGpuCodeObject::load_sections() {
       kernel.code_size = 0;
       kernel.has_text_range = false;
     }
-    if (auto metadata_entry = metadata.find(kernel_name); metadata_entry != metadata.end()) {
+    if (auto metadata_entry = metadata.find(std::string_view(kernel.name));
+        metadata_entry != metadata.end()) {
       kernel.has_dynamic_lds = metadata_entry->second.has_dynamic_lds;
       kernel.uses_dynamic_stack = metadata_entry->second.uses_dynamic_stack;
       kernel.sgpr_count = metadata_entry->second.sgpr_count;

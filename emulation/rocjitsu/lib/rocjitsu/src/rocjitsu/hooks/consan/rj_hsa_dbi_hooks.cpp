@@ -2938,6 +2938,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   if (!refresh_report_config_from_env(&*config))
     return HSA_STATUS_ERROR;
 
+  // This reservation is declared before every local image owner. Reverse
+  // destruction order therefore destroys rejected transform results and local
+  // replacement storage before an RAII-only early return refunds admission.
+  ProcessTransformReservation transform_reservation;
   hsa_code_object_reader_t reader_to_load = code_object_reader;
   hsa_code_object_reader_t replacement_reader{};
   bool using_replacement_reader = false;
@@ -2964,7 +2968,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   std::optional<ConSanStaticCoverage> static_coverage_storage;
   std::optional<rocjitsu::ConSanResult> reusable_moi_inventory;
   std::optional<rocjitsu::ConSanMoiAutoReportInventory> live_fault_auto_report_capacity_inventory;
-  ProcessTransformReservation transform_reservation;
   ProcessFaultApplicationReservation process_fault_application_reservation;
   ProcessFaultReservationOutcome process_fault_reservation_outcome =
       ProcessFaultReservationOutcome::MutationAlreadyInstalled;
@@ -3101,28 +3104,34 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.moi_runtime_sample_offset = config->moi_runtime_sample_offset;
     patch_options.report_marker = config->report_marker;
     if (patch_options.flavor != rocjitsu::ConSanFlavor::None) {
-      const std::optional<uint64_t> reservation_bytes =
-          consan_transform_major_image_reservation_bytes(size,
-                                                         patch_options.patched_image_growth_limit);
+      const std::optional<ConSanTransformReservationEstimate> reservation =
+          consan_transform_major_image_reservation(size, patch_options.patched_image_growth_limit);
       const bool relative_growth = patch_options.patched_image_growth_limit.kind ==
                                    rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent;
-      log_message(kLogInfo,
-                  "ConSan transform admission request reader=%llu input_image=%zu reservation=%s "
-                  "growth_policy=%s growth_value=%llu",
-                  static_cast<unsigned long long>(code_object_reader.handle), size,
-                  reservation_bytes ? std::to_string(*reservation_bytes).c_str()
-                                    : "uint64-overflow",
-                  relative_growth ? "input-percent" : "absolute-bytes",
-                  static_cast<unsigned long long>(
-                      relative_growth ? patch_options.patched_image_growth_limit.input_percent
-                                      : patch_options.patched_image_growth_limit.absolute_bytes));
+      log_message(
+          kLogInfo,
+          "ConSan transform admission request reader=%llu input_image=%zu reservation=%s "
+          "phase=%s phase_input_copies=%llu phase_maximum_copies=%llu "
+          "growth_policy=%s growth_value=%llu",
+          static_cast<unsigned long long>(code_object_reader.handle), size,
+          reservation ? std::to_string(reservation->reservation_bytes).c_str() : "uint64-overflow",
+          reservation ? consan_transform_ownership_phase_name(reservation->ownership.phase)
+                      : "unavailable",
+          static_cast<unsigned long long>(reservation ? reservation->ownership.input_image_copies
+                                                      : 0),
+          static_cast<unsigned long long>(reservation ? reservation->ownership.maximum_image_copies
+                                                      : 0),
+          relative_growth ? "input-percent" : "absolute-bytes",
+          static_cast<unsigned long long>(
+              relative_growth ? patch_options.patched_image_growth_limit.input_percent
+                              : patch_options.patched_image_growth_limit.absolute_bytes));
       std::optional<ProcessTransformAdmissionRegistry::AdmissionResult> admission;
-      if (reservation_bytes) {
-        admission = transform_reservation.acquire(*reservation_bytes,
+      if (reservation) {
+        admission = transform_reservation.acquire(reservation->reservation_bytes,
                                                   config->process_concurrent_transform_limit_bytes);
       }
       const bool accounting_overflow =
-          !reservation_bytes ||
+          !reservation ||
           (admission &&
            admission->outcome ==
                ProcessTransformAdmissionRegistry::AdmissionOutcome::AccountingOverflow);
@@ -3137,7 +3146,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             "continuing without a process reservation\n",
             static_cast<unsigned long long>(code_object_reader.handle), size,
             static_cast<unsigned long long>(admission ? admission->live_bytes : 0),
-            reservation_bytes ? std::to_string(*reservation_bytes).c_str() : "uint64-overflow");
+            reservation ? std::to_string(reservation->reservation_bytes).c_str()
+                        : "uint64-overflow");
       } else if (accounting_overflow || limit_exceeded) {
         ConSanStaticCoverageRegistry::instance().record_unclassified_incomplete_code_object();
         const char *rejection_reason = "process-concurrent-transform-accounting";
@@ -3159,7 +3169,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
               "reader=%llu input_image=%zu live=%llu reservation=%s process_ceiling=%llu\n",
               static_cast<unsigned long long>(code_object_reader.handle), size,
               static_cast<unsigned long long>(admission ? admission->live_bytes : 0),
-              reservation_bytes ? std::to_string(*reservation_bytes).c_str() : "uint64-overflow",
+              reservation ? std::to_string(reservation->reservation_bytes).c_str()
+                          : "uint64-overflow",
               static_cast<unsigned long long>(*config->process_concurrent_transform_limit_bytes));
         }
         if (config->fail_closed || config->require_patch) {
@@ -3173,9 +3184,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       } else if (admission && *admission) {
         log_message(kLogInfo,
                     "ConSan transform admission reader=%llu input_image=%zu reservation=%llu "
+                    "phase=%s phase_input_copies=%llu phase_maximum_copies=%llu "
                     "live_before=%llu required=%llu process_ceiling=%s",
                     static_cast<unsigned long long>(code_object_reader.handle), size,
                     static_cast<unsigned long long>(admission->reservation_bytes),
+                    consan_transform_ownership_phase_name(reservation->ownership.phase),
+                    static_cast<unsigned long long>(reservation->ownership.input_image_copies),
+                    static_cast<unsigned long long>(reservation->ownership.maximum_image_copies),
                     static_cast<unsigned long long>(admission->live_bytes),
                     static_cast<unsigned long long>(*admission->required_bytes),
                     admission->limit_bytes ? std::to_string(*admission->limit_bytes).c_str()
