@@ -428,6 +428,73 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_a
   return true;
 }
 
+bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillManager &spills,
+                     rj_code_arch_t arch, std::vector<SpillSlot> &out, std::string *error_out) {
+  out.clear();
+
+  // Plans AccVGPR spills only; the orchestrator routes VGPRs/SGPRs elsewhere.
+  std::string non_acc;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.cls != RegClass::ACC_VGPR) {
+      non_acc += non_acc.empty() ? " " : ", ";
+      non_acc += reg_name(ref);
+    }
+  });
+  if (!non_acc.empty()) {
+    report(error_out,
+           ("probe-call spill of non-AccVGPR registers not yet supported:" + non_acc).c_str());
+    return false;
+  }
+  if (spill_set.none())
+    return true;
+
+  const uint32_t max_offset = max_scratch_offset_bytes(arch);
+  if (max_offset == 0) {
+    report(error_out, "probe-call spilling not supported for target architecture");
+    return false;
+  }
+
+  // Never spill an AccVGPR the kernel did not allocate: acc_count is the AGPR
+  // window size (unified VGPR budget minus the ACCUM_OFFSET base). Reject out of
+  // band before reserving anything.
+  std::string oob;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.index >= acc_count) {
+      oob += oob.empty() ? " " : ", ";
+      oob += reg_name(ref);
+    }
+  });
+  if (!oob.empty()) {
+    report(error_out,
+           ("probe-call spill of AccVGPR past the kernel's allocated count:" + oob).c_str());
+    return false;
+  }
+
+  bool ok = true;
+  std::string fail;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (!ok)
+      return;
+    const std::optional<uint32_t> off = spills.allocate_slot(ref);
+    if (!off) {
+      fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
+      ok = false;
+    } else if (*off > max_offset) {
+      fail = "probe-call spill offset for " + reg_name(ref) +
+             " exceeds the scratch instruction offset field";
+      ok = false;
+    } else {
+      out.push_back(SpillSlot{RegClass::ACC_VGPR, ref.index, *off});
+    }
+  });
+  if (!ok) {
+    out.clear();
+    report(error_out, fail.c_str());
+    return false;
+  }
+  return true;
+}
+
 namespace {
 
 // Fill the layout/identity fields shared by every trampoline plan
@@ -809,13 +876,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
           spills.emplace(kernel.descriptor.private_segment_fixed_size, scratch_limit);
           spill_descriptor_file_offset = kernel.descriptor_file_offset;
         }
-        // Split by class: VGPRs go straight to scratch; SGPRs need a bridge VGPR.
-        // AccVGPRs are still unsupported and fail closed inside plan_sgpr_spills.
+        // Split by class: VGPRs go straight to scratch; SGPRs bridge through a dead
+        // VGPR; AccVGPRs go straight to scratch via the CDNA `acc` bit (no bridge).
         RegisterSet vgpr_spill = spill;
         vgpr_spill.clear_class(RegClass::SGPR);
         vgpr_spill.clear_class(RegClass::ACC_VGPR);
         RegisterSet sgpr_spill = spill;
         sgpr_spill.clear_class(RegClass::VGPR);
+        sgpr_spill.clear_class(RegClass::ACC_VGPR);
+        RegisterSet acc_spill = spill;
+        acc_spill.clear_class(RegClass::VGPR);
+        acc_spill.clear_class(RegClass::SGPR);
         if (!plan_vgpr_spills(vgpr_spill, *spills, arch_, plan.vgpr_spills, &err)) {
           result.errors.push_back(std::move(err));
           continue;
@@ -830,6 +901,23 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                               plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
           result.errors.push_back(std::move(err));
           continue;
+        }
+        // AccVGPRs (CDNA only). The AGPR window is the unified VGPR budget above the
+        // ACCUM_OFFSET base ((encoded+1)*4); reject an index the kernel never
+        // allocated. Only CDNA decodes ACC_VGPR clobbers, and CDNA2/3/4 all use the
+        // gfx90a ACCUM_OFFSET encoding, so this is reached only where it is valid.
+        if (!acc_spill.none()) {
+          const uint32_t accum_base =
+              (AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
+                               rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+               1) *
+              4;
+          const uint32_t acc_count =
+              kernel_vgpr_count > accum_base ? kernel_vgpr_count - accum_base : 0;
+          if (!plan_acc_spills(acc_spill, acc_count, *spills, arch_, plan.acc_spills, &err)) {
+            result.errors.push_back(std::move(err));
+            continue;
+          }
         }
       }
 

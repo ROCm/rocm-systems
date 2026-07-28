@@ -70,6 +70,10 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace {
 
+using test::kAccReadV3A0Hi;
+using test::kAccReadV3A0Lo;
+using test::kAccWriteA0ZeroHi;
+using test::kAccWriteA0ZeroLo;
 using test::kMovS8Zero;
 using test::kMovS9Zero;
 using test::kMovV2Zero;
@@ -541,6 +545,129 @@ TEST_F(DbiRdna4TwoSgprSpillSimFixture, BothSpilledSgprsSurviveClobberingProbe) {
   expect_both_sgprs_survive();
 }
 
+//==============================================================================
+// AccVGPR (AGPR) spill, on CDNA3 and CDNA4. AGPRs are CDNA-only, so there is no
+// RDNA4 variant. The spill is direct (scratch store/load with the FLAT acc bit,
+// no bridge VGPR), unlike the SGPR path.
+//==============================================================================
+
+// Patches a kernel with a probe that clobbers the live AGPR acc0, forcing an
+// AccVGPR spill (acc=1 scratch store -> acc=1 scratch load). Arch config as in
+// DbiVgprSpillSimBase; the DbiCdna3*/DbiCdna4* wrappers select it.
+class DbiAccVgprSpillSimBase : public ::testing::Test {
+protected:
+  explicit DbiAccVgprSpillSimBase(const SpillSimArch &a) : a_(a) {}
+
+  void SetUp() override {
+    const uint32_t endpgm = build_s_endpgm(a_.arch);
+    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    // v_accvgpr_write a0, K ; v_accvgpr_read v3, a0 (ANCHOR at offset 8, acc0
+    // live) ; s_endpgm. The read copies restored acc0 into v3 for observability.
+    auto target = test::make_amdgpu_kernel_elf(
+        {kAccWriteA0ZeroLo, test::make_accvgpr_write_a0_inline_hi(kSentinel), kAccReadV3A0Lo,
+         kAccReadV3A0Hi, endpgm},
+        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    auto probe = test::make_amdgpu_probe_elf(
+        "rj_test_probe", {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc}, a_.e_flags);
+
+    AmdGpuCodeObject obj(target.data(), target.size());
+    AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+    ASSERT_TRUE(obj.is_valid());
+    ASSERT_TRUE(probe_obj.is_valid());
+
+    Instrumentor instr(obj, a_.arch);
+    InstrumentationPoint pt;
+    pt.anchor_offset = 8; // v_accvgpr_read v3, a0 -> reads acc0 (acc0 live at the anchor).
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    instr.add_point(pt);
+
+    auto result = instr.patch_with_debug_summaries();
+    ASSERT_TRUE(result.errors.empty())
+        << (result.errors.empty() ? std::string{} : result.errors.front());
+    ASSERT_EQ(result.patches.size(), 1u);
+    ASSERT_TRUE(result.patches[0].is_probe_call);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    patched_text_ = test::section_words(patched, ".text");
+    ASSERT_FALSE(patched_text_.empty());
+    patched_scratch_ = test::patched_private_segment_size(patched);
+  }
+
+  // The spilled AGPR survives the clobbering probe: v3 (a copy of the restored
+  // acc0, read after the probe returns) equals the sentinel on every active lane,
+  // and the descriptor scratch grew (64 -> 68) to hold the per-lane slot.
+  void expect_spilled_accvgpr_survives() {
+    EXPECT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to cover the spill slot";
+    DbiSim sim(a_.sim_arch, a_.wave_size);
+    const std::vector<uint32_t> v3 =
+        sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
+    ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+      EXPECT_EQ(v3[lane], kSentinel)
+          << "lane " << lane << ": acc0 was not restored after the probe clobbered it";
+  }
+
+  // Negative control: nop the epilogue acc=1 scratch load (the AGPR restore) so
+  // acc0 stays clobbered (0) and v3 reads 0; then confirm the intact text
+  // restores it.
+  void expect_missing_restore_clobbers_accvgpr() {
+    const std::vector<uint32_t> load =
+        build_scratch_load_dword(/*acc0=*/0, 64, a_.arch, /*acc=*/true);
+    const uint32_t nop = build_s_nop(0, a_.arch);
+
+    std::vector<uint32_t> sabotaged = patched_text_;
+    auto it = std::search(sabotaged.begin(), sabotaged.end(), load.begin(), load.end());
+    ASSERT_NE(it, sabotaged.end()) << "epilogue acc scratch load (the restore) not found";
+    for (size_t i = 0; i < load.size(); ++i)
+      *(it + static_cast<std::ptrdiff_t>(i)) = nop;
+
+    DbiSim broken(a_.sim_arch, a_.wave_size);
+    const std::vector<uint32_t> v3_broken =
+        broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
+    ASSERT_EQ(v3_broken.size(), a_.wave_size);
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+      EXPECT_EQ(v3_broken[lane], 0u)
+          << "lane " << lane << ": without the restore, v3 should read the clobbered 0";
+
+    DbiSim intact(a_.sim_arch, a_.wave_size);
+    const std::vector<uint32_t> v3_intact =
+        intact.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
+    ASSERT_EQ(v3_intact.size(), a_.wave_size);
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+      EXPECT_EQ(v3_intact[lane], kSentinel)
+          << "lane " << lane << ": intact restore should recover acc0";
+  }
+
+  SpillSimArch a_;
+  std::vector<uint32_t> patched_text_;
+  uint32_t patched_scratch_ = 0;
+};
+
+class DbiCdna3AccVgprSpillSimFixture : public DbiAccVgprSpillSimBase {
+protected:
+  DbiCdna3AccVgprSpillSimFixture() : DbiAccVgprSpillSimBase(kCdna3SpillArch) {}
+};
+class DbiCdna4AccVgprSpillSimFixture : public DbiAccVgprSpillSimBase {
+protected:
+  DbiCdna4AccVgprSpillSimFixture() : DbiAccVgprSpillSimBase(kCdna4SpillArch) {}
+};
+
+TEST_F(DbiCdna3AccVgprSpillSimFixture, SpilledAccVgprSurvivesClobberingProbe) {
+  expect_spilled_accvgpr_survives();
+}
+TEST_F(DbiCdna3AccVgprSpillSimFixture, MissingRestoreLeavesAccVgprClobbered) {
+  expect_missing_restore_clobbers_accvgpr();
+}
+TEST_F(DbiCdna4AccVgprSpillSimFixture, SpilledAccVgprSurvivesClobberingProbe) {
+  expect_spilled_accvgpr_survives();
+}
+TEST_F(DbiCdna4AccVgprSpillSimFixture, MissingRestoreLeavesAccVgprClobbered) {
+  expect_missing_restore_clobbers_accvgpr();
+}
+
+//==============================================================================
 // EXEC preservation + full-mask spilling on CDNA3 (wave64), CDNA4 (wave64), and
 // RDNA4 (wave32). The partial-EXEC-mask scenario is wave-size-specific, so it rides
 // a per-arch config (ExecSimArch) with thin DbiCdna3*/DbiCdna4*/DbiRdna4* wrappers.

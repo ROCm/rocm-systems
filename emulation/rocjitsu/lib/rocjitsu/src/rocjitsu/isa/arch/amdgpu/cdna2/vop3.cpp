@@ -1884,8 +1884,11 @@ void VSwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 VAccvgprMovB32Vop3::VAccvgprMovB32Vop3(const MachineInst *inst)
     : Vop3("v_accvgpr_mov_b32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VAccvgprMovB32Vop3>()),
-      vdst(32, OperandType::OPR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, OperandType::OPR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst + OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)),
+      src0(32, OperandType::OPR_SRC_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->src0 +
+            (OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256))) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;

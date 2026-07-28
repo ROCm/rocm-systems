@@ -54,6 +54,22 @@ inline constexpr uint32_t kMovS9Zero = 0xbe890080u; // s_mov_b32 s9, 0  -> clobb
   return 0x7E040200u | (src0 & 0x1FFu);
 }
 
+// AccVGPR VOP3 (gfx942/gfx950, identical encodings), two words each.
+// v_accvgpr_read_b32 v3, a0  -> reads acc0 (acc0 live before the anchor).
+inline constexpr uint32_t kAccReadV3A0Lo = 0xD3D84003u;
+inline constexpr uint32_t kAccReadV3A0Hi = 0x18000100u;
+// v_accvgpr_write_b32 a0, 0  -> clobbers acc0.
+inline constexpr uint32_t kAccWriteA0ZeroLo = 0xD3D94000u;
+inline constexpr uint32_t kAccWriteA0ZeroHi = 0x18000080u;
+
+// v_accvgpr_write_b32 a0, <inline const K> for K in [0, 64]: the lo word is
+// kAccWriteA0ZeroLo; the hi word carries the inline src0 (128 for 0, 128+K for
+// 1..64), same src0 field encoding as make_mov_v2_inline.
+[[nodiscard]] inline constexpr uint32_t make_accvgpr_write_a0_inline_hi(uint32_t k) {
+  const uint32_t src0 = (k == 0) ? 128u : (128u + k); // 129..192 for 1..64.
+  return 0x18000000u | (src0 & 0x1FFu);
+}
+
 // s_setpc_b64 s[30:31] (GFX9 family): a minimal probe body tail that returns
 // through the link pair, so build_probe_callable accepts it.
 inline constexpr uint32_t kProbeSetpcS30S31 = 0xbe801d1eu;

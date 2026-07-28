@@ -6405,6 +6405,16 @@ class CodeGenerator:
                     f'mfma_src2_encoding({expr}, '
                     'reinterpret_cast<const OpEncoding*>(inst)->acc_cd)'
                 )
+        # Dedicated AccVGPR types (accvgpr read/write/mov) are always accumulator
+        # regs, but their raw field is below the canonical ACC selector range that
+        # name()/to_register_ref() match. Canonicalize so those paths see the reg;
+        # the value still resolves to the same unified index for execute.
+        if ctx.operand_type == 'OPR_ACCVGPR':
+            # vdst field holds the accumulator number directly (0..255).
+            expr = f'({expr} + OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)'
+        elif ctx.operand_type == 'OPR_SRC_ACCVGPR':
+            # 9-bit source field encodes acc N as 256 + N; shift into [768, 1023].
+            expr = f'({expr} + (OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256))'
         return expr
 
     @classmethod

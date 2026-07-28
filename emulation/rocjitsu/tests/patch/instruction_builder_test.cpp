@@ -328,6 +328,43 @@ TEST(InstructionBuilder, BuildScratchLoadDword) {
   EXPECT_EQ(rdna4[2], 0x00004000u);
 }
 
+TEST(InstructionBuilder, BuildScratchStoreDwordAccVgpr) {
+  // acc=1 sets the CDNA FLAT acc bit (word1 bit 23 = 0x00800000), addressing the
+  // AccVGPR file for the data operand. Same as BuildScratchStoreDword otherwise.
+  const auto cdna3 = build_scratch_store_dword(/*vdata=*/3, /*byte_offset=*/64,
+                                               ROCJITSU_CODE_ARCH_CDNA3, /*acc=*/true);
+  ASSERT_EQ(cdna3.size(), 2u);
+  EXPECT_EQ(cdna3[0], 0xDC704040u);
+  EXPECT_EQ(cdna3[1], 0x00FF0300u);
+
+  const auto cdna4 = build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4, /*acc=*/true);
+  ASSERT_EQ(cdna4.size(), 2u);
+  EXPECT_EQ(cdna4[0], 0xDC704040u);
+  EXPECT_EQ(cdna4[1], 0x00FF0300u);
+
+  // RDNA has no AccVGPRs: requesting acc is rejected.
+  EXPECT_THROW((void)build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_RDNA4, /*acc=*/true),
+               util::UnimplementedInst);
+}
+
+TEST(InstructionBuilder, BuildScratchLoadDwordAccVgpr) {
+  // acc=1 sets the CDNA FLAT acc bit (word1 bit 23 = 0x00800000), writing the load
+  // result into the AccVGPR file. Same as BuildScratchLoadDword otherwise.
+  const auto cdna3 = build_scratch_load_dword(/*vdst=*/5, /*byte_offset=*/64,
+                                              ROCJITSU_CODE_ARCH_CDNA3, /*acc=*/true);
+  ASSERT_EQ(cdna3.size(), 2u);
+  EXPECT_EQ(cdna3[0], 0xDC504040u);
+  EXPECT_EQ(cdna3[1], 0x05FF0000u);
+
+  const auto cdna4 = build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4, /*acc=*/true);
+  ASSERT_EQ(cdna4.size(), 2u);
+  EXPECT_EQ(cdna4[0], 0xDC504040u);
+  EXPECT_EQ(cdna4[1], 0x05FF0000u);
+
+  EXPECT_THROW((void)build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_RDNA4, /*acc=*/true),
+               util::UnimplementedInst);
+}
+
 TEST(InstructionBuilder, BuildWaitLoadsComplete) {
   // CDNA3 and CDNA4: s_waitcnt 0 (all counters).
   EXPECT_EQ(build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA3), 0xBF8C0000u);

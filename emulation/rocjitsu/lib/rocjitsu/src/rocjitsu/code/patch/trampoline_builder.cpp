@@ -94,18 +94,20 @@ struct SpillBracket {
 
 [[nodiscard]] SpillBracket build_spill_bracket(const std::vector<SpillSlot> &vgpr_spills,
                                                const std::vector<SpillSlot> &sgpr_spills,
+                                               const std::vector<SpillSlot> &acc_spills,
                                                uint16_t bridge_vgpr, rj_code_arch_t arch) {
   constexpr uint16_t kUniformLane = 0; // An SGPR is uniform; one lane suffices.
   SpillBracket bracket;
 
   const bool has_vgpr = !vgpr_spills.empty();
   const bool has_sgpr = !sgpr_spills.empty();
+  const bool has_acc = !acc_spills.empty();
 
   // Drain any in-flight load that could still be writing a to-be-spilled register:
   // a register live at the anchor may be the target of a pre-anchor load whose
   // consumer wait sits after the anchor, so storing it now without this drain would
   // spill a stale value. Emitted once, before any store.
-  if (has_vgpr || has_sgpr) {
+  if (has_vgpr || has_sgpr || has_acc) {
     const std::vector<uint32_t> drain = build_wait_all_loads_complete(arch);
     bracket.prologue.insert(bracket.prologue.end(), drain.begin(), drain.end());
   }
@@ -113,6 +115,14 @@ struct SpillBracket {
   // VGPRs: batch stores in the prologue.
   for (const SpillSlot &slot : vgpr_spills) {
     const std::vector<uint32_t> store = build_scratch_store_dword(slot.reg, slot.byte_offset, arch);
+    bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
+  }
+
+  // AccVGPRs: like VGPRs but store/load directly out of the accumulator file via
+  // the CDNA scratch `acc` bit -- no writelane/readlane bridge needed. Stores batch
+  // with the VGPR stores; loads batch with the VGPR loads under the shared wait below.
+  for (const SpillSlot &slot : acc_spills) {
+    const auto store = build_scratch_store_dword(slot.reg, slot.byte_offset, arch, /*acc=*/true);
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
   }
 
@@ -142,7 +152,7 @@ struct SpillBracket {
   }
 
   // Epilogue: restore SGPRs first (load/wait/readlane each, since the single bridge
-  // is reused), then the VGPRs, so a reused bridge's reload lands last (see above).
+  // is reused), then the VGPRs and AccVGPRs, so a reused bridge's reload lands last.
   for (const SpillSlot &slot : sgpr_spills) {
     const std::vector<uint32_t> load =
         build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch);
@@ -156,13 +166,17 @@ struct SpillBracket {
     const std::vector<uint32_t> load = build_scratch_load_dword(slot.reg, slot.byte_offset, arch);
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
   }
-  if (has_vgpr)
+  for (const SpillSlot &slot : acc_spills) {
+    const auto load = build_scratch_load_dword(slot.reg, slot.byte_offset, arch, /*acc=*/true);
+    bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
+  }
+  if (has_vgpr || has_acc)
     bracket.epilogue.push_back(build_wait_loads_complete(arch));
 
   // Drain all scratch stores before the call: the store's async read of the source
   // register must finish before the probe clobbers it, which also orders each store
   // ahead of its reload. RDNA4 stores live on STORECNT, which s_wait_loadcnt misses.
-  if (has_vgpr || has_sgpr)
+  if (has_vgpr || has_sgpr || has_acc)
     bracket.prologue.push_back(build_wait_stores_complete(arch));
 
   return bracket;
@@ -364,13 +378,15 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   constexpr uint16_t kLiteralConstant = 0xFF;
 
   const SpillBracket spill =
-      build_spill_bracket(plan.vgpr_spills, plan.sgpr_spills, plan.spill_bridge_vgpr, plan.arch);
+      build_spill_bracket(plan.vgpr_spills, plan.sgpr_spills, plan.acc_spills,
+                          plan.spill_bridge_vgpr, plan.arch);
 
   std::vector<uint32_t> env;
 
   // The site spills iff there is anything to spill; this drives the EXEC full-mask
   // toggles only. EXEC save/restore is decided by special_state_saves membership.
-  const bool full_mask_exec = !plan.vgpr_spills.empty() || !plan.sgpr_spills.empty();
+  const bool full_mask_exec =
+      !plan.vgpr_spills.empty() || !plan.sgpr_spills.empty() || !plan.acc_spills.empty();
 
   // SGPR pair holding the saved anchor EXEC (populated by the save loop below).
   // Reused to restore the anchor mask before the call; always present when spilling.

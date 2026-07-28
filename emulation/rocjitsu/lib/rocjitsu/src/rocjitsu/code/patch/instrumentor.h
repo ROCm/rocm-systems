@@ -277,6 +277,20 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                                     rj_code_arch_t arch, std::vector<SpillSlot> &out,
                                     uint16_t &out_bridge, std::string *error_out = nullptr);
 
+/// @brief Reserve a scratch slot per AccVGPR in @p spill_set and fill @p out.
+///
+/// AccVGPRs store/load directly out of the accumulator file via the CDNA scratch
+/// `acc` bit -- no bridge VGPR needed. @p acc_count is the kernel's allocated
+/// AccVGPR count (unified VGPR budget minus the ACCUM_OFFSET window base); an index
+/// at or past it is rejected so we never spill an AGPR the kernel did not allocate.
+///
+/// Fails closed (returns false, @p out empty) on a non-AccVGPR register, an AGPR
+/// index past @p acc_count, an arch with no scratch emitter, a slot past the
+/// scratch limit, or an offset that does not fit the scratch offset field.
+[[nodiscard]] bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count,
+                                   SpillManager &spills, rj_code_arch_t arch,
+                                   std::vector<SpillSlot> &out, std::string *error_out = nullptr);
+
 /// @brief Does a kernel that allocates @p kernel_sgpr_count SGPRs own the fixed
 ///        return-link pair s[link_base : link_base+1]?
 ///

@@ -180,3 +180,37 @@ def test_mfma_acc_without_acc_cd_does_not_fold_multiplicand_banks():
             )
         )
         assert expr == f'reinterpret_cast<const OpEncoding*>(inst)->{operand_name}'
+
+
+def test_accvgpr_dst_is_canonicalized_into_acc_range():
+    # v_accvgpr_write / v_accvgpr_mov dst: raw vdst (0..255) is shifted into the
+    # OPR_ACCVGPR selector range so name()/to_register_ref() resolve the acc reg.
+    expr = CodeGenerator._operand_encoding_value_expr(
+        _OperandCtx(
+            'vdst',
+            'ENC_VOP3P',
+            packed_16bit=False,
+            operand_type='OPR_ACCVGPR',
+        )
+    )
+    assert expr == (
+        '(reinterpret_cast<const OpEncoding*>(inst)->vdst + '
+        'OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)'
+    )
+
+
+def test_accvgpr_src_is_canonicalized_into_acc_range():
+    # v_accvgpr_read / v_accvgpr_mov src: raw src (256 + N) is shifted into the
+    # OPR_SRC_ACCVGPR range [768, 1023], matching vgpr_index()'s ev >= 256 branch.
+    expr = CodeGenerator._operand_encoding_value_expr(
+        _OperandCtx(
+            'src0',
+            'ENC_VOP3P',
+            packed_16bit=False,
+            operand_type='OPR_SRC_ACCVGPR',
+        )
+    )
+    assert expr == (
+        '(reinterpret_cast<const OpEncoding*>(inst)->src0 + '
+        '(OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256))'
+    )

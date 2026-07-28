@@ -119,6 +119,10 @@ struct TrampolinePlan {
 
   /// Dead-at-anchor VGPR bridging SGPR<->scratch. Valid iff sgpr_spills non-empty.
   uint16_t spill_bridge_vgpr = 0;
+
+  /// AccVGPRs to save/restore around the call, stored/loaded directly with the
+  /// CDNA scratch `acc` bit (no bridge VGPR needed). CDNA-only. Empty otherwise.
+  std::vector<SpillSlot> acc_spills;
 };
 
 /// @brief Output bytes for one trampoline.

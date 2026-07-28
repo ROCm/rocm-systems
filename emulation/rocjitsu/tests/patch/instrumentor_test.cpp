@@ -1668,6 +1668,64 @@ TEST(InstrumentorSpill, PlanSgprSpillsRejectsNonSgpr) {
   EXPECT_NE(err.find("v2"), std::string::npos) << "error was: " << err;
 }
 
+RegisterSet make_acc_set(std::initializer_list<uint16_t> indices) {
+  RegisterSet set;
+  for (uint16_t i : indices)
+    set.expand(RegisterRef{RegClass::ACC_VGPR, i, 1});
+  return set;
+}
+
+// plan_acc_spills reserves a slot per AccVGPR directly (no bridge) in ascending
+// order, tagging each slot RegClass::ACC_VGPR so the emitter uses the `acc` bit.
+TEST(InstrumentorSpill, PlanAccSpillsReservesSlots) {
+  SpillManager spills(/*original_private_bytes=*/64, /*per_lane_scratch_limit=*/4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_TRUE(plan_acc_spills(make_acc_set({5, 2}), /*acc_count=*/8, spills,
+                              ROCJITSU_CODE_ARCH_CDNA4, out, &err))
+      << err;
+  ASSERT_EQ(out.size(), 2u);
+  EXPECT_EQ(out[0].cls, RegClass::ACC_VGPR);
+  EXPECT_EQ(out[0].reg, 2u);
+  EXPECT_EQ(out[0].byte_offset, 64u);
+  EXPECT_EQ(out[1].reg, 5u);
+  EXPECT_EQ(out[1].byte_offset, 68u);
+}
+
+// A non-AccVGPR register in the spill set fails closed and is named.
+TEST(InstrumentorSpill, PlanAccSpillsRejectsNonAcc) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_FALSE(
+      plan_acc_spills(make_vgpr_set({2}), /*acc_count=*/8, spills, ROCJITSU_CODE_ARCH_CDNA4, out,
+                      &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("v2"), std::string::npos) << "error was: " << err;
+}
+
+// An AccVGPR index at or past the kernel's allocated AGPR count fails closed
+// before anything is reserved (never spill an AGPR the kernel didn't allocate).
+TEST(InstrumentorSpill, PlanAccSpillsRejectsIndexPastAllocatedCount) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_FALSE(plan_acc_spills(make_acc_set({8}), /*acc_count=*/8, spills,
+                               ROCJITSU_CODE_ARCH_CDNA4, out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("acc8"), std::string::npos) << "error was: " << err;
+}
+
+// An arch with no scratch spill emitter fails closed.
+TEST(InstrumentorSpill, PlanAccSpillsRejectsUnsupportedArch) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_FALSE(plan_acc_spills(make_acc_set({1}), /*acc_count=*/8, spills,
+                               ROCJITSU_CODE_ARCH_CDNA2, out, &err));
+  EXPECT_TRUE(out.empty());
+}
+
 //==============================================================================
 // Section 7: Instrumentor probe-call patch end-to-end
 //
@@ -2175,6 +2233,18 @@ protected:
         << "missing readlane for s" << sgpr;
   }
 
+  // Assert AccVGPR acc`acc`'s spill words are in `cave`: a scratch store (prologue) and
+  // load (epilogue) at slot `off`, both carrying the `acc` bit (a direct accumulator-file
+  // spill, no bridge). Checks the words appear, not their order or the descriptor size.
+  void expect_acc_spill_present(const std::vector<uint32_t> &cave, uint16_t acc, uint32_t off) {
+    const auto store = build_scratch_store_dword(acc, off, a_.arch, /*acc=*/true);
+    const auto load = build_scratch_load_dword(acc, off, a_.arch, /*acc=*/true);
+    EXPECT_NE(std::search(cave.begin(), cave.end(), store.begin(), store.end()), cave.end())
+        << "missing store for acc" << acc;
+    EXPECT_NE(std::search(cave.begin(), cave.end(), load.begin(), load.end()), cave.end())
+        << "missing load for acc" << acc;
+  }
+
   // Assert the standard single-VGPR spill in `caved`: v2 stored/reloaded at slot 64,
   // the reload guarded by a load wait, the prologue drain immediately before the store,
   // and the descriptor grown by one slot (64 -> 68).
@@ -2197,6 +2267,16 @@ protected:
     const auto writelane = build_v_writelane_b32(/*bridge=*/0, /*sgpr=*/8, /*lane=*/0, a_.arch);
     expect_drain_before_store(cave, {writelane.begin(), writelane.end()});
     expect_drain_before_fill(cave, build_scratch_load_dword(/*bridge=*/0, /*off=*/64, a_.arch));
+    EXPECT_EQ(caved.scratch, 68u);
+  }
+
+  // Assert the standard single-AccVGPR spill in `caved`: acc0 stored/reloaded at slot 64
+  // via the `acc` bit (no bridge), the reload guarded by a load wait, and the descriptor
+  // grown by one slot (64 -> 68).
+  void expect_acc_spill(const Caved &caved) {
+    const std::vector<uint32_t> &cave = caved.cave;
+    expect_acc_spill_present(cave, /*acc=*/0, /*off=*/64);
+    EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(a_.arch)), cave.end());
     EXPECT_EQ(caved.scratch, 68u);
   }
 
@@ -2327,6 +2407,20 @@ TEST_F(Rdna4ProbeSpill, SpillsLiveClobberedSgpr) {
       {kMovV3S8, endpgm()}, {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), setpc()}, 64));
 }
 
+// A live+clobbered AccVGPR spills straight to scratch via the `acc` bit -- no bridge
+// VGPR, no writelane/readlane. AGPRs are CDNA-only, so there is no RDNA4 variant. Relies
+// on the decoder tagging v_accvgpr_read (src) and v_accvgpr_write (dst) operands as
+// ACC_VGPR so they reach the spill set.
+TEST_F(Cdna3ProbeSpill, SpillsLiveClobberedAccVgpr) {
+  expect_acc_spill(patch_spill({kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()},
+                               {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64));
+}
+
+TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedAccVgpr) {
+  expect_acc_spill(patch_spill({kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()},
+                               {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64));
+}
+
 // A kernel with zero fixed scratch cannot be spilled into and fails closed.
 TEST_F(Cdna3ProbeSpill, ZeroScratchFailsClosed) { expect_zero_scratch_fails_closed(); }
 TEST_F(Cdna4ProbeSpill, ZeroScratchFailsClosed) { expect_zero_scratch_fails_closed(); }
@@ -2414,23 +2508,28 @@ TEST_F(Cdna4ProbeSpill, MultiKernelSpillFailsClosed) {
   expect_failure_containing(patch_expecting_result(target, probe), "single kernel");
 }
 
-// A site whose spill set contains both a live+clobbered VGPR and SGPR spills both
-// in one bracket: the VGPR straight to scratch, the SGPR bridged through v0. The
-// VGPR takes the first slot (offset 64), the SGPR the next (68); descriptor -> 72.
-TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgprAndSgpr) {
-  // Anchor reads v2; the next instruction reads s8, so both are live at the anchor.
-  const Caved caved =
-      patch_spill({kMovV3V2, kMovV3S8, endpgm()}, {kMovV2Zero, kMovS8Zero, setpc()}, 64);
+// A site whose spill set contains a live+clobbered VGPR, SGPR, and AccVGPR spills all
+// three in one bracket: the VGPR and AccVGPR straight to scratch, the SGPR bridged
+// through v0. Allocation is VGPR -> SGPR -> ACC, so v2 -> slot 64, s8 -> 68, acc0 -> 72;
+// the descriptor grows to cover all three -> 76.
+TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgprSgprAndAccVgpr) {
+  // Anchor reads v2; the next two instructions read s8 then a0, so v2, s8, and acc0 are
+  // all live at the anchor and all clobbered by the probe.
+  const Caved caved = patch_spill(
+      {kMovV3V2, kMovV3S8, kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()},
+      {kMovV2Zero, kMovS8Zero, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64);
   const std::vector<uint32_t> &cave = caved.cave;
 
   // VGPR v2 -> slot 64, straight to scratch.
   expect_vgpr_spill_present(cave, /*vgpr=*/2, /*off=*/64);
   // SGPR s8 -> slot 68, bridged through v0.
   expect_sgpr_spill_present(cave, /*sgpr=*/8, /*off=*/68);
+  // AccVGPR acc0 -> slot 72, straight to scratch via the acc bit.
+  expect_acc_spill_present(cave, /*acc=*/0, /*off=*/72);
   EXPECT_NE(std::find(cave.begin(), cave.end(), build_wait_loads_complete(arch())), cave.end());
 
-  // Two 4-byte slots on top of the 16-aligned base: 64 -> 72.
-  EXPECT_EQ(caved.scratch, 72u);
+  // Three 4-byte slots on top of the 16-aligned base: 64 -> 76.
+  EXPECT_EQ(caved.scratch, 76u);
 }
 
 // Two live+clobbered SGPRs spill through a single shared bridge VGPR (v0), each to

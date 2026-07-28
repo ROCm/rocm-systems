@@ -66,16 +66,21 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
 }
 
 /// @brief Encode an off-mode scratch store of @p vdata at @p byte_offset.
+/// @param acc When true, @p vdata names an AccVGPR (CDNA `acc` bit) rather than an
+///   ordinary VGPR, so the store reads its data from the accumulator file. AGPRs
+///   exist only on CDNA; requesting @p acc on an arch without them is rejected.
 /// @note CDNA offset is 12-bit (0..4095); RDNA is 24-bit. 2 words on CDNA, 3 on RDNA.
 [[nodiscard]] inline std::vector<uint32_t>
-build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t arch) {
+build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t arch,
+                          bool acc = false) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3: {
     const auto w = cdna3::build_flat(cdna3::kFlatStoreDwordFlat,
                                      {.offset = static_cast<uint16_t>(byte_offset & 0xFFFu),
                                       .seg = 1,
                                       .data = static_cast<uint8_t>(vdata),
-                                      .saddr = 0x7F});
+                                      .saddr = 0x7F,
+                                      .acc = static_cast<uint8_t>(acc ? 1 : 0)});
     return {w.begin(), w.end()};
   }
   case ROCJITSU_CODE_ARCH_CDNA4: {
@@ -83,10 +88,13 @@ build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t a
                                      {.offset = static_cast<uint16_t>(byte_offset & 0xFFFu),
                                       .seg = 1,
                                       .data = static_cast<uint8_t>(vdata),
-                                      .saddr = 0x7F});
+                                      .saddr = 0x7F,
+                                      .acc = static_cast<uint8_t>(acc ? 1 : 0)});
     return {w.begin(), w.end()};
   }
   case ROCJITSU_CODE_ARCH_RDNA4: {
+    if (acc)
+      throw util::UnimplementedInst("scratch_store of an AccVGPR on an arch without them");
     const auto w = rdna4::build_vscratch(
         rdna4::kScratchStoreB32Vscratch,
         {.saddr = 0x7C, .vsrc = static_cast<uint8_t>(vdata), .ioffset = byte_offset & 0xFFFFFFu});
@@ -98,15 +106,20 @@ build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t a
 }
 
 /// @brief Encode an off-mode scratch load into @p vdst at @p byte_offset.
+/// @param acc When true, @p vdst names an AccVGPR (CDNA `acc` bit) rather than an
+///   ordinary VGPR, so the load writes its result into the accumulator file. AGPRs
+///   exist only on CDNA; requesting @p acc on an arch without them is rejected.
 /// @note A build_wait_loads_complete() must precede any use of @p vdst.
 [[nodiscard]] inline std::vector<uint32_t>
-build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch) {
+build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch,
+                         bool acc = false) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3: {
     const auto w = cdna3::build_flat(cdna3::kFlatLoadDwordFlat,
                                      {.offset = static_cast<uint16_t>(byte_offset & 0xFFFu),
                                       .seg = 1,
                                       .saddr = 0x7F,
+                                      .acc = static_cast<uint8_t>(acc ? 1 : 0),
                                       .vdst = static_cast<uint8_t>(vdst)});
     return {w.begin(), w.end()};
   }
@@ -115,10 +128,13 @@ build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arc
                                      {.offset = static_cast<uint16_t>(byte_offset & 0xFFFu),
                                       .seg = 1,
                                       .saddr = 0x7F,
+                                      .acc = static_cast<uint8_t>(acc ? 1 : 0),
                                       .vdst = static_cast<uint8_t>(vdst)});
     return {w.begin(), w.end()};
   }
   case ROCJITSU_CODE_ARCH_RDNA4: {
+    if (acc)
+      throw util::UnimplementedInst("scratch_load of an AccVGPR on an arch without them");
     const auto w = rdna4::build_vscratch(
         rdna4::kScratchLoadB32Vscratch,
         {.saddr = 0x7C, .vdst = static_cast<uint8_t>(vdst), .ioffset = byte_offset & 0xFFFFFFu});
