@@ -111,11 +111,10 @@ def test_collection_period_trace(json_data, collection_period_data):
                 if window.in_region(ts):
                     on_core_records[index] += 1
 
-    # An API interceptor can snapshot the active context immediately before stop_context,
-    # then be descheduled before taking the record's public start timestamp. Such a record
-    # can appear anywhere in the following off window, but there can be at most one
-    # in-flight interceptor per application thread. A second record from the same thread
-    # proves that a subsequent API call was also collected while the context was stopped.
+    # A thread may read the active context just before stop_context and then be
+    # descheduled before recording the API call's start time. When it resumes, that one
+    # in-flight call can appear in the next off window. Each thread can have only one
+    # such call, so seeing another means tracing continued after the context stopped.
     for (window_index, thread_id), records in off_core_records.items():
         assert len(records) <= 1, (
             "multiple records from one thread were collected while tracing was off "
