@@ -56,6 +56,7 @@ test_categories:
       - "RCCL_LOG_ROCTX=1"
       - "UT_MIN_GPUS=8"
       - "UT_MAX_GPUS=8"
+      - "UT_DATATYPES=ncclBfloat16,ncclFloat32"
   quick_env_thread_name:
     description: "AlltoAll graph capture under NCCL_SET_THREAD_NAME=1."
     test_patterns:
