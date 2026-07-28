@@ -44,6 +44,133 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
   return (value + alignment - 1) / alignment * alignment;
 }
 
+void append_bytes(std::vector<uint8_t> &bytes, const void *source, size_t size) {
+  const auto *begin = static_cast<const uint8_t *>(source);
+  bytes.insert(bytes.end(), begin, begin + size);
+}
+
+void append_msgpack_string(std::vector<uint8_t> &bytes, std::string_view value) {
+  if (value.size() > 31) {
+    ADD_FAILURE() << "metadata fixture string is too large for a msgpack fixstr";
+    return;
+  }
+  bytes.push_back(static_cast<uint8_t>(0xa0u | value.size()));
+  append_bytes(bytes, value.data(), value.size());
+}
+
+std::vector<uint8_t> make_kernel_metadata_payload(size_t kernel_count) {
+  if (kernel_count > std::numeric_limits<uint32_t>::max()) {
+    ADD_FAILURE() << "metadata fixture kernel count is outside the msgpack array range";
+    return {};
+  }
+
+  std::vector<uint8_t> payload;
+  payload.push_back(0x81u); // one-entry root map
+  append_msgpack_string(payload, "amdhsa.kernels");
+  payload.push_back(0xddu); // array32
+  const uint32_t count = static_cast<uint32_t>(kernel_count);
+  for (int shift = 24; shift >= 0; shift -= 8)
+    payload.push_back(static_cast<uint8_t>((count >> shift) & 0xffu));
+
+  for (size_t index = 0; index < kernel_count; ++index) {
+    payload.push_back(0x82u); // .name plus one retained metadata field
+    append_msgpack_string(payload, ".name");
+    const char name = static_cast<char>(1u + index % 255u);
+    append_msgpack_string(payload, std::string_view(&name, 1));
+    append_msgpack_string(payload, ".sgpr_count");
+    payload.push_back(0x08u);
+  }
+  return payload;
+}
+
+std::vector<uint8_t> make_kernel_metadata_note(size_t kernel_count) {
+  const std::vector<uint8_t> payload = make_kernel_metadata_payload(kernel_count);
+  if (payload.empty())
+    return {};
+
+  std::vector<uint8_t> note;
+  Elf64_Nhdr header{};
+  header.n_namesz = 7;
+  header.n_descsz = static_cast<uint32_t>(payload.size());
+  header.n_type = NT_AMDGPU_METADATA;
+  append_bytes(note, &header, sizeof(header));
+  constexpr std::array<char, 8> kNoteName{'A', 'M', 'D', 'G', 'P', 'U', '\0', '\0'};
+  append_bytes(note, kNoteName.data(), kNoteName.size());
+  append_bytes(note, payload.data(), payload.size());
+  note.resize(align_up(note.size(), 4), 0);
+  return note;
+}
+
+bool install_kernel_metadata_note(std::vector<uint8_t> &image, size_t kernel_count,
+                                  uint64_t note_offset = sizeof(Elf64_Ehdr) + sizeof(Elf64_Phdr)) {
+  if (image.size() < sizeof(Elf64_Ehdr))
+    return false;
+  const std::vector<uint8_t> note = make_kernel_metadata_note(kernel_count);
+  const uint64_t program_header_offset = sizeof(Elf64_Ehdr);
+  if (note.empty() || note_offset < program_header_offset + sizeof(Elf64_Phdr) ||
+      note_offset > image.size() || note.size() > image.size() - note_offset) {
+    return false;
+  }
+
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  header.e_phoff = program_header_offset;
+  header.e_phentsize = sizeof(Elf64_Phdr);
+  header.e_phnum = 1;
+  std::memcpy(image.data(), &header, sizeof(header));
+
+  Elf64_Phdr program_header{};
+  program_header.p_type = PT_NOTE;
+  program_header.p_offset = note_offset;
+  program_header.p_filesz = note.size();
+  std::memcpy(image.data() + program_header_offset, &program_header, sizeof(program_header));
+  std::memcpy(image.data() + note_offset, note.data(), note.size());
+  return true;
+}
+
+std::vector<uint8_t> make_elf_with_kernel_metadata_note(size_t kernel_count) {
+  const std::vector<uint8_t> note = make_kernel_metadata_note(kernel_count);
+  if (note.empty())
+    return {};
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+  const uint64_t note_offset = sizeof(Elf64_Ehdr) + sizeof(Elf64_Phdr);
+  const uint64_t shstrtab_offset = note_offset + note.size();
+  const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t kSectionCount = 2;
+  std::vector<uint8_t> image(shoff + kSectionCount * sizeof(Elf64_Shdr), 0);
+
+  Elf64_Ehdr header{};
+  std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  header.e_ident[EI_CLASS] = ELFCLASS64;
+  header.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  header.e_type = ET_REL;
+  header.e_machine = EM_AMDGPU;
+  header.e_version = 1;
+  header.e_shoff = shoff;
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  header.e_ehsize = sizeof(Elf64_Ehdr);
+  header.e_shentsize = sizeof(Elf64_Shdr);
+  header.e_shnum = kSectionCount;
+  header.e_shstrndx = 1;
+  std::memcpy(image.data(), &header, sizeof(header));
+  if (!install_kernel_metadata_note(image, kernel_count, note_offset)) {
+    ADD_FAILURE() << "metadata fixture note does not fit in its ELF image";
+    return {};
+  }
+
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+  std::array<Elf64_Shdr, kSectionCount> sections{};
+  sections[1].sh_name = shstrtab_name;
+  sections[1].sh_type = SHT_STRTAB;
+  sections[1].sh_offset = shstrtab_offset;
+  sections[1].sh_size = shstrtab.size();
+  sections[1].sh_addralign = 1;
+  std::memcpy(image.data() + shoff, sections.data(), sizeof(sections));
+  return image;
+}
+
 // A 64-byte kernel descriptor whose wavefront SGPR granulation field is
 // `granulated`; everything else zero.
 KD make_kd(uint32_t granulated) {
@@ -204,12 +331,19 @@ constexpr size_t kRetainedKernelBoundaryCount = 34;
 constexpr size_t kRetainedCombinedBoundaryCount = 21;
 constexpr size_t kDerivedStateBudgetBytes =
     kAmdGpuCodeObjectRetainedDerivedStateImageUnits * kDerivedStateBoundaryImageBytes;
+// Short function names are copied once and short kernel names twice.
 constexpr size_t kMaximumShortRetainedFunctionEntries =
-    kDerivedStateBudgetBytes / kAmdGpuCodeObjectFunctionEntryChargeBytes;
+    kDerivedStateBudgetBytes / (kAmdGpuCodeObjectFunctionEntryChargeBytes + 1);
 constexpr size_t kMaximumShortRetainedKernelEntries =
-    kDerivedStateBudgetBytes / kAmdGpuCodeObjectKernelEntryChargeBytes;
+    kDerivedStateBudgetBytes / (kAmdGpuCodeObjectKernelEntryChargeBytes + 2);
 static_assert(kMaximumShortRetainedFunctionEntries <= 64);
 static_assert(kMaximumShortRetainedKernelEntries <= 64);
+static_assert((kMaximumShortRetainedFunctionEntries + 1) *
+                  (kAmdGpuCodeObjectFunctionEntryChargeBytes + 1) >
+              kDerivedStateBudgetBytes);
+static_assert((kMaximumShortRetainedKernelEntries + 1) *
+                  (kAmdGpuCodeObjectKernelEntryChargeBytes + 2) >
+              kDerivedStateBudgetBytes);
 
 struct DerivedStateBoundaryOptions {
   SymbolNameBudget budget = SymbolNameBudget::AtBoundary;
@@ -476,6 +610,39 @@ TEST(AmdGpuCodeObjectSgpr, NoKernelDescriptorReturnsNullopt) {
   EXPECT_FALSE(obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2).has_value());
 }
 
+TEST(AmdGpuCodeObjectAccounting, ChecksAllocationAndExcessCapacityCharges) {
+  using amdgpu_code_object_detail::checked_allocation_charge;
+  using amdgpu_code_object_detail::excess_vector_charge;
+
+  EXPECT_EQ(checked_allocation_charge(5, 3, 7), std::optional<uint64_t>(26));
+  EXPECT_FALSE(checked_allocation_charge(std::numeric_limits<uint64_t>::max(), 1, 1));
+  EXPECT_FALSE(checked_allocation_charge(0, std::numeric_limits<uint64_t>::max(), 2));
+
+  EXPECT_EQ(excess_vector_charge(12, 8, 10), std::optional<uint64_t>(40));
+  EXPECT_EQ(excess_vector_charge(8, 8, 10), std::optional<uint64_t>(0));
+  EXPECT_FALSE(excess_vector_charge(7, 8, 10));
+  EXPECT_FALSE(excess_vector_charge(std::numeric_limits<uint64_t>::max(), 0, 2));
+}
+
+TEST(AmdGpuCodeObjectAccounting, SymbolRoleChargeIsAdditiveAndMonotone) {
+  using amdgpu_code_object_detail::retained_symbol_role_charge;
+
+  EXPECT_EQ(retained_symbol_role_charge(false, false, false), 0u);
+  EXPECT_EQ(retained_symbol_role_charge(true, true, true),
+            kAmdGpuCodeObjectKernelEntryChargeBytes + kAmdGpuCodeObjectFunctionEntryChargeBytes +
+                kAmdGpuCodeObjectTransientSymbolEntryChargeBytes);
+  for (unsigned roles = 0; roles < 8; ++roles) {
+    const uint64_t charge = retained_symbol_role_charge(roles & 1u, roles & 2u, roles & 4u);
+    for (unsigned added_role : {1u, 2u, 4u}) {
+      if ((roles & added_role) == 0) {
+        const unsigned with_role = roles | added_role;
+        EXPECT_LE(charge,
+                  retained_symbol_role_charge(with_role & 1u, with_role & 2u, with_role & 4u));
+      }
+    }
+  }
+}
+
 TEST(AmdGpuCodeObjectValidation, RejectsAggregateCopiedSectionsLargerThanImage) {
   auto image = make_elf_with_kds({{"k", 0}});
   Elf64_Ehdr header{};
@@ -542,15 +709,46 @@ TEST(AmdGpuCodeObjectValidation, RejectsAggregateSectionNameAmplificationBeforeA
   EXPECT_FALSE(obj.is_valid());
 }
 
-TEST(AmdGpuCodeObjectValidation, AcceptsDenseZeroSizedProgbitsSections) {
-  // This is a representative dense collection, not a parser layout limit.
-  constexpr size_t kSectionCount = 512;
+TEST(AmdGpuCodeObjectValidation, AcceptsMaximumElfSectionCountWithoutTransientIndexState) {
+  constexpr size_t kSectionCount = std::numeric_limits<uint16_t>::max();
   const auto image = make_zero_sized_section_dense_elf(kSectionCount);
   AmdGpuCodeObject obj(image.data(), image.size());
 
   ASSERT_TRUE(obj.is_valid());
   EXPECT_EQ(obj.all_sections().size(), kSectionCount - 1);
   EXPECT_EQ(obj.text_sections().size(), (kSectionCount - 2) / 2);
+}
+
+TEST(AmdGpuCodeObjectValidation, AcceptsKernelMetadataEntriesEqualToBudget) {
+  constexpr size_t kMetadataEntries = 154;
+  const auto image = make_elf_with_kernel_metadata_note(kMetadataEntries);
+  ASSERT_EQ(kMetadataEntries * kAmdGpuCodeObjectKernelMetadataEntryChargeBytes,
+            image.size() * kAmdGpuCodeObjectRetainedDerivedStateImageUnits);
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, RejectsOneTooManyKernelMetadataEntries) {
+  constexpr size_t kMetadataEntries = 155;
+  const auto image = make_elf_with_kernel_metadata_note(kMetadataEntries);
+  ASSERT_GT(kMetadataEntries * kAmdGpuCodeObjectKernelMetadataEntryChargeBytes,
+            image.size() * kAmdGpuCodeObjectRetainedDerivedStateImageUnits);
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_FALSE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, SharesDerivedStateBudgetBetweenSymbolsAndMetadata) {
+  auto image = make_elf_at_retained_derived_state_boundary();
+  {
+    AmdGpuCodeObject symbol_only(image.data(), image.size());
+    ASSERT_TRUE(symbol_only.is_valid());
+  }
+  ASSERT_TRUE(install_kernel_metadata_note(image, 1));
+
+  AmdGpuCodeObject combined(image.data(), image.size());
+  EXPECT_FALSE(combined.is_valid());
 }
 
 TEST(AmdGpuCodeObjectValidation, AcceptsRetainedFunctionStateEqualToBudget) {

@@ -202,6 +202,16 @@ TEST(ConSanTransformMemoryTest, PinsParserAndPhaseOwnershipCoefficients) {
   EXPECT_EQ(phases[0].maximum_image_copies, 12u);
   EXPECT_EQ(rocjitsu::consan_hook::consan_transform_max_maximum_image_copies(), 13u);
   EXPECT_EQ(rocjitsu::consan_hook::consan_transform_max_total_copies(), 19u);
+
+  const rocjitsu::ConSanPatchedImageGrowthLimit floors_to_zero = {
+      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent,
+      .input_percent = 37,
+  };
+  const auto tiny_estimate =
+      rocjitsu::consan_hook::consan_transform_major_image_reservation(1, floors_to_zero);
+  ASSERT_TRUE(tiny_estimate);
+  EXPECT_EQ(tiny_estimate->maximum_image_bytes, 1u);
+  EXPECT_EQ(tiny_estimate->reservation_bytes, 19u);
 }
 
 TEST(ConSanTransformMemoryTest, ReportsNoGoverningPhaseForZeroReservation) {

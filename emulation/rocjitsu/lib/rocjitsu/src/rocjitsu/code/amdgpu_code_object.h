@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -57,14 +58,19 @@ struct AmdGpuFunctionInfo {
   bool code_size_inferred_from_zero = false;
 };
 
-/// Conservative fixed charges for symbol-derived parser roles.
-///
-/// Aggregate accounting combines roles that share a logical name. These
-/// charges are built from the retained public records, transient entries, and
-/// associative container nodes that each role owns. Copied name bytes and
-/// excess vector capacity are charged separately. Allocator bookkeeping remains
-/// outside the major-image model.
 namespace amdgpu_code_object_detail {
+
+/// Parser-private layout models and checked ownership-charge arithmetic.
+///
+/// The private container charges remain expressible as constant expressions in
+/// this header and are pinned against the production types in
+/// amdgpu_code_object.cpp.
+struct KernelMetadata {
+  bool has_dynamic_lds = false;
+  std::optional<bool> uses_dynamic_stack;
+  std::optional<uint16_t> sgpr_count;
+  std::optional<std::array<uint32_t, 3>> required_workgroup_size;
+};
 
 [[nodiscard]] inline constexpr uint64_t aligned_charge(uint64_t bytes, uint64_t alignment) {
   return ((bytes + alignment - 1u) / alignment) * alignment;
@@ -72,14 +78,38 @@ namespace amdgpu_code_object_detail {
 
 inline constexpr uint64_t kAssociativeEntryBookkeepingBytes = 4 * sizeof(void *);
 inline constexpr uint64_t kViewedBooleanEntryBytes =
-    aligned_charge(sizeof(std::string_view) + sizeof(bool), alignof(void *));
+    sizeof(std::pair<const std::string_view, bool>);
 inline constexpr uint64_t kFunctionSymbolEntryBytes = aligned_charge(
     sizeof(std::string_view) + 4 * sizeof(uint64_t) + sizeof(bool), alignof(uint64_t));
 inline constexpr uint64_t kFunctionEvidenceEntryBytes =
     aligned_charge(3 * sizeof(uint64_t) + sizeof(bool), alignof(uint64_t));
 
+[[nodiscard]] inline constexpr std::optional<uint64_t>
+checked_allocation_charge(uint64_t accumulated, uint64_t count, uint64_t element_bytes) {
+  if (count != 0 && element_bytes > std::numeric_limits<uint64_t>::max() / count)
+    return std::nullopt;
+  const uint64_t bytes = count * element_bytes;
+  if (bytes > std::numeric_limits<uint64_t>::max() - accumulated)
+    return std::nullopt;
+  return accumulated + bytes;
+}
+
+[[nodiscard]] inline constexpr std::optional<uint64_t>
+excess_vector_charge(uint64_t capacity, uint64_t requested, uint64_t element_bytes) {
+  if (capacity < requested)
+    return std::nullopt;
+  return checked_allocation_charge(0, capacity - requested, element_bytes);
+}
+
 } // namespace amdgpu_code_object_detail
 
+/// Conservative fixed charges for parser-derived state.
+///
+/// Aggregate accounting combines symbol roles that share a logical name. These
+/// charges are built from retained public records, transient entries, metadata
+/// entries, and associative container nodes. Copied name bytes and excess
+/// vector capacity are charged separately. Allocator bookkeeping remains
+/// outside the major-image model.
 inline constexpr uint64_t kAmdGpuCodeObjectTransientSymbolEntryChargeBytes =
     amdgpu_code_object_detail::kViewedBooleanEntryBytes +
     amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes;
@@ -95,6 +125,20 @@ inline constexpr uint64_t kAmdGpuCodeObjectFunctionEntryChargeBytes =
     2 * amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes;
 inline constexpr uint64_t kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes =
     kAmdGpuCodeObjectFunctionEntryChargeBytes + kAmdGpuCodeObjectTransientSymbolEntryChargeBytes;
+inline constexpr uint64_t kAmdGpuCodeObjectKernelMetadataEntryChargeBytes =
+    sizeof(std::pair<const std::string_view, amdgpu_code_object_detail::KernelMetadata>) +
+    amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes;
+
+namespace amdgpu_code_object_detail {
+
+[[nodiscard]] inline constexpr uint64_t
+retained_symbol_role_charge(bool has_kernel, bool has_function, bool has_dynamic_stack) {
+  return (has_kernel ? kAmdGpuCodeObjectKernelEntryChargeBytes : 0u) +
+         (has_function ? kAmdGpuCodeObjectFunctionEntryChargeBytes : 0u) +
+         (has_dynamic_stack ? kAmdGpuCodeObjectTransientSymbolEntryChargeBytes : 0u);
+}
+
+} // namespace amdgpu_code_object_detail
 
 /// Decode `GRANULATED_WAVEFRONT_SGPR_COUNT` for one kernel descriptor.
 ///

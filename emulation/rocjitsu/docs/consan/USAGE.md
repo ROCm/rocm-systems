@@ -175,6 +175,10 @@ each newly retained role for its copied name plus conservative aggregate
 kernel/function record and container state; roles sharing one logical symbol
 name share overlapping transient-state charges. It also charges retained kernel
 metadata map entries and vector capacity beyond the requested entry count.
+Symbol and metadata entries share that three-unit budget rather than receiving
+separate allowances, so metadata can reject an object already at the symbol
+boundary. This tightens parser admission without changing the eight-unit parser
+coefficient or the `12*M`, `13*M`, and `9*I + 10*M` phase coefficients.
 Section headers, transient symbol-name characters, and metadata names are views
 into the image rather than duplicate owning collections.
 Admission uses the largest phase value and reports the governing phase and
