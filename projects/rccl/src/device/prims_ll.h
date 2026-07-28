@@ -157,7 +157,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       // Comm FIFO buffers are uncached; use non-temporal loads so the flag poll
       // never observes a stale cache line (no system-scope cache-bypass needed).
       *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
-      *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v+1);
+      *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
       *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
       *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v + 1);
@@ -196,10 +196,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
         // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
         line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
-        line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v+1);
+        line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
-        line[i].v[0] = __builtin_nontemporal_load(src->v);
-        line[i].v[1] = __builtin_nontemporal_load(src->v + 1);
+        line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
+        line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #endif
 #else
         asm volatile("ld.volatile.global.v4.u32 {%0,%1,%2,%3}, [%4];"
@@ -225,7 +225,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
       // Comm FIFO buffers are uncached; use non-temporal loads (no bypass).
       line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
-      line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v+1);
+      line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
 #else
       line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
       line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v + 1);
