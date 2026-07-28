@@ -45,21 +45,11 @@ constexpr size_t kAllocatorTrimKernelCadence = 8;
 
 enum class ProgressMode : uint8_t { Auto, Always, Never };
 
-struct TargetInfo {
-  std::string_view name;
-  rj_code_target_id_t target;
+constexpr std::array<rj_code_target_id_t, 8> kSupportedTargets = {
+    ROCJITSU_CODE_TARGET_GFX942,  ROCJITSU_CODE_TARGET_GFX950,  ROCJITSU_CODE_TARGET_GFX1100,
+    ROCJITSU_CODE_TARGET_GFX1150, ROCJITSU_CODE_TARGET_GFX1151, ROCJITSU_CODE_TARGET_GFX1200,
+    ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX1250,
 };
-
-constexpr std::array<TargetInfo, 8> kSupportedTargets = {{
-    {"gfx942", ROCJITSU_CODE_TARGET_GFX942},
-    {"gfx950", ROCJITSU_CODE_TARGET_GFX950},
-    {"gfx1100", ROCJITSU_CODE_TARGET_GFX1100},
-    {"gfx1150", ROCJITSU_CODE_TARGET_GFX1150},
-    {"gfx1151", ROCJITSU_CODE_TARGET_GFX1151},
-    {"gfx1200", ROCJITSU_CODE_TARGET_GFX1200},
-    {"gfx1201", ROCJITSU_CODE_TARGET_GFX1201},
-    {"gfx1250", ROCJITSU_CODE_TARGET_GFX1250},
-}};
 
 struct CliOptions {
   std::vector<std::string> input_paths;
@@ -282,7 +272,7 @@ void print_supported_targets(std::ostream &os) {
   for (size_t i = 0; i < kSupportedTargets.size(); ++i) {
     if (i != 0)
       os << ", ";
-    os << kSupportedTargets[i].name;
+    os << rj_code_target_name(kSupportedTargets[i]);
   }
 }
 
@@ -315,14 +305,6 @@ void print_help() {
             << "Supported target names: ";
   print_supported_targets(std::cout);
   std::cout << ".\n";
-}
-
-[[nodiscard]] std::string_view target_name(rj_code_target_id_t target) {
-  for (const TargetInfo &info : kSupportedTargets) {
-    if (info.target == target)
-      return info.name;
-  }
-  return "unsupported";
 }
 
 [[nodiscard]] std::string_view access_name(WaitcheckAccessKind access) {
@@ -373,8 +355,9 @@ void print_help() {
 counter_parity_catalog_key(rj_code_target_id_t target,
                            const WaitcheckCounterUnderaccountingDiagnostic &diagnostic) {
   std::ostringstream os;
-  os << target_name(target) << "/" << (diagnostic.has_required_dependency ? "modeled" : "unmodeled")
-     << "/" << wait_counter_name(diagnostic.counter) << "/";
+  os << rj_code_target_name(target) << "/"
+     << (diagnostic.has_required_dependency ? "modeled" : "unmodeled") << "/"
+     << wait_counter_name(diagnostic.counter) << "/";
   if (diagnostic.has_required_dependency) {
     os << access_name(diagnostic.access) << "/" << register_class_name(diagnostic.reg.cls) << "/"
        << instruction_mnemonic(diagnostic.producer_instruction) << "/";
@@ -455,7 +438,7 @@ public:
       output_ << "{\"schema\":\"rj-waitcheck-diagnostic-v1\",\"input\":";
       write_json_string(output_, input_path);
       output_ << ",\"target\":";
-      write_json_string(output_, target_name(target));
+      write_json_string(output_, rj_code_target_name(target));
       output_ << ",\"code_object_index\":" << code_object_index << ",\"kernel_name\":";
       if (kernel)
         write_json_string(output_, kernel->name);
@@ -503,7 +486,7 @@ public:
       const std::array<std::string, 8> fixed_repro_argv = {tool_path_,
                                                            std::string(input_path),
                                                            "--target",
-                                                           std::string(target_name(target)),
+                                                           std::string(rj_code_target_name(target)),
                                                            "--code-object-index",
                                                            std::to_string(code_object_index),
                                                            "--no-fail",
@@ -570,7 +553,7 @@ public:
       output_ << ",\"input\":";
       write_json_string(output_, input_path);
       output_ << ",\"target\":";
-      write_json_string(output_, target_name(target));
+      write_json_string(output_, rj_code_target_name(target));
       output_ << ",\"code_object_index\":" << code_object_index << ",\"kernel_name\":";
       if (diagnostic.has_kernel)
         write_json_string(output_, diagnostic.kernel_name);
@@ -666,7 +649,7 @@ public:
       const std::array<std::string, 9> fixed_repro_argv = {tool_path_,
                                                            std::string(input_path),
                                                            "--target",
-                                                           std::string(target_name(target)),
+                                                           std::string(rj_code_target_name(target)),
                                                            "--code-object-index",
                                                            std::to_string(code_object_index),
                                                            "--check-counter-parity",
@@ -713,9 +696,9 @@ private:
 };
 
 [[nodiscard]] std::optional<rj_code_target_id_t> parse_target(std::string_view value) {
-  for (const TargetInfo &info : kSupportedTargets) {
-    if (value == info.name)
-      return info.target;
+  for (rj_code_target_id_t target : kSupportedTargets) {
+    if (value == rj_code_target_name(target))
+      return target;
   }
   return std::nullopt;
 }
@@ -1045,12 +1028,12 @@ private:
     if (!executable.is_valid())
       continue;
 
-    for (const TargetInfo &info : kSupportedTargets) {
-      if (options.target && *options.target != info.target)
+    for (rj_code_target_id_t target : kSupportedTargets) {
+      if (options.target && *options.target != target)
         continue;
-      const uint32_t count = executable.num_code_objects(info.target);
+      const uint32_t count = executable.num_code_objects(target);
       for (uint32_t index = 0; index < count; ++index) {
-        const AmdGpuCodeObject *code_object = executable.code_object(info.target, index);
+        const AmdGpuCodeObject *code_object = executable.code_object(target, index);
         if (!code_object)
           continue;
         ++totals.code_objects;
@@ -1077,24 +1060,24 @@ private:
 
 void list_code_objects(const Executable &executable, std::string_view input_path,
                        bool include_path) {
-  for (const TargetInfo &info : kSupportedTargets) {
-    const uint32_t count = executable.num_code_objects(info.target);
+  for (rj_code_target_id_t target : kSupportedTargets) {
+    const uint32_t count = executable.num_code_objects(target);
     if (include_path)
       std::cout << input_path << ":";
-    std::cout << info.name << ": " << count << "\n";
+    std::cout << rj_code_target_name(target) << ": " << count << "\n";
   }
 }
 
 void list_kernels(const Executable &executable, std::string_view input_path,
                   const CliOptions &options) {
-  for (const TargetInfo &info : kSupportedTargets) {
-    if (options.target && *options.target != info.target)
+  for (rj_code_target_id_t target : kSupportedTargets) {
+    if (options.target && *options.target != target)
       continue;
-    const uint32_t count = executable.num_code_objects(info.target);
+    const uint32_t count = executable.num_code_objects(target);
     for (uint32_t index = 0; index < count; ++index) {
       if (options.code_object_index_set && index != options.code_object_index)
         continue;
-      const AmdGpuCodeObject *code_object = executable.code_object(info.target, index);
+      const AmdGpuCodeObject *code_object = executable.code_object(target, index);
       if (!code_object)
         continue;
       const std::vector<WaitcheckKernelInfo> kernels = waitcheck_kernels(*code_object);
@@ -1103,7 +1086,7 @@ void list_kernels(const Executable &executable, std::string_view input_path,
       std::cout << ",\"input\":";
       write_json_string(std::cout, input_path);
       std::cout << ",\"target\":";
-      write_json_string(std::cout, info.name);
+      write_json_string(std::cout, rj_code_target_name(target));
       std::cout << ",\"code_object_index\":" << index << ",\"kernel_count\":" << kernels.size()
                 << "}\n";
       for (const WaitcheckKernelInfo &kernel : kernels) {
@@ -1112,7 +1095,7 @@ void list_kernels(const Executable &executable, std::string_view input_path,
         std::cout << ",\"input\":";
         write_json_string(std::cout, input_path);
         std::cout << ",\"target\":";
-        write_json_string(std::cout, info.name);
+        write_json_string(std::cout, rj_code_target_name(target));
         std::cout << ",\"code_object_index\":" << index << ",\"kernel_name\":";
         write_json_string(std::cout, kernel.name);
         std::cout << ",\"descriptor_vaddr\":" << kernel.descriptor_vaddr
@@ -1140,7 +1123,7 @@ select_code_object(const CliOptions &options, const std::string &input_path, std
         selected.executable->code_object(*options.target, options.code_object_index);
     if (!selected.code_object) {
       std::ostringstream os;
-      os << "failed to select " << target_name(*options.target) << " code object "
+      os << "failed to select " << rj_code_target_name(*options.target) << " code object "
          << options.code_object_index;
       error = os.str();
       selected.executable.reset();
@@ -1153,10 +1136,10 @@ select_code_object(const CliOptions &options, const std::string &input_path, std
 
   std::optional<rj_code_target_id_t> target_with_objects;
   uint32_t target_count = 0;
-  for (const TargetInfo &info : kSupportedTargets) {
-    if (selected.executable->num_code_objects(info.target) == 0)
+  for (rj_code_target_id_t target : kSupportedTargets) {
+    if (selected.executable->num_code_objects(target) == 0)
       continue;
-    target_with_objects = info.target;
+    target_with_objects = target;
     ++target_count;
   }
 
@@ -1175,7 +1158,7 @@ select_code_object(const CliOptions &options, const std::string &input_path, std
       selected.executable->code_object(*target_with_objects, options.code_object_index);
   if (!selected.code_object) {
     std::ostringstream os;
-    os << "failed to select " << target_name(*target_with_objects) << " code object "
+    os << "failed to select " << rj_code_target_name(*target_with_objects) << " code object "
        << options.code_object_index;
     error = os.str();
     selected.executable.reset();
@@ -1192,7 +1175,7 @@ void print_diagnostics(const std::string &input_path, rj_code_target_id_t target
   const size_t limit = std::min(max_diagnostics, report.diagnostics.size());
   for (size_t i = 0; i < limit; ++i) {
     const auto &diag = report.diagnostics[i];
-    std::cout << input_path << ":" << target_name(target) << "[" << code_object_index
+    std::cout << input_path << ":" << rj_code_target_name(target) << "[" << code_object_index
               << "]:" << diag.section_name << "+" << hex_offset(diag.section_offset) << ": "
               << diag.message << "\n";
     std::cout << "  producer " << diag.section_name << "+"
@@ -1219,7 +1202,8 @@ void print_counter_underaccounting(const std::string &input_path, rj_code_target
   const size_t limit = std::min(max_diagnostics, report.counter_underaccounting_diagnostics.size());
   for (size_t i = 0; i < limit; ++i) {
     const auto &diag = report.counter_underaccounting_diagnostics[i];
-    std::cout << input_path << ":" << target_name(target) << "[" << code_object_index << "]";
+    std::cout << input_path << ":" << rj_code_target_name(target) << "[" << code_object_index
+              << "]";
     if (diag.has_kernel)
       std::cout << ":kernel=" << diag.kernel_name << "@.text+"
                 << hex_offset(diag.kernel_entry_offset);
@@ -1249,7 +1233,7 @@ void print_counter_underaccounting(const std::string &input_path, rj_code_target
 void print_summary(const std::string &input_path, rj_code_target_id_t target,
                    uint32_t code_object_index, std::optional<uint64_t> kernel_entry,
                    const WaitcheckReport &report) {
-  std::cout << "rj_waitcheck: " << input_path << ":" << target_name(target) << "["
+  std::cout << "rj_waitcheck: " << input_path << ":" << rj_code_target_name(target) << "["
             << code_object_index << "]";
   if (kernel_entry)
     std::cout << ":kernel=.text+" << hex_offset(*kernel_entry);
@@ -1300,7 +1284,8 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
   const rj_code_arch_t arch = waitcheck_arch_for_target(target);
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
     result.report.supported = false;
-    result.error = "target is not supported by waitcheck: " + std::string(target_name(target));
+    result.error =
+        "target is not supported by waitcheck: " + std::string(rj_code_target_name(target));
     return result;
   }
 
@@ -1324,8 +1309,8 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
     result.report.analysis_error = "unexpected non-standard analysis failure";
   }
   if (!result.report.supported) {
-    result.error = "waitcheck analysis failed for " + std::string(target_name(target)) + "[" +
-                   std::to_string(code_object_index) + "]";
+    result.error = "waitcheck analysis failed for " + std::string(rj_code_target_name(target)) +
+                   "[" + std::to_string(code_object_index) + "]";
     if (!result.report.analysis_error.empty())
       result.error += ": " + result.report.analysis_error;
   }
@@ -1341,7 +1326,8 @@ run_kernel_batch_analysis(const CliOptions &options, const std::string &input_pa
   const rj_code_arch_t arch = waitcheck_arch_for_target(target);
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
     result.report.supported = false;
-    result.error = "target is not supported by waitcheck: " + std::string(target_name(target));
+    result.error =
+        "target is not supported by waitcheck: " + std::string(rj_code_target_name(target));
     return result;
   }
 
@@ -1355,7 +1341,7 @@ run_kernel_batch_analysis(const CliOptions &options, const std::string &input_pa
   if (options.slowest_kernels != 0)
     analysis_options.kernel_timing_callback = [&](const WaitcheckKernelInfo &kernel,
                                                   std::chrono::nanoseconds elapsed) {
-      result.slow_kernels.push_back({elapsed, input_path, std::string(target_name(target)),
+      result.slow_kernels.push_back({elapsed, input_path, std::string(rj_code_target_name(target)),
                                      code_object_index, kernel.name, kernel.entry_offset});
     };
 
@@ -1369,8 +1355,8 @@ run_kernel_batch_analysis(const CliOptions &options, const std::string &input_pa
     result.report.analysis_error = "unexpected non-standard analysis failure";
   }
   if (!result.report.supported) {
-    result.error = "waitcheck analysis failed for " + std::string(target_name(target)) + "[" +
-                   std::to_string(code_object_index) + "]";
+    result.error = "waitcheck analysis failed for " + std::string(rj_code_target_name(target)) +
+                   "[" + std::to_string(code_object_index) + "]";
     if (!result.report.analysis_error.empty())
       result.error += ": " + result.report.analysis_error;
   }
@@ -1561,16 +1547,17 @@ void print_slowest_kernels(const ScanTotals &totals) {
   };
   std::vector<CodeObjectTask> code_object_tasks;
   std::vector<WorkItem> work_items;
-  for (const TargetInfo &info : kSupportedTargets) {
-    if (options.target && *options.target != info.target)
+  for (rj_code_target_id_t target : kSupportedTargets) {
+    if (options.target && *options.target != target)
       continue;
 
-    const uint32_t count = executable.num_code_objects(info.target);
+    const uint32_t count = executable.num_code_objects(target);
     for (uint32_t index = 0; index < count; ++index) {
-      const AmdGpuCodeObject *code_object = executable.code_object(info.target, index);
+      const AmdGpuCodeObject *code_object = executable.code_object(target, index);
       if (!code_object) {
         std::ostringstream os;
-        os << input_path << ": failed to select " << info.name << " code object " << index;
+        os << input_path << ": failed to select " << rj_code_target_name(target) << " code object "
+           << index;
         if (options.exhaustive) {
           record_analysis_error(input_path, os.str(), totals, progress);
           continue;
@@ -1579,14 +1566,15 @@ void print_slowest_kernels(const ScanTotals &totals) {
         return false;
       }
       code_object_tasks.push_back(
-          {info.target, index, code_object, waitcheck_kernels(*code_object), {}});
+          {target, index, code_object, waitcheck_kernels(*code_object), {}});
     }
   }
 
   if (code_object_tasks.empty()) {
     const std::string reason =
-        options.target ? "no " + std::string(target_name(*options.target)) + " code objects found"
-                       : "no supported code objects found";
+        options.target
+            ? "no " + std::string(rj_code_target_name(*options.target)) + " code objects found"
+            : "no supported code objects found";
     if (options.exhaustive) {
       ignore_input(input_path, reason, totals, options.summary_only);
       return true;
@@ -1642,7 +1630,7 @@ void print_slowest_kernels(const ScanTotals &totals) {
       const WorkItem &work = work_items[work_index];
       const CodeObjectTask &task = code_object_tasks[work.code_object_task];
       if (progress)
-        progress->begin_code_object(input_path, target_name(task.target), task.index);
+        progress->begin_code_object(input_path, rj_code_target_name(task.target), task.index);
       if (work.kernel_count != 0) {
         work_results[work_index] = run_kernel_batch_analysis(
             options, input_path, task.target, task.index, *task.code_object,

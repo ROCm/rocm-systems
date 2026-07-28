@@ -238,13 +238,14 @@ TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   const auto result = try_patch_consan(bytes, options);
 
   EXPECT_TRUE(result.visited_code_object);
+  EXPECT_FALSE(result.parsed_code_object);
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_EQ(result.input_size, bytes.size());
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.errors.empty());
   EXPECT_TRUE(result.warnings.empty());
-  EXPECT_TRUE(result.target_name.empty());
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_INVALID);
   EXPECT_TRUE(result.kernels.empty());
 }
 
@@ -397,39 +398,49 @@ TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
   const auto result = try_patch_consan(bytes, options);
 
   EXPECT_TRUE(result.visited_code_object);
+  EXPECT_FALSE(result.parsed_code_object);
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(result.input_size, bytes.size());
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_FALSE(result.errors.empty());
-  EXPECT_TRUE(result.target_name.empty());
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_INVALID);
   EXPECT_TRUE(result.kernels.empty());
 }
 
 TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
   const std::array<uint32_t, 1> text_words = {build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+  struct UnsupportedTarget {
+    uint32_t machine;
+    rj_code_target_id_t target;
+  };
   constexpr std::array unsupported_targets = {
-      EF_AMDGPU_MACH_AMDGCN_GFX90A,
-      EF_AMDGPU_MACH_AMDGCN_GFX1200,
+      UnsupportedTarget{EF_AMDGPU_MACH_AMDGCN_GFX90A, ROCJITSU_CODE_TARGET_GFX90A},
+      UnsupportedTarget{EF_AMDGPU_MACH_AMDGCN_GFX1200, ROCJITSU_CODE_TARGET_GFX1200},
+      UnsupportedTarget{0x1234u, ROCJITSU_CODE_TARGET_INVALID},
   };
 
-  for (uint32_t target : unsupported_targets) {
-    SCOPED_TRACE(target);
+  for (const UnsupportedTarget &unsupported : unsupported_targets) {
+    SCOPED_TRACE(unsupported.machine);
     std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
-    mutate_elf_header(bytes, [target](Elf64_Ehdr &header) { header.e_flags = target; });
+    mutate_elf_header(bytes,
+                      [unsupported](Elf64_Ehdr &header) { header.e_flags = unsupported.machine; });
     ConSanOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
 
     const ConSanResult result = try_patch_consan(bytes, options);
 
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+    EXPECT_TRUE(result.parsed_code_object);
     EXPECT_FALSE(result.modified);
     EXPECT_TRUE(result.errors.empty());
     EXPECT_FALSE(result.semantic_arch_required);
     EXPECT_TRUE(consan_result_has_resolved_semantic_arch(result));
-    EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-      return warning.starts_with("ConSan does not support target '");
-    }));
+    EXPECT_EQ(result.target, unsupported.target);
+    EXPECT_TRUE(std::ranges::any_of(result.warnings, [&](const std::string &warning) {
+      return warning == "ConSan does not support target '" +
+                            std::string(rj_code_target_name(unsupported.target)) + "'";
+    })) << testing::PrintToString(result.warnings);
   }
 }
 
@@ -457,6 +468,7 @@ TEST(ConSan, StubRejectsEmptyCodeObject) {
   const auto result = try_patch_consan(bytes, options);
 
   EXPECT_TRUE(result.visited_code_object);
+  EXPECT_FALSE(result.parsed_code_object);
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(result.input_size, 0u);
@@ -662,7 +674,7 @@ TEST(ConSan, RejectsCodeObjectWithMalformedKernelMetadataNote) {
       EXPECT_TRUE(result.patches.empty());
       EXPECT_FALSE(result.kernel_metadata_trustworthy);
       EXPECT_EQ(result.malformed_kernel_metadata_note_count, damage.malformed_note_count);
-      EXPECT_EQ(result.target_name, "gfx1201");
+      EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1201);
       ASSERT_EQ(result.errors.size(), 1u);
       EXPECT_EQ(result.errors.front(), damage.expected_error);
       EXPECT_EQ(consan_install_action(result, false), ConSanInstallAction::LoadOriginal);

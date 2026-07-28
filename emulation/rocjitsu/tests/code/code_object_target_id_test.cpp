@@ -179,6 +179,59 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
 // Machine flag <-> ISA architecture
 //==============================================================================
 
+TEST(GfxCodeObjectTargets, CanonicalIdentityCoversEveryTargetEnumerator) {
+  struct TargetCase {
+    rj_code_target_id_t target;
+    const char *name;
+    rj_code_arch_t arch;
+  };
+  constexpr std::array cases = {
+      TargetCase{ROCJITSU_CODE_TARGET_GFX90A, "gfx90a", ROCJITSU_CODE_ARCH_CDNA2},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX942, "gfx942", ROCJITSU_CODE_ARCH_CDNA3},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX950, "gfx950", ROCJITSU_CODE_ARCH_CDNA4},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1200, "gfx1200", ROCJITSU_CODE_ARCH_RDNA4},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1201, "gfx1201", ROCJITSU_CODE_ARCH_RDNA4},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1250, "gfx1250", ROCJITSU_CODE_ARCH_GFX1250},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1100, "gfx1100", ROCJITSU_CODE_ARCH_RDNA3},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1150, "gfx1150", ROCJITSU_CODE_ARCH_RDNA3_5},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1151, "gfx1151", ROCJITSU_CODE_ARCH_RDNA3_5},
+  };
+
+  for (const TargetCase &target_case : cases) {
+    SCOPED_TRACE(target_case.name);
+    EXPECT_STREQ(rj_code_target_name(target_case.target), target_case.name);
+    EXPECT_EQ(rj_code_arch_for_target(target_case.target), target_case.arch);
+  }
+  EXPECT_STREQ(rj_code_target_name(ROCJITSU_CODE_TARGET_INVALID), "invalid");
+  EXPECT_EQ(rj_code_arch_for_target(ROCJITSU_CODE_TARGET_INVALID), ROCJITSU_CODE_ARCH_INVALID);
+  const auto unknown = static_cast<rj_code_target_id_t>(ROCJITSU_CODE_TARGET_INVALID + 1);
+  EXPECT_STREQ(rj_code_target_name(unknown), "invalid");
+  EXPECT_EQ(rj_code_arch_for_target(unknown), ROCJITSU_CODE_ARCH_INVALID);
+}
+
+TEST(GfxCodeObjectTargets, CanonicalIdentityCoversEveryArchitectureEnumerator) {
+  struct ArchCase {
+    rj_code_arch_t arch;
+    const char *name;
+  };
+  constexpr std::array cases = {
+      ArchCase{ROCJITSU_CODE_ARCH_CDNA1, "cdna1"}, ArchCase{ROCJITSU_CODE_ARCH_CDNA2, "cdna2"},
+      ArchCase{ROCJITSU_CODE_ARCH_CDNA3, "cdna3"}, ArchCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},
+      ArchCase{ROCJITSU_CODE_ARCH_RDNA1, "rdna1"}, ArchCase{ROCJITSU_CODE_ARCH_RDNA2, "rdna2"},
+      ArchCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3"}, ArchCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3.5"},
+      ArchCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"}, ArchCase{ROCJITSU_CODE_ARCH_RV32I, "rv32i"},
+      ArchCase{ROCJITSU_CODE_ARCH_RV64I, "rv64i"}, ArchCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250"},
+  };
+
+  for (const ArchCase &arch_case : cases) {
+    SCOPED_TRACE(arch_case.name);
+    EXPECT_STREQ(rj_code_arch_name(arch_case.arch), arch_case.name);
+  }
+  EXPECT_STREQ(rj_code_arch_name(ROCJITSU_CODE_ARCH_INVALID), "invalid");
+  const auto unknown = static_cast<rj_code_arch_t>(ROCJITSU_CODE_ARCH_INVALID + 1);
+  EXPECT_STREQ(rj_code_arch_name(unknown), "invalid");
+}
+
 TEST(AmdGpuElfMachineFlags, MapsGfx1250ArchitectureInBothDirections) {
   EXPECT_EQ(arch_for_elf_mach(EF_AMDGPU_MACH_AMDGCN_GFX1250), ROCJITSU_CODE_ARCH_GFX1250);
   EXPECT_EQ(elf_mach_for_arch(ROCJITSU_CODE_ARCH_GFX1250), EF_AMDGPU_MACH_AMDGCN_GFX1250);
@@ -199,6 +252,10 @@ TEST(GfxCodeObjectTargets, LoadsGfx942FromMachineFlags) {
 
 TEST(GfxCodeObjectTargets, LoadsGfx950FromMachineFlags) {
   expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950);
+}
+
+TEST(GfxCodeObjectTargets, LoadsGfx1100FromMachineFlags) {
+  expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1100, ROCJITSU_CODE_TARGET_GFX1100);
 }
 
 TEST(GfxCodeObjectTargets, LoadsGfx1150FromMachineFlags) {
@@ -248,6 +305,10 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx942ForBasicBlockList) {
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx950ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950);
+}
+
+TEST(GfxCodeObjectTargets, CApiAcceptsGfx1100ForBasicBlockList) {
+  expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1100, ROCJITSU_CODE_TARGET_GFX1100);
 }
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx1150ForBasicBlockList) {

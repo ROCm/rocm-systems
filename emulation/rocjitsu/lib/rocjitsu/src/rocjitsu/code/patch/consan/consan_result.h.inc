@@ -86,6 +86,9 @@ struct ConSanPatchedImageGrowthRejection {
 
 struct ConSanResult {
   bool visited_code_object = false;
+  /// True after the input has been parsed as a structurally valid AMDGPU code
+  /// object. This remains true when its machine target is not enumerated.
+  bool parsed_code_object = false;
   bool modified = false;
   bool final_validation_passed = false;
   /// Both the pristine-to-mutation and mutation-to-instrumentation images were
@@ -142,6 +145,9 @@ struct ConSanResult {
   /// that retain the invalid default before coverage or require-patch
   /// classification.
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  /// Exact code-object target identity. Its display name is derived from this
+  /// value, which must not participate in semantic decisions.
+  rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
   /// Set immediately before architecture-dependent decoding and semantic
   /// classification begin. Parse-only results, including unsupported targets,
   /// leave this false even though they retain section and symbol inventory.
@@ -149,9 +155,6 @@ struct ConSanResult {
   /// semantic fields added after the transition inherit this invariant without
   /// extending a hand-maintained list of members.
   bool semantic_arch_required = false;
-  std::string target_name;
-  /// Display/logging projection only.  Semantic code must branch on arch.
-  std::string arch_display_name;
   std::vector<ConSanTextSection> text_sections;
   std::vector<ConSanKernelInfo> kernels;
   std::vector<ConSanFunctionInfo> functions;

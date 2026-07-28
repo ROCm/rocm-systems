@@ -477,8 +477,7 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
 
     AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
     const rj_code_arch_t arch = arch_for_target(code_object.target_id());
-    if (arch == ROCJITSU_CODE_ARCH_INVALID ||
-        inventory.target_name != target_name(code_object.target_id())) {
+    if (arch == ROCJITSU_CODE_ARCH_INVALID || inventory.target != code_object.target_id()) {
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry does not match the original code-object target");
     }

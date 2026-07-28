@@ -991,8 +991,8 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty());
   ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_EQ(result.target_name, "gfx1201");
-  EXPECT_EQ(result.arch_display_name, "rdna4");
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1201);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA4);
 
   const ConSanKernelInfo &kernel = result.kernels.front();
   EXPECT_EQ(kernel.name, "lds_probe");
@@ -1142,6 +1142,47 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
+TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
+  struct TargetCase {
+    rj_code_target_id_t target;
+    rj_code_arch_t arch;
+    std::vector<uint8_t> bytes;
+  };
+  const std::array<TargetCase, 4> cases = {
+      TargetCase{
+          .target = ROCJITSU_CODE_TARGET_GFX942,
+          .arch = ROCJITSU_CODE_ARCH_CDNA3,
+          .bytes = make_cdna3_lds_code_object(std::array{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3)}),
+      },
+      TargetCase{
+          .target = ROCJITSU_CODE_TARGET_GFX950,
+          .arch = ROCJITSU_CODE_ARCH_CDNA4,
+          .bytes = make_cdna4_lds_code_object(std::array{build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)}),
+      },
+      TargetCase{
+          .target = ROCJITSU_CODE_TARGET_GFX1201,
+          .arch = ROCJITSU_CODE_ARCH_RDNA4,
+          .bytes = make_rdna4_lds_code_object(std::array{build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)}),
+      },
+      TargetCase{
+          .target = ROCJITSU_CODE_TARGET_GFX1250,
+          .arch = ROCJITSU_CODE_ARCH_GFX1250,
+          .bytes = make_gfx1250_code_object(std::array{build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250)}),
+      },
+  };
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  for (const TargetCase &target_case : cases) {
+    SCOPED_TRACE(rj_code_target_name(target_case.target));
+    const ConSanResult result = try_patch_consan(target_case.bytes, options);
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    EXPECT_TRUE(result.parsed_code_object);
+    EXPECT_EQ(result.target, target_case.target);
+    EXPECT_EQ(result.arch, target_case.arch);
+  }
+}
+
 TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   const std::array<uint32_t, 5> text_words = {
       0xd81a0004u,
@@ -1157,8 +1198,8 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.target_name, "gfx950");
-  ASSERT_EQ(result.arch_display_name, "cdna4");
+  ASSERT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
+  ASSERT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_EQ(result.kernels.size(), 1u);
   const ConSanKernelInfo &kernel = result.kernels.front();
   EXPECT_TRUE(kernel.decoded);

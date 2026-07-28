@@ -3215,6 +3215,42 @@ TEST(HsaHooksUnitTest, ConSanLoaderHonorsAllTypedOutcomesAcrossAllProfiles) {
   }
 }
 
+TEST(HsaHooksUnitTest, ConSanLogsSharedNamesForParsedTypedIdentities) {
+  struct TargetCase {
+    rj_code_target_id_t target;
+    rj_code_arch_t semantic_arch;
+    const char *target_name;
+    const char *display_arch_name;
+  };
+  constexpr std::array cases = {
+      TargetCase{ROCJITSU_CODE_TARGET_GFX942, ROCJITSU_CODE_ARCH_CDNA3, "gfx942", "cdna3"},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX950, ROCJITSU_CODE_ARCH_CDNA4, "gfx950", "cdna4"},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_ARCH_RDNA4, "gfx1201", "rdna4"},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", "gfx1250"},
+      TargetCase{ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_ARCH_INVALID, "gfx1200", "rdna4"},
+      TargetCase{ROCJITSU_CODE_TARGET_INVALID, ROCJITSU_CODE_ARCH_INVALID, "invalid", "invalid"},
+  };
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  for (const TargetCase &target_case : cases) {
+    SCOPED_TRACE(target_case.target_name);
+    rocjitsu::ConSanResult result;
+    result.parsed_code_object = true;
+    result.target = target_case.target;
+    result.arch = target_case.semantic_arch;
+    result.outcome = target_case.semantic_arch == ROCJITSU_CODE_ARCH_INVALID
+                         ? rocjitsu::ConSanTransformOutcome::Unsupported
+                         : rocjitsu::ConSanTransformOutcome::Unchanged;
+
+    testing::internal::CaptureStderr();
+    run_hook_load_case(kConSanHookProfiles[1], false, result, HSA_STATUS_SUCCESS, 101u);
+    const std::string log = testing::internal::GetCapturedStderr();
+    const std::string expected =
+        "target=" + std::string(target_case.target_name) + " arch=" + target_case.display_arch_name;
+    EXPECT_NE(log.find(expected), std::string::npos) << log;
+  }
+}
+
 TEST(HsaHooksUnitTest, ConSanProductionUnsupportedTargetPassesThroughWhenFailOpen) {
   const std::vector<uint8_t> unsupported =
       rocjitsu::waitcheck_test::make_gfx1200_code_object({0xBFB00000u});
@@ -3222,18 +3258,21 @@ TEST(HsaHooksUnitTest, ConSanProductionUnsupportedTargetPassesThroughWhenFailOpe
   direct_options.flavor = rocjitsu::ConSanFlavor::Moi;
   const rocjitsu::ConSanResult direct = rocjitsu::try_patch_consan(unsupported, direct_options);
   ASSERT_EQ(direct.outcome, rocjitsu::ConSanTransformOutcome::Unsupported);
+  ASSERT_TRUE(direct.parsed_code_object);
   ASSERT_EQ(direct.arch, ROCJITSU_CODE_ARCH_INVALID);
   ASSERT_FALSE(direct.text_sections.empty());
   ASSERT_FALSE(direct.kernels.empty());
   ASSERT_FALSE(direct.semantic_arch_required);
   ASSERT_TRUE(rocjitsu::consan_result_has_resolved_semantic_arch(direct));
 
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   for (const ConSanHookProfile &profile : kConSanHookProfiles) {
     SCOPED_TRACE(profile.name);
     reset_code_object_observations();
     configure_consan_profile(profile, /*fail_closed=*/false);
     g_transform_override_uses_production = true;
     FakeApiTable api;
+    testing::internal::CaptureStderr();
     InstalledDbiHook hook(api);
     ASSERT_TRUE(hook.installed()) << profile.name << ": " << hook.error();
 
@@ -3246,6 +3285,8 @@ TEST(HsaHooksUnitTest, ConSanProductionUnsupportedTargetPassesThroughWhenFailOpe
               HSA_STATUS_SUCCESS);
     expect_transform_profile(profile);
     EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{101u});
+    const std::string log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("target=gfx1200 arch=rdna4"), std::string::npos) << log;
   }
 }
 

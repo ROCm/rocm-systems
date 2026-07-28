@@ -128,6 +128,109 @@ typedef enum rj_code_target_id_t {
   ROCJITSU_CODE_TARGET_INVALID
 } rj_code_target_id_t;
 
+#if defined(__clang__)
+#define RJ_CODE_NO_SANITIZE_ENUM __attribute__((no_sanitize("enum")))
+#else
+#define RJ_CODE_NO_SANITIZE_ENUM
+#endif
+
+/// @brief Return the canonical display name for a target identifier.
+/// @param[in] target Target identifier.
+/// @returns A process-lifetime string. Invalid or unknown values return
+///          `"invalid"`.
+static inline RJ_CODE_NO_SANITIZE_ENUM const char *rj_code_target_name(rj_code_target_id_t target) {
+  switch (target) {
+  case ROCJITSU_CODE_TARGET_GFX90A:
+    return "gfx90a";
+  case ROCJITSU_CODE_TARGET_GFX942:
+    return "gfx942";
+  case ROCJITSU_CODE_TARGET_GFX950:
+    return "gfx950";
+  case ROCJITSU_CODE_TARGET_GFX1200:
+    return "gfx1200";
+  case ROCJITSU_CODE_TARGET_GFX1201:
+    return "gfx1201";
+  case ROCJITSU_CODE_TARGET_GFX1250:
+    return "gfx1250";
+  case ROCJITSU_CODE_TARGET_GFX1100:
+    return "gfx1100";
+  case ROCJITSU_CODE_TARGET_GFX1150:
+    return "gfx1150";
+  case ROCJITSU_CODE_TARGET_GFX1151:
+    return "gfx1151";
+  case ROCJITSU_CODE_TARGET_INVALID:
+    break;
+  }
+  return "invalid";
+}
+
+/// @brief Return the ISA architecture family for a target identifier.
+/// @param[in] target Target identifier.
+/// @returns The target's architecture family, or
+///          @ref ROCJITSU_CODE_ARCH_INVALID for invalid or unknown values.
+static inline RJ_CODE_NO_SANITIZE_ENUM rj_code_arch_t
+rj_code_arch_for_target(rj_code_target_id_t target) {
+  switch (target) {
+  case ROCJITSU_CODE_TARGET_GFX90A:
+    return ROCJITSU_CODE_ARCH_CDNA2;
+  case ROCJITSU_CODE_TARGET_GFX942:
+    return ROCJITSU_CODE_ARCH_CDNA3;
+  case ROCJITSU_CODE_TARGET_GFX950:
+    return ROCJITSU_CODE_ARCH_CDNA4;
+  case ROCJITSU_CODE_TARGET_GFX1200:
+  case ROCJITSU_CODE_TARGET_GFX1201:
+    return ROCJITSU_CODE_ARCH_RDNA4;
+  case ROCJITSU_CODE_TARGET_GFX1250:
+    return ROCJITSU_CODE_ARCH_GFX1250;
+  case ROCJITSU_CODE_TARGET_GFX1100:
+    return ROCJITSU_CODE_ARCH_RDNA3;
+  case ROCJITSU_CODE_TARGET_GFX1150:
+  case ROCJITSU_CODE_TARGET_GFX1151:
+    return ROCJITSU_CODE_ARCH_RDNA3_5;
+  case ROCJITSU_CODE_TARGET_INVALID:
+    break;
+  }
+  return ROCJITSU_CODE_ARCH_INVALID;
+}
+
+/// @brief Return the canonical display name for an ISA architecture.
+/// @param[in] arch ISA architecture identifier.
+/// @returns A process-lifetime string. Invalid or unknown values return
+///          `"invalid"`.
+static inline RJ_CODE_NO_SANITIZE_ENUM const char *rj_code_arch_name(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return "cdna1";
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return "cdna2";
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return "cdna3";
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return "cdna4";
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return "rdna1";
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return "rdna2";
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return "rdna3";
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return "rdna3.5";
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return "rdna4";
+  case ROCJITSU_CODE_ARCH_RV32I:
+    return "rv32i";
+  case ROCJITSU_CODE_ARCH_RV64I:
+    return "rv64i";
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return "gfx1250";
+  case ROCJITSU_CODE_ARCH_INVALID:
+    break;
+  }
+  return "invalid";
+}
+
+#undef RJ_CODE_NO_SANITIZE_ENUM
+
 /// @brief Instruction property flags.
 /// @details Each flag is a single bit in a bitmask. Multiple flags can be
 /// combined with bitwise OR to describe an instruction's properties.

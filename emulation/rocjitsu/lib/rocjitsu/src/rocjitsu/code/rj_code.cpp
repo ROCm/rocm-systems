@@ -12,8 +12,8 @@ using namespace rocjitsu;
 namespace {
 
 /*
- * \NPI new GPU: add its target -> Decoder mapping in create_decoder_for_target() \
- * and its target -> arch mapping in arch_for_target() below.
+ * \NPI a new ISA family needs a Decoder cache below. New targets that use an \
+ * existing family require only the exhaustive rj_code_arch_for_target() map.
  */
 Decoder *create_decoder_for_target(rj_code_target_id_t target) {
   static thread_local std::unique_ptr<Decoder> cdna2_decoder;
@@ -24,63 +24,44 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
   static thread_local std::unique_ptr<Decoder> rdna4_decoder;
   static thread_local std::unique_ptr<Decoder> gfx1250_decoder;
 
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX90A:
+  switch (rj_code_arch_for_target(target)) {
+  case ROCJITSU_CODE_ARCH_CDNA2:
     if (!cdna2_decoder)
       cdna2_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
     return cdna2_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX942:
+  case ROCJITSU_CODE_ARCH_CDNA3:
     if (!cdna3_decoder)
       cdna3_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
     return cdna3_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX950:
+  case ROCJITSU_CODE_ARCH_CDNA4:
     if (!cdna4_decoder)
       cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     return cdna4_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX1100:
+  case ROCJITSU_CODE_ARCH_RDNA3:
     if (!rdna3_decoder)
       rdna3_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
     return rdna3_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX1150:
-  case ROCJITSU_CODE_TARGET_GFX1151:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
     if (!rdna3_5_decoder)
       rdna3_5_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
     return rdna3_5_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX1200:
-  case ROCJITSU_CODE_TARGET_GFX1201:
+  case ROCJITSU_CODE_ARCH_RDNA4:
     if (!rdna4_decoder)
       rdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
     return rdna4_decoder.get();
-  case ROCJITSU_CODE_TARGET_GFX1250:
+  case ROCJITSU_CODE_ARCH_GFX1250:
     if (!gfx1250_decoder)
       gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
     return gfx1250_decoder.get();
-  default:
-    return nullptr;
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_INVALID:
+    break;
   }
-}
-
-rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX90A:
-    return ROCJITSU_CODE_ARCH_CDNA2;
-  case ROCJITSU_CODE_TARGET_GFX942:
-    return ROCJITSU_CODE_ARCH_CDNA3;
-  case ROCJITSU_CODE_TARGET_GFX950:
-    return ROCJITSU_CODE_ARCH_CDNA4;
-  case ROCJITSU_CODE_TARGET_GFX1100:
-    return ROCJITSU_CODE_ARCH_RDNA3;
-  case ROCJITSU_CODE_TARGET_GFX1150:
-  case ROCJITSU_CODE_TARGET_GFX1151:
-    return ROCJITSU_CODE_ARCH_RDNA3_5;
-  case ROCJITSU_CODE_TARGET_GFX1200:
-  case ROCJITSU_CODE_TARGET_GFX1201:
-    return ROCJITSU_CODE_ARCH_RDNA4;
-  case ROCJITSU_CODE_TARGET_GFX1250:
-    return ROCJITSU_CODE_ARCH_GFX1250;
-  default:
-    return ROCJITSU_CODE_ARCH_INVALID;
-  }
+  return nullptr;
 }
 
 } // namespace
@@ -219,7 +200,7 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
   if (!decoder)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const rj_code_arch_t arch = arch_for_target(target_id);
+  const rj_code_arch_t arch = rj_code_arch_for_target(target_id);
   if (arch == ROCJITSU_CODE_ARCH_INVALID)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 

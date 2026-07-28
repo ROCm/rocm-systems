@@ -1995,7 +1995,7 @@ TEST(ConSanMoi, Gfx1201MoiEnginesAdmitNativeB96Accesses) {
       });
 }
 
-TEST(ConSanMoi, InventoryUsesTypedArchNotDisplayName) {
+TEST(ConSanMoi, InventoryUsesSemanticArchNotDisplayTarget) {
   constexpr std::array<uint32_t, 3> text_words = {0xDB78000Cu,
                                                   0x00000100u, // ds_store_b96 v0, v[1:3] offset:12
                                                   build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
@@ -2007,9 +2007,10 @@ TEST(ConSanMoi, InventoryUsesTypedArchNotDisplayName) {
   options.moi_report_buffer_size = 64u * 1024u * 1024u;
   ConSanResult result = try_patch_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1201);
   ASSERT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA4);
 
-  result.arch_display_name = "stale-display-name";
+  result.target = ROCJITSU_CODE_TARGET_GFX942;
   EXPECT_EQ(inventory_consan_moi_auto_report(result, options, bytes).access_range_count, 1u);
 }
 
@@ -2333,8 +2334,8 @@ TEST(ConSanMoi, Cdna4OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_display_name, "cdna4");
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);

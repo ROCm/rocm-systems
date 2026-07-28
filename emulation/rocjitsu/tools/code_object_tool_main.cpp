@@ -47,21 +47,11 @@ using KernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
 
 static_assert(sizeof(KernelDescriptor) == 64, "AMDHSA kernel descriptor size changed");
 
-struct TargetInfo {
-  std::string_view name;
-  rj_code_target_id_t target;
+constexpr std::array<rj_code_target_id_t, 8> kKnownTargets = {
+    ROCJITSU_CODE_TARGET_GFX942,  ROCJITSU_CODE_TARGET_GFX950,  ROCJITSU_CODE_TARGET_GFX1100,
+    ROCJITSU_CODE_TARGET_GFX1150, ROCJITSU_CODE_TARGET_GFX1151, ROCJITSU_CODE_TARGET_GFX1200,
+    ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX1250,
 };
-
-constexpr std::array<TargetInfo, 8> kKnownTargets = {{
-    {"gfx942", ROCJITSU_CODE_TARGET_GFX942},
-    {"gfx950", ROCJITSU_CODE_TARGET_GFX950},
-    {"gfx1100", ROCJITSU_CODE_TARGET_GFX1100},
-    {"gfx1150", ROCJITSU_CODE_TARGET_GFX1150},
-    {"gfx1151", ROCJITSU_CODE_TARGET_GFX1151},
-    {"gfx1200", ROCJITSU_CODE_TARGET_GFX1200},
-    {"gfx1201", ROCJITSU_CODE_TARGET_GFX1201},
-    {"gfx1250", ROCJITSU_CODE_TARGET_GFX1250},
-}};
 
 struct CliOptions {
   std::string input_path;
@@ -134,18 +124,10 @@ struct MappedLocation {
   return os.str();
 }
 
-[[nodiscard]] std::string_view target_name(rj_code_target_id_t target) {
-  for (const TargetInfo &info : kKnownTargets) {
-    if (info.target == target)
-      return info.name;
-  }
-  return "unknown";
-}
-
 [[nodiscard]] std::optional<rj_code_target_id_t> parse_target(std::string_view value) {
-  for (const TargetInfo &info : kKnownTargets) {
-    if (value == info.name)
-      return info.target;
+  for (rj_code_target_id_t target : kKnownTargets) {
+    if (value == rj_code_target_name(target))
+      return target;
   }
   return std::nullopt;
 }
@@ -316,8 +298,8 @@ void print_help() {
 }
 
 void list_code_objects(const Executable &executable) {
-  for (const TargetInfo &info : kKnownTargets)
-    std::cout << info.name << ": " << executable.num_code_objects(info.target) << "\n";
+  for (rj_code_target_id_t target : kKnownTargets)
+    std::cout << rj_code_target_name(target) << ": " << executable.num_code_objects(target) << "\n";
 }
 
 [[nodiscard]] SelectedCodeObject
@@ -334,7 +316,7 @@ select_code_object(const CliOptions &options, const std::string &input_path, std
     selected.code_object =
         selected.executable->code_object(*options.target, options.code_object_index);
     if (!selected.code_object) {
-      error = "failed to select " + std::string(target_name(*options.target)) + "[" +
+      error = "failed to select " + std::string(rj_code_target_name(*options.target)) + "[" +
               std::to_string(options.code_object_index) + "]";
       selected.executable.reset();
       return selected;
@@ -346,10 +328,10 @@ select_code_object(const CliOptions &options, const std::string &input_path, std
 
   std::optional<rj_code_target_id_t> target_with_objects;
   uint32_t target_count = 0;
-  for (const TargetInfo &info : kKnownTargets) {
-    if (selected.executable->num_code_objects(info.target) == 0)
+  for (rj_code_target_id_t target : kKnownTargets) {
+    if (selected.executable->num_code_objects(target) == 0)
       continue;
-    target_with_objects = info.target;
+    target_with_objects = target;
     ++target_count;
   }
   if (target_count == 0) {
@@ -366,7 +348,7 @@ select_code_object(const CliOptions &options, const std::string &input_path, std
   selected.code_object =
       selected.executable->code_object(*target_with_objects, options.code_object_index);
   if (!selected.code_object) {
-    error = "failed to select " + std::string(target_name(*target_with_objects)) + "[" +
+    error = "failed to select " + std::string(rj_code_target_name(*target_with_objects)) + "[" +
             std::to_string(options.code_object_index) + "]";
     selected.executable.reset();
     return selected;
@@ -608,7 +590,7 @@ void print_mapped_location(std::string_view label, const MappedLocation &mapped)
 }
 
 void print_kernels(const CodeObjectInfo &info, rj_code_target_id_t target, uint32_t index) {
-  std::cout << "target " << target_name(target) << "[" << index << "]\n";
+  std::cout << "target " << rj_code_target_name(target) << "[" << index << "]\n";
   for (const TextSectionInfo &text : info.text_sections) {
     std::cout << "section " << text.name << " size=" << hex_value(text.size)
               << " va=" << hex_value(text.vaddr) << " file-offset=" << hex_value(text.file_offset)
@@ -632,7 +614,7 @@ void print_kernels(const CodeObjectInfo &info, rj_code_target_id_t target, uint3
 
 void print_waitcheck_summary(const WaitcheckReport &report, const CodeObjectInfo &info,
                              rj_code_target_id_t target, uint32_t index) {
-  std::cout << "waitcheck " << target_name(target) << "[" << index
+  std::cout << "waitcheck " << rj_code_target_name(target) << "[" << index
             << "]: instructions=" << report.instructions_analyzed
             << " memory-events=" << report.memory_events_tracked << " diagnostics="
             << count_label(report.diagnostics_observed, report.diagnostics_truncated)
@@ -681,11 +663,11 @@ void print_repro(const CliOptions &options, const WaitcheckReport &report,
   std::cout << "Repro:\n\n";
   std::cout << "```sh\n";
   std::cout << "rj_waitcheck " << relative_command_path(options.input_path) << " --target "
-            << target_name(target) << " --code-object-index " << index << " --max-diagnostics "
-            << (*options.repro_diagnostic + 1) << "\n";
+            << rj_code_target_name(target) << " --code-object-index " << index
+            << " --max-diagnostics " << (*options.repro_diagnostic + 1) << "\n";
   std::cout << "```\n\n";
   std::cout << "Artifact: `" << relative_command_path(options.input_path) << "`\n";
-  std::cout << "Target: `" << target_name(target) << "[" << index << "]`\n";
+  std::cout << "Target: `" << rj_code_target_name(target) << "[" << index << "]`\n";
   if (kernel) {
     std::cout << "Kernel: `" << kernel->name << "` (`.text+" << hex_value(kernel->entry_offset)
               << ".." << hex_value(kernel->entry_offset + kernel->size) << "`)\n";
@@ -742,7 +724,7 @@ void disassemble_window(const MappedLocation &mapped, rj_code_arch_t arch, uint6
                                                            size_t max_diagnostics) {
   const rj_code_arch_t arch = waitcheck_arch_for_target(target);
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
-    std::cerr << "waitcheck does not support target " << target_name(target) << "\n";
+    std::cerr << "waitcheck does not support target " << rj_code_target_name(target) << "\n";
     return std::nullopt;
   }
   WaitcheckOptions options;
@@ -813,8 +795,8 @@ int main(int argc, char **argv) {
     }
     const rj_code_arch_t arch = waitcheck_arch_for_target(selected.target);
     if (arch == ROCJITSU_CODE_ARCH_INVALID) {
-      std::cerr << "decoder target is not supported by rj_co: " << target_name(selected.target)
-                << "\n";
+      std::cerr << "decoder target is not supported by rj_co: "
+                << rj_code_target_name(selected.target) << "\n";
       return kInputError;
     }
     disassemble_window(*mapped, arch, options.context_bytes);

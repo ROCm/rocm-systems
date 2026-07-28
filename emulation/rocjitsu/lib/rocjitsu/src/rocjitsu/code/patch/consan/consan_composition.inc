@@ -661,10 +661,10 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     result.errors.emplace_back("ConSan could not parse AMDGPU code object");
     return result;
   }
+  result.parsed_code_object = true;
   result.kernel_metadata_trustworthy = code_object->kernel_metadata_is_trustworthy();
   result.malformed_kernel_metadata_note_count = code_object->malformed_kernel_metadata_note_count();
-  result.target_name = target_name(code_object->target_id());
-  result.arch_display_name = arch_name(code_object->target_id());
+  result.target = code_object->target_id();
   result.arch = arch_for_target(code_object->target_id());
   result.errors = validate_consan_input_layout(*code_object);
   if (!result.errors.empty())
@@ -719,7 +719,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
   const rj_code_arch_t arch = result.arch;
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
-    result.warnings.emplace_back("ConSan does not support target '" + result.target_name + "'");
+    result.warnings.emplace_back("ConSan does not support target '" +
+                                 std::string(rj_code_target_name(result.target)) + "'");
     result.outcome = ConSanTransformOutcome::Unsupported;
     return result;
   }
@@ -728,7 +729,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     result.warnings.emplace_back("ConSan could not create decoder for arch '" +
-                                 result.arch_display_name + "'");
+                                 std::string(rj_code_arch_name(result.arch)) + "'");
     result.outcome = ConSanTransformOutcome::Unsupported;
     return result;
   }

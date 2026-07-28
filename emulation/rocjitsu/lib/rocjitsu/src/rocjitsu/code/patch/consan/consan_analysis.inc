@@ -3,43 +3,6 @@ namespace {
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 
-[[nodiscard]] const char *target_name(rj_code_target_id_t target) {
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX90A:
-    return "gfx90a";
-  case ROCJITSU_CODE_TARGET_GFX942:
-    return "gfx942";
-  case ROCJITSU_CODE_TARGET_GFX950:
-    return "gfx950";
-  case ROCJITSU_CODE_TARGET_GFX1200:
-    return "gfx1200";
-  case ROCJITSU_CODE_TARGET_GFX1201:
-    return "gfx1201";
-  case ROCJITSU_CODE_TARGET_GFX1250:
-    return "gfx1250";
-  default:
-    return "invalid";
-  }
-}
-
-[[nodiscard]] const char *arch_name(rj_code_target_id_t target) {
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX90A:
-    return "cdna2";
-  case ROCJITSU_CODE_TARGET_GFX942:
-    return "cdna3";
-  case ROCJITSU_CODE_TARGET_GFX950:
-    return "cdna4";
-  case ROCJITSU_CODE_TARGET_GFX1200:
-  case ROCJITSU_CODE_TARGET_GFX1201:
-    return "rdna4";
-  case ROCJITSU_CODE_TARGET_GFX1250:
-    return "gfx1250";
-  default:
-    return "invalid";
-  }
-}
-
 [[nodiscard]] bool is_cdna_arch(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;

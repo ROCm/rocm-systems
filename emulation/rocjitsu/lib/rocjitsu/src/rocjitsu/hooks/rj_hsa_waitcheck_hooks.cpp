@@ -157,29 +157,6 @@ void print_summary_once() {
       static_cast<unsigned long long>(g_stats.unavailable.load(std::memory_order_relaxed)));
 }
 
-[[nodiscard]] const char *target_name(rj_code_target_id_t target) {
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX942:
-    return "gfx942";
-  case ROCJITSU_CODE_TARGET_GFX950:
-    return "gfx950";
-  case ROCJITSU_CODE_TARGET_GFX1100:
-    return "gfx1100";
-  case ROCJITSU_CODE_TARGET_GFX1150:
-    return "gfx1150";
-  case ROCJITSU_CODE_TARGET_GFX1151:
-    return "gfx1151";
-  case ROCJITSU_CODE_TARGET_GFX1200:
-    return "gfx1200";
-  case ROCJITSU_CODE_TARGET_GFX1201:
-    return "gfx1201";
-  case ROCJITSU_CODE_TARGET_GFX1250:
-    return "gfx1250";
-  default:
-    return "unsupported";
-  }
-}
-
 void print_report(const rocjitsu::AmdGpuCodeObject &code_object,
                   const rocjitsu::WaitcheckReport &report, std::string_view kernel_name = {}) {
   if (report.passed())
@@ -188,12 +165,12 @@ void print_report(const rocjitsu::AmdGpuCodeObject &code_object,
   if (report.diagnostics_truncated) {
     std::fprintf(stderr,
                  "rocjitsu-waitcheck: at least %zu waitcnt hazard(s) in %s code object%s%.*s\n",
-                 report.diagnostics_observed, target_name(code_object.target_id()),
+                 report.diagnostics_observed, rj_code_target_name(code_object.target_id()),
                  kernel_name.empty() ? "" : " kernel ", static_cast<int>(kernel_name.size()),
                  kernel_name.empty() ? "" : kernel_name.data());
   } else {
     std::fprintf(stderr, "rocjitsu-waitcheck: %zu waitcnt hazard(s) in %s code object%s%.*s\n",
-                 report.diagnostics_observed, target_name(code_object.target_id()),
+                 report.diagnostics_observed, rj_code_target_name(code_object.target_id()),
                  kernel_name.empty() ? "" : " kernel ", static_cast<int>(kernel_name.size()),
                  kernel_name.empty() ? "" : kernel_name.data());
   }
@@ -222,7 +199,7 @@ void print_analysis_failure(const rocjitsu::AmdGpuCodeObject &code_object,
                             const rocjitsu::WaitcheckReport &report,
                             std::string_view kernel_name = {}) {
   std::fprintf(stderr, "rocjitsu-waitcheck: analysis failed for %s code object%s%.*s",
-               target_name(code_object.target_id()), kernel_name.empty() ? "" : " kernel ",
+               rj_code_target_name(code_object.target_id()), kernel_name.empty() ? "" : " kernel ",
                static_cast<int>(kernel_name.size()), kernel_name.empty() ? "" : kernel_name.data());
   if (!report.analysis_error.empty())
     std::fprintf(stderr, ": %s", report.analysis_error.c_str());

@@ -153,29 +153,6 @@ hsa_status_t HSA_API select_group_segment_region(hsa_region_t region, void *data
 
 enum class WaitcheckPreflightOutcome { NotApplicable, Passed, HazardReported, AnalysisFailed };
 
-[[nodiscard]] const char *waitcheck_target_name(rj_code_target_id_t target) {
-  switch (target) {
-  case ROCJITSU_CODE_TARGET_GFX942:
-    return "gfx942";
-  case ROCJITSU_CODE_TARGET_GFX950:
-    return "gfx950";
-  case ROCJITSU_CODE_TARGET_GFX1100:
-    return "gfx1100";
-  case ROCJITSU_CODE_TARGET_GFX1150:
-    return "gfx1150";
-  case ROCJITSU_CODE_TARGET_GFX1151:
-    return "gfx1151";
-  case ROCJITSU_CODE_TARGET_GFX1200:
-    return "gfx1200";
-  case ROCJITSU_CODE_TARGET_GFX1201:
-    return "gfx1201";
-  case ROCJITSU_CODE_TARGET_GFX1250:
-    return "gfx1250";
-  default:
-    return "unsupported";
-  }
-}
-
 void print_waitcheck_issue(uint64_t reader, const rocjitsu::AmdGpuCodeObject &code_object,
                            const rocjitsu::WaitcheckReport &report) {
   std::lock_guard lock(log_mutex());
@@ -184,7 +161,7 @@ void print_waitcheck_issue(uint64_t reader, const rocjitsu::AmdGpuCodeObject &co
                  "rocjitsu-waitcheck: ConSan preflight reported reader=%llu target=%s "
                  "reason=analysis-failed action=continue",
                  static_cast<unsigned long long>(reader),
-                 waitcheck_target_name(code_object.target_id()));
+                 rj_code_target_name(code_object.target_id()));
     if (!report.analysis_error.empty())
       std::fprintf(stderr, ": %s", report.analysis_error.c_str());
     std::fprintf(stderr, "\n");
@@ -195,7 +172,7 @@ void print_waitcheck_issue(uint64_t reader, const rocjitsu::AmdGpuCodeObject &co
                "rocjitsu-waitcheck: ConSan preflight reported reader=%llu target=%s "
                "reason=wait-hazard diagnostics=%zu action=continue\n",
                static_cast<unsigned long long>(reader),
-               waitcheck_target_name(code_object.target_id()), report.diagnostics_observed);
+               rj_code_target_name(code_object.target_id()), report.diagnostics_observed);
   constexpr size_t kMaxDiagnostics = 32;
   const size_t limit = std::min(kMaxDiagnostics, report.diagnostics.size());
   for (size_t i = 0; i < limit; ++i) {
@@ -246,7 +223,7 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
                   "waitcheck preflight reader=%llu target=%s outcome=not-applicable "
                   "reason=unsupported-target",
                   static_cast<unsigned long long>(reader),
-                  waitcheck_target_name(code_object.target_id()));
+                  rj_code_target_name(code_object.target_id()));
       return WaitcheckPreflightOutcome::NotApplicable;
     }
 
@@ -266,7 +243,7 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
                 "waitcheck preflight reader=%llu target=%s outcome=passed instructions=%zu "
                 "memory_events=%zu kernels=%zu/%zu",
                 static_cast<unsigned long long>(reader),
-                waitcheck_target_name(code_object.target_id()), report.instructions_analyzed,
+                rj_code_target_name(code_object.target_id()), report.instructions_analyzed,
                 report.memory_events_tracked, report.kernels_analyzed, report.kernels_discovered);
     return WaitcheckPreflightOutcome::Passed;
   } catch (const std::exception &error) {
@@ -3602,12 +3579,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         static_cast<unsigned long long>(patch_options.moi_report_buffer_size),
         static_cast<unsigned long long>(config->moi_auto_report_buffer_size),
         config->require_patch ? "true" : "false");
-    if (!patch_result.target_name.empty()) {
+    if (patch_result.parsed_code_object) {
       log_message(kLogInfo,
                   "ConSan code-object reader=%llu target=%s arch=%s text_sections=%zu "
                   "kernels=%zu functions=%zu",
                   static_cast<unsigned long long>(code_object_reader.handle),
-                  patch_result.target_name.c_str(), patch_result.arch_display_name.c_str(),
+                  rj_code_target_name(patch_result.target),
+                  rj_code_arch_name(rj_code_arch_for_target(patch_result.target)),
                   patch_result.text_sections.size(), patch_result.kernels.size(),
                   patch_result.functions.size());
     }

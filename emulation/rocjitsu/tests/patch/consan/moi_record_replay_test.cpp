@@ -521,7 +521,7 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   expect_invalid(std::move(wrong_engine), bytes, "requested engine");
 
   ConSanResult wrong_target = pristine;
-  wrong_target.target_name = "gfx1250";
+  wrong_target.target = ROCJITSU_CODE_TARGET_GFX1250;
   expect_invalid(std::move(wrong_target), bytes, "code-object target");
 
   ConSanResult wrong_arch = pristine;
@@ -2048,8 +2048,8 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_display_name, "cdna4");
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
@@ -5404,8 +5404,8 @@ TEST(ConSanMoi, Cdna4BarrierRecordForcedSpillUsesNativePrivateWindows) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors);
-  EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_display_name, "cdna4");
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
@@ -7119,8 +7119,8 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesDoNotRequireBarrierRouter) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_display_name, "cdna4");
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -7262,8 +7262,8 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayBarriersUseRelocatedRouter) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_display_name, "cdna4");
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kSiteCount);
@@ -8233,8 +8233,8 @@ TEST(ConSanMoi, Cdna3RecordReplayAtomicEmitsValidatedNativeTransaction) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.target_name, "gfx942");
-  EXPECT_EQ(result.arch_display_name, "cdna3");
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX942);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA3);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
             1u);
@@ -8273,8 +8273,8 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors);
-  EXPECT_EQ(result.target_name, "gfx950");
-  EXPECT_EQ(result.arch_display_name, "cdna4");
+  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {

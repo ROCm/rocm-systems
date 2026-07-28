@@ -480,22 +480,6 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
   }
 }
 
-/// @brief Return a compact architecture-family name for diagnostics.
-[[nodiscard]] const char *arch_name(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
-    return "cdna3";
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return "cdna4";
-  case ROCJITSU_CODE_ARCH_RDNA3:
-    return "rdna3";
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return "rdna4";
-  default:
-    return "invalid";
-  }
-}
-
 /// @brief Return a stable diagnostic severity name.
 [[nodiscard]] const char *diagnostic_severity_name(DiagnosticSeverity severity) {
   switch (severity) {
@@ -1186,7 +1170,8 @@ public:
     active_ = true;
 
     log_message(kLogInfo, "installed DBT hook target=%s arch=%s mach=0x%x",
-                config_->target.name.data(), arch_name(config_->target.arch), config_->target.mach);
+                config_->target.name.data(), rj_code_arch_name(config_->target.arch),
+                config_->target.mach);
     return true;
   }
 
@@ -3792,7 +3777,7 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   if (source_target.arch == config->target.arch && source_target.mach == config->target.mach) {
     log_message(kLogInfo,
                 "source target %s arch %s already matches requested target; passing through",
-                elf_mach_name(source_target.mach), arch_name(source_target.arch));
+                elf_mach_name(source_target.mach), rj_code_arch_name(source_target.arch));
     // Parse and validate hook metadata BEFORE loading, so an unusable code object
     // is rejected without first mutating executable state, and so the malformed-
     // metadata policy matches the translated path (reject, not ignore).
@@ -3834,8 +3819,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   std::vector<uint8_t> translated_elf;
   log_message(kLogInfo, "translating reader=%llu %s/%s -> %s/%s mach=0x%x",
               static_cast<unsigned long long>(code_object_reader.handle),
-              elf_mach_name(source_target.mach), arch_name(source_target.arch),
-              config->target.name.data(), arch_name(config->target.arch), config->target.mach);
+              elf_mach_name(source_target.mach), rj_code_arch_name(source_target.arch),
+              config->target.name.data(), rj_code_arch_name(config->target.arch),
+              config->target.mach);
 
   AmdGpuCodeObject source_object(bytes, size);
   if (!source_object.is_valid()) {
