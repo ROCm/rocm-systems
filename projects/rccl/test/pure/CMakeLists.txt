@@ -135,7 +135,11 @@ add_executable(rccl-PureUnitTests
   ${RCCL_TEST_DIR}/EnqueueCountTests.cpp
   ${RCCL_TEST_DIR}/BootstrapBidirTests.cpp
   ${RCCL_TEST_DIR}/AltRsmiTests.cpp
-  ${RCCL_TEST_DIR}/CodeReviewBugTests.cpp
+  ${RCCL_TEST_DIR}/NetIbCastTests.cpp
+  ${RCCL_TEST_DIR}/TransportBoundsTests.cpp
+  ${RCCL_TEST_DIR}/ChannelGroupTests.cpp
+  ${RCCL_TEST_DIR}/BufferBoundsTests.cpp
+  ${RCCL_TEST_DIR}/PipeReadTests.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
   bootstrap_bidir_stub.cpp
   ${RCCL_SRC_DIR}/misc/kernel_config.cc
