@@ -28,7 +28,7 @@
  *      shrink the plan budget so ~7 rounds exhaust it. NCCL_MAX_NCHANNELS=4
  *      fixes the channel count for deterministic plan splitting.
  *   2. Sparse + repeated topology: REPS repetitions of the full star pattern
- *      within ONE rcclGroupStart/End. Rank 0 generates REPS*(nRanks-1) rounds;
+ *      within ONE ncclGroupStart/End. Rank 0 generates REPS*(nRanks-1) rounds;
  *      each leaf generates only REPS rounds. Budget exhaustion splits rank 0
  *      across multiple plans with ascending epochs while leaves stay in one
  *      plan (epoch=1) — the epoch mismatch.
@@ -55,7 +55,9 @@
 using namespace MPITestConstants;
 
 namespace {
-constexpr int    MIN_RANKS           = 5;
+// Absolute minimum for the star pattern; reliable bug reproduction requires 16
+// ranks (REPS=4 gives rank 0 60 rounds, enough to exhaust the ~7-round plan budget).
+constexpr int    MIN_RANKS           = 16;
 // Repetitions of the full star pattern within ONE ncclGroupStart/End call.
 // Creates the asymmetric round count: rank 0 gets REPS*(nRanks-1) rounds,
 // each leaf gets REPS rounds. This is what forces the epoch mismatch.
@@ -164,6 +166,8 @@ TEST_F(SparseSendRecv, StarTopology)
               hipMemcpy(send_buf, rank_vals.data(), buf_bytes, hipMemcpyHostToDevice));
 
     // Allocate per-repetition recv buffers to avoid aliasing within a group call.
+    // Buffers are zeroed once at allocation; stream ordering guarantees no stale
+    // data from a prior iteration reaches the verification step.
     if (rank == 0) {
         hub_recv_bufs_.assign(nRanks - 1, std::vector<float*>(REPS, nullptr));
         for (int peer = 1; peer < nRanks; ++peer) {
@@ -192,9 +196,12 @@ TEST_F(SparseSendRecv, StarTopology)
             // Budget exhaustion forces multiple kernel plans with ascending epochs.
             for (int rep = 0; rep < REPS; ++rep) {
                 for (int peer = 1; peer < nRanks; ++peer) {
-                    ASSERT_EQ(ncclSuccess,
+                    // Use EXPECT (not ASSERT) inside the group: an ASSERT would
+                    // exit the test body without calling ncclGroupEnd(), leaving
+                    // all other ranks blocked forever.
+                    EXPECT_EQ(ncclSuccess,
                         ncclSend(send_buf, NUM_ELEMS, ncclFloat, peer, comm, stream));
-                    ASSERT_EQ(ncclSuccess,
+                    EXPECT_EQ(ncclSuccess,
                         ncclRecv(hub_recv_bufs_[peer - 1][rep], NUM_ELEMS,
                                  ncclFloat, peer, comm, stream));
                 }
@@ -203,17 +210,22 @@ TEST_F(SparseSendRecv, StarTopology)
             // Leaf: REPS sends+recvs to rank 0 only.
             // Total rounds: REPS. Fits in one plan (epoch=1) on a pre-fix library.
             for (int rep = 0; rep < REPS; ++rep) {
-                ASSERT_EQ(ncclSuccess,
+                EXPECT_EQ(ncclSuccess,
                     ncclSend(send_buf, NUM_ELEMS, ncclFloat, 0, comm, stream));
-                ASSERT_EQ(ncclSuccess,
+                EXPECT_EQ(ncclSuccess,
                     ncclRecv(leaf_recv_bufs_[rep], NUM_ELEMS, ncclFloat, 0, comm, stream));
             }
         }
 
         ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+        // Bail out if any ncclSend/ncclRecv failed — the stream state is undefined.
+        if (HasFailure()) break;
+
         ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream));
 
         // Spot-check first repetition's recv buffers each iteration.
+        // Reps 1-(REPS-1) are not verified; the primary signal is whether
+        // hipStreamSynchronize returns at all (hang detection).
         if (rank == 0) {
             for (int peer = 1; peer < nRanks; ++peer) {
                 std::vector<float> received(NUM_ELEMS, 0.0f);

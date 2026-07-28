@@ -141,7 +141,7 @@
         {
           "name": "sparse_send_recv",
           "description": "Test sparse send/recv functionality over multiple plans",
-          "test_filter": "sparse_send_recv.*"
+          "test_filter": "SparseSendRecv.*"
         }
       ]
     },
