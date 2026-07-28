@@ -1,0 +1,97 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Multi-Arch CI ASAN Nightly for rocm-systems
+#
+# Scheduled nightly ASAN builds with full device-side instrumentation.
+# For on-demand ASAN runs, use therock-multi-arch-ci-asan.yml.
+#
+# This workflow is split from therock-multi-arch-ci-asan.yml (rather than using
+# a single workflow with multiple triggers) to allow different concurrency
+# semantics: scheduled runs cancel previous in-progress nightlies, while
+# manual workflow_dispatch runs are independent.
+
+name: TheRock Multi-Arch CI ASAN Nightly
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  # For scheduled runs, cancel any in-progress nightly so only one runs at a time.
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    with:
+      build_variant: "asan"
+      linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
+      repository: ROCm/TheRock
+      ref: "main"
+      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+
+  log_therock_ref:
+    name: Locked TheRock ref
+    needs: [setup]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Surface locked TheRock ref
+        run: |
+          RESOLVED_REF="${{ needs.setup.outputs.ref }}"
+          COMMIT_URL="https://github.com/ROCm/TheRock/commit/${RESOLVED_REF}"
+          echo "Locked TheRock ref for this run: ${RESOLVED_REF} (${COMMIT_URL})"
+          {
+            echo "### Locked TheRock ref"
+            echo ""
+            echo "Every build/test job in this run is locked to ROCm/TheRock commit [\`${RESOLVED_REF}\`](${COMMIT_URL})."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  linux_build_and_test:
+    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
+    needs: setup
+    if: >-
+      ${{
+        needs.setup.outputs.linux_build_config != '' &&
+        needs.setup.outputs.enable_build_jobs == 'true'
+      }}
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    secrets: inherit
+    with:
+      build_config: ${{ needs.setup.outputs.linux_build_config }}
+      test_labels: ${{ needs.setup.outputs.linux_test_labels }}
+      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      test_type: ${{ needs.setup.outputs.test_type }}
+      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+      repository: ROCm/TheRock
+      ref: ${{ needs.setup.outputs.ref }}
+    permissions:
+      contents: read
+      id-token: write
+
+  multi_arch_ci_summary:
+    name: Multi-Arch CI Summary
+    if: always()
+    needs:
+      - setup
+      - linux_build_and_test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ needs.setup.outputs.ref }}
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Evaluate workflow results
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python build_tools/github_actions/workflow_summary.py \
+            --needs-json '${{ toJSON(needs) }}'

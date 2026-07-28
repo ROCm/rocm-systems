@@ -28,4 +28,11 @@ rj_add_object_library(rocjitsu_isa_rdna4
     vopc.cpp
     vsample.cpp
     vscratch.cpp
+    target_provider.cpp
+)
+
+rj_add_isa_target_provider(
+    rocjitsu_isa_rdna4
+    HEADER rocjitsu/isa/arch/amdgpu/rdna4/target_provider.h
+    BUILTIN
 )

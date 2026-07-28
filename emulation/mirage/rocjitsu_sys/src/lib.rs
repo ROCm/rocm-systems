@@ -222,6 +222,7 @@ impl RjVmGpuInfo {
 type FnVmCreate = unsafe extern "C" fn(*const c_char, RjVmMode, *mut *mut RjVm) -> RjStatus;
 type FnVmCreateFromString =
     unsafe extern "C" fn(*const c_char, RjVmMode, *mut *mut RjVm) -> RjStatus;
+type FnVmLoadPlugins = unsafe extern "C" fn(*mut RjVm, *const c_char, *const c_char) -> RjStatus;
 type FnVmRun = unsafe extern "C" fn(*mut RjVm, *mut u64) -> RjStatus;
 type FnVmRequestExit = unsafe extern "C" fn(*mut RjVm, *const c_char);
 type FnVmDestroy = unsafe extern "C" fn(*mut RjVm);
@@ -252,6 +253,10 @@ pub struct Lib {
     // so it is kept in `_lib` and dropped last.
     vm_create: FnVmCreate,
     vm_create_from_string: FnVmCreateFromString,
+    // Optional: only present in rocjitsu libraries that ship the runtime
+    // plugin loader. When absent, plugin selection in the config is a no-op
+    // for a C-API host (the daemon), matching an older library.
+    vm_load_plugins: Option<FnVmLoadPlugins>,
     vm_run: FnVmRun,
     vm_request_exit: FnVmRequestExit,
     vm_destroy: FnVmDestroy,
@@ -296,6 +301,11 @@ impl Lib {
             let vm_create = *lib.get::<FnVmCreate>(b"rj_vm_create\0")?;
             let vm_create_from_string =
                 *lib.get::<FnVmCreateFromString>(b"rj_vm_create_from_string\0")?;
+            // Optional symbol: tolerate older libraries that predate the loader.
+            let vm_load_plugins = lib
+                .get::<FnVmLoadPlugins>(b"rj_vm_load_plugins\0")
+                .map(|s| *s)
+                .ok();
             let vm_run = *lib.get::<FnVmRun>(b"rj_vm_run\0")?;
             let vm_request_exit = *lib.get::<FnVmRequestExit>(b"rj_vm_request_exit\0")?;
             let vm_destroy = *lib.get::<FnVmDestroy>(b"rj_vm_destroy\0")?;
@@ -317,6 +327,7 @@ impl Lib {
             Ok(Self {
                 vm_create,
                 vm_create_from_string,
+                vm_load_plugins,
                 vm_run,
                 vm_request_exit,
                 vm_destroy,
@@ -362,6 +373,30 @@ impl Lib {
         let mut vm: *mut RjVm = std::ptr::null_mut();
         let status = unsafe { (self.vm_create_from_string)(json.as_ptr(), mode, &mut vm) };
         (status, vm)
+    }
+
+    /// Load and attach the execution plugins declared in `config_json`
+    /// (its `plugins` / `sinks` / `profiled` sections) to `vm`.
+    ///
+    /// `plugin_dir`, when non-empty, is a trusted directory the plugin
+    /// shared objects are loaded from by explicit path — required in
+    /// daemon mode, where the process is not re-`exec`'d and so cannot
+    /// rely on a launcher-populated `LD_LIBRARY_PATH`.
+    ///
+    /// Returns `None` when the loaded library predates the
+    /// `rj_vm_load_plugins` symbol (an older rocjitsu without the runtime
+    /// plugin loader); otherwise the C API status.
+    ///
+    /// # Safety
+    /// `vm` must be a live handle from [`Lib::vm_create`].
+    pub unsafe fn vm_load_plugins(
+        &self,
+        vm: *mut RjVm,
+        config_json: &CStr,
+        plugin_dir: &CStr,
+    ) -> Option<RjStatus> {
+        let load = self.vm_load_plugins?;
+        Some(unsafe { load(vm, config_json.as_ptr(), plugin_dir.as_ptr()) })
     }
 
     /// Run the simulation engine until [`Lib::vm_request_exit`] is
