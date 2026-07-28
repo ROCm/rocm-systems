@@ -10,6 +10,7 @@ are resolved from PATH. Run `consan_validation.py doctor` before GPU work and
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
 import json
 import os
@@ -43,6 +44,8 @@ TIMEOUT_SECONDS = 30
 NATIVE_CDNA_TARGETS = frozenset(("gfx942", "gfx950"))
 SINGLE_REPETITION_TARGETS = frozenset(("gfx942", "gfx950", "gfx1250"))
 QWEN_OVERHEAD_REPETITIONS = {target: 1 for target in SINGLE_REPETITION_TARGETS}
+STREAMK_WORKLOAD_IDS = ("streamk-arrival", "tree-atomic-or")
+STREAMK_FAULT_FAMILIES = ("atomic-weaken-order", "atomic-weaken-scope")
 CONTROLLED_ENV_PREFIX = "RJ_CONSAN_"
 TOOLS = ("iree-run-module", "iree-benchmark-module", "rocminfo")
 HSA_TOOL_ENVIRONMENT = {
@@ -858,7 +861,7 @@ WORKLOADS = (
         tracks_barriers=True,
         tracks_atomics=True,
         overhead_processes=3,
-        fault_families=("atomic-weaken-order", "atomic-weaken-scope"),
+        fault_families=STREAMK_FAULT_FAMILIES,
     ),
     Workload(
         id="tree-atomic-or",
@@ -880,7 +883,7 @@ WORKLOADS = (
         tracks_barriers=True,
         tracks_atomics=True,
         overhead_processes=3,
-        fault_families=("atomic-weaken-order", "atomic-weaken-scope"),
+        fault_families=STREAMK_FAULT_FAMILIES,
     ),
     Workload(
         id="jakub-attention",
@@ -976,6 +979,13 @@ def _validate_coverage_output_contract(workload: Workload) -> None:
 def _validate_workload_manifest() -> None:
     for workload in WORKLOADS:
         _validate_coverage_output_contract(workload)
+        if (
+            workload.id in STREAMK_WORKLOAD_IDS
+            and workload.fault_families != STREAMK_FAULT_FAMILIES
+        ):
+            raise RuntimeError(
+                f"{workload.id} must declare the shared Stream-K fault families"
+            )
 
 
 _validate_workload_manifest()
@@ -1002,266 +1012,249 @@ def _target_fault_families(target: str, workload: Workload) -> tuple[str, ...]:
         "tp1-decode-combined",
     ):
         return ("barrier-move",)
+    families = workload.fault_families
     if target in NATIVE_CDNA_TARGETS:
         # CDNA compiler atomics encode ordering through surrounding cache and
         # wait operations, but have no gfx12-style instruction scope field.
         families = tuple(
-            family
-            for family in workload.fault_families
-            if family != "atomic-weaken-scope"
+            family for family in families if family != "atomic-weaken-scope"
         )
         if not families:
             raise ValidationError(
                 f"{target} workload has no applicable fault family: {workload.id}"
             )
         return families
-    return workload.fault_families
+    return families
 
 
-# Workload IDs describe target-independent validation roles.  Native test
-# binaries and gtest suites are target-specific implementation details.  Keep
-# the gfx1201 spellings above as the historical/default contract and resolve
-# gfx942/gfx950 to the corresponding CDNA artifacts at the validation boundary.
-GFX942_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
-    "d128-block": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx942",
+@dataclass(frozen=True)
+class _NativeGtestTarget:
+    id: str
+    build_dir: str
+    executable_family: str
+    matrix_executable_family: str
+    suite_family: str
+    matrix_suite_family: str
+    matrix_operation: str
+    d128_block_oracle: str
+    d128_block_fault_uses_oracle: bool = False
+
+
+def _cdna_gtest_target(
+    target_id: str,
+    *,
+    suite_family: str,
+    matrix_suite_family: str,
+) -> _NativeGtestTarget:
+    target = cdna_hip_moi_registry.TARGETS[target_id]
+    return _NativeGtestTarget(
+        id=target_id,
+        build_dir=target.build_dir_name,
+        executable_family=target.executable_family,
+        matrix_executable_family=f"{target.executable_family}_mfma",
+        suite_family=suite_family,
+        matrix_suite_family=matrix_suite_family,
+        matrix_operation="Mfma",
+        d128_block_oracle="SampledFastContextMatchesHostReference",
+    )
+
+
+NATIVE_GTEST_TARGETS = {
+    "gfx1201": _NativeGtestTarget(
+        id="gfx1201",
+        build_dir="hip-moi-build",
+        executable_family="rdna4",
+        matrix_executable_family="rdna4_wmma",
+        suite_family="Rdna4",
+        matrix_suite_family="Rdna4Wmma",
+        matrix_operation="Wmma",
+        d128_block_oracle="ExactContextMatchesHostReference",
+    ),
+    "gfx942": _cdna_gtest_target(
+        "gfx942",
+        suite_family="Cdna3",
+        matrix_suite_family="Cdna3Mfma",
+    ),
+    "gfx950": _cdna_gtest_target(
+        "gfx950",
+        suite_family="Cdna4",
+        matrix_suite_family="Cdna4Mfma",
+    ),
+    "gfx1250": _NativeGtestTarget(
+        id="gfx1250",
+        build_dir="hip-moi-build-gfx1250-tests",
+        executable_family="gfx1250",
+        matrix_executable_family="gfx1250_wmma",
+        suite_family="Gfx1250",
+        matrix_suite_family="Gfx1250Wmma",
+        matrix_operation="Wmma",
+        d128_block_oracle="SampledFastContextMatchesHostReference",
+        d128_block_fault_uses_oracle=True,
+    ),
+}
+
+
+def _native_gtest_path(
+    target: _NativeGtestTarget,
+    suite_id: str,
+    executable: str,
+) -> str:
+    if target.id in NATIVE_CDNA_TARGETS:
+        return str(cdna_hip_moi_registry.relative_executable_path(target.id, suite_id))
+    return str(Path(target.build_dir) / "tests" / executable)
+
+
+def _attention_override(
+    relative_path: str,
+    suite: str,
+    oracle: str,
+    *,
+    fault_uses_oracle: bool = False,
+) -> dict[str, str]:
+    oracle_filter = f"{suite}.{oracle}"
+    override = {
+        "relative_path": relative_path,
+        "clean_filter": f"{suite}.*",
+        "overhead_filter": oracle_filter,
+    }
+    if fault_uses_oracle:
+        override["fault_filter"] = oracle_filter
+    return override
+
+
+def _single_oracle_override(
+    relative_path: str,
+    oracle_filter: str,
+) -> dict[str, str]:
+    return {
+        "relative_path": relative_path,
+        "clean_filter": oracle_filter,
+        "overhead_filter": oracle_filter,
+    }
+
+
+STREAMK_WORKLOAD_SHAPES = {
+    "streamk-arrival": (
+        "streamk_arrival_counter_test",
+        "StreamKArrivalCounter",
+        "AcqRelFetchAddOrders",
+    ),
+    "tree-atomic-or": (
+        "streamk_tree_atomic_or_test",
+        "StreamKTreeAtomicOr",
+        "AcqRelBitmaskOrders",
+    ),
+}
+
+
+def _validate_exact_keys(
+    label: str,
+    actual: Iterable[str],
+    expected: Iterable[str],
+) -> None:
+    actual_keys = set(actual)
+    expected_keys = set(expected)
+    missing = sorted(expected_keys - actual_keys)
+    extra = sorted(actual_keys - expected_keys)
+    if missing or extra:
+        raise RuntimeError(f"{label} mismatch: missing={missing} extra={extra}")
+
+
+_validate_exact_keys(
+    "native Stream-K workload shapes",
+    STREAMK_WORKLOAD_SHAPES,
+    STREAMK_WORKLOAD_IDS,
+)
+
+
+def _streamk_overrides(
+    target: _NativeGtestTarget,
+) -> dict[str, dict[str, str]]:
+    overrides = {}
+    for workload_id in STREAMK_WORKLOAD_IDS:
+        executable_stem, suite_stem, oracle_stem = STREAMK_WORKLOAD_SHAPES[workload_id]
+        overrides[workload_id] = _single_oracle_override(
+            _native_gtest_path(
+                target,
+                workload_id,
+                "hip_moi_instrumented_"
+                f"{target.matrix_executable_family}_{executable_stem}",
+            ),
+            f"HipMoi{target.matrix_suite_family}{suite_stem}."
+            f"{oracle_stem}{target.matrix_operation}Partials",
+        )
+    return overrides
+
+
+def _native_gtest_overrides(
+    target: _NativeGtestTarget,
+) -> dict[str, dict[str, str]]:
+    base = target.executable_family
+    matrix = target.matrix_executable_family
+    suite = target.suite_family
+    matrix_suite = target.matrix_suite_family
+    streamk = _streamk_overrides(target)
+    return {
+        "d128-block": _attention_override(
+            _native_gtest_path(
+                target,
                 "d128-block",
-            )
+                f"hip_moi_instrumented_{base}_d128_attention_block_test",
+            ),
+            f"HipMoi{suite}D128AttentionBlock",
+            target.d128_block_oracle,
+            fault_uses_oracle=target.d128_block_fault_uses_oracle,
         ),
-        "clean_filter": "HipMoiCdna3D128AttentionBlock.*",
-        "overhead_filter": (
-            "HipMoiCdna3D128AttentionBlock." "SampledFastContextMatchesHostReference"
-        ),
-    },
-    "d128-pressure": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx942",
+        "d128-pressure": _attention_override(
+            _native_gtest_path(
+                target,
                 "d128-pressure",
-            )
+                f"hip_moi_instrumented_{base}_d128_attention_pressure_test",
+            ),
+            f"HipMoi{suite}D128AttentionPressure",
+            "FullKvDoubleBufferedExactContextMatchesHostReference",
         ),
-        "clean_filter": "HipMoiCdna3D128AttentionPressure.*",
-        "overhead_filter": (
-            "HipMoiCdna3D128AttentionPressure."
-            "FullKvDoubleBufferedExactContextMatchesHostReference"
-        ),
-    },
-    "wmma-attention": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx942",
+        "wmma-attention": _attention_override(
+            _native_gtest_path(
+                target,
                 "mfma-attention",
-            )
+                f"hip_moi_instrumented_{matrix}_attention_block_test",
+            ),
+            f"HipMoi{matrix_suite}AttentionBlock",
+            "ExactContextMatchesHostReference",
         ),
-        "clean_filter": "HipMoiCdna3MfmaAttentionBlock.*",
-        "overhead_filter": "HipMoiCdna3MfmaAttentionBlock.ExactContextMatchesHostReference",
-    },
-    "streamk-arrival": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx942",
-                "streamk-arrival",
-            )
-        ),
-        "clean_filter": (
-            "HipMoiCdna3MfmaStreamKArrivalCounter." "AcqRelFetchAddOrdersMfmaPartials"
-        ),
-        "overhead_filter": (
-            "HipMoiCdna3MfmaStreamKArrivalCounter." "AcqRelFetchAddOrdersMfmaPartials"
-        ),
-    },
-    "tree-atomic-or": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx942",
-                "tree-atomic-or",
-            )
-        ),
-        "clean_filter": (
-            "HipMoiCdna3MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
-        ),
-        "overhead_filter": (
-            "HipMoiCdna3MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
-        ),
-    },
-    "jakub-attention": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx942",
+        **streamk,
+        "jakub-attention": _single_oracle_override(
+            _native_gtest_path(
+                target,
                 "jakub-matmul",
-            )
+                f"hip_moi_reference_{base}_jakub_matmul",
+            ),
+            f"SafeFp16Packed/Jakub{suite}MatmulReference." "MatchesHostReference/*",
         ),
-        "clean_filter": "SafeFp16Packed/JakubCdna3MatmulReference.MatchesHostReference/*",
-        "overhead_filter": "SafeFp16Packed/JakubCdna3MatmulReference.MatchesHostReference/*",
-    },
+    }
+
+
+NATIVE_GTEST_WORKLOAD_OVERRIDES = {
+    target_id: _native_gtest_overrides(target)
+    for target_id, target in NATIVE_GTEST_TARGETS.items()
 }
-
-
-GFX950_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
-    "d128-block": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx950",
-                "d128-block",
-            )
-        ),
-        "clean_filter": "HipMoiCdna4D128AttentionBlock.*",
-        # This specialization executes the admitted group-FLAT probes on
-        # gfx950; ExactContext has no dynamic ConSan access evidence.
-        "overhead_filter": (
-            "HipMoiCdna4D128AttentionBlock." "SampledFastContextMatchesHostReference"
-        ),
-    },
-    "d128-pressure": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx950",
-                "d128-pressure",
-            )
-        ),
-        "clean_filter": "HipMoiCdna4D128AttentionPressure.*",
-        "overhead_filter": (
-            "HipMoiCdna4D128AttentionPressure."
-            "FullKvDoubleBufferedExactContextMatchesHostReference"
-        ),
-    },
-    "wmma-attention": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx950",
-                "mfma-attention",
-            )
-        ),
-        "clean_filter": "HipMoiCdna4MfmaAttentionBlock.*",
-        "overhead_filter": "HipMoiCdna4MfmaAttentionBlock.ExactContextMatchesHostReference",
-    },
-    "streamk-arrival": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx950",
-                "streamk-arrival",
-            )
-        ),
-        "clean_filter": (
-            "HipMoiCdna4MfmaStreamKArrivalCounter." "AcqRelFetchAddOrdersMfmaPartials"
-        ),
-        "overhead_filter": (
-            "HipMoiCdna4MfmaStreamKArrivalCounter." "AcqRelFetchAddOrdersMfmaPartials"
-        ),
-    },
-    "tree-atomic-or": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx950",
-                "tree-atomic-or",
-            )
-        ),
-        # Clean, overhead, and the implicit fault fallback deliberately use
-        # only the ordering oracle; do not widen this to the racy sibling test.
-        "clean_filter": (
-            "HipMoiCdna4MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
-        ),
-        "overhead_filter": (
-            "HipMoiCdna4MfmaStreamKTreeAtomicOr." "AcqRelBitmaskOrdersMfmaPartials"
-        ),
-    },
-    "jakub-attention": {
-        "relative_path": str(
-            cdna_hip_moi_registry.relative_executable_path(
-                "gfx950",
-                "jakub-matmul",
-            )
-        ),
-        "clean_filter": "SafeFp16Packed/JakubCdna4MatmulReference.MatchesHostReference/*",
-        "overhead_filter": "SafeFp16Packed/JakubCdna4MatmulReference.MatchesHostReference/*",
-    },
-}
-
-
-GFX1250_WORKLOAD_OVERRIDES: dict[str, dict[str, str]] = {
-    "d128-block": {
-        "relative_path": (
-            "hip-moi-build-gfx1250-tests/tests/"
-            "hip_moi_instrumented_gfx1250_d128_attention_block_test"
-        ),
-        "clean_filter": "HipMoiGfx1250D128AttentionBlock.*",
-        "overhead_filter": (
-            "HipMoiGfx1250D128AttentionBlock.SampledFastContextMatchesHostReference"
-        ),
-        # Keep fault inventory and exact mutation on the oracle-bearing fast
-        # variant.  The full clean filter also executes the much more costly
-        # exact-context variant and is unnecessary for selecting a shared
-        # barrier sequence.
-        "fault_filter": (
-            "HipMoiGfx1250D128AttentionBlock.SampledFastContextMatchesHostReference"
-        ),
-    },
-    "d128-pressure": {
-        "relative_path": (
-            "hip-moi-build-gfx1250-tests/tests/"
-            "hip_moi_instrumented_gfx1250_d128_attention_pressure_test"
-        ),
-        "clean_filter": "HipMoiGfx1250D128AttentionPressure.*",
-        "overhead_filter": (
-            "HipMoiGfx1250D128AttentionPressure."
-            "FullKvDoubleBufferedExactContextMatchesHostReference"
-        ),
-    },
-    "wmma-attention": {
-        "relative_path": (
-            "hip-moi-build-gfx1250-tests/tests/"
-            "hip_moi_instrumented_gfx1250_wmma_attention_block_test"
-        ),
-        "clean_filter": "HipMoiGfx1250WmmaAttentionBlock.*",
-        "overhead_filter": "HipMoiGfx1250WmmaAttentionBlock.ExactContextMatchesHostReference",
-    },
-    "streamk-arrival": {
-        "relative_path": (
-            "hip-moi-build-gfx1250-tests/tests/"
-            "hip_moi_instrumented_gfx1250_wmma_streamk_arrival_counter_test"
-        ),
-        "clean_filter": (
-            "HipMoiGfx1250WmmaStreamKArrivalCounter.AcqRelFetchAddOrdersWmmaPartials"
-        ),
-        "overhead_filter": (
-            "HipMoiGfx1250WmmaStreamKArrivalCounter.AcqRelFetchAddOrdersWmmaPartials"
-        ),
-    },
-    "tree-atomic-or": {
-        "relative_path": (
-            "hip-moi-build-gfx1250-tests/tests/"
-            "hip_moi_instrumented_gfx1250_wmma_streamk_tree_atomic_or_test"
-        ),
-        "clean_filter": (
-            "HipMoiGfx1250WmmaStreamKTreeAtomicOr.AcqRelBitmaskOrdersWmmaPartials"
-        ),
-        "overhead_filter": (
-            "HipMoiGfx1250WmmaStreamKTreeAtomicOr.AcqRelBitmaskOrdersWmmaPartials"
-        ),
-    },
-    # Keep the row visible and let doctor report the missing target-native
-    # artifact until hip-moi provides the semantically equivalent workload.
-    "jakub-attention": {
-        "relative_path": (
-            "hip-moi-build-gfx1250-tests/tests/hip_moi_reference_gfx1250_jakub_matmul"
-        ),
-        "clean_filter": "SafeFp16Packed/JakubGfx1250MatmulReference.MatchesHostReference/*",
-        "overhead_filter": "SafeFp16Packed/JakubGfx1250MatmulReference.MatchesHostReference/*",
-    },
-}
+NATIVE_GTEST_WORKLOAD_IDS = tuple(
+    workload.id for workload in WORKLOADS if workload.kind == "gtest"
+)
+for target_id, overrides in NATIVE_GTEST_WORKLOAD_OVERRIDES.items():
+    _validate_exact_keys(
+        f"{target_id} native gtest override matrix",
+        overrides,
+        NATIVE_GTEST_WORKLOAD_IDS,
+    )
 
 
 def _resolved_workload(target: str, workload: Workload) -> Workload:
     """Materialize one target's command overrides from a canonical registry row."""
     if workload.kind != "gtest":
         return workload
-    overrides = {
-        "gfx942": GFX942_WORKLOAD_OVERRIDES,
-        "gfx950": GFX950_WORKLOAD_OVERRIDES,
-        "gfx1250": GFX1250_WORKLOAD_OVERRIDES,
-    }.get(target)
+    overrides = NATIVE_GTEST_WORKLOAD_OVERRIDES.get(target)
     if overrides is None:
         return workload
     override = overrides.get(workload.id)
@@ -1303,6 +1296,44 @@ def _target(args: argparse.Namespace) -> str:
             f"set --target or {TARGET_ENV} to a gfx architecture name"
         )
     return value
+
+
+@dataclass(frozen=True)
+class WorkloadSelection:
+    target: str
+    workload_id: str
+    workload: Workload | None
+
+    @property
+    def is_all(self) -> bool:
+        return self.workload_id == "all"
+
+    def require_workload(self) -> Workload:
+        if self.workload is None:
+            raise ValidationError("command requires one concrete workload")
+        return self.workload
+
+    def selected_ids(self) -> tuple[str, ...] | None:
+        return None if self.is_all else (self.workload_id,)
+
+
+def _resolve_workload_selection(
+    args: argparse.Namespace,
+    *,
+    allow_all: bool,
+) -> WorkloadSelection:
+    target = _target(args)
+    workload_id = getattr(args, "workload", "all")
+    if workload_id == "all":
+        if not allow_all:
+            command = getattr(args, "command", "this command")
+            raise ValidationError(f"{command} requires one concrete workload")
+        return WorkloadSelection(target=target, workload_id="all", workload=None)
+    return WorkloadSelection(
+        target=target,
+        workload_id=workload_id,
+        workload=_workload_for_target(target, workload_id),
+    )
 
 
 def _command_json(value: str) -> list[str]:
@@ -2961,6 +2992,14 @@ def _gtest_median(log_texts: list[str]) -> dict[str, float]:
     return {"process": statistics.median(values)}
 
 
+def _gtest_test_count(log_text: str) -> int | None:
+    matches = re.findall(
+        r"\[==========\]\s+Running\s+([0-9]+)\s+tests?\s+from",
+        log_text,
+    )
+    return int(matches[-1]) if matches else None
+
+
 def _run_process(
     command: list[str],
     environment: dict[str, str],
@@ -3139,6 +3178,12 @@ def _run_profile(
             for log in logs
         ]
         coverage = coverage_runs[-1]
+    gtest_test_counts = (
+        [_gtest_test_count(log) for log in logs] if workload.kind == "gtest" else None
+    )
+    gtest_executed = gtest_test_counts is None or all(
+        count is not None and count > 0 for count in gtest_test_counts
+    )
     result = {
         "schema_version": SCHEMA_VERSION,
         "workload": workload.id,
@@ -3154,8 +3199,10 @@ def _run_profile(
         "timing_median_ms": timing,
         "coverage": coverage,
         "coverage_runs": coverage_runs,
+        "gtest_test_counts": gtest_test_counts,
         "accepted": (
             all(code == 0 for code in returncodes)
+            and gtest_executed
             and (
                 profile is None
                 or bool(coverage_runs)
@@ -3398,8 +3445,9 @@ def _fault_inventory_environment(family: str) -> dict[str, str]:
 
 
 def _inventory(args: argparse.Namespace) -> int:
-    target = _target(args)
-    workload = _workload_for_target(target, args.workload)
+    selection = _resolve_workload_selection(args, allow_all=False)
+    target = selection.target
+    workload = selection.require_workload()
     workspace = _workspace_from_environment()
     if not _doctor(workspace, target, (workload.id,))["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
@@ -4176,8 +4224,9 @@ def _fault_acceptance(result: dict, policy: dict) -> tuple[bool, list[str]]:
 
 
 def _fault(args: argparse.Namespace) -> int:
-    target = _target(args)
-    workload = _workload_for_target(target, args.workload)
+    selection = _resolve_workload_selection(args, allow_all=False)
+    target = selection.target
+    workload = selection.require_workload()
     workspace = _workspace_from_environment()
     if not _doctor(workspace, target, (workload.id,))["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
@@ -4380,8 +4429,9 @@ def _fault(args: argparse.Namespace) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
-    target = _target(args)
-    workload = _workload_for_target(target, args.workload)
+    selection = _resolve_workload_selection(args, allow_all=False)
+    target = selection.target
+    workload = selection.require_workload()
     workspace = _workspace_from_environment()
     timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
     doctor = _doctor(workspace, target, (workload.id,))
@@ -4550,12 +4600,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        target = _target(args)
+        selection = _resolve_workload_selection(args, allow_all=True)
+        target = selection.target
         # Reject cheap target/input mismatches before requiring a configured
-        # workspace. Handlers repeat this guard to protect direct entry calls.
-        requested_workload = getattr(args, "workload", "all")
-        if requested_workload != "all":
-            _workload_for_target(target, requested_workload)
+        # workspace. Handlers reuse the same resolver for direct entry calls.
         if args.command == "manifest":
             result = _manifest(target)
             if args.json:
@@ -4567,12 +4615,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         workspace = _workspace_from_environment()
         if args.command == "explain":
-            if args.workload == "all":
+            if selection.is_all:
                 workload_ids = tuple(
                     workload.id for workload in _workloads_for_target(target)
                 )
             else:
-                workload_ids = (args.workload,)
+                workload_ids = (selection.require_workload().id,)
             profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
             result = _explain_contract(
                 workspace,
@@ -4588,8 +4636,7 @@ def main(argv: list[str] | None = None) -> int:
                 _print_explain(result)
             return 0
         if args.command == "doctor":
-            workload_ids = None if args.workload == "all" else (args.workload,)
-            result = _doctor(workspace, target, workload_ids)
+            result = _doctor(workspace, target, selection.selected_ids())
             if args.json:
                 print(json.dumps(result, indent=2, sort_keys=True))
             else:

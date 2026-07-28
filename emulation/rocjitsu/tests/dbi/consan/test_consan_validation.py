@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import io
 import json
 import os
@@ -24,6 +24,18 @@ from consan_validation_test_support import (
     RETIRED_TOPK_CODE_OBJECT_FINGERPRINT,
     temporary_root,
 )
+
+
+@dataclass(frozen=True)
+class NativeGtestTargetExpectation:
+    build_dir: str
+    base: str
+    matrix: str
+    suite: str
+    matrix_suite: str
+    matrix_operation: str
+    d128_block_oracle: str
+    d128_block_fault_uses_oracle: bool = False
 
 
 def moi_auto_report(
@@ -170,7 +182,8 @@ class ConSanValidationTest(unittest.TestCase):
                     .read_text(encoding="utf-8")
                     .split()[2]
                 )
-            except FileNotFoundError:
+            # procfs can surface ESRCH if the task disappears during open.
+            except (FileNotFoundError, ProcessLookupError):
                 break
             if state == "Z":
                 break
@@ -1324,6 +1337,72 @@ class ConSanValidationTest(unittest.TestCase):
                     ],
                 )
 
+    def test_workload_selection_preserves_all_or_resolves_one_row(self) -> None:
+        aggregate = validation._resolve_workload_selection(
+            validation._parse_args(["--target", "gfx950", "doctor"]),
+            allow_all=True,
+        )
+        concrete = validation._resolve_workload_selection(
+            validation._parse_args(
+                [
+                    "--target",
+                    "gfx950",
+                    "doctor",
+                    "--workload",
+                    "d128-block",
+                ]
+            ),
+            allow_all=True,
+        )
+
+        self.assertTrue(aggregate.is_all)
+        self.assertIsNone(aggregate.workload)
+        self.assertIsNone(aggregate.selected_ids())
+        self.assertFalse(concrete.is_all)
+        self.assertIs(concrete.workload, validation.WORKLOAD_BY_ID["d128-block"])
+        self.assertEqual(concrete.selected_ids(), ("d128-block",))
+
+        with self.assertRaisesRegex(
+            validation.ValidationError,
+            "doctor requires one concrete workload",
+        ):
+            validation._resolve_workload_selection(
+                validation._parse_args(["--target", "gfx950", "doctor"]),
+                allow_all=False,
+            )
+        with self.assertRaisesRegex(
+            validation.ValidationError,
+            "command requires one concrete workload",
+        ):
+            aggregate.require_workload()
+        with self.assertRaisesRegex(
+            validation.ValidationError,
+            "gfx942 manifest excludes workload: pytorch-rdna4-compiled-softmax",
+        ):
+            validation._resolve_workload_selection(
+                validation._parse_args(
+                    [
+                        "--target",
+                        "gfx942",
+                        "doctor",
+                        "--workload",
+                        "pytorch-rdna4-compiled-softmax",
+                    ]
+                ),
+                allow_all=True,
+            )
+
+    def test_exact_key_validation_reports_missing_and_extra_ids(self) -> None:
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"matrix mismatch: missing=\['second'\] extra=\['third'\]",
+        ):
+            validation._validate_exact_keys(
+                "matrix",
+                {"first": object(), "third": object()},
+                ("first", "second"),
+            )
+
     def test_cli_rejects_workload_excluded_by_target_manifest(self) -> None:
         with temporary_root() as workspace:
             commands = (
@@ -1495,7 +1574,7 @@ class ConSanValidationTest(unittest.TestCase):
         native_spellings = json.dumps(
             [
                 workloads[workload_id]
-                for workload_id in validation.GFX950_WORKLOAD_OVERRIDES
+                for workload_id in validation.NATIVE_GTEST_WORKLOAD_OVERRIDES["gfx950"]
             ]
         )
         self.assertNotIn("rdna4", native_spellings.lower())
@@ -1534,7 +1613,7 @@ class ConSanValidationTest(unittest.TestCase):
         native_spellings = json.dumps(
             [
                 workloads[workload_id]
-                for workload_id in validation.GFX942_WORKLOAD_OVERRIDES
+                for workload_id in validation.NATIVE_GTEST_WORKLOAD_OVERRIDES["gfx942"]
             ]
         )
         self.assertNotIn("rdna4", native_spellings.lower())
@@ -1551,55 +1630,6 @@ class ConSanValidationTest(unittest.TestCase):
                 "hip_moi_instrumented_cdna3_d128_attention_pressure_test"
             ),
         )
-
-    def test_gfx942_doctor_checks_resolved_cdna3_executables(self) -> None:
-        expected_paths = {
-            "d128-block": (
-                "hip-moi-build-gfx942-tests/tests/"
-                "hip_moi_instrumented_cdna3_d128_attention_block_test"
-            ),
-            "d128-pressure": (
-                "hip-moi-build-gfx942-tests/tests/"
-                "hip_moi_instrumented_cdna3_d128_attention_pressure_test"
-            ),
-            "wmma-attention": (
-                "hip-moi-build-gfx942-tests/tests/"
-                "hip_moi_instrumented_cdna3_mfma_attention_block_test"
-            ),
-            "streamk-arrival": (
-                "hip-moi-build-gfx942-tests/tests/"
-                "hip_moi_instrumented_cdna3_mfma_streamk_arrival_counter_test"
-            ),
-            "tree-atomic-or": (
-                "hip-moi-build-gfx942-tests/tests/"
-                "hip_moi_instrumented_cdna3_mfma_streamk_tree_atomic_or_test"
-            ),
-            "jakub-attention": (
-                "hip-moi-build-gfx942-tests/tests/"
-                "hip_moi_reference_cdna3_jakub_matmul"
-            ),
-        }
-        with temporary_root() as workspace:
-            (workspace / "hip-moi").mkdir()
-            hook = (
-                workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
-                "librocjitsu_dbi_hooks.so"
-            )
-            hook.parent.mkdir(parents=True)
-            hook.touch()
-            for relative_path in expected_paths.values():
-                executable = workspace / relative_path
-                executable.parent.mkdir(parents=True, exist_ok=True)
-                executable.touch()
-            self.assertFalse((workspace / "hip-moi-build").exists())
-            with mock.patch.object(validation.shutil, "which", return_value="/tool"):
-                doctor = validation._doctor(workspace, "gfx942", tuple(expected_paths))
-        self.assertTrue(doctor["ok"])
-        for workload_id, relative_path in expected_paths.items():
-            with self.subTest(workload=workload_id):
-                executable = doctor["paths"][f"workload:{workload_id}:executable"]
-                self.assertEqual(executable["path"], str(workspace / relative_path))
-                self.assertTrue(executable["present"])
 
     def test_gfx942_doctor_rejects_missing_resolved_cdna3_executable(self) -> None:
         with temporary_root() as workspace:
@@ -1628,55 +1658,6 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertTrue(all(doctor["tools"].values()))
         self.assertEqual(doctor["runtimes"], {})
         self.assertFalse(doctor["ok"])
-
-    def test_gfx950_doctor_checks_resolved_cdna4_executables(self) -> None:
-        expected_paths = {
-            "d128-block": (
-                "hip-moi-build-gfx950-tests/tests/"
-                "hip_moi_instrumented_cdna4_d128_attention_block_test"
-            ),
-            "d128-pressure": (
-                "hip-moi-build-gfx950-tests/tests/"
-                "hip_moi_instrumented_cdna4_d128_attention_pressure_test"
-            ),
-            "wmma-attention": (
-                "hip-moi-build-gfx950-tests/tests/"
-                "hip_moi_instrumented_cdna4_mfma_attention_block_test"
-            ),
-            "streamk-arrival": (
-                "hip-moi-build-gfx950-tests/tests/"
-                "hip_moi_instrumented_cdna4_mfma_streamk_arrival_counter_test"
-            ),
-            "tree-atomic-or": (
-                "hip-moi-build-gfx950-tests/tests/"
-                "hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test"
-            ),
-            "jakub-attention": (
-                "hip-moi-build-gfx950-tests/tests/"
-                "hip_moi_reference_cdna4_jakub_matmul"
-            ),
-        }
-        with temporary_root() as workspace:
-            (workspace / "hip-moi").mkdir()
-            hook = (
-                workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
-                "librocjitsu_dbi_hooks.so"
-            )
-            hook.parent.mkdir(parents=True)
-            hook.touch()
-            for relative_path in expected_paths.values():
-                executable = workspace / relative_path
-                executable.parent.mkdir(parents=True, exist_ok=True)
-                executable.touch()
-            self.assertFalse((workspace / "hip-moi-build").exists())
-            with mock.patch.object(validation.shutil, "which", return_value="/tool"):
-                doctor = validation._doctor(workspace, "gfx950", tuple(expected_paths))
-        self.assertTrue(doctor["ok"])
-        for workload_id, relative_path in expected_paths.items():
-            with self.subTest(workload=workload_id):
-                executable = doctor["paths"][f"workload:{workload_id}:executable"]
-                self.assertEqual(executable["path"], str(workspace / relative_path))
-                self.assertTrue(executable["present"])
 
     def test_gfx1250_manifest_resolves_target_native_workloads(self) -> None:
         manifest = validation._manifest("gfx1250")
@@ -1711,111 +1692,207 @@ class ConSanValidationTest(unittest.TestCase):
             ("barrier-move",),
         )
 
-    def test_streamk_fault_commands_resolve_native_executables_and_ordering_oracles(
+    def test_native_gtest_routing_matrix_pins_executables_and_phase_filters(
         self,
     ) -> None:
-        expected_filters = {
-            "gfx942": {
-                "streamk-arrival": (
-                    "HipMoiCdna3MfmaStreamKArrivalCounter."
-                    "AcqRelFetchAddOrdersMfmaPartials"
-                ),
-                "tree-atomic-or": (
-                    "HipMoiCdna3MfmaStreamKTreeAtomicOr."
-                    "AcqRelBitmaskOrdersMfmaPartials"
-                ),
-            },
-            "gfx1201": {
-                "streamk-arrival": (
-                    "HipMoiRdna4WmmaStreamKArrivalCounter."
-                    "AcqRelFetchAddOrdersWmmaPartials"
-                ),
-                "tree-atomic-or": (
-                    "HipMoiRdna4WmmaStreamKTreeAtomicOr."
-                    "AcqRelBitmaskOrdersWmmaPartials"
-                ),
-            },
-            "gfx950": {
-                "streamk-arrival": (
-                    "HipMoiCdna4MfmaStreamKArrivalCounter."
-                    "AcqRelFetchAddOrdersMfmaPartials"
-                ),
-                "tree-atomic-or": (
-                    "HipMoiCdna4MfmaStreamKTreeAtomicOr."
-                    "AcqRelBitmaskOrdersMfmaPartials"
-                ),
-            },
-            "gfx1250": {
-                "streamk-arrival": (
-                    "HipMoiGfx1250WmmaStreamKArrivalCounter."
-                    "AcqRelFetchAddOrdersWmmaPartials"
-                ),
-                "tree-atomic-or": (
-                    "HipMoiGfx1250WmmaStreamKTreeAtomicOr."
-                    "AcqRelBitmaskOrdersWmmaPartials"
-                ),
-            },
-        }
-        # Reconstruct paths independently of the override tables so this test
-        # catches a wrong target-resolved Stream-K executable spelling.
-        executable_prefixes = {
-            "gfx942": (
-                "hip-moi-build-gfx942-tests/tests/" "hip_moi_instrumented_cdna3_mfma_"
+        target_shapes = {
+            "gfx1201": NativeGtestTargetExpectation(
+                build_dir="hip-moi-build",
+                base="rdna4",
+                matrix="rdna4_wmma",
+                suite="Rdna4",
+                matrix_suite="Rdna4Wmma",
+                matrix_operation="Wmma",
+                d128_block_oracle="ExactContextMatchesHostReference",
             ),
-            "gfx1201": "hip-moi-build/tests/hip_moi_instrumented_rdna4_wmma_",
-            "gfx950": (
-                "hip-moi-build-gfx950-tests/tests/" "hip_moi_instrumented_cdna4_mfma_"
+            "gfx942": NativeGtestTargetExpectation(
+                build_dir="hip-moi-build-gfx942-tests",
+                base="cdna3",
+                matrix="cdna3_mfma",
+                suite="Cdna3",
+                matrix_suite="Cdna3Mfma",
+                matrix_operation="Mfma",
+                d128_block_oracle="SampledFastContextMatchesHostReference",
             ),
-            "gfx1250": (
-                "hip-moi-build-gfx1250-tests/tests/"
-                "hip_moi_instrumented_gfx1250_wmma_"
+            "gfx950": NativeGtestTargetExpectation(
+                build_dir="hip-moi-build-gfx950-tests",
+                base="cdna4",
+                matrix="cdna4_mfma",
+                suite="Cdna4",
+                matrix_suite="Cdna4Mfma",
+                matrix_operation="Mfma",
+                d128_block_oracle="SampledFastContextMatchesHostReference",
+            ),
+            "gfx1250": NativeGtestTargetExpectation(
+                build_dir="hip-moi-build-gfx1250-tests",
+                base="gfx1250",
+                matrix="gfx1250_wmma",
+                suite="Gfx1250",
+                matrix_suite="Gfx1250Wmma",
+                matrix_operation="Wmma",
+                d128_block_oracle="SampledFastContextMatchesHostReference",
+                d128_block_fault_uses_oracle=True,
             ),
         }
-        executable_stems = {
-            "streamk-arrival": "streamk_arrival_counter_test",
-            "tree-atomic-or": "streamk_tree_atomic_or_test",
+        workload_stems = {
+            "d128-block": ("base", "instrumented", "d128_attention_block_test"),
+            "d128-pressure": (
+                "base",
+                "instrumented",
+                "d128_attention_pressure_test",
+            ),
+            "wmma-attention": ("matrix", "instrumented", "attention_block_test"),
+            "streamk-arrival": (
+                "matrix",
+                "instrumented",
+                "streamk_arrival_counter_test",
+            ),
+            "tree-atomic-or": (
+                "matrix",
+                "instrumented",
+                "streamk_tree_atomic_or_test",
+            ),
+            "jakub-attention": ("base", "reference", "jakub_matmul"),
         }
-        for target, expected_by_workload in expected_filters.items():
-            workloads = {
-                workload["id"]: workload
-                for workload in validation._manifest(target)["workloads"]
+        self.assertEqual(
+            tuple(workload_stems),
+            validation.NATIVE_GTEST_WORKLOAD_IDS,
+        )
+        for target, shape in target_shapes.items():
+            expected_paths = {}
+            for workload_id, (family_kind, binary_kind, stem) in workload_stems.items():
+                family = shape.base if family_kind == "base" else shape.matrix
+                expected_paths[workload_id] = (
+                    f"{shape.build_dir}/tests/hip_moi_{binary_kind}_{family}_{stem}"
+                )
+            d128_block_clean = f"HipMoi{shape.suite}D128AttentionBlock.*"
+            d128_block_oracle = (
+                f"HipMoi{shape.suite}D128AttentionBlock." f"{shape.d128_block_oracle}"
+            )
+            expected_filters = {
+                "d128-block": (
+                    d128_block_clean,
+                    d128_block_oracle,
+                    (
+                        d128_block_oracle
+                        if shape.d128_block_fault_uses_oracle
+                        else d128_block_clean
+                    ),
+                ),
+                "d128-pressure": (
+                    f"HipMoi{shape.suite}D128AttentionPressure.*",
+                    f"HipMoi{shape.suite}D128AttentionPressure."
+                    "FullKvDoubleBufferedExactContextMatchesHostReference",
+                    f"HipMoi{shape.suite}D128AttentionPressure.*",
+                ),
+                "wmma-attention": (
+                    f"HipMoi{shape.matrix_suite}AttentionBlock.*",
+                    f"HipMoi{shape.matrix_suite}AttentionBlock."
+                    "ExactContextMatchesHostReference",
+                    f"HipMoi{shape.matrix_suite}AttentionBlock.*",
+                ),
+                "streamk-arrival": (
+                    f"HipMoi{shape.matrix_suite}StreamKArrivalCounter."
+                    f"AcqRelFetchAddOrders{shape.matrix_operation}Partials",
+                )
+                * 3,
+                "tree-atomic-or": (
+                    f"HipMoi{shape.matrix_suite}StreamKTreeAtomicOr."
+                    f"AcqRelBitmaskOrders{shape.matrix_operation}Partials",
+                )
+                * 3,
+                "jakub-attention": (
+                    f"SafeFp16Packed/Jakub{shape.suite}MatmulReference."
+                    "MatchesHostReference/*",
+                )
+                * 3,
             }
-            for workload_id, expected_filter in expected_by_workload.items():
-                with self.subTest(target=target, workload=workload_id):
-                    streamk = workloads[workload_id]
-                    self.assertEqual(streamk["clean_filter"], expected_filter)
-                    self.assertEqual(streamk["overhead_filter"], expected_filter)
-                    self.assertIsNone(streamk["fault_filter"])
-                    fault_command = validation._workload_command(
-                        Path("/workspace"),
+            with self.subTest(target=target), temporary_root() as workspace:
+                (workspace / "hip-moi").mkdir()
+                hook = (
+                    workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                    "librocjitsu_dbi_hooks.so"
+                )
+                hook.parent.mkdir(parents=True)
+                hook.touch()
+                for relative_path in expected_paths.values():
+                    executable = workspace / relative_path
+                    executable.parent.mkdir(parents=True, exist_ok=True)
+                    executable.touch()
+                with mock.patch.object(
+                    validation.shutil, "which", return_value="/tool"
+                ):
+                    doctor = validation._doctor(
+                        workspace,
                         target,
-                        validation.WORKLOAD_BY_ID[workload_id],
-                        "fault",
-                        Path("/unused"),
-                    )
-                    self.assertEqual(
-                        fault_command,
-                        [
-                            str(
-                                Path("/workspace")
-                                / (
-                                    executable_prefixes[target]
-                                    + executable_stems[workload_id]
-                                )
-                            ),
-                            f"--gtest_filter={expected_filter}",
-                        ],
+                        tuple(expected_paths),
                     )
 
-    def test_gfx1250_doctor_checks_target_native_executables(self) -> None:
+                self.assertTrue(doctor["ok"], doctor)
+                for workload_id, relative_path in expected_paths.items():
+                    executable = doctor["paths"][f"workload:{workload_id}:executable"]
+                    self.assertEqual(
+                        executable,
+                        {
+                            "path": str(workspace / relative_path),
+                            "present": True,
+                        },
+                    )
+                    clean_filter, overhead_filter, fault_filter = expected_filters[
+                        workload_id
+                    ]
+                    for phase, expected_filter in (
+                        ("clean", clean_filter),
+                        ("overhead", overhead_filter),
+                        ("fault", fault_filter),
+                    ):
+                        with self.subTest(
+                            target=target,
+                            workload=workload_id,
+                            phase=phase,
+                        ):
+                            self.assertEqual(
+                                validation._workload_command(
+                                    workspace,
+                                    target,
+                                    validation.WORKLOAD_BY_ID[workload_id],
+                                    phase,
+                                    workspace / "unused.json",
+                                ),
+                                [
+                                    str(workspace / relative_path),
+                                    f"--gtest_filter={expected_filter}",
+                                ],
+                            )
+
+    def test_gfx1250_doctor_reports_missing_target_native_jakub_artifact(
+        self,
+    ) -> None:
         with temporary_root() as workspace:
+            (workspace / "hip-moi").mkdir()
+            hook = (
+                workspace / "rocjitsu-build/lib/rocjitsu/src/rocjitsu/hooks/"
+                "librocjitsu_dbi_hooks.so"
+            )
+            hook.parent.mkdir(parents=True)
+            hook.touch()
             with mock.patch.object(validation.shutil, "which", return_value="/tool"):
-                doctor = validation._doctor(workspace, "gfx1250")
-        d128 = doctor["paths"]["workload:d128-block:executable"]
-        self.assertTrue(d128["path"].endswith("gfx1250_d128_attention_block_test"))
-        jakub = doctor["paths"]["workload:jakub-attention:executable"]
-        self.assertTrue(
-            jakub["path"].endswith("hip_moi_reference_gfx1250_jakub_matmul")
+                doctor = validation._doctor(
+                    workspace,
+                    "gfx1250",
+                    ("jakub-attention",),
+                )
+
+        self.assertFalse(doctor["ok"])
+        self.assertEqual(
+            doctor["paths"]["workload:jakub-attention:executable"],
+            {
+                "path": str(
+                    workspace / "hip-moi-build-gfx1250-tests/tests/"
+                    "hip_moi_reference_gfx1250_jakub_matmul"
+                ),
+                "present": False,
+            },
         )
 
     def test_main_doctor_all_uses_target_filtered_workloads(self) -> None:
@@ -2178,6 +2255,59 @@ class ConSanValidationTest(unittest.TestCase):
             profile="record-replay",
             coverage_output_contract=contract,
         )
+
+    def test_gtest_run_rejects_zero_or_unreported_test_count(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["d128-block"]
+        cases = (
+            (
+                "matched",
+                "[==========] Running 1 test from 1 test suite.\n",
+                [1],
+                True,
+            ),
+            (
+                "zero",
+                "[==========] Running 0 tests from 0 test suites.\n",
+                [0],
+                False,
+            ),
+            ("missing", "process exited successfully\n", [None], False),
+        )
+        for name, output, expected_counts, expected_accepted in cases:
+            with self.subTest(name=name), temporary_root() as root:
+                artifact_root = root / "artifacts"
+                hook = root / "hook.so"
+                hook.write_bytes(b"hook")
+                with (
+                    mock.patch.object(validation, "_hook_path", return_value=hook),
+                    mock.patch.object(
+                        validation,
+                        "_workload_command",
+                        return_value=["/bin/true"],
+                    ),
+                    mock.patch.object(
+                        validation,
+                        "_run_process",
+                        return_value=(0, 0.1, output),
+                    ),
+                    mock.patch.object(
+                        validation,
+                        "_source_identities",
+                        return_value=[],
+                    ),
+                ):
+                    result = validation._run_profile(
+                        root,
+                        "gfx950",
+                        workload,
+                        None,
+                        "clean",
+                        artifact_root,
+                        30,
+                    )
+
+            self.assertEqual(result["gtest_test_counts"], expected_counts)
+            self.assertEqual(result["accepted"], expected_accepted)
 
     def test_ordinary_record_replay_run_persists_structural_verdict(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-torch-mode"]
@@ -3217,7 +3347,8 @@ class ConSanValidationTest(unittest.TestCase):
             Path("/workspace"), "gfx1201", workload, "fault", Path("/unused")
         )
         self.assertEqual(
-            rdna_command[1], "--gtest_filter=HipMoiRdna4D128AttentionBlock.*"
+            rdna_command[1],
+            "--gtest_filter=HipMoiRdna4D128AttentionBlock.*",
         )
 
     def test_overhead_uses_bracketing_baseline_mean_and_maximum_mode(self) -> None:
