@@ -11005,7 +11005,7 @@ TEST(BinaryTranslatorE2E, Gfx1250UsesNeutralScaledK128Fp8Bf8Wmma) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr auto completion_wait = kGfx1250WmmaCompletionWait;
 
-  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 43u);
+  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 44u);
   for (const WmmaCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     auto source_wmma = gfx1250::build_vop3p(test_case.source_opcode, fields);
@@ -12403,6 +12403,248 @@ TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataRangeBoundsAfterRelocatio
 
   ASSERT_NO_FATAL_FAILURE(verify_target(false));
   ASSERT_NO_FATAL_FAILURE(verify_target(true));
+}
+
+// The affected barrier-state ids take one result field from a second query.
+// The merge writes SCC, which the replaced query does not, so it is saved and
+// restored around the bitwise operations.
+TEST(BinaryTranslatorE2E, Gfx1250SplicesBarrierStateFieldForA0) {
+  constexpr uint8_t kSecondQueryIdInline = 129;
+  constexpr uint8_t kDestination = 20;
+  constexpr uint8_t kScalarLiteral = 255;
+  constexpr uint8_t kInlineZero = 128;
+  constexpr uint8_t kInlineOne = 129;
+  constexpr uint32_t kFieldMask = 0x1f000000u;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  for (const uint8_t affected_id : {uint8_t{193}, uint8_t{194}}) {
+    SCOPED_TRACE(static_cast<int>(affected_id));
+    const auto query = gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1,
+                                           {.ssrc0 = affected_id, .sdst = kDestination});
+    auto image =
+        rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({query[0], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    const size_t count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+    ASSERT_GE(count, 11u);
+
+    // Recover the two borrowed registers from the emitted words, then pin every
+    // instruction against the builder so a changed opcode cannot pass.
+    const uint32_t scratch = (out[1] >> 16) & 0x7fu;
+    const uint32_t saved_scc = (out[3] >> 16) & 0x7fu;
+    EXPECT_NE(scratch, kDestination);
+    EXPECT_NE(saved_scc, kDestination);
+    EXPECT_NE(saved_scc, scratch);
+    EXPECT_LE(scratch, 105u);
+    EXPECT_LE(saved_scc, 105u);
+
+    EXPECT_EQ(out[0], query[0]) << "the original query must be preserved";
+    EXPECT_EQ(out[1], gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1,
+                                          {.ssrc0 = kSecondQueryIdInline,
+                                           .sdst = static_cast<uint8_t>(scratch)})[0]);
+    EXPECT_EQ(out[2], gfx1250::build_sopp(gfx1250::kSWaitKmcntSopp, {.simm16 = 0})[0])
+        << "both results complete through KMCNT and must be drained";
+    EXPECT_EQ(out[3], gfx1250::build_sop2(gfx1250::kSCselectB32Sop2,
+                                          {.ssrc0 = kInlineOne,
+                                           .ssrc1 = kInlineZero,
+                                           .sdst = static_cast<uint8_t>(saved_scc)})[0])
+        << "SCC must be saved before the merge";
+    EXPECT_EQ(out[4], gfx1250::build_sop2(gfx1250::kSAndB32Sop2,
+                                          {.ssrc0 = static_cast<uint8_t>(scratch),
+                                           .ssrc1 = kScalarLiteral,
+                                           .sdst = static_cast<uint8_t>(scratch)})[0]);
+    EXPECT_EQ(out[5], kFieldMask);
+    EXPECT_EQ(out[6], gfx1250::build_sop2(gfx1250::kSAndB32Sop2, {.ssrc0 = kDestination,
+                                                                  .ssrc1 = kScalarLiteral,
+                                                                  .sdst = kDestination})[0]);
+    EXPECT_EQ(out[7], ~kFieldMask);
+    EXPECT_EQ(out[8],
+              gfx1250::build_sop2(gfx1250::kSOrB32Sop2, {.ssrc0 = kDestination,
+                                                         .ssrc1 = static_cast<uint8_t>(scratch),
+                                                         .sdst = kDestination})[0]);
+    EXPECT_EQ(out[9], gfx1250::build_sopc(
+                          gfx1250::kSCmpLgU32Sopc,
+                          {.ssrc0 = static_cast<uint8_t>(saved_scc), .ssrc1 = kInlineZero})[0])
+        << "SCC must be restored after the merge";
+    EXPECT_EQ(out[10], kGfx1250SEndpgm) << "the expansion must end where the kernel resumes";
+  }
+}
+
+// A comparison feeding a later branch must still see its own result, even
+// though the merge in between writes SCC.
+// The expansion keeps the affected query as its first word, so nothing stops a
+// second pass from matching it again and wrapping another envelope around it.
+// Translating already-translated text must be a no-op.
+// With every ordinary scalar register live there is nowhere to stage the second
+// result or to park SCC, so the splice must refuse rather than clobber one.
+TEST(BinaryTranslatorE2E, Gfx1250FailsClosedWhenBarrierStateHasNoScratchForA0) {
+  constexpr uint8_t kAffectedIdInline = 193;
+  constexpr uint8_t kDestination = 20;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto query = gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1,
+                                         {.ssrc0 = kAffectedIdInline, .sdst = kDestination});
+  std::vector<uint32_t> words = {query[0]};
+  // Reading every ordinary scalar register after the query keeps them all live
+  // across it, so the allocator has nothing to borrow.
+  for (uint16_t base = 0; base + 1 <= 101; base += 2) {
+    words.push_back(
+        gfx1250::build_sop2(gfx1250::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
+                                                    .ssrc1 = static_cast<uint8_t>(base + 1),
+                                                    .sdst = 102})[0]);
+  }
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
+  EXPECT_TRUE(rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
+                                             "could not allocate a dead SGPR"));
+}
+
+// Two affected queries back to back each need their own envelope. This also
+// checks the already-spliced test does not mistake the second query for the
+// companion the first one emits.
+TEST(BinaryTranslatorE2E, Gfx1250SplicesAdjacentBarrierStateQueriesForA0) {
+  constexpr uint8_t kFirstAffectedId = 193;
+  constexpr uint8_t kSecondAffectedId = 194;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto first =
+      gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1, {.ssrc0 = kFirstAffectedId, .sdst = 20});
+  const auto second =
+      gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1, {.ssrc0 = kSecondAffectedId, .sdst = 22});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {first[0], second[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  EXPECT_EQ(std::count(out, out + count, first[0]), 1);
+  EXPECT_EQ(std::count(out, out + count, second[0]), 1);
+  // One envelope per affected query, each drained by its own wait.
+  const auto wait = gfx1250::build_sopp(gfx1250::kSWaitKmcntSopp, {.simm16 = 0});
+  EXPECT_EQ(std::count(out, out + count, wait[0]), 2)
+      << "each affected query needs its own companion and drain";
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250BarrierStateSpliceIsStableOnSecondPassForA0) {
+  constexpr uint8_t kAffectedIdInline = 193;
+  constexpr uint8_t kDestination = 20;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto query = gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1,
+                                         {.ssrc0 = kAffectedIdInline, .sdst = kDestination});
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({query[0], kGfx1250SEndpgm});
+
+  std::vector<uint8_t> current = image;
+  std::vector<uint32_t> first_pass;
+  for (int pass = 0; pass < 2; ++pass) {
+    rocjitsu::AmdGpuCodeObject source(current.data(), current.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    const auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    const size_t count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+    std::vector<uint32_t> words(out, out + count);
+    if (pass == 0) {
+      ASSERT_GE(words.size(), 11u) << "the first pass must emit the envelope";
+      first_pass = words;
+    } else {
+      EXPECT_EQ(words, first_pass) << "the second pass must not wrap the splice again";
+    }
+    current = result.elf_bytes;
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250BarrierStateSpliceKeepsGuestSccForA0) {
+  constexpr uint8_t kAffectedIdInline = 193;
+  constexpr uint8_t kInlineZero = 128;
+  const auto compare =
+      gfx1250::build_sopc(gfx1250::kSCmpLgU32Sopc, {.ssrc0 = 0, .ssrc1 = kInlineZero});
+  const auto query =
+      gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1, {.ssrc0 = kAffectedIdInline, .sdst = 20});
+  const auto branch = gfx1250::build_sopp(gfx1250::kSCbranchScc1Sopp, {.simm16 = 0});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {compare[0], query[0], branch[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  const auto branch_at = std::ranges::find_if(
+      decoded, [](const auto &inst) { return inst->mnemonic() == "s_cbranch_scc1"; });
+  ASSERT_NE(branch_at, decoded.end());
+  ASSERT_NE(branch_at, decoded.begin());
+  EXPECT_EQ((*std::prev(branch_at))->mnemonic(), "s_cmp_lg_u32")
+      << "the branch must read a restored SCC, not the merge result";
+}
+
+// Every other barrier-state id reports the field itself and is copied.
+TEST(BinaryTranslatorE2E, Gfx1250CopiesRemainingBarrierStateQueriesForA0) {
+  constexpr uint8_t kInlineMinusThree = 195;
+  constexpr uint8_t kInlinePlusOne = 129;
+  constexpr uint8_t kM0Selector = 125;
+  constexpr uint8_t kSgprZero = 0;
+  for (const uint8_t barrier_id : {kInlineMinusThree, kInlinePlusOne, kM0Selector, kSgprZero}) {
+    const auto query =
+        gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1, {.ssrc0 = barrier_id, .sdst = 20});
+    constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+    auto image =
+        rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({query[0], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << "barrier id " << static_cast<int>(barrier_id);
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    EXPECT_EQ(out[0], query[0]);
+    EXPECT_EQ(out[1], kGfx1250SEndpgm) << "barrier id " << static_cast<int>(barrier_id);
+  }
 }
 
 // SIMM16[15] alone selects the unbounded form. The table separates that test

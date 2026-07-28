@@ -405,6 +405,144 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
   return ExpandResult::success(std::vector<uint32_t>(nop.begin(), nop.end()));
 }
 
+/// @brief Take one field of the barrier-state result from a second query.
+///
+/// @details The result word carries a count in bits [28:24] that this profile
+/// does not populate for the affected barrier ids. A second query on a
+/// different id reports it, so the sequence issues that query into a borrowed
+/// register and splices the field into the original destination. The query
+/// completes through KMCNT, so both results are drained before either is read.
+///
+/// The merge uses scalar bitwise operations, which write SCC, while the query
+/// being replaced does not. SCC is therefore saved into a second borrowed
+/// register and restored afterwards, so a comparison feeding a later branch
+/// still sees its own result. The dataflow model does not track SCC, so this
+/// cannot be inferred from liveness.
+ExpandResult expand_gfx1250_get_barrier_state(const Instruction &inst, uint32_t, uint64_t,
+                                              std::span<const uint8_t>,
+                                              const LivenessAnalysis &liveness,
+                                              TranslationContext &, const LaneLayout *,
+                                              const LaneLayout *) {
+  if (inst.opcode() != gfx1250::kSGetBarrierStateSop1 ||
+      inst.size() != static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
+    return ExpandResult::failed("gfx1250 barrier-state rule received an unsupported instruction");
+  }
+
+  // Result-word layout, most significant first: five reserved bits, a three-bit
+  // named-barrier count, one reserved bit, a seven-bit signal count, five
+  // reserved bits, a seven-bit member count, three reserved bits, and a valid
+  // bit. The spliced field is the named-barrier count at [26:24]; the two
+  // reserved bits above it are carried with it so the destination takes the
+  // whole [28:24] span from the reporting query rather than keeping whatever
+  // the affected one left there.
+  constexpr uint32_t kNamedBarrierCountShift = 24;
+  constexpr uint32_t kNamedBarrierCountBits = 3;
+  constexpr uint32_t kCarriedReservedBits = 2;
+  constexpr uint32_t kFieldMask =
+      (((uint32_t{1} << (kNamedBarrierCountBits + kCarriedReservedBits)) - 1u)
+       << kNamedBarrierCountShift);
+  static_assert(kFieldMask == 0x1f000000u);
+  constexpr uint8_t kSecondQueryId = 129; // inline +1
+  constexpr uint8_t kScalarLiteral = 255;
+  constexpr uint8_t kInlineZero = 128;
+  constexpr uint8_t kInlineOne = 129;
+  constexpr uint16_t kMaxOrdinarySgpr = 105;
+
+  // Dispatch is by opcode, so decline the ids that report the field themselves.
+  //
+  // The two affected ids are negative inline constants. This operand takes an
+  // inline constant or M0 and nothing else, and the M0 form selects the barrier
+  // from a five-bit zero-extended slice of that register, so a register-supplied
+  // id is always in [0, 31] and can never be one of them. Copying the dynamic
+  // form is therefore fail-closed rather than an unchecked assumption, and
+  // refusing it would reject valid input for no gain.
+  constexpr int kAffectedIdInlineFirst = 193;
+  constexpr int kAffectedIdInlineSecond = 194;
+  const Operand *barrier_id = inst.src_operand(0);
+  if (barrier_id == nullptr || (barrier_id->encoding_value() != kAffectedIdInlineFirst &&
+                                barrier_id->encoding_value() != kAffectedIdInlineSecond)) {
+    return ExpandResult::not_handled();
+  }
+
+  // The expansion keeps the affected query as its first word, so a second pass
+  // sees the same instruction again. Recognize the envelope this rule emits --
+  // the companion query for the neighbouring id followed by its wait -- and
+  // leave it alone, so translating already-translated text is a no-op.
+  const Instruction *companion = inst.next_instruction();
+  if (companion != nullptr && companion->opcode() == gfx1250::kSGetBarrierStateSop1 &&
+      companion->raw_encoding() != nullptr &&
+      (companion->raw_encoding()[0] & 0xffu) == kSecondQueryId) {
+    const Instruction *wait = companion->next_instruction();
+    const auto expected_wait = gfx1250::build_sopp(gfx1250::kSWaitKmcntSopp, {.simm16 = 0});
+    if (wait != nullptr && wait->raw_encoding() != nullptr &&
+        wait->raw_encoding()[0] == expected_wait[0]) {
+      return ExpandResult::not_handled();
+    }
+  }
+
+  const Operand *destination = inst.dst_operand(0);
+  if (destination == nullptr || destination->encoding_value() > kMaxOrdinarySgpr)
+    return ExpandResult::failed("gfx1250 barrier-state destination is not an ordinary SGPR");
+  const uint16_t dest = static_cast<uint16_t>(destination->encoding_value());
+
+  // The destination is written rather than read here, so it can look free.
+  const auto borrow = [&](uint16_t after) -> std::optional<uint16_t> {
+    std::optional<uint16_t> pick = liveness.find_free_sgpr(&inst, after);
+    while (pick && (*pick == dest))
+      pick = liveness.find_free_sgpr(&inst, static_cast<uint16_t>(*pick + 1));
+    if (pick && *pick > kMaxOrdinarySgpr)
+      return std::nullopt;
+    return pick;
+  };
+  const std::optional<uint16_t> scratch = borrow(0);
+  if (!scratch)
+    return ExpandResult::failed("gfx1250 barrier-state merge could not allocate a dead SGPR");
+  const std::optional<uint16_t> saved_scc = borrow(static_cast<uint16_t>(*scratch + 1));
+  if (!saved_scc) {
+    return ExpandResult::failed(
+        "gfx1250 barrier-state merge could not allocate a dead SGPR to preserve SCC");
+  }
+  // No descriptor growth is involved. This target's scalar file is fixed rather
+  // than sized by the descriptor, and the translator does not write the legacy
+  // granulated field for it, so raising a requirement here would change nothing.
+  // The bound that matters is that both borrowed registers stay inside the
+  // architecturally addressable range, which the checks above enforce.
+
+  std::vector<uint32_t> words;
+  words.reserve(12);
+  words.push_back(inst.raw_encoding()[0]);
+  append_words(words, gfx1250::build_sop1(
+                          gfx1250::kSGetBarrierStateSop1,
+                          {.ssrc0 = kSecondQueryId, .sdst = static_cast<uint8_t>(*scratch)}));
+  append_words(words, gfx1250::build_sopp(gfx1250::kSWaitKmcntSopp, {.simm16 = 0}));
+
+  // s_cselect_b32 reads SCC without writing it; s_cmp_lg_u32 restores it.
+  append_words(words, gfx1250::build_sop2(gfx1250::kSCselectB32Sop2,
+                                          {.ssrc0 = kInlineOne,
+                                           .ssrc1 = kInlineZero,
+                                           .sdst = static_cast<uint8_t>(*saved_scc)}));
+
+  append_words(
+      words, gfx1250::build_sop2(gfx1250::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(*scratch),
+                                                         .ssrc1 = kScalarLiteral,
+                                                         .sdst = static_cast<uint8_t>(*scratch)}));
+  words.push_back(kFieldMask);
+  append_words(words,
+               gfx1250::build_sop2(gfx1250::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(dest),
+                                                           .ssrc1 = kScalarLiteral,
+                                                           .sdst = static_cast<uint8_t>(dest)}));
+  words.push_back(~kFieldMask);
+  append_words(words,
+               gfx1250::build_sop2(gfx1250::kSOrB32Sop2, {.ssrc0 = static_cast<uint8_t>(dest),
+                                                          .ssrc1 = static_cast<uint8_t>(*scratch),
+                                                          .sdst = static_cast<uint8_t>(dest)}));
+
+  append_words(words, gfx1250::build_sopc(
+                          gfx1250::kSCmpLgU32Sopc,
+                          {.ssrc0 = static_cast<uint8_t>(*saved_scc), .ssrc1 = kInlineZero}));
+  return ExpandResult::success(std::move(words));
+}
+
 /// @brief Drain outstanding memory work before an unbounded sleep.
 ///
 /// @details SIMM16[15] selects the unbounded form; SIMM16[6:0] is an ordinary
@@ -2394,9 +2532,11 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
 // The semantic translator binary-searches this table, so entries must stay
 // sorted by the full encoding ID and then opcode. VDS encoding IDs include the
 // high opcode bits, hence the four consecutive kVdsOpHi* groups below.
-inline constexpr std::array<TranslationRule, 43> kGfx1250B0ToA0ExpandRules = {{
+inline constexpr std::array<TranslationRule, 44> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kSop1, gfx1250::kSBarrierSignalIsfirstSop1, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_barrier_signal_isfirst, nullptr, nullptr, false},
+    {gfx1250::encoding::kSop1, gfx1250::kSGetBarrierStateSop1, RuleAction::Expand, 0, 0, nullptr,
+     expand_gfx1250_get_barrier_state, nullptr, nullptr},
     {gfx1250::encoding::kSopp, gfx1250::kSSleepSopp, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_unbounded_sleep, nullptr, nullptr, false},
     {gfx1250::encoding::kSopp, gfx1250::kSMonitorSleepSopp, RuleAction::Expand, 0, 0, nullptr,
