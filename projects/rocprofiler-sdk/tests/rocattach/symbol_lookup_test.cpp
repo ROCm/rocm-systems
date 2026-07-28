@@ -29,6 +29,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <array>
@@ -267,16 +268,90 @@ expect_root_fallback_validates_build_id(const loaded_library& source,
 
     std::filesystem::copy_file(
         source.path, path_buffer, std::filesystem::copy_options::overwrite_existing);
-    auto mapped = load_library(path_buffer.c_str());
 
-    // Keep the original inode mapped, but replace its pathname with an
-    // identical ELF on a different inode. This models the identity mismatch
-    // seen when maps exposes an OverlayFS backing file.
-    std::filesystem::remove(path_buffer);
-    std::filesystem::copy_file(source.path, path_buffer);
+    auto address_pipe = std::array<int, 2>{};
+    auto done_pipe    = std::array<int, 2>{};
+    if(pipe(address_pipe.data()) != 0 || pipe(done_pipe.data()) != 0)
+    {
+        std::cerr << "pipe failed for cross-process fallback test\n";
+        std::exit(1);
+    }
 
+    auto child = fork();
+    if(child < 0)
+    {
+        std::cerr << "fork failed for cross-process fallback test\n";
+        std::exit(1);
+    }
+    if(child == 0)
+    {
+        close(address_pipe[0]);
+        close(done_pipe[1]);
+
+        auto        mapped = load_library(path_buffer.c_str());
+        struct stat before
+        {};
+        if(stat(path_buffer.c_str(), &before) != 0) _exit(2);
+
+        // Keep the original inode mapped, but replace its pathname with an
+        // identical ELF on a different inode. This models the identity mismatch
+        // seen when maps exposes an OverlayFS backing file.
+        std::filesystem::remove(path_buffer);
+        std::filesystem::copy_file(source.path, path_buffer);
+
+        struct stat after
+        {};
+        if(stat(path_buffer.c_str(), &after) != 0 ||
+           (before.st_dev == after.st_dev && before.st_ino == after.st_ino))
+        {
+            _exit(3);
+        }
+
+        auto* expected = dlsym(mapped.handle, ATTACH_SYMBOL_NAME);
+        auto  address  = reinterpret_cast<uintptr_t>(expected);
+        if(expected == nullptr || write(address_pipe[1], &address, sizeof(address)) !=
+                                      static_cast<ssize_t>(sizeof(address)))
+        {
+            _exit(4);
+        }
+
+        auto done = char{};
+        if(read(done_pipe[0], &done, sizeof(done)) != static_cast<ssize_t>(sizeof(done))) _exit(5);
+        cleanup_loaded_library(mapped);
+        _exit(0);
+    }
+
+    close(address_pipe[1]);
+    close(done_pipe[0]);
     setenv("ROCATTACH_TEST_DISABLE_MAP_FILES", "1", 1);
-    expect_resolves_to_dlsym(mapped);
+
+    auto cleanup = rocprofiler::common::scope_destructor{[&]() {
+        unsetenv("ROCATTACH_TEST_DISABLE_MAP_FILES");
+        auto done         = char{};
+        auto write_result = write(done_pipe[1], &done, sizeof(done));
+        (void) write_result;
+        close(done_pipe[1]);
+        close(address_pipe[0]);
+        (void) waitpid(child, nullptr, 0);
+        std::error_code ec;
+        std::filesystem::remove(path_buffer, ec);
+        std::filesystem::remove(path_buffer + ".replacement", ec);
+    }};
+
+    auto expected = uintptr_t{};
+    if(read(address_pipe[0], &expected, sizeof(expected)) != static_cast<ssize_t>(sizeof(expected)))
+    {
+        std::cerr << "child failed to prepare cross-process fallback test\n";
+        std::exit(1);
+    }
+
+    void* resolved = nullptr;
+    if(!rocprofiler::rocattach::find_symbol(child, resolved, path_buffer, ATTACH_SYMBOL_NAME) ||
+       reinterpret_cast<uintptr_t>(resolved) != expected)
+    {
+        std::cerr << "find_symbol failed cross-process Build ID fallback validation\n";
+        std::exit(1);
+    }
 
     // A layout-compatible pathname replacement with another Build ID must not
     // be used to resolve a symbol from the still-mapped original.
@@ -285,8 +360,8 @@ expect_root_fallback_validates_build_id(const loaded_library& source,
         different_build.path, replacement, std::filesystem::copy_options::overwrite_existing);
     std::filesystem::rename(replacement, path_buffer);
 
-    void* resolved = nullptr;
-    if(rocprofiler::rocattach::find_symbol(getpid(), resolved, mapped.path, ATTACH_SYMBOL_NAME))
+    resolved = nullptr;
+    if(rocprofiler::rocattach::find_symbol(child, resolved, path_buffer, ATTACH_SYMBOL_NAME))
     {
         std::cerr << "find_symbol unexpectedly accepted a replacement ELF with a different "
                      "Build ID\n";
@@ -297,15 +372,35 @@ expect_root_fallback_validates_build_id(const loaded_library& source,
         no_build_id.path, replacement, std::filesystem::copy_options::overwrite_existing);
     std::filesystem::rename(replacement, path_buffer);
     resolved = nullptr;
-    if(rocprofiler::rocattach::find_symbol(getpid(), resolved, mapped.path, ATTACH_SYMBOL_NAME))
+    if(rocprofiler::rocattach::find_symbol(child, resolved, path_buffer, ATTACH_SYMBOL_NAME))
     {
         std::cerr << "find_symbol unexpectedly accepted a replacement ELF without a Build ID\n";
         std::exit(1);
     }
-    unsetenv("ROCATTACH_TEST_DISABLE_MAP_FILES");
+}
 
-    cleanup_loaded_library(mapped);
-    std::filesystem::remove(path_buffer);
+void
+expect_unrelated_mapping_does_not_change_resolution(const loaded_library& library)
+{
+    auto fd = open(library.path.c_str(), O_RDONLY | O_CLOEXEC);
+    if(fd < 0)
+    {
+        std::cerr << "open failed for unrelated mapping test\n";
+        std::exit(1);
+    }
+    auto close_fd = rocprofiler::common::scope_destructor{[&]() { close(fd); }};
+
+    auto  page_size_value = sysconf(_SC_PAGESIZE);
+    auto  page_size = (page_size_value > 0) ? static_cast<size_t>(page_size_value) : size_t{4096};
+    auto* mapping   = mmap(nullptr, page_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if(mapping == MAP_FAILED)
+    {
+        std::cerr << "mmap failed for unrelated mapping test\n";
+        std::exit(1);
+    }
+    auto unmap = rocprofiler::common::scope_destructor{[&]() { munmap(mapping, page_size); }};
+
+    expect_resolves_to_dlsym(library);
 }
 }  // namespace
 
@@ -322,7 +417,7 @@ main(int argc, char** argv)
 
     auto libraries = std::vector<loaded_library>{};
     libraries.reserve(7);
-    for(auto* path :
+    for(const auto* path :
         std::array<const char*, 7>{argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]})
     {
         libraries.emplace_back(load_library(path));
@@ -332,7 +427,9 @@ main(int argc, char** argv)
     expect_resolves_to_dlsym(libraries.at(1));
     expect_resolves_to_dlsym(libraries.at(2));
     expect_resolves_to_dlsym(libraries.at(3));
+    expect_resolves_to_dlsym(libraries.at(4));
     expect_different_symbol_offsets(libraries.at(0), libraries.at(3));
+    expect_unrelated_mapping_does_not_change_resolution(libraries.at(0));
     {
         auto sectionless_normal  = create_and_load_sectionless_copy(libraries.at(0), "normal");
         auto sectionless_gnu     = create_and_load_sectionless_copy(libraries.at(1), "gnu");
