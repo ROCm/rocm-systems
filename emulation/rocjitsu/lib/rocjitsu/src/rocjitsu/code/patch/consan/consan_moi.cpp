@@ -92,6 +92,71 @@ uint16_t consan_detail::scalar_owner_tail_floor(const ScalarOwnerContextSummary 
   return floor;
 }
 
+namespace {
+
+[[nodiscard]] std::optional<uint16_t>
+scalar_owner_cdna_physical_vcc_base(uint32_t decoded_sgpr_count) {
+  constexpr uint32_t kSgprGranularity = 8u;
+  constexpr uint32_t kCdnaAllocationTailAfterOrdinarySgprs = 6u;
+  const uint32_t encoded_allocation =
+      ((decoded_sgpr_count + kSgprGranularity - 1u) / kSgprGranularity) * kSgprGranularity;
+  if (encoded_allocation < kCdnaAllocationTailAfterOrdinarySgprs)
+    return std::nullopt;
+  const uint32_t base = encoded_allocation - kCdnaAllocationTailAfterOrdinarySgprs;
+  if (base > std::numeric_limits<uint16_t>::max())
+    return std::nullopt;
+  return static_cast<uint16_t>(base);
+}
+
+[[nodiscard]] bool scalar_owner_ranges_conflict_with_physical_vcc(
+    std::span<const consan_detail::ScalarOwnerSgprRange> ranges, uint32_t current_sgpr_count) {
+  const auto original_vcc = scalar_owner_cdna_physical_vcc_base(current_sgpr_count);
+  if (!original_vcc || ranges.empty())
+    return true;
+  uint32_t required_count = current_sgpr_count;
+  for (const consan_detail::ScalarOwnerSgprRange &range : ranges)
+    required_count = std::max<uint32_t>(required_count, range.base + range.width);
+  const auto grown_vcc = scalar_owner_cdna_physical_vcc_base(required_count);
+  if (!grown_vcc)
+    return true;
+  return std::ranges::any_of(ranges, [&](const consan_detail::ScalarOwnerSgprRange &range) {
+    const auto overlaps = [&](uint16_t other_base) {
+      return range.base < static_cast<uint32_t>(other_base) + 2u &&
+             other_base < static_cast<uint32_t>(range.base) + range.width;
+    };
+    return range.width == 0u || overlaps(*original_vcc) || overlaps(*grown_vcc) ||
+           static_cast<uint32_t>(range.base) + range.width > *grown_vcc;
+  });
+}
+
+} // namespace
+
+bool consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(
+    std::span<const ScalarOwnerContextSummary> contexts,
+    std::span<const ScalarOwnerSgprRange> ranges) {
+  if (contexts.empty() || ranges.empty())
+    return true;
+  return std::ranges::any_of(contexts, [&](const ScalarOwnerContextSummary &context) {
+    return !context.descriptor_valid ||
+           scalar_owner_ranges_conflict_with_physical_vcc(ranges, context.current_sgpr_count);
+  });
+}
+
+bool consan_detail::scalar_owner_contexts_admit_reserved_window(
+    std::span<const ScalarOwnerContextSummary> contexts, uint16_t base, uint16_t width,
+    bool protect_physical_vcc) {
+  if (contexts.empty() || width == 0u)
+    return false;
+  const std::array ranges{ScalarOwnerSgprRange{base, width}};
+  return std::ranges::all_of(contexts,
+                             [&](const ScalarOwnerContextSummary &context) {
+                               return context.descriptor_valid &&
+                                      scalar_owner_tail_floor(context) <= base;
+                             }) &&
+         (!protect_physical_vcc ||
+          !scalar_owner_contexts_conflict_with_physical_vcc(contexts, ranges));
+}
+
 bool consan_detail::validate_scalar_state_temporaries(const ConSanOptions &options,
                                                       std::string_view consumer,
                                                       std::vector<std::string> &errors) {
@@ -511,19 +576,19 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
           return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
         });
       });
-  if (configure_automatic_moi_owner_sgpr(effective_options, result, arch))
+  if (configure_automatic_moi_owner_sgpr(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   // Dispatch identity is persistent across every instrumented site, whereas
   // the larger EXEC/VCC/SCC save window is needed only while a probe runs and
   // can use CFG-proven dead registers. Reserve the persistent pair first so a
   // high referenced SGPR does not let the transient window consume the last
   // fresh registers and make dispatch identity spuriously impossible.
-  if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, arch))
+  if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
-  if (configure_automatic_moi_exec_save_sgprs(effective_options, result, code_object_bytes, arch))
+  if (configure_automatic_moi_exec_save_sgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (configure_gfx1250_record_replay_dispatch_id_overrides(effective_options, result,
-                                                            code_object_bytes, arch))
+                                                            resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||

@@ -96,6 +96,26 @@ struct ScalarOwnerContextResolution {
 
 [[nodiscard]] uint16_t scalar_owner_tail_floor(const ScalarOwnerContextSummary &context);
 
+struct ScalarOwnerSgprRange {
+  uint16_t base = 0;
+  uint16_t width = 0;
+};
+
+/// Return whether any owner's original or grown CDNA physical VCC aliases one
+/// of the requested ordinary-SGPR ranges. Empty or invalid owner sets fail
+/// closed.
+[[nodiscard]] bool scalar_owner_contexts_conflict_with_physical_vcc(
+    std::span<const ScalarOwnerContextSummary> contexts,
+    std::span<const ScalarOwnerSgprRange> ranges);
+
+/// Return whether every owner admits a persistent ordinary-SGPR window above
+/// its complete scalar tail. CDNA callers additionally request physical-VCC
+/// qualification.
+[[nodiscard]] bool
+scalar_owner_contexts_admit_reserved_window(std::span<const ScalarOwnerContextSummary> contexts,
+                                            uint16_t base, uint16_t width,
+                                            bool protect_physical_vcc);
+
 /// Fully encoded semantic identity for one sampled atomic synchronization
 /// candidate. Physical aliases may fold only when every field matches.
 struct SampledAtomicSemantics {

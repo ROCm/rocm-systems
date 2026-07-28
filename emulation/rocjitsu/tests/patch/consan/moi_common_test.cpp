@@ -9,6 +9,12 @@
 namespace rocjitsu {
 namespace {
 
+[[nodiscard]] constexpr bool sgpr_ranges_overlap(uint16_t base, uint16_t width, uint16_t other_base,
+                                                 uint16_t other_width) {
+  return base < static_cast<uint32_t>(other_base) + other_width &&
+         other_base < static_cast<uint32_t>(base) + width;
+}
+
 TEST(ConSanMoi, SampledAtomicPhysicalAliasRejectsEverySemanticMismatch) {
   using Semantics = consan_detail::SampledAtomicSemantics;
   struct Candidate {
@@ -232,6 +238,53 @@ TEST(ConSanMoi, ScalarOwnerContextResolutionFailsClosedAndComputesTailFloor) {
   ASSERT_TRUE(skipped_invalid);
   EXPECT_EQ(skipped_invalid->context_indices, (std::vector<size_t>{1u}));
   EXPECT_EQ(skipped_invalid->tail_floor, 48u);
+}
+
+TEST(ConSanMoi, ScalarOwnerWindowQualificationUsesEveryTailAndPhysicalVcc) {
+  using Range = consan_detail::ScalarOwnerSgprRange;
+  using Summary = consan_detail::ScalarOwnerContextSummary;
+  const std::array direct_owners = {
+      Summary{.descriptor_file_offset = 0x10u,
+              .current_sgpr_count = 32u,
+              .max_referenced_sgpr_count = 12u,
+              .sgpr_reference_coverage_complete = true,
+              .descriptor_valid = true},
+      Summary{.descriptor_file_offset = 0x20u,
+              .current_sgpr_count = 48u,
+              .max_referenced_sgpr_count = 12u,
+              .sgpr_reference_coverage_complete = true,
+              .descriptor_valid = true},
+  };
+  const std::array misses_both_vcc{Range{12u, 2u}};
+  const std::array dispatch_hits_second_vcc{Range{42u, 2u}};
+  const std::array hits_second_vcc{Range{36u, 30u}};
+
+  EXPECT_FALSE(consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(direct_owners,
+                                                                               misses_both_vcc));
+  EXPECT_TRUE(consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(
+      direct_owners, dispatch_hits_second_vcc));
+  EXPECT_TRUE(consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(direct_owners,
+                                                                              hits_second_vcc));
+  EXPECT_TRUE(consan_detail::scalar_owner_contexts_admit_reserved_window(
+      direct_owners, 12u, 2u, /*protect_physical_vcc=*/true));
+
+  std::array indirect_owners = direct_owners;
+  indirect_owners[1].has_indirect_sgpr_access = true;
+  EXPECT_FALSE(consan_detail::scalar_owner_contexts_admit_reserved_window(
+      indirect_owners, 12u, 2u, /*protect_physical_vcc=*/false));
+  EXPECT_TRUE(consan_detail::scalar_owner_contexts_admit_reserved_window(
+      indirect_owners, 48u, 2u, /*protect_physical_vcc=*/false));
+
+  std::array invalid_owners = direct_owners;
+  invalid_owners[1].descriptor_valid = false;
+  EXPECT_TRUE(consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(invalid_owners,
+                                                                              misses_both_vcc));
+  EXPECT_FALSE(consan_detail::scalar_owner_contexts_admit_reserved_window(
+      invalid_owners, 48u, 2u, /*protect_physical_vcc=*/false));
+  EXPECT_TRUE(consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(
+      std::span<const Summary>{}, misses_both_vcc));
+  EXPECT_FALSE(consan_detail::scalar_owner_contexts_admit_reserved_window(
+      std::span<const Summary>{}, 48u, 2u, /*protect_physical_vcc=*/false));
 }
 
 TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {
@@ -851,6 +904,28 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+    ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+    EXPECT_GE(*result.resolved_moi_dispatch_id_sgpr, 80u);
+    EXPECT_GE(*result.resolved_moi_exec_save_sgpr, 80u);
+    for (const ConSanMoiTransientSgprAssignment &assignment :
+         result.resolved_moi_transient_sgpr_assignments) {
+      EXPECT_GE(assignment.exec_save_sgpr, 80u);
+      if (assignment.dispatch_id_sgpr) {
+        EXPECT_GE(*assignment.dispatch_id_sgpr, 80u);
+      }
+    }
+    if (engine == ConSanMoiEngine::Sampled) {
+      // Above the 80-SGPR scalar-relative tail, CDNA4 has too few physical-VCC
+      // safe holes for dispatch state, the nine-register transient window, and
+      // persistent owner/epoch state. Failing closed is the only safe result.
+      EXPECT_FALSE(result.modified);
+      EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+      EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+        return warning.find("cannot place persistent scalar state") != std::string::npos;
+      }));
+      continue;
+    }
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
     ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr)
         << testing::PrintToString(result.warnings);
@@ -883,6 +958,61 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
         }));
     EXPECT_TRUE(result.final_validation_passed);
   }
+}
+
+TEST(ConSanMoi, Cdna4SharedInlineExecSaveAvoidsEveryOwnerPhysicalVcc) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto access =
+      build_cdna4_ds_store_b32(/*vaddr=*/10u, /*vdata=*/11u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(access);
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.first_vgpr_granulated = 7u;
+  fixture.second_vgpr_granulated = 7u;
+  fixture.entry_nop_words = 8u;
+  std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture, kArch, *access);
+  ASSERT_FALSE(bytes.empty());
+  mutate_kernel_descriptor(bytes, "shared_owner_0", [](KD &descriptor) {
+    // 32 decoded SGPRs place physical VCC at s26:s27.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 3u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 8u);
+  });
+  mutate_kernel_descriptor(bytes, "shared_owner_1", [](KD &descriptor) {
+    // 48 decoded SGPRs place physical VCC at s42:s43.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 5u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 8u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 12u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  // The highest original VCC ends at s43, so the wide window must start at or
+  // above s44.
+  EXPECT_GE(*result.resolved_moi_exec_save_sgpr, 44u);
+  constexpr std::array<uint16_t, 2> kOriginalVccBases = {26u, 42u};
+  for (uint16_t vcc_base : kOriginalVccBases) {
+    EXPECT_FALSE(sgpr_ranges_overlap(*result.resolved_moi_dispatch_id_sgpr, 2u, vcc_base, 2u));
+    EXPECT_FALSE(sgpr_ranges_overlap(*result.resolved_moi_exec_save_sgpr,
+                                     kConSanMoiInlineExecSaveSgprCount, vcc_base, 2u));
+  }
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {

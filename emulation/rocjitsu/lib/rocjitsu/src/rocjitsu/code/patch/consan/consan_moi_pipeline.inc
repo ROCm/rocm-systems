@@ -1081,17 +1081,15 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
         continue;
       if (state.arch == ROCJITSU_CODE_ARCH_GFX1250 && !owner_options.moi_dispatch_id_sgpr)
         continue;
+      const auto owner_contexts =
+          resolve_moi_scalar_owner_contexts(state, plan.owner_descriptor_file_offsets);
       const bool missing_dispatch = !owner_options.moi_dispatch_id_sgpr;
       const uint16_t dispatch_base = owner_options.moi_dispatch_id_sgpr.value_or(0u);
-      const bool conflicts_with_cdna_vcc =
-          !missing_dispatch && instrumentation::is_cdna_family_arch(state.arch) &&
-          cdna_sgpr_window_conflicts_with_physical_vcc(
-              dispatch_base, moi_dispatch_state_sgpr_count(owner_options), plan.current_sgpr_count);
-      // max_referenced_sgpr_count is a count: equality means every guest
-      // reference is below dispatch_base, while a greater count reaches or
-      // crosses persistent dispatch state and cannot share this global pair.
-      if (missing_dispatch || plan.max_referenced_sgpr_count > dispatch_base ||
-          conflicts_with_cdna_vcc) {
+      const bool admitted = !missing_dispatch && owner_contexts &&
+                            moi_scalar_contexts_admit_reserved_window(
+                                owner_contexts->summaries, dispatch_base,
+                                moi_dispatch_state_sgpr_count(owner_options), state.arch);
+      if (!admitted) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
         plan.scratch_vgpr.reset();
@@ -1114,11 +1112,11 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
         if (apply_moi_transient_sgpr_assignment(owner_options, plan.owner_descriptor_file_offsets))
           continue;
       }
-      const bool conflicts_with_cdna_vcc = instrumentation::is_cdna_family_arch(state.arch) &&
-                                           cdna_sgpr_window_conflicts_with_physical_vcc(
-                                               exec_base, exec_count, plan.current_sgpr_count);
+      const auto owner_contexts =
+          resolve_moi_scalar_owner_contexts(state, plan.owner_descriptor_file_offsets);
       if (!plan.owner_descriptor_file_offsets.empty() &&
-          (plan.max_referenced_sgpr_count > exec_base || conflicts_with_cdna_vcc)) {
+          (!owner_contexts || !moi_scalar_contexts_admit_reserved_window(
+                                  owner_contexts->summaries, exec_base, exec_count, state.arch))) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
         plan.scratch_vgpr.reset();
