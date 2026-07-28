@@ -50,11 +50,6 @@ option(USE_GDA "Enable GDA conduit" OFF)
 option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
-option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
-option(USE_HEAP_DEVICE_UNCACHED "Heap uses GPU memory in uncached mode" OFF)
-option(USE_HEAP_DEVICE_COARSEGRAIN "Heap uses GPU memory in coarsegrain mode" OFF)
-option(USE_HEAP_DEVICE_VMM_POSIX "Heap uses GPU memory with VMM and POSIX FD IPC (requires ROCm 7.0+)" OFF)
-option(USE_HEAP_DEVICE_VMM_FABRIC "Heap uses GPU memory with VMM and Fabric handles (requires ROCm 7.next)" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
 option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
@@ -112,15 +107,6 @@ include(ROCMCheckTargetIds)
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 #############################################################################
-# VALIDATE VMM POSIX ALLOCATOR OPTION
-#############################################################################
-if(USE_HEAP_DEVICE_VMM_POSIX)
-  if(${ROCM_MAJOR_VERSION} LESS 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} LESS 2))
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.2 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
-  endif()
-endif()
-
-#############################################################################
 # DETECT POD CAPABILITY
 #############################################################################
 # Try to find AMD SMI library
@@ -166,25 +152,6 @@ if(TARGET amd_smi)
   endif()
 else()
   message(STATUS "AMD SMI library not found - disabling pod-based IPC capability detection")
-endif()
-
-#############################################################################
-# VALIDATE VMM FABRIC ALLOCATOR OPTION
-#############################################################################
-if(USE_HEAP_DEVICE_VMM_FABRIC)
-  if(${ROCM_MAJOR_VERSION} LESS 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} LESS 2))
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.2 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
-  endif()
-
-  # VMM Fabric allocator requires both AMD SMI fabric info and HIP fabric handle support
-  if(NOT HAVE_AMDSMI_GPU_FABRIC_INFO)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires both:\n"
-                        "  1. AMD SMI library with amdsmi_get_gpu_fabric_info support\n"
-                        "  2. HIP runtime with hipMemFabricHandle_t support (ROCm 7.14+)\n"
-                        "Either update to ROCm 7.14 or newer, or disable USE_HEAP_DEVICE_VMM_FABRIC.")
-  endif()
-
-  message(STATUS "USE_HEAP_DEVICE_VMM_FABRIC enabled with full fabric handle support")
 endif()
 
 #############################################################################

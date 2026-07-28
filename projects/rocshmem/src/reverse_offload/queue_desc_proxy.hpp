@@ -57,7 +57,7 @@ class QueueDescProxy {
   QueueDescProxy() = default;
 
   QueueDescProxy(size_t max_queues,
-                 const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator())
+                 const HIPAllocatorFinegrained& alloc = HIPAllocatorFinegrained())
     : alloc_{alloc}, proxy_{max_queues, alloc_}, max_queues_{max_queues} {
 
     auto *queue_descs{proxy_.get()};
@@ -78,7 +78,7 @@ class QueueDescProxy {
   __host__ __device__ queue_desc_t *get() { return proxy_.get(); }
 
  private:
-  HIPDefaultFinegrainedAllocator alloc_{};
+  HIPAllocatorFinegrained alloc_{};
   ProxyT proxy_{};
 
   size_t max_queues_{};

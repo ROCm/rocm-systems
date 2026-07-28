@@ -64,7 +64,7 @@ class DefaultBlockHandleProxy {
                           AWF_Queue_statusT *default_ctx_status,
                           AWF_Queue_ret_buffT *default_ctx_g_ret,
                           AWF_Queue_ret_buffT *default_ctx_atomic_ret,
-                          const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator(),
+                          const HIPAllocatorFinegrained& alloc = HIPAllocatorFinegrained(),
                           size_t num_elems = 1)
     : alloc_{alloc}, proxy_{num_elems, alloc_} {
 
@@ -97,7 +97,7 @@ class DefaultBlockHandleProxy {
   __host__ __device__ BlockHandle *get() { return proxy_.get(); }
 
  private:
-  HIPDefaultFinegrainedAllocator alloc_{};
+  HIPAllocatorFinegrained alloc_{};
   ProxyT proxy_{};
 };
 
@@ -109,7 +109,7 @@ class BlockHandleProxy {
 
   BlockHandleProxy(void *g_ret, void *atomic_ret, Queue *queue, size_t offset,
                    volatile char *status, size_t max_blocks,
-                   const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator())
+                   const HIPAllocatorFinegrained& alloc = HIPAllocatorFinegrained())
     : alloc_{alloc}, proxy_{max_blocks, alloc_} {
 
     for (size_t i{0}; i < max_blocks; i++) {
@@ -141,7 +141,7 @@ class BlockHandleProxy {
   __host__ __device__ BlockHandle *get() { return proxy_.get(); }
 
  private:
-  HIPDefaultFinegrainedAllocator alloc_{};
+  HIPAllocatorFinegrained alloc_{};
   ProxyT proxy_{};
 };
 

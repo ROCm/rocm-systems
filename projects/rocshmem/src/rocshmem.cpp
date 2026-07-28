@@ -160,11 +160,14 @@ static void setFilesLimit() {
 [[maybe_unused]] __host__ void inline library_init(MPI_Comm comm) {
   assert(!backend);
 
-#if defined(USE_HEAP_DEVICE_VMM_POSIX)
-  LOG_ERROR_EXIT("VMM POSIX allocator (USE_HEAP_DEVICE_VMM_POSIX) is not compatible with MPI-based initialization.\n"
-                 "  Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or disable VMM POSIX allocator.\n"
-                 "  ");
-#endif
+  {
+    const std::string alloc_type = envvar::heap_allocator_type.get_value();
+    if (alloc_type == "vmm_posix" || alloc_type == "VMM_POSIX") {
+      LOG_ERROR_EXIT("ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix is not compatible with MPI-based initialization.\n"
+                     "  Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or choose a different allocator type.\n"
+                     "  ");
+    }
+  }
 
   int count = 0;
   CHECK_HIP(hipGetDeviceCount(&count));

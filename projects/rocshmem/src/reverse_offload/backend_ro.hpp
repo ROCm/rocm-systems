@@ -363,7 +363,7 @@ class ROBackend : public Backend {
    * operation completes. The GPU then resets status back to zero. There is
    * a separate status variable for each work-item in a RO Context
    */
-  HIPDefaultFinegrainedAllocator status_alloc_{};
+  HIPAllocatorFinegrained status_alloc_{};
   StatusProxyT status_;
   StatusProxyT status_default_ctx_;
 };

@@ -136,7 +136,7 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
 
   if (!vmm_supported) {
     LOG_ERROR_ABORT("Virtual Memory Management (VMM) is not supported on device %d. "
-                    "The USE_HEAP_DEVICE_VMM_POSIX allocator requires a GPU with VMM support. "
+                    "The vmm_posix allocator requires a GPU with VMM support. "
                     "Please use a different memory allocator.", device_id);
   }
 
