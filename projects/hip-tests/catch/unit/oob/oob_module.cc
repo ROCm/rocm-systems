@@ -454,8 +454,9 @@ HIP_TEST_CASE(OOB_hipModuleLoadData_Negative_TruncatedImages) {
     // of bounds. Checks that the oversized size isn't used to read past the image
     // when the code object is handed off for loading.
     Bytes payload = MakeAmdgpuElf64Image(64);
-    const uint64_t e_shoff = 0x1000000;                           // section table far past 64 bytes
-    std::memcpy(payload.data() + 40, &e_shoff, sizeof(e_shoff));  // Elf64_Ehdr::e_shoff
+    Wr16(payload, kEShentsize, 64);
+    Wr64(payload, kEShoff, uint64_t(1) << 24);  // e_shoff: table far past 64 bytes
+    Wr16(payload, kEShnum, 1);                  // one entry
     TailMappedImage img(payload);
     HIP_CHECK_ERROR(hipModuleLoadData(&module, img.image()), hipErrorInvalidImage);
   }
