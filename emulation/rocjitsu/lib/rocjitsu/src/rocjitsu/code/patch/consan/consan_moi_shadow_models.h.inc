@@ -920,7 +920,9 @@ consan_moi_sampled_begin_causal_claim(std::span<ConSanMoiSampledCausalWindow> wi
 
 /// Re-run only MOI planning, lowering, and validation from a semantic
 /// inventory produced for the same bytes and engine. This is used after a
-/// runtime-sized report buffer becomes available.
-[[nodiscard]] ConSanResult retry_patch_consan_moi_from_inventory(
-    ConSanResult inventory, const ConSanMoiReportRetryConfig &report,
-    std::span<const uint8_t> code_object_bytes);
+/// runtime-sized report buffer and, optionally, a live fault selection become
+/// available.
+[[nodiscard]] ConSanResult
+retry_patch_consan_moi_from_inventory(ConSanResult inventory,
+                                      const ConSanMoiInventoryRetryConfig &retry,
+                                      std::span<const uint8_t> code_object_bytes);

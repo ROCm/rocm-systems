@@ -412,8 +412,9 @@ TEST(ConSanMoi, ReportBufferRetryMatchesFreshRecordReplayTransform) {
       .generation = options.moi_report_generation,
       .dispatch_id = options.moi_report_dispatch_id,
   };
-  const ConSanResult retried =
-      retry_patch_consan_moi_from_inventory(std::move(inventory), report, bytes);
+  const ConSanResult retried = retry_patch_consan_moi_from_inventory(
+      std::move(inventory), ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt},
+      bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
@@ -463,8 +464,9 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
       .generation = options.moi_report_generation,
       .dispatch_id = options.moi_report_dispatch_id,
   };
-  const ConSanResult retried =
-      retry_patch_consan_moi_from_inventory(std::move(inventory), report, bytes);
+  const ConSanResult retried = retry_patch_consan_moi_from_inventory(
+      std::move(inventory), ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt},
+      bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
@@ -494,8 +496,9 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   report.buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   const auto expect_invalid = [&](ConSanResult inventory, std::span<const uint8_t> retry_bytes,
                                   std::string_view expected_error) {
-    const ConSanResult result =
-        retry_patch_consan_moi_from_inventory(std::move(inventory), report, retry_bytes);
+    const ConSanResult result = retry_patch_consan_moi_from_inventory(
+        std::move(inventory),
+        ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt}, retry_bytes);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
     EXPECT_TRUE(std::ranges::any_of(result.errors, [&](const std::string &error) {
       return error.find(expected_error) != std::string::npos;

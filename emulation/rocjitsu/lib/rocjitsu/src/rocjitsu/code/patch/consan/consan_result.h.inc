@@ -125,7 +125,8 @@ struct ConSanResult {
   size_t malformed_kernel_metadata_note_count = 0;
   /// Immutable semantic options captured before the first MOI planning pass.
   /// A report-buffer retry derives its options from this snapshot and can
-  /// change only ConSanMoiReportRetryConfig fields.
+  /// change only ConSanMoiReportRetryConfig fields plus the narrow live-fault
+  /// selection carried by ConSanFaultMutationRetryConfig.
   std::optional<ConSanOptions> moi_inventory_options;
   /// Resolved target architecture.  Production transforms set this before
   /// candidate classification.  The hook rejects candidate-bearing results

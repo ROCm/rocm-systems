@@ -80,6 +80,7 @@ std::mutex &log_mutex();
 using ConSanTransformOverride = rocjitsu::ConSanResult (*)(std::span<const uint8_t>,
                                                            const rocjitsu::ConSanOptions &);
 std::atomic<ConSanTransformOverride> g_test_consan_transform_override{nullptr};
+std::atomic<size_t> g_test_consan_moi_retry_count{0};
 
 rocjitsu::ConSanResult run_consan_transform(std::span<const uint8_t> bytes,
                                             const rocjitsu::ConSanOptions &options) {
@@ -97,16 +98,21 @@ rocjitsu::ConSanResult retry_consan_moi_transform(std::span<const uint8_t> bytes
   // inventory and reruns only MOI planning/lowering with the allocated buffer.
   if (const ConSanTransformOverride override =
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
+    g_test_consan_moi_retry_count.fetch_add(1, std::memory_order_relaxed);
     return override(bytes, options);
   }
-  const rocjitsu::ConSanMoiReportRetryConfig report{
-      .buffer_address = options.moi_report_buffer_address,
-      .buffer_size = options.moi_report_buffer_size,
-      .layout = options.moi_report_layout,
-      .generation = options.moi_report_generation,
-      .dispatch_id = options.moi_report_dispatch_id,
+  const rocjitsu::ConSanMoiInventoryRetryConfig retry{
+      .report =
+          {
+              .buffer_address = options.moi_report_buffer_address,
+              .buffer_size = options.moi_report_buffer_size,
+              .layout = options.moi_report_layout,
+              .generation = options.moi_report_generation,
+              .dispatch_id = options.moi_report_dispatch_id,
+          },
+      .fault = rocjitsu::ConSanFaultMutationRetryConfig::from_options(options),
   };
-  return rocjitsu::retry_patch_consan_moi_from_inventory(std::move(inventory), report, bytes);
+  return rocjitsu::retry_patch_consan_moi_from_inventory(std::move(inventory), retry, bytes);
 }
 
 struct GroupSegmentRegionSearch {
@@ -833,29 +839,12 @@ private:
   bool reserved_ = false;
 };
 
-using FaultMutationMember = bool rocjitsu::ConSanOptions::*;
-constexpr std::array<FaultMutationMember, 10> kFaultMutationMembers = {
-    &rocjitsu::ConSanOptions::fault_drop_barrier,
-    &rocjitsu::ConSanOptions::fault_move_barrier,
-    &rocjitsu::ConSanOptions::fault_mutate_barrier_id_scope,
-    &rocjitsu::ConSanOptions::fault_mutate_barrier_participants,
-    &rocjitsu::ConSanOptions::fault_atomic_wrong_address,
-    &rocjitsu::ConSanOptions::fault_atomic_weaken_order,
-    &rocjitsu::ConSanOptions::fault_atomic_weaken_scope,
-    &rocjitsu::ConSanOptions::fault_ordinary_wrong_address,
-    &rocjitsu::ConSanOptions::fault_ordinary_weaken_order,
-    &rocjitsu::ConSanOptions::fault_ordinary_weaken_scope,
-};
-
 [[nodiscard]] bool fault_mutations_enabled(const rocjitsu::ConSanOptions &options) {
-  return std::ranges::any_of(kFaultMutationMembers,
-                             [&options](FaultMutationMember member) { return options.*member; });
+  return rocjitsu::consan_fault_mutations_enabled(options);
 }
 
 void disable_fault_mutations(rocjitsu::ConSanOptions *options) {
-  for (FaultMutationMember member : kFaultMutationMembers)
-    options->*member = false;
-  options->fault_require_exactly_one = false;
+  rocjitsu::disable_consan_fault_mutations(*options);
 }
 
 void log_message(int required_level, const char *format, ...) {
@@ -3361,10 +3350,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       // A report-sizing pass is pristine MOI inventory, never the live
       // mutation stage. fault_dry_run returns after fault planning and before
       // MOI candidate/resource planning, so disable the mutation members while
-      // retaining the complete MOI inventory pass. The live transform still
-      // runs after the runtime layout is known.
-      if (live_fault_transform)
+      // retaining the complete MOI inventory pass. Retry binds the selected
+      // mutation and runtime layout to this pristine inventory.
+      if (live_fault_transform) {
+        inventory_options.qualify_extended_barrier_pairs =
+            rocjitsu::consan_qualifies_extended_barrier_pairs(patch_options);
         disable_fault_mutations(&inventory_options);
+      }
       log_message(kLogInfo, "ConSan MOI inventory begin reader=%llu bytes=%zu",
                   static_cast<unsigned long long>(code_object_reader.handle), size);
       const auto inventory_begin = std::chrono::steady_clock::now();
@@ -3481,7 +3473,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         patch_options.moi_report_dispatch_id = code_object_reader.handle;
         if (live_fault_transform && planned_report_inventory)
           live_fault_auto_report_capacity_inventory = *planned_report_inventory;
-        else if (!live_fault_transform)
+        if (!live_fault_transform ||
+            patch_options.sc_perturb_kind == rocjitsu::ConSanPerturbationKind::None)
           reusable_moi_inventory = std::move(inventory);
       } else if (auto_report_plan_available && !patch_result_storage && config->fail_closed) {
         return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
@@ -4755,4 +4748,9 @@ extern "C" RJ_HOOK_EXPORT void OnUnload() { layer().uninstall(); }
 extern "C" RJ_HOOK_EXPORT void
 rj_dbi_test_set_consan_transform_override(ConSanTransformOverride override) {
   g_test_consan_transform_override.store(override, std::memory_order_release);
+  g_test_consan_moi_retry_count.store(0, std::memory_order_relaxed);
+}
+
+extern "C" RJ_HOOK_EXPORT size_t rj_dbi_test_consan_moi_retry_count() {
+  return g_test_consan_moi_retry_count.load(std::memory_order_relaxed);
 }

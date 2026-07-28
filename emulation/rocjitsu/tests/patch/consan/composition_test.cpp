@@ -5,6 +5,12 @@
 #include "rocjitsu/code/major_image_ownership.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
 
+#include <chrono>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+
 namespace rocjitsu {
 namespace {
 
@@ -24,6 +30,247 @@ namespace {
   options.fault_atomic_address_delta = 4;
   options.fault_require_exactly_one = with_atomic_fault;
   return options;
+}
+
+[[nodiscard]] ConSanMoiInventoryRetryConfig moi_inventory_retry_config(const ConSanOptions &options,
+                                                                       bool bind_fault = true) {
+  return {
+      .report =
+          {
+              .buffer_address = options.moi_report_buffer_address,
+              .buffer_size = options.moi_report_buffer_size,
+              .layout = options.moi_report_layout,
+              .generation = options.moi_report_generation,
+              .dispatch_id = options.moi_report_dispatch_id,
+          },
+      .fault = bind_fault ? std::optional{ConSanFaultMutationRetryConfig::from_options(options)}
+                          : std::nullopt,
+  };
+}
+
+TEST(ConSanMoi, FaultRetryConfigProjectsOnlyLateBoundMutationState) {
+  ConSanOptions live;
+  live.fault_dry_run = true;
+  live.fault_drop_barrier = true;
+  live.fault_allow_destructive_incomplete_barrier_drop = true;
+  live.fault_move_barrier = false;
+  live.fault_allow_completing_conditional_barrier_move = true;
+  live.fault_allow_destructive_divergent_barrier_move = false;
+  live.fault_mutate_barrier_id_scope = true;
+  live.fault_mutate_barrier_participants = false;
+  live.fault_atomic_wrong_address = true;
+  live.fault_atomic_weaken_order = false;
+  live.fault_atomic_order_edge = ConSanAtomicOrderEdge::Acquire;
+  live.fault_atomic_weaken_scope = true;
+  live.fault_ordinary_wrong_address = false;
+  live.fault_ordinary_weaken_order = true;
+  live.fault_ordinary_weaken_scope = false;
+  live.fault_atomic_address_delta = 16;
+  live.fault_ordinary_address_delta = 32;
+  live.fault_require_exactly_one = true;
+  live.fault_barrier_index = 3;
+  live.fault_atomic_index = 5;
+  live.fault_ordinary_index = 7;
+  live.fault_site_identity = "site";
+  live.fault_barrier_destination_identity = "destination";
+  live.fault_barrier_sequence_identity = "sequence";
+  live.fault_barrier_companion_site_identity = "companion-site";
+  live.fault_barrier_companion_sequence_identity = "companion-sequence";
+  live.fault_barrier_target_id = 11;
+  live.fault_barrier_target_participant_count = 64;
+  live.fault_barrier_target_participant_mask = 0x55aa;
+  live.fault_barrier_move_direction = ConSanBarrierMoveDirection::Later;
+  live.fault_barrier_marker_imm = 17;
+  const ConSanFaultMutationRetryConfig retry = ConSanFaultMutationRetryConfig::from_options(live);
+
+  ConSanOptions target;
+  target.flavor = ConSanFlavor::Moi;
+  target.moi_engine = ConSanMoiEngine::InlineShadow;
+  target.moi_report_buffer_address = 0x123456780000ull;
+  target.collect_barrier_move_destinations = false;
+  target.fault_dry_run = true;
+  target.faults_preapplied = true;
+  retry.apply_to(target);
+
+  EXPECT_EQ(ConSanFaultMutationRetryConfig::from_options(target), retry);
+  EXPECT_EQ(target.flavor, ConSanFlavor::Moi);
+  EXPECT_EQ(target.moi_engine, ConSanMoiEngine::InlineShadow);
+  EXPECT_EQ(target.moi_report_buffer_address, 0x123456780000ull);
+  EXPECT_FALSE(target.collect_barrier_move_destinations);
+  EXPECT_TRUE(target.fault_dry_run);
+  EXPECT_FALSE(target.faults_preapplied);
+}
+
+TEST(ConSanMoi, FaultRetryRejectsDryRunFaultRequest) {
+  const std::vector<uint8_t> bytes = make_rdna4_release_wait_no_return_bitwise_code_object();
+  ConSanOptions inventory_options = release_last_record_replay_options(/*with_atomic_fault=*/false);
+  inventory_options.moi_report_buffer_address.reset();
+  inventory_options.moi_report_buffer_size = 0;
+  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+
+  ConSanOptions dry_run = release_last_record_replay_options(/*with_atomic_fault=*/true);
+  dry_run.fault_dry_run = true;
+  const ConSanResult retried = retry_patch_consan_moi_from_inventory(
+      std::move(inventory), moi_inventory_retry_config(dry_run), bytes);
+
+  EXPECT_EQ(retried.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_FALSE(retried.modified);
+  EXPECT_EQ(retried.applied_fault_mutations, 0u);
+  EXPECT_TRUE(std::ranges::any_of(retried.errors, [](const std::string &error) {
+    return error.find("only a live late-bound fault selection") != std::string::npos;
+  })) << testing::PrintToString(retried.errors);
+}
+
+TEST(ConSanMoi, AtomicWrongAddressRetryFromInventoryMatchesFreshLiveTransform) {
+  const std::vector<uint8_t> bytes = make_rdna4_release_wait_no_return_bitwise_code_object();
+  const ConSanOptions live = release_last_record_replay_options(/*with_atomic_fault=*/true);
+  ConSanOptions inventory_options = live;
+  inventory_options.moi_report_buffer_address.reset();
+  inventory_options.moi_report_buffer_size = 0;
+  inventory_options.fault_atomic_wrong_address = false;
+  inventory_options.fault_require_exactly_one = false;
+  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+  ASSERT_FALSE(inventory.modified);
+
+  // A sizing outcome is not fault-planning state. Exercise the reset contract
+  // explicitly instead of relying only on the ordinary Unchanged case.
+  inventory.outcome = ConSanTransformOutcome::Unsupported;
+  inventory.final_validation_passed = true;
+  const ConSanResult fresh = try_patch_consan(bytes, live);
+  const ConSanResult retried = retry_patch_consan_moi_from_inventory(
+      std::move(inventory), moi_inventory_retry_config(live), bytes);
+
+  ASSERT_EQ(retried.outcome, fresh.outcome)
+      << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
+  EXPECT_EQ(retried.modified, fresh.modified);
+  EXPECT_EQ(retried.final_validation_passed, fresh.final_validation_passed);
+  EXPECT_EQ(retried.applied_fault_mutations, fresh.applied_fault_mutations);
+  EXPECT_EQ(retried.applied_fault_logical_identity, fresh.applied_fault_logical_identity);
+  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  ASSERT_EQ(retried.patches.size(), fresh.patches.size());
+  for (size_t index = 0; index < fresh.patches.size(); ++index) {
+    EXPECT_EQ(retried.patches[index].kind, fresh.patches[index].kind);
+    EXPECT_EQ(retried.patches[index].anchor_offset, fresh.patches[index].anchor_offset);
+    EXPECT_EQ(retried.patches[index].trampoline_offset, fresh.patches[index].trampoline_offset);
+  }
+  EXPECT_EQ(retried.warnings, fresh.warnings);
+}
+
+TEST(ConSanMoi, UnsatisfiedLateFaultRetryMatchesFreshRejection) {
+  const std::vector<uint8_t> bytes = make_rdna4_release_wait_no_return_bitwise_code_object();
+  ConSanOptions inventory_options = release_last_record_replay_options(/*with_atomic_fault=*/false);
+  inventory_options.moi_report_buffer_address.reset();
+  inventory_options.moi_report_buffer_size = 0;
+  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+
+  ConSanOptions live = release_last_record_replay_options(/*with_atomic_fault=*/true);
+  live.fault_site_identity = "missing-site";
+  const ConSanResult fresh = try_patch_consan(bytes, live);
+  const ConSanResult retried = retry_patch_consan_moi_from_inventory(
+      std::move(inventory), moi_inventory_retry_config(live), bytes);
+
+  EXPECT_EQ(retried.outcome, fresh.outcome);
+  EXPECT_EQ(retried.applied_fault_mutations, 0u);
+  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.errors, fresh.errors);
+  EXPECT_EQ(retried.warnings, fresh.warnings);
+}
+
+TEST(ConSanMoi, DisabledFaultProjectionUsesReportOnlyRetryPath) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanOptions inventory_options = moi_options(ConSanMoiEngine::RecordReplay);
+  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+
+  ConSanOptions live = inventory_options;
+  live.moi_report_buffer_address = 0x123456780000ull;
+  live.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
+  const ConSanResult absent = retry_patch_consan_moi_from_inventory(
+      inventory, moi_inventory_retry_config(live, /*bind_fault=*/false), bytes);
+  const ConSanResult disabled =
+      retry_patch_consan_moi_from_inventory(inventory, moi_inventory_retry_config(live), bytes);
+
+  EXPECT_EQ(disabled.outcome, absent.outcome);
+  EXPECT_EQ(disabled.modified, absent.modified);
+  EXPECT_EQ(disabled.final_validation_passed, absent.final_validation_passed);
+  EXPECT_EQ(disabled.elf_bytes, absent.elf_bytes);
+  EXPECT_EQ(disabled.errors, absent.errors);
+  EXPECT_EQ(disabled.warnings, absent.warnings);
+}
+
+TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
+  const char *path = std::getenv("RJ_CONSAN_BENCHMARK_OBJECT");
+  if (path == nullptr)
+    GTEST_SKIP() << "set RJ_CONSAN_BENCHMARK_OBJECT to an AMDGPU code object";
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input) << path;
+  const std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(input), {});
+  ASSERT_FALSE(bytes.empty());
+
+  const auto timed = [](auto &&action) {
+    const auto begin = std::chrono::steady_clock::now();
+    auto result = action();
+    return std::pair{
+        std::move(result),
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count(),
+    };
+  };
+  ConSanOptions live = moi_options(ConSanMoiEngine::RecordReplay);
+  live.moi_track_barriers = true;
+  live.moi_track_atomics = true;
+  live.max_patches_is_expert_limit = false;
+  live.fault_atomic_wrong_address = true;
+  live.fault_atomic_address_delta = 4;
+  live.fault_require_exactly_one = true;
+
+  ConSanOptions probe_options = live;
+  probe_options.fault_dry_run = true;
+  probe_options.fault_require_exactly_one = false;
+  const auto [probe, probe_ms] = timed([&] { return try_patch_consan(bytes, probe_options); });
+  ASSERT_TRUE(probe.errors.empty()) << testing::PrintToString(probe.errors);
+  ASSERT_EQ(probe.planned_fault_mutations, 1u)
+      << "benchmark object needs one default atomic wrong-address target";
+
+  ConSanOptions inventory_options = live;
+  inventory_options.fault_atomic_wrong_address = false;
+  inventory_options.fault_require_exactly_one = false;
+  const auto [inventory, inventory_ms] =
+      timed([&] { return try_patch_consan(bytes, inventory_options); });
+  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
+  ASSERT_FALSE(inventory.modified);
+  const ConSanMoiAutoReportInventory capacity =
+      inventory_consan_moi_auto_report(inventory, inventory_options, bytes);
+  const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(capacity);
+  ASSERT_TRUE(plan.complete());
+  const auto layout = consan_moi_auto_report_layout_override(plan);
+  ASSERT_TRUE(layout);
+  live.moi_report_buffer_address = 0x123456780000ull;
+  live.moi_report_buffer_size = plan.required_bytes;
+  live.moi_report_layout = *layout;
+
+  const auto [fresh, fresh_ms] = timed([&] { return try_patch_consan(bytes, live); });
+  ASSERT_EQ(fresh.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(fresh.errors) << testing::PrintToString(fresh.warnings);
+  const ConSanMoiInventoryRetryConfig retry_config = moi_inventory_retry_config(live);
+  ConSanResult retry_inventory = inventory;
+  const auto [retried, retry_ms] = timed([&] {
+    return retry_patch_consan_moi_from_inventory(std::move(retry_inventory), retry_config, bytes);
+  });
+  ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
+  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.applied_fault_mutations, 1u);
+  const ConSanMoiAutoReportInventory required =
+      inventory_consan_moi_auto_report(retried, live, bytes);
+  EXPECT_TRUE(consan_moi_auto_report_inventory_covers(capacity, required));
+
+  std::cout << "live_fault_retry_benchmark bytes=" << bytes.size() << " probe_ms=" << probe_ms
+            << " inventory_ms=" << inventory_ms << " fresh_live_ms=" << fresh_ms
+            << " retry_ms=" << retry_ms << " old_total_ms=" << probe_ms + inventory_ms + fresh_ms
+            << " new_total_ms=" << probe_ms + inventory_ms + retry_ms << '\n';
 }
 
 TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
@@ -303,14 +550,135 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   ASSERT_EQ(live.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(live.errors) << testing::PrintToString(live.warnings);
   ASSERT_EQ(live.applied_fault_mutations, 1u);
+  const ConSanMoiInventoryRetryConfig retry{
+      .report =
+          {
+              .buffer_address = live_options.moi_report_buffer_address,
+              .buffer_size = live_options.moi_report_buffer_size,
+              .layout = live_options.moi_report_layout,
+              .generation = live_options.moi_report_generation,
+              .dispatch_id = live_options.moi_report_dispatch_id,
+          },
+      .fault = ConSanFaultMutationRetryConfig::from_options(live_options),
+  };
+  const ConSanResult retried = retry_patch_consan_moi_from_inventory(pristine, retry, bytes);
+  ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
+  EXPECT_EQ(retried.applied_fault_mutations, 1u);
+  EXPECT_EQ(retried.elf_bytes, live.elf_bytes);
+  EXPECT_EQ(retried.final_validation_passed, live.final_validation_passed);
   const ConSanMoiAutoReportInventory live_inventory =
-      inventory_consan_moi_auto_report(live, live_options, bytes);
+      inventory_consan_moi_auto_report(retried, live_options, bytes);
 
   EXPECT_TRUE(consan_moi_auto_report_inventory_covers(pristine_inventory, live_inventory));
   EXPECT_EQ(pristine_inventory.access_range_count, live_inventory.access_range_count);
   EXPECT_GE(pristine_inventory.barrier_event_count, live_inventory.barrier_event_count);
   EXPECT_GE(pristine_inventory.atomic_event_count, live_inventory.atomic_event_count);
   EXPECT_GE(pristine_inventory.fence_event_count, live_inventory.fence_event_count);
+}
+
+TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
+  std::array<uint32_t, 17> text_words{};
+  text_words[0] = 0xBE804EC1u; // s_barrier_signal -1
+  std::fill(text_words.begin() + 1, text_words.begin() + 15,
+            build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words[15] = 0xBF94FFFFu; // s_barrier_wait -1
+  text_words[16] = 0xBFB00000u;
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "retry_extended_barrier_pair");
+
+  ConSanOptions live = moi_options(ConSanMoiEngine::RecordReplay);
+  live.moi_track_barriers = true;
+  live.moi_report_buffer_address = 0x123456780000ull;
+  live.moi_report_buffer_size = 64u * 1024u * 1024u;
+  live.max_patches = 16;
+  live.fault_drop_barrier = true;
+  const ConSanResult selection = try_patch_consan(bytes, [&] {
+    ConSanOptions options = live;
+    options.fault_dry_run = true;
+    return options;
+  }());
+  const auto sequence = std::ranges::find(
+      selection.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, selection.sync_sequences.end());
+  const auto primary = std::ranges::find_if(selection.fault_sites, [&](const auto &site) {
+    return site.sync_sequence_identity == sequence->identity && site.mnemonic == "s_barrier_signal";
+  });
+  ASSERT_NE(primary, selection.fault_sites.end());
+  live.fault_site_identity = primary->identity;
+
+  ConSanOptions inventory_options = live;
+  inventory_options.moi_report_buffer_address.reset();
+  inventory_options.moi_report_buffer_size = 0;
+  inventory_options.fault_drop_barrier = false;
+  inventory_options.qualify_extended_barrier_pairs = true;
+  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_EQ(std::ranges::count(inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
+                               &ConSanSyncSequence::operation),
+            1u);
+  const ConSanResult fresh = try_patch_consan(bytes, live);
+  const ConSanResult retried = retry_patch_consan_moi_from_inventory(
+      std::move(inventory), moi_inventory_retry_config(live), bytes);
+
+  EXPECT_EQ(fresh.outcome, ConSanTransformOutcome::Unchanged);
+  EXPECT_EQ(retried.outcome, fresh.outcome);
+  EXPECT_EQ(retried.applied_fault_mutations, 0u);
+  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.errors, fresh.errors);
+  EXPECT_EQ(retried.warnings, fresh.warnings);
+}
+
+TEST(ConSanMoi, MissingExtendedBarrierInventoryFallsBackToFreshWholePairDrop) {
+  std::array<uint32_t, 17> text_words{};
+  text_words[0] = 0xBE804EC1u; // s_barrier_signal -1
+  std::fill(text_words.begin() + 1, text_words.begin() + 15,
+            build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words[15] = 0xBF94FFFFu; // s_barrier_wait -1
+  text_words[16] = 0xBFB00000u;
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "retry_fallback_barrier_pair");
+
+  ConSanOptions selection_options = moi_options(ConSanMoiEngine::RecordReplay);
+  selection_options.fault_drop_barrier = true;
+  selection_options.fault_dry_run = true;
+  const ConSanResult selection = try_patch_consan(bytes, selection_options);
+  const auto sequence = std::ranges::find(
+      selection.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, selection.sync_sequences.end());
+  const auto primary = std::ranges::find_if(selection.fault_sites, [&](const auto &site) {
+    return site.sync_sequence_identity == sequence->identity && site.mnemonic == "s_barrier_signal";
+  });
+  ASSERT_NE(primary, selection.fault_sites.end());
+
+  ConSanOptions live = moi_options(ConSanMoiEngine::RecordReplay);
+  live.moi_track_barriers = true;
+  live.moi_report_buffer_address = 0x123456780000ull;
+  live.moi_report_buffer_size = 64u * 1024u * 1024u;
+  live.max_patches = 16;
+  live.fault_drop_barrier = true;
+  live.fault_require_exactly_one = true;
+  live.fault_site_identity = primary->identity;
+  live.fault_barrier_sequence_identity = sequence->identity;
+  ConSanOptions inventory_options = live;
+  inventory_options.moi_report_buffer_address.reset();
+  inventory_options.moi_report_buffer_size = 0;
+  inventory_options.fault_drop_barrier = false;
+  inventory_options.fault_require_exactly_one = false;
+  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ASSERT_EQ(std::ranges::count(inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
+                               &ConSanSyncSequence::operation),
+            0u);
+
+  const ConSanResult fresh = try_patch_consan(bytes, live);
+  const ConSanResult retried = retry_patch_consan_moi_from_inventory(
+      std::move(inventory), moi_inventory_retry_config(live), bytes);
+  ASSERT_EQ(fresh.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(fresh.errors);
+  EXPECT_EQ(retried.outcome, fresh.outcome);
+  EXPECT_EQ(retried.applied_fault_mutations, 1u);
+  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.errors, fresh.errors);
+  EXPECT_EQ(retried.warnings, fresh.warnings);
 }
 
 TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow) {

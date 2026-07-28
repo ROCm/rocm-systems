@@ -296,6 +296,25 @@ const ConSanSyncSequence *find_consan_sync_sequence_for_event(const ConSanResult
 
 namespace {
 
+struct ConSanPristineMutationInventory {
+  ConSanResult result;
+};
+
+void reset_inventory_for_fault_planning(const ConSanOptions &options, ConSanResult &result) {
+  // The mutation stage must observe the reused result exactly as if semantic
+  // analysis and fault planning had run, without inheriting a MOI lowering
+  // outcome or any mutation-stage state from the sizing pass.
+  result.warnings.resize(result.moi_stage_warning_begin);
+  result.outcome = ConSanTransformOutcome::Unchanged;
+  result.final_validation_passed = false;
+  result.staged_composition_validated = false;
+  result.requested_fault_mutations = requested_fault_mutation_count(options);
+  result.planned_fault_mutations = 0;
+  result.applied_fault_mutations = 0;
+  result.applied_fault_logical_identity.reset();
+  result.fault_plans.clear();
+}
+
 void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                        const ConSanOptions &options, ConSanResult &result) {
   if (options.fault_drop_barrier)
@@ -326,9 +345,10 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
 } // namespace
 
-[[nodiscard]] ConSanResult
-try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
-                      std::span<const CarriedPerturbationPlan> carried_plans = {}) {
+[[nodiscard]] ConSanResult try_patch_consan_impl(
+    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+    std::span<const CarriedPerturbationPlan> carried_plans = {},
+    std::optional<ConSanPristineMutationInventory> pristine_inventory = std::nullopt) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   const bool has_fault =
@@ -373,8 +393,15 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     planning_options.faults_preapplied = false;
     if (!has_perturbation)
       planning_options.fault_require_exactly_one = false;
-    ConSanResult pristine_mutation_plan =
-        try_patch_consan_impl(code_object_bytes, planning_options);
+    ConSanResult pristine_mutation_plan;
+    if (pristine_inventory) {
+      pristine_mutation_plan = std::move(pristine_inventory->result);
+      reset_inventory_for_fault_planning(planning_options, pristine_mutation_plan);
+      build_fault_mutation_plan(planning_options, pristine_mutation_plan.arch,
+                                pristine_mutation_plan);
+    } else {
+      pristine_mutation_plan = try_patch_consan_impl(code_object_bytes, planning_options);
+    }
     const size_t retained_planned_fault_mutations = pristine_mutation_plan.planned_fault_mutations;
     const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
         pristine_mutation_plan.fault_plans;
@@ -747,12 +774,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     const SyncEventIdentityIndex sync_events = build_sync_event_identity_index(result);
     const auto sync_blocks = build_sync_basic_blocks(*code_object, *decoder, arch, result);
     build_singleton_sync_sequences(sync_blocks, result);
-    const bool allow_extended_barrier_pairs =
-        options.fault_drop_barrier || options.fault_move_barrier ||
-        options.fault_mutate_barrier_id_scope || options.fault_mutate_barrier_participants ||
-        options.abort_unmatched_barrier_wait ||
-        (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
-    associate_barrier_sync_sequences(sync_blocks, allow_extended_barrier_pairs, result);
+    associate_barrier_sync_sequences(sync_blocks, consan_qualifies_extended_barrier_pairs(options),
+                                     result);
     associate_atomic_sync_sequences(sync_blocks, arch, sync_events, result);
     build_barrier_lifecycle_group_inventory(result);
     if (options.collect_barrier_move_destinations)

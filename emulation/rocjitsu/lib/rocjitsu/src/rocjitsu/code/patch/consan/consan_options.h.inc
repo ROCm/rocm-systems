@@ -368,6 +368,11 @@ struct ConSanOptions {
   /// the complete analysis by default; production hooks may disable it when
   /// no move fault is requested.
   bool collect_barrier_move_destinations = true;
+  /// Preserve the extended same-block barrier-pair inventory required by a
+  /// late-bound fault after the mutation flags themselves are cleared for an
+  /// immutable MOI sizing pass. Retry checks this inventory-shaping predicate
+  /// before reusing the result.
+  bool qualify_extended_barrier_pairs = false;
   /// Explicit non-destructive-test opt-in for moving a reconverged barrier
   /// earlier into the guard of a narrowly proven completing CFG diamond.
   bool fault_allow_completing_conditional_barrier_move = false;
@@ -566,6 +571,41 @@ struct ConSanOptions {
   uint32_t report_marker = 1;
 };
 
+[[nodiscard]] inline bool consan_qualifies_extended_barrier_pairs(const ConSanOptions &options) {
+  return options.qualify_extended_barrier_pairs || options.fault_drop_barrier ||
+         options.fault_move_barrier || options.fault_mutate_barrier_id_scope ||
+         options.fault_mutate_barrier_participants || options.abort_unmatched_barrier_wait ||
+         (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
+}
+
+using ConSanFaultMutationMember = bool ConSanOptions::*;
+inline constexpr std::array<ConSanFaultMutationMember, 10> kConSanFaultMutationMembers = {
+    &ConSanOptions::fault_drop_barrier,
+    &ConSanOptions::fault_move_barrier,
+    &ConSanOptions::fault_mutate_barrier_id_scope,
+    &ConSanOptions::fault_mutate_barrier_participants,
+    &ConSanOptions::fault_atomic_wrong_address,
+    &ConSanOptions::fault_atomic_weaken_order,
+    &ConSanOptions::fault_atomic_weaken_scope,
+    &ConSanOptions::fault_ordinary_wrong_address,
+    &ConSanOptions::fault_ordinary_weaken_order,
+    &ConSanOptions::fault_ordinary_weaken_scope,
+};
+
+[[nodiscard]] inline bool consan_fault_mutations_enabled(const ConSanOptions &options) {
+  for (ConSanFaultMutationMember member : kConSanFaultMutationMembers) {
+    if (options.*member)
+      return true;
+  }
+  return false;
+}
+
+inline void disable_consan_fault_mutations(ConSanOptions &options) {
+  for (ConSanFaultMutationMember member : kConSanFaultMutationMembers)
+    options.*member = false;
+  options.fault_require_exactly_one = false;
+}
+
 /// Runtime report-buffer state that may change after an immutable MOI semantic
 /// inventory has been built. Retry does not accept another full ConSanOptions
 /// object, so parser, CFG, ownership, and admission semantics cannot drift
@@ -576,6 +616,134 @@ struct ConSanMoiReportRetryConfig {
   std::optional<ConSanMoiReportLayoutOverride> layout;
   uint64_t generation = 0;
   uint64_t dispatch_id = 0;
+};
+
+/// Fault-selection state that may be bound after an immutable MOI semantic
+/// inventory has been built. The report-buffer retry accepts this narrow
+/// projection instead of another full ConSanOptions object, so unrelated
+/// parser, CFG, ownership, and admission semantics cannot drift.
+struct ConSanFaultMutationRetryConfig {
+  bool dry_run = false;
+  bool drop_barrier = false;
+  bool allow_destructive_incomplete_barrier_drop = false;
+  bool move_barrier = false;
+  bool allow_completing_conditional_barrier_move = false;
+  bool allow_destructive_divergent_barrier_move = false;
+  bool mutate_barrier_id_scope = false;
+  bool mutate_barrier_participants = false;
+  bool atomic_wrong_address = false;
+  bool atomic_weaken_order = false;
+  ConSanAtomicOrderEdge atomic_order_edge = ConSanAtomicOrderEdge::Any;
+  bool atomic_weaken_scope = false;
+  bool ordinary_wrong_address = false;
+  bool ordinary_weaken_order = false;
+  bool ordinary_weaken_scope = false;
+  uint32_t atomic_address_delta = 4;
+  uint32_t ordinary_address_delta = 4;
+  bool require_exactly_one = false;
+  uint32_t barrier_index = 0;
+  uint32_t atomic_index = 0;
+  uint32_t ordinary_index = 0;
+  std::string site_identity;
+  std::string barrier_destination_identity;
+  std::string barrier_sequence_identity;
+  std::string barrier_companion_site_identity;
+  std::string barrier_companion_sequence_identity;
+  std::optional<int32_t> barrier_target_id;
+  std::optional<uint32_t> barrier_target_participant_count;
+  std::optional<uint64_t> barrier_target_participant_mask;
+  ConSanBarrierMoveDirection barrier_move_direction = ConSanBarrierMoveDirection::LegacyMarker;
+  uint16_t barrier_marker_imm = 42;
+
+  auto operator<=>(const ConSanFaultMutationRetryConfig &) const = default;
+
+  [[nodiscard]] bool enabled() const {
+    return drop_barrier || move_barrier || mutate_barrier_id_scope || mutate_barrier_participants ||
+           atomic_wrong_address || atomic_weaken_order || atomic_weaken_scope ||
+           ordinary_wrong_address || ordinary_weaken_order || ordinary_weaken_scope;
+  }
+
+  [[nodiscard]] static ConSanFaultMutationRetryConfig from_options(const ConSanOptions &options) {
+    return {
+        .dry_run = options.fault_dry_run,
+        .drop_barrier = options.fault_drop_barrier,
+        .allow_destructive_incomplete_barrier_drop =
+            options.fault_allow_destructive_incomplete_barrier_drop,
+        .move_barrier = options.fault_move_barrier,
+        .allow_completing_conditional_barrier_move =
+            options.fault_allow_completing_conditional_barrier_move,
+        .allow_destructive_divergent_barrier_move =
+            options.fault_allow_destructive_divergent_barrier_move,
+        .mutate_barrier_id_scope = options.fault_mutate_barrier_id_scope,
+        .mutate_barrier_participants = options.fault_mutate_barrier_participants,
+        .atomic_wrong_address = options.fault_atomic_wrong_address,
+        .atomic_weaken_order = options.fault_atomic_weaken_order,
+        .atomic_order_edge = options.fault_atomic_order_edge,
+        .atomic_weaken_scope = options.fault_atomic_weaken_scope,
+        .ordinary_wrong_address = options.fault_ordinary_wrong_address,
+        .ordinary_weaken_order = options.fault_ordinary_weaken_order,
+        .ordinary_weaken_scope = options.fault_ordinary_weaken_scope,
+        .atomic_address_delta = options.fault_atomic_address_delta,
+        .ordinary_address_delta = options.fault_ordinary_address_delta,
+        .require_exactly_one = options.fault_require_exactly_one,
+        .barrier_index = options.fault_barrier_index,
+        .atomic_index = options.fault_atomic_index,
+        .ordinary_index = options.fault_ordinary_index,
+        .site_identity = options.fault_site_identity,
+        .barrier_destination_identity = options.fault_barrier_destination_identity,
+        .barrier_sequence_identity = options.fault_barrier_sequence_identity,
+        .barrier_companion_site_identity = options.fault_barrier_companion_site_identity,
+        .barrier_companion_sequence_identity = options.fault_barrier_companion_sequence_identity,
+        .barrier_target_id = options.fault_barrier_target_id,
+        .barrier_target_participant_count = options.fault_barrier_target_participant_count,
+        .barrier_target_participant_mask = options.fault_barrier_target_participant_mask,
+        .barrier_move_direction = options.fault_barrier_move_direction,
+        .barrier_marker_imm = options.fault_barrier_marker_imm,
+    };
+  }
+
+  void apply_to(ConSanOptions &options) const {
+    options.fault_dry_run = dry_run;
+    options.fault_drop_barrier = drop_barrier;
+    options.fault_allow_destructive_incomplete_barrier_drop =
+        allow_destructive_incomplete_barrier_drop;
+    options.fault_move_barrier = move_barrier;
+    options.fault_allow_completing_conditional_barrier_move =
+        allow_completing_conditional_barrier_move;
+    options.fault_allow_destructive_divergent_barrier_move =
+        allow_destructive_divergent_barrier_move;
+    options.fault_mutate_barrier_id_scope = mutate_barrier_id_scope;
+    options.fault_mutate_barrier_participants = mutate_barrier_participants;
+    options.fault_atomic_wrong_address = atomic_wrong_address;
+    options.fault_atomic_weaken_order = atomic_weaken_order;
+    options.fault_atomic_order_edge = atomic_order_edge;
+    options.fault_atomic_weaken_scope = atomic_weaken_scope;
+    options.fault_ordinary_wrong_address = ordinary_wrong_address;
+    options.fault_ordinary_weaken_order = ordinary_weaken_order;
+    options.fault_ordinary_weaken_scope = ordinary_weaken_scope;
+    options.fault_atomic_address_delta = atomic_address_delta;
+    options.fault_ordinary_address_delta = ordinary_address_delta;
+    options.fault_require_exactly_one = require_exactly_one;
+    options.fault_barrier_index = barrier_index;
+    options.fault_atomic_index = atomic_index;
+    options.fault_ordinary_index = ordinary_index;
+    options.fault_site_identity = site_identity;
+    options.fault_barrier_destination_identity = barrier_destination_identity;
+    options.fault_barrier_sequence_identity = barrier_sequence_identity;
+    options.fault_barrier_companion_site_identity = barrier_companion_site_identity;
+    options.fault_barrier_companion_sequence_identity = barrier_companion_sequence_identity;
+    options.fault_barrier_target_id = barrier_target_id;
+    options.fault_barrier_target_participant_count = barrier_target_participant_count;
+    options.fault_barrier_target_participant_mask = barrier_target_participant_mask;
+    options.fault_barrier_move_direction = barrier_move_direction;
+    options.fault_barrier_marker_imm = barrier_marker_imm;
+    options.faults_preapplied = false;
+  }
+};
+
+struct ConSanMoiInventoryRetryConfig {
+  ConSanMoiReportRetryConfig report;
+  std::optional<ConSanFaultMutationRetryConfig> fault;
 };
 
 [[nodiscard]] inline bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {

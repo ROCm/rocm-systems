@@ -435,7 +435,7 @@ validated_composite_proof(const ConSanResult &dry_run, const ConSanResult &valid
 } // namespace
 
 ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
-                                                   const ConSanMoiReportRetryConfig &report,
+                                                   const ConSanMoiInventoryRetryConfig &retry,
                                                    std::span<const uint8_t> code_object_bytes) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
@@ -491,13 +491,41 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
       return finalize_consan_result(std::move(inventory), code_object_bytes);
     }
 
-    options.moi_report_buffer_address = report.buffer_address;
-    options.moi_report_buffer_size = report.buffer_size;
-    options.moi_report_layout = report.layout;
-    options.moi_report_generation = report.generation;
-    options.moi_report_dispatch_id = report.dispatch_id;
+    options.moi_report_buffer_address = retry.report.buffer_address;
+    options.moi_report_buffer_size = retry.report.buffer_size;
+    options.moi_report_layout = retry.report.layout;
+    options.moi_report_generation = retry.report.generation;
+    options.moi_report_dispatch_id = retry.report.dispatch_id;
+    const bool has_late_fault = retry.fault && retry.fault->enabled();
+    if (has_late_fault && retry.fault->dry_run) {
+      inventory.errors.emplace_back(
+          "ConSan MOI inventory retry accepts only a live late-bound fault selection");
+      inventory.outcome = ConSanTransformOutcome::Invalid;
+      return finalize_consan_result(std::move(inventory), code_object_bytes);
+    }
+    const bool inventory_has_extended_barrier_pairs =
+        consan_qualifies_extended_barrier_pairs(options);
+    const bool inventory_has_barrier_move_destinations = options.collect_barrier_move_destinations;
+    if (has_late_fault)
+      retry.fault->apply_to(options);
+    const bool inventory_shape_mismatch =
+        has_late_fault &&
+        (inventory_has_extended_barrier_pairs != consan_qualifies_extended_barrier_pairs(options) ||
+         (options.fault_move_barrier && !inventory_has_barrier_move_destinations));
+    // Correctness takes precedence over the inventory shortcut. A caller that
+    // did not preserve all fault-shaped semantics, or that composes a fault
+    // with perturbation planning, receives the ordinary fresh transform.
+    if (has_late_fault &&
+        (inventory_shape_mismatch || options.sc_perturb_kind != ConSanPerturbationKind::None)) {
+      ConSanResult result = try_patch_consan_impl(code_object_bytes, options);
+      try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
+      return finalize_consan_result(std::move(result), code_object_bytes);
+    }
     ConSanResult result =
-        try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch);
+        has_late_fault
+            ? try_patch_consan_impl(code_object_bytes, options, {},
+                                    ConSanPristineMutationInventory{.result = std::move(inventory)})
+            : try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
     return finalize_consan_result(std::move(result), code_object_bytes);
   } catch (const std::exception &error) {

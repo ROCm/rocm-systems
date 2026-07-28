@@ -1358,7 +1358,10 @@ public:
     on_unload_ = reinterpret_cast<OnUnloadFn>(dlsym(library_, "OnUnload"));
     set_override_ = reinterpret_cast<SetOverrideFn>(
         dlsym(library_, "rj_dbi_test_set_consan_transform_override"));
-    if (on_load_ == nullptr || on_unload_ == nullptr || set_override_ == nullptr) {
+    moi_retry_count_ =
+        reinterpret_cast<MoiRetryCountFn>(dlsym(library_, "rj_dbi_test_consan_moi_retry_count"));
+    if (on_load_ == nullptr || on_unload_ == nullptr || set_override_ == nullptr ||
+        moi_retry_count_ == nullptr) {
       error_ = dlerror();
       return;
     }
@@ -1379,6 +1382,7 @@ public:
 
   [[nodiscard]] bool installed() const { return installed_; }
   [[nodiscard]] const std::string &error() const { return error_; }
+  [[nodiscard]] size_t moi_retry_count() const { return moi_retry_count_(); }
   void unload() {
     if (on_unload_ != nullptr && needs_unload_) {
       on_unload_();
@@ -1402,10 +1406,12 @@ private:
   using OnLoadFn = bool (*)(HsaApiTable *, uint64_t, uint64_t, const char *const *);
   using OnUnloadFn = void (*)();
   using SetOverrideFn = void (*)(ConSanTransformOverride);
+  using MoiRetryCountFn = size_t (*)();
   void *library_ = nullptr;
   OnLoadFn on_load_ = nullptr;
   OnUnloadFn on_unload_ = nullptr;
   SetOverrideFn set_override_ = nullptr;
+  MoiRetryCountFn moi_retry_count_ = nullptr;
   bool installed_ = false;
   bool needs_unload_ = false;
   std::string error_;
@@ -4194,7 +4200,7 @@ rocjitsu::ConSanResult auto_report_replay_transform_result() {
   return result;
 }
 
-TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineInventoryAndFreshLiveTransform) {
+TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLiveOptions) {
   constexpr std::array fault_environments = {
       "RJ_CONSAN_FAULT_DROP_BARRIER",
       "RJ_CONSAN_FAULT_MOVE_BARRIER",
@@ -4244,6 +4250,7 @@ TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineInventoryAndFreshLiv
 
       EXPECT_EQ(g_transform_override_fault_dry_runs, (std::vector<bool>{true, false, false}));
       EXPECT_EQ(g_transform_override_fault_mutations, (std::vector<bool>{true, false, true}));
+      EXPECT_EQ(hook.moi_retry_count(), 1u);
       ASSERT_EQ(g_transform_override_report_layouts.size(), 3u);
       EXPECT_FALSE(g_transform_override_report_layouts[0]);
       EXPECT_FALSE(g_transform_override_report_layouts[1]);
