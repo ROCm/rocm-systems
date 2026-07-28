@@ -56,10 +56,11 @@ void note_special_state(ProbeClobberSummary &summary, RegClass cls) {
 // present. We map the display name ("exec_lo", "m0", "vcc", ...), until
 // operands expose their special RegClass structurally.
 //
-// NOTE: this only sees *explicit* operands. Implicit special-state writes (e.g.
-// SCC from scalar ALU, VCC from v_cmp, EXEC from v_cmpx) have no operand and are
-// not modeled by the decoder, so they remain invisible here. SCC is exempt from
-// concern because the trampoline envelope always save/restores it.
+// NOTE: this sees any write the decoder exposes as a named operand, including
+// VCC from v_cmp / EXEC from v_cmpx (their VOPC models set a "vcc"/"exec" dst).
+// A truly operand-less def (e.g. SCC from scalar ALU) stays invisible; SCC is
+// covered by the envelope's save/restore, and EXEC/VCC by the trampoline's
+// unconditional preserve.
 //
 // Matching is case-insensitive: operand display names are lowercase on some
 // arches (CDNA2) but uppercase on others (CDNA4: "EXEC_LO", "M0", ...).
