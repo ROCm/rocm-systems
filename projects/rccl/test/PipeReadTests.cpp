@@ -1,8 +1,11 @@
-// Regression tests for PIPE_READ macro in test infrastructure.
+// Known-defect tests for PIPE_READ macro in test infrastructure.
 //
-// Each test asserts CORRECT behavior. A test that FAILS means the underlying
-// bug is still present. When the fix lands, the test will PASS and prevent
-// the bug from regressing.
+// These tests reproduce buggy code patterns in isolation using local types.
+// They document and assert the presence of known defects — a FAILING test
+// confirms the bug pattern still exists in the codebase. They do NOT compile
+// production RCCL source, so they will not automatically pass when a fix
+// lands in production code. When a fix is applied, update or remove the
+// corresponding test.
 
 #include "gtest/gtest.h"
 #include <cstddef>

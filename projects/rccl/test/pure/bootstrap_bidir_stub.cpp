@@ -3,6 +3,10 @@
 // directly (via getenv) instead of going through NCCL_PARAM infrastructure.
 // This is safe because BootstrapBidirTests runs each case in a forked child
 // process with a clean environment set by ProcessIsolatedTestRunner.
+//
+// WARNING: This is a hand-rolled reimplementation. If the production logic
+// in src/bootstrap.cc changes, this stub must be updated manually.
+// grep for bootstrapBidirEnabled in src/bootstrap.cc to check for drift.
 
 #include <cstdlib>
 #include <cstdint>

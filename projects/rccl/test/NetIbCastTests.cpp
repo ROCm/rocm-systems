@@ -1,11 +1,13 @@
-// Regression tests for bugs in src/transport/net_ib_cast/p2p.cc.
+// Known-defect tests for bugs in src/transport/net_ib_cast/p2p.cc.
 //
-// Each test asserts CORRECT behavior. A test that FAILS means the underlying
-// bug is still present. When the fix lands, the test will PASS and prevent
-// the bug from regressing.
+// These tests reproduce buggy code patterns in isolation using local types.
+// They document and assert the presence of known defects — a FAILING test
+// confirms the bug pattern still exists in the codebase. They do NOT compile
+// production RCCL source, so they will not automatically pass when a fix
+// lands in production code. When a fix is applied, update or remove the
+// corresponding test.
 //
-// Tests reproduce the exact logic from the buggy call site using local types
-// so they compile with g++ and need no GPU or network hardware.
+// Compile with g++; no GPU or network hardware needed.
 
 #include "gtest/gtest.h"
 #include <cstdint>
