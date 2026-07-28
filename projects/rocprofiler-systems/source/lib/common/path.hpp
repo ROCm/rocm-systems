@@ -90,6 +90,9 @@ find_path(const std::string& _path, int _verbose,
 parent_path(std::string_view fpath, std::uint16_t levels = 1) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline std::string
+filename(std::string_view path) ROCPROFSYS_INTERNAL_API;
+
+[[nodiscard]] inline std::string
 realpath(const std::string& path) ROCPROFSYS_INTERNAL_API;
 
 inline bool
@@ -235,6 +238,21 @@ parent_path(std::string_view fpath, std::uint16_t levels)
         result = std::move(parent);
     }
     return result.string();
+}
+
+/**
+ * Get the component of @p path after the last '/'.
+ * Pure lexical operation: no filesystem access, no normalization.
+ * @code filename("/a/b.so") @endcode returns "b.so".
+ * @code filename("/a/b/") @endcode returns "".
+ * @param path the path to take the filename of
+ * @return the filename component, or "" if @p path ends in '/'
+ */
+[[nodiscard]] std::string
+filename(std::string_view path)
+{
+    const auto pos = path.rfind('/');
+    return std::string{ (pos == std::string_view::npos) ? path : path.substr(pos + 1) };
 }
 
 /** @brief Read the symbolic link target.
