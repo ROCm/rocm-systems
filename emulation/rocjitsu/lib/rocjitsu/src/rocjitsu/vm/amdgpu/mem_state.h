@@ -128,12 +128,13 @@ struct VectorMemState : DynamicInstState {
   std::vector<uint8_t> store_data;
   uint8_t transpose = 0; ///< Transpose-load kind (0=none, see ds_transpose.h).
 
-  /// @brief DS dual-access support (ds_write2/ds_read2).
+  /// @brief DS dual-access support.
   ///
   /// When ds2_active is true, per_lane_addr holds the first access addresses
-  /// and ds2_per_lane_addr holds the second. For loads, ds2_dst_reg_base is
-  /// the VGPR base for the second access result. For stores, ds2_store_data
-  /// contains the second access data.
+  /// and ds2_per_lane_addr holds the second. For ordinary loads and returning
+  /// atomics, ds2_dst_reg_base is the VGPR base for the second result and the
+  /// two response vectors preserve each access independently. For stores and
+  /// atomics, ds2_store_data contains the second access payload.
   bool ds2_active = false;
   std::array<uint64_t, 64> ds2_per_lane_addr = {};
   uint32_t ds2_dst_reg_base = 0;
