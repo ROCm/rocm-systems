@@ -181,6 +181,17 @@ class Runtime {
   // @brief Print known allocations near ptr.
   static void PrintMemoryMapNear(void* ptr);
 
+  /// @brief Query pointer information, routing to the virtio thunk when
+  /// HSAKMT_VIRTIO_ENABLED is defined (hsaKmtQueryPointerInfo is a global
+  /// thunk call and cannot be dispatched through the Driver polymorphism).
+  static HSAKMT_STATUS QueryPointerInfo(const void* ptr, HsaPointerInfo* pointer_info);
+
+  /// @brief Allocate aligned memory, routing to the virtio thunk when
+  /// HSAKMT_VIRTIO_ENABLED is defined.
+  static HSAKMT_STATUS AllocMemoryAlign(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
+                                        HSAuint64 Alignment, HsaMemFlags MemFlags,
+                                        void** MemoryAddress);
+
   /// @brief Singleton object of the runtime.
   static Runtime* runtime_singleton_;
 

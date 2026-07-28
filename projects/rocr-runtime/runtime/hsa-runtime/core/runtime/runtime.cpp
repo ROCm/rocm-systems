@@ -87,6 +87,10 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/util/os.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 
+#ifdef HSAKMT_VIRTIO_ENABLED
+#include "hsakmt/hsakmt_virtio.h"
+#endif
+
 #ifndef HSA_VERSION_MAJOR
 #define HSA_VERSION_MAJOR 1
 #endif
@@ -1159,7 +1163,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
     // We don't care if this returns an error code.
     // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
-    auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
+    auto err = QueryPointerInfo(ptr, &thunkInfo);
     if (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
       if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
         /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
@@ -2428,6 +2432,24 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
     }
     it++;
   }
+}
+
+HSAKMT_STATUS Runtime::QueryPointerInfo(const void* ptr, HsaPointerInfo* pointer_info) {
+#ifdef HSAKMT_VIRTIO_ENABLED
+  return vhsaKmtQueryPointerInfo(ptr, pointer_info);
+#else
+  return HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, pointer_info));
+#endif
+}
+
+HSAKMT_STATUS Runtime::AllocMemoryAlign(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
+                                        HSAuint64 Alignment, HsaMemFlags MemFlags,
+                                        void** MemoryAddress) {
+#ifdef HSAKMT_VIRTIO_ENABLED
+  return vhsaKmtAllocMemoryAlign(PreferredNode, SizeInBytes, Alignment, MemFlags, MemoryAddress);
+#else
+  return HSAKMT_CALL(hsaKmtAllocMemoryAlign(PreferredNode, SizeInBytes, Alignment, MemFlags, MemoryAddress));
+#endif
 }
 
 Runtime::AsyncEventsInfo::AsyncEventsInfo(bool exceptions_)
@@ -3815,10 +3837,10 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   memFlags.ui32.FixedAddress = 1;
 
   /* Try to reserving the VA requested by user */
-  if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS) {
+  if (AllocMemoryAlign(0, size, alignment, memFlags, &addr) != HSAKMT_STATUS_SUCCESS) {
     memFlags.ui32.FixedAddress = 0;
     /* Could not reserved VA requested, allocate alternate VA */
-    if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS)
+    if (AllocMemoryAlign(0, size, alignment, memFlags, &addr) != HSAKMT_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
