@@ -934,14 +934,13 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       break;
     }
     case HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED: {
-    // Host memory DMA-BUF allocation via vmem APIs requires:
-    //  - Virtual Memory APIs supported by the driver
-    //  - At least one GPU agent (needed for DRM operations)
-    auto* runtime = core::Runtime::runtime_singleton_;
-    *((bool*)value) = runtime->VirtualMemApiSupported() &&
-                      !runtime->gpu_agents().empty();
-    break;
-  }
+      // Host memory DMA-BUF allocation via vmem APIs requires:
+      //  - Virtual Memory APIs supported by the driver
+      //  - At least one GPU agent (needed for DRM operations)
+      auto* runtime = core::Runtime::runtime_singleton_;
+      *((bool*)value) = runtime->VirtualMemApiSupported() && !runtime->gpu_agents().empty();
+      break;
+    }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
