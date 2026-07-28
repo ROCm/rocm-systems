@@ -1142,19 +1142,14 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     }
 
     // Determine if the PDI is cached, if not it will be added to the PDI cache and the hardware
-    // context will be reconfigured. A descriptor with no PDI (pdi_bo_va == nullptr) uses CU index
-    // 0.
+    // context will be reconfigured. A descriptor with no PDI (pdi_size == 0) uses CU index 0.
+    // The BO handle was resolved once at load; the blob is immutable so no per-dispatch resolve.
     hsa_status_t err = HSA_STATUS_SUCCESS;
     PDICache::size_type cached_pdi_index = 0;
-    if (desc->pdi_bo_va != nullptr) {
-      uint32_t pdi_handle = AMDXDNA_INVALID_BO_HANDLE;
-      err = ResolveBOHandle(desc->pdi_bo_va, agent, &pdi_handle, nullptr, nullptr);
-      if (err != HSA_STATUS_SUCCESS) {
-        return err;
-      }
-      auto idx = kmq_metadata->pdi_cache.GetIndex(pdi_handle);
+    if (desc->pdi_size != 0) {
+      auto idx = kmq_metadata->pdi_cache.GetIndex(desc->pdi_bo_handle);
       if (idx == PDICache::NotFound) {
-        err = kmq_metadata->pdi_cache.SetNext(pdi_handle, idx);
+        err = kmq_metadata->pdi_cache.SetNext(desc->pdi_bo_handle, idx);
         if (err != HSA_STATUS_SUCCESS) {
           assert(false && "Failed to set PDI in cache.");
           return err;
@@ -1164,17 +1159,12 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
       cached_pdi_index = idx;
     }
 
-    // Add the instruction sequence BO handle. The PDI/insts blobs are immutable
-    // and were flushed from the CPU cache once at load time, so no per-dispatch
-    // flush is needed here (only the mutable kernargs are flushed, below).
+    // Add the instruction sequence BO handle (resolved once at load). The PDI/insts
+    // blobs are immutable and were flushed from the CPU cache once at load time, so no
+    // per-dispatch flush is needed here (only the mutable kernargs are flushed, below).
+    // The VA is still needed as the device instruction address in cmd->data[3] below.
     void* insts_addr = desc->insts_bo_va;
-    uint32_t instr_handle = AMDXDNA_INVALID_BO_HANDLE;
-    err = ResolveBOHandle(insts_addr, agent, &instr_handle, nullptr, nullptr);
-    if (err != HSA_STATUS_SUCCESS) {
-      assert(false && "Failed to find instruction sequence BO for command packet.");
-      return err;
-    }
-    bo_handles.push_back(instr_handle);
+    bo_handles.push_back(desc->insts_bo_handle);
 
     // Add the argument BO handles to bo_handles.
     auto* kernarg_address = static_cast<uint64_t*>(pkt->kernarg_address);

@@ -76,13 +76,16 @@ struct AieKernelDescriptor {
   /// @brief Reserved; must be 0.
   uint32_t reserved0;
   /// @brief Host virtual address of the instruction blob's XDNA BO (mmap'd to
-  /// device); resolved back to a BO handle via FindBOHandle at submit.
+  /// device); used directly as the device instruction address at submit.
   void* insts_bo_va;
   /// @brief Instruction blob size in bytes.
   uint64_t insts_size;
-  /// @brief Host virtual address of the PDI blob's XDNA BO (mmap'd to device), or
-  /// null if no PDI.
-  void* pdi_bo_va;
+  /// @brief XDNA BO handle of the instruction blob, resolved once at load. The
+  /// blob is immutable, so the handle is stable for the object's lifetime.
+  uint32_t insts_bo_handle;
+  /// @brief XDNA BO handle of the PDI blob, resolved once at load; unused when
+  /// @ref pdi_size is 0 (no PDI).
+  uint32_t pdi_bo_handle;
   /// @brief PDI blob size in bytes; 0 if no PDI.
   uint64_t pdi_size;
   /// @brief Kernel argument buffer size in bytes.
