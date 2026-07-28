@@ -232,8 +232,11 @@ TEST(Gfx1250B0ToA0Library, FansOutRequiredWorkAsCallbackViews) {
 // misbehaving kernel reads these diagnostics for, so it has to reach the
 // callback on the success path too.
 TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslation) {
-  constexpr auto deferred =
-      rocjitsu::gfx1250::build_sopp(rocjitsu::gfx1250::kSMonitorSleepSopp, {.simm16 = 1});
+  // s_get_barrier_state rather than s_monitor_sleep: the latter's erratum is
+  // specific to the unbounded form, which now has a semantic rule, so the
+  // barrier-state query is the only remaining deferred family.
+  constexpr auto deferred = rocjitsu::gfx1250::build_sop1(rocjitsu::gfx1250::kSGetBarrierStateSop1,
+                                                          {.ssrc0 = 0, .sdst = 0});
   constexpr uint32_t kEndpgm = 0xBFB00000u;
   const std::array<uint32_t, 3> text = {deferred[0], deferred[0], kEndpgm};
   const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
@@ -250,7 +253,7 @@ TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslatio
 
   const auto reported = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
     return item.severity == "warning" && item.kind == "translator-legalization" &&
-           item.mnemonic == "s_monitor_sleep";
+           item.mnemonic == "s_get_barrier_state";
   });
   ASSERT_NE(reported, diagnostics.end())
       << "a successful translation must still report the pass-through gap";
@@ -258,7 +261,7 @@ TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslatio
 
   // Two instructions, one report: the gap is a property of the mnemonic.
   const auto count = std::count_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
-    return item.mnemonic == "s_monitor_sleep";
+    return item.mnemonic == "s_get_barrier_state";
   });
   EXPECT_EQ(count, 1);
 }

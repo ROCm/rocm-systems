@@ -32,9 +32,14 @@ namespace {
 /// handled separately by family-level translation rules.
 ///
 /// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
-/// operand inspection (see gfx1250_reads_flat_scratch_base_64bit), and the
-/// barrier-state query and s_monitor_sleep are DEFERRED with a pass-through
-/// report rather than fail-closed (see gfx1250_b0_to_a0_is_deferred_family).
+/// operand inspection (see gfx1250_reads_flat_scratch_base_64bit). The unbounded
+/// sleep is decided entirely by its semantic rule, which is attempted before raw
+/// encoding translation and returns not-handled for the forms that need nothing,
+/// leaving them on the copy path. This classification is looked up first, but its
+/// action applies only once the rule declines, so a predicate here would turn
+/// every declined sleep into a refusal. The barrier-state query is DEFERRED with
+/// a pass-through report rather than fail-closed (see
+/// gfx1250_b0_to_a0_is_deferred_family).
 inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",
@@ -230,13 +235,14 @@ void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
 }
 
 bool gfx1250_b0_to_a0_is_deferred_family(std::string_view mnemonic) {
-  // s_sleep and s_sleep_var are deliberately absent. They behave identically on
-  // A0 and B0. Only s_monitor_sleep('forever') with MWAIT=0 requires an A0
-  // translation. Copying a plain sleep through is the correct translation, not
-  // an unimplemented one, so reporting
-  // it said nothing and buried the reports that do name a real gap -- one RCCL
-  // all_reduce run emitted 104,831 of them.
-  return mnemonic == "s_get_barrier_state" || mnemonic == "s_monitor_sleep";
+  // No sleep form is deferred. s_sleep and s_sleep_var behave identically on A0
+  // and B0, so copying them through is the correct translation rather than an
+  // unimplemented one -- reporting them said nothing and buried the reports that
+  // do name a real gap, one RCCL all_reduce run emitting 104,831 of them.
+  // s_monitor_sleep was deferred for DEGFXMI400-12268, the 'forever' form with
+  // MWAIT=0; that now has a semantic rule which prepends the required XCNT
+  // drain, so it is translated rather than passed through with a report.
+  return mnemonic == "s_get_barrier_state";
 }
 
 const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst) {

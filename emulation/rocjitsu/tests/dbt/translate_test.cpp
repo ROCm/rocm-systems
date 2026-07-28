@@ -10937,6 +10937,8 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
 
   const std::vector<uint32_t> expected = {
       (static_cast<uint32_t>(gfx1250::encoding::kSop1) << 16) | gfx1250::kSBarrierSignalIsfirstSop1,
+      (static_cast<uint32_t>(gfx1250::encoding::kSopp) << 16) | gfx1250::kSSleepSopp,
+      (static_cast<uint32_t>(gfx1250::encoding::kSopp) << 16) | gfx1250::kSMonitorSleepSopp,
       (static_cast<uint32_t>(gfx1250::encoding::kSopp) << 16) | gfx1250::kSClauseSopp,
       (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
           gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
@@ -11003,7 +11005,7 @@ TEST(BinaryTranslatorE2E, Gfx1250UsesNeutralScaledK128Fp8Bf8Wmma) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr auto completion_wait = kGfx1250WmmaCompletionWait;
 
-  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 41u);
+  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 43u);
   for (const WmmaCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     auto source_wmma = gfx1250::build_vop3p(test_case.source_opcode, fields);
@@ -12401,6 +12403,232 @@ TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataRangeBoundsAfterRelocatio
 
   ASSERT_NO_FATAL_FAILURE(verify_target(false));
   ASSERT_NO_FATAL_FAILURE(verify_target(true));
+}
+
+// SIMM16[15] alone selects the unbounded form. The table separates that test
+// from whole-immediate equality, from an overbroad high-bit check, and from a
+// plain bounded duration, which needs no guard and stays on the copy path.
+TEST(BinaryTranslatorE2E, Gfx1250GuardsUnboundedSleepFormsForA0) {
+  struct SleepCase {
+    const char *name;
+    uint16_t simm16;
+    bool expect_guard;
+  };
+  const std::vector<SleepCase> cases = {
+      {"selector only", 0x8000, true},
+      {"selector with duration", 0x807f, true},
+      {"unrelated high bit", 0x4000, false},
+      {"bounded duration", 0x7f, false},
+  };
+  // Both immediate-taking sleep opcodes encode the unbounded form in the same
+  // bit, so both are driven through the same cases.
+  const std::vector<std::pair<const char *, uint16_t>> opcodes = {
+      {"monitor sleep", gfx1250::kSMonitorSleepSopp},
+      {"plain sleep", gfx1250::kSSleepSopp},
+  };
+  constexpr auto expected_guard = gfx1250::build_sopp(gfx1250::kSWaitXcntSopp, {.simm16 = 0});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  for (const auto &[opcode_name, opcode] : opcodes)
+    for (const SleepCase &test_case : cases) {
+      SCOPED_TRACE(opcode_name);
+      SCOPED_TRACE(test_case.name);
+      const auto sleep = gfx1250::build_sopp(opcode, {.simm16 = test_case.simm16});
+      auto image =
+          rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({sleep[0], kGfx1250SEndpgm});
+      rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+      rocjitsu::BinaryTranslator translator(
+          ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+          gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                   rocjitsu::ProcessorRevision::Gfx1250A0));
+      auto result = translator.translate(source);
+      ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                              : result.diagnostics.front().message);
+
+      rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_FALSE(translated.text_sections().empty());
+      const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+      const size_t count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+      // Compared as a whole sequence, terminator included, so a truncation or an
+      // extra insertion cannot pass and the reads stay in bounds.
+      const std::vector<uint32_t> actual(out, out + count);
+      const std::vector<uint32_t> want =
+          test_case.expect_guard
+              ? std::vector<uint32_t>{expected_guard[0], sleep[0], kGfx1250SEndpgm}
+              : std::vector<uint32_t>{sleep[0], kGfx1250SEndpgm};
+      EXPECT_EQ(actual, want);
+    }
+}
+
+// A trailing literal can hold the guard's exact encoding without being a guard.
+// Matching the preceding decoded instruction rather than the preceding word is
+// what separates the two; comparing raw words suppressed the guard here.
+TEST(BinaryTranslatorE2E, Gfx1250GuardsUnboundedSleepAfterALiteralMatchingTheGuardForA0) {
+  constexpr uint16_t kSleepForever = uint16_t{1} << 15;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint8_t kLiteralOperand = 255;
+  constexpr auto guard = gfx1250::build_sopp(gfx1250::kSWaitXcntSopp, {.simm16 = 0});
+  constexpr auto sleep =
+      gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = kSleepForever});
+  // s_mov_b32 s0, <guard encoding>: two words, the second equal to the guard.
+  constexpr auto mov =
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = kLiteralOperand, .sdst = 0});
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {mov[0], guard[0], sleep[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const std::vector<uint32_t> actual(out, out + count);
+
+  const std::vector<uint32_t> want = {mov[0], guard[0], guard[0], sleep[0], kGfx1250SEndpgm};
+  EXPECT_EQ(actual, want) << "the literal is not a guard, so the sleep needs its own";
+}
+
+// A guard in the preceding word is not reachable when a branch jumps over it,
+// so it cannot stand in for the sleep's own. Matching a decoded predecessor in
+// the same basic block is what rejects it; a contiguous-word check would see a
+// guard here and skip the insertion, leaving the branch path undrained.
+//
+// The branch is conditional on purpose. An unconditional one would leave the
+// original guard unreachable, it would be dropped as dead, and the inserted
+// guard would take its place in the output -- the two outcomes would then be
+// byte-identical and the test could not tell them apart.
+TEST(BinaryTranslatorE2E, Gfx1250GuardsUnboundedSleepReachedByABranchForA0) {
+  constexpr uint16_t kSleepForever = uint16_t{1} << 15;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr auto guard = gfx1250::build_sopp(gfx1250::kSWaitXcntSopp, {.simm16 = 0});
+  constexpr auto sleep =
+      gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = kSleepForever});
+  // The offset is relative to the following instruction, so +1 skips the guard
+  // and lands on the sleep. The guard runs only on the fallthrough path.
+  constexpr auto branch = gfx1250::build_sopp(gfx1250::kSCbranchScc0Sopp, {.simm16 = 1});
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {branch[0], guard[0], sleep[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  const std::vector<uint32_t> actual(out, out + count);
+
+  // The branch keeps its offset because the inserted guard takes the target's
+  // place, which is what puts the drain on the path that skips the original.
+  const std::vector<uint32_t> want = {branch[0], guard[0], guard[0], sleep[0], kGfx1250SEndpgm};
+  EXPECT_EQ(actual, want) << "the guard the branch skips cannot serve as the sleep's";
+}
+
+// A second pass over already-translated text must produce the same bytes, so a
+// guard that is already in front is recognized instead of duplicated.
+TEST(BinaryTranslatorE2E, Gfx1250UnboundedMonitorSleepGuardIsStableOnSecondPassForA0) {
+  constexpr uint16_t kSleepForever = uint16_t{1} << 15;
+  constexpr auto sleep =
+      gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = kSleepForever});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({sleep[0], kGfx1250SEndpgm});
+
+  std::vector<uint8_t> current = image;
+  std::vector<uint32_t> first_pass;
+  for (int pass = 0; pass < 2; ++pass) {
+    rocjitsu::AmdGpuCodeObject source(current.data(), current.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    const size_t count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+    std::vector<uint32_t> words(out, out + count);
+    if (pass == 0) {
+      // Pin the shape once, so the comparison below cannot be satisfied by two
+      // passes agreeing on the wrong sequence.
+      constexpr auto guard = gfx1250::build_sopp(gfx1250::kSWaitXcntSopp, {.simm16 = 0});
+      const std::vector<uint32_t> want = {guard[0], sleep[0], kGfx1250SEndpgm};
+      ASSERT_EQ(words, want);
+      first_pass = words;
+    } else {
+      EXPECT_EQ(words, first_pass) << "the second pass must not add another guard";
+    }
+    current = result.elf_bytes;
+  }
+}
+
+// The barrier-state query is the only mnemonic still passed through with a
+// warning. The sleeps are either handled by a rule or copied deliberately, so
+// warning about them would be noise that buries the one case that is genuinely
+// unhandled. This pins that boundary in both directions.
+TEST(BinaryTranslatorE2E, Gfx1250WarnsOnlyForTheDeferredBarrierStateQueryForA0) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint8_t kInlineZero = 128;
+  struct DeferralCase {
+    const char *name;
+    uint32_t word;
+    bool expect_warning;
+  };
+  const std::vector<DeferralCase> cases = {
+      {"bounded sleep", gfx1250::build_sopp(gfx1250::kSSleepSopp, {.simm16 = 0x7f})[0], false},
+      // The duration comes from a register, so SIMM16[15] cannot classify it and
+      // the rule never sees it. It is copied on purpose, not by omission.
+      {"variable sleep", gfx1250::build_sop1(gfx1250::kSSleepVarSop1, {.ssrc0 = kInlineZero})[0],
+       false},
+      {"barrier state query",
+       gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1, {.ssrc0 = kInlineZero, .sdst = 0})[0],
+       true},
+  };
+
+  for (const DeferralCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {test_case.word, kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+
+    const auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+
+    // Reported through the diagnostic channel rather than stderr, and once per
+    // mnemonic: the translator deduplicates so a common instruction cannot bury
+    // the reports that name a real gap.
+    const auto deferred =
+        std::ranges::find_if(result.diagnostics, [](const rocjitsu::TranslationDiagnostic &item) {
+          return item.severity == rocjitsu::DiagnosticSeverity::Warning &&
+                 item.kind == rocjitsu::DiagnosticKind::Legalization;
+        });
+    if (test_case.expect_warning) {
+      ASSERT_NE(deferred, result.diagnostics.end()) << "the deferred query must be reported";
+      EXPECT_EQ(deferred->mnemonic, "s_get_barrier_state") << "the report must name the query";
+    } else {
+      EXPECT_EQ(deferred, result.diagnostics.end())
+          << "a handled or deliberately copied mnemonic must not be reported";
+    }
+  }
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnExcludedBarrierSignalIsfirst) {
@@ -16335,9 +16563,13 @@ translate_gfx1250_b0_to_a0_result(rocjitsu::BinaryTranslator &translator,
                                rocjitsu::ProcessorRevision::Gfx1250A0));
 }
 
-/// @brief An s_monitor_sleep whose A0 handling is deferred.
+/// @brief An s_get_barrier_state, whose A0 handling is still deferred.
+/// @details s_monitor_sleep used to serve here. Its erratum, DEGFXMI400-12268,
+/// is specific to the unbounded form, which now has a semantic rule prepending
+/// the required XCNT drain -- so it is translated rather than passed through,
+/// and the barrier-state query is the only remaining deferred family.
 [[nodiscard]] uint32_t gfx1250_deferred_word() {
-  return gfx1250::build_sopp(gfx1250::kSMonitorSleepSopp, {.simm16 = 1})[0];
+  return gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1, {.ssrc0 = 0, .sdst = 0})[0];
 }
 
 } // namespace
@@ -16351,23 +16583,8 @@ TEST(BinaryTranslatorE2E, Gfx1250ReportsOncePerDeferredMnemonicWithinOneTranslat
   const auto result = translate_gfx1250_b0_to_a0_result(
       translator, {deferred, deferred, deferred, deferred, deferred});
 
-  EXPECT_EQ(deferred_family_reports(result), (std::vector<std::string>{"s_monitor_sleep"}))
+  EXPECT_EQ(deferred_family_reports(result), (std::vector<std::string>{"s_get_barrier_state"}))
       << "five deferred instructions must produce one diagnostic, not five";
-}
-
-// Distinct deferred mnemonics are distinct gaps, so suppressing one must not
-// suppress another.
-TEST(BinaryTranslatorE2E, Gfx1250ReportsSeparatelyForEachDeferredMnemonic) {
-  const uint32_t deferred = gfx1250_deferred_word();
-  const uint32_t barrier_state =
-      gfx1250::build_sop1(gfx1250::kSGetBarrierStateSop1, {.ssrc0 = 0, .sdst = 0})[0];
-  auto translator = make_gfx1250_b0_to_a0_translator();
-  const auto result = translate_gfx1250_b0_to_a0_result(
-      translator, {deferred, barrier_state, deferred, barrier_state});
-
-  auto reported = deferred_family_reports(result);
-  std::ranges::sort(reported);
-  EXPECT_EQ(reported, (std::vector<std::string>{"s_get_barrier_state", "s_monitor_sleep"}));
 }
 
 // The suppression is scoped to one translation. Process-wide state would let
@@ -16381,8 +16598,8 @@ TEST(BinaryTranslatorE2E, Gfx1250ReportsAgainForEachSeparateTranslation) {
   const auto first = translate_gfx1250_b0_to_a0_result(first_translator, {deferred, deferred});
   const auto second = translate_gfx1250_b0_to_a0_result(second_translator, {deferred, deferred});
 
-  EXPECT_EQ(deferred_family_reports(first), (std::vector<std::string>{"s_monitor_sleep"}));
-  EXPECT_EQ(deferred_family_reports(second), (std::vector<std::string>{"s_monitor_sleep"}))
+  EXPECT_EQ(deferred_family_reports(first), (std::vector<std::string>{"s_get_barrier_state"}));
+  EXPECT_EQ(deferred_family_reports(second), (std::vector<std::string>{"s_get_barrier_state"}))
       << "a second code object must report the gap independently";
 }
 
@@ -16394,8 +16611,8 @@ TEST(BinaryTranslatorE2E, Gfx1250ReportsAgainWhenOneTranslatorIsReused) {
   const auto first = translate_gfx1250_b0_to_a0_result(translator, {deferred, deferred});
   const auto second = translate_gfx1250_b0_to_a0_result(translator, {deferred, deferred});
 
-  EXPECT_EQ(deferred_family_reports(first), (std::vector<std::string>{"s_monitor_sleep"}));
-  EXPECT_EQ(deferred_family_reports(second), (std::vector<std::string>{"s_monitor_sleep"}))
+  EXPECT_EQ(deferred_family_reports(first), (std::vector<std::string>{"s_get_barrier_state"}));
+  EXPECT_EQ(deferred_family_reports(second), (std::vector<std::string>{"s_get_barrier_state"}))
       << "translate() must reset the per-translation suppression state";
 }
 
@@ -16409,7 +16626,7 @@ TEST(BinaryTranslatorE2E, Gfx1250DeferredFamilyReportCarriesOffsetAndMnemonic) {
       translate_gfx1250_b0_to_a0_result(translator, {kGfx1250SNop, deferred, deferred});
 
   const auto reported = std::ranges::find_if(result.diagnostics, [](const auto &diagnostic) {
-    return diagnostic.mnemonic == "s_monitor_sleep";
+    return diagnostic.mnemonic == "s_get_barrier_state";
   });
   ASSERT_NE(reported, result.diagnostics.end());
   EXPECT_EQ(reported->severity, rocjitsu::DiagnosticSeverity::Warning);

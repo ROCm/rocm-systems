@@ -70,6 +70,14 @@ gfx1250_floating_wmma_control_error(const gfx1250::Vop3pMachineInst &matrix,
   return nullptr;
 }
 
+/// @brief Check for one exact, contiguous predecessor in the same basic block.
+[[nodiscard]] bool has_canonical_predecessor(const Instruction &inst, uint32_t expected_word) {
+  const Instruction *previous = inst.previous_instruction();
+  return previous != nullptr && previous->size() == static_cast<int>(sizeof(uint32_t)) &&
+         previous->src_loc() + sizeof(uint32_t) == inst.src_loc() &&
+         previous->raw_encoding() != nullptr && previous->raw_encoding()[0] == expected_word;
+}
+
 /// @brief Append a generated instruction's words to one replacement sequence.
 template <size_t N>
 void append_words(std::vector<uint32_t> &output, const std::array<uint32_t, N> &words) {
@@ -397,6 +405,58 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
   return ExpandResult::success(std::vector<uint32_t>(nop.begin(), nop.end()));
 }
 
+/// @brief Drain outstanding memory work before an unbounded sleep.
+///
+/// @details SIMM16[15] selects the unbounded form; SIMM16[6:0] is an ordinary
+/// duration and needs nothing, so the test is on that one bit rather than on
+/// the whole immediate. The unbounded form carries a stated requirement to drain
+/// XCNT -- the count of outstanding memory operations -- beforehand, so the
+/// wake-up it waits on cannot be missed. The other waits this target exposes
+/// track unrelated work and do not stand in for it.
+///
+/// Both sleep opcodes that take an immediate are covered. The requirement is
+/// stated for the monitor form, whose wake-up arrives through the monitor path;
+/// the plain form encodes the same SIMM16[15] and is guarded too rather than
+/// assumed exempt, because the guard is one instruction, changes no semantics,
+/// and costs nothing when the wait was already satisfied. The variable-duration
+/// sleep takes its count from a register and has no unbounded form, so it is not
+/// handled here.
+///
+/// A guard already immediately in front is left alone so a second pass over
+/// translated text produces the same bytes. The predecessor is matched as a
+/// decoded, contiguous instruction in the same block rather than as the
+/// preceding word: a branch landing on the sleep would otherwise reach it
+/// without executing a wait that merely sits earlier in the text, and a literal
+/// payload equal to the guard's encoding would masquerade as one.
+ExpandResult expand_gfx1250_unbounded_sleep(const Instruction &inst, uint32_t, uint64_t,
+                                            std::span<const uint8_t>, const LivenessAnalysis &,
+                                            TranslationContext &, const LaneLayout *,
+                                            const LaneLayout *) {
+  const bool is_sleep_opcode =
+      inst.opcode() == gfx1250::kSMonitorSleepSopp || inst.opcode() == gfx1250::kSSleepSopp;
+  if (!is_sleep_opcode || inst.size() != static_cast<int>(sizeof(uint32_t)) ||
+      inst.raw_encoding() == nullptr) {
+    return ExpandResult::failed("gfx1250 sleep rule received an unsupported instruction");
+  }
+
+  constexpr uint16_t kSleepForever = uint16_t{1} << 15;
+  const Operand *immediate = inst.src_operand(0);
+  if (immediate == nullptr ||
+      (static_cast<uint16_t>(immediate->encoding_value()) & kSleepForever) == 0) {
+    return ExpandResult::not_handled();
+  }
+
+  const auto guard = gfx1250::build_sopp(gfx1250::kSWaitXcntSopp, {.simm16 = 0});
+  if (has_canonical_predecessor(inst, guard[0]))
+    return ExpandResult::not_handled();
+
+  std::vector<uint32_t> words;
+  words.reserve(2);
+  append_words(words, guard);
+  words.push_back(inst.raw_encoding()[0]);
+  return ExpandResult::success(std::move(words));
+}
+
 /// @brief Decline the one barrier id this profile excludes.
 ///
 /// @details Barrier id -3 is the only one this instruction may not name; every
@@ -652,14 +712,6 @@ struct TensorMaskWrapper {
       .restore = gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
                                      {.ssrc0 = scratch, .sdst = descriptor_base})[0],
   };
-}
-
-/// @brief Check for one exact, contiguous predecessor in the same basic block.
-[[nodiscard]] bool has_canonical_predecessor(const Instruction &inst, uint32_t expected_word) {
-  const Instruction *previous = inst.previous_instruction();
-  return previous != nullptr && previous->size() == static_cast<int>(sizeof(uint32_t)) &&
-         previous->src_loc() + sizeof(uint32_t) == inst.src_loc() &&
-         previous->raw_encoding() != nullptr && previous->raw_encoding()[0] == expected_word;
 }
 
 /// @brief Check whether every path to a tensor load executes the canonical mask clear.
@@ -2342,9 +2394,13 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
 // The semantic translator binary-searches this table, so entries must stay
 // sorted by the full encoding ID and then opcode. VDS encoding IDs include the
 // high opcode bits, hence the four consecutive kVdsOpHi* groups below.
-inline constexpr std::array<TranslationRule, 41> kGfx1250B0ToA0ExpandRules = {{
+inline constexpr std::array<TranslationRule, 43> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kSop1, gfx1250::kSBarrierSignalIsfirstSop1, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_barrier_signal_isfirst, nullptr, nullptr, false},
+    {gfx1250::encoding::kSopp, gfx1250::kSSleepSopp, RuleAction::Expand, 0, 0, nullptr,
+     expand_gfx1250_unbounded_sleep, nullptr, nullptr, false},
+    {gfx1250::encoding::kSopp, gfx1250::kSMonitorSleepSopp, RuleAction::Expand, 0, 0, nullptr,
+     expand_gfx1250_unbounded_sleep, nullptr, nullptr, false},
     {gfx1250::encoding::kSopp, gfx1250::kSClauseSopp, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_s_clause, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3p, gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p, RuleAction::Expand, 0, 0,
@@ -2426,6 +2482,18 @@ inline constexpr std::array<TranslationRule, 41> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kVglobal, gfx1250::kClusterLoadAsyncToLdsB128Vglobal, RuleAction::Expand, 0,
      0, nullptr, expand_gfx1250_cluster_load, nullptr, nullptr},
 }};
+
+// The comment above is advisory; this is not. An entry in the wrong place makes
+// the binary search miss it and, because lower_bound stops early, take the
+// neighbouring rules down with it -- a silent copy-through rather than a
+// failure.
+static_assert(std::ranges::is_sorted(kGfx1250B0ToA0ExpandRules, {},
+                                     [](const TranslationRule &rule) {
+                                       // Must match SemanticTranslator::packed_rule_key().
+                                       return (static_cast<uint32_t>(rule.src_encoding_id) << 16) |
+                                              rule.src_opcode;
+                                     }),
+              "gfx1250 B0-to-A0 expand rules must stay sorted by encoding ID then opcode");
 
 } // namespace
 
