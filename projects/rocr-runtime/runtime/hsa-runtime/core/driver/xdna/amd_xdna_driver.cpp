@@ -769,10 +769,10 @@ hsa_status_t XdnaDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
   BOHandle bo_handle;
   bo_handle.handle = static_cast<uint32_t>(handle.handle);
   bo_handle.size = handle.size;
-  // Unmap only share BOs, which own an independent mmap. Dev-SVM allocations carve
+  // Unmap only BO_SHAREs, which own an independent mmap. BO_DEV_HEAP allocations carve
   // their VA out of the shared device heap and must leave that mapping intact; they
   // are recognized by the VA falling inside the device-heap range. A null vaddr
-  // (AllocateMemoryOnly share BOs) has nothing to unmap.
+  // (AllocateMemoryOnly BO_SHAREs) has nothing to unmap.
   bo_handle.vaddr = handle.vaddr;
   bo_handle.unmap_vaddr = (handle.vaddr != nullptr) && !IsDevHeapVA(handle.vaddr);
 
