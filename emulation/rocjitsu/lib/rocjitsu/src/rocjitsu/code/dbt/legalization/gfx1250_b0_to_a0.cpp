@@ -33,15 +33,15 @@ namespace {
 ///
 /// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
 /// operand inspection (see gfx1250_reads_flat_scratch_base_64bit). The unbounded
-/// sleep and the affected barrier-state ids are decided entirely by their
-/// semantic rules, which are attempted before raw encoding translation and
-/// return not-handled for the forms that need nothing, leaving those on the copy
-/// path. This classification is looked up first, but its action applies only
-/// once a rule declines, so a predicate here would turn every declined
-/// instruction into a refusal. Ordinary sleeps are copied silently; an
-/// unaffected barrier id is copied too, but still carries the DEFERRED
-/// pass-through report (see gfx1250_b0_to_a0_is_deferred_family), because the
-/// query as a whole has no A0 handling beyond the two spliced ids.
+/// sleep, the affected barrier-state ids, and the lookup-table permutes are
+/// decided entirely by their semantic rules, which are attempted before raw
+/// encoding translation and return not-handled for the forms that need nothing,
+/// leaving those on the copy path. This classification is looked up first, but
+/// its action applies only once a rule declines, so a predicate here would turn
+/// every declined instruction into a refusal. Ordinary sleeps are copied
+/// silently; an unaffected barrier id is copied too, but still carries the
+/// DEFERRED pass-through report (see gfx1250_b0_to_a0_is_deferred_family),
+/// because the query as a whole has no A0 handling beyond the two spliced ids.
 inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",

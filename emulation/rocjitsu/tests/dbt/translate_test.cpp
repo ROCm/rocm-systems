@@ -10953,6 +10953,9 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
           gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p,
       (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
           gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3OpHi4) << 16) | gfx1250::kVPermPk16B4U4Vop3,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3OpHi4) << 16) | gfx1250::kVPermPk16B6U4Vop3,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3OpHi4) << 16) | gfx1250::kVPermPk16B8U4Vop3,
   };
   // The standalone 32x16 FP4 and packed-f16 K=128 rules are deliberately
   // absent because they query operand-bank liveness.
@@ -11005,7 +11008,7 @@ TEST(BinaryTranslatorE2E, Gfx1250UsesNeutralScaledK128Fp8Bf8Wmma) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr auto completion_wait = kGfx1250WmmaCompletionWait;
 
-  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 44u);
+  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 47u);
   for (const WmmaCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     auto source_wmma = gfx1250::build_vop3p(test_case.source_opcode, fields);
@@ -12403,6 +12406,127 @@ TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataRangeBoundsAfterRelocatio
 
   ASSERT_NO_FATAL_FAILURE(verify_target(false));
   ASSERT_NO_FATAL_FAILURE(verify_target(true));
+}
+
+// Each lookup-table permute gains a filler in the slot immediately after it,
+// and the rest of the stream is left in place.
+TEST(BinaryTranslatorE2E, Gfx1250AppendsFillerAfterPermPk16ForA0) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto filler = gfx1250::build_vop1(gfx1250::kVNopVop1);
+  for (const uint16_t opcode :
+       {gfx1250::kVPermPk16B4U4Vop3, gfx1250::kVPermPk16B6U4Vop3, gfx1250::kVPermPk16B8U4Vop3}) {
+    SCOPED_TRACE(opcode);
+    const auto permute =
+        gfx1250::build_vop3(opcode, {.vdst = 4, .src0 = 256 + 8, .src1 = 256 + 12});
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {permute[0], permute[1], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    EXPECT_EQ(out[0], permute[0]) << "the permute itself must be unchanged";
+    EXPECT_EQ(out[1], permute[1]);
+    EXPECT_EQ(out[2], filler[0]) << "a filler must occupy the following slot";
+    EXPECT_EQ(out[3], kGfx1250SEndpgm) << "the rest of the stream must be preserved";
+  }
+}
+
+// A permute carrying a trailing literal keeps it, and the filler goes after the
+// whole instruction rather than between it and its literal.
+TEST(BinaryTranslatorE2E, Gfx1250AppendsFillerAfterLiteralBearingPermPk16ForA0) {
+  constexpr uint16_t kScalarLiteral = 255;
+  constexpr uint32_t kLiteralPayload = 0x0badf00du;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto permute = gfx1250::build_vop3(gfx1250::kVPermPk16B4U4Vop3,
+                                           {.vdst = 4, .src0 = kScalarLiteral, .src1 = 256 + 12});
+  const auto filler = gfx1250::build_vop1(gfx1250::kVNopVop1);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {permute[0], permute[1], kLiteralPayload, kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(out[0], permute[0]);
+  EXPECT_EQ(out[1], permute[1]);
+  EXPECT_EQ(out[2], kLiteralPayload) << "the literal must stay with its instruction";
+  EXPECT_EQ(out[3], filler[0]);
+  EXPECT_EQ(out[4], kGfx1250SEndpgm);
+}
+
+// A distinguishable successor shows the filler is inserted before it rather
+// than replacing it.
+TEST(BinaryTranslatorE2E, Gfx1250KeepsExistingSuccessorAfterPermPk16FillerForA0) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto permute =
+      gfx1250::build_vop3(gfx1250::kVPermPk16B4U4Vop3, {.vdst = 4, .src0 = 256 + 8});
+  const auto successor = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 256 + 2, .vdst = 6});
+  const auto filler = gfx1250::build_vop1(gfx1250::kVNopVop1);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {permute[0], permute[1], successor[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(out[2], filler[0]) << "the filler takes the slot after the permute";
+  EXPECT_EQ(out[3], successor[0]) << "the original follower must be kept";
+  EXPECT_EQ(out[4], kGfx1250SEndpgm);
+}
+
+// A permute whose slot is already filled is left alone, so a second pass over
+// translated text produces the same bytes.
+TEST(BinaryTranslatorE2E, Gfx1250PermPk16FillerIsStableOnSecondPassForA0) {
+  const auto permute =
+      gfx1250::build_vop3(gfx1250::kVPermPk16B4U4Vop3, {.vdst = 4, .src0 = 256 + 8});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {permute[0], permute[1], kGfx1250SEndpgm});
+
+  std::vector<uint8_t> current = image;
+  std::vector<uint32_t> first_pass;
+  for (int pass = 0; pass < 2; ++pass) {
+    rocjitsu::AmdGpuCodeObject source(current.data(), current.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    const size_t count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+    std::vector<uint32_t> words(out, out + count);
+    if (pass == 0)
+      first_pass = words;
+    else
+      EXPECT_EQ(words, first_pass) << "the second pass must not add another filler";
+    current = result.elf_bytes;
+  }
 }
 
 // The affected barrier-state ids take one result field from a second query.

@@ -543,6 +543,49 @@ ExpandResult expand_gfx1250_get_barrier_state(const Instruction &inst, uint32_t,
   return ExpandResult::success(std::move(words));
 }
 
+/// @brief Follow a lookup-table permute with a fixed filler.
+///
+/// @details This profile restricts which instruction may issue in the single
+/// slot immediately after the permute to a limited set. The restriction covers
+/// that one slot only, so exactly one filler satisfies it; this is not a
+/// multi-slot spacing requirement and must not be widened into one. The source
+/// may already comply, but once relocation and expansion have run the
+/// translator no longer controls what follows, so the filler is appended
+/// unconditionally.
+///
+/// V_NOP is the filler because it issues regardless of the exec mask. An
+/// ordinary VALU is skipped when the mask is zero and would leave the slot
+/// unoccupied in exactly the divergent regions that are hardest to reason about.
+///
+/// A filler already in that slot is left alone so a second pass over translated
+/// text produces the same bytes. The successor is matched as a decoded
+/// instruction in the same block rather than as the following word, so a
+/// trailing literal that happens to equal the filler's encoding is not mistaken
+/// for one, and a slot that belongs to a different block is not assumed.
+ExpandResult expand_gfx1250_perm_pk16(const Instruction &inst, uint32_t, uint64_t offset,
+                                      std::span<const uint8_t> source_text,
+                                      const LivenessAnalysis &, TranslationContext &,
+                                      const LaneLayout *, const LaneLayout *) {
+  if (inst.size() <= 0 || inst.size() % static_cast<int>(sizeof(uint32_t)) != 0)
+    return ExpandResult::failed("gfx1250 permute rule received an unsupported instruction");
+  const size_t size = static_cast<size_t>(inst.size());
+  // Subtraction keeps the bound check from wrapping on a large offset.
+  if (offset > source_text.size() || size > source_text.size() - offset)
+    return ExpandResult::failed("gfx1250 permute rule received an unsupported instruction");
+
+  const auto filler = gfx1250::build_vop1(gfx1250::kVNopVop1);
+  const Instruction *following = inst.next_instruction();
+  if (following != nullptr && following->size() == static_cast<int>(sizeof(uint32_t)) &&
+      following->raw_encoding() != nullptr && following->raw_encoding()[0] == filler[0]) {
+    return ExpandResult::not_handled();
+  }
+
+  std::vector<uint32_t> words(size / sizeof(uint32_t));
+  std::memcpy(words.data(), source_text.data() + offset, size);
+  append_words(words, filler);
+  return ExpandResult::success(std::move(words));
+}
+
 /// @brief Drain outstanding memory work before an unbounded sleep.
 ///
 /// @details SIMM16[15] selects the unbounded form; SIMM16[6:0] is an ordinary
@@ -2532,7 +2575,7 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
 // The semantic translator binary-searches this table, so entries must stay
 // sorted by the full encoding ID and then opcode. VDS encoding IDs include the
 // high opcode bits, hence the four consecutive kVdsOpHi* groups below.
-inline constexpr std::array<TranslationRule, 44> kGfx1250B0ToA0ExpandRules = {{
+inline constexpr std::array<TranslationRule, 47> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kSop1, gfx1250::kSBarrierSignalIsfirstSop1, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_barrier_signal_isfirst, nullptr, nullptr, false},
     {gfx1250::encoding::kSop1, gfx1250::kSGetBarrierStateSop1, RuleAction::Expand, 0, 0, nullptr,
@@ -2575,6 +2618,12 @@ inline constexpr std::array<TranslationRule, 44> kGfx1250B0ToA0ExpandRules = {{
      expand_gfx1250_tensor_load_to_lds, nullptr, nullptr},
     {gfx1250::encoding::kVop3OpHi3, gfx1250::kVCvtF32Fp8Vop3, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_cvt_f32_fp8_e5m3, nullptr, nullptr},
+    {gfx1250::encoding::kVop3OpHi4, gfx1250::kVPermPk16B4U4Vop3, RuleAction::Expand, 0, 0, nullptr,
+     expand_gfx1250_perm_pk16, nullptr, nullptr, false},
+    {gfx1250::encoding::kVop3OpHi4, gfx1250::kVPermPk16B6U4Vop3, RuleAction::Expand, 0, 0, nullptr,
+     expand_gfx1250_perm_pk16, nullptr, nullptr, false},
+    {gfx1250::encoding::kVop3OpHi4, gfx1250::kVPermPk16B8U4Vop3, RuleAction::Expand, 0, 0, nullptr,
+     expand_gfx1250_perm_pk16, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3OpHi6, gfx1250::kVCvtPkFp8F32Vop3, RuleAction::Expand, 0, 0, nullptr,
      expand_gfx1250_cvt_pk_fp8_f32_e5m3, nullptr, nullptr},
     {gfx1250::encoding::kVop3OpHi6, gfx1250::kVCvtSrFp8F32Vop3, RuleAction::Expand, 0, 0, nullptr,
