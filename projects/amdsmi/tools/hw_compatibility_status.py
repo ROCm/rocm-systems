@@ -598,12 +598,6 @@ def run_tests():
 
     test_api("amdsmi_get_violation_status", lambda: amdsmi.amdsmi_get_violation_status(gpu_handle))
 
-    test_api(
-        "amdsmi_gpu_driver_reload",
-        None,
-        skip_reason="Risky - reloads GPU driver, could crash system",
-    )
-
     # ========================================================================
     # SECTION 7: PCIe INFO (12 APIs)
     # ========================================================================

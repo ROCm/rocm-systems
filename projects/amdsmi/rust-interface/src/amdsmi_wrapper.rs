@@ -5157,9 +5157,6 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
-    pub fn amdsmi_gpu_driver_reload() -> AmdsmiStatusT;
-}
-extern "C" {
     pub fn amdsmi_get_gpu_ptl_state(
         processor_handle: AmdsmiProcessorHandle,
         enabled: *mut bool,
