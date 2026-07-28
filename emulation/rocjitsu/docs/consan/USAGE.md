@@ -170,17 +170,27 @@ incremental patch, `I + 13*M` while independently validated composite mutation
 storage remains live, and `9*I + 10*M` during final validation. Each parser has
 eight major-image units: its image, up to two units for section objects and
 their vector slots, bounded payload, bounded section names, and up to three
-units for symbol- and kernel-metadata-derived state. That final budget charges
-each newly retained role for its copied name plus conservative aggregate
-kernel/function record and container state; roles sharing one logical symbol
-name share overlapping transient-state charges. It also charges retained kernel
-metadata map entries and vector capacity beyond the requested entry count.
-Symbol and metadata entries share that three-unit budget rather than receiving
-separate allowances, so metadata can reject an object already at the symbol
-boundary. This tightens parser admission without changing the eight-unit parser
-coefficient or the `12*M`, `13*M`, and `9*I + 10*M` phase coefficients.
+units for compact section classification plus symbol- and
+kernel-metadata-derived state. That final budget charges each newly retained
+role for its copied name plus conservative aggregate kernel/function record and
+container state; roles sharing one logical symbol name share overlapping
+transient-state charges. It also charges retained kernel metadata map entries
+before insertion and vector capacity beyond the requested entry count. Section
+classification is one bit per section and keeps symbol lookup linear in the ELF
+section and symbol counts. Classification, symbol, and metadata state share
+that three-unit budget rather than receiving separate allowances, so metadata
+can reject an object already at the symbol boundary. This tightens parser
+admission without changing the eight-unit parser coefficient or the `12*M`,
+`13*M`, and `9*I + 10*M` phase coefficients.
 Section headers, transient symbol-name characters, and metadata names are views
-into the image rather than duplicate owning collections.
+into the image rather than duplicate owning collections. Repeated kernel names
+within one AMDGPU metadata note retain the final record, while an earlier note
+keeps precedence over later notes, matching the parser's existing merge rules.
+Metadata note walking separately charges both planned payload passes against
+four image-sized units of work, so overlapping or repeated program-header
+references cannot multiply parser time without limit. Reserved-range ELF symbol
+section indices do not resolve against oversized directly encoded section
+tables.
 Admission uses the largest phase value and reports the governing phase and
 coefficients. The parser rejects aggregate copied section payload or
 section-name bytes larger than its backing image, and conservatively charged

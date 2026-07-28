@@ -47,7 +47,12 @@ inline constexpr Elf_Half ET_REL = 1;
 inline constexpr Elf_Half ET_DYN = 3;
 
 inline constexpr Elf_Half SHN_UNDEF = 0;
+inline constexpr Elf_Half SHN_LORESERVE = 0xff00;
 inline constexpr Elf_Half SHN_ABS = 0xfff1;
+
+[[nodiscard]] inline constexpr bool is_regular_elf_section_index(Elf_Half index) {
+  return index > SHN_UNDEF && index < SHN_LORESERVE;
+}
 
 inline constexpr uint32_t EF_AMDGPU_MACH = 0x0ff;
 inline constexpr uint32_t EF_AMDGPU_MACH_NONE = 0;

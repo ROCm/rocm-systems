@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -24,6 +25,13 @@
 namespace rocjitsu {
 
 inline constexpr uint64_t kAmdGpuCodeObjectRetainedDerivedStateImageUnits = 3;
+
+/// Maximum metadata payload bytes visited across both parser passes.
+///
+/// Valid non-overlapping note payloads fit within one image. Four image units
+/// leave room for overlapping segments while bounding repeated program-header
+/// references to the same payload.
+inline constexpr uint64_t kAmdGpuCodeObjectMetadataParseWorkImageUnits = 4;
 
 /// Conservative image-sized ownership units retained by one parsed object.
 ///
@@ -65,13 +73,6 @@ namespace amdgpu_code_object_detail {
 /// The private container charges remain expressible as constant expressions in
 /// this header and are pinned against the production types in
 /// amdgpu_code_object.cpp.
-struct KernelMetadata {
-  bool has_dynamic_lds = false;
-  std::optional<bool> uses_dynamic_stack;
-  std::optional<uint16_t> sgpr_count;
-  std::optional<std::array<uint32_t, 3>> required_workgroup_size;
-};
-
 [[nodiscard]] inline constexpr uint64_t aligned_charge(uint64_t bytes, uint64_t alignment) {
   return ((bytes + alignment - 1u) / alignment) * alignment;
 }
@@ -83,6 +84,11 @@ inline constexpr uint64_t kFunctionSymbolEntryBytes = aligned_charge(
     sizeof(std::string_view) + 4 * sizeof(uint64_t) + sizeof(bool), alignof(uint64_t));
 inline constexpr uint64_t kFunctionEvidenceEntryBytes =
     aligned_charge(3 * sizeof(uint64_t) + sizeof(bool), alignof(uint64_t));
+inline constexpr uint64_t kKernelMetadataEntryBytes =
+    aligned_charge(sizeof(std::string_view) + sizeof(bool) + sizeof(std::optional<bool>) +
+                       sizeof(std::optional<uint16_t>) +
+                       sizeof(std::optional<std::array<uint32_t, 3>>) + sizeof(uint64_t),
+                   alignof(void *));
 
 [[nodiscard]] inline constexpr std::optional<uint64_t>
 checked_allocation_charge(uint64_t accumulated, uint64_t count, uint64_t element_bytes) {
@@ -100,6 +106,45 @@ excess_vector_charge(uint64_t capacity, uint64_t requested, uint64_t element_byt
     return std::nullopt;
   return checked_allocation_charge(0, capacity - requested, element_bytes);
 }
+
+inline constexpr uint64_t kSectionClassificationBitsPerWord = std::numeric_limits<uint64_t>::digits;
+
+[[nodiscard]] inline constexpr std::optional<uint64_t>
+section_classification_charge(uint64_t section_count) {
+  const uint64_t word_count = section_count / kSectionClassificationBitsPerWord +
+                              (section_count % kSectionClassificationBitsPerWord != 0);
+  return checked_allocation_charge(0, word_count, sizeof(uint64_t));
+}
+
+[[nodiscard]] inline constexpr bool set_section_classification(std::span<uint64_t> words,
+                                                               uint64_t section_index) {
+  const uint64_t word_index = section_index / kSectionClassificationBitsPerWord;
+  if (word_index >= words.size())
+    return false;
+  words[word_index] |= uint64_t{1} << (section_index % kSectionClassificationBitsPerWord);
+  return true;
+}
+
+[[nodiscard]] inline constexpr bool test_section_classification(std::span<const uint64_t> words,
+                                                                uint64_t section_index) {
+  const uint64_t word_index = section_index / kSectionClassificationBitsPerWord;
+  return word_index < words.size() &&
+         (words[word_index] &
+          (uint64_t{1} << (section_index % kSectionClassificationBitsPerWord))) != 0;
+}
+
+static_assert(checked_allocation_charge(0, 2, std::numeric_limits<uint64_t>::max() / 2) ==
+              std::numeric_limits<uint64_t>::max() - 1);
+static_assert(checked_allocation_charge(1, 1, std::numeric_limits<uint64_t>::max() - 1) ==
+              std::numeric_limits<uint64_t>::max());
+static_assert(checked_allocation_charge(std::numeric_limits<uint64_t>::max(), 0, 8) ==
+              std::numeric_limits<uint64_t>::max());
+static_assert(excess_vector_charge(0, 0, 8) == 0);
+static_assert(section_classification_charge(0) == 0);
+static_assert(section_classification_charge(1) == sizeof(uint64_t));
+static_assert(section_classification_charge(kSectionClassificationBitsPerWord) == sizeof(uint64_t));
+static_assert(section_classification_charge(kSectionClassificationBitsPerWord + 1) ==
+              2 * sizeof(uint64_t));
 
 } // namespace amdgpu_code_object_detail
 
@@ -126,7 +171,7 @@ inline constexpr uint64_t kAmdGpuCodeObjectFunctionEntryChargeBytes =
 inline constexpr uint64_t kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes =
     kAmdGpuCodeObjectFunctionEntryChargeBytes + kAmdGpuCodeObjectTransientSymbolEntryChargeBytes;
 inline constexpr uint64_t kAmdGpuCodeObjectKernelMetadataEntryChargeBytes =
-    sizeof(std::pair<const std::string_view, amdgpu_code_object_detail::KernelMetadata>) +
+    amdgpu_code_object_detail::kKernelMetadataEntryBytes +
     amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes;
 
 namespace amdgpu_code_object_detail {
@@ -137,6 +182,32 @@ retained_symbol_role_charge(bool has_kernel, bool has_function, bool has_dynamic
          (has_function ? kAmdGpuCodeObjectFunctionEntryChargeBytes : 0u) +
          (has_dynamic_stack ? kAmdGpuCodeObjectTransientSymbolEntryChargeBytes : 0u);
 }
+
+static_assert(retained_symbol_role_charge(true, false, false) ==
+              kAmdGpuCodeObjectKernelEntryChargeBytes);
+static_assert(retained_symbol_role_charge(false, true, false) ==
+              kAmdGpuCodeObjectFunctionEntryChargeBytes);
+static_assert(retained_symbol_role_charge(false, false, true) ==
+              kAmdGpuCodeObjectTransientSymbolEntryChargeBytes);
+
+[[nodiscard]] inline constexpr bool retained_symbol_role_charge_is_monotone() {
+  for (unsigned roles = 0; roles < 8; ++roles) {
+    const uint64_t old_charge =
+        retained_symbol_role_charge((roles & 1u) != 0, (roles & 2u) != 0, (roles & 4u) != 0);
+    for (unsigned added_role : {1u, 2u, 4u}) {
+      const unsigned with_role = roles | added_role;
+      if (old_charge > retained_symbol_role_charge((with_role & 1u) != 0, (with_role & 2u) != 0,
+                                                   (with_role & 4u) != 0)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// Adding a role never lowers its charge, so callers may safely account only
+// the difference between a symbol's old and new role sets.
+static_assert(retained_symbol_role_charge_is_monotone());
 
 } // namespace amdgpu_code_object_detail
 

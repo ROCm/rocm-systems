@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -32,6 +33,9 @@ namespace {
 
 namespace kd = rocr::llvm::amdhsa;
 using KD = kd::kernel_descriptor_t;
+
+constexpr uint16_t kKernelMetadataFixtureSectionCount = 2;
+constexpr uint16_t kDerivedStateFixtureSectionCount = 6;
 
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
@@ -58,33 +62,71 @@ void append_msgpack_string(std::vector<uint8_t> &bytes, std::string_view value) 
   append_bytes(bytes, value.data(), value.size());
 }
 
-std::vector<uint8_t> make_kernel_metadata_payload(size_t kernel_count) {
+void append_kernel_metadata_payload_header(std::vector<uint8_t> &payload, size_t kernel_count) {
   if (kernel_count > std::numeric_limits<uint32_t>::max()) {
     ADD_FAILURE() << "metadata fixture kernel count is outside the msgpack array range";
-    return {};
+    return;
   }
-
-  std::vector<uint8_t> payload;
   payload.push_back(0x81u); // one-entry root map
   append_msgpack_string(payload, "amdhsa.kernels");
   payload.push_back(0xddu); // array32
   const uint32_t count = static_cast<uint32_t>(kernel_count);
   for (int shift = 24; shift >= 0; shift -= 8)
     payload.push_back(static_cast<uint8_t>((count >> shift) & 0xffu));
+}
 
+bool append_kernel_metadata_record(std::vector<uint8_t> &payload, char name, uint8_t sgpr_count) {
+  if (sgpr_count >= 0x80u) {
+    ADD_FAILURE() << "metadata fixture sgpr_count is outside the msgpack fixint range";
+    return false;
+  }
+  payload.push_back(0x82u); // .name plus one retained metadata field
+  append_msgpack_string(payload, ".name");
+  append_msgpack_string(payload, std::string_view(&name, 1));
+  append_msgpack_string(payload, ".sgpr_count");
+  payload.push_back(sgpr_count);
+  return true;
+}
+
+std::vector<uint8_t> make_kernel_metadata_payload(size_t kernel_count) {
+  std::vector<uint8_t> payload;
+  append_kernel_metadata_payload_header(payload, kernel_count);
+  if (payload.empty())
+    return {};
   for (size_t index = 0; index < kernel_count; ++index) {
-    payload.push_back(0x82u); // .name plus one retained metadata field
-    append_msgpack_string(payload, ".name");
     const char name = static_cast<char>(1u + index % 255u);
-    append_msgpack_string(payload, std::string_view(&name, 1));
-    append_msgpack_string(payload, ".sgpr_count");
-    payload.push_back(0x08u);
+    if (!append_kernel_metadata_record(payload, name, 8u))
+      return {};
   }
   return payload;
 }
 
-std::vector<uint8_t> make_kernel_metadata_note(size_t kernel_count) {
-  const std::vector<uint8_t> payload = make_kernel_metadata_payload(kernel_count);
+std::vector<uint8_t>
+make_named_kernel_metadata_payload(const std::vector<std::pair<char, uint8_t>> &kernels) {
+  std::vector<uint8_t> payload;
+  append_kernel_metadata_payload_header(payload, kernels.size());
+  if (payload.empty())
+    return {};
+  for (const auto &[name, sgpr_count] : kernels) {
+    if (!append_kernel_metadata_record(payload, name, sgpr_count))
+      return {};
+  }
+  return payload;
+}
+
+std::vector<std::pair<char, uint8_t>> make_distinct_kernel_metadata_records(size_t count) {
+  if (count > 255) {
+    ADD_FAILURE() << "metadata fixture has too many distinct one-byte names";
+    return {};
+  }
+  std::vector<std::pair<char, uint8_t>> kernels;
+  kernels.reserve(count);
+  for (size_t index = 0; index < count; ++index)
+    kernels.emplace_back(static_cast<char>(index + 1), 8u);
+  return kernels;
+}
+
+std::vector<uint8_t> make_kernel_metadata_note_from_payload(const std::vector<uint8_t> &payload) {
   if (payload.empty())
     return {};
 
@@ -101,14 +143,38 @@ std::vector<uint8_t> make_kernel_metadata_note(size_t kernel_count) {
   return note;
 }
 
-bool install_kernel_metadata_note(std::vector<uint8_t> &image, size_t kernel_count,
-                                  uint64_t note_offset = sizeof(Elf64_Ehdr) + sizeof(Elf64_Phdr)) {
+std::vector<uint8_t> make_kernel_metadata_note(size_t kernel_count) {
+  return make_kernel_metadata_note_from_payload(make_kernel_metadata_payload(kernel_count));
+}
+
+bool install_kernel_metadata_notes(std::vector<uint8_t> &image,
+                                   const std::vector<std::vector<uint8_t>> &notes,
+                                   uint64_t note_offset = sizeof(Elf64_Ehdr) + sizeof(Elf64_Phdr),
+                                   size_t program_header_count = 1) {
   if (image.size() < sizeof(Elf64_Ehdr))
     return false;
-  const std::vector<uint8_t> note = make_kernel_metadata_note(kernel_count);
   const uint64_t program_header_offset = sizeof(Elf64_Ehdr);
-  if (note.empty() || note_offset < program_header_offset + sizeof(Elf64_Phdr) ||
-      note_offset > image.size() || note.size() > image.size() - note_offset) {
+  if (program_header_count == 0 || program_header_count > std::numeric_limits<uint16_t>::max()) {
+    return false;
+  }
+  const uint64_t program_header_bytes = program_header_count * sizeof(Elf64_Phdr);
+  uint64_t note_bytes = 0;
+  for (const auto &note : notes) {
+    if (note.empty() || note.size() > std::numeric_limits<uint64_t>::max() - note_bytes)
+      return false;
+    note_bytes += note.size();
+  }
+  if (notes.empty() || note_offset < program_header_offset + program_header_bytes ||
+      note_offset > image.size() || note_bytes > image.size() - note_offset) {
+    return false;
+  }
+  const auto region_is_zero = [&](uint64_t offset, uint64_t size) {
+    return std::all_of(image.begin() + static_cast<ptrdiff_t>(offset),
+                       image.begin() + static_cast<ptrdiff_t>(offset + size),
+                       [](uint8_t byte) { return byte == 0; });
+  };
+  if (!region_is_zero(program_header_offset, program_header_bytes) ||
+      !region_is_zero(note_offset, note_bytes)) {
     return false;
   }
 
@@ -116,30 +182,55 @@ bool install_kernel_metadata_note(std::vector<uint8_t> &image, size_t kernel_cou
   std::memcpy(&header, image.data(), sizeof(header));
   header.e_phoff = program_header_offset;
   header.e_phentsize = sizeof(Elf64_Phdr);
-  header.e_phnum = 1;
+  header.e_phnum = static_cast<uint16_t>(program_header_count);
   std::memcpy(image.data(), &header, sizeof(header));
 
   Elf64_Phdr program_header{};
   program_header.p_type = PT_NOTE;
   program_header.p_offset = note_offset;
-  program_header.p_filesz = note.size();
-  std::memcpy(image.data() + program_header_offset, &program_header, sizeof(program_header));
-  std::memcpy(image.data() + note_offset, note.data(), note.size());
+  program_header.p_filesz = note_bytes;
+  for (size_t index = 0; index < program_header_count; ++index) {
+    std::memcpy(image.data() + program_header_offset + index * sizeof(Elf64_Phdr), &program_header,
+                sizeof(program_header));
+  }
+  uint64_t cursor = note_offset;
+  for (const auto &note : notes) {
+    std::memcpy(image.data() + cursor, note.data(), note.size());
+    cursor += note.size();
+  }
   return true;
 }
 
-std::vector<uint8_t> make_elf_with_kernel_metadata_note(size_t kernel_count) {
-  const std::vector<uint8_t> note = make_kernel_metadata_note(kernel_count);
-  if (note.empty())
+bool install_kernel_metadata_note(std::vector<uint8_t> &image, size_t kernel_count,
+                                  uint64_t note_offset = sizeof(Elf64_Ehdr) + sizeof(Elf64_Phdr)) {
+  return install_kernel_metadata_notes(image, {make_kernel_metadata_note(kernel_count)},
+                                       note_offset);
+}
+
+std::vector<uint8_t>
+make_elf_with_kernel_metadata_payloads(const std::vector<std::vector<uint8_t>> &payloads,
+                                       size_t fixed_image_size = 0,
+                                       size_t program_header_count = 1) {
+  std::vector<std::vector<uint8_t>> notes;
+  uint64_t note_bytes = 0;
+  for (const auto &payload : payloads) {
+    auto note = make_kernel_metadata_note_from_payload(payload);
+    if (note.empty() || note.size() > std::numeric_limits<uint64_t>::max() - note_bytes)
+      return {};
+    note_bytes += note.size();
+    notes.push_back(std::move(note));
+  }
+  if (notes.empty() || program_header_count == 0 ||
+      program_header_count > std::numeric_limits<uint16_t>::max()) {
     return {};
+  }
 
   std::vector<uint8_t> shstrtab{'\0'};
   const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
-  const uint64_t note_offset = sizeof(Elf64_Ehdr) + sizeof(Elf64_Phdr);
-  const uint64_t shstrtab_offset = note_offset + note.size();
+  const uint64_t note_offset = sizeof(Elf64_Ehdr) + program_header_count * sizeof(Elf64_Phdr);
+  const uint64_t shstrtab_offset = note_offset + note_bytes;
   const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
-  constexpr uint16_t kSectionCount = 2;
-  std::vector<uint8_t> image(shoff + kSectionCount * sizeof(Elf64_Shdr), 0);
+  std::vector<uint8_t> image(shoff + kKernelMetadataFixtureSectionCount * sizeof(Elf64_Shdr), 0);
 
   Elf64_Ehdr header{};
   std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
@@ -152,23 +243,36 @@ std::vector<uint8_t> make_elf_with_kernel_metadata_note(size_t kernel_count) {
   header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
   header.e_ehsize = sizeof(Elf64_Ehdr);
   header.e_shentsize = sizeof(Elf64_Shdr);
-  header.e_shnum = kSectionCount;
+  header.e_shnum = kKernelMetadataFixtureSectionCount;
   header.e_shstrndx = 1;
   std::memcpy(image.data(), &header, sizeof(header));
-  if (!install_kernel_metadata_note(image, kernel_count, note_offset)) {
+  if (!install_kernel_metadata_notes(image, notes, note_offset, program_header_count)) {
     ADD_FAILURE() << "metadata fixture note does not fit in its ELF image";
     return {};
   }
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
-  std::array<Elf64_Shdr, kSectionCount> sections{};
+  std::array<Elf64_Shdr, kKernelMetadataFixtureSectionCount> sections{};
   sections[1].sh_name = shstrtab_name;
   sections[1].sh_type = SHT_STRTAB;
   sections[1].sh_offset = shstrtab_offset;
   sections[1].sh_size = shstrtab.size();
   sections[1].sh_addralign = 1;
   std::memcpy(image.data() + shoff, sections.data(), sizeof(sections));
+  if (fixed_image_size != 0) {
+    if (image.size() > fixed_image_size) {
+      ADD_FAILURE() << "metadata fixture does not fit in its fixed-size image";
+      return {};
+    }
+    image.resize(fixed_image_size, 0);
+  }
   return image;
+}
+
+std::vector<uint8_t> make_elf_with_kernel_metadata_note(size_t kernel_count,
+                                                        size_t fixed_image_size = 0) {
+  return make_elf_with_kernel_metadata_payloads({make_kernel_metadata_payload(kernel_count)},
+                                                fixed_image_size);
 }
 
 // A 64-byte kernel descriptor whose wavefront SGPR granulation field is
@@ -328,22 +432,27 @@ enum class RetainedSymbolKind {
 constexpr size_t kDerivedStateBoundaryImageBytes = 4098;
 constexpr size_t kRetainedFunctionBoundaryCount = 48;
 constexpr size_t kRetainedKernelBoundaryCount = 34;
-constexpr size_t kRetainedCombinedBoundaryCount = 21;
+constexpr size_t kRetainedCombinedBoundaryCount = 20;
 constexpr size_t kDerivedStateBudgetBytes =
     kAmdGpuCodeObjectRetainedDerivedStateImageUnits * kDerivedStateBoundaryImageBytes;
+constexpr size_t kDerivedStateFixtureClassificationBytes =
+    *amdgpu_code_object_detail::section_classification_charge(kDerivedStateFixtureSectionCount);
+static_assert(kDerivedStateFixtureClassificationBytes < kDerivedStateBudgetBytes);
+constexpr size_t kDerivedStateFixtureRoleBudgetBytes =
+    kDerivedStateBudgetBytes - kDerivedStateFixtureClassificationBytes;
 // Short function names are copied once and short kernel names twice.
 constexpr size_t kMaximumShortRetainedFunctionEntries =
-    kDerivedStateBudgetBytes / (kAmdGpuCodeObjectFunctionEntryChargeBytes + 1);
+    kDerivedStateFixtureRoleBudgetBytes / (kAmdGpuCodeObjectFunctionEntryChargeBytes + 1);
 constexpr size_t kMaximumShortRetainedKernelEntries =
-    kDerivedStateBudgetBytes / (kAmdGpuCodeObjectKernelEntryChargeBytes + 2);
+    kDerivedStateFixtureRoleBudgetBytes / (kAmdGpuCodeObjectKernelEntryChargeBytes + 2);
 static_assert(kMaximumShortRetainedFunctionEntries <= 64);
 static_assert(kMaximumShortRetainedKernelEntries <= 64);
 static_assert((kMaximumShortRetainedFunctionEntries + 1) *
                   (kAmdGpuCodeObjectFunctionEntryChargeBytes + 1) >
-              kDerivedStateBudgetBytes);
+              kDerivedStateFixtureRoleBudgetBytes);
 static_assert((kMaximumShortRetainedKernelEntries + 1) *
                   (kAmdGpuCodeObjectKernelEntryChargeBytes + 2) >
-              kDerivedStateBudgetBytes);
+              kDerivedStateFixtureRoleBudgetBytes);
 
 struct DerivedStateBoundaryOptions {
   SymbolNameBudget budget = SymbolNameBudget::AtBoundary;
@@ -383,13 +492,13 @@ make_elf_at_retained_derived_state_boundary(const DerivedStateBoundaryOptions &o
   size_t last_name_extra = 0;
   if (options.short_retained_name_count == 0) {
     const uint64_t fixed_entry_charge = retained_name_count * per_name_entry_charge;
-    if (fixed_entry_charge >= kDerivedStateBudgetBytes ||
-        (kDerivedStateBudgetBytes - fixed_entry_charge) % charged_name_copies != 0) {
+    if (fixed_entry_charge >= kDerivedStateFixtureRoleBudgetBytes ||
+        (kDerivedStateFixtureRoleBudgetBytes - fixed_entry_charge) % charged_name_copies != 0) {
       ADD_FAILURE() << "boundary fixture charges do not divide the derived-state budget";
       return {};
     }
-    size_t aggregate_name_bytes =
-        static_cast<size_t>((kDerivedStateBudgetBytes - fixed_entry_charge) / charged_name_copies);
+    size_t aggregate_name_bytes = static_cast<size_t>(
+        (kDerivedStateFixtureRoleBudgetBytes - fixed_entry_charge) / charged_name_copies);
     if (options.budget == SymbolNameBudget::OneByteOver)
       ++aggregate_name_bytes;
     const size_t distinct_length_delta = retained_name_count * (retained_name_count - 1) / 2;
@@ -453,8 +562,8 @@ make_elf_at_retained_derived_state_boundary(const DerivedStateBoundaryOptions &o
   const uint64_t symbol_bytes = symbols.size() * sizeof(Elf64_Sym);
   const uint64_t shstrtab_offset = symtab_offset + symbol_bytes;
   const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
-  constexpr uint16_t section_count = 6;
-  if (shoff + section_count * sizeof(Elf64_Shdr) > kDerivedStateBoundaryImageBytes) {
+  if (shoff + kDerivedStateFixtureSectionCount * sizeof(Elf64_Shdr) >
+      kDerivedStateBoundaryImageBytes) {
     ADD_FAILURE() << "boundary fixture metadata does not fit in its fixed-size image";
     return {};
   }
@@ -471,7 +580,7 @@ make_elf_at_retained_derived_state_boundary(const DerivedStateBoundaryOptions &o
   header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
   header.e_ehsize = sizeof(Elf64_Ehdr);
   header.e_shentsize = sizeof(Elf64_Shdr);
-  header.e_shnum = section_count;
+  header.e_shnum = kDerivedStateFixtureSectionCount;
   header.e_shstrndx = 5;
   std::memcpy(image.data(), &header, sizeof(header));
 
@@ -481,7 +590,7 @@ make_elf_at_retained_derived_state_boundary(const DerivedStateBoundaryOptions &o
   std::memcpy(image.data() + symtab_offset, symbols.data(), symbol_bytes);
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
 
-  std::array<Elf64_Shdr, section_count> sections{};
+  std::array<Elf64_Shdr, kDerivedStateFixtureSectionCount> sections{};
   sections[1].sh_name = text_name;
   sections[1].sh_type = options.code_section_type;
   sections[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
@@ -519,19 +628,41 @@ make_elf_at_retained_derived_state_boundary(const DerivedStateBoundaryOptions &o
   return image;
 }
 
-std::vector<uint8_t> make_zero_sized_section_dense_elf(size_t section_count) {
+std::vector<uint8_t>
+make_zero_sized_section_dense_elf(size_t section_count,
+                                  std::optional<Elf_Half> function_section_index = std::nullopt) {
   if (section_count < 3 || section_count > std::numeric_limits<uint16_t>::max()) {
     ADD_FAILURE() << "dense-section fixture count is outside the ELF header range";
+    return {};
+  }
+  const size_t shstrtab_index = section_count - 1;
+  const size_t strtab_index = section_count - 2;
+  const size_t symtab_index = section_count - 3;
+  if (function_section_index &&
+      (*function_section_index == SHN_UNDEF || *function_section_index >= symtab_index)) {
+    ADD_FAILURE() << "dense-section function index overlaps fixture metadata";
     return {};
   }
 
   std::vector<uint8_t> shstrtab{'\0'};
   const uint32_t text_name = add_elf_name(shstrtab, ".text");
   const uint32_t rodata_name = add_elf_name(shstrtab, ".rodata");
+  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
+  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
   const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+  std::vector<uint8_t> strtab{'\0'};
+  const uint32_t function_name = add_elf_name(strtab, "f");
+  std::array<Elf64_Sym, 2> symbols{};
+  symbols[1].st_name = function_name;
+  symbols[1].st_info = static_cast<uint8_t>((1u << 4) | kElfSymbolTypeFunc);
+  symbols[1].st_shndx = function_section_index.value_or(SHN_UNDEF);
   const uint64_t shoff = sizeof(Elf64_Ehdr);
   const uint64_t shstrtab_offset = shoff + section_count * sizeof(Elf64_Shdr);
-  std::vector<uint8_t> image(shstrtab_offset + shstrtab.size(), 0);
+  const uint64_t strtab_offset = shstrtab_offset + shstrtab.size();
+  const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), alignof(Elf64_Sym));
+  const uint64_t image_size =
+      function_section_index ? symtab_offset + sizeof(symbols) : shstrtab_offset + shstrtab.size();
+  std::vector<uint8_t> image(image_size, 0);
 
   Elf64_Ehdr header{};
   std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
@@ -545,21 +676,43 @@ std::vector<uint8_t> make_zero_sized_section_dense_elf(size_t section_count) {
   header.e_ehsize = sizeof(Elf64_Ehdr);
   header.e_shentsize = sizeof(Elf64_Shdr);
   header.e_shnum = static_cast<uint16_t>(section_count);
-  header.e_shstrndx = static_cast<uint16_t>(section_count - 1);
+  header.e_shstrndx = static_cast<uint16_t>(shstrtab_index);
   std::memcpy(image.data(), &header, sizeof(header));
 
   std::vector<Elf64_Shdr> sections(section_count);
   for (size_t i = 1; i + 1 < section_count; ++i) {
-    sections[i].sh_name = i % 2 == 0 ? text_name : rodata_name;
+    if (function_section_index)
+      sections[i].sh_name = i == *function_section_index ? text_name : rodata_name;
+    else
+      sections[i].sh_name = i % 2 == 0 ? text_name : rodata_name;
     sections[i].sh_type = SHT_PROGBITS;
   }
-  sections.back().sh_name = shstrtab_name;
-  sections.back().sh_type = SHT_STRTAB;
-  sections.back().sh_offset = shstrtab_offset;
-  sections.back().sh_size = shstrtab.size();
-  sections.back().sh_addralign = 1;
+  if (function_section_index) {
+    sections[strtab_index].sh_name = strtab_name;
+    sections[strtab_index].sh_type = SHT_STRTAB;
+    sections[strtab_index].sh_offset = strtab_offset;
+    sections[strtab_index].sh_size = strtab.size();
+    sections[strtab_index].sh_addralign = 1;
+    sections[symtab_index].sh_name = symtab_name;
+    sections[symtab_index].sh_type = SHT_SYMTAB;
+    sections[symtab_index].sh_offset = symtab_offset;
+    sections[symtab_index].sh_size = sizeof(symbols);
+    sections[symtab_index].sh_link = strtab_index;
+    sections[symtab_index].sh_info = 1;
+    sections[symtab_index].sh_entsize = sizeof(Elf64_Sym);
+    sections[symtab_index].sh_addralign = alignof(Elf64_Sym);
+  }
+  sections[shstrtab_index].sh_name = shstrtab_name;
+  sections[shstrtab_index].sh_type = SHT_STRTAB;
+  sections[shstrtab_index].sh_offset = shstrtab_offset;
+  sections[shstrtab_index].sh_size = shstrtab.size();
+  sections[shstrtab_index].sh_addralign = 1;
   std::memcpy(image.data() + shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+  if (function_section_index) {
+    std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
+    std::memcpy(image.data() + symtab_offset, symbols.data(), sizeof(symbols));
+  }
   return image;
 }
 
@@ -610,37 +763,49 @@ TEST(AmdGpuCodeObjectSgpr, NoKernelDescriptorReturnsNullopt) {
   EXPECT_FALSE(obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2).has_value());
 }
 
-TEST(AmdGpuCodeObjectAccounting, ChecksAllocationAndExcessCapacityCharges) {
+TEST(AmdGpuCodeObjectAccounting, CheckedAllocationChargeHandlesExactFitsAndOverflow) {
   using amdgpu_code_object_detail::checked_allocation_charge;
-  using amdgpu_code_object_detail::excess_vector_charge;
 
   EXPECT_EQ(checked_allocation_charge(5, 3, 7), std::optional<uint64_t>(26));
   EXPECT_FALSE(checked_allocation_charge(std::numeric_limits<uint64_t>::max(), 1, 1));
   EXPECT_FALSE(checked_allocation_charge(0, std::numeric_limits<uint64_t>::max(), 2));
+}
+
+TEST(AmdGpuCodeObjectAccounting, ExcessVectorChargeHandlesCapacityBoundaries) {
+  using amdgpu_code_object_detail::excess_vector_charge;
 
   EXPECT_EQ(excess_vector_charge(12, 8, 10), std::optional<uint64_t>(40));
-  EXPECT_EQ(excess_vector_charge(8, 8, 10), std::optional<uint64_t>(0));
   EXPECT_FALSE(excess_vector_charge(7, 8, 10));
   EXPECT_FALSE(excess_vector_charge(std::numeric_limits<uint64_t>::max(), 0, 2));
 }
 
-TEST(AmdGpuCodeObjectAccounting, SymbolRoleChargeIsAdditiveAndMonotone) {
+TEST(AmdGpuCodeObjectAccounting, SymbolRoleChargeCombinesAllRoleCosts) {
   using amdgpu_code_object_detail::retained_symbol_role_charge;
 
   EXPECT_EQ(retained_symbol_role_charge(false, false, false), 0u);
   EXPECT_EQ(retained_symbol_role_charge(true, true, true),
             kAmdGpuCodeObjectKernelEntryChargeBytes + kAmdGpuCodeObjectFunctionEntryChargeBytes +
                 kAmdGpuCodeObjectTransientSymbolEntryChargeBytes);
-  for (unsigned roles = 0; roles < 8; ++roles) {
-    const uint64_t charge = retained_symbol_role_charge(roles & 1u, roles & 2u, roles & 4u);
-    for (unsigned added_role : {1u, 2u, 4u}) {
-      if ((roles & added_role) == 0) {
-        const unsigned with_role = roles | added_role;
-        EXPECT_LE(charge,
-                  retained_symbol_role_charge(with_role & 1u, with_role & 2u, with_role & 4u));
-      }
-    }
-  }
+}
+
+TEST(AmdGpuCodeObjectAccounting, SectionClassificationCrossesWordBoundaries) {
+  std::array<uint64_t, 2> words{};
+  for (const uint64_t index : {1u, 63u, 64u, 70u})
+    ASSERT_TRUE(amdgpu_code_object_detail::set_section_classification(words, index));
+  for (const uint64_t index : {1u, 63u, 64u, 70u})
+    EXPECT_TRUE(amdgpu_code_object_detail::test_section_classification(words, index));
+  EXPECT_FALSE(amdgpu_code_object_detail::test_section_classification(words, 62));
+  EXPECT_FALSE(amdgpu_code_object_detail::set_section_classification(words, 128));
+  EXPECT_FALSE(amdgpu_code_object_detail::test_section_classification(words, 128));
+}
+
+TEST(AmdGpuElfSectionIndex, DistinguishesRegularAndReservedIndices) {
+  EXPECT_TRUE(is_regular_elf_section_index(1));
+  EXPECT_TRUE(is_regular_elf_section_index(SHN_LORESERVE - 1));
+  EXPECT_FALSE(is_regular_elf_section_index(SHN_UNDEF));
+  EXPECT_FALSE(is_regular_elf_section_index(SHN_LORESERVE));
+  EXPECT_FALSE(is_regular_elf_section_index(SHN_ABS));
+  EXPECT_FALSE(is_regular_elf_section_index(std::numeric_limits<uint16_t>::max()));
 }
 
 TEST(AmdGpuCodeObjectValidation, RejectsAggregateCopiedSectionsLargerThanImage) {
@@ -709,8 +874,9 @@ TEST(AmdGpuCodeObjectValidation, RejectsAggregateSectionNameAmplificationBeforeA
   EXPECT_FALSE(obj.is_valid());
 }
 
-TEST(AmdGpuCodeObjectValidation, AcceptsMaximumElfSectionCountWithoutTransientIndexState) {
-  constexpr size_t kSectionCount = std::numeric_limits<uint16_t>::max();
+TEST(AmdGpuCodeObjectValidation, AcceptsMaximumDirectlyEncodedElfSectionCount) {
+  // Direct e_shnum values stop before the ELF reserved-index range.
+  constexpr size_t kSectionCount = SHN_LORESERVE - 1;
   const auto image = make_zero_sized_section_dense_elf(kSectionCount);
   AmdGpuCodeObject obj(image.data(), image.size());
 
@@ -719,34 +885,164 @@ TEST(AmdGpuCodeObjectValidation, AcceptsMaximumElfSectionCountWithoutTransientIn
   EXPECT_EQ(obj.text_sections().size(), (kSectionCount - 2) / 2);
 }
 
-TEST(AmdGpuCodeObjectValidation, AcceptsKernelMetadataEntriesEqualToBudget) {
-  constexpr size_t kMetadataEntries = 154;
-  const auto image = make_elf_with_kernel_metadata_note(kMetadataEntries);
-  ASSERT_EQ(kMetadataEntries * kAmdGpuCodeObjectKernelMetadataEntryChargeBytes,
-            image.size() * kAmdGpuCodeObjectRetainedDerivedStateImageUnits);
+TEST(AmdGpuCodeObjectValidation,
+     SafelyHandlesMaximumSectionTableWithoutResolvingReservedFunctionIndex) {
+  constexpr size_t kSectionCount = std::numeric_limits<uint16_t>::max();
+  const auto image = make_zero_sized_section_dense_elf(kSectionCount, SHN_LORESERVE);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_EQ(obj.all_sections().size(), kSectionCount - 1);
+  EXPECT_EQ(obj.text_sections().size(), 1u);
+  EXPECT_TRUE(obj.functions().empty());
+}
+
+constexpr size_t kKernelMetadataBoundaryImageBytes = 4096;
+constexpr size_t kKernelMetadataFixtureClassificationBytes =
+    *amdgpu_code_object_detail::section_classification_charge(kKernelMetadataFixtureSectionCount);
+constexpr size_t kMaximumKernelMetadataEntries =
+    (kAmdGpuCodeObjectRetainedDerivedStateImageUnits * kKernelMetadataBoundaryImageBytes -
+     kKernelMetadataFixtureClassificationBytes) /
+    kAmdGpuCodeObjectKernelMetadataEntryChargeBytes;
+static_assert(kMaximumKernelMetadataEntries < 255);
+static_assert(kKernelMetadataFixtureClassificationBytes +
+                  kMaximumKernelMetadataEntries * kAmdGpuCodeObjectKernelMetadataEntryChargeBytes <=
+              kAmdGpuCodeObjectRetainedDerivedStateImageUnits * kKernelMetadataBoundaryImageBytes);
+static_assert(kKernelMetadataFixtureClassificationBytes +
+                  (kMaximumKernelMetadataEntries + 1) *
+                      kAmdGpuCodeObjectKernelMetadataEntryChargeBytes >
+              kAmdGpuCodeObjectRetainedDerivedStateImageUnits * kKernelMetadataBoundaryImageBytes);
+
+TEST(AmdGpuCodeObjectValidation, AcceptsMaximumKernelMetadataEntriesWithinBudget) {
+  const auto image = make_elf_with_kernel_metadata_note(kMaximumKernelMetadataEntries,
+                                                        kKernelMetadataBoundaryImageBytes);
+  ASSERT_EQ(image.size(), kKernelMetadataBoundaryImageBytes);
 
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_TRUE(obj.is_valid());
 }
 
 TEST(AmdGpuCodeObjectValidation, RejectsOneTooManyKernelMetadataEntries) {
-  constexpr size_t kMetadataEntries = 155;
-  const auto image = make_elf_with_kernel_metadata_note(kMetadataEntries);
-  ASSERT_GT(kMetadataEntries * kAmdGpuCodeObjectKernelMetadataEntryChargeBytes,
-            image.size() * kAmdGpuCodeObjectRetainedDerivedStateImageUnits);
+  const auto image = make_elf_with_kernel_metadata_note(kMaximumKernelMetadataEntries + 1,
+                                                        kKernelMetadataBoundaryImageBytes);
+  ASSERT_EQ(image.size(), kKernelMetadataBoundaryImageBytes);
 
   AmdGpuCodeObject obj(image.data(), image.size());
   EXPECT_FALSE(obj.is_valid());
 }
 
+TEST(AmdGpuCodeObjectValidation, DoesNotChargeDuplicateMetadataWithinOneNote) {
+  auto records = make_distinct_kernel_metadata_records(kMaximumKernelMetadataEntries);
+  ASSERT_EQ(records.size(), kMaximumKernelMetadataEntries);
+  records.push_back(records.front());
+  const auto image = make_elf_with_kernel_metadata_payloads(
+      {make_named_kernel_metadata_payload(records)}, kKernelMetadataBoundaryImageBytes);
+  ASSERT_EQ(image.size(), kKernelMetadataBoundaryImageBytes);
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, DoesNotChargeDuplicateMetadataAcrossNotes) {
+  const auto records = make_distinct_kernel_metadata_records(kMaximumKernelMetadataEntries);
+  ASSERT_EQ(records.size(), kMaximumKernelMetadataEntries);
+  const auto image = make_elf_with_kernel_metadata_payloads(
+      {make_named_kernel_metadata_payload(records),
+       make_named_kernel_metadata_payload({records.front()})},
+      kKernelMetadataBoundaryImageBytes);
+  ASSERT_EQ(image.size(), kKernelMetadataBoundaryImageBytes);
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, MalformedNoteConsumesNoMetadataStateBudget) {
+  const auto records = make_distinct_kernel_metadata_records(kMaximumKernelMetadataEntries);
+  ASSERT_EQ(records.size(), kMaximumKernelMetadataEntries);
+  const auto image = make_elf_with_kernel_metadata_payloads(
+      {{0x81u}, make_named_kernel_metadata_payload(records)}, kKernelMetadataBoundaryImageBytes);
+  ASSERT_EQ(image.size(), kKernelMetadataBoundaryImageBytes);
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, RejectsRepeatedMetadataPayloadsAboveParseWorkBudget) {
+  constexpr size_t kDuplicateRecordCount = 200;
+  constexpr size_t kRepeatedProgramHeaderCount = 3;
+  const std::vector<std::pair<char, uint8_t>> records(kDuplicateRecordCount, {'k', 8u});
+  const auto payload = make_named_kernel_metadata_payload(records);
+  ASSERT_FALSE(payload.empty());
+  const auto single_reference = make_elf_with_kernel_metadata_payloads({payload});
+  ASSERT_FALSE(single_reference.empty());
+  ASSERT_LE(2 * payload.size(),
+            kAmdGpuCodeObjectMetadataParseWorkImageUnits * single_reference.size());
+  AmdGpuCodeObject accepted(single_reference.data(), single_reference.size());
+  ASSERT_TRUE(accepted.is_valid());
+
+  const auto repeated_references =
+      make_elf_with_kernel_metadata_payloads({payload}, 0, kRepeatedProgramHeaderCount);
+  ASSERT_FALSE(repeated_references.empty());
+  ASSERT_GT(2 * payload.size() * kRepeatedProgramHeaderCount,
+            kAmdGpuCodeObjectMetadataParseWorkImageUnits * repeated_references.size());
+  AmdGpuCodeObject rejected(repeated_references.data(), repeated_references.size());
+  EXPECT_FALSE(rejected.is_valid());
+}
+
+TEST(AmdGpuCodeObjectValidation, RetainsLastRecordForDuplicateKernelNamesWithinOneNote) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  const auto payload = make_named_kernel_metadata_payload({{'k', 8u}, {'k', 16u}});
+  const auto note = make_kernel_metadata_note_from_payload(payload);
+  ASSERT_TRUE(install_kernel_metadata_notes(image, {note}));
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_EQ(obj.kernels().size(), 1u);
+  EXPECT_EQ(obj.kernels().front().sgpr_count, std::optional<uint16_t>(16u));
+}
+
+TEST(AmdGpuCodeObjectValidation, RetainsFirstRecordForDuplicateKernelNamesAcrossNotes) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  const auto first_note =
+      make_kernel_metadata_note_from_payload(make_named_kernel_metadata_payload({{'k', 8u}}));
+  const auto second_note =
+      make_kernel_metadata_note_from_payload(make_named_kernel_metadata_payload({{'k', 16u}}));
+  ASSERT_TRUE(install_kernel_metadata_notes(image, {first_note, second_note}));
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_EQ(obj.kernels().size(), 1u);
+  EXPECT_EQ(obj.kernels().front().sgpr_count, std::optional<uint16_t>(8u));
+}
+
+TEST(AmdGpuCodeObjectValidation, AcceptsCombinedSymbolAndMetadataStateBelowBudget) {
+  constexpr size_t kShortFunctionEntryCharge = kAmdGpuCodeObjectFunctionEntryChargeBytes + 1;
+  static_assert(kDerivedStateFixtureClassificationBytes +
+                    kMaximumShortRetainedFunctionEntries * kShortFunctionEntryCharge +
+                    kAmdGpuCodeObjectKernelMetadataEntryChargeBytes <=
+                kDerivedStateBudgetBytes);
+
+  auto image = make_elf_at_retained_derived_state_boundary({
+      .short_retained_name_count = kMaximumShortRetainedFunctionEntries,
+  });
+  ASSERT_TRUE(install_kernel_metadata_note(image, 1));
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+}
+
 TEST(AmdGpuCodeObjectValidation, SharesDerivedStateBudgetBetweenSymbolsAndMetadata) {
-  auto image = make_elf_at_retained_derived_state_boundary();
   {
+    const auto image = make_elf_with_kernel_metadata_note(1);
+    AmdGpuCodeObject metadata_only(image.data(), image.size());
+    ASSERT_TRUE(metadata_only.is_valid());
+  }
+  {
+    const auto image = make_elf_at_retained_derived_state_boundary();
     AmdGpuCodeObject symbol_only(image.data(), image.size());
     ASSERT_TRUE(symbol_only.is_valid());
   }
+  auto image = make_elf_at_retained_derived_state_boundary();
   ASSERT_TRUE(install_kernel_metadata_note(image, 1));
-
   AmdGpuCodeObject combined(image.data(), image.size());
   EXPECT_FALSE(combined.is_valid());
 }
@@ -793,6 +1089,16 @@ TEST(AmdGpuCodeObjectValidation, IgnoresUnretainedNamesAboveRetainedNameBudget) 
   EXPECT_TRUE(obj.is_valid());
   EXPECT_TRUE(obj.functions().empty());
   EXPECT_TRUE(obj.kernels().empty());
+}
+
+TEST(AmdGpuCodeObjectValidation, IgnoresFunctionSymbolWithOutOfRangeSectionIndex) {
+  const auto image = make_elf_at_retained_derived_state_boundary({
+      .symbol_section_index = 42,
+      .short_retained_name_count = 1,
+  });
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_TRUE(obj.is_valid());
+  EXPECT_TRUE(obj.functions().empty());
 }
 
 TEST(AmdGpuCodeObjectValidation, DeduplicatesRetainedNamesAcrossSymbolTables) {

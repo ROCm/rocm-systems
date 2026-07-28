@@ -10,12 +10,14 @@
 #include "hsa/AMDHSAKernelDescriptor.h" // Check SGPR allocation
 
 #include <algorithm>
+#include <concepts>
 #include <cstring>
 #include <limits>
 #include <map>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -52,6 +54,12 @@ public:
 private:
   Elf64_Shdr shdr_;
 };
+
+// The requested section objects and their mutually exclusive text/rodata
+// classification slot must fit within the two-image section model. The runtime
+// capacity check below additionally covers standard-library over-allocation.
+static_assert(sizeof(HsaSection) + sizeof(std::unique_ptr<Section>) + sizeof(const Section *) <=
+              2 * sizeof(Elf64_Shdr));
 
 bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE); }
 
@@ -265,8 +273,28 @@ struct MetadataCursor {
   }
 }
 
-using KernelMetadata = amdgpu_code_object_detail::KernelMetadata;
-using KernelMetadataMap = std::unordered_map<std::string_view, KernelMetadata>;
+struct KernelMetadata {
+  bool has_dynamic_lds = false;
+  std::optional<bool> uses_dynamic_stack;
+  std::optional<uint16_t> sgpr_count;
+  std::optional<std::array<uint32_t, 3>> required_workgroup_size;
+};
+
+struct KernelMetadataEntry {
+  KernelMetadata metadata;
+  uint64_t source_note = 0;
+};
+
+using KernelMetadataMap = std::unordered_map<std::string_view, KernelMetadataEntry>;
+static_assert(kAmdGpuCodeObjectKernelMetadataEntryChargeBytes >=
+                  sizeof(KernelMetadataMap::value_type) +
+                      amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes,
+              "update kKernelMetadataEntryBytes to cover KernelMetadataMap::value_type");
+static_assert(kAmdGpuCodeObjectKernelMetadataEntryChargeBytes <=
+                  sizeof(KernelMetadataMap::value_type) +
+                      amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes +
+                      2 * alignof(void *),
+              "kKernelMetadataEntryBytes has drifted above the real entry layout");
 
 [[nodiscard]] bool read_kernel_args_metadata(MetadataCursor &cursor, bool &has_dynamic_lds) {
   uint32_t argument_count = 0;
@@ -293,90 +321,111 @@ using KernelMetadataMap = std::unordered_map<std::string_view, KernelMetadata>;
   return true;
 }
 
-[[nodiscard]] KernelMetadataMap parse_kernel_metadata(std::span<const uint8_t> payload) {
-  KernelMetadataMap result;
+template <typename Visitor>
+[[nodiscard]] bool visit_kernel_metadata(std::span<const uint8_t> payload, Visitor &&visitor) {
   MetadataCursor root{payload};
   uint32_t root_entries = 0;
   if (!read_metadata_collection_count(root, /*map=*/true, root_entries))
-    return result;
+    return false;
   for (uint32_t entry = 0; entry < root_entries; ++entry) {
     std::string_view key;
     if (!read_metadata_string(root, key))
-      return {};
+      return false;
     if (key != "amdhsa.kernels") {
       if (!skip_metadata_value(root))
-        return {};
+        return false;
       continue;
     }
     uint32_t kernel_count = 0;
     if (!read_metadata_collection_count(root, /*map=*/false, kernel_count))
-      return {};
+      return false;
     for (uint32_t kernel_index = 0; kernel_index < kernel_count; ++kernel_index) {
       uint32_t kernel_entries = 0;
       if (!read_metadata_collection_count(root, /*map=*/true, kernel_entries))
-        return {};
+        return false;
       std::optional<std::string_view> name;
       KernelMetadata metadata;
       for (uint32_t kernel_entry = 0; kernel_entry < kernel_entries; ++kernel_entry) {
         std::string_view kernel_key;
         if (!read_metadata_string(root, kernel_key))
-          return {};
+          return false;
         if (kernel_key == ".name") {
           std::string_view parsed_name;
           if (!read_metadata_string(root, parsed_name))
-            return {};
+            return false;
           name = parsed_name;
         } else if (kernel_key == ".args") {
           if (!read_kernel_args_metadata(root, metadata.has_dynamic_lds))
-            return {};
+            return false;
         } else if (kernel_key == ".uses_dynamic_stack") {
           if (root.offset >= root.bytes.size())
-            return {};
+            return false;
           const uint8_t tag = root.bytes[root.offset++];
           if (tag != 0xc2u && tag != 0xc3u)
-            return {};
+            return false;
           metadata.uses_dynamic_stack = tag == 0xc3u;
         } else if (kernel_key == ".sgpr_count") {
           uint64_t count = 0;
           if (!read_metadata_unsigned(root, count) ||
               count > std::numeric_limits<uint16_t>::max()) {
-            return {};
+            return false;
           }
           metadata.sgpr_count = static_cast<uint16_t>(count);
         } else if (kernel_key == ".reqd_workgroup_size") {
           uint32_t dimension_count = 0;
           if (!read_metadata_collection_count(root, /*map=*/false, dimension_count) ||
               dimension_count != 3u) {
-            return {};
+            return false;
           }
           std::array<uint32_t, 3> dimensions{};
           for (uint32_t dimension = 0; dimension < dimension_count; ++dimension) {
             uint64_t value = 0;
             if (!read_metadata_unsigned(root, value) || value == 0u ||
                 value > std::numeric_limits<uint32_t>::max()) {
-              return {};
+              return false;
             }
             dimensions[dimension] = static_cast<uint32_t>(value);
           }
           metadata.required_workgroup_size = dimensions;
         } else if (!skip_metadata_value(root)) {
-          return {};
+          return false;
         }
       }
-      if (name && (metadata.has_dynamic_lds || metadata.uses_dynamic_stack || metadata.sgpr_count ||
-                   metadata.required_workgroup_size))
-        result[*name] = metadata;
+      if (name &&
+          (metadata.has_dynamic_lds || metadata.uses_dynamic_stack || metadata.sgpr_count ||
+           metadata.required_workgroup_size) &&
+          !visitor(*name, metadata)) {
+        return false;
+      }
     }
     break;
   }
-  return result;
+  return true;
 }
 
 [[nodiscard]] uint64_t align4(uint64_t value) { return (value + 3u) & ~uint64_t{3}; }
 
-[[nodiscard]] KernelMetadataMap read_kernel_metadata(std::span<const uint8_t> image,
-                                                     const Elf64_Ehdr &header) {
-  KernelMetadataMap result;
+struct KernelMetadataReadResult {
+  KernelMetadataMap metadata;
+  bool budget_exceeded = false;
+  bool parse_work_exceeded = false;
+  bool replay_failed = false;
+};
+
+template <typename RetainDerivedStateBytes>
+  requires std::invocable<RetainDerivedStateBytes &, uint64_t> &&
+           std::convertible_to<std::invoke_result_t<RetainDerivedStateBytes &, uint64_t>, bool>
+[[nodiscard]] KernelMetadataReadResult
+read_kernel_metadata(std::span<const uint8_t> image, const Elf64_Ehdr &header,
+                     RetainDerivedStateBytes &&retain_derived_state_bytes) {
+  KernelMetadataReadResult result;
+  uint64_t next_source_note = 0;
+  uint64_t metadata_parse_work_bytes = 0;
+  const uint64_t metadata_parse_work_budget_bytes =
+      image.size() >
+              std::numeric_limits<uint64_t>::max() / kAmdGpuCodeObjectMetadataParseWorkImageUnits
+          ? std::numeric_limits<uint64_t>::max()
+          : kAmdGpuCodeObjectMetadataParseWorkImageUnits * image.size();
   if (header.e_phentsize != sizeof(Elf64_Phdr) || header.e_phoff > image.size() ||
       static_cast<uint64_t>(header.e_phnum) * sizeof(Elf64_Phdr) > image.size() - header.e_phoff) {
     return result;
@@ -404,9 +453,49 @@ using KernelMetadataMap = std::unordered_map<std::string_view, KernelMetadata>;
       cursor = desc_offset + desc_bytes;
       if (note.n_type != NT_AMDGPU_METADATA || note.n_descsz > image.size() - desc_offset)
         continue;
-      auto parsed =
-          parse_kernel_metadata(image.subspan(static_cast<size_t>(desc_offset), note.n_descsz));
-      result.merge(parsed);
+      const auto payload = image.subspan(static_cast<size_t>(desc_offset), note.n_descsz);
+      // Account both passes before parsing. Valid non-overlapping payloads fit
+      // within one image; repeated or overlapping note references cannot
+      // multiply parser work beyond the image-proportional bound.
+      const auto parse_work = amdgpu_code_object_detail::checked_allocation_charge(
+          metadata_parse_work_bytes, payload.size(), 2);
+      if (!parse_work || *parse_work > metadata_parse_work_budget_bytes) {
+        result.parse_work_exceeded = true;
+        return result;
+      }
+      metadata_parse_work_bytes = *parse_work;
+      // Validate the entire note before retaining any part of it. The second
+      // pass deliberately re-parses the bounded payload, then charges each
+      // unique entry before its map allocation.
+      if (!visit_kernel_metadata(payload,
+                                 [](std::string_view, const KernelMetadata &) { return true; })) {
+        continue;
+      }
+      const uint64_t source_note = next_source_note++;
+      const bool parsed = visit_kernel_metadata(
+          payload, [&](std::string_view name, const KernelMetadata &metadata) {
+            if (auto existing = result.metadata.find(name); existing != result.metadata.end()) {
+              // Preserve the old last-record-wins rule within one note while
+              // retaining the old first-note-wins rule across notes.
+              if (existing->second.source_note == source_note)
+                existing->second.metadata = metadata;
+              return true;
+            }
+            if (!retain_derived_state_bytes(kAmdGpuCodeObjectKernelMetadataEntryChargeBytes)) {
+              result.budget_exceeded = true;
+              return false;
+            }
+            result.metadata.emplace(name, KernelMetadataEntry{metadata, source_note});
+            return true;
+          });
+      if (result.budget_exceeded)
+        return result;
+      // The first validation pass consumed the same immutable payload, and the
+      // only visitor failure is handled as budget exhaustion above.
+      if (!parsed) {
+        result.replay_failed = true;
+        return result;
+      }
     }
   }
   return result;
@@ -599,6 +688,22 @@ void AmdGpuCodeObject::load_sections() {
     return {shstrtab_data + shdr.sh_name, strnlen(shstrtab_data + shdr.sh_name, max_len)};
   };
 
+  uint64_t retained_derived_state_bytes = 0;
+  const uint64_t derived_state_budget_bytes =
+      image_.size() >
+              std::numeric_limits<uint64_t>::max() / kAmdGpuCodeObjectRetainedDerivedStateImageUnits
+          ? std::numeric_limits<uint64_t>::max()
+          : kAmdGpuCodeObjectRetainedDerivedStateImageUnits * image_.size();
+  const auto retain_derived_state_bytes = [&](uint64_t charge) {
+    if (charge > std::numeric_limits<uint64_t>::max() - retained_derived_state_bytes ||
+        retained_derived_state_bytes + charge > derived_state_budget_bytes) {
+      is_valid_ = false;
+      return false;
+    }
+    retained_derived_state_bytes += charge;
+    return true;
+  };
+
   // Bound aggregate string ownership before materializing HsaSection names.
   // Duplicate offsets and long unterminated suffixes must not amplify one
   // string table into a quadratic parser working set.
@@ -619,6 +724,21 @@ void AmdGpuCodeObject::load_sections() {
   size_t materialized_section_count = 0;
   size_t text_section_count = 0;
   size_t rodata_section_count = 0;
+  const auto section_classification_bytes =
+      amdgpu_code_object_detail::section_classification_charge(section_count);
+  // The in-image section table makes this charge smaller than the image for
+  // the current Elf64 layout. Keep the checked charge as a portability
+  // backstop and to account it in the shared ledger before allocation.
+  if (!section_classification_bytes || !retain_derived_state_bytes(*section_classification_bytes)) {
+    is_valid_ = false;
+    return;
+  }
+  const size_t section_classification_word_count =
+      (*section_classification_bytes / sizeof(uint64_t));
+  auto text_section_classification_words =
+      std::make_unique<uint64_t[]>(section_classification_word_count);
+  const std::span<uint64_t> text_section_classification(text_section_classification_words.get(),
+                                                        section_classification_word_count);
   for (size_t i = 0; i < section_count; ++i) {
     const Elf64_Shdr shdr = *section_header(i);
     const std::string_view sec_name = section_name(shdr);
@@ -633,20 +753,27 @@ void AmdGpuCodeObject::load_sections() {
     copied_section_bytes += shdr.sh_size;
     // Only materialized, in-image sections participate in text classification.
     // NOBITS has no file bytes and cannot provide patchable function ranges.
+    if (sec_name == ".text" &&
+        !amdgpu_code_object_detail::set_section_classification(text_section_classification, i)) {
+      is_valid_ = false;
+      return;
+    }
     ++materialized_section_count;
     text_section_count += sec_name == ".text";
     rodata_section_count += sec_name == ".rodata";
   }
   const auto is_materialized_text_section = [&](size_t index) {
-    const std::optional<Elf64_Shdr> shdr = section_header(index);
-    return shdr && shdr->sh_type != SHT_NULL && shdr->sh_type != SHT_NOBITS &&
-           section_name(*shdr) == ".text";
+    return index <= std::numeric_limits<Elf_Half>::max() &&
+           is_regular_elf_section_index(static_cast<Elf_Half>(index)) &&
+           amdgpu_code_object_detail::test_section_classification(text_section_classification,
+                                                                  index);
   };
 
-  // Charge the actual capacities returned by the standard library before
-  // materializing section objects. Exact reserve behavior fits by construction
-  // from the in-image section table; this runtime limit is the portability
-  // backstop for capacity over-allocation or a larger private section type.
+  // The in-image section table bounds the three slot-array reservations before
+  // this check. Charge the actual capacities returned by the standard library
+  // before materializing section objects. Exact reserve behavior fits by
+  // construction; the runtime limit is the portability backstop for capacity
+  // over-allocation or a larger private section type.
   sections_.reserve(materialized_section_count);
   text_sections_.reserve(text_section_count);
   rodata_sections_.reserve(rodata_section_count);
@@ -699,7 +826,6 @@ void AmdGpuCodeObject::load_sections() {
   // names, public records, and overlapping transient structures within the
   // exported derived-state budget. Aggregate accounting matters because a
   // kernel, function, and dynamic-stack symbol commonly share one logical name.
-  uint64_t retained_derived_state_bytes = 0;
   std::unordered_map<std::string_view, uint64_t> kernel_descriptor_offsets;
   std::unordered_map<std::string_view, uint64_t> descriptor_file_offsets;
   std::unordered_map<std::string_view, FunctionSymbolInfo> function_symbols;
@@ -742,20 +868,6 @@ void AmdGpuCodeObject::load_sections() {
     DynamicStack,
   };
   using amdgpu_code_object_detail::retained_symbol_role_charge;
-  const uint64_t derived_state_budget_bytes =
-      image_.size() >
-              std::numeric_limits<uint64_t>::max() / kAmdGpuCodeObjectRetainedDerivedStateImageUnits
-          ? std::numeric_limits<uint64_t>::max()
-          : kAmdGpuCodeObjectRetainedDerivedStateImageUnits * image_.size();
-  const auto retain_derived_state_bytes = [&](uint64_t charge) {
-    if (charge > std::numeric_limits<uint64_t>::max() - retained_derived_state_bytes ||
-        retained_derived_state_bytes + charge > derived_state_budget_bytes) {
-      is_valid_ = false;
-      return false;
-    }
-    retained_derived_state_bytes += charge;
-    return true;
-  };
   const auto retain_symbol_role = [&](std::string_view name, SymbolRetentionRole role) {
     bool has_kernel = kernel_descriptor_offsets.contains(name);
     bool has_function = function_symbols.contains(name);
@@ -862,7 +974,10 @@ void AmdGpuCodeObject::load_sections() {
 
       if (elf_symbol_type(sym.st_info) == kElfSymbolTypeFunc &&
           is_materialized_text_section(sym.st_shndx)) {
-        const Elf64_Shdr text = *section_header(sym.st_shndx);
+        const std::optional<Elf64_Shdr> text_header = section_header(sym.st_shndx);
+        if (!text_header)
+          continue;
+        const Elf64_Shdr text = *text_header;
         if (sym.st_value >= text.sh_addr && sym.st_value - text.sh_addr <= text.sh_size) {
           FunctionSymbolInfo info;
           info.entry_text_offset = sym.st_value - text.sh_addr;
@@ -923,21 +1038,15 @@ void AmdGpuCodeObject::load_sections() {
 
   Elf64_Ehdr elf_header{};
   std::memcpy(&elf_header, image_.data(), sizeof(elf_header));
-  const auto metadata = read_kernel_metadata(
+  auto metadata_result = read_kernel_metadata(
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(image_.data()), image_.size()),
-      elf_header);
-  static_assert(kAmdGpuCodeObjectKernelMetadataEntryChargeBytes ==
-                sizeof(KernelMetadataMap::value_type) + kAssociativeEntryBookkeepingBytes);
-  // The transient map is constructed from bounded note payload and keeps names
-  // as image views. This post-construction check qualifies its fixed retained
-  // state against the same aggregate budget as symbol-derived state.
-  if (metadata.size() >
-          std::numeric_limits<uint64_t>::max() / kAmdGpuCodeObjectKernelMetadataEntryChargeBytes ||
-      !retain_derived_state_bytes(metadata.size() *
-                                  kAmdGpuCodeObjectKernelMetadataEntryChargeBytes)) {
+      elf_header, retain_derived_state_bytes);
+  if (metadata_result.budget_exceeded || metadata_result.parse_work_exceeded ||
+      metadata_result.replay_failed) {
     is_valid_ = false;
     return;
   }
+  const KernelMetadataMap &metadata = metadata_result.metadata;
 
   kernels_.clear();
   kernels_.reserve(kernel_descriptor_offsets.size());
@@ -969,10 +1078,10 @@ void AmdGpuCodeObject::load_sections() {
     }
     if (auto metadata_entry = metadata.find(std::string_view(kernel.name));
         metadata_entry != metadata.end()) {
-      kernel.has_dynamic_lds = metadata_entry->second.has_dynamic_lds;
-      kernel.uses_dynamic_stack = metadata_entry->second.uses_dynamic_stack;
-      kernel.sgpr_count = metadata_entry->second.sgpr_count;
-      kernel.required_workgroup_size = metadata_entry->second.required_workgroup_size;
+      kernel.has_dynamic_lds = metadata_entry->second.metadata.has_dynamic_lds;
+      kernel.uses_dynamic_stack = metadata_entry->second.metadata.uses_dynamic_stack;
+      kernel.sgpr_count = metadata_entry->second.metadata.sgpr_count;
+      kernel.required_workgroup_size = metadata_entry->second.metadata.required_workgroup_size;
     }
     if (!kernel.uses_dynamic_stack) {
       auto dynamic_stack = dynamic_stack_symbols.find(kernel_name);
