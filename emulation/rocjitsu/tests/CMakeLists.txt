@@ -577,7 +577,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         NAME Gfx1250B0ToA0Library.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0> -P
+            -DMODEL_BINARY=$<TARGET_FILE:hsa_hotswap_rocjitsu> -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -757,7 +757,10 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
 )
-target_link_libraries(rj_dbt_translate_smoke_test PRIVATE GTest::gtest)
+target_link_libraries(
+    rj_dbt_translate_smoke_test
+    PRIVATE rocjitsu_tooling GTest::gtest
+)
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
 add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
 if(RJ_INSTALL_TESTS)
@@ -1064,6 +1067,41 @@ target_link_libraries(
 )
 rj_configure_target(hsa_hooks_unit_test TEST)
 gtest_discover_tests(hsa_hooks_unit_test)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        hsa_hotswap_rocjitsu_unit_test
+        dbt/hsa_hotswap_rocjitsu_unit_test.cpp
+    )
+    target_include_directories(
+        hsa_hotswap_rocjitsu_unit_test
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+    )
+    target_include_directories(
+        hsa_hotswap_rocjitsu_unit_test
+        SYSTEM
+        PRIVATE ${HSA_INCLUDE_DIR}
+    )
+    target_link_libraries(
+        hsa_hotswap_rocjitsu_unit_test
+        PRIVATE hsa_hotswap_rocjitsu_testable GTest::gtest_main
+    )
+    if(HAS_GFX1250_DBT_FIXTURE)
+        target_compile_definitions(
+            hsa_hotswap_rocjitsu_unit_test
+            PRIVATE
+                GFX1250_B0_TO_A0_FIXTURE="${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco"
+        )
+        add_dependencies(
+            hsa_hotswap_rocjitsu_unit_test
+            probe_relocation_function_table_dispatch_gfx1250
+        )
+    endif()
+    rj_configure_target(hsa_hotswap_rocjitsu_unit_test TEST)
+    gtest_discover_tests(hsa_hotswap_rocjitsu_unit_test)
+endif()
 
 # --- Interposer loader initialization regression tests ---
 

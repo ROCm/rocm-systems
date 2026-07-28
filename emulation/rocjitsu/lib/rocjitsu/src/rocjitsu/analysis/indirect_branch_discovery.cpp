@@ -687,6 +687,12 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   return (inst.flags() & INDIRECT_CALL) != 0 && inst.branch_offset_bytes().has_value();
 }
 
+[[nodiscard]] bool is_recoverable_indirect_consumer(const Instruction &inst) {
+  // Every fixup producer in this pass targets one of these consumer kinds.
+  // Extend this predicate when adding recovery for another terminator.
+  return is_indirect_branch(inst) || ((inst.flags() & INDIRECT_CALL) != 0 && !is_direct_call(inst));
+}
+
 [[nodiscard]] bool has_no_direct_successor(const Instruction &inst) {
   // Indirect branches have no known target until this analysis recovers one.
   // Indirect calls still expose their ordinary fallthrough/return continuation
@@ -1181,6 +1187,15 @@ explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
   return entries;
 }
 
+[[nodiscard]] bool is_analysis_root(size_t block_index, std::span<const uint8_t> external_entries,
+                                    const std::vector<std::vector<size_t>> &predecessors,
+                                    ExternalEntryPolicy entry_policy) {
+  if (external_entries[block_index] != 0)
+    return true;
+  return entry_policy == ExternalEntryPolicy::InferPredecessorless &&
+         predecessors[block_index].empty();
+}
+
 void set_kill_transfer(AnalysisBlock &block, uint16_t pair_lo) {
   // KILL is weaker than SET for the same block: if the final state proves a
   // concrete builder, earlier dirty writes in the block should not downgrade it.
@@ -1524,15 +1539,16 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
 [[nodiscard]] std::vector<LatticeFacts>
 run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
                    std::span<const PendingConsumer> pending_consumers,
-                   std::span<const uint64_t> extra_leaders) {
+                   std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
   // Phase 3: compute block-entry facts to a fixed point.
   //
   // entry[B] = JOIN(exit[P]) for every predecessor P of B.
   //
-  // Blocks with no predecessors keep an empty entry map. Empty does not mean
-  // "known empty set"; it means every pair is at unconstrained kernel-entry
-  // state unless a predecessor later mentions that pair. Consumers interpret a
-  // missing fact as unresolved.
+  // Explicit external entries begin with an empty map. Empty does not mean
+  // "known empty set"; at those entries every pair has an unconstrained
+  // hardware-supplied value unless a predecessor later mentions it. Under the
+  // ExplicitOnly policy, a predecessorless non-entry is instead unreachable
+  // (BOTTOM), so its empty map must not participate in a successor join.
   std::vector<std::vector<size_t>> predecessors(blocks.size());
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     for (size_t successor : blocks[block_index].successors)
@@ -1560,8 +1576,17 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
   // Treating that backedge as unconstrained permanently poisons an otherwise
   // dominated PC builder (the RCCL call-loop shape). Section entry and every
   // caller-provided kernel entry are nevertheless external roots even when
-  // they have structural predecessors. Blocks with no predecessors remain
-  // conservative analysis roots because they may also be externally entered.
+  // they have structural predecessors.
+  //
+  // With ExplicitOnly, do not infer an external entry merely because a block
+  // has no predecessor. BinaryTranslator supplies every descriptor- or
+  // firmware-visible kernel entry, then walks each entry's reachable CFG and
+  // emits shared blocks separately in every kernel-local scope. A callable
+  // helper is either an explicit leader itself or has a direct or recovered
+  // predecessor edge; a predecessorless block after a non-returning instruction
+  // such as s_trap 2 cannot acquire a hidden incoming edge from another kernel
+  // scope. Generic callers without a complete entry list use
+  // InferPredecessorless to preserve conservative multi-function recovery.
   std::vector<bool> reachable(blocks.size(), false);
   // Keep key presence separate from the sparse fact vectors. The dataflow
   // join needs the union of predecessor keys on every worklist visit; caching
@@ -1583,7 +1608,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
     LatticeFacts new_entry;
     std::bitset<REGISTER_SET_MAX_SGPRS> mentioned_pairs;
     const bool new_reachable =
-        external_entries[block_index] != 0 || predecessors[block_index].empty() ||
+        is_analysis_root(block_index, external_entries, predecessors, entry_policy) ||
         std::ranges::any_of(predecessors[block_index],
                             [&](size_t predecessor) { return reachable[predecessor]; });
     if (new_reachable && !predecessors[block_index].empty()) {
@@ -1783,9 +1808,31 @@ struct VectorLaneFlowState {
   return ref;
 }
 
-void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
+// Whether a physical VGPR is callee-saved under the AMDGPU device calling
+// convention (CSR_AMDGPU_VGPRs). The callee-saved VGPRs are interleaved with
+// scratch registers in stripes of eight at a stride of sixteen starting at
+// v40: v40-47, v56-63, v72-79, ... A conforming callee must preserve these
+// across a call, so a PC stashed in one survives an intervening call even
+// though the analysis does not descend into the callee body.
+//
+// TODO: Replace this calling-convention assumption with analysis that proves
+// every reachable callee preserves the stashed physical VGPR before allowing
+// the stash to survive a call. A compiler-generated callee violating the ABI is
+// highly unlikely, but hand-written or otherwise non-conforming code may still
+// do so. See the LLVM AMDGPU User Guide and AMDGPUCallingConv.td.
+//
+// @p phys_vgpr is the resolved physical index, which for gfx1250 VGPR_MSB
+// banking may exceed 255 (bank*256 + selector). The ABI table only defines the
+// convention for v0-255, so a banked register above that range is NOT proven
+// callee-saved and must fail closed rather than be masked down to its selector.
+[[nodiscard]] bool is_callee_saved_vgpr(uint16_t phys_vgpr) {
+  return phys_vgpr >= 40 && phys_vgpr <= 255 && ((phys_vgpr - 40) % 16) < 8;
+}
+
+void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
                                      std::vector<IndirectCallFixup> &recovered,
-                                     std::span<const uint64_t> extra_leaders) {
+                                     std::span<const uint64_t> extra_leaders,
+                                     ExternalEntryPolicy entry_policy) {
   // gfx1250 device functions sometimes keep a small static call set in one
   // VGPR: getpc-built low/high halves are written to fixed lanes, then read
   // back into an SGPR pair before swappc. Track only fixed-lane
@@ -1802,16 +1849,15 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
   // conflicting definition, unknown bank, or overlapping VGPR write therefore
   // still fails closed.
   //
-  // The gfx1250 A0 trap-recovery workaround requires S_SET_VGPR_MSB SIMM16[15:8]
-  // to carry the previous bank state. The architectural bank update remains
-  // SIMM16[7:0], so analysis intentionally ignores the workaround metadata byte.
+  // The gfx1250 A0 profile uses S_SET_VGPR_MSB SIMM16[15:8] for the previous
+  // bank state. The bank update remains SIMM16[7:0], so analysis ignores the
+  // profile metadata byte.
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
   if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
     return;
 
-  const std::vector<AnalysisBlock> blocks = build_analysis_blocks(ctx, extra_leaders);
   if (blocks.empty())
     return;
   const std::vector<uint8_t> external_entries = explicit_external_entries(blocks, extra_leaders);
@@ -1863,10 +1909,12 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
 
       if (facts.call_sdst) {
         // A direct call can clobber any caller-saved VGPR before its
-        // fallthrough continuation executes. The temporary CFG has no
-        // context-sensitive return edge, so no pre-call lane stash is proven
-        // to survive into either successor.
-        state.slots.clear();
+        // fallthrough continuation executes, and the temporary CFG has no
+        // context-sensitive return edge. Drop every stash in a caller-saved
+        // VGPR; a conforming callee must preserve a callee-saved VGPR, so a
+        // stash there survives (see is_callee_saved_vgpr).
+        std::erase_if(state.slots,
+                      [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
       }
 
       if (mnemonic == "v_writelane_b32") {
@@ -1929,9 +1977,12 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
       if (facts.swappc_sdst) {
         // A returning indirect call may execute arbitrary callee code before
         // the fallthrough continuation. Resolve this call from the pre-call
-        // state above, then discard every lane stash before publishing the
-        // block exit so a callee-clobbered value cannot reach the continuation.
-        state.slots.clear();
+        // state above, then drop every stash in a caller-saved VGPR before
+        // publishing the block exit so a callee-clobbered value cannot reach
+        // the continuation. A callee-saved VGPR is preserved by a conforming
+        // callee, so a stash there survives (see is_callee_saved_vgpr).
+        std::erase_if(state.slots,
+                      [](const auto &item) { return !is_callee_saved_vgpr(item.first.vgpr); });
       }
 
       RegisterSet vgpr_defs;
@@ -2015,13 +2066,13 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx,
         new_entry.vgpr_msb_imm = std::nullopt;
     }
 
-    // A block with no direct predecessors is a possible device-function entry.
-    // Section entry and every caller-provided kernel entry are explicit
-    // external entries even when they have structural predecessors. Meet the
-    // corresponding external state with any reachable predecessor: it
-    // contributes no lane stash, and explicit kernel entries begin in bank
-    // zero according to the entry contract.
-    if (predecessors[block_index].empty() || external_entries[block_index] != 0) {
+    // Generic callers conservatively infer predecessorless device-function
+    // entries; callers with a complete entry list leave unlisted blocks at
+    // BOTTOM. Explicit entries remain roots even with structural predecessors.
+    // Meet a root's external state with any reachable predecessor: it
+    // contributes no lane stash, and explicit entries begin in bank zero
+    // according to the entry contract.
+    if (is_analysis_root(block_index, external_entries, predecessors, entry_policy)) {
       new_reachable = true;
       VectorLaneFlowState external_entry;
       if (external_entries[block_index] != 0)
@@ -2165,18 +2216,11 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
   return static_cast<uint16_t>((word >> 16) & 0x7fu);
 }
 
-} // namespace
-
-std::vector<IndirectCallFixup>
-discover_indirect_branch_edges(std::span<const Instruction *const> insts,
-                               std::span<const uint8_t> text, rj_code_arch_t arch,
-                               std::span<const uint64_t> extra_leaders) {
+[[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges_unfiltered(
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
   std::vector<IndirectCallFixup> recovered;
-  if (insts.empty())
-    return recovered;
-
   AnalysisContext ctx = build_context(insts, text, arch);
-  recover_vector_lane_stashed_pcs(ctx, recovered, extra_leaders);
   std::vector<uint64_t> leaders(extra_leaders.begin(), extra_leaders.end());
 
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
@@ -2187,26 +2231,58 @@ discover_indirect_branch_edges(std::span<const Instruction *const> insts,
 
     std::vector<PendingConsumer> pending_consumers;
     std::vector<IndirectCallFixup> iteration_recovered;
+    // Lane-stash recovery consumes the same graph as scalar recovery, including
+    // edges proven in earlier rounds. Keep extra_leaders separate from leaders:
+    // recovered targets become reachable through those edges, not by being
+    // promoted to external roots.
+    recover_vector_lane_stashed_pcs(ctx, blocks, iteration_recovered, extra_leaders, entry_policy);
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
       scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered);
     recover_signed_delta_templates(ctx, blocks, iteration_recovered);
 
-    size_t unresolved_consumers = 0;
     if (!pending_consumers.empty()) {
-      const auto entry_facts = run_block_dataflow(blocks, pending_consumers, extra_leaders);
-      unresolved_consumers = classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
-                                                        iteration_recovered);
+      const auto entry_facts =
+          run_block_dataflow(blocks, pending_consumers, extra_leaders, entry_policy);
+      (void)classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
+                                       iteration_recovered);
     }
 
     bool changed = false;
     for (const IndirectCallFixup &fixup : iteration_recovered)
       changed |= append_unique(recovered, fixup);
-    if (!changed || unresolved_consumers == 0)
+    if (!changed)
       break;
   }
 
   std::ranges::sort(recovered, {}, &IndirectCallFixup::source_call_offset);
   return recovered;
+}
+
+} // namespace
+
+std::vector<IndirectCallFixup> discover_indirect_branch_edges(
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy) {
+  if (insts.empty())
+    return {};
+
+  // Every recoverable edge ends at an indirect branch/call consumer. Most
+  // generated kernels have none, so avoid building the auxiliary CFG and
+  // running its dataflow passes when no fixup can possibly be produced.
+  const bool has_indirect_consumer = std::ranges::any_of(
+      insts, [](const Instruction *inst) { return is_recoverable_indirect_consumer(*inst); });
+  if (!has_indirect_consumer) {
+#ifndef NDEBUG
+    // Keep the cheap predicate coupled to every fixup producer. A future
+    // recovery path for another consumer kind must extend the predicate above.
+    const auto unfiltered =
+        discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy);
+    assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
+#endif
+    return {};
+  }
+
+  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy);
 }
 
 } // namespace rocjitsu
