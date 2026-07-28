@@ -167,6 +167,11 @@ ncclResult_t symTeamObtainUcLe(struct ncclComm* comm, struct ncclDevrTeam* t, st
 
 ncclResult_t symTeamObtainMcLe(struct ncclComm* comm, struct ncclDevrTeam* t, struct ncclDevrState* devr,
                                bool* needBarrier) {
+  if (!comm->nvlsSupport) {
+    WARN("CFT multicast support requested, but NVLS is disabled or unsupported.");
+    return ncclInvalidArgument;
+  }
+
   ncclResult_t ret = ncclSuccess;
   ncclCftLeId leMcId = NCCL_LE_ID_INVALID;
   int bindCount = 0, releaseCount = 0;

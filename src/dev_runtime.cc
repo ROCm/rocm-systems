@@ -706,13 +706,15 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
       }
       ret = ncclSuccess;
 
-      NOWARN(ret = symTeamObtain(comm, mcTeam, /*multimem=*/false, /*uc=*/false, /*mc=*/true, nullptr, nullptr),
-             NCCL_INIT);
-      if (ret != ncclSuccess && comm->config.hostCftMode == ncclHostCftEnable) {
-        WARN("Failed to obtain the MC team");
-        goto fail_mem_space_teams;
+      if (comm->nvlsSupport) {
+        NOWARN(ret = symTeamObtain(comm, mcTeam, /*multimem=*/false, /*uc=*/false, /*mc=*/true, nullptr, nullptr),
+               NCCL_INIT);
+        if (ret != ncclSuccess && comm->config.hostCftMode == ncclHostCftEnable) {
+          WARN("Failed to obtain the MC team");
+          goto fail_mem_space_teams;
+        }
+        ret = ncclSuccess;
       }
-      ret = ncclSuccess;
     }
   }
 
@@ -1355,7 +1357,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
     if (tmCft != nullptr) outDevComm->ucLeId = tmCft->ucLeId;
   }
 
-  if (comm->gpuCftSupport && (reqs->cftCaps & NCCL_CFT_MULTIMEM)) {
+  if (comm->gpuCftSupport && comm->nvlsSupport && (reqs->cftCaps & NCCL_CFT_MULTIMEM)) {
     // needBarrier = nullptr, the bootstrapBarrier below will barrier regardless
     struct ncclDevrTeam* tmCft = nullptr;
     NCCLCHECKGOTO(symTeamObtain(comm, mcTeam, /*multimem=*/false, /*uc=*/false, /*mc=*/true, &tmCft, nullptr), ret,
@@ -1815,6 +1817,11 @@ ncclResult_t ncclDevCommCreate(ncclComm_t comm, struct ncclDevCommRequirements c
       ret = ncclInvalidArgument;
       goto fail;
     }
+    if (!comm->nvlsSupport && (createJob->reqs->cftCaps & NCCL_CFT_MULTIMEM)) {
+      WARN("User requested CFT multicast capability, but NVLS is disabled or unsupported.");
+      ret = ncclInvalidArgument;
+      goto fail;
+    }
     // ncclMgmtTaskEnqueue takes ownership of createJob (enqueues on success, frees on
     // failure), so drop our reference before checking the result to avoid a double free.
     ret =
@@ -1831,6 +1838,11 @@ ncclResult_t ncclDevCommCreate(ncclComm_t comm, struct ncclDevCommRequirements c
     if (comm->gpuCftSupport == 0 && task->reqs->cftCaps != NCCL_CFT_NONE) {
       WARN("User requested CFT capabilities (cftCaps=0x%x), but not all ranks in the communicator support CFT.",
            task->reqs->cftCaps);
+      ret = ncclInvalidArgument;
+      goto fail;
+    }
+    if (!comm->nvlsSupport && (task->reqs->cftCaps & NCCL_CFT_MULTIMEM)) {
+      WARN("User requested CFT multicast capability, but NVLS is disabled or unsupported.");
       ret = ncclInvalidArgument;
       goto fail;
     }
