@@ -51,14 +51,14 @@ typedef struct queue_desc {
 } __attribute__((__aligned__(64))) queue_desc_t;
 
 class QueueDescProxy {
-  using ProxyT = DeviceProxy<HIPDefaultFinegrainedAllocator, queue_desc_t>;
+  using ProxyT = DeviceProxy<queue_desc_t>;
 
  public:
   QueueDescProxy() = default;
 
   QueueDescProxy(size_t max_queues,
-                 [[maybe_unused]] const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator())
-    : proxy_{max_queues}, max_queues_{max_queues} {
+                 const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator())
+    : alloc_{alloc}, proxy_{max_queues, alloc_}, max_queues_{max_queues} {
 
     auto *queue_descs{proxy_.get()};
     for (size_t i{0}; i < max_queues_; i++) {
@@ -78,6 +78,7 @@ class QueueDescProxy {
   __host__ __device__ queue_desc_t *get() { return proxy_.get(); }
 
  private:
+  HIPDefaultFinegrainedAllocator alloc_{};
   ProxyT proxy_{};
 
   size_t max_queues_{};

@@ -56,9 +56,8 @@ class ROHostContext;
  * the host (which is an inversion of the normal behavior).
  */
 class ROBackend : public Backend {
-  using RetBufferProxyT = DeviceProxy<HIPAllocator, uint64_t>;
-  using StatusProxyT =
-          DeviceProxy<HIPDefaultFinegrainedAllocator, char>;
+  using RetBufferProxyT = DeviceProxy<uint64_t>;
+  using StatusProxyT = DeviceProxy<char>;
 
  public:
   /**
@@ -347,6 +346,7 @@ class ROBackend : public Backend {
   /**
    * @brief Return buffer for rocshmem_g API
    */
+  HIPAllocator ret_buffer_alloc_{};
   RetBufferProxyT g_ret_buffer_;
   RetBufferProxyT g_ret_buffer_default_ctx_;
 
@@ -363,6 +363,7 @@ class ROBackend : public Backend {
    * operation completes. The GPU then resets status back to zero. There is
    * a separate status variable for each work-item in a RO Context
    */
+  HIPDefaultFinegrainedAllocator status_alloc_{};
   StatusProxyT status_;
   StatusProxyT status_default_ctx_;
 };

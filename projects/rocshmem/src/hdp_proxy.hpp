@@ -32,15 +32,15 @@
 namespace rocshmem {
 
 class HdpProxy {
-  using HdpProxyT = DeviceProxy<HIPHostAllocator, HdpPolicy>;
+  using HdpProxyT = DeviceProxy<HdpPolicy>;
 
  public:
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  HdpProxy([[maybe_unused]] const HIPHostAllocator& alloc = HIPHostAllocator(),
+  HdpProxy(const HIPHostAllocator& alloc = HIPHostAllocator(),
            size_t num_elems = 1)
-    : proxy_{num_elems} {
+    : alloc_{alloc}, proxy_{num_elems, alloc_} {
     new (proxy_.get()) HdpPolicy();
   }
 
@@ -66,6 +66,7 @@ class HdpProxy {
   __host__ __device__ HdpPolicy* get() { return proxy_.get(); }
 
  private:
+  HIPHostAllocator alloc_{};
   /*
    * @brief Memory managed by the lifetime of this object
    */
