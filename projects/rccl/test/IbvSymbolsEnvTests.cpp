@@ -4,10 +4,16 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE  // dlinfo()
+#endif
+
 #include <gtest/gtest.h>
 
 #include <dlfcn.h>
+#include <link.h>
 #include <cstdlib>
+#include <string>
 
 #include "ibvsymbols.h"
 
@@ -17,7 +23,10 @@
 // behavior as RCCL's built-in default env plugin
 // (src/plugin/env/env_v1.cc: ncclEnvGetEnv -> std::getenv) so the unit under
 // test reads the process environment directly, without linking the env-plugin
-// machinery.
+// machinery. Keep it hidden so it only satisfies the locally-compiled
+// ibvsymbols.cc reference and never interposes librccl's own ncclGetEnv in
+// Debug builds (where librccl is compiled with -fvisibility=default).
+__attribute__((visibility("hidden")))
 const char* ncclGetEnv(const char* name) { return std::getenv(name); }
 
 namespace RcclUnitTesting
@@ -60,16 +69,31 @@ namespace RcclUnitTesting
       std::string saved_;
     };
 
+    // Resolves the absolute path of the loadable libibverbs on this host, or an
+    // empty string if neither soname can be opened. Using the resolved absolute
+    // path (rather than a bare soname) lets EnvOverrideValidSoname prove the env
+    // slot was actually used: buildIbvSymbols' hardcoded fallbacks only try the
+    // bare "libibverbs.so[.1]" names, so a load from an absolute path can only
+    // have come through NCCL_IBVERBS_LIB.
+    std::string LibibverbsPath()
+    {
+      for (const char* soname : {"libibverbs.so.1", "libibverbs.so"})
+      {
+        void* h = dlopen(soname, RTLD_NOW | RTLD_LOCAL);
+        if (!h) continue;
+        std::string path;
+        struct link_map* lm = nullptr;
+        if (dlinfo(h, RTLD_DI_LINKMAP, &lm) == 0 && lm && lm->l_name && lm->l_name[0])
+          path = lm->l_name;
+        dlclose(h);
+        if (!path.empty()) return path;
+      }
+      return {};
+    }
+
     // True when libibverbs is installed and loadable on this host. When false,
     // every case below is a hardware/environment SKIP rather than a failure.
-    bool LibibverbsAvailable()
-    {
-      void* h = dlopen("libibverbs.so.1", RTLD_NOW | RTLD_LOCAL);
-      if (!h) h = dlopen("libibverbs.so", RTLD_NOW | RTLD_LOCAL);
-      if (!h) return false;
-      dlclose(h);
-      return true;
-    }
+    bool LibibverbsAvailable() { return !LibibverbsPath().empty(); }
 
     // A successful buildIbvSymbols() populates the whole function-pointer
     // table; spot-check representative entries that every provider exports.
@@ -96,15 +120,18 @@ namespace RcclUnitTesting
     ExpectSymbolsLoaded(symbols);
   }
 
-  // Env set to a valid soname: the override slot (index 0) is taken first and
-  // dlopen succeeds, so the hardcoded fallbacks are never reached.
+  // Env set to the resolved absolute path: the override slot (index 0) is taken
+  // first and dlopen succeeds, so the hardcoded fallbacks are never reached. An
+  // absolute path can only load via the env slot (the fallbacks try bare
+  // sonames only), so success here proves the override was honored.
   TEST(IbvSymbolsEnv, EnvOverrideValidSoname)
   {
-    if (!LibibverbsAvailable())
+    std::string libPath = LibibverbsPath();
+    if (libPath.empty())
       GTEST_SKIP() << "libibverbs not installed on this host";
 
     ScopedEnv env;
-    env.set("libibverbs.so.1");
+    env.set(libPath.c_str());
 
     ncclIbvSymbols symbols = {};
     ASSERT_EQ(buildIbvSymbols(&symbols), ncclSuccess);
