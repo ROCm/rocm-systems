@@ -5682,23 +5682,8 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
   info->pcie_metric.pcie_replay_count = metric_info.pcie_replay_count_acc;
   info->pcie_metric.pcie_l0_to_recovery_count = metric_info.pcie_l0_to_recov_count_acc;
   info->pcie_metric.pcie_replay_roll_over_count = metric_info.pcie_replay_rover_count_acc;
-  /**
-   * pcie_metric.pcie_nak_received_count: (uint64_t)
-   * metric_info.pcie_nak_rcvd_count_acc: (uint32_t)
-   */
-  info->pcie_metric.pcie_nak_received_count =
-      translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_nak_received_count)>(
-          metric_info.pcie_nak_rcvd_count_acc, (metric_info.pcie_nak_rcvd_count_acc));
-  /**
-   * pcie_metric.pcie_nak_sent_count:     (uint64_t)
-   * metric_info.pcie_nak_sent_count_acc: (uint32_t)
-   */
-  info->pcie_metric.pcie_nak_sent_count =
-      translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_nak_sent_count)>(
-          metric_info.pcie_nak_sent_count_acc, (metric_info.pcie_nak_sent_count_acc));
-  /**
-   * pcie_metric.pcie_lc_perf_other_end_recovery: (uint32_t)
-   */
+  info->pcie_metric.pcie_nak_received_count = metric_info.pcie_nak_rcvd_count_acc;
+  info->pcie_metric.pcie_nak_sent_count = metric_info.pcie_nak_sent_count_acc;
   info->pcie_metric.pcie_lc_perf_other_end_recovery_count = translate_umax_or_assign_value<
       decltype(info->pcie_metric.pcie_lc_perf_other_end_recovery_count)>(
       metric_info.pcie_lc_perf_other_end_recovery, (metric_info.pcie_lc_perf_other_end_recovery));

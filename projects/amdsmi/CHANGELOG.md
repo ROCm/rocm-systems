@@ -17,6 +17,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
+- **Widened five `amdsmi_gpu_metrics_t` accumulator counters from 32-bit to 64-bit** (breaking).  
+  - `gfx_activity_acc`, `mem_activity_acc`, `pcie_nak_sent_count_acc`, `pcie_nak_rcvd_count_acc`, and `pcie_lc_perf_other_end_recovery` are now `uint64_t` to match the amdgpu pmfw metrics header. Recompile callers that read these fields; the struct layout and field offsets have changed.
+
 ### Fixed
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.
