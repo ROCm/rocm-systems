@@ -708,7 +708,7 @@ static HSAKMT_STATUS hsaKmtGetCoreDeviceInfoCtx(HsaKFDContext *ctx,
 	/* SIMD/compute topology */
 	device_info->simd_count = props.NumFComputeCores;
 	device_info->max_waves_per_simd = props.MaxWavesPerSIMD;
-	device_info->array_count = props.NumArrays * props.NumShaderBanks;
+	device_info->array_count = (props.NumArrays * props.NumShaderBanks) / props.NumXcc;
 	device_info->simd_arrays_per_engine = props.NumArrays;
 	device_info->num_xcc = props.NumXcc;
 

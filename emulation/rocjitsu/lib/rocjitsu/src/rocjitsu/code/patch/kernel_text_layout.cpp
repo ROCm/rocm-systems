@@ -27,11 +27,12 @@ constexpr uint16_t kDirectBranchIslandPoolSlots = 16;
 ///
 /// @details The largest current gfx1250 semantic replacement grows a 16-byte
 /// Scale16 WMMA to at most 272 bytes (17x, including VGPR-MSB mode changes).
-/// Seven KiB of maximally dense expansion therefore remains below the 128 KiB
-/// signed SOPP reach, while genuinely close branches keep compact slots. The
-/// production NVFP4 branch which exposed this limit spans about 15 KiB and is
-/// conservatively assigned a long window by this threshold.
-constexpr uint64_t kLongDirectBranchSourceDistanceThresholdBytes = 7 * 1024;
+/// Four KiB of maximally dense expansion remains comfortably below the 128 KiB
+/// signed SOPP reach after accounting for branch windows and island pools,
+/// while genuinely close branches keep compact slots. The production NVFP4
+/// branch which exposed this limit spans 5,568 bytes and is conservatively
+/// assigned a long window by this threshold.
+constexpr uint64_t kLongDirectBranchSourceDistanceThresholdBytes = 4 * 1024;
 } // namespace
 
 [[nodiscard]] TextRelocationResult relocation_ok() { return {}; }
@@ -402,6 +403,8 @@ uint64_t direct_branch_patch_window_bytes(const Instruction &inst, uint64_t sour
   const bool speculate_long_branch =
       absolute_branch_distance(source_inst_offset, source_target_offset) >
       kLongDirectBranchSourceDistanceThresholdBytes;
+  const bool invertible_conditional =
+      (inst.flags() & COND_BRANCH) != 0 && conditional_branch_can_invert(inst.mnemonic());
   if (can_use_long_direct_branches && speculate_long_branch)
     return kMaxDirectBranchTransferWords * sizeof(uint32_t);
 
@@ -410,15 +413,10 @@ uint64_t direct_branch_patch_window_bytes(const Instruction &inst, uint64_t sour
   // branch into the island chain. Keep this policy beside the actual patcher
   // support check so the translator only reserves windows the patch layer owns.
   //
-  // Known limitation (fail-closed, not a miscompile): a NEAR conditional branch
-  // gets only this two-word window. If translation expansion later pushes it out
-  // of SOPP range and the island pool cannot reach it, the long-branch sequence
-  // for a conditional (invert + getpc + builder + setpc, up to ~7 words) will not
-  // fit and append_long_direct_branch_sequence reports relocation_error, so the
-  // kernel is skipped rather than mis-branched. Widening this window for
-  // invertible conditionals when a long-branch SGPR is available would lift the
-  // limitation for large kernels; today the conservative window is kept.
-  if ((inst.flags() & COND_BRANCH) != 0 && conditional_branch_can_invert(inst.mnemonic()))
+  // A source-near branch can still move out of SOPP range when many instructions
+  // in the intervening region expand. The long-window threshold above leaves
+  // enough headroom for the largest current Scale16 WMMA expansion.
+  if (invertible_conditional)
     return 2 * sizeof(uint32_t);
 
   return inst.size();

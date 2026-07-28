@@ -78,6 +78,10 @@ void dfs_reverse_post_order(const BasicBlock &start,
 
 } // namespace
 
+LivenessAnalysis::LivenessAnalysis(UnavailableTag) : available_(false) {}
+
+LivenessAnalysis LivenessAnalysis::unavailable() { return LivenessAnalysis(UnavailableTag{}); }
+
 std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   std::vector<const BasicBlock *> postorder;
   std::unordered_set<const BasicBlock *> allowed;
@@ -109,6 +113,11 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOpti
 LivenessAnalysis::~LivenessAnalysis() = default;
 LivenessAnalysis::LivenessAnalysis(LivenessAnalysis &&) noexcept = default;
 LivenessAnalysis &LivenessAnalysis::operator=(LivenessAnalysis &&) noexcept = default;
+
+void LivenessAnalysis::require_available() const {
+  if (!available_)
+    throw std::logic_error("liveness query from a rule marked liveness-free");
+}
 
 void LivenessAnalysis::analyze(KernelBlockScope blocks, const LivenessAnalysisOptions &options,
                                std::span<const ScopedCfgEdge> extra_edges) {
@@ -256,6 +265,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, const LivenessAnalysisOp
 }
 
 const BlockLiveness &LivenessAnalysis::block_liveness(const BasicBlock &block) const {
+  require_available();
   auto it = block_index_.find(&block);
   if (it == block_index_.end())
     throw std::out_of_range("block_liveness: block was not part of this analysis");
@@ -263,6 +273,7 @@ const BlockLiveness &LivenessAnalysis::block_liveness(const BasicBlock &block) c
 }
 
 const RegisterSet &LivenessAnalysis::live_before(const Instruction &inst) const {
+  require_available();
   auto it = live_before_.find(&inst);
   return it != live_before_.end() ? it->second : empty_;
 }
@@ -273,6 +284,7 @@ bool LivenessAnalysis::is_live_before(const Instruction &inst, RegisterRef ref) 
 
 std::optional<uint8_t> LivenessAnalysis::vgpr_msb_bank_before(const Instruction &inst,
                                                               amdgpu::VgprMsbRole role) const {
+  require_available();
   if (gfx1250_vgpr_msb_ == nullptr)
     return std::nullopt;
   return gfx1250_vgpr_msb_->bank_before(inst, role);
@@ -281,6 +293,7 @@ std::optional<uint8_t> LivenessAnalysis::vgpr_msb_bank_before(const Instruction 
 std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst, uint16_t count,
                                                         uint16_t search_start,
                                                         uint16_t base_alignment) const {
+  require_available();
   assert(count > 0 && "Must request at least one register");
   assert(base_alignment > 0 && "Register tuple alignment must be non-zero");
   auto live_it = live_before_.find(inst);
@@ -299,6 +312,7 @@ std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst,
 
 std::optional<uint16_t> LivenessAnalysis::find_free_sgpr_pair(const Instruction *inst,
                                                               uint16_t search_start) const {
+  require_available();
   auto live_it = live_before_.find(inst);
   if (live_it == live_before_.end())
     return std::nullopt;
@@ -316,6 +330,7 @@ std::optional<uint16_t> LivenessAnalysis::find_free_sgpr_pair(const Instruction 
 
 std::optional<uint16_t> LivenessAnalysis::find_free_sgpr(const Instruction *inst,
                                                          uint16_t search_start) const {
+  require_available();
   auto live_it = live_before_.find(inst);
   if (live_it == live_before_.end())
     return std::nullopt;

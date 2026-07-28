@@ -402,6 +402,7 @@ inline uint32_t sdwa_clamp_f32(uint32_t result) {
 }
 
 } // namespace sdwa
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
