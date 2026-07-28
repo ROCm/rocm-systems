@@ -32,7 +32,7 @@ foreach(_XNACK on off)
         DEPENDS transpose
         TIMEOUT 45
         DISABLED ON
-        LABELS "integration-tests;multi-gpu"
+        LABELS "integration-tests;exclusive-gpu"
         ENVIRONMENT "${kfd-xnack-${_XNACK}-env}"
         FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         FIXTURES_SETUP rocprofv3-test-kfd-xnack-${_XNACK})
@@ -46,7 +46,7 @@ foreach(_XNACK on off)
              ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace/out_results.json
         TIMEOUT 45
         DISABLED ON
-        LABELS "integration-tests;multi-gpu"
+        LABELS "integration-tests;exclusive-gpu"
         FAIL_REGULAR_EXPRESSION "AssertionError"
         FIXTURES_REQUIRED rocprofv3-test-kfd-xnack-${_XNACK})
 endforeach()

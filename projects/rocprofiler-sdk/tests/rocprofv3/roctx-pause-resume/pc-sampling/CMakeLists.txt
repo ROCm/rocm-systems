@@ -49,7 +49,7 @@ rocprofiler_add_integration_execute_test(
         --log-level env -- $<TARGET_FILE:roctx-pause-resume>
     DEPENDS roctx-pause-resume
     TIMEOUT 45
-    LABELS "integration-tests;pc-sampling;pause-resume"
+    LABELS "integration-tests;pc-sampling;pause-resume;exclusive-gpu"
     ENVIRONMENT "${roctx-pause-resume-env}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     DISABLED "${IS_PC_SAMPLING_DISABLED}"
@@ -63,7 +63,7 @@ rocprofiler_add_integration_validate_test(
     ARGS --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/roctx-pause-resume-pc-sampling/out_results.json
     TIMEOUT 45
-    LABELS "integration-tests;pc-sampling;pause-resume"
+    LABELS "integration-tests;pc-sampling;pause-resume;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-pc-sampling
     FAIL_REGULAR_EXPRESSION "AssertionError"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"

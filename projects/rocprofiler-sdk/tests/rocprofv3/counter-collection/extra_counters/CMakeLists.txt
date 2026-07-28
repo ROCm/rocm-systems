@@ -22,7 +22,7 @@ rocprofiler_add_integration_execute_test(
         csv -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-txt-pmc1-extra-counters)
 
@@ -34,5 +34,5 @@ rocprofiler_add_integration_validate_test(
     ARGS --input
          ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_1_extra/pmc_1/pmc1_counter_collection.csv
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-txt-pmc1-extra-counters)

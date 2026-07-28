@@ -24,7 +24,7 @@ rocprofiler_add_integration_execute_test(
         out_json -f csv -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-json-pmc1)
 
@@ -42,7 +42,7 @@ rocprofiler_add_integration_validate_test(
          --counter-input
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_json_counter_collection.csv
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-json-pmc1)
 
 # YAML input test
@@ -54,7 +54,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-yaml-pmc1)
 
@@ -72,5 +72,5 @@ rocprofiler_add_integration_validate_test(
          --counter-input
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_yaml_counter_collection.csv
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-yaml-pmc1)

@@ -22,7 +22,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS vector-ops
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-txt-pmc2)
 
@@ -40,5 +40,5 @@ rocprofiler_add_integration_validate_test(
          --counter-input
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_counter_collection.csv
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-txt-pmc2)

@@ -45,7 +45,8 @@ rocprofiler_add_integration_execute_test(
         --log-level info -- $<TARGET_FILE:roctx-pause-resume>
     DEPENDS roctx-pause-resume
     TIMEOUT 120
-    LABELS "integration-tests;pause-resume;counter-collection;selected-regions"
+    LABELS
+        "integration-tests;pause-resume;counter-collection;selected-regions;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-pmc-selected-regions)
 
@@ -56,6 +57,7 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/pmc-sel-reg-out/out_results.json
     TIMEOUT 120
-    LABELS "integration-tests;pause-resume;counter-collection;selected-regions"
+    LABELS
+        "integration-tests;pause-resume;counter-collection;selected-regions;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-pmc-selected-regions
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

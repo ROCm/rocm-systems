@@ -15,7 +15,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-single-test
     TARGET thread-trace-test-app
     TIMEOUT 10
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-single-tool>")
 
 # Multi dispatch test
@@ -23,7 +23,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-multi-test
     TARGET thread-trace-test-app
     TIMEOUT 10
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-multi-tool>")
 
 # Agent profiling test
@@ -31,7 +31,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-agent-test
     TARGET thread-trace-test-app
     TIMEOUT 10
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>")
 
 # Start before hsa_init(): verifies the request is cached and replayed once HSA registers.
@@ -39,7 +39,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-agent-before-hsa-init-test
     TARGET thread-trace-test-app
     TIMEOUT 10
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
     ENVIRONMENT "ATT_START_BEFORE_HSA_INIT=1")
 
@@ -48,7 +48,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-agent-start-stop-before-hsa-init-test
     TARGET thread-trace-test-app
     TIMEOUT 10
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
     ENVIRONMENT "ATT_START_BEFORE_HSA_INIT=1;ATT_STOP_BEFORE_HSA_INIT=1")
 
@@ -69,7 +69,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-large-buffer-test
     TARGET thread-trace-test-app
     TIMEOUT 30
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
     ENVIRONMENT "ATT_LARGE_BUFFER_TEST=1"
     DISABLED ${IS_DISABLED})
@@ -79,6 +79,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-extra-args
     TARGET thread-trace-test-app
     TIMEOUT 10
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
     ENVIRONMENT "ATT_NODETAIL=1"
     DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
@@ -91,6 +92,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-consistency-test
     TARGET thread-trace-test-app
     TIMEOUT 120
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
@@ -100,6 +102,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-hammer-test
     TARGET thread-trace-test-app
     TIMEOUT 240
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=0;ATT_SLOW_CALLBACK=0"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
@@ -109,6 +112,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-slow-test
     TARGET thread-trace-test-app
     TIMEOUT 120
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
@@ -119,6 +123,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-no-pause-test
     TARGET thread-trace-test-app
     TIMEOUT 120
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;EXECUTE_PAUSE=0"
     DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS} OR ${TRIPLE_BUFFER_DISABLED})
@@ -128,6 +133,7 @@ rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-multiple-cmds-test
     TARGET thread-trace-test-app
     TIMEOUT 120
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;STARTSTOP=1;ATT_NODETAIL=1"
     DISABLED ${TRIPLE_BUFFER_DISABLED})

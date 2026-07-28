@@ -23,7 +23,7 @@ rocprofiler_add_integration_execute_test(
         JSON PFTRACE CSV -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 90
-    LABELS "integration-tests;application-replay"
+    LABELS "integration-tests;application-replay;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection)
 
@@ -44,7 +44,7 @@ foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
              --counter-input
              ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_counter_collection.csv
         TIMEOUT 45
-        LABELS "integration-tests;application-replay"
+        LABELS "integration-tests;application-replay;exclusive-gpu"
         FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection)
 endforeach()
 
@@ -62,6 +62,7 @@ foreach(_GROUP "single" "multiple")
             2 50 5
         DEPENDS transpose
         TIMEOUT 45
+        LABELS "integration-tests;exclusive-gpu"
         PRELOAD "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
 
@@ -84,6 +85,6 @@ foreach(_GROUP "single" "multiple")
              --counter-input
              ${_TEST_OUTPUT_PREFIX}_counter_collection.csv
         TIMEOUT 45
-        LABELS "integration-tests"
+        LABELS "integration-tests;exclusive-gpu"
         FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
 endforeach()

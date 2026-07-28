@@ -31,7 +31,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:transpose> ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
     DEPENDS transpose
     TIMEOUT 90
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
@@ -52,7 +52,7 @@ rocprofiler_add_integration_validate_test(
          --input-agent-info-csv
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_agent_info.csv
     TIMEOUT 60
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-cmd
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
@@ -67,7 +67,7 @@ rocprofiler_add_integration_execute_test(
         ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
     DEPENDS transpose
     TIMEOUT 90
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
@@ -88,7 +88,7 @@ rocprofiler_add_integration_validate_test(
          --input-agent-info-csv
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_agent_info.csv
     TIMEOUT 60
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-json
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
@@ -102,7 +102,7 @@ rocprofiler_add_integration_execute_test(
         -- $<TARGET_FILE:transpose> ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
     DEPENDS transpose
     TIMEOUT 90
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
@@ -123,7 +123,7 @@ rocprofiler_add_integration_validate_test(
          --input-agent-info-csv
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_agent_info.csv
     TIMEOUT 60
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-yaml
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"

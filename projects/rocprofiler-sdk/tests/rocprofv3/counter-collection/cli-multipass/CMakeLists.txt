@@ -44,7 +44,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-cli-multipass)
 
@@ -55,5 +55,5 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-cli-multipass)

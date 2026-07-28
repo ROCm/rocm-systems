@@ -21,7 +21,7 @@ rocprofiler_add_integration_execute_test(
         -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 120
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-json)
 
@@ -48,7 +48,7 @@ rocprofiler_add_integration_validate_test(
          --input-json-pass4
          ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_4/out_results.json
     TIMEOUT 120
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-json)
 
 rocprofiler_add_integration_execute_test(
@@ -60,7 +60,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 120
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-cmd)
 
@@ -73,7 +73,7 @@ rocprofiler_add_integration_validate_test(
     ARGS --input-csv-pmc1
          ${CMAKE_CURRENT_BINARY_DIR}/cmd_input/pmc_1/out_counter_collection.csv
     TIMEOUT 120
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-cmd)
 
 rocprofiler_add_integration_execute_test(
@@ -84,7 +84,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 120
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-input-yaml)
 
@@ -111,5 +111,5 @@ rocprofiler_add_integration_validate_test(
          --input-json-pass4
          ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_4/out_results.json
     TIMEOUT 120
-    LABELS "integration-tests" FIXTURES
-           rocprofv3-test-counter-collection-kernel-filtering-input-yaml)
+    LABELS "integration-tests;exclusive-gpu"
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-yaml)

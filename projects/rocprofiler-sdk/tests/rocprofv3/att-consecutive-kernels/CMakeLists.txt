@@ -74,7 +74,7 @@ rocprofiler_add_integration_execute_test(
         --log-level env -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     DISABLED ${IS_DISABLED}
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-att-consecutive-kernels)
@@ -85,7 +85,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 60
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-att-consecutive-kernels
     DISABLED ${IS_DISABLED}
     ARGS --csv-directory-input ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/

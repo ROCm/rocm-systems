@@ -141,7 +141,7 @@ rocprofiler_add_integration_execute_test(
             $<TARGET_FILE:rocprofiler-sdk-c-tool>
     DEPENDS rocattach-parallel-attach-test
     TIMEOUT 45
-    LABELS "attachment"
+    LABELS "attachment;exclusive-gpu"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
@@ -194,7 +194,7 @@ rocprofiler_add_integration_execute_test(
             $<TARGET_FILE:rocprofiler-sdk-c-tool> --send-signal
     DEPENDS rocattach-parallel-attach-test
     TIMEOUT 45
-    LABELS "attachment"
+    LABELS "attachment;exclusive-gpu"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
@@ -214,7 +214,7 @@ rocprofiler_add_integration_execute_test(
     TARGET rocattach-attach-tree-test
     ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
     TIMEOUT 45
-    LABELS "attachment"
+    LABELS "attachment;exclusive-gpu"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"

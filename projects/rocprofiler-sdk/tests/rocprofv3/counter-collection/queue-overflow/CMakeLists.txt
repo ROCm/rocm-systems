@@ -33,7 +33,7 @@ rocprofiler_add_integration_execute_test(
         queue_overflow --output-format csv json -- $<TARGET_FILE:multistream>
     DEPENDS multistream
     TIMEOUT 300
-    LABELS "integration-tests;counter-collection"
+    LABELS "integration-tests;counter-collection;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-queue-overflow)
 
@@ -47,5 +47,5 @@ rocprofiler_add_integration_validate_test(
          --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_queue_overflow/queue_overflow_results.json
     TIMEOUT 120
-    LABELS "integration-tests;counter-collection"
+    LABELS "integration-tests;counter-collection;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-queue-overflow)

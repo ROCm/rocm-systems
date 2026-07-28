@@ -22,7 +22,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/range_filter -- $<TARGET_FILE:transpose> 1 15
     DEPENDS transpose
     TIMEOUT 120
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-range-filter)
 
@@ -40,5 +40,5 @@ rocprofiler_add_integration_validate_test(
          --input-json-pass3
          ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_3/out_results.json
     TIMEOUT 120
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-range-filter)

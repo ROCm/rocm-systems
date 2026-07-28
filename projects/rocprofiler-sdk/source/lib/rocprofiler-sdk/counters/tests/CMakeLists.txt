@@ -100,6 +100,19 @@ rocprofiler_add_unit_test(
         "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
     )
 
+set_tests_properties(
+    unit.core.check_packet_generation
+    unit.core.test_profile_incremental
+    unit.dimension.block_dim_test
+    unit.device_counting_service_test.sync_counters
+    unit.device_counting_service_test.async_counters
+    unit.device_counting_service_test.sync_grbm_verify
+    unit.device_counting_service_test.sync_gpu_util_verify
+    unit.device_counting_service_test.sync_sq_waves_verify
+    unit.device_counting_service_test.sync_sq_waves_verify_non_intercept
+    unit.device_counting_service_test.raw_sq_waves_verify
+    PROPERTIES LABELS "unittests;exclusive-gpu")
+
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 
 add_executable(consumer-test)

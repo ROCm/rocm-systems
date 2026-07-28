@@ -25,7 +25,7 @@ rocprofiler_add_integration_execute_test(
         -- $<TARGET_FILE:exec-mask-manipulation>
     DEPENDS exec-mask-manipulation
     TIMEOUT 90
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
@@ -44,7 +44,7 @@ rocprofiler_add_integration_validate_test(
          --all-sampled
          False
     TIMEOUT 60
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
@@ -59,7 +59,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:exec-mask-manipulation>
     DEPENDS exec-mask-manipulation
     TIMEOUT 90
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json
@@ -78,7 +78,7 @@ rocprofiler_add_integration_validate_test(
          --all-sampled
          False
     TIMEOUT 60
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
@@ -92,7 +92,7 @@ rocprofiler_add_integration_execute_test(
         json -- $<TARGET_FILE:exec-mask-manipulation>
     DEPENDS exec-mask-manipulation
     TIMEOUT 90
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml
@@ -111,7 +111,7 @@ rocprofiler_add_integration_validate_test(
          --all-sampled
          False
     TIMEOUT 60
-    LABELS "integration-tests;pc-sampling"
+    LABELS "integration-tests;pc-sampling;exclusive-gpu"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"

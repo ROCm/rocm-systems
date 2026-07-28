@@ -44,7 +44,7 @@ rocprofiler_add_integration_execute_test(
         -T -d ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script -o pmc1 --output-format
         csv -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     TIMEOUT 45
     PRELOAD "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
@@ -94,7 +94,7 @@ foreach(i RANGE 0 ${convert_test_length})
         COMMAND ${conversion_cmd}
         DEPENDS rocprofiler-sdk::convert-counters-collection-format
         TIMEOUT 45
-        LABELS "integration-tests"
+        LABELS "integration-tests;exclusive-gpu"
         PRELOAD "${PRELOAD_ENV}"
         FIXTURES_REQUIRED rocprofv3-test-conversion-script
         FIXTURES_SETUP ${test_name})
@@ -106,7 +106,7 @@ foreach(i RANGE 0 ${convert_test_length})
         CONFIG pytest.ini
         ARGS --input ${output} ${validate_args}
         TIMEOUT 45
-        LABELS "integration-tests"
+        LABELS "integration-tests;exclusive-gpu"
         FIXTURES_REQUIRED ${test_name}
         UNSTABLE)
 endforeach()

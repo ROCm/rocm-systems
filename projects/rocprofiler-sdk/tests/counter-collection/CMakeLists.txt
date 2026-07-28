@@ -15,7 +15,7 @@ rocprofiler_add_integration_execute_test(
     counter-collection
     TARGET multistream
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=counter-collection-test.json"
@@ -29,7 +29,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     TIMEOUT 45
     FIXTURES_REQUIRED counter-collection
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/counter-collection-test.json

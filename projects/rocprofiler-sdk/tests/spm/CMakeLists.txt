@@ -33,7 +33,7 @@ rocprofiler_add_integration_execute_test(
     test-spm-dispatch-collection-execute
     TARGET simple-transpose
     TIMEOUT 60
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=spm-dispatch-collection-test.json"
@@ -47,7 +47,7 @@ rocprofiler_add_integration_execute_test(
     test-spm-dispatch-buffer-collection-execute
     TARGET simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=spm-buffer-dispatch-collection-test.json"
@@ -64,7 +64,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 160
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_REQUIRED spm-dispatch
     DISABLED ${IS_DISABLED})
@@ -76,7 +76,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 160
-    LABELS "integration-tests"
+    LABELS "integration-tests;exclusive-gpu"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_REQUIRED spm-buffer
     DISABLED ${IS_DISABLED})
