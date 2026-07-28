@@ -15,6 +15,7 @@ This document outlines coding conventions and best practices for Python developm
 - [Levels of Abstraction](#levels-of-abstraction)
 - [Avoiding Deep Nesting](#avoiding-deep-nesting)
 - [Code Organization](#code-organization)
+- [Testing Conventions](#testing-conventions)
 - [Key Principles Summary](#key-principles-summary)
 
 ## Function Length
@@ -781,6 +782,17 @@ def compute_hash():
 def _other_helper():
     pass
 ```
+
+## Testing Conventions
+
+Before adding or modifying tests, read the existing test modules to understand the project's conventions for class-vs-function grouping, marker usage, import style, and helper naming. Identify whether the change calls for a unit test or an integration test and place it in the appropriate module — do not mix the two in the same file.
+
+### Rules
+
+- Unit test module names must correspond 1:1 with the source file's leaf name (e.g. source `parser.py` maps to test file `test_parser.py`).
+- Integration test modules are named after the user-facing feature or workflow they exercise end-to-end (e.g. `test_roofline_workflow.py`, `test_profile_export.py`), not after a single source file. The name should tell a reader what scenario is being validated without opening the file.
+- Prefer `monkeypatch` (pytest fixture) over `unittest.mock.Mock` / `MagicMock` — `monkeypatch` integrates with pytest's fixture lifecycle and is the dominant pattern in this project. Reserve `Mock` / `MagicMock` for cases that genuinely need call tracking or attribute auto-creation.
+- Use `types.SimpleNamespace` or `argparse.Namespace` for plain attribute bags instead of mock objects.
 
 ## Key Principles Summary
 

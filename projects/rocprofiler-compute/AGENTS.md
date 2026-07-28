@@ -12,7 +12,7 @@
 
 Read and follow **[`.ai/rules/python-style.md`](.ai/rules/python-style.md)** before
 generating or modifying any Python code. These rules cover function design, naming,
-nesting, and code organization.
+nesting, code organization, and testing conventions.
 
 ## Ruff and Tooling
 
