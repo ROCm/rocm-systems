@@ -102,6 +102,7 @@ RJ_DIAGNOSTIC_POP
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -139,6 +140,46 @@ std::vector<T> read_elf_array_for_test(const std::vector<uint8_t> &image, uint64
   assert(count <= (image.size() - offset) / sizeof(T));
   std::memcpy(values.data(), image.data() + offset, count * sizeof(T));
   return values;
+}
+
+std::optional<Elf64_Sym> find_elf_symbol_for_test(const std::vector<uint8_t> &image,
+                                                  std::string_view name) {
+  const auto range_is_in_image = [&](uint64_t offset, uint64_t size) {
+    const uint64_t image_size = image.size();
+    return offset <= image_size && size <= image_size - offset;
+  };
+  if (!range_is_in_image(0, sizeof(Elf64_Ehdr)))
+    return std::nullopt;
+
+  const auto header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  const uint64_t section_table_size = static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr);
+  if (!range_is_in_image(header.e_shoff, section_table_size))
+    return std::nullopt;
+
+  const auto sections = read_elf_array_for_test<Elf64_Shdr>(image, header.e_shoff, header.e_shnum);
+  for (const Elf64_Shdr &symtab : sections) {
+    if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
+        symtab.sh_entsize != sizeof(Elf64_Sym) || symtab.sh_size % sizeof(Elf64_Sym) != 0 ||
+        symtab.sh_link >= sections.size() || !range_is_in_image(symtab.sh_offset, symtab.sh_size)) {
+      continue;
+    }
+    const Elf64_Shdr &strtab = sections[symtab.sh_link];
+    if (strtab.sh_type != SHT_STRTAB || !range_is_in_image(strtab.sh_offset, strtab.sh_size))
+      continue;
+    const auto symbols = read_elf_array_for_test<Elf64_Sym>(image, symtab.sh_offset,
+                                                            symtab.sh_size / sizeof(Elf64_Sym));
+    for (const Elf64_Sym &symbol : symbols) {
+      if (symbol.st_name >= strtab.sh_size)
+        continue;
+      const char *begin =
+          reinterpret_cast<const char *>(image.data() + strtab.sh_offset + symbol.st_name);
+      const size_t remaining = strtab.sh_size - symbol.st_name;
+      const auto *end = static_cast<const char *>(std::memchr(begin, '\0', remaining));
+      if (end != nullptr && std::string_view(begin, static_cast<size_t>(end - begin)) == name)
+        return symbol;
+    }
+  }
+  return std::nullopt;
 }
 
 template <typename T>
@@ -389,8 +430,11 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_load_segments() {
   return image;
 }
 
-std::vector<uint8_t>
-make_minimal_amdgpu_elf_with_descriptor_after_text(const std::vector<uint32_t> &text_words) {
+std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
+    const std::vector<uint32_t> &text_words,
+    std::optional<size_t> text_function_words = std::nullopt) {
+  if (text_function_words && *text_function_words > text_words.size())
+    throw std::invalid_argument("text function extent exceeds .text fixture");
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   const uint64_t text_size = text_words.size() * sizeof(uint32_t);
@@ -406,6 +450,7 @@ make_minimal_amdgpu_elf_with_descriptor_after_text(const std::vector<uint32_t> &
 
   std::vector<uint8_t> strtab{'\0'};
   const uint32_t kd_symbol_name = add_elf_name(strtab, "kernel.kd");
+  const uint32_t text_symbol_name = text_function_words ? add_elf_name(strtab, "kernel") : 0;
 
   // The kernel descriptor requires 8-byte alignment (tests reinterpret_cast the
   // .rodata bytes to TestKernelDescriptor). An odd text_words count leaves
@@ -416,7 +461,7 @@ make_minimal_amdgpu_elf_with_descriptor_after_text(const std::vector<uint32_t> &
   const uint64_t rodata_vaddr = align_up_for_test(text_vaddr + text_size, 8) + load_align;
   const uint64_t strtab_offset = rodata_offset + rodata_size;
   const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
-  constexpr size_t sym_count = 2;
+  const size_t sym_count = text_function_words ? 3 : 2;
   const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
   const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
   constexpr uint16_t section_count = 6;
@@ -469,12 +514,19 @@ make_minimal_amdgpu_elf_with_descriptor_after_text(const std::vector<uint32_t> &
   std::memcpy(image.data() + rodata_offset, descriptor.data(), descriptor.size());
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
-  std::array<Elf64_Sym, sym_count> syms{};
+  std::vector<Elf64_Sym> syms(sym_count);
   syms[1].st_name = kd_symbol_name;
   syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
   syms[1].st_shndx = 2;
   syms[1].st_value = rodata_vaddr;
   syms[1].st_size = kKernelDescriptorSize;
+  if (text_function_words) {
+    syms[2].st_name = text_symbol_name;
+    syms[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+    syms[2].st_shndx = 1;
+    syms[2].st_value = text_vaddr;
+    syms[2].st_size = *text_function_words * sizeof(uint32_t);
+  }
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
@@ -523,6 +575,25 @@ make_minimal_amdgpu_elf_with_descriptor_after_text(const std::vector<uint32_t> &
 
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text() {
   return make_minimal_amdgpu_elf_with_descriptor_after_text({0xBF800000u, 0xBF800000u});
+}
+
+template <size_t N>
+std::vector<uint8_t>
+make_gfx1250_image_with_live_sgprs(const std::array<uint32_t, N> &instruction_words,
+                                   uint16_t live_sgprs) {
+  if (live_sgprs > REGISTER_SET_ALLOCATABLE_SGPRS) {
+    ADD_FAILURE() << "liveness wall exceeds the allocatable SGPR range";
+    return {};
+  }
+  constexpr uint16_t kGfx1250M0Operand = 125;
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  std::vector<uint32_t> words(instruction_words.begin(), instruction_words.end());
+  for (uint16_t sgpr = 0; sgpr < live_sgprs; ++sgpr) {
+    words.push_back(gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(sgpr),
+                                                                .sdst = kGfx1250M0Operand})[0]);
+  }
+  words.push_back(kGfx1250SEndpgm);
+  return make_minimal_amdgpu_elf_with_descriptor_after_text(words);
 }
 
 std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch) {
@@ -2267,38 +2338,247 @@ TEST(InstructionBuilder, PatchPcrelBranchOffsetRejectsMisalignedDelta) {
   EXPECT_EQ(words[0], build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
 }
 
-TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosed) {
+/// @brief One incomplete-consumer body with a second, independent PC builder.
+///
+/// @details The consumer's own fact is incomplete: one path builds a concrete PC
+/// in s[8:9], the other reaches the setpc with the pair unconstrained. Whether
+/// the translation may keep that dynamic transfer depends entirely on the second
+/// builder in s[10:11]: @p bypass_builder_delta decides whether its value lands
+/// on a relocatable block start or on an address DBT cannot move.
+std::vector<uint32_t> make_incomplete_indirect_consumer_body(uint32_t bypass_builder_delta) {
   constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kBypassSreg = 10;
   constexpr uint32_t kLiteralOperand = 255;
   constexpr uint32_t kInlineInt0 = 128;
 
-  // Same incomplete-fact shape as CfgAnalysis.IncompleteFactConsumerIsFlaggedIncomplete:
-  // one path builds a concrete PC, the other reaches the setpc consumer with the
-  // pair unconstrained. The unconstrained path may hold an original .text address
-  // that DBT cannot relocate, so the whole translation must fail closed rather than
-  // relocate only the known builder and leave the dynamic transfer pointing at
-  // stale bytes.
+  return {
+      pack_sopp(5, 5),                                     // 0x00: cbranch scc0 -> bypass at 0x18.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
+      40,                                                  // 0x0c: target delta -> 0x30.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      build_s_branch(5, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x2c.
+      pack_sop1(0x1c, kBypassSreg, 0),                     // 0x18: bypass-path s_getpc_b64.
+      pack_sop2(0, kBypassSreg, kBypassSreg, kLiteralOperand),     // 0x1c: s_add_u32.
+      bypass_builder_delta,                                        // 0x20.
+      pack_sop2(4, kBypassSreg + 1, kBypassSreg + 1, kInlineInt0), // 0x24: s_addc_u32.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                    // 0x28: closes the chain.
+      pack_sop1(0x1d, 0, kPcSreg),                                 // 0x2c: joined consumer setpc.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                    // 0x30: builder target.
+  };
+}
+
+TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosed) {
+  // The bypass builder computes 0x1c + 0x100000, far outside .text. That value
+  // is a PC-derived address DBT cannot rewrite to a relocated one, so the scope
+  // still contains a potential stale PC. The unconstrained path into the setpc
+  // may hold exactly such a value, so the whole translation must fail closed
+  // rather than relocate only the known builder and leave the dynamic transfer
+  // pointing at stale bytes.
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      make_incomplete_indirect_consumer_body(0x100000));
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  ASSERT_FALSE(result.diagnostics.empty());
+  EXPECT_NE(result.diagnostics.front().message.find("unconstrained predecessor path"),
+            std::string::npos)
+      << result.diagnostics.front().message;
+  EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
+}
+
+TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnOpenPcBuilderChain) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kOpenSreg = 10;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // The s[10:11] getpc at 0x14 is the last instruction of its block, so nothing
+  // in this block proves what its value becomes: this is exactly the shape whose
+  // delta add lives in a successor, where an unmodeled write would leave the
+  // original delta in place. The scope therefore cannot be proven free of stale
+  // PC values and the incomplete consumer must keep failing closed.
   std::vector<uint32_t> words = {
       pack_sopp(5, 5),                                     // 0x00: cbranch scc0 -> bypass at 0x18.
       pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
       pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
-      28,                                                  // 0x0c: target delta -> 0x24.
-      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
-      build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x1c.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: bypass (unconstrained).
-      pack_sop1(0x1d, 0, kPcSreg),                         // 0x1c: joined consumer setpc.
-      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x20: not a target.
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),            // 0x24: builder target.
+      36,                                                  // 0x0c: target delta -> 0x2c.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32 (chain closed).
+      pack_sop1(0x1c, kOpenSreg, 0),                       // 0x14: bare s_getpc_b64 at block end.
+      pack_sop2(0, kOpenSreg, kOpenSreg, kLiteralOperand), // 0x18: its s_add_u32, next block.
+      12,                                                  // 0x1c.
+      pack_sop2(4, kOpenSreg + 1, kOpenSreg + 1, kInlineInt0), // 0x20: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                             // 0x24: joined consumer setpc.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                // 0x28: not a target.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                // 0x2c: builder target.
   };
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 
-  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
   auto result = translator.translate(source);
   EXPECT_FALSE(result.ok());
+  ASSERT_FALSE(result.diagnostics.empty());
+  EXPECT_NE(result.diagnostics.front().message.find("unconstrained predecessor path"),
+            std::string::npos)
+      << result.diagnostics.front().message;
   EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
 }
+
+TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStalePcValues) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kBypassSreg = 10;
+
+  // Same body, except the bypass builder now targets 0x1c + 0x14 = 0x30, the
+  // same relocatable block start as the consumed builder. Every PC-derived value
+  // in the scope can therefore be rewritten to its relocated address, so no path
+  // into the setpc can deliver a stale one and the dynamic transfer is safe to
+  // keep even though the consumer's own fact stays incomplete.
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      make_incomplete_indirect_consumer_body(0x14));
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+
+  // Assert the relocated deltas structurally instead of by absolute index: for a
+  // rewritten builder, getpc_next + delta must land on the relocated s_endpgm.
+  const auto expect_builder_targets_endpgm = [&](uint16_t pc_sreg) {
+    const uint32_t getpc = pack_sop1(0x1c, pc_sreg, 0);
+    size_t found = 0;
+    for (size_t i = 0; i + 2 < word_count; ++i) {
+      if (target_words[i] != getpc)
+        continue;
+      ++found;
+      const uint64_t target = (i + 1) * sizeof(uint32_t) + target_words[i + 2];
+      ASSERT_EQ(target % sizeof(uint32_t), 0u);
+      ASSERT_LT(target / sizeof(uint32_t), word_count);
+      EXPECT_EQ(target_words[target / sizeof(uint32_t)], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3))
+          << "builder for s[" << pc_sreg << ":" << pc_sreg + 1
+          << "] was not rewritten to its relocated target";
+    }
+    EXPECT_EQ(found, 1u);
+  };
+  expect_builder_targets_endpgm(kPcSreg);
+  // The unconsumed builder must be relocated too: it is the producer whose
+  // stale value the fail-closed path exists to prevent.
+  expect_builder_targets_endpgm(kBypassSreg);
+
+  EXPECT_NE(std::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
+            target_words + word_count)
+      << "an incomplete consumer must keep its dynamic transfer, not become a direct window";
+}
+
+TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnNonContiguousBuilderRange) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint16_t kBypassSreg = 10;
+  constexpr uint16_t kUnrelatedSreg = 20;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+
+  // The bypass builder in s[10:11] targets the relocatable block start at 0x34,
+  // so on its own it would satisfy the whole-scope proof. But an unrelated
+  // s_mov_b32 sits between its s_add_u32 and s_addc_u32: the pair survives that
+  // move (it writes s20, not the pair), so the recovered builder range spans it.
+  // patch_recovered_builder_fixups NOPs the whole range, which would erase the
+  // move. The proof must fail closed on the non-contiguous range, keeping the
+  // incomplete consumer's original refusal and leaving the object unchanged.
+  std::vector<uint32_t> words = {
+      pack_sopp(5, 6),                                     // 0x00: cbranch scc0 -> bypass at 0x1c.
+      pack_sop1(0x1c, kPcSreg, 0),                         // 0x04: s_getpc_b64.
+      pack_sop2(0, kPcSreg, kPcSreg, kLiteralOperand),     // 0x08: s_add_u32.
+      44,                                                  // 0x0c: target delta -> 0x34.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x10: s_addc_u32.
+      build_s_branch(6, ROCJITSU_CODE_ARCH_CDNA4),         // 0x14 -> consumer at 0x30.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),            // 0x18: padding before bypass.
+      pack_sop1(0x1c, kBypassSreg, 0),                     // 0x1c: bypass s_getpc_b64.
+      pack_sop2(0, kBypassSreg, kBypassSreg, kLiteralOperand), // 0x20: s_add_u32.
+      20,                                                      // 0x24: -> 0x20 + 20 = 0x34.
+      build_s_mov_b32(kUnrelatedSreg, 0,
+                      ROCJITSU_CODE_ARCH_CDNA4), // 0x28: unrelated write, in range.
+      pack_sop2(4, kBypassSreg + 1, kBypassSreg + 1, kInlineInt0), // 0x2c: s_addc_u32.
+      pack_sop1(0x1d, 0, kPcSreg),                                 // 0x30: joined consumer setpc.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                    // 0x34: builder target.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  ASSERT_FALSE(result.diagnostics.empty());
+  EXPECT_NE(result.diagnostics.front().message.find("unconstrained predecessor path"),
+            std::string::npos)
+      << result.diagnostics.front().message;
+  EXPECT_EQ(result.elf_bytes, image)
+      << "a non-contiguous builder range must fail closed, preserving the unrelated instruction";
+}
+
+TEST(BinaryTranslatorE2E, IncompleteConsumerFailsClosedAtKernargPreloadFirmwareEntry) {
+  // The same incomplete-consumer body that translates when rooted at the ordinary
+  // kernel entry (IncompleteIndirectConsumerTranslatesWhenScopeHasNoStalePcValues)
+  // must instead fail closed when its scope root is the kernarg-preload firmware
+  // entry (descriptor entry + 256). Before that entry runs, the command processor
+  // copies caller-controlled kernarg words into user SGPRs, so the pair the
+  // consumer reads on its unconstrained path can hold an original .text pointer
+  // that no in-scope builder or relocation rewrites. The entry-state gate must not
+  // treat the +256 entry as a safe root.
+  constexpr size_t kPreloadEntryWord = kKernargPreloadSkipBytes / sizeof(uint32_t);
+
+  // Descriptor entry (word 0) is a trivial ordinary path. The incomplete-consumer
+  // body is placed at the +256 preload firmware entry, so it is reachable only
+  // from that root.
+  std::vector<uint32_t> words(kPreloadEntryWord, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  words[0] = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto body = make_incomplete_indirect_consumer_body(0x14);
+  words.insert(words.end(), body.begin(), body.end());
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  enable_workgroup_id_x_sgpr(image);
+
+  rocjitsu::AmdGpuCodeObject source_layout(image.data(), image.size());
+  ASSERT_TRUE(source_layout.is_valid());
+  const auto *source_rodata = find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+  auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  ASSERT_FALSE(result.diagnostics.empty());
+  EXPECT_NE(result.diagnostics.front().message.find("unconstrained predecessor path"),
+            std::string::npos)
+      << result.diagnostics.front().message;
+  EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
+}
+
+// The external-entry soundness gate (rejecting relocation-table-dispatched
+// callees as unconstrained roots) is unit-tested directly in
+// analysis/liveness_test.cpp (BinaryTranslatorInternal.ScopeRootsReject
+// RelocationTableCallee): reaching its rejecting branch end-to-end would require
+// a descriptor-bearing relocation-table dispatch fixture, whereas the pure gate
+// exercises both the accept and reject paths precisely. The entry-state ACCEPT
+// path is already covered end-to-end by
+// IncompleteIndirectConsumerTranslatesWhenScopeHasNoStalePcValues above.
 
 } // namespace
 } // namespace rocjitsu
@@ -7305,9 +7585,9 @@ TEST(BinaryTranslatorE2E, PatchesRecoveredSwappcTargetAfterRelocation) {
       kOriginalGetpcDelta,                                                // 0x08.
       build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0),            // 0x0c.
       build_s_swappc_b64(kReturnSreg, kPcSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x10.
-      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                 // 0x14 fallthrough.
-      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                 // 0x18 unreachable.
-      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                 // 0x1c target.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x14 unreachable continuation.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4), // 0x18 unreachable.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x1c target.
   };
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -7323,15 +7603,16 @@ TEST(BinaryTranslatorE2E, PatchesRecoveredSwappcTargetAfterRelocation) {
 
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  ASSERT_GE(translated.text_sections()[0]->size(), 12 * sizeof(uint32_t));
+  ASSERT_GE(translated.text_sections()[0]->size(), 11 * sizeof(uint32_t));
   EXPECT_EQ(target_words[0], build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
   EXPECT_EQ(target_words[2], kOriginalGetpcDelta);
   EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
-  EXPECT_EQ(target_words[4], build_s_call_b64(kReturnSreg, 6));
+  // The target is non-returning, so relocation drops the dead continuation.
+  // The pre-existing recovered-transfer window remains in place on this branch.
+  EXPECT_EQ(target_words[4], build_s_call_b64(kReturnSreg, 5));
   expect_nop_words(target_words, 5, 10, ROCJITSU_CODE_ARCH_CDNA3);
   EXPECT_EQ(target_words[10], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[11], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
 }
 
 TEST(BinaryTranslatorE2E, TranslatesDirectSCallWithSetpcReturn) {
@@ -7406,6 +7687,40 @@ TEST(BinaryTranslatorE2E, TranslatesDirectSCallWhenCalleeBranchesToSetpcReturn) 
   EXPECT_EQ(target_words[2], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[3], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[4], build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, TranslatesNestedCallReturningThroughOuterPair) {
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint16_t kInnerReturnSreg = 28;
+  const std::vector<uint32_t> words = {
+      build_s_call_b64(kOuterReturnSreg, 1),              // 0x00 -> outer callee at 0x08.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 outer continuation.
+      build_s_call_b64(kInnerReturnSreg, 1),              // 0x08 -> inner callee at 0x10.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x0c inner continuation.
+      rocjitsu::pack_sopp(5, 1),                          // 0x10 -> outer return at 0x18.
+      build_s_setpc_b64(kInnerReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x14 inner return.
+      build_s_setpc_b64(kOuterReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x18 outer return.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_GE(decoded.size(), words.size());
+  const auto count_mnemonic = [&](std::string_view mnemonic) {
+    return std::ranges::count_if(
+        decoded, [&](const auto &inst) { return inst != nullptr && inst->mnemonic() == mnemonic; });
+  };
+  EXPECT_EQ(count_mnemonic("s_call_b64"), 2);
+  EXPECT_EQ(count_mnemonic("s_setpc_b64"), 2);
 }
 
 TEST(BinaryTranslatorE2E, TranslatesSwappcCallWhenCalleeSetpcBranchesToReturn) {
@@ -7998,6 +8313,44 @@ TEST(BinaryTranslatorE2E, Gfx1250RelocatesDirectCallForB0ToA0) {
   EXPECT_EQ(*decoded[1]->branch_offset_bytes(), 4);
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250DirectTailTransferCompactionIsIdempotent) {
+  constexpr uint16_t kReturnSreg = 30;
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250),
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0],
+            rocjitsu::build_s_call_b64(kReturnSreg, 0, ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(target_words[1], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  rocjitsu::BinaryTranslator verifier(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto second = verifier.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, result.elf_bytes);
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250KernargPreloadUsesSingleDescriptorEntry) {
   constexpr uint32_t kGfx1250SNop = 0xBF800000u;
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -8213,6 +8566,74 @@ TEST(BinaryTranslatorE2E, Gfx1250EmulatesCvtF32Fp8E5m3ForA0) {
     EXPECT_EQ(offset->encoding_value(), 136) << "E5M3 byte-select must be byte 1 (offset 8)";
   }
   EXPECT_EQ(bfe_count, 1) << "E5M3 unpack must isolate the byte with exactly one v_bfe_u32";
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250E5m3CompareMasksTargetDeadSgprs) {
+  constexpr auto conversion = gfx1250::build_vop3(
+      gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .opsel = 2, .clamp = 1, .src0 = 256 + 22});
+  constexpr uint16_t kLiveSgprs = 8;
+  auto image = rocjitsu::make_gfx1250_image_with_live_sgprs(conversion, kLiveSgprs);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  std::optional<uint16_t> nan_mask;
+  std::optional<uint16_t> exp31_mask;
+  std::vector<uint16_t> cndmask_predicates;
+  for (const auto &inst : decoded) {
+    if (inst->mnemonic() == "v_cmp_eq_u32" || inst->mnemonic() == "v_cmp_lt_u32") {
+      ASSERT_NE(inst->raw_encoding(), nullptr);
+      gfx1250::Vop3MachineInst encoded{};
+      std::memcpy(&encoded, inst->raw_encoding(), sizeof(encoded));
+      if (inst->mnemonic() == "v_cmp_eq_u32")
+        nan_mask = static_cast<uint16_t>(encoded.vdst);
+      else
+        exp31_mask = static_cast<uint16_t>(encoded.vdst);
+    } else if (inst->mnemonic() == "v_cndmask_b32") {
+      const rocjitsu::Operand *predicate = inst->src_operand(2);
+      ASSERT_NE(predicate, nullptr);
+      cndmask_predicates.push_back(predicate->encoding_value());
+    }
+  }
+  ASSERT_TRUE(nan_mask.has_value());
+  ASSERT_TRUE(exp31_mask.has_value());
+  ASSERT_EQ(cndmask_predicates.size(), 2u);
+  EXPECT_NE(*nan_mask, *exp31_mask);
+  EXPECT_GE(*nan_mask, kLiveSgprs);
+  EXPECT_GE(*exp31_mask, kLiveSgprs);
+  EXPECT_EQ(cndmask_predicates[0], *exp31_mask);
+  EXPECT_EQ(cndmask_predicates[1], *nan_mask);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250E5m3UnpackFailsClosedWithoutPredicateSgprs) {
+  constexpr auto conversion = gfx1250::build_vop3(
+      gfx1250::kVCvtF32Fp8Vop3, {.vdst = 30, .opsel = 2, .clamp = 1, .src0 = 256 + 22});
+  for (const uint16_t live_sgprs :
+       {static_cast<uint16_t>(rocjitsu::REGISTER_SET_ALLOCATABLE_SGPRS - 1u),
+        static_cast<uint16_t>(rocjitsu::REGISTER_SET_ALLOCATABLE_SGPRS)}) {
+    SCOPED_TRACE(live_sgprs);
+    auto image = rocjitsu::make_gfx1250_image_with_live_sgprs(conversion, live_sgprs);
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    const auto result = translator.translate(source);
+
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.elf_bytes, image);
+    EXPECT_TRUE(rocjitsu::has_error_containing(
+        result, rocjitsu::DiagnosticKind::ExpandFailed,
+        "gfx1250 E5M3 unpack could not allocate two dead SGPR masks"));
+  }
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250CopiesWmmaOutsideB0ToA0Profile) {
@@ -8536,6 +8957,22 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
       (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
           gfx1250::kVSwmmacI3216x16x128Iu8Vop3p,
       (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
+          gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p,
+      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
           gfx1250::kVWmmaF3232x16x128F4Vop3p,
   };
   EXPECT_EQ(liveness_free_rules, expected);
@@ -8598,17 +9035,20 @@ TEST(BinaryTranslatorE2E, Gfx1250LowersF32K128Fp8Bf8WmmaToNeutralRegularScale) {
 
     const auto *words = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
     const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
-    EXPECT_NE(std::find(words, words + word_count, 0x7f7f7f7fu), words + word_count);
     const auto prefix = std::find_if(words, words + word_count, [](uint32_t word) {
       return ((word >> 24) & 0xffu) == 0xccu && ((word >> 16) & 0xffu) == 0x35u;
     });
     ASSERT_NE(prefix, words + word_count);
     ASSERT_GE(words + word_count - prefix, 4);
-    const uint16_t scale_a = static_cast<uint16_t>(prefix[1] & 0x1ffu);
-    const uint16_t scale_b = static_cast<uint16_t>((prefix[1] >> 9) & 0x1ffu);
-    EXPECT_EQ(scale_a, scale_b);
-    EXPECT_LT(scale_a, 106u);
-    EXPECT_EQ((prefix[1] >> 18) & 0x1ffu, 0x100u);
+    gfx1250::Vop3pMachineInst scale_prefix{};
+    std::memcpy(&scale_prefix, prefix, sizeof(scale_prefix));
+    EXPECT_EQ(scale_prefix.src0, 128u);
+    EXPECT_EQ(scale_prefix.src1, 128u);
+    EXPECT_EQ(scale_prefix.src2, 256u);
+    EXPECT_EQ(scale_prefix.neg, 0u);
+    EXPECT_EQ(scale_prefix.neg_hi, 0u);
+    EXPECT_EQ(scale_prefix.opsel, 0u);
+    EXPECT_EQ(scale_prefix.opsel_hi, 0u);
 
     gfx1250::Vop3pMachineInst replacement{};
     std::memcpy(&replacement, prefix + 2, sizeof(replacement));
@@ -8623,34 +9063,6 @@ TEST(BinaryTranslatorE2E, Gfx1250LowersF32K128Fp8Bf8WmmaToNeutralRegularScale) {
     EXPECT_EQ(replacement.opsel_hi, test_case.matrix_b_fmt);
     EXPECT_EQ(replacement.neg, fields.neg);
   }
-}
-
-TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaFailsClosedWithoutNeutralScaleSgpr) {
-  constexpr auto source_wmma =
-      gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-                           {.vdst = 54, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48});
-  constexpr uint16_t kGfx1250M0Operand = 125;
-  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  std::vector<uint32_t> words{source_wmma[0], source_wmma[1]};
-  for (uint16_t sgpr = 0; sgpr < rocjitsu::REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
-    words.push_back(gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(sgpr),
-                                                                .sdst = kGfx1250M0Operand})[0]);
-  }
-  words.push_back(kGfx1250SEndpgm);
-
-  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
-  const auto result = translator.translate(source);
-
-  EXPECT_FALSE(result.ok());
-  EXPECT_EQ(result.elf_bytes, image);
-  EXPECT_TRUE(
-      rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
-                                     "K=128 WMMA could not allocate a dead neutral-scale SGPR"));
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaRejectsNonVgprMatrixInputs) {
@@ -8906,6 +9318,7 @@ TEST(BinaryTranslatorE2E, Gfx1250WrapsBareF8f6f4WmmaInNeutralScaleForA0) {
   };
   constexpr auto wmma = gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p, fields);
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr size_t kPrefixAndMatrixWords = 4;
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
       {wmma[0], wmma[1], kGfx1250SEndpgm});
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
@@ -8925,18 +9338,25 @@ TEST(BinaryTranslatorE2E, Gfx1250WrapsBareF8f6f4WmmaInNeutralScaleForA0) {
   ASSERT_GE(decoded.size(), 2u);
   EXPECT_EQ(decoded[0]->mnemonic(), "v_wmma_scale_f32_16x16x128_f8f6f4");
   EXPECT_EQ(decoded[0]->size(), 4 * static_cast<int>(sizeof(uint32_t)));
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
 
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  ASSERT_GE(translated.text_sections()[0]->size() / sizeof(uint32_t), kPrefixAndMatrixWords + 1u);
   gfx1250::Vop3pMachineInst prefix{};
   std::memcpy(&prefix, target_words, sizeof(prefix));
   EXPECT_EQ(prefix.op, 0x35u);
   EXPECT_EQ(prefix.src0, 128u);
   EXPECT_EQ(prefix.src1, 128u);
   EXPECT_EQ(prefix.src2, 256u);
+  EXPECT_EQ(prefix.neg, 0u);
+  EXPECT_EQ(prefix.neg_hi, 0u);
+  EXPECT_EQ(prefix.opsel, 0u);
+  EXPECT_EQ(prefix.opsel_hi, 0u);
+  EXPECT_EQ(prefix.pad_14, 0u);
   EXPECT_EQ(target_words[2], wmma[0]);
   EXPECT_EQ(target_words[3], wmma[1]);
-  EXPECT_EQ(target_words[4], kGfx1250SEndpgm);
+  EXPECT_EQ(target_words[kPrefixAndMatrixWords], kGfx1250SEndpgm);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250CopiesSupportedK64LowPrecisionWmmaThroughForA0) {
@@ -9164,7 +9584,59 @@ TEST(BinaryTranslatorE2E, Gfx1250GeneratedVgprMsbTransitionsCarryPreviousState) 
       generated_modes.push_back(static_cast<uint16_t>(decoded[index]->raw_encoding()[0] & 0xffffu));
     }
   }
-  EXPECT_EQ(generated_modes, (std::vector<uint16_t>{0x0100, 0x0004, 0x0401}));
+  // Input mode has SRC0 bank 1, SRC1 bank 0. The ds_store_addtid_b32 store-data
+  // operand is a SRC1-role VGPR, so the store mode carries src1_bank (0) in the
+  // SRC1 field, not src0_bank. With src1_bank 0 the store transition is a no-op
+  // and is elided, leaving only the compute transition and the final restore.
+  EXPECT_EQ(generated_modes, (std::vector<uint16_t>{0x0100, 0x0001}));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250AddtidStoreModeUsesSrc1BankNotSrc0) {
+  // Regression for the ADDTID store-data bank: the emitted ds_store_b32 keeps
+  // the original store-data VGPR in data0, a SRC1-role operand, so its high bank
+  // must come from src1_bank. Choose differing nonzero banks (SRC0 bank 1, SRC1
+  // bank 2) so a src0_bank/src1_bank swap is observable: the store mode must be
+  // 0x08 (bank 2 in the SRC1 field), not 0x04 (bank 1).
+  constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto original_mode =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
+  constexpr uint32_t kModeLiteral = (1u << 14) | (2u << 16); // SRC0 bank 1, SRC1 bank 2.
+  constexpr auto addtid =
+      gfx1250::build_vds(gfx1250::kDsStoreAddtidB32Vds, {.offset0 = 4, .data0 = 8});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {original_mode[0], kModeLiteral, addtid[0], addtid[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+
+  // Assert the full generated s_set_vgpr_msb sequence, not just the store mode's
+  // low byte, so this also catches a regression that drops the previous-mode
+  // carry (SIMM16[15:8]) or restores the wrong original mode. The set_vgpr_msb
+  // byte is {DST[7:6], SRC2[5:4], SRC1[3:2], SRC0[1:0]}; the high byte carries
+  // the immediately-preceding mode. The live mode is SRC0 bank 1, SRC1 bank 2 =
+  // 0x09. Transitions: compute (new 0x00, prev 0x09) = 0x0900; store (new
+  // src1_bank 2 in the SRC1 field 0x08, prev 0x00) = 0x0008; restore (new 0x09,
+  // prev 0x08) = 0x0809. A src0_bank/src1_bank swap would make the store mode
+  // 0x04 instead of 0x08.
+  std::vector<uint16_t> generated_modes;
+  for (size_t index = 0; index < decoded.size(); ++index) {
+    if (decoded[index]->mnemonic() == "s_set_vgpr_msb") {
+      ASSERT_NE(decoded[index]->raw_encoding(), nullptr);
+      generated_modes.push_back(static_cast<uint16_t>(decoded[index]->raw_encoding()[0] & 0xffffu));
+    }
+  }
+  EXPECT_EQ(generated_modes, (std::vector<uint16_t>{0x0900, 0x0008, 0x0809}))
+      << "ADDTID store mode must carry src1_bank (2) in the SRC1 field, and every transition "
+         "must record the previous mode in SIMM16[15:8]";
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250ConservativelyPadsIu8WmmaForA0) {
@@ -10015,7 +10487,7 @@ TEST(BinaryTranslatorE2E, Gfx1250AcceptsClangUnreachableKernelStub) {
   constexpr uint32_t kSetReplayMode = 0xb9800641u;
   constexpr uint32_t kLiteralOne = 1u;
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
-      {kSetReplayMode, kLiteralOne, 0});
+      {kSetReplayMode, kLiteralOne, 0}, 2);
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 
@@ -10031,13 +10503,18 @@ TEST(BinaryTranslatorE2E, Gfx1250AcceptsClangUnreachableKernelStub) {
   ASSERT_FALSE(translated.text_sections().empty());
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_EQ(decoded.size(), 2u);
+  ASSERT_EQ(decoded.size(), 2u)
+      << "the synthesized endpgm must be the only instruction after the stub body";
   ASSERT_NE(decoded[0]->raw_encoding(), nullptr);
   EXPECT_EQ(decoded[0]->mnemonic(), "s_setreg_imm32_b32");
   EXPECT_EQ(decoded[0]->raw_encoding()[0], kSetReplayMode);
   EXPECT_EQ(decoded[0]->raw_encoding()[1], kLiteralOne);
-  EXPECT_EQ(decoded[1]->mnemonic(), "s_nop")
-      << "the translated body may contain only the normal text-alignment nop";
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
+
+  const auto kernel_symbol = rocjitsu::find_elf_symbol_for_test(result.elf_bytes, "kernel");
+  ASSERT_TRUE(kernel_symbol.has_value());
+  EXPECT_EQ(kernel_symbol->st_size, 3 * sizeof(uint32_t))
+      << "the translated function extent must include its synthesized terminator";
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250AcceptsClangUnreachableKernelStubWithPrefetchPrologue) {
@@ -10064,15 +10541,42 @@ TEST(BinaryTranslatorE2E, Gfx1250AcceptsClangUnreachableKernelStubWithPrefetchPr
   ASSERT_FALSE(translated.text_sections().empty());
   const auto decoded =
       decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_EQ(decoded.size(), 4u);
+  ASSERT_EQ(decoded.size(), 4u)
+      << "the synthesized endpgm must be the only instruction after the stub body";
   EXPECT_EQ(decoded[0]->mnemonic(), "global_prefetch_b8");
   EXPECT_EQ(decoded[1]->mnemonic(), "v_nop_e32");
   EXPECT_EQ(decoded[2]->mnemonic(), "s_setreg_imm32_b32");
   ASSERT_NE(decoded[2]->raw_encoding(), nullptr);
   EXPECT_EQ(decoded[2]->raw_encoding()[0], kSetReplayMode[0]);
   EXPECT_EQ(decoded[2]->raw_encoding()[1], kSetReplayMode[1]);
-  EXPECT_EQ(decoded[3]->mnemonic(), "s_nop")
-      << "the translated body may contain only the normal text-alignment nop";
+  EXPECT_EQ(decoded[3]->mnemonic(), "s_endpgm");
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250MaterializesSectionFinalClangUnreachableKernelStub) {
+  constexpr uint32_t kSetReplayMode = 0xb9800641u;
+  constexpr uint32_t kLiteralOne = 1u;
+  auto image =
+      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({kSetReplayMode, kLiteralOne});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto first = translator.translate(source);
+  ASSERT_TRUE(first.ok()) << (first.diagnostics.empty() ? "" : first.diagnostics.front().message);
+  rocjitsu::AmdGpuCodeObject first_output(first.elf_bytes.data(), first.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*first_output.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(decoded.size(), 2u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_setreg_imm32_b32");
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_endpgm");
+
+  auto second = translator.translate(first_output);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, first.elf_bytes);
 }
 
 TEST(BinaryTranslatorE2E, MatchedSemanticExpandRuleFailureIsDiagnostic) {
