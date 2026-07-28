@@ -62,6 +62,7 @@
 #include "core/inc/amd_aie_code.hpp"
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/amd_aie_section.h"
+#include "core/inc/runtime.h"
 #include "core/inc/amd_elf_image.hpp"
 #include "core/inc/amd_hsa_code.hpp"
 #include "amd_hsa_code_util.hpp"
@@ -1671,12 +1672,36 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       return s;
     }
 
+    // The insts/PDI blobs are immutable after load, so their XDNA BO handles are
+    // stable for the object's lifetime. Resolve once here instead of on every
+    // dispatch. Kernarg BOs are per-dispatch and still resolve at submit.
+    auto resolve_handle = [&](void* va, uint32_t* out_handle) -> hsa_status_t {
+      void* base = nullptr;
+      core::DriverMemoryHandle handle{};
+      if (core::Runtime::runtime_singleton_->FindDriverMemoryHandle(va, core_agent, &base,
+                                                                    &handle) != HSA_STATUS_SUCCESS) {
+        return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+      }
+      *out_handle = static_cast<uint32_t>(handle.handle);
+      return HSA_STATUS_SUCCESS;
+    };
+
     auto desc = std::make_unique<AMD::AieKernelDescriptor>();
     desc->version = AMD::kAieKernelDescriptorVersion;
     desc->reserved0 = 0;
     desc->insts_bo_va = insts_dev;
     desc->insts_size = ki->insts_size;
-    desc->pdi_bo_va = pdi_dev;
+    if (auto s = resolve_handle(insts_dev, &desc->insts_bo_handle); s != HSA_STATUS_SUCCESS) {
+      loaded_obj->Destroy();
+      return s;
+    }
+    desc->pdi_bo_handle = 0;
+    if (pdi_dev != nullptr) {
+      if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
+        loaded_obj->Destroy();
+        return s;
+      }
+    }
     desc->pdi_size = ki->pdi_size;
     desc->kernarg_size = ki->kernarg_size;
     desc->num_cols = ki->num_cols;
