@@ -26,6 +26,7 @@
 // [NCCL_CE_AR_MIN_MSG_BYTES, NCCL_CE_AR_MAX_MSG_BYTES] range below
 // (default 4 MiB .. 256 MiB).
 #define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
+#define NCCL_OOB_CE_AR_MAX_MSG_BYTES (8ull * 1024 * 1024 * 1024)
 #define NCCL_CE_AR_MIN_MSG_BYTES (4ull * 1024 * 1024)
 
 struct ncclCeColl {

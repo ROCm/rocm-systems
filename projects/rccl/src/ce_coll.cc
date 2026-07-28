@@ -4,7 +4,8 @@
  *
  * See LICENSE.txt for more license information
  *************************************************************************/
-
+ 
+#include "rccl_common.h"
 #include "comm.h"
 #include "register_inline.h"
 #include <algorithm>
@@ -133,7 +134,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   // Layout: [0 .. nRanks*maxChunk) scatter staging slots,
   //         [nRanks*maxChunk .. (nRanks+1)*maxChunk) local-reduce scratch.
   {
-    size_t maxChunkBytes = NCCL_CE_AR_MAX_MSG_BYTES / comm->nRanks;
+    size_t maxChunkBytes =
+        (rcclParamOobBalanced() ? NCCL_OOB_CE_AR_MAX_MSG_BYTES : NCCL_CE_AR_MAX_MSG_BYTES) / comm->nRanks;
     size_t ceARTmpBufSize = alignUp((comm->nRanks + 1) * maxChunkBytes, 16);
     uint8_t* ceARTmpBuf = nullptr;
     ncclWindow_vidmem* arWinDev;

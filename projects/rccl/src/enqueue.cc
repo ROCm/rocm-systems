@@ -3696,10 +3696,11 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         } else {
           size_t minCEBytes = rcclParamOobBalanced() ? 0 : NCCL_CE_AR_MIN_MSG_BYTES;
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || totalBytes < minCEBytes) {
+          size_t maxCE_bytes = rcclParamOobBalanced() ? NCCL_OOB_CE_AR_MAX_MSG_BYTES : NCCL_CE_AR_MAX_MSG_BYTES;
+          if (totalBytes > maxCE_bytes || totalBytes < minCEBytes) {
             ceAllReduceFits = false;
             INFO(NCCL_COLL, "CE AllReduce: msg %zu B range (%zu, %zu) B, falling back to standard NCCL AllReduce",
-                 totalBytes, minCEBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
+                 totalBytes, minCEBytes, maxCE_bytes);
           }
         }
       }
