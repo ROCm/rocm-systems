@@ -175,9 +175,13 @@ add_dependencies(vector-scalar-add-xrt aie_kernel_artifacts)
 add_executable(vector-scalar-add-xrt-elf vector_scalar_add_xrt_elf.cpp)
 target_compile_features(vector-scalar-add-xrt-elf PRIVATE cxx_std_20)
 target_include_directories(vector-scalar-add-xrt-elf PRIVATE "${XRT_INC_DIR}")
+# DEFAULT_KERNEL_NAME is passed unquoted (like DEFAULT_ELF_PATH) and quoted once
+# by STRINGIFY in the source. The full-ELF kernel is named "main" by aiecc (see
+# full_elf_config.json), with instance "sequence"; the xrt::ext::kernel lookup
+# key is "<kernel>:<instance>".
 target_compile_definitions(vector-scalar-add-xrt-elf PRIVATE
   DEFAULT_ELF_PATH=${FULL_ELF}
-  DEFAULT_KERNEL_NAME="vector_scalar_add:sequence"
+  DEFAULT_KERNEL_NAME=main:sequence
 )
 target_link_directories(vector-scalar-add-xrt-elf PRIVATE "${XRT_LIB_DIR}")
 target_link_libraries(vector-scalar-add-xrt-elf PRIVATE
