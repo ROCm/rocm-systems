@@ -867,18 +867,18 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
 
   if (image_.size() < sizeof(Elf64_Ehdr))
     return malformed();
-  // Build the replacement transactionally. Malformed metadata discovered late
-  // in relocation or descriptor adjustment must not leave a partially shifted
-  // code object behind.
-  std::vector<uint8_t> image = image_;
+  // Parse immutable metadata before allocating the transactional image.
+  // Malformed metadata discovered late in relocation or descriptor adjustment
+  // must not leave a partially shifted code object behind.
   Elf64_Ehdr header{};
-  std::memcpy(&header, image.data(), sizeof(header));
-  auto maybe_shdrs = read_section_headers(image, header);
-  auto maybe_phdrs = read_program_headers(image, header);
+  std::memcpy(&header, image_.data(), sizeof(header));
+  auto maybe_shdrs = read_section_headers(image_, header);
+  auto maybe_phdrs = read_program_headers(image_, header);
   if (!maybe_shdrs || !maybe_phdrs)
     return malformed();
   auto shdrs = std::move(*maybe_shdrs);
   auto phdrs = std::move(*maybe_phdrs);
+  std::vector<uint8_t> image;
 
   const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
   if (!text_index) {
@@ -931,10 +931,15 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
       return TextReplacementResult::file_growth_limit_exceeded(*required_file_growth);
     if (*padded_file_delta % sizeof(uint32_t) != 0)
       return malformed();
-    if (*padded_file_delta > image.max_size() - image.size())
+    if (*padded_file_delta > image_.max_size() - image_.size())
       return TextReplacementResult::allocation_failure(required_file_growth);
 
     try {
+      // Allocate the exact final image capacity before copying the pristine
+      // bytes. This avoids both a temporary full-size transactional buffer and
+      // vector's geometric reallocation during the insertion below.
+      image.reserve(image_.size() + *padded_file_delta);
+      image.assign(image_.begin(), image_.end());
       std::vector<uint8_t> inserted;
       inserted.resize(*padded_file_delta, 0);
       std::vector<bool> shift_segment_vaddr(phdrs.size(), false);
@@ -992,6 +997,7 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
     }
   } else {
     required_file_growth = 0;
+    image = image_;
   }
 
   std::memcpy(image.data() + text_offset_, new_text.data(), new_text.size());

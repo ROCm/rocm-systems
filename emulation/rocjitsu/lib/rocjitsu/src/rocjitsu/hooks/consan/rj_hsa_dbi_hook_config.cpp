@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_transform_memory.h"
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
@@ -547,24 +548,19 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (env_has_value("RJ_CONSAN_MOI_ENGINE") && env_has_value("RJ_CONSAN_MOI_BACKEND"))
     warn_ignored_env("RJ_CONSAN_MOI_BACKEND", "RJ_CONSAN_MOI_ENGINE takes precedence");
 
-  if (config.process_concurrent_transform_limit_bytes &&
-      config.patched_image_growth_limit.kind ==
-          rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes) {
-    constexpr uint64_t kMinimumNonemptyImageWorkingSetBytes = 3;
-    const uint64_t growth_bytes = config.patched_image_growth_limit.absolute_bytes;
+  if (config.process_concurrent_transform_limit_bytes) {
     const std::optional<uint64_t> minimum_reservation =
-        growth_bytes <= std::numeric_limits<uint64_t>::max() - kMinimumNonemptyImageWorkingSetBytes
-            ? std::optional<uint64_t>(growth_bytes + kMinimumNonemptyImageWorkingSetBytes)
-            : std::nullopt;
+        consan_transform_major_image_reservation_bytes(1, config.patched_image_growth_limit);
     if (!minimum_reservation ||
         *config.process_concurrent_transform_limit_bytes < *minimum_reservation) {
       std::fprintf(
           stderr,
           "[rocjitsu-dbi-hooks] warning: "
           "RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=%llu cannot admit any nonempty "
-          "code object under the absolute per-object growth ceiling of %llu bytes\n",
+          "code object under the configured per-object growth policy; the major-image "
+          "reservation is %llu * (input bytes + maximum growth bytes)\n",
           static_cast<unsigned long long>(*config.process_concurrent_transform_limit_bytes),
-          static_cast<unsigned long long>(growth_bytes));
+          static_cast<unsigned long long>(kConSanTransformMajorImageCopies));
     }
   }
 

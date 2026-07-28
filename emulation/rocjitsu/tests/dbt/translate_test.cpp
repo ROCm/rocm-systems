@@ -1517,7 +1517,9 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   ASSERT_TRUE(replacement.required_file_growth());
   EXPECT_EQ(*replacement.required_file_growth(), 2u * sizeof(uint32_t));
 
-  auto patched_bytes = patcher.emit();
+  auto patched_bytes = std::move(patcher).emit();
+  EXPECT_EQ(patched_bytes.capacity(), patched_bytes.size())
+      << "grown transactional images must not retain geometric vector capacity";
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_FALSE(patched.text_sections().empty());
