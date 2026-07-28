@@ -15,7 +15,7 @@
  *   -h, --help             Show this help message
  *
  * Run with profiler:
- *   ROCPROFSYS_AMD_SMI_METRICS=sdma_usage rocprof-sys-run -- ./sdma_test
+ *   rocprof-sys-run -e ROCPROFSYS_AMD_SMI_METRICS=sdma_usage -- ./sdma_test
  */
 
 #include <chrono>
@@ -73,7 +73,8 @@ print_usage(const char* prog_name)
     printf("  %s -s 1024 -n 5        # 1GB transfers, 5 iterations\n", prog_name);
     printf("  %s -s 256 -n 0         # 256MB transfers, run until Ctrl+C\n", prog_name);
     printf("\nRun with profiler:\n");
-    printf("  ROCPROFSYS_AMD_SMI_METRICS=sdma_usage rocprof-sys-run -- %s\n", prog_name);
+    printf("  rocprof-sys-run -e ROCPROFSYS_AMD_SMI_METRICS=sdma_usage -- %s\n",
+           prog_name);
 }
 
 size_t
