@@ -20,12 +20,15 @@
 
 namespace rocjitsu {
 
+inline constexpr uint64_t kAmdGpuCodeObjectRetainedSymbolStateImageUnits = 3;
+
 /// Conservative image-sized ownership units retained by one parsed object.
 ///
 /// The bound covers the backing image, up to two units for section objects and
 /// their vector slots, one copied-payload unit, one copied-section-name unit,
-/// and up to two retained symbol-name units.
-inline constexpr uint64_t kAmdGpuCodeObjectRetainedMajorImageUnits = 7;
+/// and up to three bounded symbol-derived units for names and fixed entry state.
+inline constexpr uint64_t kAmdGpuCodeObjectRetainedMajorImageUnits =
+    5 + kAmdGpuCodeObjectRetainedSymbolStateImageUnits;
 
 struct AmdGpuKernelInfo {
   std::string name;
@@ -50,6 +53,23 @@ struct AmdGpuFunctionInfo {
   uint64_t code_size = 0;
   bool code_size_inferred_from_zero = false;
 };
+
+/// Conservative fixed charges for symbol-derived parser roles.
+///
+/// Aggregate accounting combines roles that share a logical name. These
+/// charges scale with retained public records and leave room for overlapping
+/// transient entries, vector capacity, and associative container nodes. Copied
+/// name bytes are charged separately. Allocator bookkeeping remains outside the
+/// major-image model.
+inline constexpr uint64_t kAmdGpuCodeObjectKernelEntryChargeBytes = 3 * sizeof(AmdGpuKernelInfo);
+inline constexpr uint64_t kAmdGpuCodeObjectKernelAndTransientEntryChargeBytes =
+    4 * sizeof(AmdGpuKernelInfo);
+inline constexpr uint64_t kAmdGpuCodeObjectFunctionEntryChargeBytes =
+    3 * sizeof(AmdGpuFunctionInfo) + sizeof(void *);
+inline constexpr uint64_t kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes =
+    4 * sizeof(AmdGpuFunctionInfo);
+inline constexpr uint64_t kAmdGpuCodeObjectTransientSymbolEntryChargeBytes =
+    sizeof(AmdGpuFunctionInfo);
 
 /// Decode `GRANULATED_WAVEFRONT_SGPR_COUNT` for one kernel descriptor.
 ///

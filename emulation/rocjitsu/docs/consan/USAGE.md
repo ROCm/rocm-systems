@@ -162,24 +162,28 @@ continues to return the HSA error to callers that correctly handle it.
 
 The three process controls are independent. The concurrent-transform control is
 acquired before semantic inventory. It is a conservative admission unit for
-major ELF and section storage, not a strict RSS limit: smaller analysis
+major ELF and parser storage, not a strict RSS limit: other non-image analysis
 metadata, allocator bookkeeping, and unrelated process memory are outside the
 model. Let `I` be the original input size and `M` be `I` plus the configured
-per-object maximum growth. The modeled phases are `I + 11*M` for an ordinary
-incremental patch, `I + 12*M` while independently validated composite mutation
-storage remains live, and `8*I + 9*M` during final validation. Each parser has
-seven major-image units: its image, up to two units for section objects and
-their vector slots, bounded payload, bounded section names, and up to two
-retained copies of bounded symbol names. Section headers, transient symbol
-names, and metadata names are views into the image rather than duplicate owning
-collections.
+per-object maximum growth. The modeled phases are `I + 12*M` for an ordinary
+incremental patch, `I + 13*M` while independently validated composite mutation
+storage remains live, and `9*I + 10*M` during final validation. Each parser has
+eight major-image units: its image, up to two units for section objects and
+their vector slots, bounded payload, bounded section names, and up to three units
+for symbol-derived state. That final budget charges each newly retained role
+for its copied name plus conservative aggregate kernel/function record and
+container state; roles sharing one logical symbol name share overlapping
+transient-state charges.
+Section headers, transient symbol-name characters, and metadata names are views
+into the image rather than duplicate owning collections.
 Admission uses the largest phase value and reports the governing phase and
-coefficients. The parser rejects aggregate copied section payload, section-name
-bytes, or distinct retained kernel/function-name bytes larger than its backing
-image. These coefficients supersede the earlier `I + 10*M`, `I + 11*M`, and
-`7*I + 8*M` model, which did not fully account for section-object and vector-slot
-storage. Deployments with a tuned concurrent-transform ceiling should rederive
-it from the current coefficients. The patcher
+coefficients. The parser rejects aggregate copied section payload or
+section-name bytes larger than its backing image, and conservatively charged
+symbol-derived state larger than its three-unit budget. These coefficients
+supersede the earlier `I + 10*M`, `I + 11*M`, and
+`7*I + 8*M` model, which did not fully account for section-object, vector-slot,
+or dense per-symbol state. Deployments with a tuned concurrent-transform
+ceiling should rederive it from the current coefficients. The patcher
 preallocates every file insertion, commits same-size rewrites directly, moves
 every emitted image, and avoids a separate padding buffer so vector growth
 cannot add an unmodelled geometric full-image allocation. The two retained-

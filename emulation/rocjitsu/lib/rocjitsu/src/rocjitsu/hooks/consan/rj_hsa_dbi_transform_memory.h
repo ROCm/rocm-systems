@@ -20,6 +20,9 @@ enum class ConSanTransformOwnershipPhase : uint8_t {
   FinalValidation,
 };
 
+[[nodiscard]] inline constexpr const char *
+consan_transform_ownership_phase_name(ConSanTransformOwnershipPhase phase);
+
 struct ConSanTransformOwnership {
   ConSanTransformOwnershipPhase phase;
   uint64_t input_image_copies;
@@ -30,6 +33,16 @@ struct ConSanTransformReservationEstimate {
   std::optional<ConSanTransformOwnership> ownership;
   uint64_t maximum_image_bytes;
   uint64_t reservation_bytes;
+
+  [[nodiscard]] constexpr const char *phase_name() const {
+    return ownership ? consan_transform_ownership_phase_name(ownership->phase) : "none";
+  }
+  [[nodiscard]] constexpr uint64_t input_image_copies() const {
+    return ownership ? ownership->input_image_copies : 0;
+  }
+  [[nodiscard]] constexpr uint64_t maximum_image_copies() const {
+    return ownership ? ownership->maximum_image_copies : 0;
+  }
 };
 
 [[nodiscard]] inline constexpr const char *
@@ -48,26 +61,25 @@ consan_transform_ownership_phase_name(ConSanTransformOwnershipPhase phase) {
 /// Major-image ownership at each supported transform peak.
 ///
 /// IncrementalPatch owns the hook's pristine staging image, the previous
-/// result, a parser's seven units, the patcher image, replacement text, and the
-/// transactional grown image. Each parser owns its image, section objects and
-/// vector slots, bounded payload, bounded section names, and at most two
-/// retained copies of bounded symbol names. Section headers, transient symbol
-/// names, and metadata names are views into the parser image so temporary full
-/// collections do not overlap the retained representations.
+/// result, a parser's exported ownership units, the patcher image, replacement
+/// text, and the transactional grown image. Each parser owns its image, section
+/// objects and vector slots, bounded payload, bounded section names, and
+/// conservatively charged symbol-derived state. Section headers, transient
+/// symbol-name characters, and metadata names are views into the parser image.
 ///
 /// The composite variant additionally retains the independently validated
 /// mutation image while instrumenting it. That extra phase exists because the
 /// SuperCollider flat tail currently overlaps its outer parser with the parser
 /// for the mutated image; reducing both sides to compact name/descriptor maps
 /// would be the place to remove it. FinalValidation owns pristine staging plus
-/// the six original-parser units, and the result plus six replacement-
-/// parser units and a descriptor probe. ConSan releases its outer inventory
-/// parser before entering the incremental MOI pipeline, and every patch stage
-/// moves its emitted image.
+/// the original parser's `kAmdGpuCodeObjectRetainedMajorImageUnits` units, and
+/// the result plus the replacement parser's units and a descriptor probe.
+/// ConSan releases its outer inventory parser before entering the incremental
+/// MOI pipeline, and every patch stage moves its emitted image.
 ///
-/// AmdGpuCodeObject rejects aggregate copied section payload and aggregate
-/// section-name or symbol-name bytes larger than its backing image. Smaller
-/// non-string analysis metadata and allocator overhead are not represented by
+/// AmdGpuCodeObject rejects aggregate copied section payload or section names
+/// larger than its backing image and symbol-derived state larger than its
+/// exported multi-unit budget. Allocator bookkeeping is not represented by
 /// these major-image units. The non-parser terms below keep the phase table
 /// mechanically coupled to the parser's exported ownership bound.
 inline constexpr uint64_t kConSanIncrementalNonParserMaximumImageUnits = 4;

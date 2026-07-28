@@ -53,9 +53,11 @@ private:
   Elf64_Shdr shdr_;
 };
 
-// One section header in the source image must conservatively cover at most two
-// image-sized units of retained section object plus vector-slot storage.
-static_assert(sizeof(HsaSection) + sizeof(std::unique_ptr<Section>) <= 2 * sizeof(Elf64_Shdr));
+// One section header in the source image must conservatively cover its object,
+// owning slot, and at most one mutually exclusive text/rodata classification
+// slot within two image-sized units.
+static_assert(sizeof(HsaSection) + sizeof(std::unique_ptr<Section>) + sizeof(const Section *) <=
+              2 * sizeof(Elf64_Shdr));
 
 bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE); }
 
@@ -73,6 +75,13 @@ struct FunctionSymbolInfo {
   uint64_t code_size = 0;
   bool code_size_inferred_from_zero = false;
 };
+
+struct FunctionEntryEvidence {
+  uint64_t explicit_code_size = 0;
+  bool conflicting_explicit_sizes = false;
+};
+
+using FunctionEntryKey = std::pair<uint64_t, uint64_t>;
 
 struct MetadataCursor {
   std::span<const uint8_t> bytes;
@@ -625,7 +634,6 @@ void AmdGpuCodeObject::load_sections() {
   for (size_t i = 0; i < section_count; ++i) {
     const Elf64_Shdr shdr = *section_header(i);
     const std::string_view sec_name = section_name(shdr);
-    text_section_indices[i] = sec_name == ".text";
     if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS || sec_name.empty()) {
       continue;
     }
@@ -635,33 +643,23 @@ void AmdGpuCodeObject::load_sections() {
       return;
     }
     copied_section_bytes += shdr.sh_size;
+    text_section_indices[i] = sec_name == ".text";
     ++materialized_section_count;
     text_section_count += sec_name == ".text";
     rodata_section_count += sec_name == ".rodata";
   }
 
-  // Allocate each section-index vector once so geometric growth cannot overlap
-  // old and new slot arrays. Then enforce the two-unit collection bound against
-  // the capacities actually selected by this standard-library implementation.
+  // The complete per-header static_assert above and the section-table bounds
+  // prove that these requested collections fit in two image units before any
+  // allocation. Allocate each vector once so geometric growth cannot overlap
+  // old and new slot arrays, then qualify the exact-capacity behavior relied on
+  // by supported standard-library implementations.
   sections_.reserve(materialized_section_count);
   text_sections_.reserve(text_section_count);
   rodata_sections_.reserve(rodata_section_count);
-  uint64_t section_collection_bytes = 0;
-  const auto account_collection = [&](uint64_t count, uint64_t element_bytes) {
-    if (count != 0 && element_bytes > std::numeric_limits<uint64_t>::max() / count)
-      return false;
-    const uint64_t bytes = count * element_bytes;
-    if (bytes > std::numeric_limits<uint64_t>::max() - section_collection_bytes)
-      return false;
-    section_collection_bytes += bytes;
-    return true;
-  };
-  if (!account_collection(materialized_section_count, sizeof(HsaSection)) ||
-      !account_collection(sections_.capacity(), sizeof(std::unique_ptr<Section>)) ||
-      !account_collection(text_sections_.capacity(), sizeof(const Section *)) ||
-      !account_collection(rodata_sections_.capacity(), sizeof(const Section *)) ||
-      (section_collection_bytes > image_.size() &&
-       section_collection_bytes - image_.size() > image_.size())) {
+  if (sections_.capacity() != materialized_section_count ||
+      text_sections_.capacity() != text_section_count ||
+      rodata_sections_.capacity() != rodata_section_count) {
     is_valid_ = false;
     return;
   }
@@ -690,18 +688,109 @@ void AmdGpuCodeObject::load_sections() {
   // contain the latter. Transient maps retain string views into image_, while
   // the final object owns two copies of each kernel name (kd_offsets_ and
   // kernels_) and one of each function name. Charging each distinct retained
-  // kernel and function key once therefore proves 2*K + F <= 2*(K + F).
-  uint64_t copied_symbol_name_bytes = 0;
+  // role's copied name plus conservative aggregate fixed state therefore bounds
+  // names, public records, and overlapping transient structures within the
+  // exported symbol-state budget. Aggregate accounting matters because a
+  // kernel, function, and dynamic-stack symbol commonly share one logical name.
+  uint64_t retained_symbol_state_bytes = 0;
   std::unordered_map<std::string_view, uint64_t> kernel_descriptor_offsets;
   std::unordered_map<std::string_view, uint64_t> descriptor_file_offsets;
   std::unordered_map<std::string_view, FunctionSymbolInfo> function_symbols;
   std::unordered_map<std::string_view, bool> dynamic_stack_symbols;
-  const auto retain_symbol_name = [&](std::string_view name) {
-    if (name.size() > image_.size() - copied_symbol_name_bytes) {
+  constexpr uint64_t kAssociativeEntryBookkeepingBytes = 4 * sizeof(void *);
+  static_assert(kAmdGpuCodeObjectKernelEntryChargeBytes >=
+                sizeof(AmdGpuKernelInfo) + sizeof(decltype(kd_offsets_)::value_type) +
+                    sizeof(decltype(kernel_descriptor_offsets)::value_type) +
+                    sizeof(decltype(descriptor_file_offsets)::value_type) +
+                    3 * kAssociativeEntryBookkeepingBytes);
+  static_assert(kAmdGpuCodeObjectKernelAndTransientEntryChargeBytes >=
+                sizeof(AmdGpuKernelInfo) + sizeof(decltype(kd_offsets_)::value_type) +
+                    sizeof(decltype(kernel_descriptor_offsets)::value_type) +
+                    sizeof(decltype(descriptor_file_offsets)::value_type) +
+                    sizeof(decltype(dynamic_stack_symbols)::value_type) +
+                    4 * kAssociativeEntryBookkeepingBytes);
+  static_assert(kAmdGpuCodeObjectFunctionEntryChargeBytes >=
+                sizeof(AmdGpuFunctionInfo) + sizeof(decltype(function_symbols)::value_type) +
+                    sizeof(std::map<FunctionEntryKey, FunctionEntryEvidence>::value_type) +
+                    2 * kAssociativeEntryBookkeepingBytes);
+  static_assert(kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes >=
+                sizeof(AmdGpuFunctionInfo) + sizeof(decltype(function_symbols)::value_type) +
+                    sizeof(std::map<FunctionEntryKey, FunctionEntryEvidence>::value_type) +
+                    sizeof(decltype(dynamic_stack_symbols)::value_type) +
+                    3 * kAssociativeEntryBookkeepingBytes);
+  static_assert(kAmdGpuCodeObjectTransientSymbolEntryChargeBytes >=
+                sizeof(decltype(dynamic_stack_symbols)::value_type) +
+                    kAssociativeEntryBookkeepingBytes);
+
+  enum class SymbolRetentionRole {
+    Kernel,
+    Function,
+    DynamicStack,
+  };
+  const auto fixed_symbol_state_charge = [](bool has_kernel, bool has_function,
+                                            bool has_dynamic_stack) {
+    if (has_kernel && has_function) {
+      return kAmdGpuCodeObjectKernelEntryChargeBytes +
+             (has_dynamic_stack ? kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes
+                                : kAmdGpuCodeObjectFunctionEntryChargeBytes);
+    }
+    if (has_kernel) {
+      return has_dynamic_stack ? kAmdGpuCodeObjectKernelAndTransientEntryChargeBytes
+                               : kAmdGpuCodeObjectKernelEntryChargeBytes;
+    }
+    if (has_function) {
+      return has_dynamic_stack ? kAmdGpuCodeObjectFunctionAndTransientEntryChargeBytes
+                               : kAmdGpuCodeObjectFunctionEntryChargeBytes;
+    }
+    return has_dynamic_stack ? kAmdGpuCodeObjectTransientSymbolEntryChargeBytes : 0u;
+  };
+  const auto retain_symbol_role = [&](std::string_view name, SymbolRetentionRole role) {
+    bool has_kernel = kernel_descriptor_offsets.contains(name);
+    bool has_function = function_symbols.contains(name);
+    bool has_dynamic_stack = dynamic_stack_symbols.contains(name);
+    const bool already_retained = role == SymbolRetentionRole::Kernel     ? has_kernel
+                                  : role == SymbolRetentionRole::Function ? has_function
+                                                                          : has_dynamic_stack;
+    if (already_retained)
+      return true;
+
+    const uint64_t old_fixed_charge =
+        fixed_symbol_state_charge(has_kernel, has_function, has_dynamic_stack);
+    has_kernel |= role == SymbolRetentionRole::Kernel;
+    has_function |= role == SymbolRetentionRole::Function;
+    has_dynamic_stack |= role == SymbolRetentionRole::DynamicStack;
+    const uint64_t new_fixed_charge =
+        fixed_symbol_state_charge(has_kernel, has_function, has_dynamic_stack);
+    const uint64_t copied_name_count = role == SymbolRetentionRole::Kernel     ? 2u
+                                       : role == SymbolRetentionRole::Function ? 1u
+                                                                               : 0u;
+    if (copied_name_count != 0 &&
+        name.size() > std::numeric_limits<uint64_t>::max() / copied_name_count) {
       is_valid_ = false;
       return false;
     }
-    copied_symbol_name_bytes += name.size();
+    const uint64_t copied_name_bytes = copied_name_count * name.size();
+    const uint64_t fixed_charge_increment = new_fixed_charge - old_fixed_charge;
+    if (copied_name_bytes > std::numeric_limits<uint64_t>::max() - fixed_charge_increment) {
+      is_valid_ = false;
+      return false;
+    }
+    const uint64_t charge = fixed_charge_increment + copied_name_bytes;
+    if (charge > std::numeric_limits<uint64_t>::max() - retained_symbol_state_bytes) {
+      is_valid_ = false;
+      return false;
+    }
+    retained_symbol_state_bytes += charge;
+    uint64_t remaining_symbol_state_bytes = retained_symbol_state_bytes;
+    for (uint64_t unit = 0; unit < kAmdGpuCodeObjectRetainedSymbolStateImageUnits; ++unit) {
+      if (remaining_symbol_state_bytes <= image_.size())
+        return true;
+      remaining_symbol_state_bytes -= image_.size();
+    }
+    if (remaining_symbol_state_bytes != 0) {
+      is_valid_ = false;
+      return false;
+    }
     return true;
   };
   const auto symbol_file_offset = [&](const Elf64_Sym &sym) -> std::optional<uint64_t> {
@@ -747,7 +836,14 @@ void AmdGpuCodeObject::load_sections() {
       if (sym.st_shndx == SHN_ABS && sym_name.ends_with(kDynamicStackSuffix)) {
         const std::string_view kernel_name =
             sym_name.substr(0, sym_name.size() - kDynamicStackSuffix.size());
-        dynamic_stack_symbols[kernel_name] = sym.st_value != 0;
+        auto dynamic_stack = dynamic_stack_symbols.find(kernel_name);
+        if (dynamic_stack == dynamic_stack_symbols.end()) {
+          if (!retain_symbol_role(kernel_name, SymbolRetentionRole::DynamicStack))
+            return;
+          dynamic_stack_symbols.emplace(kernel_name, sym.st_value != 0);
+        } else {
+          dynamic_stack->second = sym.st_value != 0;
+        }
         continue;
       }
       // AMDHSA kernel descriptors have a ".kd" suffix symbol.
@@ -755,7 +851,7 @@ void AmdGpuCodeObject::load_sections() {
         const std::string_view kernel_name = sym_name.substr(0, sym_name.size() - 3);
         auto descriptor = kernel_descriptor_offsets.find(kernel_name);
         if (descriptor == kernel_descriptor_offsets.end()) {
-          if (!retain_symbol_name(kernel_name))
+          if (!retain_symbol_role(kernel_name, SymbolRetentionRole::Kernel))
             return;
           kernel_descriptor_offsets.emplace(kernel_name, sym.st_value);
         } else {
@@ -777,7 +873,7 @@ void AmdGpuCodeObject::load_sections() {
           info.code_size = sym.st_size;
           const auto existing = function_symbols.find(sym_name);
           if (existing == function_symbols.end()) {
-            if (!retain_symbol_name(sym_name))
+            if (!retain_symbol_role(sym_name, SymbolRetentionRole::Function))
               return;
             function_symbols.emplace(sym_name, info);
           } else if (existing->second.code_size == 0 && info.code_size != 0) {
@@ -788,11 +884,6 @@ void AmdGpuCodeObject::load_sections() {
     }
   }
 
-  struct FunctionEntryEvidence {
-    uint64_t explicit_code_size = 0;
-    bool conflicting_explicit_sizes = false;
-  };
-  using FunctionEntryKey = std::pair<uint64_t, uint64_t>;
   std::map<FunctionEntryKey, FunctionEntryEvidence> function_entries;
   for (const auto &[name, function] : function_symbols) {
     (void)name;
@@ -840,6 +931,10 @@ void AmdGpuCodeObject::load_sections() {
 
   kernels_.clear();
   kernels_.reserve(kernel_descriptor_offsets.size());
+  if (kernels_.capacity() != kernel_descriptor_offsets.size()) {
+    is_valid_ = false;
+    return;
+  }
   for (const auto &entry : kernel_descriptor_offsets) {
     const std::string_view kernel_name = entry.first;
     AmdGpuKernelInfo kernel;
@@ -879,6 +974,10 @@ void AmdGpuCodeObject::load_sections() {
 
   functions_.clear();
   functions_.reserve(function_symbols.size());
+  if (functions_.capacity() != function_symbols.size()) {
+    is_valid_ = false;
+    return;
+  }
   for (const auto &entry : function_symbols) {
     AmdGpuFunctionInfo function;
     function.name = entry.first;

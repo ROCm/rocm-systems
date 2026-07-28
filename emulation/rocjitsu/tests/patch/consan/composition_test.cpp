@@ -43,7 +43,7 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
   const auto composite_reservation = consan_hook::consan_transform_phase_reservation_bytes(
       *composite_phase, bytes.size(), valid.elf_bytes.size());
   ASSERT_TRUE(composite_reservation);
-  EXPECT_EQ(*composite_reservation, bytes.size() + 12u * valid.elf_bytes.size())
+  EXPECT_EQ(*composite_reservation, bytes.size() + 13u * valid.elf_bytes.size())
       << "modified composite transforms must retain their explicit parser-complete phase";
   EXPECT_GE(ownership_estimate->reservation_bytes, *composite_reservation);
   const auto mutation = std::ranges::find(
