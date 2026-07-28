@@ -9918,6 +9918,7 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
   }
 
   const std::vector<uint32_t> expected = {
+      (static_cast<uint32_t>(gfx1250::encoding::kSop1) << 16) | gfx1250::kSBarrierSignalIsfirstSop1,
       (static_cast<uint32_t>(gfx1250::encoding::kSopp) << 16) | gfx1250::kSClauseSopp,
       (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
           gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
@@ -9991,7 +9992,7 @@ TEST(BinaryTranslatorE2E, Gfx1250UsesNeutralScaledK128Fp8Bf8Wmma) {
   };
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
 
-  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 38u);
+  EXPECT_EQ(rocjitsu::semantic_expand_rules_gfx1250_b0_to_a0().size(), 39u);
   for (const WmmaCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
     auto source_wmma = gfx1250::build_vop3p(test_case.source_opcode, fields);
@@ -10597,12 +10598,11 @@ TEST(BinaryTranslatorE2E, Gfx1250MaterializesDsAddtidAddressForA0) {
   EXPECT_EQ(((*v_bfe)->raw_encoding()[1] >> 18) & 0x1ffu, static_cast<uint16_t>(kInline + 20));
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnUnsupportedBarrierSignalIsfirst) {
-  // s_barrier_signal_isfirst is classified as needing an expansion but has no rule
-  // yet, so the translation must fail closed (ExpandMissing) rather than pass the
-  // instruction through. This pins the NOT-YET-SUPPORTED contract for the
-  // classifier-only mnemonics.
-  constexpr auto barrier = gfx1250::build_sop1(gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = 0});
+TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnExcludedBarrierSignalIsfirst) {
+  // Inline constants encode -1 at 193, so the excluded id is 195.
+  constexpr uint8_t kExcludedBarrierIdInline = 195;
+  constexpr auto barrier =
+      gfx1250::build_sop1(gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = kExcludedBarrierIdInline});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image =
       rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({barrier[0], kGfx1250SEndpgm});
@@ -10616,11 +10616,49 @@ TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnUnsupportedBarrierSignalIsfirst) {
 
   EXPECT_FALSE(result.ok());
   EXPECT_EQ(result.elf_bytes, image) << "a fail-closed translation must leave the object unchanged";
-  const auto diagnostic = std::ranges::find_if(result.diagnostics, [](const auto &d) {
-    return d.kind == rocjitsu::DiagnosticKind::ExpandMissing;
-  });
-  ASSERT_NE(diagnostic, result.diagnostics.end());
-  EXPECT_EQ(diagnostic->severity, rocjitsu::DiagnosticSeverity::Error);
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::ExpandFailed,
+      "s_barrier_signal_isfirst cannot name barrier id -3 (inline selector 195)"));
+}
+
+// Every other barrier id must survive translation unchanged. This operand
+// admits inline constants and M0; the neighbouring inline ids and an M0 source
+// therefore cover the supported spellings.
+//
+// M0 is the one case here that copies a run-time value. It is copied rather
+// than refused because that form draws the id from a zero-extended low field
+// and so cannot reach the excluded negative id. If that ever stopped holding,
+// this case would belong in the fail-closed test above instead.
+TEST(BinaryTranslatorE2E, Gfx1250CopiesRemainingBarrierSignalIsfirstFormsForA0) {
+  constexpr uint8_t kInlineMinusOne = 193;
+  constexpr uint8_t kInlineMinusTwo = 194;
+  constexpr uint8_t kInlineMinusFour = 196;
+  constexpr uint8_t kInlinePlusOne = 129;
+  constexpr uint8_t kM0Selector = 125;
+  for (const uint8_t barrier_id :
+       {kInlineMinusOne, kInlineMinusTwo, kInlineMinusFour, kInlinePlusOne, kM0Selector}) {
+    const auto barrier =
+        gfx1250::build_sop1(gfx1250::kSBarrierSignalIsfirstSop1, {.ssrc0 = barrier_id});
+    constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+    auto image =
+        rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({barrier[0], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << "barrier id " << static_cast<int>(barrier_id) << ": "
+                             << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *target_words =
+        reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    EXPECT_EQ(target_words[0], barrier[0])
+        << "barrier id " << static_cast<int>(barrier_id) << " must be copied verbatim";
+  }
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250WrapsBareF8f6f4WmmaInNeutralScaleForA0) {
