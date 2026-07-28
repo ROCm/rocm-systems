@@ -165,6 +165,10 @@ void BasicBlock::add_static_indirect_call_fixup(IndirectCallFixup fixup) {
   static_indirect_call_fixups_.push_back(fixup);
 }
 
+void BasicBlock::add_static_pc_address_builder(PcAddressBuilder builder) {
+  static_pc_address_builders_.push_back(builder);
+}
+
 std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co, Decoder &decoder,
                                                            rj_code_arch_t arch,
                                                            std::span<const uint64_t> extra_leaders,
@@ -225,8 +229,9 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(sec->data()), sec->size());
     const auto decoded_span =
         std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size());
-    std::vector<IndirectCallFixup> recovered_indirect_targets =
-        discover_indirect_branch_edges(decoded_span, text, arch, extra_leaders, entry_policy);
+    std::vector<PcAddressBuilder> pc_address_builders;
+    std::vector<IndirectCallFixup> recovered_indirect_targets = discover_indirect_branch_edges(
+        decoded_span, text, arch, extra_leaders, entry_policy, &pc_address_builders);
 
     std::set<uint64_t> leaders;
     leaders.insert(decoded.front()->src_loc());
@@ -309,6 +314,24 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
     block_by_offset.reserve(section_blocks.size());
     for (auto &block : section_blocks)
       block_by_offset.emplace(block->start_offset(), block.get());
+
+    // Attach every discovered PC-relative address producer to the block that
+    // contains its s_getpc_b64. Blocks are in ascending source order and cover
+    // the decoded stream without overlap, so the owning block is the last one
+    // starting at or before the producer.
+    const auto starts_after = [](uint64_t offset, const std::unique_ptr<BasicBlock> &block) {
+      return offset < block->start_offset();
+    };
+    for (const PcAddressBuilder &builder : pc_address_builders) {
+      const auto it = std::upper_bound(section_blocks.begin(), section_blocks.end(),
+                                       builder.source_getpc_offset, starts_after);
+      if (it == section_blocks.begin())
+        continue;
+      BasicBlock &owner = **(it - 1);
+      if (builder.source_getpc_offset >= owner.end_offset())
+        continue;
+      owner.add_static_pc_address_builder(builder);
+    }
 
     std::vector<DeferredCallSite> deferred_calls;
     std::unordered_map<const BasicBlock *, size_t> call_site_by_source;
