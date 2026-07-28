@@ -4,12 +4,20 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.8.0 for ROCm 7.15.0 (unreleased)
+## ROCm Systems Profiler 1.9.0 for ROCm 7.16.0 (unreleased)
+
+### Added
+
+- `--env` flag for `rocprof-sys-run` and `rocprof-sys-sample` to set environment
+  variables in `VARIABLE=VALUE` form (repeatable).
+
+## ROCm Systems Profiler 1.8.0 for ROCm 7.15.0
 
 ### Added
 
 - hipFILE (GPU-direct storage) API tracing. Add `hipfile_api` to
-  `ROCPROFSYS_ROCM_DOMAINS` (shorthand: `hipfile`) to capture hipFILE API traces. Requires ROCProfiler-SDK version 1.3.5 or later.
+  `ROCPROFSYS_ROCM_DOMAINS` (shorthand: `hipfile`) to capture hipFILE API traces.
+  Requires ROCProfiler-SDK version 1.3.5 or later.
 
 - `--exe-only` flag for `rocprof-sys-instrument`: shorthand for excluding every shared
   library from instrumentation, leaving only the main executable.

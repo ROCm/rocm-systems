@@ -336,6 +336,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "minimal",
         "rank_filter",
         "pytest_impl",
+        "env_flag",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")

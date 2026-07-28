@@ -144,6 +144,7 @@ TEST_F(help_system_test, compact_help_contains_essential_info)
     EXPECT_NE(output.find("--help="), std::string::npos);
     EXPECT_NE(output.find("QUICK START"), std::string::npos);
     EXPECT_NE(output.find("HELP TOPICS"), std::string::npos);
+    EXPECT_NE(output.find("--env"), std::string::npos);
     EXPECT_NE(output.find("rocprof-sys-run"), std::string::npos);
 }
 

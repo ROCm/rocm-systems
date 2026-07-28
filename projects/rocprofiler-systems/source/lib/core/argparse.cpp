@@ -292,6 +292,31 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("config_file");
     }
 
+    if(_data.reg.environ_filter("env", _data))
+    {
+        _parser
+            .add_argument({ "--env" },
+                          "Environment variables to set for the target process in form "
+                          "VARIABLE=VALUE. May be repeated.")
+            .min_count(1)
+            .dtype("string")
+            .action([&](parser_t& p) {
+                for(const auto& entry : p.get<strvec_t>("env"))
+                {
+                    const auto eq_pos = entry.find('=');
+                    if(eq_pos == std::string::npos || eq_pos == 0)
+                    {
+                        throw std::runtime_error(fmt::format(
+                            "Error! --env value '{}' is not in form VARIABLE=VALUE",
+                            entry));
+                    }
+                    update_env(_data, entry.substr(0, eq_pos), entry.substr(eq_pos + 1));
+                }
+            });
+
+        _data.reg.processed_environs.emplace("env");
+    }
+
     if(_data.reg.environ_filter("output", _data))
     {
         _parser

@@ -746,7 +746,8 @@ print_compact_help(std::string_view tool_name, std::ostream& out)
         << "COMMON OPTIONS\n"
         << "  -o, --output PATH      Output directory\n"
         << "  -T, --trace            Enable/disable Perfetto tracing\n"
-        << "  -P, --profile          Enable/disable call-stack profiling\n";
+        << "  -P, --profile          Enable/disable call-stack profiling\n"
+        << "  --env VAR=VALUE        Set environment variable (repeatable)\n";
     if(tool_name == "run") out << "  -S, --sample           Enable/disable sampling\n";
     out << "  --export-config[=FILE] Export resolved config as JSON\n"
         << "  -v, --verbose          Increase verbosity\n"
