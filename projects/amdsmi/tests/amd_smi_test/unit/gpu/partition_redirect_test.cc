@@ -37,7 +37,11 @@
 namespace amd::smi {
 
 // Forward declaration of the internal helper under test (defined in
-// src/amd_smi/amd_smi.cc).
+// src/amd_smi/amd_smi.cc). This symbol is internal to the library and is not part
+// of the exported amdsmi_* ABI (the shared-library version script keeps it
+// hidden), so the test resolves it through the static library. Building the test
+// suite turns on BUILD_BOTH_LIBS, which links amdsmitst against that static lib;
+// keep this declaration in sync with the definition's signature.
 int primary_partition_redirect_index(const std::vector<uint32_t>& partition_ids, size_t self_index);
 
 }  // namespace amd::smi

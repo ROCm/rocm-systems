@@ -3304,7 +3304,12 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(
     return AMDSMI_STATUS_INVAL;
   }
   std::ostringstream ss;
-  auto status = rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_get, processor_handle, 0,
+  // The mem-alloc-mode sysfs node lives in the whole-GPU compute-partition config
+  // and only responds on the primary partition, so a sub-partition handle is
+  // redirected to its owning device's primary partition (all partitions share one
+  // mem-alloc mode).
+  amdsmi_processor_handle query_handle = resolve_partition_query_handle(processor_handle);
+  auto status = rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_get, query_handle, 0,
                              reinterpret_cast<rsmi_compute_partition_mem_alloc_mode_t*>(mode));
   ss << __PRETTY_FUNCTION__ << " | rsmi_dev_compute_partition_mem_alloc_mode_get() returned: "
      << smi_amdgpu_get_status_string(status, false);
@@ -3497,6 +3502,11 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
   if (!amd::smi::is_sudo_user()) {
     return AMDSMI_STATUS_NO_PERM;
   }
+  // This enumerates the device's supported accelerator profiles (a whole-GPU
+  // capability) and probes them with internal partition-config writes. It is not
+  // part of the per-partition partition display fixed for issue #100, so the
+  // sub-partition redirect applied by the partition getters is intentionally not
+  // used here.
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | START ";
   // std::cout << ss.str() << std::endl;
