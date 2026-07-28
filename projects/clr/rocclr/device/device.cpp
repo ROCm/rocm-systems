@@ -99,7 +99,8 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       // nullptr for the ID.
       //
       // Columns: {target-id, ROC-supported, PAL-supported, major, minor, step, SRAMECC, XNACK}.
-      // HW properties (SIMD/LDS/etc.) are derived at runtime via Isa accessors, not stored here.
+      // HW properties (SIMD width, LDS banks/alignment, etc.) are constants derived from the ISA
+      // version via Isa accessors, and LDS size per CU comes from the driver; none are stored here.
       {"gfx801", true, true, 8, 0, 1, NONE, ANY},
       {"gfx801:xnack-", true, false, 8, 0, 1, NONE, OFF},
       {"gfx801:xnack+", true, true, 8, 0, 1, NONE, ON},
@@ -227,45 +228,6 @@ std::string Isa::processorName() const {
 }
 
 std::string Isa::isaName() const { return std::string(hsaIsaNamePrefix) + targetId(); }
-
-namespace {
-// Caches immutable per-ISA integer properties queried from comgr at runtime. A concurrent miss may
-// perform the same idempotent query more than once, but the comgr call must not run under this
-// process-wide cache lock.
-uint32_t cachedIsaMetaUint(const Isa& isa, const char* key, uint32_t defaultValue) {
-  static std::mutex mutex;
-  static std::map<std::string, uint32_t> cache;
-  const std::string cacheKey = isa.isaName() + '/' + key;
-
-  {
-    std::lock_guard<std::mutex> lock(mutex);
-    auto it = cache.find(cacheKey);
-    if (it != cache.end()) {
-      return it->second;
-    }
-  }
-
-  const uint32_t value = amd::device::getUintFromIsaMeta(isa.isaName(), key, defaultValue);
-
-  std::lock_guard<std::mutex> lock(mutex);
-  return cache.emplace(cacheKey, value).first->second;
-}
-}  // namespace
-
-uint32_t Isa::localMemSizePerCU() const {
-  const uint32_t fallback = (versionMajor_ == 9 && versionMinor_ == 5)    ? 160 * Ki
-                            : (versionMajor_ == 12 && versionMinor_ == 5) ? 320 * Ki
-                                                                           : 64 * Ki;
-  return cachedIsaMetaUint(*this, "LocalMemorySize", fallback);
-}
-
-uint32_t Isa::localMemBanks() const {
-  const uint32_t fallback = ((versionMajor_ == 9 && versionMinor_ == 5) ||
-                             (versionMajor_ == 12 && versionMinor_ == 5))
-                                ? 64
-                                : 32;
-  return cachedIsaMetaUint(*this, "LDSBankCount", fallback);
-}
 
 bool Isa::isCompatible(const Isa& codeObjectIsa, const Isa& agentIsa) {
   bool isGeneric = std::strstr(codeObjectIsa.targetId(), "generic") != nullptr;

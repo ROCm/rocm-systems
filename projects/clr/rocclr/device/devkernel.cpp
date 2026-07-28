@@ -74,26 +74,6 @@ bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& r
 }
 
 // ================================================================================================
-// Queries an unsigned ISA-metadata property from comgr (e.g. "LocalMemorySize"); returns
-// |defaultValue| if unavailable, so callers never depend on a hardcoded device table.
-uint32_t getUintFromIsaMeta(const std::string& isa, const char* key, uint32_t defaultValue) {
-  // Ensure comgr is loaded first: PAL can populate device info before comgr init, leaving its
-  // entry points null. Fall back to |defaultValue| if unavailable.
-  if (!amd::Comgr::EnsureLoaded()) {
-    return defaultValue;
-  }
-  std::string value;
-  if (getValueFromIsaMeta(isa, key, value)) {
-    uint32_t parsed = 0;
-    std::istringstream iss(value);
-    if (iss >> parsed) {
-      return parsed;
-    }
-  }
-  return defaultValue;
-}
-
-// ================================================================================================
 static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
                                        const amd_comgr_metadata_node_t value, void* data) {
   amd_comgr_status_t status;

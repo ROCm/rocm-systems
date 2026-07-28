@@ -1443,7 +1443,6 @@ class VirtualDevice : public amd::ReferenceCountedObject {
 };
 
 extern bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue);
-extern uint32_t getUintFromIsaMeta(const std::string& isa, const char* key, uint32_t defaultValue);
 }  // namespace amd::device
 
 namespace amd {
@@ -1625,12 +1624,15 @@ class Isa {
   /// @returns This Isa's memory channel bank width.
   uint32_t memChannelBankWidth() const { return 256; }
 
-  /// @returns This Isa's local memory size per CU (comgr "LocalMemorySize";
-  /// online devices prefer the driver/HSA value).
-  uint32_t localMemSizePerCU() const;
-
-  /// @returns This Isa's number of local-memory banks (comgr "LDSBankCount").
-  uint32_t localMemBanks() const;
+  /// @returns This Isa's number of local-memory banks. Derived from the ISA version.
+  uint32_t localMemBanks() const {
+    // gfx950 (gfx9.5) and gfx1250 (gfx12.5) double the bank count.
+    if ((versionMajor_ == 9 && versionMinor_ == 5) ||
+        (versionMajor_ == 12 && versionMinor_ == 5)) {
+      return 64;
+    }
+    return 32;
+  }
 
   /// @returns This Isa's LDS alignment. Derived from the ISA version.
   uint32_t ldsAlignment() const {
