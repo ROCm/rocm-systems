@@ -123,6 +123,12 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
     eStop.awaitEventCompletion();
     ms = static_cast<float>(eStop.time(false) - time(false)) * kNsToMs;
   }
+  // Guarantee CUDA-compatible semantics: elapsed time is never negative. For very
+  // short intervals the two markers' HW end timestamps can be read with a small
+  // reverse skew, which would otherwise surface as a tiny negative result.
+  if (ms < 0.0f) {
+    ms = 0.0f;
+  }
   return hipSuccess;
 }
 
