@@ -214,6 +214,7 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define RCCL_DTYPE_SHIFT 16
 #define RCCL_ACC_SHIFT 20
 #define RCCL_PIPELINE_SHIFT 24
+#define RCCL_REG_SHIFT 28
 
 struct ncclConnInfo {
   // Regular comm mechanism
@@ -788,16 +789,27 @@ inline bool ncclNvlsSupported(int devRedOp, int type) {
 // Map the uint64_t key to funcIdx
 extern std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 
+// LL128 for these collectives is generated as two separate kernels selected by
+// user-buffer registration mode (UserRegMode 1=registered, 2=non-registered).
+// Keep in sync with `ll128_reg_variant_colls` in src/device/generate.py.
+inline bool ncclDevFuncIsLL128RegVariant(int coll, int proto) {
+  return proto == NCCL_PROTO_LL128 &&
+         (coll == ncclFuncAllReduce || coll == ncclFuncAllGather || coll == ncclFuncBroadcast);
+}
+
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
-inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, int acc = 0, int pipeline = 0) {
+// `reg` is the user-buffer registration mode (0=n/a, 1=registered, 2=non-registered)
+// and is only used to distinguish the LL128 reg-variant collectives.
+inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, int acc = 0, int pipeline = 0, int reg = 0) {
   int row = -1;
   uint64_t key;
   // Pack 4-bit fields from right (LSB) to left in order:
-  // coll, algo, proto, devRedOp, type, acc, pipeline
+  // coll, algo, proto, devRedOp, type, acc, pipeline, reg
   // This logic must be in sync with the key generation logic in generate.py
   if (coll == ncclFuncBroadcast) {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
-          ((uint64_t)(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
+          ((uint64_t)(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT) |
+          ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
   } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda ||
              coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT);
@@ -808,7 +820,8 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
           ((uint64_t)(devRedOp & RCCL_FUNC_ID_MASK) << RCCL_REDOP_SHIFT) |
           ((uint64_t)(type & RCCL_FUNC_ID_MASK) << RCCL_DTYPE_SHIFT) |
           ((uint64_t)(acc & RCCL_FUNC_ID_MASK) << RCCL_ACC_SHIFT) |
-          ((uint64_t)(pipeline & RCCL_FUNC_ID_MASK) << RCCL_PIPELINE_SHIFT);
+          ((uint64_t)(pipeline & RCCL_FUNC_ID_MASK) << RCCL_PIPELINE_SHIFT) |
+          ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
   }
   auto it = ncclDevFuncNameToId.find(key);
   if (it != ncclDevFuncNameToId.end()) {
@@ -816,8 +829,8 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   }
   if (row < 0) {
     WARN("Fatal error: ncclDevFuncId: %lu not found for coll: %d, algo: %d, proto: %d, devRedOp: %d, type: %d, acc: "
-         "%d, pipeline: %d",
-         key, coll, algo, proto, devRedOp, type, acc, pipeline);
+         "%d, pipeline: %d, reg: %d",
+         key, coll, algo, proto, devRedOp, type, acc, pipeline, reg);
     return -1;
   }
   return row;
