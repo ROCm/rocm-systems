@@ -117,25 +117,31 @@ def test_counter_collection_fields_match_across_rocpd_csv_json(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        event_table = next(name for name in tables if "rocpd_pmc_event_" in name)
-        suffix = event_table.split("rocpd_pmc_event_", 1)[1]
-        info_table = "rocpd_info_pmc_{}".format(suffix)
-        dispatch_table = "rocpd_kernel_dispatch_{}".format(suffix)
-        assert info_table in tables and dispatch_table in tables
-        db_records = list(
-            connection.execute(
-                """
-                SELECT dispatch.dispatch_id, info.name, event.value
-                FROM {event} AS event
-                JOIN {info} AS info ON event.pmc_id = info.id
-                JOIN {dispatch} AS dispatch ON event.event_id = dispatch.event_id
-                """.format(
-                    event=event_table,
-                    info=info_table,
-                    dispatch=dispatch_table,
+        event_tables = sorted(
+            name for name in tables if name.startswith("rocpd_pmc_event_")
+        )
+        assert event_tables
+
+        db_records = []
+        for event_table in event_tables:
+            suffix = event_table.split("rocpd_pmc_event_", 1)[1]
+            info_table = "rocpd_info_pmc_{}".format(suffix)
+            dispatch_table = "rocpd_kernel_dispatch_{}".format(suffix)
+            assert info_table in tables and dispatch_table in tables
+            db_records.extend(
+                connection.execute(
+                    """
+                    SELECT dispatch.dispatch_id, info.name, event.value
+                    FROM {event} AS event
+                    JOIN {info} AS info ON event.pmc_id = info.id
+                    JOIN {dispatch} AS dispatch ON event.event_id = dispatch.event_id
+                    """.format(
+                        event=event_table,
+                        info=info_table,
+                        dispatch=dispatch_table,
+                    )
                 )
             )
-        )
 
     json_aggregates = aggregate(json_records)
     assert aggregate(csv_records) == json_aggregates
