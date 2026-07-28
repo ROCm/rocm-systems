@@ -53,12 +53,21 @@ struct ConSanBarrierLifecycleGroup {
   std::string rejection_reason;
 };
 
-/// One canonical physical native-LDS access in SuperCollider's resolved
-/// planning scope. The hook consumes this ledger instead of reconstructing
-/// applicability from aliased kernel inventories that may lack a complete
-/// all-owner CFG/liveness context.
-struct ConSanScLdsCoverageSite {
+enum class ConSanScAccessCoverageKind : uint8_t {
+  NativeLds,
+  FlatGroup,
+};
+
+/// One canonical physical access in SuperCollider's resolved planning scope.
+/// The hook consumes this ledger instead of reconstructing applicability from
+/// aliased kernel inventories that may lack a complete all-owner CFG/liveness
+/// context.
+struct ConSanScAccessCoverageSite {
+  ConSanScAccessCoverageKind kind = ConSanScAccessCoverageKind::NativeLds;
   uint64_t file_offset = 0;
+  /// True after the matching planner has evaluated this physical site.
+  /// Unevaluated sites remain fail-closed for require-patch policy.
+  bool evaluated = false;
   bool supported = false;
 };
 
@@ -168,11 +177,12 @@ struct ConSanResult {
   std::optional<std::string> applied_fault_logical_identity;
   std::vector<ConSanMoiCandidate> moi_candidates;
   std::vector<ConSanSiteDispositionRecord> site_dispositions;
-  /// True when sc_lds_coverage_sites is the authoritative physical native-LDS
-  /// denominator for this transform. Independently planned FLAT sites remain
-  /// outside this ledger.
-  bool sc_lds_coverage_resolved = false;
-  std::vector<ConSanScLdsCoverageSite> sc_lds_coverage_sites;
+  /// True when sc_access_coverage_sites is the authoritative physical access
+  /// denominator for this SuperCollider transform. Planning can promote a
+  /// site to supported only after every alias and execution owner has a
+  /// complete CFG/liveness context.
+  bool sc_access_coverage_resolved = false;
+  std::vector<ConSanScAccessCoverageSite> sc_access_coverage_sites;
   /// Warning boundary immediately before MOI planning. A validated retry with
   /// a runtime-allocated report buffer trims only the prior MOI-stage
   /// diagnostics while retaining parser and semantic-analysis warnings.

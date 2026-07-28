@@ -39,20 +39,25 @@ flat_check_trap_delay_source_sgpr(const ConSanOptions &options) {
   return delay_source && flat_check_trap_sgpr_ranges_overlap(base, width, *delay_source, 1u);
 }
 
-[[nodiscard]] std::optional<uint16_t>
-choose_flat_check_trap_vcc_save_sgpr(const Instruction *inst, const LivenessAnalysis *liveness,
-                                     std::optional<uint16_t> min_preferred_sgpr,
-                                     const ConSanOptions &options,
-                                     bool preserve_dynamic_stack_abi) {
-  if (inst == nullptr || liveness == nullptr)
+[[nodiscard]] std::optional<uint16_t> choose_flat_check_trap_vcc_save_sgpr(
+    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
+    std::optional<uint16_t> min_preferred_sgpr, const ConSanOptions &options,
+    bool preserve_dynamic_stack_abi) {
+  if (inst == nullptr || owner_liveness.empty() ||
+      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
   const auto find_pair = [&](uint16_t start) -> std::optional<uint16_t> {
-    while (auto pair = liveness->find_free_sgpr_pair(inst, start)) {
+    while (auto pair = owner_liveness.front()->find_free_sgpr_pair(inst, start)) {
       const bool overlaps_dynamic_stack =
           preserve_dynamic_stack_abi &&
           flat_check_trap_sgpr_ranges_overlap(*pair, 2u, kDynamicStackTopSgpr, 2u);
-      if (!flat_check_trap_overlaps_delay_source(*pair, 2u, options) &&
-          !overlaps_dynamic_stack)
+      const RegisterRef ref{RegClass::SGPR, *pair, 2u};
+      const bool dead_for_every_owner =
+          std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
+            return !liveness->is_live_before(*inst, ref);
+          });
+      if (!flat_check_trap_overlaps_delay_source(*pair, 2u, options) && !overlaps_dynamic_stack &&
+          dead_for_every_owner)
         return pair;
       if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
         return std::nullopt;
@@ -87,17 +92,24 @@ choose_flat_check_trap_scalar_spill_pair(uint16_t allocated_sgpr_count,
 }
 
 [[nodiscard]] std::optional<LdsCheckTrapIndirectScalarScratch>
-choose_flat_check_trap_indirect_scalar_scratch(const Instruction *inst,
-                                               const LivenessAnalysis *liveness,
-                                               std::optional<uint16_t> min_preferred_sgpr,
-                                               const ConSanOptions &options) {
-  if (inst == nullptr || liveness == nullptr)
+choose_flat_check_trap_indirect_scalar_scratch(
+    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
+    std::optional<uint16_t> min_preferred_sgpr, const ConSanOptions &options) {
+  if (inst == nullptr || owner_liveness.empty() ||
+      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
     return std::nullopt;
 
+  const auto dead_for_every_owner = [&](uint16_t base, uint8_t width) {
+    const RegisterRef ref{RegClass::SGPR, base, width};
+    return std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
+      return !liveness->is_live_before(*inst, ref);
+    });
+  };
   const auto search = [&](uint16_t start) -> std::optional<LdsCheckTrapIndirectScalarScratch> {
     uint16_t vcc_start = start;
-    while (auto vcc_pair = liveness->find_free_sgpr_pair(inst, vcc_start)) {
-      if (flat_check_trap_overlaps_delay_source(*vcc_pair, 2u, options)) {
+    while (auto vcc_pair = owner_liveness.front()->find_free_sgpr_pair(inst, vcc_start)) {
+      if (flat_check_trap_overlaps_delay_source(*vcc_pair, 2u, options) ||
+          !dead_for_every_owner(*vcc_pair, 2u)) {
         if (*vcc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
           return std::nullopt;
         vcc_start = static_cast<uint16_t>(*vcc_pair + 2u);
@@ -105,9 +117,10 @@ choose_flat_check_trap_indirect_scalar_scratch(const Instruction *inst,
       }
 
       uint16_t pc_start = start;
-      while (auto pc_pair = liveness->find_free_sgpr_pair(inst, pc_start)) {
+      while (auto pc_pair = owner_liveness.front()->find_free_sgpr_pair(inst, pc_start)) {
         if (flat_check_trap_sgpr_ranges_overlap(*pc_pair, 2u, *vcc_pair, 2u) ||
-            flat_check_trap_overlaps_delay_source(*pc_pair, 2u, options)) {
+            flat_check_trap_overlaps_delay_source(*pc_pair, 2u, options) ||
+            !dead_for_every_owner(*pc_pair, 2u)) {
           if (*pc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
             break;
           pc_start = static_cast<uint16_t>(*pc_pair + 2u);
@@ -115,10 +128,11 @@ choose_flat_check_trap_indirect_scalar_scratch(const Instruction *inst,
         }
 
         uint16_t scc_start = start;
-        while (auto scc_save = liveness->find_free_sgpr(inst, scc_start)) {
+        while (auto scc_save = owner_liveness.front()->find_free_sgpr(inst, scc_start)) {
           if (!flat_check_trap_sgpr_ranges_overlap(*scc_save, 1u, *vcc_pair, 2u) &&
               !flat_check_trap_sgpr_ranges_overlap(*scc_save, 1u, *pc_pair, 2u) &&
-              !flat_check_trap_overlaps_delay_source(*scc_save, 1u, options)) {
+              !flat_check_trap_overlaps_delay_source(*scc_save, 1u, options) &&
+              dead_for_every_owner(*scc_save, 1u)) {
             return LdsCheckTrapIndirectScalarScratch{*vcc_pair, *pc_pair, *scc_save};
           }
           if (*scc_save + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS)
@@ -145,6 +159,46 @@ choose_flat_check_trap_indirect_scalar_scratch(const Instruction *inst,
   return search(0);
 }
 
+[[nodiscard]] std::optional<uint16_t> choose_flat_check_trap_scratch_vgpr(
+    const ConSanFlatSite &site, const ConSanOptions &options, const Instruction *inst,
+    std::span<const LivenessAnalysis *const> owner_liveness,
+    std::optional<uint16_t> min_auto_scratch_vgpr, std::optional<uint16_t> max_auto_scratch_vgpr,
+    uint16_t required_vgprs) {
+  if (options.scratch_vgpr) {
+    return choose_flat_scratch_vgpr(site, options, inst, nullptr, min_auto_scratch_vgpr,
+                                    max_auto_scratch_vgpr, required_vgprs);
+  }
+  if (inst == nullptr || owner_liveness.empty() ||
+      std::ranges::any_of(owner_liveness,
+                          [](const auto *liveness) { return liveness == nullptr; }) ||
+      required_vgprs > std::numeric_limits<uint8_t>::max())
+    return std::nullopt;
+
+  uint16_t search_start =
+      std::max(flat_scratch_search_start(site), min_auto_scratch_vgpr.value_or(0));
+  while (search_start < REGISTER_SET_MAX_VGPRS) {
+    const auto candidate =
+        owner_liveness.front()->find_free_run(inst, required_vgprs, search_start);
+    if (!candidate)
+      return std::nullopt;
+    const uint32_t candidate_end = static_cast<uint32_t>(*candidate) + required_vgprs;
+    if (max_auto_scratch_vgpr && candidate_end > *max_auto_scratch_vgpr)
+      return std::nullopt;
+    const RegisterRef ref{RegClass::VGPR, *candidate, static_cast<uint8_t>(required_vgprs)};
+    const bool dead_for_every_owner =
+        std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
+          return !liveness->is_live_before(*inst, ref);
+        });
+    if (candidate_end <= REGISTER_SET_MAX_VGPRS && dead_for_every_owner &&
+        !is_forbidden_flat_scratch_vgpr_run(site, *candidate, required_vgprs))
+      return candidate;
+    if (*candidate == UINT16_MAX)
+      return std::nullopt;
+    search_start = static_cast<uint16_t>(*candidate + 1u);
+  }
+  return std::nullopt;
+}
+
 void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                      const ConSanOptions &options, ConSanResult &result,
                                      std::span<const ByteRange> initial_reserved_ranges = {}) {
@@ -153,14 +207,73 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     return;
   }
 
-  const auto contains_supported_site = [&](const auto &containers) {
-    return std::ranges::any_of(containers, [&](const auto &container) {
-      return std::ranges::any_of(container.flat_sites, [&](const ConSanFlatSite &site) {
-        return is_supported_flat_check_trap_site(site, options.flat_provenance_mode);
-      });
-    });
+  struct CanonicalFlatSite {
+    std::string_view container_name;
+    uint64_t container_entry_text_offset = 0;
+    ConSanFlatSite site;
   };
-  if (!contains_supported_site(result.kernels) && !contains_supported_site(result.functions)) {
+  size_t discovered_site_count = 0;
+  for (const ConSanKernelInfo &kernel : result.kernels)
+    discovered_site_count += kernel.flat_sites.size();
+  for (const ConSanFunctionInfo &function : result.functions)
+    discovered_site_count += function.flat_sites.size();
+  auto canonicalizer = consan_detail::make_physical_site_alias_canonicalizer<CanonicalFlatSite>(
+      result.errors, "ConSan FLAT physical site",
+      [](const CanonicalFlatSite &candidate) { return candidate.site.file_offset; },
+      [](const CanonicalFlatSite &candidate) { return candidate.container_name; },
+      [&](const CanonicalFlatSite &lhs, const CanonicalFlatSite &rhs) {
+        return lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
+               sc_flat_site_semantics_equal(lhs.site, rhs.site);
+      },
+      [](CanonicalFlatSite &retained, const CanonicalFlatSite &alias) {
+        retained.site.owner_descriptor_file_offsets.insert(
+            retained.site.owner_descriptor_file_offsets.end(),
+            alias.site.owner_descriptor_file_offsets.begin(),
+            alias.site.owner_descriptor_file_offsets.end());
+      },
+      discovered_site_count);
+  for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanFlatSite &site : kernel.flat_sites) {
+      if (!sc_flat_site_is_applicable(site, options.flat_provenance_mode))
+        continue;
+      CanonicalFlatSite candidate{
+          .container_name = kernel.name,
+          .container_entry_text_offset = kernel.entry_text_offset,
+          .site = site,
+      };
+      candidate.site.owner_descriptor_file_offsets.push_back(kernel.descriptor_file_offset);
+      if (!canonicalizer.insert(std::move(candidate)))
+        return;
+    }
+  }
+  for (const ConSanFunctionInfo &function : result.functions) {
+    for (const ConSanFlatSite &site : function.flat_sites) {
+      if (!sc_flat_site_is_applicable(site, options.flat_provenance_mode))
+        continue;
+      if (!canonicalizer.insert({
+              .container_name = function.name,
+              .container_entry_text_offset = function.entry_text_offset,
+              .site = site,
+          }))
+        return;
+    }
+  }
+  std::optional<std::vector<CanonicalFlatSite>> canonical_sites_result =
+      std::move(canonicalizer).take();
+  if (!canonical_sites_result)
+    return;
+  std::vector<CanonicalFlatSite> canonical_sites = std::move(*canonical_sites_result);
+  for (CanonicalFlatSite &canonical : canonical_sites) {
+    auto &owners = canonical.site.owner_descriptor_file_offsets;
+    std::ranges::sort(owners);
+    owners.erase(std::ranges::unique(owners).begin(), owners.end());
+  }
+
+  if (std::ranges::none_of(canonical_sites, [&](const CanonicalFlatSite &canonical) {
+        return is_supported_flat_check_trap_site(canonical.site, options.flat_provenance_mode);
+      })) {
+    publish_sc_access_coverage_support(
+        result, ConSanScAccessCoverageKind::FlatGroup, [](uint64_t) { return false; });
     result.warnings.emplace_back(
         "ConSan flat check/trap proof found no supported likely group-FLAT load/store site");
     return;
@@ -186,9 +299,18 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   for (const LocalNopCave &cave : local_nop_caves)
     max_uncovered_nop_cave_words = std::max(max_uncovered_nop_cave_words, cave.word_count);
 
+  struct FlatOwnerPlanningContext {
+    uint64_t descriptor_file_offset = 0;
+    KernelCfgScope scope;
+    std::unique_ptr<LivenessAnalysis> liveness;
+  };
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   std::vector<BasicBlock *> block_ptrs;
-  std::unique_ptr<LivenessAnalysis> liveness;
+  BlockOffsetIndex block_index;
+  std::vector<uint64_t> kernel_entries;
+  std::span<const uint8_t> pristine_text;
+  std::unordered_map<uint64_t, FlatOwnerPlanningContext> owner_contexts;
+  std::unordered_set<uint64_t> failed_owner_contexts;
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (decoder) {
     std::vector<uint64_t> extra_leaders = kernel_entry_offsets(result);
@@ -207,9 +329,22 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
     blocks = BasicBlock::build(code_object, *decoder, arch, extra_leaders, code_ranges);
     block_ptrs = block_ptrs_for(blocks);
-    if (!block_ptrs.empty())
-      liveness = std::make_unique<LivenessAnalysis>(KernelBlockScope(block_ptrs));
+
+    block_index = build_block_offset_index(blocks);
+    for (const ConSanKernelInfo &kernel : result.kernels) {
+      if (kernel.has_text_range)
+        kernel_entries.push_back(kernel.entry_text_offset);
+    }
+    std::ranges::sort(kernel_entries);
+    kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
+    if (code_object.text_sections().size() == 1) {
+      const Section *text = code_object.text_sections().front();
+      pristine_text =
+          std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
+    }
   }
+  owner_contexts.reserve(result.kernels.size());
+  failed_owner_contexts.reserve(result.kernels.size());
 
   struct FlatCheckTrapCandidate {
     const ConSanFlatSite *site = nullptr;
@@ -306,8 +441,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                         std::optional<uint16_t> max_auto_scratch_vgpr,
                         std::optional<uint16_t> min_fresh_sgpr,
                         std::optional<uint16_t> allocated_sgpr_count,
-                        uint32_t original_private_segment_size,
-                        FlatOwnerStackKind owner_stack_kind,
+                        uint32_t original_private_segment_size, FlatOwnerStackKind owner_stack_kind,
+                        std::span<const LivenessAnalysis *const> owner_liveness,
                         std::vector<uint64_t> owner_descriptor_file_offsets) {
     if (!is_supported_flat_check_trap_site(site, options.flat_provenance_mode))
       return;
@@ -343,8 +478,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         find_instruction_at_text_offset(KernelBlockScope(block_ptrs), site.text_offset);
     const bool uses_dynamic_stack = owner_stack_kind == FlatOwnerStackKind::Dynamic;
     const bool preserve_dynamic_stack_abi = owner_stack_kind != FlatOwnerStackKind::Fixed;
-    auto vcc_save = choose_flat_check_trap_vcc_save_sgpr(
-        site_inst, liveness.get(), min_fresh_sgpr, options, preserve_dynamic_stack_abi);
+    auto vcc_save = choose_flat_check_trap_vcc_save_sgpr(site_inst, owner_liveness, min_fresh_sgpr,
+                                                         options, preserve_dynamic_stack_abi);
     bool spill_vcc_save_pair_to_vgprs = false;
     if (!vcc_save && arch == ROCJITSU_CODE_ARCH_GFX1250 && allocated_sgpr_count) {
       vcc_save = choose_flat_check_trap_scalar_spill_pair(
@@ -355,9 +490,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       return;
     uint32_t scratch_vgprs =
         instrumentation_scratch_vgprs + (spill_vcc_save_pair_to_vgprs ? 1u : 0u);
-    auto scratch =
-        choose_flat_scratch_vgpr(site, options, site_inst, liveness.get(), min_auto_scratch_vgpr,
-                                 max_auto_scratch_vgpr, scratch_vgprs);
+    auto scratch = choose_flat_check_trap_scratch_vgpr(site, options, site_inst, owner_liveness,
+                                                       min_auto_scratch_vgpr, max_auto_scratch_vgpr,
+                                                       scratch_vgprs);
     std::optional<VgprSpillSequence> vgpr_spill;
     std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
     uint16_t scalar_vcc_spill_vgpr_count = spill_vcc_save_pair_to_vgprs ? 1u : 0u;
@@ -467,14 +602,14 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!scalar_vcc_spill_vgpr && appended_cave_offset != 0 && result.elf_bytes.empty() &&
         !owner_descriptor_file_offsets.empty()) {
       auto scalar_scratch = choose_flat_check_trap_indirect_scalar_scratch(
-          site_inst, liveness.get(), min_fresh_sgpr, options);
+          site_inst, owner_liveness, min_fresh_sgpr, options);
       // Prefer fresh scalar words above every owner reference.  A maximally
       // allocated owner may leave too little room there for the PC pair plus
       // SCC/VCC saves even though liveness proves a disjoint dead window at
       // the shared function site.  Match the LDS far-trampoline policy and
       // use that bounded fallback before rejecting the supported access.
       if (!scalar_scratch && min_fresh_sgpr) {
-        scalar_scratch = choose_flat_check_trap_indirect_scalar_scratch(site_inst, liveness.get(),
+        scalar_scratch = choose_flat_check_trap_indirect_scalar_scratch(site_inst, owner_liveness,
                                                                         std::nullopt, options);
       }
       if (scalar_scratch) {
@@ -548,135 +683,162 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   std::unordered_map<uint64_t, KernelMaxRegisterRefs> max_refs_by_descriptor;
   kernels_by_descriptor.reserve(result.kernels.size());
   max_refs_by_descriptor.reserve(result.kernels.size());
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.kernels)
     kernels_by_descriptor.emplace(kernel.descriptor_file_offset, &kernel);
-    max_refs_by_descriptor.emplace(
-        kernel.descriptor_file_offset,
-        max_register_refs_in_kernel(kernel, KernelBlockScope(block_ptrs)));
-  }
+  const auto get_owner_context = [&](const ConSanKernelInfo &kernel) -> FlatOwnerPlanningContext * {
+    const uint64_t descriptor_file_offset = kernel.descriptor_file_offset;
+    if (const auto existing = owner_contexts.find(descriptor_file_offset);
+        existing != owner_contexts.end())
+      return &existing->second;
+    if (decoder == nullptr || !kernel.has_text_range ||
+        failed_owner_contexts.contains(descriptor_file_offset))
+      return nullptr;
+    auto scope = build_kernel_cfg_scope(blocks, block_index,
+                                        KernelScopeRequest{.entry_offset = kernel.entry_text_offset,
+                                                           .additional_entry_offsets = {}},
+                                        kernel_entries, pristine_text);
+    if (!scope) {
+      failed_owner_contexts.insert(descriptor_file_offset);
+      return nullptr;
+    }
+    FlatOwnerPlanningContext context{
+        .descriptor_file_offset = descriptor_file_offset,
+        .scope = std::move(*scope),
+        .liveness = nullptr,
+    };
+    context.liveness =
+        std::make_unique<LivenessAnalysis>(KernelBlockScope(context.scope.blocks),
+                                           LivenessAnalysisOptions{}, context.scope.liveness_edges);
+    return &owner_contexts.emplace(descriptor_file_offset, std::move(context)).first->second;
+  };
 
-  for (const ConSanKernelInfo &kernel : result.kernels) {
-    if (kernel.preflight_action == ConSanPreflightAction::Reject)
-      continue;
-    if (!options.test_kernel_name_filter.empty() &&
-        kernel.name.find(options.test_kernel_name_filter) == std::string::npos)
-      continue;
-    const KernelMaxRegisterRefs &max_refs =
-        max_refs_by_descriptor.at(kernel.descriptor_file_offset);
-    std::optional<uint16_t> min_auto_scratch_vgpr;
-    if (max_refs.vgpr && *max_refs.vgpr < 255)
-      min_auto_scratch_vgpr = static_cast<uint16_t>(*max_refs.vgpr + 1u);
-    std::optional<uint16_t> min_fresh_sgpr;
-    if (max_refs.sgpr && *max_refs.sgpr + 1u < REGISTER_SET_ALLOCATABLE_SGPRS)
-      min_fresh_sgpr = static_cast<uint16_t>(*max_refs.sgpr + 1u);
-    const auto max_auto_scratch_vgpr =
-        descriptor_vgpr_allocation_count(original_bytes, kernel.descriptor_file_offset, arch);
-    std::optional<uint16_t> allocated_sgpr_count;
-    uint32_t original_private_segment_size = 0;
-    if (kernel.descriptor_file_offset <= original_bytes.size() &&
-        sizeof(KD) <= original_bytes.size() - kernel.descriptor_file_offset) {
+  std::unordered_set<uint64_t> supported_physical_sites;
+  supported_physical_sites.reserve(canonical_sites.size());
+  for (CanonicalFlatSite &canonical : canonical_sites) {
+    const ConSanFlatSite &site = canonical.site;
+    const Instruction *site_inst =
+        find_instruction_at_text_offset(KernelBlockScope(block_ptrs), site.text_offset);
+    std::vector<uint64_t> owners = site.owner_descriptor_file_offsets;
+    for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+      if (plan.site_kind == ConSanResourceSiteKind::Access &&
+          plan.text_offset == site.text_offset) {
+        owners.insert(owners.end(), plan.owner_descriptor_file_offsets.begin(),
+                      plan.owner_descriptor_file_offsets.end());
+      }
+    }
+    for (const ConSanFaultSite &fault : result.fault_sites) {
+      if (fault.in_kernel || fault.container_name != canonical.container_name)
+        continue;
+      for (const ConSanExecutionOwner &owner : fault.execution_owners)
+        owners.push_back(owner.descriptor_file_offset);
+    }
+    std::ranges::sort(owners);
+    owners.erase(std::ranges::unique(owners).begin(), owners.end());
+
+    bool complete_context = decoder != nullptr && site_inst != nullptr && !owners.empty();
+    std::vector<const LivenessAnalysis *> owner_liveness;
+    owner_liveness.reserve(owners.size());
+    std::optional<uint16_t> common_allocated_vgpr_count;
+    std::optional<uint16_t> common_allocated_sgpr_count;
+    std::optional<uint16_t> max_owner_vgpr_ref;
+    std::optional<uint16_t> max_owner_sgpr_ref;
+    uint32_t max_owner_private_segment_size = 0;
+    bool any_owner_uses_dynamic_stack = false;
+    bool any_owner_uses_fixed_stack = false;
+    for (uint64_t owner : owners) {
+      const auto owner_kernel = kernels_by_descriptor.find(owner);
+      FlatOwnerPlanningContext *owner_context = owner_kernel == kernels_by_descriptor.end()
+                                                    ? nullptr
+                                                    : get_owner_context(*owner_kernel->second);
+      auto refs = max_refs_by_descriptor.find(owner);
+      if (refs == max_refs_by_descriptor.end() && owner_context != nullptr) {
+        refs =
+            max_refs_by_descriptor
+                .emplace(owner,
+                         max_register_refs_in_kernel(*owner_kernel->second,
+                                                     KernelBlockScope(owner_context->scope.blocks)))
+                .first;
+      }
+      const auto allocated_vgprs = descriptor_vgpr_allocation_count(original_bytes, owner, arch);
+      const Instruction *owner_site_inst =
+          owner_context == nullptr
+              ? nullptr
+              : find_instruction_at_text_offset(
+                    KernelBlockScope(owner_context->scope.blocks), site.text_offset);
+      if (owner_kernel == kernels_by_descriptor.end() ||
+          owner_kernel->second->preflight_action == ConSanPreflightAction::Reject ||
+          owner_context == nullptr || owner_context->liveness == nullptr ||
+          owner_site_inst != site_inst ||
+          refs == max_refs_by_descriptor.end() || !allocated_vgprs ||
+          owner > original_bytes.size() || sizeof(KD) > original_bytes.size() - owner) {
+        complete_context = false;
+        break;
+      }
+      owner_liveness.push_back(owner_context->liveness.get());
+
       KD descriptor{};
-      std::memcpy(&descriptor, original_bytes.data() + kernel.descriptor_file_offset,
-                  sizeof(descriptor));
-      allocated_sgpr_count = descriptor_sgpr_allocation_count(descriptor, arch);
-      original_private_segment_size = descriptor.private_segment_fixed_size;
+      std::memcpy(&descriptor, original_bytes.data() + owner, sizeof(descriptor));
+      const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(descriptor, arch);
+      common_allocated_vgpr_count = common_allocated_vgpr_count
+                                        ? std::min(*common_allocated_vgpr_count, *allocated_vgprs)
+                                        : *allocated_vgprs;
+      common_allocated_sgpr_count = common_allocated_sgpr_count
+                                        ? std::min(*common_allocated_sgpr_count, allocated_sgprs)
+                                        : allocated_sgprs;
+      max_owner_private_segment_size =
+          std::max(max_owner_private_segment_size, descriptor.private_segment_fixed_size);
+      if (refs->second.vgpr)
+        max_owner_vgpr_ref = max_owner_vgpr_ref ? std::max(*max_owner_vgpr_ref, *refs->second.vgpr)
+                                                : *refs->second.vgpr;
+      if (refs->second.sgpr)
+        max_owner_sgpr_ref = max_owner_sgpr_ref ? std::max(*max_owner_sgpr_ref, *refs->second.sgpr)
+                                                : *refs->second.sgpr;
+      if (owner_kernel->second->uses_dynamic_stack.value_or(false))
+        any_owner_uses_dynamic_stack = true;
+      else
+        any_owner_uses_fixed_stack = true;
     }
-    for (const ConSanFlatSite &site : kernel.flat_sites)
-      visit_site(site, min_auto_scratch_vgpr, max_auto_scratch_vgpr, min_fresh_sgpr,
-                 allocated_sgpr_count, original_private_segment_size,
-                 kernel.uses_dynamic_stack.value_or(false) ? FlatOwnerStackKind::Dynamic
-                                                           : FlatOwnerStackKind::Fixed,
-                 {kernel.descriptor_file_offset});
-  }
-  for (const ConSanFunctionInfo &function : result.functions) {
-    if (!options.test_kernel_name_filter.empty() &&
-        function.name.find(options.test_kernel_name_filter) == std::string::npos)
+    if (!complete_context || !common_allocated_vgpr_count || !common_allocated_sgpr_count)
       continue;
-    for (const ConSanFlatSite &site : function.flat_sites) {
-      std::vector<uint64_t> owners = site.owner_descriptor_file_offsets;
-      for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-        if (plan.site_kind == ConSanResourceSiteKind::Access &&
-            plan.text_offset == site.text_offset) {
-          owners.insert(owners.end(), plan.owner_descriptor_file_offsets.begin(),
-                        plan.owner_descriptor_file_offsets.end());
-        }
-      }
-      for (const ConSanFaultSite &fault : result.fault_sites) {
-        if (fault.in_kernel || fault.container_name != function.name)
-          continue;
-        for (const ConSanExecutionOwner &owner : fault.execution_owners)
-          owners.push_back(owner.descriptor_file_offset);
-      }
-      std::ranges::sort(owners);
-      owners.erase(std::ranges::unique(owners).begin(), owners.end());
-      uint16_t common_allocated_vgpr_count = 0;
-      bool has_common_allocated_vgpr_count = false;
-      bool all_owners_have_vgpr_allocations = !owners.empty();
-      uint16_t common_allocated_sgpr_count = 0;
-      bool has_common_allocated_sgpr_count = false;
-      bool all_owners_have_sgpr_allocations = !owners.empty();
-      std::optional<uint16_t> max_owner_sgpr_ref = std::nullopt;
-      uint32_t max_owner_private_segment_size = 0;
-      bool any_owner_uses_dynamic_stack = false;
-      bool any_owner_uses_fixed_stack = false;
-      for (uint64_t owner : owners) {
-        const auto allocated = descriptor_vgpr_allocation_count(original_bytes, owner, arch);
-        if (!allocated) {
-          all_owners_have_vgpr_allocations = false;
-        } else {
-          common_allocated_vgpr_count = has_common_allocated_vgpr_count
-                                            ? std::min(common_allocated_vgpr_count, *allocated)
-                                            : *allocated;
-          has_common_allocated_vgpr_count = true;
-        }
-        if (owner > original_bytes.size() || sizeof(KD) > original_bytes.size() - owner) {
-          all_owners_have_sgpr_allocations = false;
-        } else {
-          KD descriptor{};
-          std::memcpy(&descriptor, original_bytes.data() + owner, sizeof(descriptor));
-          const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(descriptor, arch);
-          max_owner_private_segment_size =
-              std::max(max_owner_private_segment_size, descriptor.private_segment_fixed_size);
-          common_allocated_sgpr_count = has_common_allocated_sgpr_count
-                                            ? std::min(common_allocated_sgpr_count, allocated_sgprs)
-                                            : allocated_sgprs;
-          has_common_allocated_sgpr_count = true;
-        }
-        const auto owner_kernel = kernels_by_descriptor.find(owner);
-        if (owner_kernel != kernels_by_descriptor.end()) {
-          if (owner_kernel->second->uses_dynamic_stack.value_or(false))
-            any_owner_uses_dynamic_stack = true;
-          else
-            any_owner_uses_fixed_stack = true;
-          const KernelMaxRegisterRefs &refs = max_refs_by_descriptor.at(owner);
-          if (refs.sgpr)
-            max_owner_sgpr_ref =
-                max_owner_sgpr_ref ? std::max(*max_owner_sgpr_ref, *refs.sgpr) : *refs.sgpr;
-        }
-      }
-      std::optional<uint16_t> min_fresh_sgpr;
-      if (max_owner_sgpr_ref && *max_owner_sgpr_ref + 1u < REGISTER_SET_ALLOCATABLE_SGPRS)
-        min_fresh_sgpr = static_cast<uint16_t>(*max_owner_sgpr_ref + 1u);
-      std::optional<uint16_t> allocated_sgpr_count;
-      if (all_owners_have_sgpr_allocations && has_common_allocated_sgpr_count)
-        allocated_sgpr_count = common_allocated_sgpr_count;
-      const FlatOwnerStackKind owner_stack_kind =
-          any_owner_uses_dynamic_stack && any_owner_uses_fixed_stack
-              ? FlatOwnerStackKind::Mixed
-          : any_owner_uses_dynamic_stack ? FlatOwnerStackKind::Dynamic
-                                         : FlatOwnerStackKind::Fixed;
-      if (all_owners_have_vgpr_allocations && has_common_allocated_vgpr_count) {
-        visit_site(site, std::nullopt, std::optional<uint16_t>{common_allocated_vgpr_count},
-                   min_fresh_sgpr, allocated_sgpr_count, max_owner_private_segment_size,
-                   owner_stack_kind, std::move(owners));
-      } else {
-        visit_site(site, std::nullopt, std::nullopt, min_fresh_sgpr, allocated_sgpr_count,
-                   max_owner_private_segment_size, owner_stack_kind, std::move(owners));
-      }
-    }
+
+    if (is_supported_flat_check_trap_site(site, options.flat_provenance_mode))
+      supported_physical_sites.insert(site.file_offset);
+
+    const bool selected_by_filter =
+        options.test_kernel_name_filter.empty() ||
+        canonical.container_name.find(options.test_kernel_name_filter) != std::string::npos ||
+        std::ranges::any_of(owners, [&](uint64_t owner) {
+          const auto kernel = kernels_by_descriptor.find(owner);
+          return kernel != kernels_by_descriptor.end() &&
+                 kernel->second->name.find(options.test_kernel_name_filter) != std::string::npos;
+        });
+    if (!selected_by_filter)
+      continue;
+
+    std::optional<uint16_t> min_auto_scratch_vgpr;
+    if (max_owner_vgpr_ref && *max_owner_vgpr_ref < 255u)
+      min_auto_scratch_vgpr = static_cast<uint16_t>(*max_owner_vgpr_ref + 1u);
+    std::optional<uint16_t> min_fresh_sgpr;
+    if (max_owner_sgpr_ref && *max_owner_sgpr_ref + 1u < REGISTER_SET_ALLOCATABLE_SGPRS)
+      min_fresh_sgpr = static_cast<uint16_t>(*max_owner_sgpr_ref + 1u);
+    const FlatOwnerStackKind owner_stack_kind =
+        any_owner_uses_dynamic_stack && any_owner_uses_fixed_stack ? FlatOwnerStackKind::Mixed
+        : any_owner_uses_dynamic_stack                             ? FlatOwnerStackKind::Dynamic
+                                                                   : FlatOwnerStackKind::Fixed;
+    visit_site(site, min_auto_scratch_vgpr, common_allocated_vgpr_count, min_fresh_sgpr,
+               common_allocated_sgpr_count, max_owner_private_segment_size, owner_stack_kind,
+               owner_liveness, std::move(owners));
   }
+  publish_sc_access_coverage_support(
+      result, ConSanScAccessCoverageKind::FlatGroup,
+      [&](uint64_t file_offset) { return supported_physical_sites.contains(file_offset); });
   if (!result.errors.empty())
     return;
+  if (options.max_patches_is_expert_limit && options.max_patches == 0u) {
+    result.warnings.emplace_back(
+        "ConSan flat check/trap proof skipped: shared patch budget consumed");
+    return;
+  }
 
   auto candidate_order = [](const FlatCheckTrapCandidate &lhs, const FlatCheckTrapCandidate &rhs) {
     if (lhs.site->file_offset != rhs.site->file_offset)
@@ -696,9 +858,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   std::ranges::sort(appended_cave_candidates, candidate_order);
   std::ranges::sort(indirect_appended_candidates, candidate_order);
 
-  const size_t max_patches = options.max_patches_is_expert_limit
-                                 ? std::max<uint32_t>(options.max_patches, 1u)
-                                 : supported_candidate_count;
+  const size_t max_patches =
+      options.max_patches_is_expert_limit ? options.max_patches : supported_candidate_count;
   std::vector<FlatCheckTrapCandidate> selected_candidates;
   selected_candidates.reserve(std::min(max_patches, supported_candidate_count));
   DbiPatchPlacementPlanner placement_planner(arch, appended_cave_offset);

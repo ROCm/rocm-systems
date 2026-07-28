@@ -15,14 +15,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     uint64_t container_entry_text_offset = 0;
     ConSanLdsSite site;
   };
-  const auto lds_site_semantics_equal = [](const ConSanLdsSite &lhs, const ConSanLdsSite &rhs) {
-    return std::tie(lhs.kind, lhs.supported_mvp, lhs.text_offset, lhs.file_offset, lhs.size,
-                    lhs.width_bits, lhs.dst_vgpr, lhs.dst_accvgpr, lhs.addr_vgpr, lhs.data_vgpr,
-                    lhs.second_data_vgpr, lhs.mnemonic) ==
-           std::tie(rhs.kind, rhs.supported_mvp, rhs.text_offset, rhs.file_offset, rhs.size,
-                    rhs.width_bits, rhs.dst_vgpr, rhs.dst_accvgpr, rhs.addr_vgpr, rhs.data_vgpr,
-                    rhs.second_data_vgpr, rhs.mnemonic);
-  };
   size_t discovered_site_count = 0;
   for (const ConSanKernelInfo &kernel : result.kernels)
     discovered_site_count += kernel.lds_sites.size();
@@ -34,7 +26,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       [](const CanonicalLdsSite &candidate) { return candidate.container_name; },
       [&](const CanonicalLdsSite &lhs, const CanonicalLdsSite &rhs) {
         return lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
-               lds_site_semantics_equal(lhs.site, rhs.site);
+               sc_lds_site_semantics_equal(lhs.site, rhs.site);
       },
       [](CanonicalLdsSite &retained, const CanonicalLdsSite &alias) {
         // Plan and patch one physical instruction, but prove resource
@@ -78,24 +70,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
   }
 
-  const auto publish_canonical_coverage = [&](bool resolved, auto &&site_is_supported) {
-    result.sc_lds_coverage_resolved = resolved;
-    result.sc_lds_coverage_sites.clear();
-    if (!resolved)
-      return;
-    result.sc_lds_coverage_sites.reserve(canonical_sites.size());
-    for (const CanonicalLdsSite &canonical : canonical_sites) {
-      if (canonical.site.kind != ConSanLdsAccessKind::Read &&
-          canonical.site.kind != ConSanLdsAccessKind::Write)
-        continue;
-      result.sc_lds_coverage_sites.push_back(
-          {.file_offset = canonical.site.file_offset,
-           .supported = site_is_supported(canonical.site)});
-    }
-    std::ranges::sort(result.sc_lds_coverage_sites, {},
-                      &ConSanScLdsCoverageSite::file_offset);
-  };
-
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   const bool has_plannable_supported_site = [&] {
     for (const ConSanKernelInfo &kernel : result.kernels) {
@@ -127,7 +101,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     return false;
   }();
   if (!has_plannable_supported_site) {
-    publish_canonical_coverage(decoder != nullptr, [](const ConSanLdsSite &) { return false; });
+    publish_sc_access_coverage_support(
+        result, ConSanScAccessCoverageKind::NativeLds, [](uint64_t) { return false; });
     result.warnings.emplace_back("ConSan LDS check/trap proof found no supported "
                                  "native-LDS load or store site with complete owners");
     return;
@@ -729,6 +704,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     std::string_view container_name;
     uint64_t container_entry_text_offset = 0;
     const ConSanLdsSite *site = nullptr;
+    const Instruction *instruction = nullptr;
     std::vector<uint64_t> owner_descriptor_file_offsets;
     std::vector<const ScReservoirOwnerContext *> owner_contexts;
     std::optional<uint16_t> common_allocated_vgpr_count;
@@ -768,6 +744,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     context.container_entry_text_offset = container_entry_text_offset;
     context.site = &site;
     context.owner_descriptor_file_offsets = std::move(owners);
+    context.instruction =
+        find_instruction_at_text_offset(KernelBlockScope(block_ptrs), site.text_offset);
     bool complete = true;
     bool first_owner = true;
     std::optional<uint16_t> max_owner_vgpr_ref;
@@ -777,8 +755,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const auto owner_context = std::ranges::find(
           reservoir_owner_contexts, owner, &ScReservoirOwnerContext::descriptor_file_offset);
       const auto allocated_vgprs = descriptor_vgpr_allocation_count(original_bytes, owner, arch);
+      const Instruction *owner_site_inst =
+          owner_context == reservoir_owner_contexts.end()
+              ? nullptr
+              : find_instruction_at_text_offset(
+                    KernelBlockScope(owner_context->scope.blocks), site.text_offset);
       if (owner_kernel == kernels_by_descriptor.end() ||
           owner_context == reservoir_owner_contexts.end() || owner_context->liveness == nullptr ||
+          context.instruction == nullptr || owner_site_inst != context.instruction ||
           !allocated_vgprs || owner > original_bytes.size() ||
           sizeof(KD) > original_bytes.size() - owner ||
           owner_kernel->second->preflight_action == ConSanPreflightAction::Reject) {
@@ -834,10 +818,22 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     if (context.site != nullptr && !context.owner_contexts.empty())
       sites_with_complete_context.insert(context.site);
   }
-  publish_canonical_coverage(decoder != nullptr, [&](const ConSanLdsSite &site) {
-    return sites_with_complete_context.contains(&site) &&
-           is_supported_check_trap_site(site, arch);
-  });
+  std::unordered_set<uint64_t> supported_physical_sites;
+  supported_physical_sites.reserve(sites_with_complete_context.size());
+  if (decoder != nullptr) {
+    for (const ConSanLdsSite *site : sites_with_complete_context) {
+      if (site != nullptr && is_supported_check_trap_site(*site, arch))
+        supported_physical_sites.insert(site->file_offset);
+    }
+  }
+  publish_sc_access_coverage_support(
+      result, ConSanScAccessCoverageKind::NativeLds,
+      [&](uint64_t file_offset) { return supported_physical_sites.contains(file_offset); });
+  if (options.max_patches_is_expert_limit && options.max_patches == 0u) {
+    result.warnings.emplace_back(
+        "ConSan LDS check/trap proof skipped: shared patch budget consumed");
+    return;
+  }
 
   std::vector<LdsCheckTrapCandidate> inline_candidates;
   std::vector<LdsCheckTrapCandidate> local_cave_candidates;
@@ -930,8 +926,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                   (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
               ? 1u
               : 0u;
-      const Instruction *site_inst =
-          find_instruction_at_text_offset(kernel_scope, site.text_offset);
+      const Instruction *site_inst = site_context.instruction;
       if (site_inst == nullptr) {
         ++missing_instruction_site_count;
         continue;
@@ -1369,9 +1364,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   });
   std::ranges::sort(branch_only_candidates, candidate_order);
 
-  const size_t max_patches = options.max_patches_is_expert_limit
-                                 ? std::max<uint32_t>(options.max_patches, 1u)
-                                 : supported_candidate_count;
+  const size_t max_patches =
+      options.max_patches_is_expert_limit ? options.max_patches : supported_candidate_count;
   std::vector<LdsCheckTrapCandidate> selected_candidates;
   selected_candidates.reserve(std::min(max_patches, supported_candidate_count));
   std::unordered_set<const ConSanLdsSite *> selected_sites;

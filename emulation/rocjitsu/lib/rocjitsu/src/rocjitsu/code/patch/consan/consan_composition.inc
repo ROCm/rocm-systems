@@ -823,6 +823,9 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     return result;
   }
 
+  if (!initialize_sc_access_coverage(options, result))
+    return result;
+
   const bool has_redundant_access = options.probe_lds_check_trap || options.probe_flat_check_trap;
   const uint32_t overall_patch_budget = std::max<uint32_t>(options.max_patches, 1u);
   if (result.perturbation_plans.size() > overall_patch_budget) {
@@ -833,7 +836,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   redundant_options.max_patches =
       overall_patch_budget - static_cast<uint32_t>(result.perturbation_plans.size());
 
-  if (has_redundant_access && redundant_options.max_patches != 0u) {
+  if (has_redundant_access) {
     if (options.probe_lds_check_trap)
       try_apply_lds_load_check_trap_patch(*code_object, arch, redundant_options, result);
     if (options.probe_flat_check_trap && result.errors.empty()) {
@@ -858,9 +861,9 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
               }
             }));
         if (access_patches >= max_patches && redundant_options.max_patches_is_expert_limit) {
-          result.warnings.emplace_back(
-              "ConSan flat check/trap proof skipped after native LDS patching: "
-              "patch budget already consumed");
+          ConSanOptions flat_options = redundant_options;
+          flat_options.max_patches = 0u;
+          try_apply_flat_check_trap_patch(*code_object, arch, flat_options, result);
         } else if (auto reserved_ranges =
                        reserved_ranges_for_existing_patches(*code_object, result)) {
           ConSanOptions flat_options = redundant_options;
@@ -869,15 +872,16 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
           try_apply_flat_check_trap_patch(*code_object, arch, flat_options, result,
                                           *reserved_ranges);
         } else {
+          ConSanOptions flat_options = redundant_options;
+          flat_options.max_patches = 0u;
+          flat_options.max_patches_is_expert_limit = true;
+          try_apply_flat_check_trap_patch(*code_object, arch, flat_options, result);
           result.warnings.emplace_back(
               "ConSan flat check/trap proof skipped after native LDS patching: "
               "existing patch ranges could not be mapped in the original code object");
         }
       }
     }
-  } else if (has_redundant_access) {
-    result.warnings.emplace_back(
-        "ConSan redundant-access proof skipped: shared patch budget consumed by perturbation");
   } else if (!has_perturbation && options.probe_flat_trap)
     try_apply_flat_trap_patch(*code_object, arch, options, result);
   else if (!has_perturbation && options.probe_lds_endpgm)

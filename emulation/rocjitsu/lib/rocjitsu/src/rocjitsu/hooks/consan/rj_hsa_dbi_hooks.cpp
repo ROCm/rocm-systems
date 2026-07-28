@@ -291,30 +291,15 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
 
 [[nodiscard]] bool require_patch_applies_to(const rocjitsu::ConSanResult &result,
                                             const HookConfig &config) {
-  const auto container_applies = [&](const auto &container) {
-    if (config.probe_lds_check_trap) {
-      for (const rocjitsu::ConSanLdsSite &site : container.lds_sites) {
-        if (rocjitsu::consan_supercollider_supports_lds_site(site, result.arch))
-          return true;
-      }
-    }
-    if (config.probe_flat_check_trap) {
-      for (const rocjitsu::ConSanFlatSite &site : container.flat_sites) {
-        if (rocjitsu::consan_supercollider_supports_flat_site(site, config.flat_provenance_mode))
-          return true;
-      }
-    }
+  const bool has_selected_access = config.probe_lds_check_trap || config.probe_flat_check_trap;
+  if (!has_selected_access)
     return false;
-  };
-  for (const rocjitsu::ConSanKernelInfo &kernel : result.kernels) {
-    if (container_applies(kernel))
-      return true;
-  }
-  for (const rocjitsu::ConSanFunctionInfo &function : result.functions) {
-    if (container_applies(function))
-      return true;
-  }
-  return false;
+  if (!result.sc_access_coverage_resolved)
+    return result.flavor == rocjitsu::ConSanFlavor::SuperCollider;
+  return std::ranges::any_of(result.sc_access_coverage_sites, [&](const auto &site) {
+    return sc_access_coverage_kind_enabled(site.kind, config) &&
+           (!site.evaluated || site.supported);
+  });
 }
 
 [[nodiscard]] bool

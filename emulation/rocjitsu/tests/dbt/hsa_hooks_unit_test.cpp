@@ -292,78 +292,88 @@ TEST(ConSanTransformMemoryTest, RejectsUnknownGrowthPolicyKind) {
   EXPECT_FALSE(rocjitsu::consan_hook::consan_transform_major_image_reservation(8, invalid));
 }
 
-rocjitsu::ConSanLdsSite make_supported_sc_lds_site(uint64_t file_offset) {
-  rocjitsu::ConSanLdsSite site;
-  site.kind = rocjitsu::ConSanLdsAccessKind::Read;
-  site.supported_mvp = true;
-  site.file_offset = file_offset;
-  site.size = 2u * sizeof(uint32_t);
-  site.width_bits = 32u;
-  site.dst_vgpr = 1u;
-  site.addr_vgpr = 2u;
-  site.mnemonic = "ds_load_b32";
-  return site;
-}
-
-TEST(HsaHooksUnitTest, SuperColliderCoverageDeduplicatesPhysicalLdsAliases) {
+TEST(HsaHooksUnitTest, SuperColliderCoverageCountsMixedPlannerLedger) {
   rocjitsu::ConSanResult result;
   result.flavor = rocjitsu::ConSanFlavor::SuperCollider;
   result.arch = ROCJITSU_CODE_ARCH_RDNA4;
-  result.kernels.resize(1);
-  result.functions.resize(1);
-  result.kernels.front().lds_sites.push_back(make_supported_sc_lds_site(0x120u));
-  result.functions.front().lds_sites.push_back(make_supported_sc_lds_site(0x120u));
-  rocjitsu::consan_hook::HookConfig config;
-  config.probe_lds_check_trap = true;
-
-  const auto coverage =
-      rocjitsu::consan_hook::compute_consan_supercollider_access_coverage(result, config);
-
-  EXPECT_EQ(coverage.discovered, 1u);
-  EXPECT_EQ(coverage.supported, 1u);
-}
-
-TEST(HsaHooksUnitTest, SuperColliderCoverageFailsClosedOnRawAliasDisagreement) {
-  rocjitsu::ConSanResult result;
-  result.flavor = rocjitsu::ConSanFlavor::SuperCollider;
-  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
-  result.kernels.resize(1);
-  result.functions.resize(1);
-  result.kernels.front().lds_sites.push_back(make_supported_sc_lds_site(0x120u));
-  auto unsupported = make_supported_sc_lds_site(0x120u);
-  unsupported.addr_vgpr.reset();
-  result.functions.front().lds_sites.push_back(std::move(unsupported));
-  rocjitsu::consan_hook::HookConfig config;
-  config.probe_lds_check_trap = true;
-
-  const auto coverage =
-      rocjitsu::consan_hook::compute_consan_supercollider_access_coverage(result, config);
-
-  EXPECT_EQ(coverage.discovered, 1u);
-  EXPECT_EQ(coverage.supported, 0u);
-}
-
-TEST(HsaHooksUnitTest, SuperColliderCoverageUsesResolvedPlannerLedger) {
-  rocjitsu::ConSanResult result;
-  result.flavor = rocjitsu::ConSanFlavor::SuperCollider;
-  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
-  result.sc_lds_coverage_resolved = true;
-  result.sc_lds_coverage_sites = {
-      {.file_offset = 0x120u, .supported = true},
-      {.file_offset = 0x128u, .supported = false},
+  result.sc_access_coverage_resolved = true;
+  result.sc_access_coverage_sites = {
+      {.kind = rocjitsu::ConSanScAccessCoverageKind::NativeLds,
+       .file_offset = 0x120u,
+       .evaluated = true,
+       .supported = true},
+      {.kind = rocjitsu::ConSanScAccessCoverageKind::FlatGroup,
+       .file_offset = 0x128u,
+       .evaluated = true,
+       .supported = true},
+      {.kind = rocjitsu::ConSanScAccessCoverageKind::FlatGroup,
+       .file_offset = 0x130u,
+       .evaluated = true,
+       .supported = false},
+      {.kind = rocjitsu::ConSanScAccessCoverageKind::FlatGroup,
+       .file_offset = 0x138u,
+       .evaluated = false,
+       .supported = true},
   };
-  // Once resolved, raw container inventory must not resurrect or alter the
-  // planner's canonical physical LDS denominator.
+  rocjitsu::consan_hook::HookConfig config;
+  config.probe_lds_check_trap = true;
+  config.probe_flat_check_trap = true;
+
+  const auto coverage =
+      rocjitsu::consan_hook::compute_consan_supercollider_access_coverage(result, config);
+
+  EXPECT_EQ(coverage.discovered, 4u);
+  EXPECT_EQ(coverage.supported, 2u);
+}
+
+TEST(HsaHooksUnitTest, SuperColliderCoverageFiltersPlannerLedgerByEnabledKind) {
+  rocjitsu::ConSanResult result;
+  result.flavor = rocjitsu::ConSanFlavor::SuperCollider;
+  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  result.sc_access_coverage_resolved = true;
+  result.sc_access_coverage_sites = {
+      {.kind = rocjitsu::ConSanScAccessCoverageKind::NativeLds,
+       .file_offset = 0x120u,
+       .evaluated = true,
+       .supported = false},
+      {.kind = rocjitsu::ConSanScAccessCoverageKind::FlatGroup,
+       .file_offset = 0x128u,
+       .evaluated = true,
+       .supported = true},
+  };
+  rocjitsu::consan_hook::HookConfig config;
+  config.probe_flat_check_trap = true;
+
+  const auto coverage =
+      rocjitsu::consan_hook::compute_consan_supercollider_access_coverage(result, config);
+
+  EXPECT_EQ(coverage.discovered, 1u);
+  EXPECT_EQ(coverage.supported, 1u);
+}
+
+TEST(HsaHooksUnitTest, SuperColliderCoverageRejectsUnresolvedRawInventory) {
+  rocjitsu::ConSanResult result;
+  result.flavor = rocjitsu::ConSanFlavor::SuperCollider;
+  result.arch = ROCJITSU_CODE_ARCH_RDNA4;
   result.kernels.resize(1);
-  result.kernels.front().lds_sites.push_back(make_supported_sc_lds_site(0x130u));
+  rocjitsu::ConSanLdsSite raw;
+  raw.kind = rocjitsu::ConSanLdsAccessKind::Read;
+  raw.supported_mvp = true;
+  raw.file_offset = 0x120u;
+  raw.size = 2u * sizeof(uint32_t);
+  raw.width_bits = 32u;
+  raw.dst_vgpr = 1u;
+  raw.addr_vgpr = 2u;
+  raw.mnemonic = "ds_load_b32";
+  result.kernels.front().lds_sites.push_back(std::move(raw));
   rocjitsu::consan_hook::HookConfig config;
   config.probe_lds_check_trap = true;
 
   const auto coverage =
       rocjitsu::consan_hook::compute_consan_supercollider_access_coverage(result, config);
 
-  EXPECT_EQ(coverage.discovered, 2u);
-  EXPECT_EQ(coverage.supported, 1u);
+  EXPECT_EQ(coverage.discovered, 0u);
+  EXPECT_EQ(coverage.supported, 0u);
 }
 
 constexpr hsa_agent_t kGuestAgent{1};
@@ -3480,7 +3490,7 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchRejectsPrologueOnlyMoiMutation) {
                      site_patched.elf_bytes);
 }
 
-TEST(HsaHooksUnitTest, ConSanRequirePatchUsesSharedLdsSupportForFunctions) {
+TEST(HsaHooksUnitTest, ConSanRequirePatchUsesResolvedSuperColliderAccessCoverage) {
   ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "1");
   rocjitsu::ConSanResult structural_only;
   structural_only.arch = ROCJITSU_CODE_ARCH_CDNA4;
@@ -3489,11 +3499,13 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchUsesSharedLdsSupportForFunctions) {
   structural_only.modified = true;
   structural_only.final_validation_passed = true;
   structural_only.elf_bytes = {0x7f, 'E', 'L', 'F', 'd', '1', '6'};
-  structural_only.functions.resize(1);
-  auto d16 = make_supported_sc_lds_site(0x120u);
-  d16.width_bits = 8u;
-  d16.mnemonic = "ds_read_u8_d16";
-  structural_only.functions.front().lds_sites.push_back(std::move(d16));
+  structural_only.sc_access_coverage_resolved = true;
+  structural_only.sc_access_coverage_sites.push_back({
+      .kind = rocjitsu::ConSanScAccessCoverageKind::NativeLds,
+      .file_offset = 0x120u,
+      .evaluated = true,
+      .supported = true,
+  });
   rocjitsu::ConSanPatchInfo structural_patch;
   structural_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
   structural_patch.kind = rocjitsu::ConSanPatchKind::TrampolineScDenseCallDispatcher;
@@ -3501,6 +3513,23 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchUsesSharedLdsSupportForFunctions) {
 
   run_hook_load_case(kConSanHookProfiles[0], false, structural_only,
                      HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
+
+  rocjitsu::ConSanResult unevaluated = structural_only;
+  unevaluated.sc_access_coverage_sites.front().evaluated = false;
+  unevaluated.sc_access_coverage_sites.front().supported = false;
+  run_hook_load_case(kConSanHookProfiles[0], false, unevaluated,
+                     HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
+
+  rocjitsu::ConSanResult unresolved = structural_only;
+  unresolved.sc_access_coverage_resolved = false;
+  unresolved.sc_access_coverage_sites.clear();
+  run_hook_load_case(kConSanHookProfiles[0], false, unresolved,
+                     HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
+
+  rocjitsu::ConSanResult evaluated_unsupported = structural_only;
+  evaluated_unsupported.sc_access_coverage_sites.front().supported = false;
+  run_hook_load_case(kConSanHookProfiles[0], false, evaluated_unsupported, HSA_STATUS_SUCCESS, 102u,
+                     evaluated_unsupported.elf_bytes);
 }
 
 rocjitsu::ConSanResult b96_require_patch_result_for_arch(rj_code_arch_t arch) {

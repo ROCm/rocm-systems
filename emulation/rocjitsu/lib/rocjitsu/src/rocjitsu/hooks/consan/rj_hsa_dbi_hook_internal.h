@@ -15,7 +15,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
 namespace rocjitsu::consan_hook {
 
@@ -161,54 +160,30 @@ struct ConSanSuperColliderAccessCoverage {
   uint64_t supported = 0;
 };
 
+[[nodiscard]] inline bool sc_access_coverage_kind_enabled(ConSanScAccessCoverageKind kind,
+                                                          const HookConfig &config) {
+  switch (kind) {
+  case ConSanScAccessCoverageKind::NativeLds:
+    return config.probe_lds_check_trap;
+  case ConSanScAccessCoverageKind::FlatGroup:
+    return config.probe_flat_check_trap;
+  }
+  return false;
+}
+
 [[nodiscard]] inline ConSanSuperColliderAccessCoverage
 compute_consan_supercollider_access_coverage(const ConSanResult &result, const HookConfig &config) {
-  // Kernel descriptors and function symbols may alias one physical
-  // instruction. Keep one entry by file offset and retain support only when
-  // every view agrees.
-  std::unordered_map<uint64_t, bool> physical_support;
-  const auto merge_site = [&](uint64_t file_offset, bool supported) {
-    const auto [entry, inserted] = physical_support.emplace(file_offset, supported);
-    if (!inserted)
-      entry->second &= supported;
-  };
-  const auto count_container = [&](const auto &container) {
-    if (config.probe_lds_check_trap && !result.sc_lds_coverage_resolved) {
-      for (const ConSanLdsSite &site : container.lds_sites) {
-        if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
-          continue;
-        merge_site(site.file_offset, consan_supercollider_supports_lds_site(site, result.arch));
-      }
-    }
-    if (config.probe_flat_check_trap) {
-      for (const ConSanFlatSite &site : container.flat_sites) {
-        if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
-          continue;
-        const bool applicable_group =
-            site.address_space_hint == ConSanFlatAddressSpaceHint::Group ||
-            (config.flat_provenance_mode == ConSanFlatProvenanceMode::Likely &&
-             site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup);
-        if (!applicable_group)
-          continue;
-        merge_site(site.file_offset,
-                   consan_supercollider_supports_flat_site(site, config.flat_provenance_mode));
-      }
-    }
-  };
-  if (config.probe_lds_check_trap && result.sc_lds_coverage_resolved) {
-    for (const ConSanScLdsCoverageSite &site : result.sc_lds_coverage_sites)
-      merge_site(site.file_offset, site.supported);
+  if (!result.sc_access_coverage_resolved)
+    return {};
+  ConSanSuperColliderAccessCoverage coverage;
+  for (const ConSanScAccessCoverageSite &site : result.sc_access_coverage_sites) {
+    if (!sc_access_coverage_kind_enabled(site.kind, config))
+      continue;
+    ++coverage.discovered;
+    if (site.evaluated && site.supported)
+      ++coverage.supported;
   }
-  for (const ConSanKernelInfo &kernel : result.kernels)
-    count_container(kernel);
-  for (const ConSanFunctionInfo &function : result.functions)
-    count_container(function);
-
-  return {
-      .discovered = physical_support.size(),
-      .supported = static_cast<uint64_t>(
-          std::ranges::count_if(physical_support, [](const auto &entry) { return entry.second; })),
-  };
+  return coverage;
 }
 
 constexpr std::string_view kMoiStandardProfile = "standard-v1";

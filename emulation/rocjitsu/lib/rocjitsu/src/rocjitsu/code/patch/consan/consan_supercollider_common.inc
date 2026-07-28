@@ -3,6 +3,152 @@ struct ByteRange {
   uint64_t end = 0;
 };
 
+[[nodiscard]] bool sc_lds_site_semantics_equal(const ConSanLdsSite &lhs, const ConSanLdsSite &rhs) {
+  return std::tie(lhs.kind, lhs.supported_mvp, lhs.text_offset, lhs.file_offset, lhs.size,
+                  lhs.width_bits, lhs.dst_vgpr, lhs.dst_accvgpr, lhs.addr_vgpr, lhs.data_vgpr,
+                  lhs.second_data_vgpr, lhs.mnemonic) ==
+         std::tie(rhs.kind, rhs.supported_mvp, rhs.text_offset, rhs.file_offset, rhs.size,
+                  rhs.width_bits, rhs.dst_vgpr, rhs.dst_accvgpr, rhs.addr_vgpr, rhs.data_vgpr,
+                  rhs.second_data_vgpr, rhs.mnemonic);
+}
+
+[[nodiscard]] bool sc_flat_site_semantics_equal(const ConSanFlatSite &lhs,
+                                                const ConSanFlatSite &rhs) {
+  return std::tie(lhs.kind, lhs.text_offset, lhs.file_offset, lhs.size, lhs.width_bits,
+                  lhs.dst_vgpr, lhs.addr_vgpr, lhs.data_vgpr, lhs.raw_op, lhs.raw_saddr,
+                  lhs.raw_vaddr, lhs.raw_vsrc, lhs.raw_vdst, lhs.raw_ioffset, lhs.raw_segment,
+                  lhs.raw_scope, lhs.raw_th, lhs.address_space_hint, lhs.mnemonic) ==
+         std::tie(rhs.kind, rhs.text_offset, rhs.file_offset, rhs.size, rhs.width_bits,
+                  rhs.dst_vgpr, rhs.addr_vgpr, rhs.data_vgpr, rhs.raw_op, rhs.raw_saddr,
+                  rhs.raw_vaddr, rhs.raw_vsrc, rhs.raw_vdst, rhs.raw_ioffset, rhs.raw_segment,
+                  rhs.raw_scope, rhs.raw_th, rhs.address_space_hint, rhs.mnemonic);
+}
+
+[[nodiscard]] bool sc_flat_site_is_applicable(const ConSanFlatSite &site,
+                                              ConSanFlatProvenanceMode provenance_mode) {
+  if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
+    return false;
+  return site.address_space_hint == ConSanFlatAddressSpaceHint::Group ||
+         (provenance_mode == ConSanFlatProvenanceMode::Likely &&
+          site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup);
+}
+
+[[nodiscard]] bool initialize_sc_access_coverage(const ConSanOptions &options,
+                                                 ConSanResult &result) {
+  result.sc_access_coverage_resolved = false;
+  result.sc_access_coverage_sites.clear();
+
+  struct LdsAlias {
+    std::string_view container_name;
+    uint64_t container_entry_text_offset = 0;
+    const ConSanLdsSite *site = nullptr;
+  };
+  struct FlatAlias {
+    std::string_view container_name;
+    uint64_t container_entry_text_offset = 0;
+    const ConSanFlatSite *site = nullptr;
+  };
+
+  std::vector<LdsAlias> lds_aliases;
+  std::vector<FlatAlias> flat_aliases;
+  if (options.probe_lds_check_trap) {
+    for (const ConSanKernelInfo &kernel : result.kernels) {
+      for (const ConSanLdsSite &site : kernel.lds_sites) {
+        if (site.kind == ConSanLdsAccessKind::Read || site.kind == ConSanLdsAccessKind::Write)
+          lds_aliases.push_back({kernel.name, kernel.entry_text_offset, &site});
+      }
+    }
+    for (const ConSanFunctionInfo &function : result.functions) {
+      for (const ConSanLdsSite &site : function.lds_sites) {
+        if (site.kind == ConSanLdsAccessKind::Read || site.kind == ConSanLdsAccessKind::Write)
+          lds_aliases.push_back({function.name, function.entry_text_offset, &site});
+      }
+    }
+    if (!consan_detail::canonicalize_physical_site_aliases(
+            lds_aliases, result.errors, "ConSan SuperCollider native-LDS access",
+            [](const LdsAlias &alias) { return alias.site->file_offset; },
+            [](const LdsAlias &alias) { return alias.container_name; },
+            [](const LdsAlias &lhs, const LdsAlias &rhs) {
+              return lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
+                     sc_lds_site_semantics_equal(*lhs.site, *rhs.site);
+            }))
+      return false;
+  }
+
+  if (options.probe_flat_check_trap) {
+    for (const ConSanKernelInfo &kernel : result.kernels) {
+      for (const ConSanFlatSite &site : kernel.flat_sites) {
+        if (sc_flat_site_is_applicable(site, options.flat_provenance_mode))
+          flat_aliases.push_back({kernel.name, kernel.entry_text_offset, &site});
+      }
+    }
+    for (const ConSanFunctionInfo &function : result.functions) {
+      for (const ConSanFlatSite &site : function.flat_sites) {
+        if (sc_flat_site_is_applicable(site, options.flat_provenance_mode))
+          flat_aliases.push_back({function.name, function.entry_text_offset, &site});
+      }
+    }
+    if (!consan_detail::canonicalize_physical_site_aliases(
+            flat_aliases, result.errors, "ConSan SuperCollider FLAT access",
+            [](const FlatAlias &alias) { return alias.site->file_offset; },
+            [](const FlatAlias &alias) { return alias.container_name; },
+            [](const FlatAlias &lhs, const FlatAlias &rhs) {
+              return lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
+                     sc_flat_site_semantics_equal(*lhs.site, *rhs.site);
+            }))
+      return false;
+  }
+
+  result.sc_access_coverage_sites.reserve(lds_aliases.size() + flat_aliases.size());
+  for (const LdsAlias &alias : lds_aliases) {
+    result.sc_access_coverage_sites.push_back({
+        .kind = ConSanScAccessCoverageKind::NativeLds,
+        .file_offset = alias.site->file_offset,
+    });
+  }
+  for (const FlatAlias &alias : flat_aliases) {
+    result.sc_access_coverage_sites.push_back({
+        .kind = ConSanScAccessCoverageKind::FlatGroup,
+        .file_offset = alias.site->file_offset,
+    });
+  }
+  std::ranges::sort(result.sc_access_coverage_sites, [](const auto &lhs, const auto &rhs) {
+    if (lhs.file_offset != rhs.file_offset)
+      return lhs.file_offset < rhs.file_offset;
+    return lhs.kind < rhs.kind;
+  });
+  for (size_t i = 1; i < result.sc_access_coverage_sites.size(); ++i) {
+    if (result.sc_access_coverage_sites[i - 1].file_offset ==
+            result.sc_access_coverage_sites[i].file_offset &&
+        result.sc_access_coverage_sites[i - 1].kind != result.sc_access_coverage_sites[i].kind) {
+      result.errors.emplace_back(
+          "ConSan SuperCollider physical access was classified as both native LDS and group-FLAT");
+      result.sc_access_coverage_sites.clear();
+      return false;
+    }
+  }
+  result.sc_access_coverage_resolved = true;
+  return true;
+}
+
+template <typename Supported>
+void publish_sc_access_coverage_support(ConSanResult &result, ConSanScAccessCoverageKind kind,
+                                        Supported &&supported) {
+  if (!result.sc_access_coverage_resolved)
+    return;
+  for (ConSanScAccessCoverageSite &site : result.sc_access_coverage_sites) {
+    if (site.kind != kind)
+      continue;
+    const bool is_supported = supported(site.file_offset);
+    if (site.evaluated)
+      site.supported = site.supported && is_supported;
+    else {
+      site.evaluated = true;
+      site.supported = is_supported;
+    }
+  }
+}
+
 [[nodiscard]] bool sc_sgpr_ranges_overlap(uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
                                           uint16_t rhs_width) {
   return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&

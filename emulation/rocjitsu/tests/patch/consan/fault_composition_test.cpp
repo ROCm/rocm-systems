@@ -669,7 +669,17 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
   EXPECT_EQ(capped.patches.front().kind, ConSanPatchKind::TrampolineScPerturbation);
   EXPECT_TRUE(std::ranges::any_of(capped.warnings, [](const std::string &warning) {
     return warning.find("shared patch budget consumed") != std::string::npos;
-  }));
+  })) << testing::PrintToString(capped.warnings);
+
+  options.max_patches_is_expert_limit = false;
+  const ConSanResult all_supported = try_patch_consan(bytes, options);
+  ASSERT_TRUE(all_supported.errors.empty()) << testing::PrintToString(all_supported.errors);
+  EXPECT_EQ(all_supported.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_TRUE(all_supported.final_validation_passed);
+  EXPECT_EQ(all_supported.applied_perturbations, 1u);
+  ASSERT_EQ(all_supported.patches.size(), 2u);
+  EXPECT_EQ(all_supported.patches[0].kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
+  EXPECT_EQ(all_supported.patches[1].kind, ConSanPatchKind::TrampolineScPerturbation);
 }
 
 TEST(ConSan, PerturbationCompositionReservesLocalCaveAndRollsBackUnreachablePlan) {
@@ -730,8 +740,9 @@ TEST(ConSan, PerturbationCompositionSharesTransactionWithFlatRedundantAccess) {
       0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBFB00000u,
   };
-  const std::vector<uint8_t> bytes =
-      make_rdna4_code_object_with_local_function(kernel_words, function_words);
+  const std::vector<uint8_t> bytes = make_rdna4_code_object_with_local_function(
+      kernel_words, function_words, {}, kRdna4Wave64AllVgprsGranulated,
+      /*function_is_kernel=*/true);
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.probe_flat_check_trap = true;
