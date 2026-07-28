@@ -28,10 +28,9 @@ import pytest
 
 def test_validate_pc_sampling_roctx_pause_resume(json_data):
     """
-    Minimal validation: verify that PC sampling still collects a non-trivial number of
-    v_mov_b32 samples (at least 100, comprising at least 30% of all samples) when
-    roctx pause/resume is used. This ensures that pause/resume does not silently
-    suppress or corrupt PC sampling data.
+    Verify that every resumed profiling window samples its pc_sampling_kernel
+    dispatch, and that those windows collectively contain a non-trivial number
+    of v_mov_b32 samples.
     """
     data = json_data["rocprofiler-sdk-tool"]
 
@@ -42,6 +41,23 @@ def test_validate_pc_sampling_roctx_pause_resume(json_data):
 
     samples = data["buffer_records"][pc_sampling_key]
     assert len(samples) > 0, "Expected at least one PC sampling record"
+
+    pc_sampling_kernel_ids = {
+        symbol["kernel_id"]
+        for symbol in data["kernel_symbols"]
+        if "pc_sampling_kernel" in symbol["kernel_name"]
+    }
+    assert pc_sampling_kernel_ids, "pc_sampling_kernel is missing from kernel metadata"
+
+    target_dispatch_ids = {
+        record["dispatch_info"]["dispatch_id"]
+        for record in data["buffer_records"]["kernel_dispatch"]
+        if record["dispatch_info"]["kernel_id"] in pc_sampling_kernel_ids
+    }
+    assert len(target_dispatch_ids) == 4, (
+        "Expected one pc_sampling_kernel dispatch in each of four resumed "
+        f"profiling windows, got {sorted(target_dispatch_ids)}"
+    )
 
     instructions = data["strings"]["pc_sample_instructions"]
 
@@ -54,21 +70,33 @@ def test_validate_pc_sampling_roctx_pause_resume(json_data):
                 v_mov_b32_dispatch_counts.get(dispatch_id, 0) + 1
             )
 
-    assert len(v_mov_b32_dispatch_counts) == 4, (
-        "Expected v_mov_b32 samples from all four resumed target-kernel dispatches, "
-        f"got {v_mov_b32_dispatch_counts}"
+    sampled_target_dispatches = target_dispatch_ids & set(v_mov_b32_dispatch_counts)
+    assert sampled_target_dispatches == target_dispatch_ids, (
+        "Expected v_mov_b32 samples from every pc_sampling_kernel dispatch; "
+        f"sampled {sorted(sampled_target_dispatches)}, expected "
+        f"{sorted(target_dispatch_ids)}"
     )
 
-    v_mov_b32_count = sum(v_mov_b32_dispatch_counts.values())
+    target_samples = [
+        sample
+        for sample in samples
+        if sample["record"]["dispatch_id"] in target_dispatch_ids
+    ]
+    v_mov_b32_count = sum(
+        count
+        for dispatch_id, count in v_mov_b32_dispatch_counts.items()
+        if dispatch_id in target_dispatch_ids
+    )
 
     assert (
         v_mov_b32_count >= 100
-    ), f"Expected at least 100 samples with v_mov_b32 instruction, got {v_mov_b32_count}"
+    ), f"Expected at least 100 target-kernel v_mov_b32 samples, got {v_mov_b32_count}"
 
-    v_mov_b32_ratio = v_mov_b32_count / len(samples)
-    assert (
-        v_mov_b32_ratio >= 0.30
-    ), f"Expected v_mov_b32 samples to be at least 30% of total, got {v_mov_b32_ratio:.2%}"
+    v_mov_b32_ratio = v_mov_b32_count / len(target_samples)
+    assert v_mov_b32_ratio >= 0.30, (
+        "Expected v_mov_b32 to be at least 30% of target-kernel samples, "
+        f"got {v_mov_b32_ratio:.2%}"
+    )
 
 
 if __name__ == "__main__":

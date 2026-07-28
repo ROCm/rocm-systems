@@ -44,6 +44,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cinttypes>
 #include <climits>
 #include <cstring>
@@ -3158,11 +3159,6 @@ Intervals larger than t0_ will be frequency adjusted.  This admits a numerical e
 than twice the frequency stability (~10^-5).
 */
 uint64_t GpuAgent::TranslateTime(uint64_t tick) {
-  // A zero timestamp is the hardware's invalid/unavailable marker. Preserve it
-  // instead of translating it as a tick predating HSA startup, which wraps the
-  // result into a plausible-looking system timestamp.
-  if (tick == 0) return 0;
-
   // Only allow short (error bounded) extrapolation for times during program execution.
   // Limit errors due to relative frequency drift to ~0.5us.  Sync clocks at 16Hz.
   const int64_t max_extrapolation = core::Runtime::runtime_singleton_->sys_clock_freq() >> 4;
@@ -3671,14 +3667,23 @@ hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& sess
   debug_print("Created PC sampling session with thunkId:%d\n", thunkId);
   session.SetThunkId(thunkId);
 
-  hsa_status_t ret = PcSamplingCreateFromId(thunkId, session);
-  if (ret != HSA_STATUS_SUCCESS) {
-    HSAKMT_STATUS destroy_ret =
-        HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id(), thunkId));
-    if (destroy_ret != HSAKMT_STATUS_SUCCESS) {
+  auto rollback_kernel_session = [this, thunkId]() {
+    if (HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id(), thunkId)) != HSAKMT_STATUS_SUCCESS)
       debug_print("Failed to roll back PC sampling session with thunkId:%d\n", thunkId);
-    }
+  };
+
+  hsa_status_t ret;
+  try {
+    ret = PcSamplingCreateFromId(thunkId, session);
+  } catch (...) {
+    // Queue creation and the per-XCC allocations can throw. The kernel driver
+    // permits a single sampling session per node, so an orphaned thunkId would
+    // block every later create on this agent.
+    rollback_kernel_session();
+    throw;
   }
+
+  if (ret != HSA_STATUS_SUCCESS) rollback_kernel_session();
 
   return ret;
 }
@@ -3699,8 +3704,12 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  // Ensure only one session is active at a time for the given method
-  if (pcs_data->session)
+  // Ensure only one session is active at a time for the given method.
+  // xcc_data is also checked because PcSamplingDestroy deliberately retains the
+  // allocations (with pcs_data->session already cleared) when kernel teardown
+  // fails. Overwriting them here would leak buffers and signals the trap handler
+  // can still reach.
+  if (pcs_data->session || pcs_data->xcc_data)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;  // TODO: For now, we can only have
                                                // 1 pc sampling session at a
                                                // time. As a final solution, we
@@ -4234,8 +4243,6 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
 }
 
 hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) {
-  if (session.isActive()) return HSA_STATUS_SUCCESS;
-
   auto method = session.method();
 
   pcs_data_t* pcs_data = nullptr;
@@ -4249,6 +4256,19 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   } else {
     // Unsupported sampling method
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  if (session.isActive()) {
+    // A failed hsaKmtPcSamplingStop returns early with the session still active
+    // but its worker threads already joined. Reporting success here would
+    // present sampling as running while nothing drains the device buffers, and
+    // falling through would move-assign over a still-joinable consumer thread.
+    // The caller must retry stop.
+    if (pcs_data->stopping.load(std::memory_order_acquire)) {
+      debug_print("PC sampling stop did not complete; retry stop before start\n");
+      return (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY;
+    }
+    return HSA_STATUS_SUCCESS;
   }
 
   if (pcs_data->session && pcs_data->session->isActive()) {
@@ -4322,6 +4342,7 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
 
       // Cleanup any sampling threads that were already created for earlier XCCs
       // before reporting the failure for this XCC.
+      pcs_data->stopping.store(true, std::memory_order_release);
       pcs_data->session->stop();
       for (uint32_t cleanup_xcc_id = 0; cleanup_xcc_id < xcc_id; cleanup_xcc_id++) {
         if (pcs_data->xcc_data[cleanup_xcc_id].thread) {
@@ -4347,6 +4368,7 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
     });
   } catch (...) {
     // Consumer thread creation failed - cleanup XCC threads
+    pcs_data->stopping.store(true, std::memory_order_release);
     pcs_data->session->stop();
     for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
       if (pcs_data->xcc_data[xcc_id].thread) {
@@ -4367,6 +4389,10 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
 
   // Cleanup threads if kernel driver failed to start sampling
   debug_print("Failed to start PC sampling session with thunkId:%d\n", session.ThunkId());
+  // A failed start may still have partially enabled trap production in KFD.
+  // Set the independent exit flag before waking workers so a trap cannot
+  // overwrite the signal sentinel and leave cleanup blocked forever.
+  pcs_data->stopping.store(true, std::memory_order_release);
   pcs_data->session->stop();
 
   // Stop consumer thread first.
@@ -4437,21 +4463,6 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
     }
   }
 
-  // Workers no longer submit commands through QueuePCSampling, so KFD can
-  // safely quiesce sampling and its queues without a circular PM4 wait.
-  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id(), session.ThunkId()));
-  if (retKmt != HSAKMT_STATUS_SUCCESS) {
-    // KFD may still be producing samples. Keep the session active and retain
-    // the consumer/resources so a later stop can retry without freeing memory
-    // that the trap handler can still access.
-    return HSA_STATUS_ERROR;
-  }
-
-  // Trap handlers are now quiesced. Mark the API session inactive before the
-  // final drain so a short/incomplete buffer is accounted as lost, not waited
-  // on indefinitely.
-  session.stop();
-
   // Stop consumer thread before final flush. This ordering is intentional:
   // 1. XCC threads have already exited, so host_read/write_offset are stable
   // 2. Consumer may have unprocessed notifications - that's OK, Flush handles it
@@ -4462,14 +4473,38 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
   // The consumer's wait() predicate checks consumer_exit under this same lock, so either:
   // 1. Consumer is waiting: we set exit flag, then notify wakes it up
   // 2. Consumer checks predicate: it sees exit=true and doesn't wait
-  {
-    std::lock_guard<std::mutex> lock(pcs_data->consumer_mutex);
-    pcs_data->consumer_exit.store(true, std::memory_order_relaxed);
-    pcs_data->consumer_cv.notify_one();
+  //
+  // Idempotent, so a retried stop can call it again after an earlier failure.
+  auto stop_consumer = [pcs_data]() {
+    {
+      std::lock_guard<std::mutex> lock(pcs_data->consumer_mutex);
+      pcs_data->consumer_exit.store(true, std::memory_order_relaxed);
+      pcs_data->consumer_cv.notify_one();
+    }
+    if (pcs_data->consumer_thread.joinable()) {
+      pcs_data->consumer_thread.join();
+    }
+  };
+
+  // Workers no longer submit commands through QueuePCSampling, so KFD can
+  // safely quiesce sampling and its queues without a circular PM4 wait.
+  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id(), session.ThunkId()));
+  if (retKmt != HSAKMT_STATUS_SUCCESS) {
+    // KFD may still be producing samples. Keep the session active and retain
+    // the resources so a later stop can retry without freeing memory that the
+    // trap handler can still access. The consumer is joined regardless: its
+    // producers are already gone, and leaving the std::thread joinable would
+    // abort in ~GpuAgent if the caller never retries.
+    stop_consumer();
+    return HSA_STATUS_ERROR;
   }
-  if (pcs_data->consumer_thread.joinable()) {
-    pcs_data->consumer_thread.join();
-  }
+
+  // Trap handlers are now quiesced. Mark the API session inactive before the
+  // final drain so a short/incomplete buffer is accounted as lost, not waited
+  // on indefinitely.
+  session.stop();
+
+  stop_consumer();
 
   // Flush any remaining samples after consumer is stopped.
   // This delivers partial data that didn't reach callback threshold.
@@ -4479,6 +4514,18 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
 
   return HSA_STATUS_SUCCESS;
 }
+
+// Upper bound on how long a flush waits for in-flight trap handlers to publish
+// the samples they already accounted for in buf_write_val. PcSamplingStop joins
+// the worker threads before it marks the session inactive, so session.isActive()
+// alone cannot break these loops; without a deadline a wedged trap handler (GPU
+// hang, forced queue eviction) turns stop into an unbounded hang. Trap handlers
+// normally retire in microseconds, so this only fires on genuine failures.
+static constexpr std::chrono::milliseconds kPcSamplingDrainTimeout{1000};
+
+// Spins between deadline checks in the CPU-atomic drain loop. Reading the clock
+// on every iteration would dominate the cost of the load being polled.
+static constexpr uint32_t kPcSamplingDrainSpinsPerCheck = 4096;
 
 hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
     pcs_data_t* pcs_data, pcs::PcsRuntime::PcSamplingSession& session, uint32_t xcc_id) {
@@ -4552,16 +4599,23 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
         : &pcs_data->xcc_data[xcc_id].device_data->buf_written_val1;
 
     // Wait for GPU to finish writing samples (per-XCC isolation eliminates contention).
-    // During stop, KFD is deliberately still active while workers finish this
-    // in-flight drain. Only a post-KFD final flush may truncate an incomplete
-    // buffer; resetting a live buffer early would race trap-handler writes.
+    // The deadline also bounds the post-KFD final flush, so an inactive API
+    // session is not by itself a reason to discard records from trap handlers
+    // that were already in flight when sampling stopped.
     uint32_t expected_written = (uint32_t)sample_count;
+    const auto drain_deadline = std::chrono::steady_clock::now() + kPcSamplingDrainTimeout;
+    uint32_t drain_spins = 0;
 
     while (rocr::atomic::Load(bwv_written, std::memory_order_acquire) < expected_written) {
-      if (!session.isActive()) {
+      bool timed_out = (++drain_spins % kPcSamplingDrainSpinsPerCheck) == 0 &&
+                       std::chrono::steady_clock::now() >= drain_deadline;
+
+      if (timed_out) {
         // Treat remaining expected samples as lost
         uint32_t actual_written = rocr::atomic::Load(bwv_written, std::memory_order_acquire);
         if (actual_written < expected_written) {
+          debug_print("PC Sampling XCC %u: timed out draining %u of %u samples\n", xcc_id,
+                      expected_written - actual_written, expected_written);
           pcs_data->xcc_data[xcc_id].lost_sample_count.fetch_add(
               expected_written - actual_written, std::memory_order_relaxed);
         }
@@ -4756,6 +4810,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   // always retires, allowing a stop request to be observed on the host.
   if (sample_count > 0) {
     uint32_t expected_written = static_cast<uint32_t>(sample_count);
+    const auto drain_deadline = std::chrono::steady_clock::now() + kPcSamplingDrainTimeout;
 
     while (true) {
       *old_val = 0;
@@ -4796,9 +4851,13 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
       if (actual_written >= expected_written) break;
 
       // A stop request leaves KFD/trap producers active until this worker has
-      // completed its current drain. Truncate only in the final post-KFD flush,
-      // when no producer can still update this buffer.
-      if (!session.isActive()) {
+      // completed its current drain. The same finite deadline bounds the final
+      // post-KFD flush while still allowing already in-flight records to land.
+      bool timed_out = std::chrono::steady_clock::now() >= drain_deadline;
+
+      if (timed_out) {
+        debug_print("PC Sampling XCC %u: PM4 timed out draining %u of %u samples\n", xcc_id,
+                    expected_written - actual_written, expected_written);
         pcs_data->xcc_data[xcc_id].lost_sample_count.fetch_add(
             expected_written - actual_written, std::memory_order_relaxed);
         sample_count = actual_written;

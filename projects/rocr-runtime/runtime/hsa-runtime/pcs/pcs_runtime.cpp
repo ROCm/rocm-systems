@@ -227,14 +227,17 @@ hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size
       size_t buf_samples = buf1_sz / sizeof(perf_sample_hosttrap_v1_t);
       perf_sample_hosttrap_v1_t* samples = reinterpret_cast<perf_sample_hosttrap_v1_t*>(buf1);
       while (buf_samples--) {
-        samples->timestamp = gpuAgent->TranslateTime(samples->timestamp);
+        // Zero is the hardware invalid-sample marker, not a GPU clock tick.
+        if (samples->timestamp != 0)
+          samples->timestamp = gpuAgent->TranslateTime(samples->timestamp);
         samples++;
       }
 
       buf_samples = buf2_sz / sizeof(perf_sample_hosttrap_v1_t);
       samples = reinterpret_cast<perf_sample_hosttrap_v1_t*>(buf2);
       while (buf_samples--) {
-        samples->timestamp = gpuAgent->TranslateTime(samples->timestamp);
+        if (samples->timestamp != 0)
+          samples->timestamp = gpuAgent->TranslateTime(samples->timestamp);
         samples++;
       }
     }
@@ -243,14 +246,16 @@ hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size
       size_t buf_samples = buf1_sz / sizeof(perf_sample_snapshot_v1_t);
       perf_sample_snapshot_v1_t* samples = reinterpret_cast<perf_sample_snapshot_v1_t*>(buf1);
       while (buf_samples--) {
-        samples->timestamp = gpuAgent->TranslateTime(samples->timestamp);
+        if (samples->timestamp != 0)
+          samples->timestamp = gpuAgent->TranslateTime(samples->timestamp);
         samples++;
       }
 
       buf_samples = buf2_sz / sizeof(perf_sample_snapshot_v1_t);
       samples = reinterpret_cast<perf_sample_snapshot_v1_t*>(buf2);
       while (buf_samples--) {
-        samples->timestamp = gpuAgent->TranslateTime(samples->timestamp);
+        if (samples->timestamp != 0)
+          samples->timestamp = gpuAgent->TranslateTime(samples->timestamp);
         samples++;
       }
     }
