@@ -287,8 +287,8 @@ public:
 
   /// @brief Flush all per-CU caches and the shared L2 to backing store.
   ///
-  /// @details L1 V$ uses write-through, so flush just invalidates. L2 flushes
-  /// all dirty lines to the backing MemoryInterface (MSC or HBM).
+  /// @details Both L1 caches use write-through, so flush just invalidates. L2
+  /// flushes all dirty lines to the backing MemoryInterface (MSC or HBM).
   /// Note: prefer flush_l1() + per-XCD L2 flush to avoid redundant L2 flushes
   /// when multiple CUs share the same L2.
   void flush_all(uint32_t vmid = 0) {
@@ -298,14 +298,13 @@ public:
                           reinterpret_cast<uintptr_t>(this), l1_vector_.store_count(),
                           l1_vector_.store_active_count(), l1_vector_.store_l2_writes());
     });
-    l1_scalar_.writeback_all(vmid);
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
     l2_->flush_all(vmid);
   }
 
   void flush_l1(uint32_t vmid = 0) {
-    l1_scalar_.writeback_all(vmid);
+    (void)vmid;
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
   }

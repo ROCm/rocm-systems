@@ -420,6 +420,7 @@ struct TranslationRule {
   ExpandFn expand_fn;             ///< Expansion generator (for Expand).
   const LaneLayout *guest_layout; ///< Source matrix layout (for matrix Expand).
   const LaneLayout *host_layout;  ///< Target matrix layout (for matrix Expand).
+  bool requires_liveness = true;  ///< Conservative default; tables opt out after auditing.
 
   constexpr auto operator<=>(const TranslationRule &rhs) const {
     if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)

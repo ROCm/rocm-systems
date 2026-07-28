@@ -1,0 +1,24 @@
+{
+  "expected_failures": {
+    "2bff3e6611af6c6de83ff384fd5b659f9c42441c3553cf41c779047d4432b78b": {
+      "kind": "memory-limit",
+      "reason": "RCCL code object exceeds the per-object DBT memory limit in indirect-branch discovery"
+    },
+    "5d2a4110c0d8274651992689ae47abfb014cd36584338a725d77cecdec9718aa": {
+      "kind": "translation-error",
+      "reason": "PyTorch object currently exposes no non-empty text section",
+      "returncode": 3,
+      "stderr_regex": "resource-limit: code object does not expose a non-empty \\.text section for translation"
+    },
+    "af9e659f75ad449b591d855208fb122fd27d7e66422b687ee643054a5df4a2f7": {
+      "kind": "translation-error",
+      "reason": "rocFFT object currently has no kernel descriptors",
+      "returncode": 3,
+      "stderr_regex": "kernel-descriptor: kernel descriptors are required for kernel-level translation"
+    }
+  },
+  "input_revision": "b0",
+  "output_revision": "a0",
+  "schema_version": 1,
+  "target": "gfx1250"
+}
