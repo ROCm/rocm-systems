@@ -155,19 +155,21 @@ continues to return the HSA error to callers that correctly handle it.
 | `RJ_CONSAN_FLAT_PROVENANCE=likely|strict` | `likely` | Admit proven `Group` plus heuristic `MaybeGroup` flat LDS sites, or only proven `Group` sites. |
 | `RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES=N` | `201326592` (192 MiB) | Bound total additional ELF bytes, including alignment padding, across one code-object transformation. `N` is unsigned decimal; zero permits only no-growth rewrites. |
 | `RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT=N` | unset (absolute policy applies) | Use an alternative bound relative to the original code object: total additional ELF bytes may not exceed `floor(original input bytes * N / 100)`. `N` is unsigned decimal in `0..4294967295`; values above 100 intentionally allow growth larger than the original image. |
-| `RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=N` | unset (unlimited) | Bound the sum of conservative full-output reservations across code objects currently being transformed. Each reservation is `original input bytes + the configured per-object maximum growth`; all inventory and retry passes for one reader share it. `N` is unsigned decimal. A rejected fail-open load bypasses transformation, runs the original object, and makes the final analysis verdict incomplete. |
+| `RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=N` | unset (unlimited) | Bound the sum of conservative major image working-set reservations across code objects currently being transformed. Each reservation is `3 * original input bytes + the configured per-object maximum growth`, covering the reader image, the patcher's input copy, and simultaneous old/new patcher images; all inventory and retry passes for one reader share it. `N` is unsigned decimal; zero rejects every nonempty transform. A rejected fail-open load bypasses transformation, runs the original object, and makes the final analysis verdict incomplete. Fail-closed mode and `RJ_CONSAN_REQUIRE_PATCH=1` instead reject the load because applicability is not yet known. |
 | `RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES=N` | unset (unlimited) | Bound the live aggregate of full retained replacement images. `N` is unsigned decimal; zero rejects every nonempty replacement, including a no-growth rewrite. Bytes are released when a replacement load fails or its executable is destroyed. |
 | `RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES=N` | unset (unlimited) | Additionally bound the live aggregate of alignment-inclusive ELF growth across retained replacement code objects in this process. `N` is unsigned decimal; zero permits only no-growth replacements. Growth is released when a replacement load fails or its executable is destroyed. In fail-open mode, an over-budget code object runs uninstrumented and makes the final analysis verdict incomplete; use fail-closed mode when every applicable object must be instrumented. |
 | `RJ_CONSAN_DUMP_DIR=PATH` | unset | Write original and transformed `.hsaco` objects for inspection. |
 
 The three process controls are independent. The concurrent-transform control is
-conservative and is acquired before semantic inventory, so its value normally
-needs to allow at least one input image plus that image's per-object growth
-ceiling. The two retained-image controls are charged together after
-transformation, when the exact replacement size is known: one counts the full
-image and the other counts only its growth delta. Admission and ownership are
-one transaction, so failure of either retained budget commits neither charge.
-Teardown reports the live and peak values for all three controls.
+acquired before semantic inventory, so its value normally needs to allow three
+times one input image plus that image's per-object growth ceiling. This covers
+the major image allocations, not smaller transform metadata. The two
+retained-image controls are charged together after transformation, when the
+exact replacement size is known: one counts the full image and the other counts
+only its growth delta. Admission and ownership are one transaction, so failure
+of either retained budget commits neither charge. Teardown reports the live and
+peak values for all three controls, including baseline runs where the ceilings
+are unlimited.
 
 For one transition, the old `RJ_CONSAN_FLAVOR`, `RJ_CONSAN_MOI_ENGINE`, and
 `RJ_CONSAN_MOI_BACKEND` variables remain accepted with deprecation warnings.

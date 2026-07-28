@@ -547,6 +547,27 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (env_has_value("RJ_CONSAN_MOI_ENGINE") && env_has_value("RJ_CONSAN_MOI_BACKEND"))
     warn_ignored_env("RJ_CONSAN_MOI_BACKEND", "RJ_CONSAN_MOI_ENGINE takes precedence");
 
+  if (config.process_concurrent_transform_limit_bytes &&
+      config.patched_image_growth_limit.kind ==
+          rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes) {
+    constexpr uint64_t kMinimumNonemptyImageWorkingSetBytes = 3;
+    const uint64_t growth_bytes = config.patched_image_growth_limit.absolute_bytes;
+    const std::optional<uint64_t> minimum_reservation =
+        growth_bytes <= std::numeric_limits<uint64_t>::max() - kMinimumNonemptyImageWorkingSetBytes
+            ? std::optional<uint64_t>(growth_bytes + kMinimumNonemptyImageWorkingSetBytes)
+            : std::nullopt;
+    if (!minimum_reservation ||
+        *config.process_concurrent_transform_limit_bytes < *minimum_reservation) {
+      std::fprintf(
+          stderr,
+          "[rocjitsu-dbi-hooks] warning: "
+          "RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=%llu cannot admit any nonempty "
+          "code object under the absolute per-object growth ceiling of %llu bytes\n",
+          static_cast<unsigned long long>(*config.process_concurrent_transform_limit_bytes),
+          static_cast<unsigned long long>(growth_bytes));
+    }
+  }
+
   if (config.flavor == rocjitsu::ConSanFlavor::Moi) {
     if (env_has_value("RJ_CONSAN_SC_REPORT_MODE"))
       warn_ignored_env("RJ_CONSAN_SC_REPORT_MODE", "only applies to RJ_CONSAN_MODE=supercollider");

@@ -1036,7 +1036,7 @@ private:
   util::IntrusiveList<Entry> entries_;
 };
 
-/// Admits conservative replacement-image bounds for concurrent transforms.
+/// Admits conservative major image working-set bounds for concurrent transforms.
 ///
 /// The reservation is acquired before the first semantic inventory pass and
 /// remains live until the final replacement bytes are either retained by the
@@ -1081,8 +1081,7 @@ public:
       outcome = AdmissionOutcome::LimitExceeded;
       break;
     case ProcessByteBudget::ChargeOutcome::AccountingOverflow:
-      outcome =
-          limit_bytes ? AdmissionOutcome::LimitExceeded : AdmissionOutcome::AccountingOverflow;
+      outcome = AdmissionOutcome::AccountingOverflow;
       break;
     }
     const AdmissionResult result = {
@@ -1105,10 +1104,12 @@ public:
     }
   }
 
-  [[nodiscard]] ProcessByteBudget::Summary summarize_and_clear() {
+  [[nodiscard]] ProcessByteBudget::Summary summarize_and_rollover() {
     std::lock_guard lock(mutex_);
     const ProcessByteBudget::Summary summary = budget_.summary();
-    budget_.clear();
+    // OnUnload does not quiesce runtime-owned load callbacks. Preserve their
+    // live charges across reinstall while starting a fresh peak interval.
+    budget_.reset_peak_to_live();
     return summary;
   }
 
@@ -1123,10 +1124,15 @@ private:
                 "ConSan process admission requires a 64-bit size_t");
   const std::optional<size_t> maximum_growth =
       rocjitsu::consan_patched_image_growth_limit_bytes(growth_policy, input_image_bytes);
-  if (!maximum_growth || *maximum_growth > std::numeric_limits<size_t>::max() - input_image_bytes) {
+  if (!maximum_growth ||
+      input_image_bytes >
+          (std::numeric_limits<size_t>::max() - *maximum_growth) / static_cast<size_t>(3)) {
     return std::nullopt;
   }
-  return static_cast<uint64_t>(input_image_bytes + *maximum_growth);
+  // The reader-owned input remains live while CodeObjectPatcher holds its
+  // private input copy and replace_text_impl materializes a grown image beside
+  // the old patcher image.
+  return static_cast<uint64_t>(3 * input_image_bytes + *maximum_growth);
 }
 
 class ProcessTransformReservation {
@@ -1980,7 +1986,7 @@ public:
     const ConSanStaticCoverageRegistry::Summary static_coverage_summary =
         ConSanStaticCoverageRegistry::instance().summarize_and_clear();
     const ProcessByteBudget::Summary transform_admission_summary =
-        ProcessTransformAdmissionRegistry::instance().summarize_and_clear();
+        ProcessTransformAdmissionRegistry::instance().summarize_and_rollover();
     const ReplacementCodeObjectStorageRegistry::Summary patched_image_summary =
         ReplacementCodeObjectStorageRegistry::instance().summarize_and_clear();
     const bool moi_require_records = moi_require_records_;
@@ -2052,8 +2058,9 @@ public:
         static_cast<unsigned long long>(moi_report_summary.cleanup_failure_count));
     std::fprintf(stderr,
                  "[rocjitsu-dbi-hooks] ConSan transform admission memory "
-                 "live_before_cleanup=%llu live_after_cleanup=0 peak_reserved_bytes=%llu "
+                 "live_before_cleanup=%llu live_after_cleanup=%llu peak_reserved_bytes=%llu "
                  "process_ceiling=%s\n",
+                 static_cast<unsigned long long>(transform_admission_summary.live_bytes),
                  static_cast<unsigned long long>(transform_admission_summary.live_bytes),
                  static_cast<unsigned long long>(transform_admission_summary.peak_bytes),
                  process_concurrent_transform_ceiling.c_str());
@@ -3081,8 +3088,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.moi_runtime_sample_stride = config->moi_runtime_sample_stride;
     patch_options.moi_runtime_sample_offset = config->moi_runtime_sample_offset;
     patch_options.report_marker = config->report_marker;
-    if (patch_options.flavor != rocjitsu::ConSanFlavor::None &&
-        config->process_concurrent_transform_limit_bytes) {
+    if (patch_options.flavor != rocjitsu::ConSanFlavor::None) {
       const std::optional<uint64_t> reservation_bytes =
           conservative_transform_reservation_bytes(size, patch_options.patched_image_growth_limit);
       std::optional<ProcessTransformAdmissionRegistry::AdmissionResult> admission;
@@ -3090,9 +3096,28 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         admission = transform_reservation.acquire(*reservation_bytes,
                                                   config->process_concurrent_transform_limit_bytes);
       }
-      if (!admission || !*admission) {
+      const bool accounting_overflow =
+          !reservation_bytes ||
+          (admission &&
+           admission->outcome ==
+               ProcessTransformAdmissionRegistry::AdmissionOutcome::AccountingOverflow);
+      const bool limit_exceeded =
+          admission &&
+          admission->outcome == ProcessTransformAdmissionRegistry::AdmissionOutcome::LimitExceeded;
+      if (accounting_overflow && !config->process_concurrent_transform_limit_bytes) {
+        std::fprintf(
+            stderr,
+            "[rocjitsu-dbi-hooks] warning: ConSan transform reservation accounting overflow: "
+            "reader=%llu input_image=%zu live=%llu reservation=%s process_ceiling=unlimited; "
+            "continuing without a process reservation\n",
+            static_cast<unsigned long long>(code_object_reader.handle), size,
+            static_cast<unsigned long long>(admission ? admission->live_bytes : 0),
+            reservation_bytes ? std::to_string(*reservation_bytes).c_str() : "uint64-overflow");
+      } else if (accounting_overflow || limit_exceeded) {
         ConSanStaticCoverageRegistry::instance().record_unclassified_incomplete_code_object();
-        if (admission && admission->required_bytes) {
+        const char *rejection_reason = "process-concurrent-transform-accounting";
+        if (limit_exceeded) {
+          rejection_reason = "process-concurrent-transform-limit";
           std::fprintf(
               stderr,
               "[rocjitsu-dbi-hooks] ConSan process concurrent transform limit exceeded: "
@@ -3103,35 +3128,34 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
               static_cast<unsigned long long>(*admission->required_bytes),
               static_cast<unsigned long long>(*admission->limit_bytes));
         } else {
-          const uint64_t live_bytes = admission ? admission->live_bytes : 0;
-          const uint64_t requested_bytes = admission ? admission->reservation_bytes : 0;
           std::fprintf(
               stderr,
-              "[rocjitsu-dbi-hooks] ConSan process concurrent transform limit exceeded: "
-              "reader=%llu input_image=%zu live=%llu reservation=%s required=uint64-overflow "
-              "limit=%llu\n",
+              "[rocjitsu-dbi-hooks] ConSan transform reservation accounting overflow: "
+              "reader=%llu input_image=%zu live=%llu reservation=%s process_ceiling=%llu\n",
               static_cast<unsigned long long>(code_object_reader.handle), size,
-              static_cast<unsigned long long>(live_bytes),
-              reservation_bytes ? std::to_string(requested_bytes).c_str() : "uint64-overflow",
+              static_cast<unsigned long long>(admission ? admission->live_bytes : 0),
+              reservation_bytes ? std::to_string(*reservation_bytes).c_str() : "uint64-overflow",
               static_cast<unsigned long long>(*config->process_concurrent_transform_limit_bytes));
         }
         if (config->fail_closed || config->require_patch) {
-          return reject_code_object_load(
-              *config, HSA_STATUS_ERROR_OUT_OF_RESOURCES, code_object_reader.handle,
-              "process-concurrent-transform-limit", fault_installation_evidence);
+          return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                         code_object_reader.handle, rejection_reason,
+                                         fault_installation_evidence);
         }
         log_message(kLogInfo, "ConSan transform admission failed; loading original reader=%llu",
                     static_cast<unsigned long long>(code_object_reader.handle));
         return original_load(executable, agent, code_object_reader, options, loaded_code_object);
+      } else if (admission && *admission) {
+        log_message(kLogInfo,
+                    "ConSan transform admission reader=%llu input_image=%zu reservation=%llu "
+                    "live_before=%llu required=%llu process_ceiling=%s",
+                    static_cast<unsigned long long>(code_object_reader.handle), size,
+                    static_cast<unsigned long long>(admission->reservation_bytes),
+                    static_cast<unsigned long long>(admission->live_bytes),
+                    static_cast<unsigned long long>(*admission->required_bytes),
+                    admission->limit_bytes ? std::to_string(*admission->limit_bytes).c_str()
+                                           : "unlimited");
       }
-      log_message(kLogInfo,
-                  "ConSan transform admission reader=%llu input_image=%zu reservation=%llu "
-                  "live_before=%llu required=%llu limit=%llu",
-                  static_cast<unsigned long long>(code_object_reader.handle), size,
-                  static_cast<unsigned long long>(admission->reservation_bytes),
-                  static_cast<unsigned long long>(admission->live_bytes),
-                  static_cast<unsigned long long>(*admission->required_bytes),
-                  static_cast<unsigned long long>(*admission->limit_bytes));
     }
     size_t process_prior_fault_applications = 0;
     if ((config->fault_require_exactly_one && !config->fault_dry_run) ||
@@ -3435,6 +3459,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       register_auto_moi_report_metadata(code_object_reader.handle,
                                         *registered_auto_moi_report_generation, patch_result);
     install_action = rocjitsu::consan_install_action(patch_result, config->fail_closed);
+    if (install_action != rocjitsu::ConSanInstallAction::LoadReplacement) {
+      patch_result_storage->elf_bytes = {};
+      transform_reservation.release();
+    }
     log_message(kLogInfo,
                 "ConSan patch end reader=%llu visited=%s modified=%s outcome=%s errors=%zu "
                 "warnings=%zu patches=%zu",
@@ -4431,8 +4459,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           *config, dump_id, code_object_reader.handle, "patched",
           std::span<const uint8_t>(patch_result.elf_bytes.data(), patch_result.elf_bytes.size()));
     }
-    if (install_action != rocjitsu::ConSanInstallAction::LoadReplacement)
-      transform_reservation.release();
   } else {
     log_message(kLogInfo, "ConSan pass-through reader=%llu bytes=unavailable",
                 static_cast<unsigned long long>(code_object_reader.handle));
