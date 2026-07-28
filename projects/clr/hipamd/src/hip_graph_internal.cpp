@@ -1278,13 +1278,11 @@ void GraphExecSegmented::ComputeCompletionSignalFlags() {
 
 // ================================================================================================
 // DFS-based stream assignment for segment DAG.
-// Linear chains of segments stay on the same stream; branches rotate to a new stream at each leaf.
+// Mirrors ScheduleOneNode from the classic path exactly:
+//   - linear chains stay on the same stream
+//   - sid rotates at leaf segments (end of branch), not at forks
+//   - each root segment starts on the next stream (round-robin across roots)
 void GraphExecSegmented::DFSStreamAssignment() {
-  auto getPoolSize = [&](int dev_id) -> int {
-    auto it = max_streams_dev_.find(dev_id);
-    return (it != max_streams_dev_.end() && it->second > 0) ? it->second : 1;
-  };
-
   // Reset all stream IDs
   for (auto& seg : segments_) {
     seg.stream_id = -1;
@@ -1292,68 +1290,49 @@ void GraphExecSegmented::DFSStreamAssignment() {
 
   int sid = 0;
 
-  // Find root segments (no dependencies) — these are DFS entry points
-  std::vector<int> roots;
+  // Mirrors ScheduleNodes(): iterate all segments, start a new DFS for each
+  // unscheduled one with the current sid, then increment sid for the next entry.
   for (int i = 0; i < static_cast<int>(segments_.size()); ++i) {
-    if (segments_[i].segment_ids_dependencies.empty()) {
-      roots.push_back(i);
-    }
-  }
+    if (segments_[i].stream_id != -1) continue;
 
-  // Stack-based DFS over segment DAG — mirrors ScheduleOneNode exactly
-  std::vector<int> pending;
-  for (int i = static_cast<int>(roots.size()) - 1; i >= 0; --i) {
-    pending.push_back(roots[i]);
-  }
+    // Stack carries segment ids — sid is shared across the entire DFS from this root
+    // exactly like ScheduleOneNode's single `sid` variable
+    std::vector<int> pending;
+    pending.push_back(i);
 
-  while (!pending.empty()) {
-    int cur_id = pending.back();
-    pending.pop_back();
+    while (!pending.empty()) {
+      int cur_id = pending.back();
+      pending.pop_back();
 
-    if (cur_id < 0 || cur_id >= static_cast<int>(segments_.size())) continue;
-    auto& cur = segments_[cur_id];
+      if (cur_id < 0 || cur_id >= static_cast<int>(segments_.size())) continue;
+      auto& cur = segments_[cur_id];
 
-    // Skip if already assigned
-    if (cur.stream_id != -1) continue;
+      if (cur.stream_id != -1) continue;
 
-    // Assign current segment to current stream, capped per device pool
-    int pool = getPoolSize(cur.dev_id);
-    cur.stream_id = sid % pool;
+      cur.stream_id = sid % static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
 
-    // Push unassigned successors in reverse order (preserve left-to-right)
-    bool end_of_branch = true;
-    for (int i = static_cast<int>(cur.segment_ids_edges.size()) - 1; i >= 0; --i) {
-      int edge_id = cur.segment_ids_edges[i];
-      if (edge_id >= 0 && edge_id < static_cast<int>(segments_.size()) &&
-          segments_[edge_id].stream_id == -1) {
-        pending.push_back(edge_id);
-        end_of_branch = false;
-      }
-    }
-
-    // Rotate stream at branch leaf
-    if (end_of_branch) {
-      sid = (sid + 1) % static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
-    }
-  }
-
-  // Compute needs_completion_signal — same logic as RoundRobinStreamAssignment
-  for (auto& seg : segments_) {
-    seg.needs_completion_signal = false;
-    if (seg.segment_ids_edges.empty()) {
-      seg.needs_completion_signal = true;
-      continue;
-    }
-    for (int edge_id : seg.segment_ids_edges) {
-      if (edge_id >= 0 && edge_id < static_cast<int>(segments_.size())) {
-        const auto& edge_seg = segments_[edge_id];
-        if (edge_seg.dev_id != seg.dev_id || edge_seg.stream_id != seg.stream_id) {
-          seg.needs_completion_signal = true;
-          break;
+      // Push unassigned successors in reverse order (preserve left-to-right)
+      bool end_of_branch = true;
+      for (int j = static_cast<int>(cur.segment_ids_edges.size()) - 1; j >= 0; --j) {
+        int edge_id = cur.segment_ids_edges[j];
+        if (edge_id >= 0 && edge_id < static_cast<int>(segments_.size()) &&
+            segments_[edge_id].stream_id == -1) {
+          pending.push_back(edge_id);
+          end_of_branch = false;
         }
       }
+
+      // Rotate sid at leaf — mirrors ScheduleOneNode exactly
+      if (end_of_branch) {
+        sid = (sid + 1) % static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
+      }
     }
+
+    // Mirrors ScheduleNodes()'s stream_id = (stream_id+1) % pool after each root
+    sid = (sid + 1) % static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
   }
+
+  ComputeCompletionSignalFlags();
 }
 
 // ================================================================================================
@@ -1390,18 +1369,18 @@ void GraphExecSegmented::SelectStreamAssignment() {
       use_dfs = true;
       ClPrint(amd::LOG_INFO, amd::LOG_CODE,
               "[hipGraph] SelectStreamAssignment: complex graph (%zu segs, avg %.2f nodes) "
-              "→ DFS stream assignment",
+              "-> DFS stream assignment",
               segments_.size(), avg);
     }
   }
 
   if (use_dfs) {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] SelectStreamAssignment: hybrid->DFS (%zu segs)", segments_.size());
     DFSStreamAssignment();
   } else {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: simple/parallel graph (%zu segs) "
-            "→ round-robin stream assignment",
-            segments_.size());
+            "[hipGraph] SelectStreamAssignment: hybrid->round-robin (%zu segs)", segments_.size());
     RoundRobinStreamAssignment();
   }
 }
