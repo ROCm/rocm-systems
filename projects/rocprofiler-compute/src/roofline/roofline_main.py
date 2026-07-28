@@ -76,9 +76,9 @@ TRACE_COLORS: dict[str, dict[str, str]] = {
 }
 
 # Roofs are sampled so that hover snaps to a vertex anywhere along the line
-_ROOF_SAMPLES_PER_DECADE = 24
-_ROOF_SAMPLES_MIN = 32
-_ROOF_SAMPLES_MAX = 400
+_ROOF_SAMPLES_PER_DECADE = 48
+_ROOF_SAMPLES_MIN = 64
+_ROOF_SAMPLES_MAX = 800
 
 
 def _figure_class(dtype: str) -> str:

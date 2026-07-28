@@ -53,7 +53,7 @@ def build_kernel_hover_template(
         name_html,
         [
             "AI: %{x:.6g}",
-            f"Achieved throughput: %{{y:.3f}} {unit}",
+            f"Achieved throughput: %{{y:,.3f}} {unit}",
             f"Peak throughput: %{{customdata[0]}} {unit}",
             "Percent of roofline achieved: %{customdata[1]} %",
             f"Performance limiter: {limiter}",
