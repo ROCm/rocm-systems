@@ -206,9 +206,9 @@ struct HookConfig {
   uint32_t host_gpu_id = 0;
   int log_level = kLogDisabled;
   bool signal_backtrace = false;
-  /// @brief Guest/host silicon revisions from the DBT guest config. gfx1250 A0 and
-  /// B0 share an ELF machine ID, so the revision cannot be inferred from the code
-  /// object; it selects the B0->A0 workaround direction for same-target loads.
+  /// @brief Guest and host revisions from the DBT guest config. gfx1250 A0 and
+  /// B0 share an ELF machine ID, so these select the same-target translation
+  /// profile.
   ProcessorRevision guest_revision = ProcessorRevision::Unspecified;
   ProcessorRevision host_revision = ProcessorRevision::Unspecified;
 };
@@ -3857,14 +3857,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  // gfx1250 A0 and B0 share an ELF machine ID, so a same-arch/same-mach match does
-  // NOT prove the code object is already the target silicon revision. The revision
-  // cannot be inferred from the code object; it comes from the DBT guest config.
-  // When both revisions are configured, this is a real same-ISA revision
-  // translation (e.g. B0->A0), so it must go through the translator below rather
-  // than the pass-through path. When they are not configured, a same-target gfx1250
-  // load cannot be proven safe to pass through unchanged (it might require B0->A0
-  // workarounds), so fail closed. Other architectures are unambiguous by mach.
+  // gfx1250 A0 and B0 share an ELF machine ID, so a same-arch/same-mach match
+  // does not identify the revision. When both revisions are configured, use the
+  // selected same-ISA translation profile. Otherwise fail closed.
   const bool gfx1250_same_target = source_target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
                                    config->target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
                                    source_target.mach == config->target.mach;
@@ -3919,9 +3914,8 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   // an independent kernel fails translation; the skipped-kernel diagnostic names
   // the symbol that is redirected to a target no-op stub.
   translator_options.skip_failed_kernels = true;
-  // Silicon revisions come from the DBT guest config, not the code object (gfx1250
-  // A0/B0 share a machine ID). They select the same-ISA workaround direction, e.g.
-  // a B0 guest translated to A0 host.
+  // gfx1250 A0 and B0 share a machine ID. Select the same-ISA translation
+  // profile from the configured revisions.
   translator_options.input_revision = config->guest_revision;
   translator_options.output_revision = config->host_revision;
 
