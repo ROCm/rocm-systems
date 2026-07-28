@@ -3175,8 +3175,8 @@
       "tests": [
         {
           "name": "GIN_DeviceMPI_AllTests",
-          "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall + Phase-1 VA signal coverage)",
-          "test_filter": "GinMPIDeviceTests.*",
+          "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall); excludes Phase-1 VA signal tests (gin_device_signal_phase1) and tests with dedicated entries below",
+          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.VASignalAdd_Put:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create",
           "timeout": 600
         },
         {
@@ -3337,9 +3337,9 @@
           "test_filter": "GinMPIDeviceTests.SignalInc_MixingRule"
         },
         {
-          "name": "GIN_Signal_RollingBits",
-          "description": "waitSignal/readSignal with 32-bit rolling-bit mask on wide counter values",
-          "test_filter": "GinMPIDeviceTests.Signal_RollingBits"
+          "name": "GIN_Signal_WaitRead_Low32Bits",
+          "description": "waitSignal/readSignal with 32-bit masked low-bit compare and readback",
+          "test_filter": "GinMPIDeviceTests.Signal_WaitRead_Low32Bits"
         },
         {
           "name": "GIN_VASignal_StrictOrderingFlag",
@@ -3350,12 +3350,6 @@
           "name": "GIN_SignalShadow_GetPtr",
           "description": "getSignalShadowPtr/increaseSignalShadow local indexed shadow table (no network)",
           "test_filter": "GinMPIDeviceTests.SignalShadow_GetPtr"
-        },
-        {
-          "name": "GIN_SignalPhase1_All",
-          "description": "All Phase-1 GIN device signal coverage tests (VA + indexed + shadow)",
-          "test_filter": "GinMPIDeviceTests.VASignal_*:GinMPIDeviceTests.SignalAdd_PutValue:GinMPIDeviceTests.SignalInc_MixingRule:GinMPIDeviceTests.Signal_RollingBits:GinMPIDeviceTests.SignalShadow_GetPtr",
-          "timeout": 600
         }
       ]
     },
@@ -3375,14 +3369,8 @@
       },
       "tests": [
         {
-          "name": "DeviceApiMPI_AllTests_2Rank",
-          "description": "All DeviceApiMPITests on 2 co-located ranks (LSA team non-trivial); Lsa_ReduceSumCopy_DifferentTeams skips (run device_api_mpi_different_teams on 4 ranks)",
-          "test_filter": "DeviceApiMPITests.*",
-          "timeout": 600
-        },
-        {
           "name": "DeviceApiMPI_Baseline_LocalLsa",
-          "description": "Baseline local/LSA copy and reduce/reduce-copy kernels",
+          "description": "Baseline local/LSA copy and reduce/reduce-copy kernels (includes Local_ReduceSum_* variants via Local_*)",
           "test_filter": "DeviceApiMPITests.Local_*:DeviceApiMPITests.Lsa_Copy:DeviceApiMPITests.Lsa_ReduceSum:DeviceApiMPITests.Lsa_ReduceSumCopy"
         },
         {
@@ -3392,13 +3380,13 @@
         },
         {
           "name": "DeviceApiMPI_GroupB_FixedReduceCopy",
-          "description": "Group B: fixed overloads, dtype sweep, coop-thread, in-place, int32 count",
+          "description": "Group B: LSA fixed overloads and in-place reduce-copy",
           "test_filter": "DeviceApiMPITests.Lsa_ReduceSum_SymPtr:DeviceApiMPITests.Lsa_Copy_NonZeroOffset:DeviceApiMPITests.Lsa_ReduceSum_DevCommOverload:DeviceApiMPITests.ReduceCopy_*"
         },
         {
           "name": "DeviceApiMPI_GroupC_LambdaLayouts",
-          "description": "Group C: lambda-based reduce/copy layout variants",
-          "test_filter": "DeviceApiMPITests.Lsa_ReduceSum_LambdaExcludeSelf:DeviceApiMPITests.Lsa_Copy_LambdaScatter:DeviceApiMPITests.Lsa_ReduceSumCopy_LambdaLsaLsa:DeviceApiMPITests.Local_ReduceSum_Lambda"
+          "description": "Group C: LSA lambda-based reduce/copy layout variants (Local_ReduceSum_Lambda covered by Baseline Local_*)",
+          "test_filter": "DeviceApiMPITests.Lsa_ReduceSum_LambdaExcludeSelf:DeviceApiMPITests.Lsa_Copy_LambdaScatter:DeviceApiMPITests.Lsa_ReduceSumCopy_LambdaLsaLsa"
         },
         {
           "name": "DeviceApiMPI_GroupD_CustomRedOp",

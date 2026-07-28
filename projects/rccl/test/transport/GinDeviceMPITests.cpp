@@ -15,6 +15,7 @@
 #include "nccl_device.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -53,8 +54,11 @@ std::string ginTypeReason() {
 
 std::string cuMemReason() {
   const char* cumem = std::getenv("NCCL_CUMEM_ENABLE");
-  if (!cumem || std::strcmp(cumem, "1") != 0)
-    return "Symmetric memory required (NCCL_CUMEM_ENABLE=1)";
+  if (!cumem || cumem[0] == '\0')
+    return "Symmetric memory required (set NCCL_CUMEM_ENABLE to a non-zero value)";
+  errno = 0;
+  if (std::strtoll(cumem, nullptr, 0) == 0 && errno == 0)
+    return "Symmetric memory required (NCCL_CUMEM_ENABLE must be non-zero)";
   return "";
 }
 
@@ -97,6 +101,16 @@ std::string ginProxyTestSkipReason() {
   return "";
 }
 
+// rocSHMEM-GDA (type 4)/SDMA (type 5) implements only INDEXED signals; VA signals are
+// unsupported (Put/PutValue address the signal via indexedSignal.signalId).
+std::string vaSignalTestSkipReason() {
+  if (requestedGinType() == 4)
+    return "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=4)";
+  if (requestedGinType() == 5)
+    return "VA signals not supported by SDMA (NCCL_GIN_TYPE=5)";
+  return "";
+}
+
 // Initialized reqs with ginConnectionType=FULL; default for all tests here.
 ncclDevCommRequirements defaultGinReqs() {
   ncclDevCommRequirements r = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
@@ -104,37 +118,9 @@ ncclDevCommRequirements defaultGinReqs() {
   return r;
 }
 
-// MPI-coordinated checks for rank-local validation. Every rank must call these;
-// non-checkRank ranks supply tautological operands so MPI_Allreduce still runs.
-template <typename T>
-void assertMpiEqOnRank(int rank, int checkRank, const T& expected, const T& actual) {
-  const T observed = (rank == checkRank) ? actual : expected;
-  ASSERT_MPI_EQ(expected, observed);
-}
-
-void assertMpiHipOkOnRank(int rank, int checkRank, hipError_t err) {
-  const hipError_t status = (rank == checkRank) ? err : hipSuccess;
-  ASSERT_MPI_EQ(hipSuccess, status);
-}
-
-void assertMpiBufferEqOnRank(int rank, int checkRank,
-                             const std::vector<uint8_t>& expected,
-                             const std::vector<uint8_t>& actual) {
-  bool localOk = true;
-  if (rank == checkRank) {
-    if (expected.size() != actual.size()) {
-      localOk = false;
-    } else {
-      for (size_t i = 0; i < expected.size(); ++i) {
-        if (expected[i] != actual[i]) {
-          localOk = false;
-          break;
-        }
-      }
-    }
-  }
-  ASSERT_MPI_TRUE(localOk);
-}
+// Standard single-CTA GIN kernel launch (thread 0 issues, whole CTA waits/flushes).
+constexpr int kGinKernelBlocks  = 1;
+constexpr int kGinKernelThreads = 32;
 
 }  // namespace
 
@@ -261,13 +247,13 @@ class GinMPIDeviceTests : public MPITestBase {
 
     // Rank 0 puts the payload + bumps the signal; rank 1 waits on it.
     if (rank == 0) {
-      putBasicProducerKernel<<<1, 32, 0, stream>>>(
+      putBasicProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
           srcWin, /*srcOff=*/0,
           dstWin, /*dstOff=*/0,
           kTransferBytes, kSigIdx, kPeer,
           devComm);
     } else {
-      putBasicConsumerKernel<<<1, 32, 0, stream>>>(
+      putBasicConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
           kSigIdx, /*expectedSignalValue=*/1, devComm);
     }
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -360,13 +346,13 @@ TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
 
   // Rank 0 puts payload + bumps signal; rank 1 waits on the same signal.
   if (rank == 0) {
-    putBasicProducerKernel<<<1, 32, 0, stream>>>(
+    putBasicProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, kSrcOff,
         dstWin, kDstOff,
         kTransferBytes, kSigIdx, kPeer,
         devComm);
   } else {
-    putBasicConsumerKernel<<<1, 32, 0, stream>>>(
+    putBasicConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*expectedSignalValue=*/1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -472,13 +458,13 @@ TEST_F(GinMPIDeviceTests, Put_CrossNode) {
 
   // Rank 0 puts + signals; rank 1 waits.
   if (rank == 0) {
-    putBasicProducerKernel<<<1, 32, 0, stream>>>(
+    putBasicProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, kSrcOff,
         dstWin, kDstOff,
         kTransferBytes, kSigIdx, kPeer,
         devComm);
   } else {
-    putBasicConsumerKernel<<<1, 32, 0, stream>>>(
+    putBasicConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*expectedSignalValue=*/1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -590,10 +576,10 @@ TEST_F(GinMPIDeviceTests, PutValue_Inline) {
 
   // Rank 0 sends the inline value + signal; rank 1 waits.
   if (rank == 0) {
-    putValueInlineProducerKernel<<<1, 32, 0, stream>>>(
+    putValueInlineProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         dstWin, kDstOff, kValue, kSigIdx, kPeer, devComm);
   } else {
-    putValueInlineConsumerKernel<<<1, 32, 0, stream>>>(
+    putValueInlineConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*expectedSignalValue=*/1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -688,9 +674,9 @@ TEST_F(GinMPIDeviceTests, Signal_NoPayload) {
   // signal cell kSigIdx to reach 1. The successful return of waitSignal on
   // the consumer IS the assertion -- there is no payload to verify.
   if (rank == 0) {
-    signalNoPayloadProducerKernel<<<1, 32, 0, stream>>>(kSigIdx, kPeer, devComm);
+    signalNoPayloadProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(kSigIdx, kPeer, devComm);
   } else {
-    signalNoPayloadConsumerKernel<<<1, 32, 0, stream>>>(
+    signalNoPayloadConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*expectedSignalValue=*/1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -748,9 +734,9 @@ TEST_F(GinMPIDeviceTests, Signal_HighIdNoOverflow) {
   // to reach 1. The consumer's successful return IS the assertion -- pre-fix it
   // never returns because the bump truncates to cell 0.
   if (rank == 0) {
-    signalNoPayloadProducerKernel<<<1, 32, 0, stream>>>(kSigIdx, kPeer, devComm);
+    signalNoPayloadProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(kSigIdx, kPeer, devComm);
   } else {
-    signalNoPayloadConsumerKernel<<<1, 32, 0, stream>>>(
+    signalNoPayloadConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*expectedSignalValue=*/1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -860,7 +846,7 @@ TEST_F(GinMPIDeviceTests, WaitCounter_Local) {
   // 1 is purely the RDMA target -- the IB plugin lands the payload in its
   // dst window passively.
   if (rank == 0) {
-    waitCounterLocalProducerKernel<<<1, 32, 0, stream>>>(
+    waitCounterLocalProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, kSrcOff, dstWin, kDstOff,
         kTransferBytes, kCntIdx, kPeer, devComm);
   }
@@ -997,11 +983,11 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
   // rank 0, signal on rank 1); the host-side memcmp on rank 1 below
   // verifies the payload.
   if (rank == 0) {
-    waitCounterAndSignalProducerKernel<<<1, 32, 0, stream>>>(
+    waitCounterAndSignalProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, kSrcOff, dstWin, kDstOff,
         kTransferBytes, kSigIdx, kCntIdx, kPeer, devComm);
   } else {
-    waitCounterAndSignalConsumerKernel<<<1, 32, 0, stream>>>(
+    waitCounterAndSignalConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*expectedSignalValue=*/1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -1110,7 +1096,7 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
   // barrier raced past the peer (epoch broken), iter i+1 would either spin
   // forever or read a stale epoch. Kernel completion means all kIters
   // rounds stayed in lockstep.
-  barrier2RanksKernel<<<1, 32, 0, stream>>>(kIters, devComm);
+  barrier2RanksKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(kIters, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   // Successful return of the kernel IS the assertion: signal + waitSignal
@@ -1277,7 +1263,7 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
 
   // All ranks run the same collective barrier loop; completion means every
   // round's inner LSA + outer rail-GIN epochs stayed in lockstep.
-  barrierSessionHybridKernel<<<1, 32, 0, stream>>>(kIters, devComm);
+  barrierSessionHybridKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(kIters, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   MPI_Barrier(MPI_COMM_WORLD);
@@ -1506,13 +1492,13 @@ TEST_F(GinMPIDeviceTests, SignalAdd_AndShadow) {
   //         the put lands, and no later producer activity is in flight that
   //         could push signal>5.
   if (rank == 0) {
-    signalAddProducerWithCounterKernel<<<1, 32, 0, stream>>>(
+    signalAddProducerWithCounterKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, kSrcOff, dstWin, kDstOff, kTransferBytes,
         kSigIdx, /*signalDelta=*/5,
         kCntIdx, /*counterExpected=*/1,
         /*nPuts=*/1, kPeer, devComm);
   } else {
-    signalAddConsumerPhase1Kernel<<<1, 32, 0, stream>>>(
+    signalAddConsumerPhase1Kernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*least=*/5, &dResults[0], devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -1522,7 +1508,7 @@ TEST_F(GinMPIDeviceTests, SignalAdd_AndShadow) {
   //         (see banner: leastDelta=1 could otherwise observe signal=5 from
   //         P1 and return with delta=5 instead of 26).
   if (rank == 0) {
-    signalAddProducerWithCounterKernel<<<1, 32, 0, stream>>>(
+    signalAddProducerWithCounterKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, kSrcOff, dstWin, kDstOff, kTransferBytes,
         kSigIdx, /*signalDelta=*/7,
         kCntIdx, /*counterExpected=*/4,
@@ -1531,7 +1517,7 @@ TEST_F(GinMPIDeviceTests, SignalAdd_AndShadow) {
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   if (rank == 1) {
-    signalAddConsumerPhase2Kernel<<<1, 32, 0, stream>>>(
+    signalAddConsumerPhase2Kernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*leastDelta=*/1, /*shadowBump=*/100,
         &dResults[1], &dResults[2], devComm);
   }
@@ -1541,12 +1527,12 @@ TEST_F(GinMPIDeviceTests, SignalAdd_AndShadow) {
   //         consumer waitSignalMeetShadow returns when signal >= 126.
   //         Concurrent: consumer is gated on the SignalAdd landing.
   if (rank == 0) {
-    signalAddProducerNoCounterKernel<<<1, 32, 0, stream>>>(
+    signalAddProducerNoCounterKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, kSrcOff, dstWin, kDstOff, kTransferBytes,
         kSigIdx, /*signalDelta=*/100,
         kPeer, devComm);
   } else {
-    signalAddConsumerPhase3Kernel<<<1, 32, 0, stream>>>(kSigIdx, devComm);
+    signalAddConsumerPhase3Kernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(kSigIdx, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
@@ -1565,10 +1551,10 @@ TEST_F(GinMPIDeviceTests, SignalAdd_AndShadow) {
   ASSERT_MPI_EQ(hipSuccess,
                 hipMemcpy(hostResults.data(), dResults, kResultSlots * sizeof(uint64_t),
                           hipMemcpyDeviceToHost));
-  assertMpiEqOnRank(rank, 0, uint64_t{4}, hostResults[0]);
-  assertMpiEqOnRank(rank, 1, uint64_t{5}, hostResults[0]);
-  assertMpiEqOnRank(rank, 1, uint64_t{0}, hostResults[1]);
-  assertMpiEqOnRank(rank, 1, uint64_t{26}, hostResults[2]);
+  ASSERT_MPI_EQ_ON_RANK(rank, 0, uint64_t{4}, hostResults[0]);
+  ASSERT_MPI_EQ_ON_RANK(rank, 1, uint64_t{5}, hostResults[0]);
+  ASSERT_MPI_EQ_ON_RANK(rank, 1, uint64_t{0}, hostResults[1]);
+  ASSERT_MPI_EQ_ON_RANK(rank, 1, uint64_t{26}, hostResults[2]);
 
   // ScopeGuards run in reverse order on return.
 }
@@ -1706,12 +1692,12 @@ TEST_F(GinMPIDeviceTests, SymPtr_PutAndPutValue) {
     ncclSymPtr<float>    srcSym(srcWin, kSrcOff);
     ncclSymPtr<float>    dstSym(dstWin, kDstOff);
     ncclSymPtr<uint32_t> valDstSym(dstWin, kValOff);
-    symPtrProducerKernel<<<1, 32, 0, stream>>>(
+    symPtrProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         dstSym, srcSym, kNElts,
         valDstSym, kInlineValue,
         kSigIdx, kPeer, devComm);
   } else {
-    symPtrConsumerKernel<<<1, 32, 0, stream>>>(
+    symPtrConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, /*expectedSignalValue=*/2, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -2462,12 +2448,12 @@ TEST_F(GinMPIDeviceTests, LargeBuffer_Sweep) {
     // Each iter bumps signal[0] by 1; consumer waits for the cumulative count.
     signalExpected++;
     if (rank == 0) {
-      putBasicProducerKernel<<<1, 32, 0, stream>>>(
+      putBasicProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
           srcWin, /*srcOff=*/0,
           dstWin, /*dstOff=*/0,
           sz, kSigIdx, kPeer, devComm);
     } else {
-      putBasicConsumerKernel<<<1, 32, 0, stream>>>(
+      putBasicConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
           kSigIdx, signalExpected, devComm);
     }
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -2617,13 +2603,13 @@ TEST_F(GinMPIDeviceTests, Teardown_NoLeaks) {
 
     // Run a single basic put + waitSignal round-trip.
     if (rank == 0) {
-      putBasicProducerKernel<<<1, 32, 0, stream>>>(
+      putBasicProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
           srcWin, /*srcOff=*/0,
           dstWin, /*dstOff=*/0,
           kBufBytes, kSigIdx, kPeer,
           devComm);
     } else {
-      putBasicConsumerKernel<<<1, 32, 0, stream>>>(
+      putBasicConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
           kSigIdx, /*expectedSignalValue=*/1, devComm);
     }
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -2770,7 +2756,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_CrossNode) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Single combined kernel: put to every peer + flush + waitSignal.
-    alltoallKernel<<<1, 32, 0, stream>>>(
+    alltoallKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         sendWin, recvWin,
         count * sizeof(T),
         nRanks, rank,
@@ -2968,13 +2954,32 @@ __global__ void putVASignalConsumerKernel(
   gin.waitSignal(ncclCoopCta(), sigWin, sigOff, expectedSignalValue);  // <-- VA wait
 }
 
+// waitSignal (at-least) then readSignal for exact post-wait value checks.
+__global__ void indexedSignalWaitReadConsumerKernel(
+    ncclGinSignal_t sigIdx, uint64_t expected,
+    uint64_t* outRead, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  gin.waitSignal(ncclCoopCta(), sigIdx, expected);
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    *outRead = gin.readSignal(sigIdx);
+  }
+}
+
+__global__ void vaSignalWaitReadConsumerKernel(
+    ncclWindow_t sigWin, size_t sigOff, uint64_t expected,
+    uint64_t* outRead, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  gin.waitSignal(ncclCoopCta(), sigWin, sigOff, expected);
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    *outRead = gin.readSignal(sigWin, sigOff);
+  }
+}
+
 TEST_F(GinMPIDeviceTests, VASignal_Put) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
-  // rocSHMEM-GDA (type 4) implements only INDEXED signals; VA signals are
-  // unsupported (Put/PutValue address the signal via indexedSignal.signalId).
-  if (requestedGinType() == 4)
-    GTEST_SKIP() << "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=4)";
+  if (auto reason = vaSignalTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
 
@@ -2990,6 +2995,7 @@ TEST_F(GinMPIDeviceTests, VASignal_Put) {
   constexpr size_t kSigBytes = 64;     // one 8B signal cell lives at offset 0
   constexpr size_t kSigOff   = 0;
   constexpr int    kPeer     = 1;
+  constexpr uint64_t kExpectedSignal = 1;  // SignalInc from 0 on producer put
 
   // Separate buffers for payload (src/dst) and the VA signal cell.
   void* dSrc = nullptr; void* dDst = nullptr; void* dSig = nullptr;
@@ -3036,9 +3042,10 @@ TEST_F(GinMPIDeviceTests, VASignal_Put) {
 
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0)
-    putVASignalProducerKernel<<<1, 32, 0, stream>>>(srcWin, dstWin, kBytes, sigWin, kSigOff, kPeer, devComm);
+    putVASignalProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(srcWin, dstWin, kBytes, sigWin, kSigOff, kPeer, devComm);
   else
-    putVASignalConsumerKernel<<<1, 32, 0, stream>>>(sigWin, kSigOff, /*expectedSignalValue=*/1, devComm);
+    putVASignalConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        sigWin, kSigOff, kExpectedSignal, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   {
@@ -3046,8 +3053,8 @@ TEST_F(GinMPIDeviceTests, VASignal_Put) {
     hipError_t hipErr = hipSuccess;
     if (rank == 1)
       hipErr = hipMemcpy(r.data(), dDst, kBytes, hipMemcpyDeviceToHost);
-    assertMpiHipOkOnRank(rank, 1, hipErr);
-    assertMpiBufferEqOnRank(rank, 1, hs, r);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_BUFFER_EQ_ON_RANK(rank, 1, hs, r);
   }
 }
 
@@ -3154,7 +3161,7 @@ __global__ void signalAddOnceProducerKernel(
   gin.flush(ncclCoopCta());
 }
 
-__global__ void signalRollingBitsConsumerKernel(
+__global__ void signalWaitReadLow32BitsConsumerKernel(
     ncclGinSignal_t sigIdx, uint64_t least, int bits, uint64_t* outRead,
     struct ncclDevComm devComm) {
   ncclGin gin{devComm, /*ginContext=*/0};
@@ -3165,13 +3172,13 @@ __global__ void signalRollingBitsConsumerKernel(
 }
 
 __global__ void signalShadowPtrKernel(
-    ncclGinSignal_t sigIdx, uint64_t* outInitial, uint64_t* outAfterBump,
+    ncclGinSignal_t sigIdx, uint64_t bumpAmount, uint64_t* outInitial, uint64_t* outAfterBump,
     struct ncclDevComm devComm) {
   ncclGin gin{devComm, /*ginContext=*/0};
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     uint64_t* shadow = gin.getSignalShadowPtr(sigIdx);
     *outInitial = *shadow;
-    gin.increaseSignalShadow(sigIdx, 42);
+    gin.increaseSignalShadow(sigIdx, bumpAmount);
     *outAfterBump = *shadow;
   }
 }
@@ -3187,6 +3194,8 @@ __global__ void indexedSignalResetOnlyKernel(
 // put + ncclGin_VASignalAdd on a non-zero VA offset; sigWin uses STRICT_ORDERING.
 TEST_F(GinMPIDeviceTests, VASignalAdd_Put) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = vaSignalTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
@@ -3248,10 +3257,10 @@ TEST_F(GinMPIDeviceTests, VASignalAdd_Put) {
 
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0) {
-    putVASignalAddProducerKernel<<<1, 32, 0, stream>>>(
+    putVASignalAddProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, dstWin, kBytes, sigWin, kSigOff, kAddend, kPeer, devComm);
   } else {
-    putVASignalConsumerKernel<<<1, 32, 0, stream>>>(sigWin, kSigOff, kAddend, devComm);
+    putVASignalConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(sigWin, kSigOff, kAddend, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
@@ -3260,14 +3269,16 @@ TEST_F(GinMPIDeviceTests, VASignalAdd_Put) {
     hipError_t hipErr = hipSuccess;
     if (rank == 1)
       hipErr = hipMemcpy(r.data(), dDst, kBytes, hipMemcpyDeviceToHost);
-    assertMpiHipOkOnRank(rank, 1, hipErr);
-    assertMpiBufferEqOnRank(rank, 1, hs, r);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_BUFFER_EQ_ON_RANK(rank, 1, hs, r);
   }
 }
 
 // gin.signal() with VA Inc/Add and indexed SignalAdd (no payload GFDs).
 TEST_F(GinMPIDeviceTests, VASignal_NoPayload_IncAndAdd) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = vaSignalTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
@@ -3284,6 +3295,9 @@ TEST_F(GinMPIDeviceTests, VASignal_NoPayload_IncAndAdd) {
   constexpr size_t kSigOff   = 0;
   constexpr ncclGinSignal_t kSigIdx = 1;
   constexpr int kPeer = 1;
+  constexpr uint64_t kPhaseAExpected = 1;   // VA SignalInc: 0 -> 1
+  constexpr uint64_t kPhaseBAddend   = 7;
+  constexpr uint64_t kPhaseCAddend   = 3;
 
   void* dSig = nullptr;
   ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSig, kSigBytes));
@@ -3311,34 +3325,74 @@ TEST_F(GinMPIDeviceTests, VASignal_NoPayload_IncAndAdd) {
   std::vector<uint8_t> z(kSigBytes, 0);
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSig, z.data(), kSigBytes, hipMemcpyHostToDevice));
 
+  void* dOut = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dOut, sizeof(uint64_t)));
+  auto outCleanup = makeScopeGuard([&]() {
+    if (dOut) (void)hipFree(dOut);
+  });
+
   // Phase A: VA signal-only Inc (0 -> 1).
   MPI_Barrier(MPI_COMM_WORLD);
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0, sizeof(uint64_t)));
   if (rank == 0)
-    vaSignalOnlyIncProducerKernel<<<1, 32, 0, stream>>>(sigWin, kSigOff, kPeer, devComm);
+    vaSignalOnlyIncProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(sigWin, kSigOff, kPeer, devComm);
   else
-    putVASignalConsumerKernel<<<1, 32, 0, stream>>>(sigWin, kSigOff, 1, devComm);
+    vaSignalWaitReadConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        sigWin, kSigOff, kPhaseAExpected, (uint64_t*)dOut, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+  {
+    uint64_t readVal = 0;
+    hipError_t hipErr = hipSuccess;
+    if (rank == 1)
+      hipErr = hipMemcpy(&readVal, dOut, sizeof(readVal), hipMemcpyDeviceToHost);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kPhaseAExpected, readVal);
+  }
 
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dSig, 0, kSigBytes));
 
-  // Phase B: VA signal-only Add (0 -> 7).
+  // Phase B: VA signal-only Add (0 -> kPhaseBAddend).
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0, sizeof(uint64_t)));
   if (rank == 0)
-    vaSignalOnlyAddProducerKernel<<<1, 32, 0, stream>>>(sigWin, kSigOff, 7, kPeer, devComm);
+    vaSignalOnlyAddProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        sigWin, kSigOff, kPhaseBAddend, kPeer, devComm);
   else
-    putVASignalConsumerKernel<<<1, 32, 0, stream>>>(sigWin, kSigOff, 7, devComm);
+    vaSignalWaitReadConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        sigWin, kSigOff, kPhaseBAddend, (uint64_t*)dOut, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+  {
+    uint64_t readVal = 0;
+    hipError_t hipErr = hipSuccess;
+    if (rank == 1)
+      hipErr = hipMemcpy(&readVal, dOut, sizeof(readVal), hipMemcpyDeviceToHost);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kPhaseBAddend, readVal);
+  }
 
-  // Phase C: indexed signal-only SignalAdd (pool cell 1: 0 -> 3).
+  // Phase C: indexed signal-only SignalAdd (pool cell 1: 0 -> kPhaseCAddend).
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0, sizeof(uint64_t)));
   if (rank == 0)
-    indexedSignalOnlyAddProducerKernel<<<1, 32, 0, stream>>>(kSigIdx, 3, kPeer, devComm);
+    indexedSignalOnlyAddProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, kPhaseCAddend, kPeer, devComm);
   else
-    putBasicConsumerKernel<<<1, 32, 0, stream>>>(kSigIdx, 3, devComm);
+    indexedSignalWaitReadConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, kPhaseCAddend, (uint64_t*)dOut, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+  {
+    uint64_t readVal = 0;
+    hipError_t hipErr = hipSuccess;
+    if (rank == 1)
+      hipErr = hipMemcpy(&readVal, dOut, sizeof(readVal), hipMemcpyDeviceToHost);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kPhaseCAddend, readVal);
+  }
 }
 
 // readSignal / resetSignal for VA and indexed pool cells.
 TEST_F(GinMPIDeviceTests, VASignal_ReadAndReset) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = vaSignalTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
@@ -3357,6 +3411,8 @@ TEST_F(GinMPIDeviceTests, VASignal_ReadAndReset) {
   constexpr ncclGinSignal_t kSigIdx = 1;
   constexpr uint64_t kVaAddend = 5;
   constexpr uint64_t kIdxAddend = 9;
+  constexpr uint64_t kIdxPutIncAddend = kIdxAddend - 1;  // put SignalInc + one SignalAdd
+  constexpr uint64_t kResetExpected = 0;
   constexpr int kPeer = 1;
 
   void* dSrc = nullptr;
@@ -3407,10 +3463,10 @@ TEST_F(GinMPIDeviceTests, VASignal_ReadAndReset) {
   // VA: put + VASignalAdd, then read/reset on consumer.
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0) {
-    putVASignalAddProducerKernel<<<1, 32, 0, stream>>>(
+    putVASignalAddProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, dstWin, kBytes, sigWin, kSigOff, kVaAddend, kPeer, devComm);
   } else {
-    vaSignalReadResetConsumerKernel<<<1, 32, 0, stream>>>(
+    vaSignalReadResetConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         sigWin, kSigOff, kVaAddend, (uint64_t*)dOut, (uint64_t*)dOut + 1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -3420,20 +3476,20 @@ TEST_F(GinMPIDeviceTests, VASignal_ReadAndReset) {
     hipError_t hipErr = hipSuccess;
     if (rank == 1)
       hipErr = hipMemcpy(hostOut, dOut, sizeof(hostOut), hipMemcpyDeviceToHost);
-    assertMpiHipOkOnRank(rank, 1, hipErr);
-    assertMpiEqOnRank(rank, 1, kVaAddend, hostOut[0]);
-    assertMpiEqOnRank(rank, 1, uint64_t{0}, hostOut[1]);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kVaAddend, hostOut[0]);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kResetExpected, hostOut[1]);
   }
 
   // Indexed: put + SignalAdd, then read/reset on consumer.
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0, 2 * sizeof(uint64_t)));
   if (rank == 0) {
-    putBasicProducerKernel<<<1, 32, 0, stream>>>(
+    putBasicProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, 0, dstWin, 0, kBytes, kSigIdx, kPeer, devComm);
-    signalAddOnceProducerKernel<<<1, 32, 0, stream>>>(
-        kSigIdx, kIdxAddend - 1, kPeer, devComm);
+    signalAddOnceProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, kIdxPutIncAddend, kPeer, devComm);
   } else {
-    indexedSignalReadResetConsumerKernel<<<1, 32, 0, stream>>>(
+    indexedSignalReadResetConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, kIdxAddend, (uint64_t*)dOut, (uint64_t*)dOut + 1, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -3443,9 +3499,9 @@ TEST_F(GinMPIDeviceTests, VASignal_ReadAndReset) {
     hipError_t hipErr = hipSuccess;
     if (rank == 1)
       hipErr = hipMemcpy(hostOut, dOut, sizeof(hostOut), hipMemcpyDeviceToHost);
-    assertMpiHipOkOnRank(rank, 1, hipErr);
-    assertMpiEqOnRank(rank, 1, kIdxAddend, hostOut[0]);
-    assertMpiEqOnRank(rank, 1, uint64_t{0}, hostOut[1]);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kIdxAddend, hostOut[0]);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kResetExpected, hostOut[1]);
   }
 }
 
@@ -3498,10 +3554,10 @@ TEST_F(GinMPIDeviceTests, SignalAdd_PutValue) {
 
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0) {
-    putValueSignalAddProducerKernel<<<1, 32, 0, stream>>>(
+    putValueSignalAddProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         dstWin, kDstOff, kValue, kSigIdx, kAddend, kPeer, devComm);
   } else {
-    putBasicConsumerKernel<<<1, 32, 0, stream>>>(kSigIdx, kAddend, devComm);
+    putBasicConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(kSigIdx, kAddend, devComm);
   }
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
@@ -3513,8 +3569,8 @@ TEST_F(GinMPIDeviceTests, SignalAdd_PutValue) {
       hipErr = hipMemcpy(hostResult.data(), dDst, kBufBytes, hipMemcpyDeviceToHost);
       std::memcpy(&got, hostResult.data() + kDstOff, sizeof(got));
     }
-    assertMpiHipOkOnRank(rank, 1, hipErr);
-    assertMpiEqOnRank(rank, 1, kValue, got);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kValue, got);
   }
 }
 
@@ -3535,6 +3591,14 @@ TEST_F(GinMPIDeviceTests, SignalInc_MixingRule) {
 
   constexpr ncclGinSignal_t kSigIdx = 1;
   constexpr int kPeer = 1;
+  constexpr int kIncRepeatCount = 2;
+  constexpr uint64_t kPhase1Expected = kIncRepeatCount;
+  constexpr uint64_t kPhase2Addend   = 5;
+  constexpr uint64_t kPhase2Expected = kPhase1Expected + kPhase2Addend;
+  constexpr uint64_t kPhase3Addend   = 10;
+  constexpr uint64_t kPhase3Expected = kPhase3Addend;
+  constexpr int kResetKernelBlocks  = 1;
+  constexpr int kResetKernelThreads = 1;
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
@@ -3545,35 +3609,75 @@ TEST_F(GinMPIDeviceTests, SignalInc_MixingRule) {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
 
-  // P1: two consecutive SignalInc -> signal cell reaches 2.
+  void* dOut = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dOut, sizeof(uint64_t)));
+  auto outCleanup = makeScopeGuard([&]() {
+    if (dOut) (void)hipFree(dOut);
+  });
+
+  // P1: consecutive SignalInc -> signal cell reaches kPhase1Expected.
   MPI_Barrier(MPI_COMM_WORLD);
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0, sizeof(uint64_t)));
   if (rank == 0)
-    signalIncRepeatProducerKernel<<<1, 32, 0, stream>>>(kSigIdx, 2, kPeer, devComm);
+    signalIncRepeatProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, kIncRepeatCount, kPeer, devComm);
   else
-    putBasicConsumerKernel<<<1, 32, 0, stream>>>(kSigIdx, 2, devComm);
+    indexedSignalWaitReadConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, kPhase1Expected, (uint64_t*)dOut, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+  {
+    uint64_t readVal = 0;
+    hipError_t hipErr = hipSuccess;
+    if (rank == 1)
+      hipErr = hipMemcpy(&readVal, dOut, sizeof(readVal), hipMemcpyDeviceToHost);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kPhase1Expected, readVal);
+  }
 
   // P2: SignalAdd without reset (NCCL spec forbids mixing; RCCL may allow).
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0, sizeof(uint64_t)));
   if (rank == 0)
-    signalAddOnceProducerKernel<<<1, 32, 0, stream>>>(kSigIdx, 5, kPeer, devComm);
+    signalAddOnceProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, kPhase2Addend, kPeer, devComm);
   else
-    putBasicConsumerKernel<<<1, 32, 0, stream>>>(kSigIdx, 7, devComm);
+    indexedSignalWaitReadConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, kPhase2Expected, (uint64_t*)dOut, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+  {
+    uint64_t readVal = 0;
+    hipError_t hipErr = hipSuccess;
+    if (rank == 1)
+      hipErr = hipMemcpy(&readVal, dOut, sizeof(readVal), hipMemcpyDeviceToHost);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kPhase2Expected, readVal);
+  }
 
-  // P3: reset on consumer, then Add-only sequence must land at absolute 10.
+  // P3: reset on consumer, then Add-only sequence must land at absolute kPhase3Expected.
   if (rank == 1)
-    indexedSignalResetOnlyKernel<<<1, 1, 0, stream>>>(kSigIdx, devComm);
+    indexedSignalResetOnlyKernel<<<kResetKernelBlocks, kResetKernelThreads, 0, stream>>>(
+        kSigIdx, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0, sizeof(uint64_t)));
   if (rank == 0)
-    signalAddOnceProducerKernel<<<1, 32, 0, stream>>>(kSigIdx, 10, kPeer, devComm);
+    signalAddOnceProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, kPhase3Addend, kPeer, devComm);
   else
-    putBasicConsumerKernel<<<1, 32, 0, stream>>>(kSigIdx, 10, devComm);
+    indexedSignalWaitReadConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        kSigIdx, kPhase3Expected, (uint64_t*)dOut, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+  {
+    uint64_t readVal = 0;
+    hipError_t hipErr = hipSuccess;
+    if (rank == 1)
+      hipErr = hipMemcpy(&readVal, dOut, sizeof(readVal), hipMemcpyDeviceToHost);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kPhase3Expected, readVal);
+  }
 }
 
-// Rolling comparison via waitSignal/readSignal(..., bits=32).
-TEST_F(GinMPIDeviceTests, Signal_RollingBits) {
+// waitSignal/readSignal(..., bits=32): masked low-32-bit compare and readback.
+TEST_F(GinMPIDeviceTests, Signal_WaitRead_Low32Bits) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
@@ -3611,9 +3715,9 @@ TEST_F(GinMPIDeviceTests, Signal_RollingBits) {
 
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0)
-    signalAddOnceProducerKernel<<<1, 32, 0, stream>>>(kSigIdx, kLargeAdd, kPeer, devComm);
+    signalAddOnceProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(kSigIdx, kLargeAdd, kPeer, devComm);
   else
-    signalRollingBitsConsumerKernel<<<1, 32, 0, stream>>>(
+    signalWaitReadLow32BitsConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         kSigIdx, kLeast32, kBits, (uint64_t*)dOut, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
@@ -3622,15 +3726,17 @@ TEST_F(GinMPIDeviceTests, Signal_RollingBits) {
     hipError_t hipErr = hipSuccess;
     if (rank == 1)
       hipErr = hipMemcpy(&readVal, dOut, sizeof(readVal), hipMemcpyDeviceToHost);
-    assertMpiHipOkOnRank(rank, 1, hipErr);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
     constexpr uint64_t kExpectedMasked = kLargeAdd & ((1ULL << kBits) - 1);
-    assertMpiEqOnRank(rank, 1, kExpectedMasked, readVal);
+    ASSERT_MPI_EQ_ON_RANK(rank, 1, kExpectedMasked, readVal);
   }
 }
 
 // NCCL docs: VA signals should use NCCL_WIN_STRICT_ORDERING on the signal window.
 TEST_F(GinMPIDeviceTests, VASignal_StrictOrderingFlag) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = vaSignalTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
     GTEST_SKIP() << "Requires exactly 2 ranks";
@@ -3646,6 +3752,8 @@ TEST_F(GinMPIDeviceTests, VASignal_StrictOrderingFlag) {
   constexpr size_t kSigBytes = 64;
   constexpr size_t kSigOff = 0;
   constexpr int kPeer = 1;
+  constexpr uint64_t kAddend = 1;
+  constexpr uint64_t kExpected = kAddend;
 
   auto runSmoke = [&](int sigWinFlags) -> bool {
     void* dSig = nullptr;
@@ -3672,9 +3780,11 @@ TEST_F(GinMPIDeviceTests, VASignal_StrictOrderingFlag) {
     (void)hipMemcpy(dSig, z.data(), kSigBytes, hipMemcpyHostToDevice);
     MPI_Barrier(MPI_COMM_WORLD);
     if (rank == 0)
-      vaSignalOnlyAddProducerKernel<<<1, 32, 0, stream>>>(sigWin, kSigOff, 1, kPeer, dc);
+      vaSignalOnlyAddProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+          sigWin, kSigOff, kAddend, kPeer, dc);
     else
-      putVASignalConsumerKernel<<<1, 32, 0, stream>>>(sigWin, kSigOff, 1, dc);
+      putVASignalConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+          sigWin, kSigOff, kExpected, dc);
     hipError_t hipRet = hipStreamSynchronize(stream);
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -3720,14 +3830,18 @@ TEST_F(GinMPIDeviceTests, SignalShadow_GetPtr) {
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0, 2 * sizeof(uint64_t)));
 
   constexpr ncclGinSignal_t kSigIdx = 1;
-  signalShadowPtrKernel<<<1, 1, 0, stream>>>(
-      kSigIdx, (uint64_t*)dOut, (uint64_t*)dOut + 1, devComm);
+  constexpr uint64_t kInitialExpected = 0;
+  constexpr uint64_t kShadowBump      = 42;
+  constexpr int kSingleThreadBlocks  = 1;
+  constexpr int kSingleThreadThreads = 1;
+  signalShadowPtrKernel<<<kSingleThreadBlocks, kSingleThreadThreads, 0, stream>>>(
+      kSigIdx, kShadowBump, (uint64_t*)dOut, (uint64_t*)dOut + 1, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   uint64_t hostOut[2] = {0, 0};
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostOut, dOut, sizeof(hostOut), hipMemcpyDeviceToHost));
-  ASSERT_MPI_EQ(uint64_t{0}, hostOut[0]);
-  ASSERT_MPI_EQ(uint64_t{42}, hostOut[1]);
+  ASSERT_MPI_EQ(kInitialExpected, hostOut[0]);
+  ASSERT_MPI_EQ(kShadowBump, hostOut[1]);
 }
 
 // RAIL / no-cross-rail connection type -- ginConnectionType=RAIL (2.29.7).

@@ -19,6 +19,8 @@
 
 #include "nccl_device.h"
 
+#include <cerrno>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <hip/hip_runtime.h>
@@ -34,11 +36,14 @@ namespace {
 
 // Symmetric memory (cuMem) is required for window registration used by the LSA
 // paths; the Local paths only need plain device memory but we keep a single
-// gate for simplicity of the suite.
+// gate for simplicity of the suite. Match RCCL NCCL_PARAM parsing (strtoll).
 std::string cuMemReason() {
   const char* cumem = std::getenv("NCCL_CUMEM_ENABLE");
-  if (!cumem || std::strcmp(cumem, "1") != 0)
-    return "Symmetric memory required (NCCL_CUMEM_ENABLE=1)";
+  if (!cumem || cumem[0] == '\0')
+    return "Symmetric memory required (set NCCL_CUMEM_ENABLE to a non-zero value)";
+  errno = 0;
+  if (std::strtoll(cumem, nullptr, 0) == 0 && errno == 0)
+    return "Symmetric memory required (NCCL_CUMEM_ENABLE must be non-zero)";
   return "";
 }
 
@@ -60,12 +65,6 @@ constexpr int kThreads = 256;
 const std::vector<size_t>& countSweep() {
   static const std::vector<size_t> v = {1, 3, 15, 16, 17, 1024, 1025};
   return v;
-}
-
-template<typename T>
-void assertMpiEqOnRank(int rank, int checkRank, const T& expected, const T& actual) {
-  const T observed = (rank == checkRank) ? actual : expected;
-  ASSERT_MPI_EQ(expected, observed);
 }
 
 int lsaBaseRank(int rank, int lsaSize) {
@@ -235,21 +234,25 @@ TEST_F(DeviceApiMPITests, Local_ReduceSumCopy) {
 
 namespace {
 
-// Common LSA gate: symmetric memory + >=2 co-located ranks so the LSA team is
-// non-trivial. Returns a non-empty skip reason if unavailable.
-std::string lsaSkipReason() {
+std::string lsaLocalSkipReason() {
   if (auto r = cuMemReason(); !r.empty()) return r;
   if (nodeLocalRanks() < 2) return "Requires >=2 ranks co-located on a node for a non-trivial LSA team";
   return "";
 }
+std::string lsaSkipReason() {
+  const std::string local = lsaLocalSkipReason();
+  return mpiCoordinatedSkipReason(!local.empty(), local.empty() ? nullptr : local.c_str());
+}
 
 // [5.1e] LSA sub-team split needs >=4 even co-located ranks (innerFactor pair groups).
 std::string differentTeamsSkipReason() {
-  if (auto r = lsaSkipReason(); !r.empty()) return r;
-  const int lsaSize = nodeLocalRanks();
-  if (lsaSize < 4) return "Requires >=4 co-located ranks for LSA inner sub-team (5.1e)";
-  if (lsaSize % 2 != 0) return "Requires even co-located rank count for inner sub-team split";
-  return "";
+  std::string local = lsaLocalSkipReason();
+  if (local.empty()) {
+    const int lsaSize = nodeLocalRanks();
+    if (lsaSize < 4) local = "Requires >=4 co-located ranks for LSA inner sub-team (5.1e)";
+    else if (lsaSize % 2 != 0) local = "Requires even co-located rank count for inner sub-team split";
+  }
+  return mpiCoordinatedSkipReason(!local.empty(), local.empty() ? nullptr : local.c_str());
 }
 
 }  // namespace
@@ -360,9 +363,6 @@ TEST_F(DeviceApiMPITests, Lsa_ReduceSum) {
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(comm, &devComm); });
-
-  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
-  ASSERT_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
 
   int rank = -1;
   ncclCommUserRank(comm, &rank);
@@ -649,21 +649,22 @@ TEST_F(DeviceApiMPITests, Pointer_Lsa_GetLsaPointer) {
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dWin, 0, kBytes));
 
   constexpr int kMarker = 0xABCDEF01;
-  const int dstLsaPeer = (myLsa + 1) % lsaSize;
+  const int dstLsaPeer = 1;  // rank 0 writes into LSA peer 1's slot (lsaSize >= 2)
   const bool doWrite = (myLsa == 0);
   lsaPointerWriteKernel<<<1, 1, 0, stream>>>(win, 0, dstLsaPeer, kMarker, doWrite, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   int hostVal = 0;
-  if (myLsa == dstLsaPeer) {
-    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&hostVal, dWin, kBytes, hipMemcpyDeviceToHost));
-  }
-  assertMpiEqOnRank(rank, lsaBase + dstLsaPeer, kMarker, hostVal);
+  const hipError_t hostMemcpyErr =
+      (rank == lsaBase + dstLsaPeer)
+          ? hipMemcpy(&hostVal, dWin, kBytes, hipMemcpyDeviceToHost)
+          : hipSuccess;
+  ASSERT_MPI_HIP_OK_ON_RANK(rank, lsaBase + dstLsaPeer, hostMemcpyErr);
+  ASSERT_MPI_EQ_ON_RANK(rank, lsaBase + dstLsaPeer, kMarker, hostVal);
 }
 
-__global__ void peerPointerMatchKernel(ncclWindow_t win, size_t byteOff, int worldPeer, int lsaPeer, int* outMatch,
-                                       ncclDevComm devComm) {
-  (void)devComm;
+__global__ void peerPointerMatchKernel(ncclWindow_t win, size_t byteOff, int worldPeer, int lsaPeer,
+                                       int* outMatch) {
   void* pPeer = ncclGetPeerPointer(win, byteOff, worldPeer);
   void* pLsa = ncclGetLsaPointer(win, byteOff, lsaPeer);
   if (threadIdx.x == 0)
@@ -679,12 +680,6 @@ TEST_F(DeviceApiMPITests, Pointer_Peer_GetPeerPointer) {
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
-
-  ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-  reqs.lsaBarrierCount = 1;
-  ncclDevComm devComm{};
-  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
-  auto devCommCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(comm, &devComm); });
 
   int rank = -1;
   ncclCommUserRank(comm, &rank);
@@ -704,13 +699,12 @@ TEST_F(DeviceApiMPITests, Pointer_Peer_GetPeerPointer) {
   ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dMatch, sizeof(int)));
   auto matchCleanup = makeScopeGuard([&]() { if (dMatch) (void)hipFree(dMatch); });
 
-  peerPointerMatchKernel<<<1, 1, 0, stream>>>(win, 0, peerWorld, peerLsa, dMatch, devComm);
+  peerPointerMatchKernel<<<1, 1, 0, stream>>>(win, 0, peerWorld, peerLsa, dMatch);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   int hMatch = 0;
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&hMatch, dMatch, sizeof(int), hipMemcpyDeviceToHost));
-  if (rank == lsaBase)
-    ASSERT_EQ(1, hMatch);
+  ASSERT_EQ(1, hMatch);
 }
 
 __global__ void peerTeamPointerMatchKernel(ncclWindow_t win, size_t byteOff, int lsaPeer, int* outMatch,
@@ -739,11 +733,6 @@ TEST_F(DeviceApiMPITests, Pointer_Peer_TeamOverload) {
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(comm, &devComm); });
 
-  int rank = -1;
-  ncclCommUserRank(comm, &rank);
-  const int lsaSize = nodeLocalRanks();
-  const int lsaBase = lsaBaseRank(rank, lsaSize);
-
   void* dWin = nullptr;
   ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dWin, sizeof(int)));
   auto memCleanup = makeScopeGuard([&]() { if (dWin) (void)ncclMemFree(dWin); });
@@ -760,8 +749,7 @@ TEST_F(DeviceApiMPITests, Pointer_Peer_TeamOverload) {
 
   int hMatch = 0;
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&hMatch, dMatch, sizeof(int), hipMemcpyDeviceToHost));
-  if (rank == lsaBase)
-    ASSERT_EQ(1, hMatch);
+  ASSERT_EQ(1, hMatch);
 }
 
 __global__ void hostPtrMatchKernel(ncclWindow_t win, size_t byteOff, int lsaPeer, void* hostResolved, int* outMatch) {
@@ -865,16 +853,19 @@ TEST_F(DeviceApiMPITests, Barrier_Lsa_SyncOrdering) {
   auto readCleanup = makeScopeGuard([&]() { if (dRead) (void)hipFree(dRead); });
 
   constexpr int kValue = 4242;
-  const int dstLsaPeer = (myLsa + 1) % lsaSize;
+  const int dstLsaPeer = 1;  // rank 0 writes into LSA peer 1's slot (lsaSize >= 2)
   const int mode = (myLsa == 0) ? 0 : (myLsa == dstLsaPeer) ? 1 : 2;
   MPI_Barrier(MPI_COMM_WORLD);
   barrierSyncHandoffKernel<<<1, 1, 0, stream>>>(win, dstLsaPeer, kValue, dRead, devComm, mode);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   int hostRead = 0;
-  if (myLsa == dstLsaPeer)
-    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&hostRead, dRead, sizeof(int), hipMemcpyDeviceToHost));
-  assertMpiEqOnRank(rank, lsaBase + dstLsaPeer, kValue, hostRead);
+  const hipError_t hostMemcpyErr =
+      (rank == lsaBase + dstLsaPeer)
+          ? hipMemcpy(&hostRead, dRead, sizeof(int), hipMemcpyDeviceToHost)
+          : hipSuccess;
+  ASSERT_MPI_HIP_OK_ON_RANK(rank, lsaBase + dstLsaPeer, hostMemcpyErr);
+  ASSERT_MPI_EQ_ON_RANK(rank, lsaBase + dstLsaPeer, kValue, hostRead);
 }
 
 __global__ void barrierArriveWaitKernel(ncclWindow_t win, int dstLsaPeer, int writeVal, int* readBack,
@@ -928,16 +919,19 @@ TEST_F(DeviceApiMPITests, Barrier_Lsa_ArriveWaitSplit) {
   auto readCleanup = makeScopeGuard([&]() { if (dRead) (void)hipFree(dRead); });
 
   constexpr int kValue = 8080;
-  const int dstLsaPeer = (myLsa + 1) % lsaSize;
+  const int dstLsaPeer = 1;  // rank 0 writes into LSA peer 1's slot (lsaSize >= 2)
   const int mode = (myLsa == 0) ? 0 : (myLsa == dstLsaPeer) ? 1 : 2;
   MPI_Barrier(MPI_COMM_WORLD);
   barrierArriveWaitKernel<<<1, 1, 0, stream>>>(win, dstLsaPeer, kValue, dRead, devComm, mode);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   int hostRead = 0;
-  if (myLsa == dstLsaPeer)
-    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&hostRead, dRead, sizeof(int), hipMemcpyDeviceToHost));
-  assertMpiEqOnRank(rank, lsaBase + dstLsaPeer, kValue, hostRead);
+  const hipError_t hostMemcpyErr =
+      (rank == lsaBase + dstLsaPeer)
+          ? hipMemcpy(&hostRead, dRead, sizeof(int), hipMemcpyDeviceToHost)
+          : hipSuccess;
+  ASSERT_MPI_HIP_OK_ON_RANK(rank, lsaBase + dstLsaPeer, hostMemcpyErr);
+  ASSERT_MPI_EQ_ON_RANK(rank, lsaBase + dstLsaPeer, kValue, hostRead);
 }
 
 __global__ void multiCtaBarrierKernel(ncclWindow_t win, int* outBlockId, ncclDevComm devComm) {
@@ -1200,7 +1194,7 @@ __global__ void localReduceSumTypedKernel(int nSrc, T* srcBase, size_t displElts
   ncclLocalReduceSum<T>(ncclCoopCta(), nSrc, srcBase, displElts, dst, count);
 }
 
-TEST_F(DeviceApiMPITests, ReduceCopy_DtypeSweep) {
+TEST_F(DeviceApiMPITests, Local_ReduceSum_DtypeSweep) {
   if (!validateTestPrerequisites(/*min_processes=*/1))
     GTEST_SKIP() << "Requires >=1 process";
 
@@ -1209,40 +1203,49 @@ TEST_F(DeviceApiMPITests, ReduceCopy_DtypeSweep) {
 
   auto runCase = [&](auto tag) {
     using T = decltype(tag);
-    constexpr int nSrc = 3;
-    const size_t count = 17;
-    const size_t displElts = count + 4;
-    std::vector<T> hSrc(nSrc * displElts, T{0});
-    for (int s = 0; s < nSrc; ++s)
-      for (size_t i = 0; i < count; ++i)
-        hSrc[s * displElts + i] = static_cast<T>(s + 1 + i);
+    constexpr int kNSrc = 3;
+    constexpr size_t kCount = 17;
+    constexpr size_t kDisplPadElts = 4;
+    constexpr size_t kDisplElts = kCount + kDisplPadElts;
+    constexpr int kInt8SeedBase = 100;
+    std::vector<T> hSrc(kNSrc * kDisplElts, T{0});
+    for (int s = 0; s < kNSrc; ++s) {
+      for (size_t i = 0; i < kCount; ++i) {
+        if constexpr (std::is_same_v<T, int8_t>) {
+          // Per-source constants so the sum wraps (exercises OpSum<int8> __vadd4 path).
+          hSrc[s * kDisplElts + i] = static_cast<int8_t>(kInt8SeedBase + s);
+        } else {
+          hSrc[s * kDisplElts + i] = static_cast<T>(s + 1 + i);
+        }
+      }
+    }
 
     T* dSrc = nullptr;
     T* dDst = nullptr;
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dSrc, nSrc * displElts * sizeof(T)));
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dDst, count * sizeof(T)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dSrc, kNSrc * kDisplElts * sizeof(T)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dDst, kCount * sizeof(T)));
     auto guard = makeScopeGuard([&]() {
       if (dSrc) (void)hipFree(dSrc);
       if (dDst) (void)hipFree(dDst);
     });
-    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hSrc.data(), nSrc * displElts * sizeof(T), hipMemcpyHostToDevice));
-    ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, count * sizeof(T)));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hSrc.data(), kNSrc * kDisplElts * sizeof(T), hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kCount * sizeof(T)));
 
-    localReduceSumTypedKernel<T><<<1, kThreads, 0, stream>>>(nSrc, dSrc, displElts, dDst, count);
+    localReduceSumTypedKernel<T><<<1, kThreads, 0, stream>>>(kNSrc, dSrc, kDisplElts, dDst, kCount);
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
-    std::vector<T> hDst(count);
-    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hDst.data(), dDst, count * sizeof(T), hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < count; ++i) {
+    std::vector<T> hDst(kCount);
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hDst.data(), dDst, kCount * sizeof(T), hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kCount; ++i) {
       if constexpr (std::is_floating_point_v<T>) {
         double expected = 0.0;
-        for (int s = 0; s < nSrc; ++s)
-          expected += static_cast<double>(hSrc[s * displElts + i]);
+        for (int s = 0; s < kNSrc; ++s)
+          expected += static_cast<double>(hSrc[s * kDisplElts + i]);
         ASSERT_NEAR(expected, static_cast<double>(hDst[i]), 1e-5) << "i=" << i;
       } else {
         T expected = T{0};
-        for (int s = 0; s < nSrc; ++s)
-          expected = static_cast<T>(expected + hSrc[s * displElts + i]);
+        for (int s = 0; s < kNSrc; ++s)
+          expected = static_cast<T>(expected + hSrc[s * kDisplElts + i]);
         ASSERT_EQ(expected, hDst[i]) << "i=" << i;
       }
     }
@@ -1250,6 +1253,7 @@ TEST_F(DeviceApiMPITests, ReduceCopy_DtypeSweep) {
 
   runCase(float{});
   runCase(double{});
+  runCase(int8_t{});
 }
 
 __global__ void localReduceSumCoopThreadKernel(int nSrc, float* srcBase, size_t displ, float* dst, size_t count) {
@@ -1258,7 +1262,7 @@ __global__ void localReduceSumCoopThreadKernel(int nSrc, float* srcBase, size_t 
     ncclLocalReduceSum<float>(coop, nSrc, srcBase, displ, dst, count);
 }
 
-TEST_F(DeviceApiMPITests, ReduceCopy_CoopThread) {
+TEST_F(DeviceApiMPITests, Local_ReduceSum_CoopThread) {
   if (!validateTestPrerequisites(/*min_processes=*/1))
     GTEST_SKIP() << "Requires >=1 process";
 
@@ -1266,29 +1270,33 @@ TEST_F(DeviceApiMPITests, ReduceCopy_CoopThread) {
   hipStream_t stream = getActiveStream();
 
   constexpr int nSrc = 2;
-  const size_t count = 8;
-  const size_t displElts = count + 4;
-  std::vector<float> hSrc(nSrc * displElts, 0.0f);
-  hSrc[0] = 3.0f;
-  hSrc[displElts] = 5.0f;
+  constexpr size_t kCount = 8;
+  constexpr size_t kDisplPadElts = 4;
+  constexpr size_t kDisplElts = kCount + kDisplPadElts;
+  constexpr float kSrc0Value = 3.0f;
+  constexpr float kSrc1Value = 5.0f;
+  constexpr float kExpectedSum = kSrc0Value + kSrc1Value;
+  std::vector<float> hSrc(nSrc * kDisplElts, 0.0f);
+  hSrc[0] = kSrc0Value;
+  hSrc[kDisplElts] = kSrc1Value;
 
   float* dSrc = nullptr;
   float* dDst = nullptr;
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dSrc, nSrc * displElts * sizeof(float)));
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dDst, count * sizeof(float)));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dSrc, nSrc * kDisplElts * sizeof(float)));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dDst, kCount * sizeof(float)));
   auto guard = makeScopeGuard([&]() {
     if (dSrc) (void)hipFree(dSrc);
     if (dDst) (void)hipFree(dDst);
   });
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hSrc.data(), nSrc * displElts * sizeof(float), hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, count * sizeof(float)));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hSrc.data(), nSrc * kDisplElts * sizeof(float), hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kCount * sizeof(float)));
 
-  localReduceSumCoopThreadKernel<<<1, kThreads, 0, stream>>>(nSrc, dSrc, displElts, dDst, count);
+  localReduceSumCoopThreadKernel<<<1, kThreads, 0, stream>>>(nSrc, dSrc, kDisplElts, dDst, kCount);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   float h0 = 0.0f;
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&h0, dDst, sizeof(float), hipMemcpyDeviceToHost));
-  ASSERT_FLOAT_EQ(8.0f, h0);
+  ASSERT_FLOAT_EQ(kExpectedSum, h0);
 }
 
 __global__ void lsaReduceSumCopyInPlaceKernel(ncclWindow_t win, size_t byteOff, size_t count, ncclDevComm devComm) {
@@ -1296,7 +1304,10 @@ __global__ void lsaReduceSumCopyInPlaceKernel(ncclWindow_t win, size_t byteOff, 
   ncclTeam lsa = ncclTeamLsa(devComm);
   ncclLsaBarrierSession<ncclCoopCta> bar(coop, devComm, lsa, devComm.lsaBarrier, blockIdx.x);
   bar.sync(coop, cuda::memory_order_acquire);
-  ncclLsaReduceSumCopy<float>(coop, win, byteOff, win, byteOff, count, lsa);
+  // Only LSA rank 0 performs the N->N reduce-copy; peers barrier in/out so concurrent
+  // invocations do not store into each other's source slots mid-reduce.
+  if (devComm.lsaRank == 0)
+    ncclLsaReduceSumCopy<float>(coop, win, byteOff, win, byteOff, count, lsa);
   bar.sync(coop, cuda::memory_order_release);
 }
 
@@ -1321,35 +1332,36 @@ TEST_F(DeviceApiMPITests, ReduceCopy_InPlace) {
   const int lsaSize = nodeLocalRanks();
   const int lsaBase = lsaBaseRank(rank, lsaSize);
 
-  const size_t count = 64;
-  const size_t bytes = count * sizeof(float);
+  constexpr size_t kCount = 64;
+  constexpr size_t kBytes = kCount * sizeof(float);
+  constexpr size_t kByteOff = 0;
   void* dWin = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dWin, bytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dWin, kBytes));
   auto memCleanup = makeScopeGuard([&]() { if (dWin) (void)ncclMemFree(dWin); });
   ncclWindow_t win = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, dWin, bytes, &win, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, dWin, kBytes, &win, NCCL_WIN_COLL_SYMMETRIC));
   auto winCleanup = makeScopeGuard([&]() { if (win) (void)ncclCommWindowDeregister(comm, win); });
 
-  std::vector<float> hSeed(count, static_cast<float>(rank + 1));
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dWin, hSeed.data(), bytes, hipMemcpyHostToDevice));
+  std::vector<float> hSeed(kCount, static_cast<float>(rank + 1));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dWin, hSeed.data(), kBytes, hipMemcpyHostToDevice));
 
-  lsaReduceSumCopyInPlaceKernel<<<1, kThreads, 0, stream>>>(win, 0, count, devComm);
+  lsaReduceSumCopyInPlaceKernel<<<1, kThreads, 0, stream>>>(win, kByteOff, kCount, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
-  std::vector<float> hOut(count);
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hOut.data(), dWin, bytes, hipMemcpyDeviceToHost));
-  for (size_t i = 0; i < count; ++i) {
+  std::vector<float> hOut(kCount);
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hOut.data(), dWin, kBytes, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < kCount; ++i) {
     float expected = 0.0f;
     for (int p = 0; p < lsaSize; ++p) expected += static_cast<float>(lsaBase + p + 1);
     ASSERT_FLOAT_EQ(expected, hOut[i]);
   }
 }
 
-__global__ void localReduceSumU32Kernel(int nSrc, float* srcBase, size_t displ, float* dst, uint32_t count) {
+__global__ void localReduceSumCountUint32Kernel(int nSrc, float* srcBase, size_t displ, float* dst, uint32_t count) {
   ncclLocalReduceSum<float, ncclCoopCta, uint32_t>(ncclCoopCta(), nSrc, srcBase, displ, dst, count);
 }
 
-TEST_F(DeviceApiMPITests, ReduceCopy_CountInt32) {
+TEST_F(DeviceApiMPITests, Local_ReduceSum_CountUint32) {
   if (!validateTestPrerequisites(/*min_processes=*/1))
     GTEST_SKIP() << "Requires >=1 process";
 
@@ -1357,26 +1369,29 @@ TEST_F(DeviceApiMPITests, ReduceCopy_CountInt32) {
   hipStream_t stream = getActiveStream();
 
   constexpr int nSrc = 2;
-  const uint32_t count = 1024;
-  const size_t displElts = count + 8;
+  constexpr uint32_t kCount = 1024;
+  constexpr size_t kDisplPadElts = 8;
+  constexpr size_t kDisplElts = kCount + kDisplPadElts;
+  constexpr float kSrcValue = 1.0f;
+  constexpr float kExpectedSum = static_cast<float>(nSrc) * kSrcValue;
   float* dSrc = nullptr;
   float* dDst = nullptr;
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dSrc, nSrc * displElts * sizeof(float)));
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dDst, count * sizeof(float)));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dSrc, nSrc * kDisplElts * sizeof(float)));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dDst, kCount * sizeof(float)));
   auto guard = makeScopeGuard([&]() {
     if (dSrc) (void)hipFree(dSrc);
     if (dDst) (void)hipFree(dDst);
   });
-  std::vector<float> hSrc(nSrc * displElts, 1.0f);
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hSrc.data(), nSrc * displElts * sizeof(float), hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, count * sizeof(float)));
+  std::vector<float> hSrc(nSrc * kDisplElts, kSrcValue);
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hSrc.data(), nSrc * kDisplElts * sizeof(float), hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kCount * sizeof(float)));
 
-  localReduceSumU32Kernel<<<1, kThreads, 0, stream>>>(nSrc, dSrc, displElts, dDst, count);
+  localReduceSumCountUint32Kernel<<<1, kThreads, 0, stream>>>(nSrc, dSrc, kDisplElts, dDst, kCount);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   float h0 = 0.0f;
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&h0, dDst, sizeof(float), hipMemcpyDeviceToHost));
-  ASSERT_FLOAT_EQ(2.0f, h0);
+  ASSERT_FLOAT_EQ(kExpectedSum, h0);
 }
 
 // ===========================================================================
@@ -1421,31 +1436,37 @@ TEST_F(DeviceApiMPITests, Lsa_ReduceSum_LambdaExcludeSelf) {
   const int lsaBase = lsaBaseRank(rank, lsaSize);
   const int myLsa = rank - lsaBase;
 
-  const size_t count = 32;
-  const size_t bytes = count * sizeof(float);
+  constexpr size_t kCount = 32;
+  constexpr size_t kBytes = kCount * sizeof(float);
+  constexpr size_t kSrcOff = 0;
+  constexpr int kSeedScale = 10;
   void* dSrc = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, bytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
   auto memCleanup = makeScopeGuard([&]() { if (dSrc) (void)ncclMemFree(dSrc); });
   ncclWindow_t srcWin = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, dSrc, bytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, dSrc, kBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
   auto winCleanup = makeScopeGuard([&]() { if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin); });
 
   float* dDst = nullptr;
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dDst, bytes));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dDst, kBytes));
   auto dstCleanup = makeScopeGuard([&]() { if (dDst) (void)hipFree(dDst); });
 
-  const float seed = static_cast<float>((rank + 1) * 10);
-  std::vector<float> hSrc(count, seed);
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hSrc.data(), bytes, hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, bytes));
+  const float seed = static_cast<float>((rank + 1) * kSeedScale);
+  std::vector<float> hSrc(kCount, seed);
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hSrc.data(), kBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kBytes));
 
-  lsaReduceSumExcludeSelfKernel<<<1, kThreads, 0, stream>>>(srcWin, 0, dDst, count, devComm);
+  lsaReduceSumExcludeSelfKernel<<<1, kThreads, 0, stream>>>(srcWin, kSrcOff, dDst, kCount, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
-  std::vector<float> hDst(count);
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hDst.data(), dDst, bytes, hipMemcpyDeviceToHost));
-  const float expected = static_cast<float>(((lsaBase + ((myLsa + 1) % lsaSize)) + 1) * 10);
-  for (size_t i = 0; i < count; ++i)
+  std::vector<float> hDst(kCount);
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hDst.data(), dDst, kBytes, hipMemcpyDeviceToHost));
+  float expected = 0.0f;
+  for (int p = 0; p < lsaSize; ++p) {
+    if (p == myLsa) continue;
+    expected += static_cast<float>((lsaBase + p + 1) * kSeedScale);
+  }
+  for (size_t i = 0; i < kCount; ++i)
     ASSERT_FLOAT_EQ(expected, hDst[i]) << "rank=" << rank << " i=" << i;
 }
 
@@ -1483,9 +1504,11 @@ TEST_F(DeviceApiMPITests, Lsa_Copy_LambdaScatter) {
   int rank = -1;
   ncclCommUserRank(comm, &rank);
 
-  const size_t count = 16;
-  const size_t peerSkipBytes = 32;
-  const size_t winBytes = peerSkipBytes * static_cast<size_t>(nodeLocalRanks()) + count * sizeof(float);
+  constexpr size_t kCount = 16;
+  constexpr size_t kPeerSkipBytes = 32;
+  constexpr int kBaseScale = 1000;
+  constexpr size_t kBaseOff = 0;
+  const size_t winBytes = kPeerSkipBytes * static_cast<size_t>(nodeLocalRanks()) + kCount * sizeof(float);
   void* dDst = nullptr;
   ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, winBytes));
   auto memCleanup = makeScopeGuard([&]() { if (dDst) (void)ncclMemFree(dDst); });
@@ -1494,32 +1517,32 @@ TEST_F(DeviceApiMPITests, Lsa_Copy_LambdaScatter) {
   auto winCleanup = makeScopeGuard([&]() { if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin); });
 
   float* dSrc = nullptr;
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dSrc, count * sizeof(float)));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dSrc, kCount * sizeof(float)));
   auto srcCleanup = makeScopeGuard([&]() { if (dSrc) (void)hipFree(dSrc); });
 
-  std::vector<float> hSrc(count);
+  std::vector<float> hSrc(kCount);
   const int lsaSize = nodeLocalRanks();
   const int lsaBase = lsaBaseRank(rank, lsaSize);
   const int myLsa = rank - lsaBase;
-  for (size_t i = 0; i < count; ++i) hSrc[i] = static_cast<float>(lsaBase * 1000 + i);
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hSrc.data(), count * sizeof(float), hipMemcpyHostToDevice));
+  for (size_t i = 0; i < kCount; ++i) hSrc[i] = static_cast<float>(lsaBase * kBaseScale + i);
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hSrc.data(), kCount * sizeof(float), hipMemcpyHostToDevice));
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, winBytes));
 
   MPI_Barrier(MPI_COMM_WORLD);
   const int doCopy = (rank == lsaBase) ? 1 : 0;
-  lsaCopyLambdaScatterKernel<<<1, kThreads, 0, stream>>>(dSrc, dstWin, 0, peerSkipBytes, count, devComm, doCopy);
+  lsaCopyLambdaScatterKernel<<<1, kThreads, 0, stream>>>(dSrc, dstWin, kBaseOff, kPeerSkipBytes, kCount, devComm, doCopy);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
   MPI_Barrier(MPI_COMM_WORLD);
 
   // Lambda scatter writes LSA peer i at baseOff + i*peerSkipBytes in that peer's window.
-  const size_t localPayloadOff = static_cast<size_t>(myLsa) * peerSkipBytes;
-  std::vector<float> hLocal(count);
+  const size_t localPayloadOff = static_cast<size_t>(myLsa) * kPeerSkipBytes;
+  std::vector<float> hLocal(kCount);
   ASSERT_MPI_EQ(hipSuccess,
-                hipMemcpy(hLocal.data(), static_cast<char*>(dDst) + localPayloadOff, count * sizeof(float),
+                hipMemcpy(hLocal.data(), static_cast<char*>(dDst) + localPayloadOff, kCount * sizeof(float),
                           hipMemcpyDeviceToHost));
-  std::vector<float> hExpect(count);
-  for (size_t i = 0; i < count; ++i) hExpect[i] = static_cast<float>(lsaBase * 1000 + i);
-  for (size_t i = 0; i < count; ++i)
+  std::vector<float> hExpect(kCount);
+  for (size_t i = 0; i < kCount; ++i) hExpect[i] = static_cast<float>(lsaBase * kBaseScale + i);
+  for (size_t i = 0; i < kCount; ++i)
     ASSERT_FLOAT_EQ(hExpect[i], hLocal[i]) << "rank=" << rank << " i=" << i;
 }
 
@@ -1787,15 +1810,19 @@ TEST_F(DeviceApiMPITests, Local_ReduceSum_Lambda) {
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   hipStream_t stream = getActiveStream();
 
-  const size_t count = 8;
+  constexpr size_t kCount = 8;
+  constexpr float kSrc0Value = 1.0f;
+  constexpr float kSrc1Value = 2.0f;
+  constexpr float kSrc2Value = 4.0f;
+  constexpr float kExpectedSum = kSrc0Value + kSrc1Value + kSrc2Value;
   float* d0 = nullptr;
   float* d1 = nullptr;
   float* d2 = nullptr;
   float* dDst = nullptr;
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&d0, count * sizeof(float)));
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&d1, count * sizeof(float)));
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&d2, count * sizeof(float)));
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dDst, count * sizeof(float)));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&d0, kCount * sizeof(float)));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&d1, kCount * sizeof(float)));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&d2, kCount * sizeof(float)));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dDst, kCount * sizeof(float)));
   auto guard = makeScopeGuard([&]() {
     if (d0) (void)hipFree(d0);
     if (d1) (void)hipFree(d1);
@@ -1803,20 +1830,20 @@ TEST_F(DeviceApiMPITests, Local_ReduceSum_Lambda) {
     if (dDst) (void)hipFree(dDst);
   });
 
-  std::vector<float> h0(count, 1.0f);
-  std::vector<float> h1(count, 2.0f);
-  std::vector<float> h2(count, 4.0f);
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(d0, h0.data(), count * sizeof(float), hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(d1, h1.data(), count * sizeof(float), hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(d2, h2.data(), count * sizeof(float), hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, count * sizeof(float)));
+  std::vector<float> h0(kCount, kSrc0Value);
+  std::vector<float> h1(kCount, kSrc1Value);
+  std::vector<float> h2(kCount, kSrc2Value);
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(d0, h0.data(), kCount * sizeof(float), hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(d1, h1.data(), kCount * sizeof(float), hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(d2, h2.data(), kCount * sizeof(float), hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kCount * sizeof(float)));
 
-  localReduceSumLambdaKernel<<<1, kThreads, 0, stream>>>(d0, d1, d2, dDst, count);
+  localReduceSumLambdaKernel<<<1, kThreads, 0, stream>>>(d0, d1, d2, dDst, kCount);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   float hSum = 0.0f;
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&hSum, dDst, sizeof(float), hipMemcpyDeviceToHost));
-  ASSERT_FLOAT_EQ(7.0f, hSum);
+  ASSERT_FLOAT_EQ(kExpectedSum, hSum);
 }
 
 #endif  // MPI_TESTS_ENABLED
