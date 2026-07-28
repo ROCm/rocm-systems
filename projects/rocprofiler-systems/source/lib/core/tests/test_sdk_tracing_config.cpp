@@ -251,7 +251,7 @@ public:
     MOCK_METHOD(std::string, get_rocm_domains, ());
     MOCK_METHOD(std::string, get_rocm_events_setting, ());
     MOCK_METHOD(std::optional<std::string>, get_setting_value, (std::string_view));
-    MOCK_METHOD(void, set_state, (std::uint32_t));
+    MOCK_METHOD(void, set_state, (std::uint32_t) );
 };
 
 inline std::unique_ptr<gtest::StrictMock<gmock_sdk_externals>> g_mock_externals;
