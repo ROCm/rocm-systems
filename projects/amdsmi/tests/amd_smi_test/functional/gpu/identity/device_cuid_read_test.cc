@@ -70,7 +70,7 @@ void TestDeviceCuidRead::Run(void) {
     // Verify null cuid_length is rejected.
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_device_cuid",
                        "gpu=" + std::to_string(i) + ", cuid_length=null", VERB(STANDARD));
-    char cuid_buf[AMDSMI_GPU_UUID_SIZE];
+    char cuid_buf[AMDSMI_GPU_CUID_SIZE];
     err = amdsmi_get_gpu_device_cuid(processor_handles_[i], nullptr, cuid_buf);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
@@ -78,7 +78,7 @@ void TestDeviceCuidRead::Run(void) {
     // Verify null cuid buffer is rejected.
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_device_cuid", "gpu=" + std::to_string(i) + ", cuid=null",
                        VERB(STANDARD));
-    unsigned int len = AMDSMI_GPU_UUID_SIZE;
+    unsigned int len = AMDSMI_GPU_CUID_SIZE;
     err = amdsmi_get_gpu_device_cuid(processor_handles_[i], &len, nullptr);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
@@ -86,13 +86,13 @@ void TestDeviceCuidRead::Run(void) {
     // Verify undersized buffer is rejected.
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_device_cuid",
                        "gpu=" + std::to_string(i) + ", cuid_length too small", VERB(STANDARD));
-    unsigned int short_len = AMDSMI_GPU_UUID_SIZE - 1;
+    unsigned int short_len = AMDSMI_GPU_CUID_SIZE - 1;
     err = amdsmi_get_gpu_device_cuid(processor_handles_[i], &short_len, cuid_buf);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     // Happy path: either a valid CUID is returned, or the feature is unsupported.
-    len = AMDSMI_GPU_UUID_SIZE;
+    len = AMDSMI_GPU_CUID_SIZE;
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_device_cuid", "gpu=" + std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_device_cuid(processor_handles_[i], &len, cuid_buf);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
@@ -104,7 +104,7 @@ void TestDeviceCuidRead::Run(void) {
         std::cout << "\t**Device CUID: " << std::string(cuid_buf, len) << std::endl;
       }
       ASSERT_GT(len, 0u);
-      ASSERT_LT(len, static_cast<unsigned int>(AMDSMI_GPU_UUID_SIZE));
+      ASSERT_LT(len, static_cast<unsigned int>(AMDSMI_GPU_CUID_SIZE));
     }
   }
 }
