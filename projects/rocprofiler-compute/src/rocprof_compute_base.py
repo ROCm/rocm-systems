@@ -13,6 +13,10 @@ from typing import Any, Optional
 
 import config
 from argparser import omniarg_parser
+from pc_sampling.pc_sampling_profile import (
+    PC_SAMPLING_DEFAULT_INTERVALS,
+    pc_sampling_interval_limits,
+)
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils.logger import (
@@ -620,36 +624,42 @@ class RocProfCompute:
 
     def _resolve_pc_sampling_interval(self) -> None:
         """Apply the method-aware default for --pc-sampling-interval and
-        validate a user-supplied value."""
+        validate a user-supplied value against the limits the GPU reports.
+
+        An out-of-range interval deadlocks the SDK, which calls exit() from
+        inside its own initialization critical section, so it has to be
+        rejected here.
+        """
         args = self.__args
         if not getattr(args, "pc_sampling", False):
             return
 
-        stochastic_default_interval_in_cycles = 1048576
-        stochastic_min_interval_in_cycles = 65536
-        host_trap_default_interval_in_microseconds = 512
-
         method = args.pc_sampling_method
+        limits = pc_sampling_interval_limits(
+            method, getattr(args, "rocprofiler_sdk_tool_path", None)
+        )
+        min_interval = limits["min_interval"]
+        max_interval = limits["max_interval"]
+
         if args.pc_sampling_interval is None:
-            if method == "stochastic":
-                args.pc_sampling_interval = stochastic_default_interval_in_cycles
-            else:
-                args.pc_sampling_interval = host_trap_default_interval_in_microseconds
+            args.pc_sampling_interval = min(
+                PC_SAMPLING_DEFAULT_INTERVALS[method], max_interval
+            )
             return
 
         interval = args.pc_sampling_interval
-        if method == "stochastic":
-            is_power_of_two = interval > 0 and interval & (interval - 1) == 0
-            if not is_power_of_two or interval < stochastic_min_interval_in_cycles:
-                console_error(
-                    "--pc-sampling-interval for stochastic sampling must be a "
-                    f"power of 2 and at least {stochastic_min_interval_in_cycles} "
-                    f"(got {interval})."
-                )
-        elif interval <= 0:
+        if interval < min_interval or interval > max_interval:
             console_error(
-                "--pc-sampling-interval for host_trap sampling must be a "
-                f"positive integer (got {interval})."
+                f"--pc-sampling-interval for {method} sampling must be between "
+                f"{min_interval} and {max_interval} (got {interval}). "
+                "See supported configurations with "
+                "'rocprofv3-avail info --pc-sampling'."
+            )
+
+        if limits["interval_pow2"] and interval & (interval - 1) != 0:
+            console_error(
+                f"--pc-sampling-interval for {method} sampling must be a "
+                f"power of 2 (got {interval})."
             )
 
     def _validate_list_option_exclusions(self) -> None:
