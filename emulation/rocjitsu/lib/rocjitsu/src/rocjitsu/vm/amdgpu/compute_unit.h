@@ -75,6 +75,7 @@ class CommandProcessor;
 class ComputeUnitCore : public simdojo::CompositeComponent {
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
+  static constexpr uint32_t kDebugFunctionalQuantum = 64;
 
   /// @brief Configuration for a compute unit.
   struct Config {
@@ -219,6 +220,7 @@ public:
   using AluExceptionHandler = std::function<bool(Wavefront &wf)>;
   void set_alu_exception_handler(AluExceptionHandler cb) { alu_exception_handler_ = std::move(cb); }
   void set_debug_active(bool active) { debug_active_.store(active, std::memory_order_relaxed); }
+  bool debug_active() const { return debug_active_.load(std::memory_order_relaxed); }
 
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
@@ -747,7 +749,8 @@ public:
       // A request left by direct step() execution must not shorten this quantum.
       functional_yield_requested_ = false;
       last_quantum_executed_ = 0;
-      for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
+      const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : kFunctionalQuantum;
+      for (uint32_t i = 0; i < quantum && step(); ++i) {
         ++last_quantum_executed_;
         if (std::exchange(functional_yield_requested_, false))
           break;
