@@ -188,8 +188,8 @@ public:
     [[gnu::cold]] static State reset()
     {
         auto last_state = get();
+        LOG_DEBUG("Resetting state :: {} -> PreInit", last_state);
         storage().store(PreInit, std::memory_order_relaxed);
-        LOG_DEBUG("Resetting state :: {} -> PreInit", get());
         return last_state;
     }
 
