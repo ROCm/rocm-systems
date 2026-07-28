@@ -622,6 +622,26 @@ static bool subnetMatchesAny(union ibv_gid* localGid, union ibv_gid* remoteGids,
   return false;
 }
 
+// Test-only wrappers (see net_ib_cast_inspect.h). Reconstruct union ibv_gid from
+// raw 16-byte arrays and forward to the real static helpers above so unit tests
+// exercise the actual subnet-detection logic.
+extern "C" int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen) {
+  union ibv_gid l, r;
+  memcpy(l.raw, localGid, 16);
+  memcpy(r.raw, remoteGid, 16);
+  return gidSameSubnet(&l, &r, prefixLen) ? 1 : 0;
+}
+
+extern "C" int ncclIbCastTestSubnetMatchesAny(const uint8_t localGid[16], const uint8_t* remoteGids, int nRemote,
+                                              int prefixLen) {
+  union ibv_gid l;
+  memcpy(l.raw, localGid, 16);
+  union ibv_gid r[NCCL_IB_MAX_DEVS_PER_NIC];
+  if (nRemote < 0 || nRemote > NCCL_IB_MAX_DEVS_PER_NIC) return 0;
+  for (int i = 0; i < nRemote; i++) memcpy(r[i].raw, remoteGids + (size_t)i * 16, 16);
+  return subnetMatchesAny(&l, r, nRemote, prefixLen) ? 1 : 0;
+}
+
 // Given remote GIDs (one per PF on the remote side), find a local merged IB
 // device that shares a subnet with any of them. Writes defaultDev to *foundDev
 // if no better match is found, preserving existing behavior for single-subnet

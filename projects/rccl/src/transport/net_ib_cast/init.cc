@@ -215,6 +215,13 @@ static ncclResult_t IbCastGetPlaneIndex(int devPlane, int16_t* count, int16_t* p
   return ncclSuccess;
 }
 
+// Test-only wrapper (see net_ib_cast_inspect.h). Forwards to the real
+// IbCastGetPlaneIndex above so unit tests exercise the actual logic.
+extern "C" ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx) {
+  if (!count || !planes || !idx) return ncclInvalidArgument;
+  return IbCastGetPlaneIndex(devPlane, count, planes, idx);
+}
+
 ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   // On AINIC, NIC fusion (cast) is disabled by default: each NIC runs independently.
   // User must explicitly set NCCL_IB_MERGE_NICS=1 to override.
