@@ -11,12 +11,15 @@
 #include "p2p_resiliency.h"
 
 #ifdef ENABLE_FAULT_INJECTION
+#include <atomic>
 #include "net_ib_flush_fault_inject.h"
 // Test-only: when armed, ncclIbIflush re-issues the pre-fix scratchpad
 // RDMA_WRITE so a regression test can prove the write is what faults.
-static bool ncclIbFlushForceScratchpadWrite = false;
+// Atomic because the arm/disarm (test thread) and the read in ncclIbIflush
+// can run concurrently.
+static std::atomic<bool> ncclIbFlushForceScratchpadWrite{false};
 ncclResult_t ncclIbFlushFaultForceScratchpadWrite(void* /*recvComm*/, bool enable) {
-  ncclIbFlushForceScratchpadWrite = enable;
+  ncclIbFlushForceScratchpadWrite.store(enable, std::memory_order_relaxed);
   return ncclSuccess;
 }
 #endif
@@ -655,7 +658,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
 
 #ifdef ENABLE_FAULT_INJECTION
     // Test-only regression guard: re-issue the removed scratchpad RDMA_WRITE.
-    if (useGpuFlushMem && ncclIbFlushForceScratchpadWrite) {
+    if (useGpuFlushMem && ncclIbFlushForceScratchpadWrite.load(std::memory_order_relaxed)) {
       struct ibv_send_wr writeWr;
       memset(&writeWr, 0, sizeof(writeWr));
       writeWr.wr_id = wr.wr_id;
