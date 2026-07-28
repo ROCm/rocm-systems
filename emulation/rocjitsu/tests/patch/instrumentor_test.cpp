@@ -2557,9 +2557,9 @@ TEST(InstrumentorProbeSpill, Rdna4PreservesExecAndVccUnconditionally) {
   expect_special_preserved(cave, sop1_op_mov_b64(kArch), kScalarOperandVccLo);
 }
 
-// Compare-based coverage: v_cmp writes VCC and v_cmpx writes EXEC implicitly (no
-// operand), so the clobber summary is blind to them (see ProbeClobber.Implicit*).
-// The always-on preservation still brackets the call, so VCC/EXEC round-trip.
+// Compare-based coverage: v_cmp writes VCC and v_cmpx writes EXEC. The always-on
+// preservation brackets the call regardless of the summary, so VCC/EXEC round-trip
+// even for a probe whose special-state write the summary might miss.
 // Single-word VOPC encodings of v_cmp_eq_u32 / v_cmpx_eq_u32 per arch.
 TEST(InstrumentorProbeSpill, Cdna3PreservesVccFromImplicitCompare) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
