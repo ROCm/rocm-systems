@@ -46,6 +46,9 @@
 #define HSA_RUNTIME_CORE_INC_AMD_GPU_AGENT_H_
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <vector>
 #include <list>
 #include <map>
@@ -301,20 +304,17 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                   uint32_t* recommended_ids_mask) override;
 
-  // @brief Pick an SDMA engine from a preferred-engine mask using round-robin.
+  // @brief Pick the k-th engine (wrapping) from a preferred-engine mask.
   // Returns a blit object index (1-indexed, suitable for GetBlitObject), or 0
-  // if mask is empty. When advance=true (default) the counter is incremented so
-  // successive body assignments spread across engines. Pass advance=false to
-  // peek at the current position without consuming a slot — used when selecting
-  // a coordinator engine so it rotates independently of body assignments.
-  inline uint32_t PickSdmaEngine(uint32_t engine_mask, bool advance = true) {
+  // if mask is empty. Rotation is driven by the caller-supplied index (e.g. the
+  // per-entry index of a fan-out copy), so engine assignment stays *within* a
+  // single copy and is deterministic per call -- it does not march across
+  // successive API calls.
+  inline uint32_t NthSdmaEngine(uint32_t engine_mask, uint32_t k) {
     if (!engine_mask) return 0;
-    int count = rocr::os::Popcount(engine_mask);
-    if (count == 1) return rocr::os::Ffs(engine_mask);
-    uint32_t rr = advance ? sdma_rr_index_.fetch_add(1, std::memory_order_relaxed)
-                          : sdma_rr_index_.load(std::memory_order_relaxed);
+    const int count = rocr::os::Popcount(engine_mask);
     uint32_t m = engine_mask;
-    for (uint32_t i = 0, pick = rr % count; i < pick; ++i)
+    for (uint32_t i = 0, pick = k % count; i < pick; ++i)
       m &= m - 1;
     return rocr::os::Ffs(m);
   }
@@ -573,6 +573,10 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Remove a destroyed AQL queue from agent-owned tracking.
   void UnregisterAqlQueue(core::Queue* queue);
 
+  /// @brief Check if the accelerator is ready to be used.
+  /// @return HSA_STATUS_SUCCESS if the accelerator is ready, HSA_STATUS_ERROR_RESOURCE_NOT_READY otherwise.
+  hsa_status_t CheckAcceleratorReadiness();
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min
@@ -629,8 +633,6 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& session) override;
-  hsa_status_t PcSamplingFlushDeviceBuffers(pcs::PcsRuntime::PcSamplingSession& session);
-
   // @brief Node properties.
   const HsaNodeProperties properties_;
 
@@ -819,6 +821,14 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
+  // SDMA-disabled shader-blit fallback for a single DmaCopyBatch op.  Selects
+  // the blit shader based on op type: plain LINEAR uses the BlitDevToDev linear
+  // copy shader (one entry at a time).  Broadcast/swap/indirect have no shader
+  // equivalent yet and are rejected until those shaders are added.
+  hsa_status_t DmaCopyBatchFallback(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
   // Linear swap: exchanges the contents of src and dst buffers.
   // Only supported on gfx94X / gfx95X.  Uses DmaCopyFanOutOp with
   // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP.
@@ -837,7 +847,7 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
-  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
+  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyBatch,
   // swap and indirect operations.  Submits prologue, per-entry bodies
   // (selected by @p op), and epilogue with one signal.
   // @p op is the hsa_amd_memory_copy_op_type_t from the public API;
@@ -852,7 +862,9 @@ class GpuAgent : public GpuAgentInt {
       const void* const* src_list,
       void* const* dst_list,
       const hsa_agent_t* dst_agent_list,
-      const size_t* size_list);
+      const size_t* size_list,
+      uint32_t coord_engine = 0,
+      uint32_t max_engines = 0);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
@@ -922,59 +934,133 @@ class GpuAgent : public GpuAgentInt {
   void* trap_handler_tma_region_;
 
   /* PC Sampling fields - begin */
-  /* 2nd level Trap handler code is based on the offsets within this structure */
+  /* 2nd level Trap handler code is based on the offsets within this structure.
+   * Buffers start at offset 0x40, so the header must be exactly 64 bytes. */
   typedef struct {
-    uint64_t buf_write_val;
-    uint32_t buf_size;
-    uint32_t reserved0;
-    uint32_t buf_written_val0;
-    uint32_t buf_watermark0;
-    hsa_signal_t done_sig0;
-    uint32_t buf_written_val1;
-    uint32_t buf_watermark1;
-    hsa_signal_t done_sig1;
-    uint8_t reserved1[16];
-    /* pc_sample_t buffer0[buf_size]; */
+    uint64_t buf_write_val;      // [0x00] Atomic entry counter (bit 63 = buffer select)
+    uint32_t buf_size;           // [0x08] Maximum samples per buffer
+    uint32_t reserved0;          // [0x0C] Reserved
+    uint32_t buf_written_val0;   // [0x10] Samples written to buffer 0
+    uint32_t buf_watermark0;     // [0x14] Trigger threshold for buffer 0
+    hsa_signal_t done_sig0;      // [0x18] Host notification signal for buffer 0
+    uint32_t buf_written_val1;   // [0x20] Samples written to buffer 1
+    uint32_t buf_watermark1;     // [0x24] Trigger threshold for buffer 1
+    hsa_signal_t done_sig1;      // [0x28] Host notification signal for buffer 1
+    uint8_t reserved1[16];       // [0x30] Reserved (padding to 0x40)
+    /* pc_sample_t buffer0[buf_size]; starts at [0x40] */
     /* pc_sample_t buffer1[buf_size]; */
   } pcs_sampling_data_t;
 
+  /* TMA2 structure - second-level trap handler entry point */
   typedef struct {
-    /* Sampling data - stored on device for trap handler access */
-    pcs_sampling_data_t* device_data;
+    pcs_sampling_data_t* host_trap_buffers;        // [0x00] Base of host trap buffer array
+    pcs_sampling_data_t* stochastic_trap_buffers;  // [0x08] Base of stochastic trap buffer array
+    uint64_t per_xcc_size;                         // [0x10] Per-XCC stride (multi-XCC GPUs only)
+    uint64_t reserved_pad;                         // [0x18] Alignment padding
+  } pcs_tma2_t;
 
-    /* Sampling host buffer - stored on host */
+  // Static asserts to ensure struct layouts match trap handler expectations.
+  // Trap handler code reads these offsets directly - any mismatch causes silent corruption.
+  static_assert(sizeof(pcs_sampling_data_t) == 0x40,
+                "pcs_sampling_data_t must be 64 bytes; trap handler expects buffers at offset 0x40");
+  static_assert(offsetof(pcs_sampling_data_t, buf_write_val) == 0x00, "buf_write_val offset mismatch");
+  static_assert(offsetof(pcs_sampling_data_t, buf_size) == 0x08, "buf_size offset mismatch");
+  static_assert(offsetof(pcs_sampling_data_t, buf_written_val0) == 0x10, "buf_written_val0 offset mismatch");
+  static_assert(offsetof(pcs_sampling_data_t, done_sig0) == 0x18, "done_sig0 offset mismatch");
+  static_assert(offsetof(pcs_sampling_data_t, buf_written_val1) == 0x20, "buf_written_val1 offset mismatch");
+  static_assert(offsetof(pcs_sampling_data_t, done_sig1) == 0x28, "done_sig1 offset mismatch");
+  static_assert(offsetof(pcs_tma2_t, host_trap_buffers) == 0x00, "host_trap_buffers offset mismatch");
+  static_assert(offsetof(pcs_tma2_t, stochastic_trap_buffers) == 0x08, "stochastic_trap_buffers offset mismatch");
+  static_assert(offsetof(pcs_tma2_t, per_xcc_size) == 0x10, "per_xcc_size offset mismatch");
+  static_assert(sizeof(pcs_tma2_t) == 0x20, "pcs_tma2_t must be 32 bytes for trap handler compatibility");
+
+  // Per-XCC sampling data - cache-line aligned (64 bytes) to prevent false sharing.
+  // Each XCC accesses only its own struct, avoiding cross-XCC cache line contention.
+  // The alignas(64) ensures the struct starts at a cache line boundary, and the
+  // compiler will pad the struct size to a multiple of 64 bytes automatically.
+  //
+  // Threading model:
+  //   - Each XCC has one dedicated thread that flushes device->host buffers
+  //   - Per-XCC mutex serializes XCC thread vs consumer thread for each XCC's buffer
+  //   - Consumer thread aggregates data and delivers callbacks when SUM(pending) >= buffer_size
+  //   - Callbacks contain data from whichever XCCs have pending samples at threshold time
+  struct alignas(64) per_xcc_pcs_data_t {
+    pcs_sampling_data_t* device_data;         // This XCC's device buffer region
+    os::Thread thread;                        // Thread handle for this XCC's flush thread
+    uint32_t which_buffer;                    // Current buffer selector (0 or 1)
+    hsa_signal_t done_sig0;                   // Signal for buffer 0 completion
+    hsa_signal_t done_sig1;                   // Signal for buffer 1 completion
+    uint64_t host_write_offset;               // Write offset into host buffer (mutex-protected)
+    uint64_t host_read_offset;                // Read offset from host buffer (mutex-protected)
+    std::mutex host_buffer_mutex;             // Serializes XCC thread vs PcSamplingFlush()
+    uint8_t* host_buffer_begin;               // Cached: start of this XCC's host buffer partition
+    std::atomic<size_t> lost_sample_count;    // Per-XCC lost sample counter (atomic for lock-free access)
+
+    /* PM4 fallback resources (per-XCC to avoid races on multi-XCC non-large-BAR systems) */
+    uint64_t* old_val;                        // Staging area for PM4 atomic return value
+    uint32_t* cmd_data;                       // PM4 command buffer
+    size_t cmd_data_sz;                       // PM4 command buffer size
+    hsa_signal_t exec_pm4_signal;             // Signal for PM4 completion
+  };
+
+  typedef struct {
+    /* Per-XCC architecture for reduced atomic contention */
+    uint32_t num_xcc;                       // Number of XCCs on this device
+    pcs_sampling_data_t* device_data_base;  // Base of contiguous allocation
+    size_t per_xcc_device_stride;           // Device memory stride per XCC (for trap handler)
+
+    /* Host buffers - total size = 2 * session.buffer_size() */
     uint8_t* host_buffer;
     size_t host_buffer_size;
-    uint8_t* host_buffer_wrap_pos;
-    uint8_t* host_write_ptr;
-    uint8_t* host_read_ptr;
-    size_t lost_sample_count;
-    std::mutex host_buffer_mutex;
+    size_t per_xcc_host_buffer_size;  // Cached: host_buffer_size / num_xcc
+    size_t samples_per_trap_buffer;   // Cached: trap buffer capacity in samples (from device init)
 
-    uint32_t which_buffer;
-    uint64_t* old_val;
-    uint32_t* cmd_data;
-    size_t cmd_data_sz;
-    // signal to pass into ExecutePM4() so that we do not need to re-allocate a
-    // new signal on each call
-    hsa_signal_t exec_pm4_signal;
+    /* Staging buffer for combined callback delivery */
+    uint8_t* staging_buffer;          // Buffer to combine data from all XCCs before callback
+    size_t staging_buffer_size;       // Size = session.buffer_size() (delivery threshold)
+    size_t staging_offset;            // Current write position (protected by delivery_mutex)
 
-    // Host-side copies - cannot read these from device_data on non-large BAR systems
-    hsa_signal_t done_sig0;
-    hsa_signal_t done_sig1;
-    uint32_t buf_size;
+    /* Per-XCC data array - cache-line aligned AoS for optimal cache behavior */
+    per_xcc_pcs_data_t* xcc_data;  // Array of per-XCC structs (size = num_xcc)
 
-    os::Thread thread;
+    /* PM4 fallback flag (resources are per-XCC in per_xcc_pcs_data_t) */
+    bool use_pm4_fallback;           // true if large-BAR not available
+
+    /* Consumer thread for aggregated callback delivery */
+    std::thread consumer_thread;            // Aggregates data and delivers callbacks
+    std::mutex consumer_mutex;              // Protects consumer_cv, pending_flush_count, consumer_exit (for notify)
+    std::condition_variable consumer_cv;    // Wakes consumer when XCC threads have new data
+    std::atomic<bool> consumer_exit;        // Signal consumer thread to exit (atomic for lockless loop check)
+    uint32_t pending_flush_count;           // How many XCCs have notified consumer (protected by consumer_mutex)
+    std::mutex delivery_mutex;              // Serializes callback delivery (consumer vs Flush)
+
     pcs::PcsRuntime::PcSamplingSession* session;
   } pcs_data_t;
   /* PC Sampling fields - end */
 
   hsa_status_t UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,
-                                        pcs_sampling_data_t* pcs_stochastic_buffers);
+                                        pcs_sampling_data_t* pcs_stochastic_buffers,
+                                        uint32_t per_xcc_size);
 
-  // @brief Thread function to process PC sampling data collected via host-trap
-  // or Stochastic sampling.
-  void PcSamplingThread(pcs_data_t& pcs_data, const char* thread_name);
+  // @brief Per-XCC thread function (flushes device->host only, notifies consumer)
+  void PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id, const char* thread_name);
+
+  // @brief Consumer thread function (aggregates data and delivers callbacks)
+  void PcSamplingConsumerThread(pcs_data_t& pcs_data);
+
+  // @brief Deliver aggregated samples when threshold reached
+  void PcSamplingDeliverAggregatedSamples(pcs_data_t& pcs_data,
+                                          pcs::PcsRuntime::PcSamplingSession& session);
+
+  // @brief Flush device buffers for per-XCC PC sampling architecture (CPU atomic path)
+  hsa_status_t PcSamplingFlushDeviceBuffersPerXCC(pcs_data_t* pcs_data,
+                                                  pcs::PcsRuntime::PcSamplingSession& session,
+                                                  uint32_t xcc_id);
+
+  // @brief Flush device buffers using PM4 commands (fallback for non-large-BAR systems)
+  hsa_status_t PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data_t* pcs_data,
+                                                      pcs::PcsRuntime::PcSamplingSession& session,
+                                                      uint32_t xcc_id);
 
   // @brief device handle
   amdgpu_device_handle ldrm_dev_;
@@ -989,9 +1075,6 @@ class GpuAgent : public GpuAgentInt {
 
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
-
-  // Round-robin index for spreading SDMA work across engines (gfx1250+).
-  std::atomic<uint32_t> sdma_rr_index_{0};
 
   // Round-robin index for assigning engines to user-created SDMA queues
   // (hsa_amd_queue_create) that request automatic engine selection.
@@ -1016,6 +1099,8 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_dim3_t cluster_max_dim_;
 
   size_t max_wave_scratch_;
+
+  std::atomic<bool> accelerator_ready_{false};
 
   DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 };

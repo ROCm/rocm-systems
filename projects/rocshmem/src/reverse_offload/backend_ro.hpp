@@ -123,6 +123,24 @@ class ROBackend : public Backend {
   void ctx_destroy(Context *ctx) override;
 
   /**
+   * @copydoc Backend::buffer_register_symmetric
+   *
+   * Not supported by the RO backend: symmetric user-buffer registration is
+   * only implemented for the IPC and GDA backends. Always returns
+   * ROCSHMEM_ERROR without registering anything.
+   */
+  int buffer_register_symmetric(void *addr, size_t length,
+                                void **registered_addr) override;
+
+  /**
+   * @copydoc Backend::buffer_unregister_symmetric
+   *
+   * Not supported by the RO backend (see buffer_register_symmetric). Always
+   * returns ROCSHMEM_ERROR.
+   */
+  int buffer_unregister_symmetric(void *addr) override;
+
+  /**
    * @brief Free all resources associated with the backend.
    *
    * The memory allocated to the handle param is deallocated during this
@@ -159,6 +177,15 @@ class ROBackend : public Backend {
   DefaultBlockHandleProxyT default_block_handle_proxy_;
 
  protected:
+  /**
+   * @copydoc Backend::accumulate_ctx_device_stats()
+   */
+  void accumulate_ctx_device_stats() override;
+  /**
+   * @copydoc Backend::accumulate_default_host_ctx_stats()
+   */
+  void accumulate_default_host_ctx_stats() override;
+
   /**
    * @copydoc Backend::dump_backend_stats()
    */

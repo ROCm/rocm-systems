@@ -570,14 +570,24 @@ void testReduceForTileSize()
   void* devicePtr = d_result.ptr();
   void* args[] = { &devicePtr };
 
-  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSum<TileSize>), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSum<TileSize>),
+                                       gridDim,
+                                       blockDim,
+                                       args,
+                                       0,
+                                       nullptr));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
   REQUIRE(*h_result.host_ptr() == TileSize);
 
-  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSumSubtiles<TileSize>), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSumSubtiles<TileSize>),
+                                       gridDim,
+                                       blockDim,
+                                       args,
+                                       0,
+                                       nullptr));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
@@ -601,10 +611,15 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Basic, int)
   }
 }
 
+// @extraMasks  when testing coalesced_threads, this can be use to simulate
+//              divergence
 template <size_t TileSize, class Functor, class T>
-void __global__ reduceKernel(T* output, const T* input)
+void __global__ reduceKernel(T* output,
+                             const T* input,
+                             unsigned long long* extraMasks,
+                             AggregationType* aggType)
 {
-  int tid = threadIdx.x;
+  int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
   int laneId = tid % warpSize;
   cg::thread_block mygroup = cg::this_thread_block();
   auto mytile = cg::tiled_partition<TileSize>(mygroup);
@@ -612,16 +627,37 @@ void __global__ reduceKernel(T* output, const T* input)
   for (int i = 0; i < kNumReduces; i++) {
     int idx = warpSize * i + laneId;
     T& result = output[idx];
+    unsigned long long mask = extraMasks[i];
 
-    result = cg::reduce(mytile, input[idx], Functor());
+    if ((1ull << laneId) & mask) {
+      switch (*aggType) {
+      case AggregationType::Reduce:
+        result = cg::reduce(mytile, input[idx], Functor());
+        break;
+      case AggregationType::InclusiveScan:
+        result = cg::inclusive_scan(mytile, input[idx], Functor());
+        break;
+      case AggregationType::ExclusiveScan:
+        result = cg::exclusive_scan(mytile, input[idx], Functor());
+        break;
+      default:
+        assert(false && "Unsupported enumeration");
+      }
+
+    } else {
+      result = 0;
+    }
   }
 }
 
 // @extraMasks  used to simulate divergence when using coalesced_threads
 template <class Functor, class T>
-void __global__ reduceKernelCoalesced(T* output, const T* input, unsigned long long* extraMasks)
+void __global__ reduceKernelCoalesced(T* output,
+                                      const T* input,
+                                      unsigned long long* extraMasks,
+                                      AggregationType* aggType)
 {
-  int tid = threadIdx.x;
+  int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
   int laneId = tid % warpSize;
 
   for (int i = 0; i < kNumReduces; i++) {
@@ -632,7 +668,19 @@ void __global__ reduceKernelCoalesced(T* output, const T* input, unsigned long l
     if ((1ull << laneId) & mask) {
       auto coalesced = cg::coalesced_threads();
 
-      result = cg::reduce(coalesced, input[idx], Functor());
+      switch (*aggType) {
+      case AggregationType::Reduce:
+        result = cg::reduce(coalesced, input[idx], Functor());
+        break;
+      case AggregationType::InclusiveScan:
+        result = cg::inclusive_scan(coalesced, input[idx], Functor());
+        break;
+      case AggregationType::ExclusiveScan:
+        result = cg::exclusive_scan(coalesced, input[idx], Functor());
+        break;
+      default:
+        assert(false && "Unsupported enumeration");
+      }
     } else {
       result = 0;
     }
@@ -641,7 +689,8 @@ void __global__ reduceKernelCoalesced(T* output, const T* input, unsigned long l
 
 // @TileSize the tile size or 0 when testing coalesced groups
 template <size_t TileSize, class Op, class T>
-void reduceForTypeAndOp()
+void aggregateForTypeAndOp(AggregationType aggType,
+                           dim3 blockDim)
 {
   using distribution = typename DistributionType<T>::type;
   int wavefrontSize = getWarpSize();
@@ -654,18 +703,20 @@ void reduceForTypeAndOp()
                                                     kNumReduces * sizeof(unsigned long long));
   LinearAllocGuard<unsigned long long> h_extraMasks(LinearAllocs::malloc,
                                                     kNumReduces * sizeof(unsigned long long));
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
   std::mt19937_64 gen(Catch::rngSeed());
   dim3 gridDim = { 1 };
-  dim3 blockDim = { static_cast<unsigned short>(wavefrontSize) };
   hipError_t status;
   typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
                                          (std::is_signed<T>::value? -1023 : 0);
   typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
                                          1023;
-  distribution distInput(a, b);
-  int numReduce = 0;
+  distribution distInput {a, b};
+  int numAggregation = 0;
   void* kernelPtr;
+  T expected[64];
 
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
   genRandomBuffers(d_input, h_input, distInput, gen, kNumReduces * wavefrontSize);
 
   if (TileSize) {
@@ -680,7 +731,7 @@ void reduceForTypeAndOp()
                    kNumReduces);
   }
 
-  std::array<void*, 3> devicePtrs = { d_result.ptr(), d_input.ptr(), d_extraMasks.ptr() };
+  std::array<void*, 4> devicePtrs = { d_result.ptr(), d_input.ptr(), d_extraMasks.ptr(), d_aggType.ptr() };
   void* args[devicePtrs.size()];
 
   for (int i = 0; i < devicePtrs.size(); i++) {
@@ -705,96 +756,123 @@ void reduceForTypeAndOp()
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
-  while (numReduce < kNumReduces) {
+  while (numAggregation < kNumReduces) {
     for (int laneId = 0; laneId < wavefrontSize; laneId++) {
+      T result = h_result.host_ptr()[numAggregation * wavefrontSize + laneId];
+      int lastLane;
+      const T* input = &h_input.host_ptr()[numAggregation * wavefrontSize];
       unsigned long long mask = ~0ull;
-      T result = h_result.host_ptr()[numReduce * wavefrontSize + laneId], expected = 0;
-      const T* input = &h_input.host_ptr()[numReduce * wavefrontSize];
+      Op op {};
+      std::string opName = opToString<T, Op>();
+      int resultLane;
 
       if constexpr (TileSize > 0) {
         mask >>= (64 - TileSize);
         mask <<= ((laneId % wavefrontSize) / TileSize) * TileSize;
       }
 
-      mask &= h_extraMasks.host_ptr()[numReduce];
+      mask &= h_extraMasks.host_ptr()[numAggregation];
+      lastLane = 64 - __builtin_clzll(mask) - 1;
 
-      if ((1ull << laneId) & mask) {
-        Op op {};
-        expected = calculateExpected(input, op, mask);
+      if (laneId > lastLane) {
+        continue;
       }
 
-      if constexpr (std::is_integral<T>::value) {
-        // for integral types the result should match exactly
-        if (result != expected) {
-          std::string opName = opToString<T, Op>();
-          printMismatch(result, expected, input, mask);
-          INFO("Operator: " << opName);
-          REQUIRE(result == expected);
-        }
+      calculateExpected<T>(expected, input, op, mask, aggType);
+
+      if (aggType == AggregationType::Reduce) {
+        resultLane = lastLane;
       } else {
-        compareFloatingPoint(result, expected, mask, h_input.host_ptr());
+        resultLane = laneId;
+      }
+
+      if ((1ull << laneId) & mask) {
+        if constexpr (std::is_integral<T>::value) {
+          // for integral types the result should match exactly
+          // for reduce, the result would be in the last lane whose first bit is on in the mask
+          // for scans, the associated result is different in each lane
+          if (result != expected[resultLane]) {
+            INFO("Aggregation type: " << aggregationTypeToStr(aggType));
+            printMismatch(result, expected[resultLane], input, mask, laneId);
+            INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+            REQUIRE(result == expected[resultLane]);
+          }
+        } else {
+          compareFloatingPoint<Op>(result,
+                                   expected[resultLane],
+                                   mask,
+                                   h_input.host_ptr(),
+                                   laneId);
+        }
       }
     }
 
-    numReduce++;
+    numAggregation++;
   }
 }
 
 template <class Op, class T>
-void reduceCoopTiles(const std::index_sequence<>)
+void aggregateCoopTiles(AggregationType, dim3, const std::index_sequence<>)
 {
 }
 
 template <class Op, class T, size_t TileSize, size_t... TileSizes>
-void reduceCoopTiles(const std::index_sequence<TileSize, TileSizes...>)
+void aggregateCoopTiles(AggregationType aggType, dim3 blockDim, const std::index_sequence<TileSize, TileSizes...>)
 {
   const std::index_sequence<TileSizes...> remainingTiles;
 
-  reduceForTypeAndOp<TileSize, Op, T>();
-  reduceCoopTiles<Op, T>(remainingTiles);
+  aggregateForTypeAndOp<TileSize, Op, T>(aggType, blockDim);
+  aggregateCoopTiles<Op, T>(aggType, blockDim, remainingTiles);
 }
 
-template <bool Coalesced, class Op, class T, int WarpSize>
-void runReduceRandomForType()
+template <bool Coalesced, class Op, class T, int MaxTileSize>
+void runAggregationRandomForType(AggregationType aggType, dim3 blockDim)
 {
   if constexpr (Coalesced) {
-    reduceForTypeAndOp<0, Op, T>();
-  } else if constexpr (WarpSize <= 32) {
+    aggregateForTypeAndOp<0, Op, T>(aggType, blockDim);
+  } else if constexpr (MaxTileSize <= 4) {
+    std::index_sequence<1, 2, 4> tileSizes;
+    aggregateCoopTiles<Op, T>(aggType, blockDim, tileSizes);
+  } else if constexpr (MaxTileSize <= 32) {
     std::index_sequence<1, 2, 4, 8, 16, 32> tileSizes;
-    reduceCoopTiles<Op, T>(tileSizes);
+    aggregateCoopTiles<Op, T>(aggType, blockDim, tileSizes);
   } else {
     std::index_sequence<1, 2, 4, 8, 16, 32, 64> tileSizes;
-    reduceCoopTiles<Op, T>(tileSizes);
+    aggregateCoopTiles<Op, T>(aggType, blockDim, tileSizes);
   }
 }
 
 template <bool Coalesced, class T, int WarpSize, class Op = void>
-void runReduceRandomForOps(const std::tuple<>)
+void runAggregationRandomForOps(AggregationType aggType, const std::tuple<>)
 {
 }
 
 template <bool Coalesced, class T, int WarpSize, class Op, class... Ops>
-void runReduceRandomForOps(const std::tuple<Op, Ops...>)
+void runAggregationRandomForOps(AggregationType aggType, const std::tuple<Op, Ops...>)
 {
   const std::tuple<Ops...> remainingOps;
+  int wavefrontSize = getWarpSize();
+  dim3 blockDim = {static_cast<unsigned int>(wavefrontSize)};
 
-  runReduceRandomForType<Coalesced, Op, T, WarpSize>();
-  runReduceRandomForOps<Coalesced, T, WarpSize>(remainingOps);
+  runAggregationRandomForType<Coalesced, Op, T, WarpSize>(aggType, blockDim);
+  runAggregationRandomForOps<Coalesced, T, WarpSize>(aggType, remainingOps);
 }
 
 // for all the tile sizes and all input types, using random input values, calculates the reduce()
 // values. Additionally, randomly make some threads not participate for the coalesced_threads case
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+                       unsigned long long, float, half, double)
 {
   std::tuple<cooperative_groups::plus<TestType>,
              cooperative_groups::less<TestType>,
              cooperative_groups::greater<TestType>> types;
+  int wavefrontSize = getWarpSize();
+  dim3 blockDim = {static_cast<unsigned int>(wavefrontSize)};
 
-  if (getWarpSize() == 32) {
-    runReduceRandomForOps<false, TestType, 32>(types);
+  if (wavefrontSize == 32) {
+    runAggregationRandomForOps<false, TestType, 32>(AggregationType::Reduce, types);
   } else {
-    runReduceRandomForOps<false, TestType, 64>(types);
+    runAggregationRandomForOps<false, TestType, 64>(AggregationType::Reduce, types);
   }
 }
 
@@ -806,20 +884,31 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_boolean, int, unsign
              cooperative_groups::bit_xor<TestType>> types;
 
   if (getWarpSize() == 32) {
-    runReduceRandomForOps<false, TestType, 32>(types);
+    runAggregationRandomForOps<false, TestType, 32>(AggregationType::Reduce, types);
   } else {
-    runReduceRandomForOps<false, TestType, 64>(types);
+    runAggregationRandomForOps<false, TestType, 64>(AggregationType::Reduce, types);
   }
 }
 
 // passes a custom operator to cooperative_groups::reduce()
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Custom_Op)
 {
-  if (getWarpSize() == 32) {
-    runReduceRandomForType<false, MaxOfAbsolute<int>, int, 32>();
+  int wavefrontSize = getWarpSize();
+
+  dim3 blockDim = {static_cast<unsigned int>(wavefrontSize)};
+  if (wavefrontSize == 32) {
+    runAggregationRandomForType<false, MaxOfAbsolute<int>, int, 32>(AggregationType::Reduce, blockDim);
   } else {
-    runReduceRandomForType<false, MaxOfAbsolute<int>, int, 64>();
+    runAggregationRandomForType<false, MaxOfAbsolute<int>, int, 64>(AggregationType::Reduce, blockDim);
   }
+}
+
+HIP_TEST_CASE(Unit_Thread_Block_Tile_Scan_Custom_Op)
+{
+  dim3 blockDim = {static_cast<unsigned int>(getWarpSize())};
+  // only using 4 threads to avoid long long overflows
+  runAggregationRandomForType<false, NonCommutativeOp<long long>, long long, 4>(
+    AggregationType::InclusiveScan, blockDim);
 }
 
 struct Vector {
@@ -838,7 +927,7 @@ struct MaxMagnitude {
   }
 };
 
-void __global__ maxMagnitude(Vector* result)
+void __global__ maxMagnitude(Vector* result, AggregationType* aggregationType)
 {
   cg::thread_block mygroup = cg::this_thread_block();
   auto mytile = cg::tiled_partition<4>(mygroup);
@@ -848,27 +937,102 @@ void __global__ maxMagnitude(Vector* result)
                     { 0, 7 },
                     { 4, 1} };
 
-  *result = cg::reduce(mytile, input[threadIdx.x], op);
+  switch (*aggregationType) {
+  case AggregationType::Reduce:
+    result[threadIdx.x] = cg::reduce(mytile, input[threadIdx.x], op);
+    break;
+  case AggregationType::InclusiveScan:
+    result[threadIdx.x] = cg::inclusive_scan(mytile, input[threadIdx.x], op);
+    break;
+  case AggregationType::ExclusiveScan:
+    result[threadIdx.x] = cg::exclusive_scan(mytile, input[threadIdx.x], op);
+    break;
+  default:
+    assert(false && "Unexpected aggType");
+  }
 }
 
 // tests that we can pass trivially copyable structs as values to reduce
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters)
 {
-  LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector));
-  LinearAllocGuard<Vector> d_result(LinearAllocs::hipMalloc, sizeof(Vector));
   dim3 gridDim = { 1 };
   dim3 blockDim = { 4 };
-  void* devicePtr = d_result.ptr();
-  void* args[] = { &devicePtr };
+  LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector) * blockDim.x);
+  LinearAllocGuard<Vector> d_result(LinearAllocs::hipMalloc, sizeof(Vector) * blockDim.x);
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
+  std::array<void*, 2> devicePtrs = { d_result.ptr(), d_aggType.ptr() };
+  void* args[devicePtrs.size()];
   Vector* result;
+  AggregationType aggType = AggregationType::Reduce;
 
+  for (int i = 0; i < devicePtrs.size(); i++) {
+    args[i] = &devicePtrs[i];
+  }
+
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
-  result = &h_result.host_ptr()[0];
-  REQUIRE((result->x == 1 && result->y == 9));
+
+  for (unsigned int idx = 0; idx < blockDim.x; idx++) {
+    result = &h_result.host_ptr()[idx];
+    REQUIRE((result->x == 1 && result->y == 9));
+  }
+}
+
+TEST_CASE(Unit_Thread_Block_Tile_Scan_Trivially_Copyable_Parameters)
+{
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { 4 };
+  LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector) * blockDim.x);
+  LinearAllocGuard<Vector> d_result(LinearAllocs::hipMalloc, sizeof(Vector) * blockDim.x);
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
+  std::array<void*, 2> devicePtrs = { d_result.ptr(), d_aggType.ptr() };
+  void* args[devicePtrs.size()];
+  Vector* result;
+  AggregationType aggType;
+
+  for (int i = 0; i < devicePtrs.size(); i++) {
+    args[i] = &devicePtrs[i];
+  }
+
+  SECTION("inclusive") {
+    aggType = AggregationType::InclusiveScan;
+    HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
+    HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                        h_result.size_bytes(), hipMemcpyDeviceToHost));
+    result = &h_result.host_ptr()[0];
+    REQUIRE((result->x == 2 && result->y == 3));
+    result = &h_result.host_ptr()[1];
+    REQUIRE((result->x == 1 && result->y == 9));
+    result = &h_result.host_ptr()[2];
+    REQUIRE((result->x == 1 && result->y == 9));
+    result = &h_result.host_ptr()[3];
+    REQUIRE((result->x == 1 && result->y == 9));
+  }
+
+  SECTION("exclusive") {
+    aggType = AggregationType::ExclusiveScan;
+    HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
+    HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                        h_result.size_bytes(), hipMemcpyDeviceToHost));
+    result = &h_result.host_ptr()[0];
+    REQUIRE((result->x == 0 && result->y == 0));
+    result = &h_result.host_ptr()[1];
+    REQUIRE((result->x == 2 && result->y == 3));
+    result = &h_result.host_ptr()[2];
+    REQUIRE((result->x == 1 && result->y == 9));
+    result = &h_result.host_ptr()[3];
+    REQUIRE((result->x == 1 && result->y == 9));
+  }
 }
 
 template <size_t NumElems>
@@ -897,9 +1061,7 @@ struct Max {
     ArrayContainer<NumElems> result;
 
     for (int i = 0; i < NumElems; i++) {
-      for (int i = 0; i < NumElems; i++) {
         result[i] = std::max(lhs[i], rhs[i]);
-      }
     }
 
     return result;
@@ -916,13 +1078,50 @@ __global__ void applyFunctor(ArrayContainer<NumElems>* result)
 
   if (threadIdx.x < NumElems) {
     input[threadIdx.x] = threadIdx.x;
-    __syncwarp();
+  }
+
+  mytile.sync();
+
+  if (threadIdx.x < NumElems) {
     *result = cg::reduce(mytile, input, op);
   }
 }
 
+template <size_t NumElems, class Functor>
+__global__ void applyScanFunctor(ArrayContainer<NumElems>** result,
+                                 AggregationType* aggType)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<NumElems>(mygroup);
+  __shared__ ArrayContainer<NumElems> input;
+  Functor op;
+  unsigned int tid = threadIdx.x +
+                     threadIdx.y * blockDim.x +
+                     threadIdx.z * blockDim.x * blockDim.y;
+
+  if (threadIdx.x < NumElems) {
+    input[threadIdx.x] = threadIdx.x;
+  }
+
+  mytile.sync();
+
+  if (threadIdx.x < NumElems) {
+    switch (*aggType) {
+    case AggregationType::InclusiveScan:
+      *(result[tid]) = cg::inclusive_scan(mytile, input, op);
+      break;
+    case AggregationType::ExclusiveScan:
+      *(result[tid]) = cg::exclusive_scan(mytile, input, op);
+      break;
+    default:
+      assert(false && "AggregationType not supported");
+    }
+  }
+}
+
+// tests aggregations of arguments of different sizes (types <= 32 bytes are accepted)
 template <size_t NumElems, template <size_t> class Functor>
-void testReduceSizes()
+void testArgsDifferentSizesReduce()
 {
   LinearAllocGuard<ArrayContainer<NumElems>> h_result(LinearAllocs::malloc, sizeof(ArrayContainer<NumElems>));
   LinearAllocGuard<ArrayContainer<NumElems>> d_result(LinearAllocs::hipMalloc, sizeof(ArrayContainer<NumElems>));
@@ -932,7 +1131,8 @@ void testReduceSizes()
   void* args[] = { &devicePtr };
   ArrayContainer<NumElems>* result;
 
-  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(applyFunctor<NumElems, Functor<NumElems>>), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(applyFunctor<NumElems, Functor<NumElems>>),
+                                       gridDim, blockDim, args, 0, nullptr));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
@@ -953,7 +1153,101 @@ void testReduceSizes()
   }
 
   if constexpr (NumElems > 1) {
-    testReduceSizes<NumElems / 2, Functor>();
+    testArgsDifferentSizesReduce<NumElems / 2, Functor>();
+  }
+}
+
+// in this case, as opposed to the reduction, were we were only saving one result per reduction,
+// we save one result per lane. i.e. we save one ArrayContainer per lane, as each lane will return
+// a different ArrayContainer value
+template <size_t NumElems, template <size_t> class Functor>
+void testArgsDifferentSizesScan(AggregationType aggType)
+{
+  int wavefrontSize = getWarpSize();
+  // one per lane
+  LinearAllocGuard<ArrayContainer<NumElems>> h_result[64];
+  LinearAllocGuard<ArrayContainer<NumElems>> d_result[64];
+
+  // as we cannot pass d_result directly (because it is an array of
+  // LinearAllocGuards), we convert to an array of raw device pointers
+  ArrayContainer<NumElems>* h_devicePtrs[64];
+  LinearAllocGuard<ArrayContainer<NumElems>*> d_devicePtrs(LinearAllocs::hipMalloc, sizeof(void*) * 64);
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { 32 };
+  ArrayContainer<NumElems>* result;
+
+  for (int i = 0; i < wavefrontSize; i++) {
+    h_result[i] = LinearAllocGuard<ArrayContainer<NumElems>>(LinearAllocs::malloc,
+                                                             sizeof(ArrayContainer<NumElems>));
+    d_result[i] = LinearAllocGuard<ArrayContainer<NumElems>>(LinearAllocs::hipMalloc,
+                                                             sizeof(ArrayContainer<NumElems>));
+  }
+
+  for (int i = 0; i < wavefrontSize; i++) {
+    h_devicePtrs[i] = d_result[i].ptr();
+  }
+
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_devicePtrs.ptr(),
+                      h_devicePtrs,
+                      d_devicePtrs.size_bytes(),
+                      hipMemcpyHostToDevice));
+
+  std::array<void*, 2> devicePtrs = { d_devicePtrs.ptr(), d_aggType.ptr() };
+  void* args[devicePtrs.size()];
+
+  for (int i = 0; i < devicePtrs.size(); i++) {
+    args[i] = &devicePtrs[i];
+  }
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(applyScanFunctor<NumElems, Functor<NumElems>>),
+                                       gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+
+  for (int i = 0; i < wavefrontSize; i++) {
+    HIP_CHECK(hipMemcpy(h_result[i].host_ptr(), d_result[i].ptr(),
+                        h_result[i].size_bytes(), hipMemcpyDeviceToHost));
+  }
+
+  INFO("T is of size: " << NumElems);
+
+  for (int laneId = 0; laneId < NumElems; laneId++) {
+    result = &(h_result[laneId].host_ptr()[0]);
+
+    if (aggType == AggregationType::InclusiveScan) {
+      INFO("Lane: " << laneId);
+
+      if (std::is_same<Functor<NumElems>, Sum<NumElems>>::value) {
+        // the result can be calculated with an arithmetic series formula, modulo 256
+        // (we do overflow unsigned char for some indices, but that is defined behaviour)
+        REQUIRE((*result)[laneId] == (((laneId + 1) * (laneId + laneId) / 2) % 256));
+      } else {
+        REQUIRE((*result)[laneId] == laneId);
+      }
+    } else if (aggType == AggregationType::ExclusiveScan) {
+      if (std::is_same<Functor<NumElems>, Sum<NumElems>>::value) {
+        INFO("Lane: " << laneId);
+
+        // the result can be calculated with an arithmetic series formula, modulo 256
+        // (we do overflow unsigned char for some indices, but that is defined behaviour)
+        if (laneId == 0) {
+          REQUIRE((*result)[laneId] == 0);
+        } else {
+          REQUIRE((*result)[laneId] == (((laneId) * (laneId + laneId) / 2) % 256));
+        }
+      } else {
+        if (laneId == 0) {
+          REQUIRE((*result)[laneId] == 0);
+        } else {
+          REQUIRE((*result)[laneId] == laneId);
+        }
+      }
+    }
+  }
+
+  if constexpr (NumElems > 1) {
+    testArgsDifferentSizesScan<NumElems / 2, Functor>(aggType);
   }
 }
 
@@ -962,11 +1256,24 @@ void testReduceSizes()
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes)
 {
   SECTION("sum") {
-    testReduceSizes<32, Sum>();
+    testArgsDifferentSizesReduce<32, Sum>();
   }
 
   SECTION("max") {
-    testReduceSizes<32, Max>();
+    testArgsDifferentSizesReduce<32, Max>();
+  }
+}
+
+TEST_CASE(Unit_Thread_Block_Tile_Scan_All_Parameter_Sizes)
+{
+  SECTION("sum") {
+    testArgsDifferentSizesScan<32, Sum>(AggregationType::InclusiveScan);
+    testArgsDifferentSizesScan<32, Sum>(AggregationType::ExclusiveScan);
+  }
+
+  SECTION("max") {
+    testArgsDifferentSizesScan<32, Max>(AggregationType::InclusiveScan);
+    testArgsDifferentSizesScan<32, Max>(AggregationType::ExclusiveScan);
   }
 }
 
@@ -1026,12 +1333,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsig
              cooperative_groups::greater<TestType>> ops;
 
   if (getWarpSize() == 32) {
-    runReduceRandomForOps<true, TestType, 32>(ops);
+    runAggregationRandomForOps<true, TestType, 32>(AggregationType::Reduce, ops);
   } else {
-    runReduceRandomForOps<true, TestType, 64>(ops);
+    runAggregationRandomForOps<true, TestType, 64>(AggregationType::Reduce, ops);
   }
 }
-
 
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned int, long long, unsigned long long)
 {
@@ -1039,11 +1345,451 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned
              cooperative_groups::bit_or<TestType>,
              cooperative_groups::bit_xor<TestType>> ops;
   if (getWarpSize() == 32) {
-    runReduceRandomForOps<true, TestType, 32>(ops);
+    runAggregationRandomForOps<true, TestType, 32>(AggregationType::Reduce, ops);
   } else {
-    runReduceRandomForOps<true, TestType, 64>(ops);
+    runAggregationRandomForOps<true, TestType, 64>(AggregationType::Reduce, ops);
   }
-} 
+}
+
+template <size_t TileSize, AggregationType AggType, class Op, class T>
+void __global__ simpleScan(T* result)
+{
+  T value = threadIdx.x;
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<TileSize>(mygroup);
+  Op op;
+
+  if constexpr (AggType == AggregationType::InclusiveScan) {
+    result[threadIdx.x] = cg::inclusive_scan(mytile, value, op);
+  } else if constexpr (AggType == AggregationType::ExclusiveScan) {
+    result[threadIdx.x] = cg::exclusive_scan(mytile, value, op);
+  } else if constexpr (AggType == AggregationType::InclusiveScanDefault) {
+    result[threadIdx.x] = cg::inclusive_scan(mytile, value);
+  } else if constexpr (AggType == AggregationType::ExclusiveScanDefault) {
+    result[threadIdx.x] = cg::exclusive_scan(mytile, value);
+  } else {
+    assert(false && "Unexpected aggType");
+  }
+}
+
+/// @tparam Op either std::plus or std::less
+template <size_t TileSize, AggregationType AggType, class Op, class T>
+void testScanForTileSize()
+{
+  LinearAllocGuard<T> h_result(LinearAllocs::malloc, sizeof(T) * getWarpSize());
+  LinearAllocGuard<T> d_result(LinearAllocs::hipMalloc, h_result.size_bytes());
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
+  T id = 0;
+  T accum = 0;
+  int pos = 0;
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
+  std::array<void*, 2> devicePtrs = { d_result.ptr(), d_aggType.ptr() };
+  void* args[devicePtrs.size()];
+  AggregationType aggType = AggType;
+
+  if (!isInclusive(aggType)) {
+    scanIdentity<T, Op>(id);
+  }
+
+  accum = id;
+
+  for (int i = 0; i < devicePtrs.size(); i++) {
+    args[i] = &devicePtrs[i];
+  }
+
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(AggType), hipMemcpyHostToDevice));
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleScan<TileSize, AggType, Op, T>),
+                                       gridDim,
+                                       blockDim,
+                                       args,
+                                       0,
+                                       nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+
+  while (pos < getWarpSize()) {
+    for (int i = 0; i < TileSize; i++) {
+      UNSCOPED_INFO("Index: " << pos + i << " tile size: " << TileSize);
+
+      if (isInclusive(aggType)) {
+        accum += pos + i;
+        INFO("Inclusive scan");
+        REQUIRE(h_result.host_ptr()[pos + i] == accum);
+      } else {
+        using ComparisonType = typename std::conditional<std::is_same<T, half>::value, float, T>::type;
+        ComparisonType result, expected;
+
+        INFO("Exclusive scan");
+
+        if constexpr (std::is_same<T, half>::value) {
+          // Catch2 cannot print fp16 if there is an error
+          result = __half2float(h_result.host_ptr()[pos + i]);
+          expected = __half2float(__half2float(accum));
+        } else {
+          result = h_result.host_ptr()[pos + i];
+          expected = accum;
+        }
+
+        INFO("Lane: " << (pos + i));
+        REQUIRE(result == expected);
+
+        if (i == 0) {
+          accum = id;
+        }
+
+        if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value) {
+          accum = std::min(__half2float(accum), __half2float(pos + i));
+        } else {
+          accum += pos + i;
+        }
+      }
+    }
+
+    accum = id;
+    pos += TileSize;
+  }
+}
+
+TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
+{
+  using Op = cooperative_groups::plus<int>;
+  static constexpr AggregationType AggType = AggregationType::InclusiveScan;
+
+  testScanForTileSize<1, AggType, Op, int>();
+  testScanForTileSize<2, AggType, Op, int>();
+  testScanForTileSize<4, AggType, Op, int>();
+  testScanForTileSize<8, AggType, Op, int>();
+  testScanForTileSize<16, AggType, Op, int>();
+  testScanForTileSize<32, AggType, Op, int>();
+  testScanForTileSize<32, AggregationType::InclusiveScanDefault, Op, int>();
+
+  if (getWarpSize() == 64) {
+    testScanForTileSize<64, AggType, Op, int>();
+  }
+}
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half)
+{
+  static constexpr AggregationType AggType = AggregationType::ExclusiveScan;
+
+  SECTION("plus") {
+    using Op = cooperative_groups::plus<TestType>;
+    testScanForTileSize<1, AggType, Op, TestType>();
+    testScanForTileSize<2, AggType, Op, TestType>();
+    testScanForTileSize<4, AggType, Op, TestType>();
+    testScanForTileSize<8, AggType, Op, TestType>();
+    testScanForTileSize<16, AggType, Op, TestType>();
+    testScanForTileSize<32, AggType, Op, TestType>();
+    testScanForTileSize<32, AggregationType::ExclusiveScanDefault, Op, int>();
+
+    if (getWarpSize() == 64) {
+      testScanForTileSize<64, AggType, Op, TestType>();
+    }
+  }
+
+  SECTION("less") {
+    using Op = cooperative_groups::less<TestType>;
+    testScanForTileSize<1, AggType, Op, TestType>();
+    testScanForTileSize<2, AggType, Op, TestType>();
+    testScanForTileSize<4, AggType, Op, TestType>();
+    testScanForTileSize<8, AggType, Op, TestType>();
+    testScanForTileSize<16, AggType, Op, TestType>();
+    testScanForTileSize<32, AggType, Op, TestType>();
+
+    if (getWarpSize() == 64) {
+      testScanForTileSize<64, AggType, Op, TestType>();
+    }
+  }
+}
+
+// for all the tile sizes and all input types, using random input values, calculates the scan
+// values. Additionally, randomly make some threads not participate for the coalesced_threads case
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned int, long long,
+                   unsigned long long, float, half, double)
+{
+  std::tuple<cooperative_groups::plus<TestType>,
+             cooperative_groups::less<TestType>,
+             cooperative_groups::greater<TestType>> types;
+
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, TestType, 32>(AggregationType::InclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, TestType, 64>(AggregationType::InclusiveScan, types);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, TestType, 32>(AggregationType::ExclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, TestType, 64>(AggregationType::ExclusiveScan, types);
+    }
+  }
+}
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int, long long,
+                   unsigned long long)
+{
+  std::tuple<cooperative_groups::bit_and<TestType>,
+             cooperative_groups::bit_or<TestType>,
+             cooperative_groups::bit_xor<TestType>> types;
+
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, TestType, 32>(AggregationType::InclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, TestType, 64>(AggregationType::InclusiveScan, types);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, TestType, 32>(AggregationType::ExclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, TestType, 64>(AggregationType::ExclusiveScan, types);
+    }
+  }
+}
+
+// make sures that tiled blocks that use the y or z dimension work correctly
+TEST_CASE(Unit_Thread_Block_Tile_2D_3D_Blocks)
+{
+  int wavefrontSize = getWarpSize();
+
+  SECTION("2D") {
+    dim3 blockDim {1, 2, static_cast<unsigned int>(wavefrontSize / 2)};
+
+    if (wavefrontSize == 32) {
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::Reduce, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::InclusiveScan, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::ExclusiveScan, blockDim);
+    } else {
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::Reduce, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::InclusiveScan, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::ExclusiveScan, blockDim);
+    }
+  }
+
+  SECTION("3D") {
+    dim3 blockDim {static_cast<unsigned int>(wavefrontSize) / 2, 2, 1};
+
+    if (wavefrontSize == 32) {
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::Reduce, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::InclusiveScan, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 32>(AggregationType::ExclusiveScan, blockDim);
+    } else {
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::Reduce, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::InclusiveScan, blockDim);
+      runAggregationRandomForType<false, std::plus<int>, int, 64>(AggregationType::ExclusiveScan, blockDim);
+    }
+  }
+}
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned int, long long,
+                   unsigned long long, float, half, double)
+{
+  std::tuple<cooperative_groups::plus<TestType>,
+             cooperative_groups::less<TestType>,
+             cooperative_groups::greater<TestType>> ops;
+
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<true, TestType, 32>(AggregationType::InclusiveScan, ops);
+    } else {
+      runAggregationRandomForOps<true, TestType, 64>(AggregationType::InclusiveScan, ops);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<true, TestType, 32>(AggregationType::ExclusiveScan, ops);
+    } else {
+      runAggregationRandomForOps<true, TestType, 64>(AggregationType::ExclusiveScan, ops);
+    }
+  }
+}
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, long long,
+                   unsigned long long)
+{
+  std::tuple<cooperative_groups::bit_and<TestType>,
+             cooperative_groups::bit_or<TestType>,
+             cooperative_groups::bit_xor<TestType>> ops;
+
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<true, TestType, 32>(AggregationType::InclusiveScan, ops);
+    } else {
+      runAggregationRandomForOps<true, TestType, 64>(AggregationType::InclusiveScan, ops);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<true, TestType, 32>(AggregationType::ExclusiveScan, ops);
+    } else {
+      runAggregationRandomForOps<true, TestType, 64>(AggregationType::ExclusiveScan, ops);
+    }
+  }
+}
+
+void __global__ binaryPartitionCoalesced(int* out, int* ranks)
+{
+   if (threadIdx.x >= warpSize / 2) {
+     // this group will contain the upper part of the threads
+     auto coalesced = cg::coalesced_threads();
+
+     // this group is subsequently split in two: on even and odd indexes
+     auto partitioned = cg::binary_partition(coalesced, threadIdx.x % 2);
+
+     ranks[threadIdx.x] = partitioned.thread_rank();
+     out[threadIdx.x] = cg::inclusive_scan(partitioned, threadIdx.x);
+   } else {
+     ranks[threadIdx.x] = -1;
+     out[threadIdx.x] = -1;
+   }
+}
+
+template <unsigned int WarpSize>
+void __global__ binaryPartitionTiled(int* out, int* ranks)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto tile = cg::tiled_partition<WarpSize / 2>(mygroup);
+
+  if (tile.meta_group_rank() == 1) {
+    auto partitioned = cg::binary_partition(tile, threadIdx.x % 2);
+    ranks[threadIdx.x] = partitioned.thread_rank();
+    out[threadIdx.x] = cg::inclusive_scan(partitioned, threadIdx.x);
+  } else {
+    ranks[threadIdx.x] = -1;
+    out[threadIdx.x] = -1;
+  }
+}
+
+TEST_CASE(Unit_Thread_Block_Scan_partition)
+{
+  int wavefrontSize = getWarpSize();
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int) * wavefrontSize);
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, h_result.size_bytes());
+  LinearAllocGuard<int> h_ranks(LinearAllocs::malloc, sizeof(int) * wavefrontSize);
+  LinearAllocGuard<int> d_ranks(LinearAllocs::hipMalloc, h_ranks.size_bytes());
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
+  void* resultsPtr = d_result.ptr();
+  void* ranksPtr = d_ranks.ptr();
+  void* args[] = { &resultsPtr, &ranksPtr };
+  auto checkResults = [&]() {
+    int accumEven = 0;
+    int accumOdd = 0;
+
+    for (int laneId = 0; laneId < getWarpSize(); laneId++) {
+      if (laneId >= wavefrontSize / 2) {
+        if (laneId % 2 == 0) {
+          accumEven += laneId;
+        } else {
+          accumOdd += laneId;
+        }
+
+        INFO("laneId: " << laneId);
+        REQUIRE(h_ranks.host_ptr()[laneId] == (laneId - wavefrontSize / 2) / 2);
+        REQUIRE(h_result.host_ptr()[laneId] == (laneId % 2 ? accumOdd : accumEven));
+      } else {
+        INFO("laneId: " << laneId);
+        REQUIRE(h_ranks.host_ptr()[laneId] == -1);
+        REQUIRE(h_result.host_ptr()[laneId] == -1);
+      }
+    }
+  };
+
+  // the result of both sections must be the same; in one we use coalesced_threads to sub-divide
+  // into higher-order and lower-order threads, in another we just use cg::tiled_partition to do the
+  // equivalent
+  SECTION("coalesced") {
+    HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(binaryPartitionCoalesced),
+                                        gridDim,
+                                        blockDim,
+                                        args,
+                                        0,
+                                        nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(h_ranks.host_ptr(), d_ranks.ptr(),
+                        h_ranks.size_bytes(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                        h_result.size_bytes(), hipMemcpyDeviceToHost));
+    checkResults();
+  }
+
+  SECTION("tiled") {
+    void* kernelPtr = reinterpret_cast<void*>(wavefrontSize == 32?
+                                              binaryPartitionTiled<32> : binaryPartitionTiled<64>);
+    HIP_CHECK(hipLaunchCooperativeKernel(kernelPtr,
+                                         gridDim,
+                                         blockDim,
+                                         args,
+                                         0,
+                                         nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(h_ranks.host_ptr(), d_ranks.ptr(),
+                        h_ranks.size_bytes(), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                        h_result.size_bytes(), hipMemcpyDeviceToHost));
+    checkResults();
+  }
+}
+
+__global__ void multiDimReduce(int* output)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<16>(mygroup);
+  int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+
+  output[tid] = cooperative_groups::reduce(mytile, tid, cooperative_groups::plus<int>());
+}
+
+// test tiles reduces on multidimensional blocks. Basically splits the 128 threads in the block
+// into 16 threads tiles, each one contributing the tid to their reduces
+HIP_TEST_CASE(Unit_Thread_Block_Tile_Multi_Dimensional_Reduce)
+{
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int) * 128);
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, h_result.size_bytes());
+  dim3 gridDim = { 1 };
+  // use a block size bigger than the warp size
+  dim3 blockDim = { 16, 4, 2 };
+  void* devicePtr = d_result.ptr();
+  void* args[1] = { &devicePtr };
+  hipError_t status;
+
+  status = hipLaunchCooperativeKernel(multiDimReduce,
+                                      gridDim,
+                                      blockDim,
+                                      args,
+                                      0,
+                                      nullptr);
+  HIP_CHECK(status);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+
+  for (int row = 0; row < 8; row++) {
+    int rowResult = 0;
+
+    for (int index = 0; index < 16; index++) {
+      rowResult += row * 16 + index;
+    }
+
+    for (int index = 0; index < 16; index++) {
+      INFO("row: " << row << " index: " << index);
+      REQUIRE(h_result.host_ptr()[row * 16 + index] == rowResult);
+    }
+  }
+}
 
 /**
  * End doxygen group DeviceLanguageTest.

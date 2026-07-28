@@ -81,7 +81,8 @@ public:
   /// @param[in] mnemonic Human-readable mnemonic (must point to static storage
   ///            or storage that outlives the instruction — typically a string
   ///            literal or a member of the encoding base class).
-  Instruction(std::string_view mnemonic, ExecuteFn exec) : execute(exec), mnemonic_(mnemonic) {}
+  Instruction(std::string_view mnemonic, ExecuteFn exec, uint64_t src_loc = 0)
+      : execute(exec), src_loc_(src_loc), mnemonic_(mnemonic) {}
   virtual ~Instruction() = default;
 
   /// @brief Pool allocator hooks, set by the decoder's enable_pool().
@@ -116,7 +117,8 @@ public:
   /// @brief Direct execute dispatch.  Callers invoke as:
   ///   ``inst->execute(*inst, &ctx)``
   /// Each derived instruction class sets this to a trampoline that calls
-  /// its ``execute_impl()`` method.  No virtual dispatch.
+  /// its ``execute_impl()`` method. In a model-only DBT image this is nullptr
+  /// and must not be called. No virtual dispatch.
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
@@ -176,6 +178,14 @@ public:
   /// @returns Encoding size in bytes.
   int size() const { return size_; }
 
+  /// @brief Source byte offset of this instruction in the decoded text section.
+  ///
+  /// @details Most decoder users only care about the instruction encoding and
+  /// leave this as zero. CFG builders decode from a text stream and pass the
+  /// stream offset through Decoder::decode() so analyses can carry instruction
+  /// pointers without a parallel offset wrapper.
+  [[nodiscard]] uint64_t src_loc() const { return src_loc_; }
+
   /// @brief Whether this instruction is a direct branch.
   /// @retval true The instruction has BRANCH or COND_BRANCH metadata.
   /// @retval false The instruction is not a direct branch.
@@ -231,13 +241,16 @@ public:
     if (disassembly_.empty()) {
       disassembly_ = mnemonic_;
       bool first = true;
+      // TODO: Include explicit fieldless operands (and/or implicit ones too).
       for (uint8_t i = 0; i < num_dst_; ++i) {
+        if (dst_operands_[i]->is_fieldless())
+          continue;
         disassembly_ += (first ? " " : ", ");
         disassembly_ += dst_operands_[i]->name();
         first = false;
       }
       for (uint8_t i = 0; i < num_src_; ++i) {
-        if (src_operands_[i]->size_bits() == 0)
+        if (src_operands_[i]->size_bits() == 0 || src_operands_[i]->is_fieldless())
           continue;
         disassembly_ += (first ? " " : ", ");
         disassembly_ += src_operands_[i]->name();
@@ -249,13 +262,18 @@ public:
   }
 
 protected:
+  friend class Decoder;
+
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
-  /// @brief Instruction's source operands (max 6).
+  /// @brief Instruction's source operands (max 6). KEEP IN SYNC with
+  /// CodeGenerator._SRC_OPERANDS_CAPACITY (the generator's overflow tripwire
+  /// mirrors this size); resize both together.
   std::array<Operand *, 6> src_operands_{};
   uint8_t num_src_ = 0;
-  /// @brief Instruction's destination operands (max 2).
-  std::array<Operand *, 2> dst_operands_{};
+  /// @brief Instruction's destination operands (max 3). KEEP IN SYNC with
+  /// CodeGenerator._DST_OPERANDS_CAPACITY; resize both together.
+  std::array<Operand *, 3> dst_operands_{};
   uint8_t num_dst_ = 0;
   /// @brief Append modifier flags to the disassembly string (e.g. " sc0 sc1").
   /// Overridden by memory encoding bases that have flag bits to display.
@@ -272,10 +290,15 @@ protected:
   uint16_t encoding_id_ = 0;
   /// @brief Opcode within the encoding format.
   uint16_t opcode_ = 0;
+  /// @brief Source byte offset assigned at construction or by Decoder::decode().
+  uint64_t src_loc_ = 0;
 
 protected:
   std::string_view mnemonic_;
 };
+
+/// @brief Return a callback from the per-ISA backend active during decoding.
+Instruction::ExecuteFn current_instruction_execute(size_t instruction_id) noexcept;
 
 /// @brief Abstract class that holds static ISA state for a specific instruction instance.
 ///
@@ -288,7 +311,8 @@ public:
 
   /// @brief Construct an ISA instruction with the given mnemonic.
   /// @param[in] mnemonic Human-readable mnemonic string.
-  IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn) : Instruction(mnemonic, exec_fn) {}
+  IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn, uint64_t src_loc = 0)
+      : Instruction(mnemonic, exec_fn, src_loc) {}
 
   /// @brief Helper to create an execute dispatch trampoline for a concrete type.
   ///
@@ -303,6 +327,11 @@ public:
     return [](Instruction &self, void *ctx) {
       static_cast<Derived &>(self).execute_impl(*static_cast<typename Isa::Context *>(ctx));
     };
+  }
+
+  /// @brief Select a callback from the active immutable per-ISA table.
+  static ExecuteFn selected_exec_fn(size_t instruction_id) {
+    return current_instruction_execute(instruction_id);
   }
 };
 

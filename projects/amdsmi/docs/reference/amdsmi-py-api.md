@@ -1129,6 +1129,56 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_vcn_busy_percent
+
+Description: Returns the VCN (Video Core Next) engine busy percentage for the given GPU.
+Only supported on bare-metal Linux.
+
+```{note}
+**MI-series vs. Navi/RDNA devices:** On MI-series GPUs (CDNA 3 and later, such as MI300X),
+per-partition VCN utilization is also available via the `xcp_stats.vcn_busy` field returned
+by `amdsmi_get_gpu_metrics()`. Navi/RDNA GPUs do not support partitioning, so
+`amdsmi_get_vcn_busy_percent` provides a single device-wide value and
+`xcp_stats.vcn_busy` is not applicable. See the
+[GPU partitioning](/conceptual/partition.md) guide for background on the partition model.
+```
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Integer representing VCN busy percentage (0 - 100)
+
+Exceptions that can be thrown by `amdsmi_get_vcn_busy_percent` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - Data read from sysfs is not in the expected format or is empty
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            vcn_busy = amdsmi.amdsmi_get_vcn_busy_percent(device)
+            print(vcn_busy)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_power_info
 
 Description: Returns the current power and voltage for the given GPU.

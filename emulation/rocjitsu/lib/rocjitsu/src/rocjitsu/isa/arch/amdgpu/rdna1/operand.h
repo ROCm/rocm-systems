@@ -18,10 +18,14 @@ namespace rdna1 {
 class Operand : public AmdgpuIsaOperand<Isa> {
 public:
   Operand(int size_bits, OperandType opr_type, int encoding_value);
+  Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
+          bool has_literal16_display);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<RegisterRef> to_register_ref() const override;
+
+private:
   uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
   uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
   void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;
@@ -32,6 +36,8 @@ public:
   void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
 
 private:
+  uint16_t literal16_display_value_ = 0;
+  bool has_literal16_display_ = false;
   uint64_t literal64_value_ = 0;
   bool has_literal64_ = false;
 };

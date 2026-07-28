@@ -1,6 +1,8 @@
 [project]
 name = "rocprof_compute"
-requires-python = ">=3.9"
+# Baseline floor for the project (profile mode). Analyze mode requires >=3.9,
+# enforced at runtime in src/rocprof-compute.
+requires-python = ">=3.8"
 
 [tool.ruff]
 line-length = 88
@@ -110,12 +112,9 @@ markers = [
     "noise_clamp",
     "torch_ops",
     "torch_trace",
-    "division_by_zero",
+    "triton_trace",
     "multi_rank",
     "experimental_feature",
     "skip",
-    "time_unit_conversion",
-    "time_unit_edge_cases",
-    "time_unit_integration",
     "tui",
 ]

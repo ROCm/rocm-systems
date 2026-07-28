@@ -5,7 +5,14 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:demangler-tests>
+    $<TARGET_OBJECTS:track-registry-tests>
+    $<TARGET_OBJECTS:packet-framing-tests>
+    $<TARGET_OBJECTS:perfetto-engine-tests>
+    $<TARGET_OBJECTS:perfetto-sinks-tests>
+    $<TARGET_OBJECTS:emission-handshake-tls-contract-tests>
     $<TARGET_OBJECTS:output-format-tests>
+    $<TARGET_OBJECTS:parse-numeric-range-tests>
+    $<TARGET_OBJECTS:rank-passes-filter-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>
@@ -14,11 +21,18 @@ set(UNIT_TEST_OBJECTS
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
 )
 
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:amd-smi-backend-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-amd-smi-provider-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-common-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-gpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-cpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:procfs-backend-tests>)
+list(
+    APPEND UNIT_TEST_OBJECTS
+    $<$<TARGET_EXISTS:rocprofiler-sdk-backend-tests>:$<TARGET_OBJECTS:rocprofiler-sdk-backend-tests>>
+)
+set(_rocprofsys_have_sdk_pmc_tests FALSE)
 if(
     (ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
     OR (
@@ -26,8 +40,12 @@ if(
         AND ROCPROFSYS_ROCM_VERSION_MINOR GREATER_EQUAL 4
     )
 )
-    list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-sdk-pmc-collector-tests>)
+    set(_rocprofsys_have_sdk_pmc_tests TRUE)
 endif()
+list(
+    APPEND UNIT_TEST_OBJECTS
+    $<$<BOOL:${_rocprofsys_have_sdk_pmc_tests}>:$<TARGET_OBJECTS:pmc-sdk-pmc-collector-tests>>
+)
 
 add_executable(rocprof-sys-unit-tests ${UNIT_TEST_OBJECTS})
 

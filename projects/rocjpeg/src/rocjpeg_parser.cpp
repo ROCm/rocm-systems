@@ -24,6 +24,8 @@ THE SOFTWARE.
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <cstdint>
+#include <limits>
 
 RocJpegStreamParser::RocJpegStreamParser() : stream_{nullptr}, stream_start_{nullptr}, stream_end_{nullptr}, stream_length_{0},
     jpeg_stream_parameters_{} {
@@ -198,6 +200,23 @@ bool RocJpegStreamParser::ParseSOF() {
     jpeg_stream_parameters_.picture_parameter_buffer.picture_width = swap_bytes(stream_ + 5);
     jpeg_stream_parameters_.picture_parameter_buffer.num_components = stream_[7];
 
+    // Clamp SOF dimensions to the safe JPEG maximum (ISO 10918-1 allows up to
+    // 65535, but values that large cause downstream arithmetic to overflow).
+    static constexpr uint16_t kMaxSafeDimension = 65500;
+    if (jpeg_stream_parameters_.picture_parameter_buffer.picture_width > kMaxSafeDimension ||
+        jpeg_stream_parameters_.picture_parameter_buffer.picture_height > kMaxSafeDimension) {
+        ErrorLog(g_rocjpeg_logger, "JPEG dimensions exceed safe maximum (" +
+            ROCJPEG_TOSTR(kMaxSafeDimension) + "): " +
+            ROCJPEG_TOSTR(jpeg_stream_parameters_.picture_parameter_buffer.picture_width) + "x" +
+            ROCJPEG_TOSTR(jpeg_stream_parameters_.picture_parameter_buffer.picture_height));
+        return false;
+    }
+    if (jpeg_stream_parameters_.picture_parameter_buffer.picture_width == 0 ||
+        jpeg_stream_parameters_.picture_parameter_buffer.picture_height == 0) {
+        ErrorLog(g_rocjpeg_logger, "JPEG has zero dimension!");
+        return false;
+    }
+
     if (jpeg_stream_parameters_.picture_parameter_buffer.num_components > NUM_COMPONENTS - 1) {
         ErrorLog(g_rocjpeg_logger, "Unsupported JPEG: " +
             ROCJPEG_TOSTR(static_cast<int>(jpeg_stream_parameters_.picture_parameter_buffer.num_components)) +
@@ -225,8 +244,38 @@ bool RocJpegStreamParser::ParseSOF() {
     uint8_t max_h_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[0].h_sampling_factor;
     uint8_t max_v_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[0].v_sampling_factor;
 
-    jpeg_stream_parameters_.slice_parameter_buffer.num_mcus = ((jpeg_stream_parameters_.picture_parameter_buffer.picture_width + max_h_factor * 8 - 1) / (max_h_factor * 8)) *
-                                       ((jpeg_stream_parameters_.picture_parameter_buffer.picture_height + max_v_factor * 8 - 1) / (max_v_factor * 8));
+    // Validate sampling factors before using them as divisors.
+    if (max_h_factor == 0 || max_v_factor == 0) {
+        ErrorLog(g_rocjpeg_logger, "Invalid SOF sampling factor (zero)!");
+        return false;
+    }
+
+    // Compute pixel-count product in 64-bit to detect overflow before it
+    // propagates to allocations. Reject images whose raw pixel footprint
+    // (width * height * num_components) would exceed SIZE_MAX/4.
+    {
+        uint64_t w = jpeg_stream_parameters_.picture_parameter_buffer.picture_width;
+        uint64_t h = jpeg_stream_parameters_.picture_parameter_buffer.picture_height;
+        uint64_t nf = jpeg_stream_parameters_.picture_parameter_buffer.num_components;
+        uint64_t pixel_count = w * h * nf;
+        constexpr uint64_t kMaxPixelCount = static_cast<uint64_t>(SIZE_MAX) / 4;
+        if (pixel_count > kMaxPixelCount) {
+            ErrorLog(g_rocjpeg_logger, "JPEG pixel count (" + ROCJPEG_TOSTR(pixel_count) +
+                ") exceeds safe allocation limit!");
+            return false;
+        }
+    }
+
+    {
+        uint64_t mcus_h = (static_cast<uint64_t>(jpeg_stream_parameters_.picture_parameter_buffer.picture_width)  + max_h_factor * 8u - 1u) / (max_h_factor * 8u);
+        uint64_t mcus_v = (static_cast<uint64_t>(jpeg_stream_parameters_.picture_parameter_buffer.picture_height) + max_v_factor * 8u - 1u) / (max_v_factor * 8u);
+        uint64_t total_mcus = mcus_h * mcus_v;
+        if (total_mcus > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
+            ErrorLog(g_rocjpeg_logger, "JPEG MCU count overflows uint32_t!");
+            return false;
+        }
+        jpeg_stream_parameters_.slice_parameter_buffer.num_mcus = static_cast<uint32_t>(total_mcus);
+    }
 
     jpeg_stream_parameters_.chroma_subsampling = GetChromaSubsampling(jpeg_stream_parameters_.picture_parameter_buffer.components[0].h_sampling_factor,
                                                                       jpeg_stream_parameters_.picture_parameter_buffer.components[1].h_sampling_factor,

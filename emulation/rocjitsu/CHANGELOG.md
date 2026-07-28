@@ -4,6 +4,21 @@ All notable changes to rocjitsu are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-17
+
+### Added
+- Public `rj_daemon_start()`, `rj_daemon_stop()`, and `rj_daemon_status()` APIs
+  for hosting a daemon-mode VM and its Unix-socket RPC server in
+  `librocjitsu`
+
+### Changed
+- Use the shared daemon lifecycle implementation from both the RocJitsu CLI and
+  Mirage, eliminating their duplicate RPC server implementations
+- Accept JSON configuration contents directly in `rj_daemon_start()` while
+  retaining path-based configuration at the frontend command-line interfaces
+- Harden daemon startup and shutdown with stale-socket recovery, socket
+  identity checks, active-client interruption, and ordered thread cleanup
+
 ## [0.2.0] - 2026-06-23
 
 ### Changed

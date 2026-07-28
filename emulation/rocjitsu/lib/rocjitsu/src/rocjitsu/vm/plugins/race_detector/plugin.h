@@ -9,7 +9,6 @@
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -62,40 +61,25 @@ std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
 /// Shared per-dispatch because all wavefronts execute the same kernel code.
 /// Per-wavefront caches caused cache thrashing under round-robin scheduling.
 ///
-/// Indexed by (pc - base) / 4, avoiding hash-map overhead on the hot path.
-/// The mutex is only taken for vector resizes (rare) and first writes
-/// (~100 unique PCs per kernel).
+/// Keyed by absolute PC. This avoids assuming that a dispatch executes a single
+/// compact, monotonic text range; helper/trampoline code can be far away from
+/// the first PC observed for the dispatch.
 struct DisasmCache {
   void record(uint64_t pc, const Instruction &inst) {
-    size_t idx = pc_to_idx(pc);
-    if (idx < size_.load(std::memory_order_acquire) && !entries_[idx].empty())
-      return;
     std::lock_guard<std::mutex> lock(mutex_);
-    if (entries_.empty())
-      base_ = pc;
-    idx = pc_to_idx(pc);
-    if (idx >= entries_.size())
-      entries_.resize(std::max(idx + 1, entries_.size() * 2));
-    if (entries_[idx].empty())
-      entries_[idx] = inst.disassemble();
-    size_.store(entries_.size(), std::memory_order_release);
+    if (entries_.contains(pc))
+      return;
+    entries_.emplace(pc, inst.disassemble());
   }
 
   std::unordered_map<uint64_t, std::string> to_map() const {
-    std::unordered_map<uint64_t, std::string> m;
-    for (size_t i = 0; i < entries_.size(); ++i)
-      if (!entries_[i].empty())
-        m[base_ + i * 4] = entries_[i];
-    return m;
+    std::lock_guard<std::mutex> lock(mutex_);
+    return entries_;
   }
 
 private:
-  size_t pc_to_idx(uint64_t pc) const { return (pc - base_) / 4; }
-
-  std::mutex mutex_;
-  uint64_t base_ = 0;
-  std::vector<std::string> entries_;
-  std::atomic<size_t> size_{0};
+  mutable std::mutex mutex_;
+  std::unordered_map<uint64_t, std::string> entries_;
 };
 
 struct RaceWavefrontState : WavefrontState {
@@ -106,7 +90,9 @@ struct RaceWavefrontState : WavefrontState {
 
 class RaceDetectorPlugin : public ExecutionPlugin {
 public:
-  RaceDetectorPlugin();
+  /// @param config_json Plugin configuration object as a JSON string (unused;
+  ///        this plugin takes no configuration). May be null.
+  explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
@@ -117,8 +103,8 @@ public:
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override;
 
-  void onAmdgpuReadVgprs(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane_begin,
-                         uint32_t lane_end, uint8_t byte_mask = 0xF) override;
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
+                             uint8_t byte_mask = 0xF) override;
 
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) override;
 
@@ -141,6 +127,11 @@ private:
     }
   };
 
+  struct KernelNames {
+    std::string name;
+    std::string symbol;
+  };
+
   RaceWavefrontState *get_state(const amdgpu::Wavefront &wf) {
     return static_cast<RaceWavefrontState *>(wf.plugin_state(slot_index()));
   }
@@ -154,6 +145,7 @@ private:
 
   std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
+  std::unordered_map<uint32_t, KernelNames> dispatch_kernel_names_;
 };
 
 } // namespace rocjitsu::plugins::race_detector

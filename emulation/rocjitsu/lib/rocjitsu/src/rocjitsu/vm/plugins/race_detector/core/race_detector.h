@@ -21,7 +21,8 @@ namespace rocjitsu::plugins::race_detector {
 ///   1. allocateEventId() — registers a new event (ACTIVE).
 ///   2. markEventWaveComplete() — transitions to WAVE_COMPLETE (s_waitcnt).
 ///   3. retireEvent() — removes from live lists, decrements byte counts,
-///      marks RETIRED (called at s_barrier via flushWaveCompleteMemoryEvents).
+///      marks RETIRED (for LDS events, called at s_barrier via
+///      flushBarrierPendingEvents).
 ///
 /// LDS race validation uses a two-level approach:
 ///   - Fast path: per-byte counters (byteWriteCounts / byteReadCounts)

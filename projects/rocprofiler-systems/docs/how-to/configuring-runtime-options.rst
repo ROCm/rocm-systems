@@ -316,6 +316,12 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
 
+Add ``hipfile_api`` to trace the hipFILE (GPU-direct storage) API:
+
+.. code-block:: shell
+
+   ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,hipfile_api
+
 
 For KFD event tracing, first check whether your GPU supports XNACK by running
 ``rocminfo | grep xnack``. If the output contains ``xnack-``, XNACK is available
@@ -424,10 +430,9 @@ Example: trace only activity inside a region named ``Compute``:
 
 .. code-block:: shell
 
-   rocprof-sys-run \
-       -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
-       -e ROCPROFSYS_SELECTED_REGIONS=Compute \
-       -- ./my_app
+   ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
+   ROCPROFSYS_SELECTED_REGIONS=Compute \
+   rocprof-sys-run -- ./my_app
 
 rocprof-sys-avail examples
 -----------------------------------

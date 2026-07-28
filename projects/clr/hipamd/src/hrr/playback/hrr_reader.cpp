@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -70,6 +71,45 @@ std::string hash_hex(uint64_t lo, uint64_t hi) {
 const char* event_type_name(uint16_t type) {
   if (type < HRR_API_COUNT) return hrr_api_names[type];
   return "UNKNOWN";
+}
+
+static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
+  std::vector<fs::path> dirs;
+  if (!fs::exists(root) || !fs::is_directory(root)) return dirs;
+  for (const auto& ent : fs::directory_iterator(root)) {
+    if (!ent.is_directory()) continue;
+    const std::string name = ent.path().filename().string();
+    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
+      dirs.push_back(ent.path());
+  }
+  std::sort(dirs.begin(), dirs.end());
+  return dirs;
+}
+
+static bool resolve_archive_path(const std::string& input, std::string& resolved) {
+  fs::path path(input);
+  if (fs::exists(path / "events.bin")) {
+    resolved = path.string();
+    return true;
+  }
+
+  std::vector<fs::path> pid_dirs = find_pid_subarchives(path);
+  if (pid_dirs.empty()) {
+    fprintf(stderr, "[HRR] Cannot open %s\n", (path / "events.bin").string().c_str());
+    return false;
+  }
+  if (pid_dirs.size() == 1) {
+    resolved = pid_dirs.front().string();
+    return true;
+  }
+
+  fprintf(stderr,
+          "[HRR] Archive root %s contains multiple process captures; "
+          "point hrr-playback at a specific pid directory:\n",
+          input.c_str());
+  for (const auto& dir : pid_dirs)
+    fprintf(stderr, "[HRR]   %s\n", dir.string().c_str());
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +175,15 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
     if (p + arg.size > end) return false;
     arg.data.assign(p, p + arg.size);
     p += arg.size;
+    if (arg.value_kind == 3) {  // trailing embedded-pointer offset list
+      if (p + 2 > end) return false;
+      uint16_t n_ptrs; memcpy(&n_ptrs, p, 2); p += 2;
+      for (uint16_t k = 0; k < n_ptrs; k++) {
+        if (p + 2 > end) return false;
+        uint16_t off; memcpy(&off, p, 2); p += 2;
+        arg.ptr_offsets.push_back(off);
+      }
+    }
     kl.args.push_back(std::move(arg));
   }
 
@@ -159,9 +208,12 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
 // ---------------------------------------------------------------------------
 
 bool load_archive(const std::string& path, Archive& archive) {
-  archive.path = path;
+  std::string archive_dir;
+  if (!resolve_archive_path(path, archive_dir))
+    return false;
+  archive.path = archive_dir;
 
-  std::string events_path = path + "/events.bin";
+  std::string events_path = archive_dir + "/events.bin";
   FILE* f = fopen(events_path.c_str(), "rb");
   if (!f) {
     fprintf(stderr, "[HRR] Cannot open %s\n", events_path.c_str());
@@ -184,28 +236,60 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
   archive.version = fh.version;
 
-  // Read events sequentially
-  bool read_error = false;
+  // Read events sequentially.
+  //
+  // Crash resilience: events.bin is an append-only log of self-delimiting
+  // records, so a partial write can only ever be the LAST record. A torn header
+  // or payload at the tail is therefore treated as a recovery point — we keep
+  // every complete record already parsed and mark the archive truncated, rather
+  // than discarding the whole capture. The clean-shutdown trailer
+  // (hrr_eof_record) explicitly marks a whole archive.
+  bool truncated = false;
+  bool complete  = false;
+  const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   while (true) {
     Event ev;
     // Read the header first to get payload_length, then read the rest into
     // raw_payload as one contiguous block: header(32) + fields.
-    uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
     ev.raw_payload.resize(hdr_size);
-    if (fread(ev.raw_payload.data(), hdr_size, 1, f) != 1) break;  // clean EOF
+    size_t got = fread(ev.raw_payload.data(), 1, hdr_size, f);
+    if (got == 0) break;  // clean EOF at a record boundary
+    if (got < hdr_size) {
+      fprintf(stderr,
+              "[HRR] Truncated event header (%zu/%u bytes) at tail — recovered %zu events\n",
+              got, hdr_size, archive.events.size());
+      truncated = true; break;
+    }
 
-    uint16_t total = ev.header().payload_length;
+    const uint16_t etype = ev.header().event_type;
+    const uint32_t total = ev.header().payload_length;
+
     if (total < hdr_size) {
-      fprintf(stderr, "[HRR] Corrupt event: payload_length %u < header size %u\n",
-              total, hdr_size);
-      read_error = true; break;
+      fprintf(stderr,
+              "[HRR] Torn trailing record (payload_length %u < %u) — recovered %zu events\n",
+              total, hdr_size, archive.events.size());
+      truncated = true; break;
     }
     if (total > hdr_size) {
       ev.raw_payload.resize(total);
-      uint16_t pl_size = total - hdr_size;
+      uint32_t pl_size = total - hdr_size;
       if (fread(ev.raw_payload.data() + hdr_size, 1, pl_size, f) != pl_size) {
-        fprintf(stderr, "[HRR] Truncated event payload (expected %u bytes)\n", pl_size);
-        read_error = true; break;
+        fprintf(stderr,
+                "[HRR] Truncated event payload (expected %u bytes) at tail — recovered %zu events\n",
+                pl_size, archive.events.size());
+        truncated = true; break;
+      }
+    }
+
+    // Clean-shutdown trailer: full hrr_eof_record with valid magic only.
+    // event_type 0xFFFF alone is not enough — Unit_HRR_Format_UnknownEventType
+    // uses 0xFFFF with header-sized payload as an opaque unknown record.
+    if (etype == HRR_EOF_MARKER &&
+        total == static_cast<uint32_t>(sizeof(hrr_eof_record))) {
+      const auto* er = reinterpret_cast<const hrr_eof_record*>(ev.raw_payload.data());
+      if (er->eof_magic == HRR_EOF_MAGIC) {
+        complete = true;
+        continue;  // do not append trailer as a replay event
       }
     }
 
@@ -214,7 +298,7 @@ bool load_archive(const std::string& path, Archive& archive) {
     // A malformed archive could supply a valid event_type with payload_length == 32
     // (header only), which would cause an OOB read in the typed cast.
     #define AS(T) reinterpret_cast<const T*>(ev.raw_payload.data())
-    #define SIZE_OK(T) (total >= static_cast<uint16_t>(sizeof(T)))
+    #define SIZE_OK(T) (total >= static_cast<uint32_t>(sizeof(T)))
 
     switch (ev.header().event_type) {
 
@@ -294,6 +378,31 @@ bool load_archive(const std::string& path, Archive& archive) {
         ev.stream_handle      = a->stream;
         ev.memcpy_ev.hash_lo  = a->blob_hash_lo;
         ev.memcpy_ev.hash_hi  = a->blob_hash_hi;
+        break;
+      }
+
+      case HRR_API_HIPMEMCPY2D: {
+        if (!SIZE_OK(hrr_args_hipMemcpy2D)) break;
+        const auto* a = AS(hrr_args_hipMemcpy2D);
+        ev.memcpy_ev.dst_addr = a->dst;
+        ev.memcpy_ev.src_addr = a->src;
+        ev.memcpy_ev.size     = a->width * a->height;  // logical bytes (best-effort)
+        ev.memcpy_ev.kind     = a->kind;
+        // H2D blob if present, else D2H expected-output blob.
+        ev.memcpy_ev.hash_lo  = a->blob_hash_lo ? a->blob_hash_lo : a->d2h_hash_lo;
+        ev.memcpy_ev.hash_hi  = a->blob_hash_lo ? a->blob_hash_hi : a->d2h_hash_hi;
+        break;
+      }
+      case HRR_API_HIPMEMCPY2DASYNC: {
+        if (!SIZE_OK(hrr_args_hipMemcpy2DAsync)) break;
+        const auto* a = AS(hrr_args_hipMemcpy2DAsync);
+        ev.memcpy_ev.dst_addr = a->dst;
+        ev.memcpy_ev.src_addr = a->src;
+        ev.memcpy_ev.size     = a->width * a->height;  // logical bytes (best-effort)
+        ev.memcpy_ev.kind     = a->kind;
+        ev.stream_handle      = a->stream;
+        ev.memcpy_ev.hash_lo  = a->blob_hash_lo ? a->blob_hash_lo : a->d2h_hash_lo;
+        ev.memcpy_ev.hash_hi  = a->blob_hash_lo ? a->blob_hash_hi : a->d2h_hash_hi;
         break;
       }
 
@@ -429,7 +538,15 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   fclose(f);
-  if (read_error) return false;
+
+  archive.complete  = complete;
+  archive.truncated = truncated;
+  if (!complete) {
+    fprintf(stderr,
+            "[HRR] Archive has no clean-shutdown trailer (capture likely crashed); "
+            "recovered %zu events%s\n",
+            archive.events.size(), truncated ? ", trailing torn record discarded" : "");
+  }
 
   // Sort events by sequence_id to restore causal ordering across threads.
   // Multi-threaded captures write events from different threads in file-arrival
@@ -453,7 +570,7 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   // Enumerate blobs
-  std::string blobs_dir = path + "/blobs";
+  std::string blobs_dir = archive_dir + "/blobs";
   if (fs::exists(blobs_dir)) {
     for (auto& entry : fs::recursive_directory_iterator(blobs_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".blob") {
@@ -464,7 +581,7 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   // Enumerate code objects
-  std::string co_dir = path + "/code_objects";
+  std::string co_dir = archive_dir + "/code_objects";
   if (fs::exists(co_dir)) {
     for (auto& entry : fs::directory_iterator(co_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".hsaco") {

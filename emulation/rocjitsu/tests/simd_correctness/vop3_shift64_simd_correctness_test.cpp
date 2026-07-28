@@ -5,7 +5,8 @@
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the 64-bit-lane
 /// VOP3 shifts on CDNA4: the reverse shifts v_lshlrev_b64 / v_lshrrev_b64 /
 /// v_ashrrev_i64 (shift the 64-bit src1 by the 32-bit src0, masked to [0,63])
-/// and v_lshl_add_u64 ((src0 << (src1 & 63)) + src2). These use the new
+/// and v_lshl_add_u64 ((src0 << (src1 & 63)) + src2). The mad64 coverage also
+/// checks v_mad_u64_u32's explicit SDST carry-out mask. These use the new
 /// mixed-width 64-bit shift glue (32-bit count + 64-bit value); shifts produce
 /// no NaN so every value is compared exactly. Each case runs TWICE in the same
 /// process -- once forcing the scalar body, once the SIMD fast path, with
@@ -298,6 +299,8 @@ void check_mad64(const char *name, uint32_t op, bool is_signed, uint64_t exec) {
           << name << ": SIMD sdst mismatch for a" << arot << ":c" << crot;
       compare_and_check_inactive(name, exec, scalar_out.dst, simd_out.dst,
                                  "a" + std::to_string(arot) + ":c" + std::to_string(crot));
+      EXPECT_EQ(scalar_out.sdst, simd_out.sdst)
+          << name << " a" << arot << ":c" << crot << ": SIMD SDST diverged from scalar body";
     }
 }
 
