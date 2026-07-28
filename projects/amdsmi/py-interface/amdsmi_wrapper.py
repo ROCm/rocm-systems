@@ -169,7 +169,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Dynamic library loading
 # ---------------------------------------------------------------------------
-# This wrapper supports two self-contained install paths:
+# This wrapper supports three self-contained install paths:
 #
 #   1. pip wheel
 #      The wheel ships ``libamd_smi_python.so`` next to this file.
@@ -180,15 +180,24 @@ from pathlib import Path
 #      ``/opt/rocm/lib`` so the dynamic linker resolves the SONAME
 #      ``libamd_smi.so.<SOVERSION>`` without further help.
 #
-# A user installs ONE of those two packages. We never combine paths
-# from both -- no ROCM_HOME / ROCM_PATH ladders, no walking up to a
+#   3. relocatable ROCm tree (TheRock rocm-sdk wheels, portable tarball)
+#      Wrapper at ``<root>/share/amd_smi/amdsmi/``, library at
+#      ``<root>/lib/<SONAME>`` -- resolved by fixed relative path.
+#
+# A user installs ONE of these packages. We never combine paths
+# from them -- no ROCM_HOME / ROCM_PATH ladders, no walking up to a
 # ROCm root, no LD_LIBRARY_PATH probing. ``AMDSMI_LIB_OVERRIDE`` stays
 # as a single-purpose escape hatch for ABI tests that need to load an
 # alternate .so explicitly.
 # ---------------------------------------------------------------------------
 
+_libraries = {}
 
-# Versioned SONAME the system package ships; matches src/CMakeLists.txt SOVERSION.
+
+# SONAME the system rpm/deb ships and the relocatable tree names. Always the
+# system lib, never the wheel-private libamd_smi_python.so, even when the
+# wrapper is generated with -l libamd_smi_python.so. Major = src/CMakeLists.txt
+# SOVERSION (= AMDSMI_LIB_VERSION_MAJOR in amdsmi.h).
 _AMDSMI_LIB_SONAME = "libamd_smi.so.27"
 
 # Whether the loader may fall back to the system SONAME after the bundled
@@ -206,7 +215,8 @@ def _load_library():
     Order:
       1. ``AMDSMI_LIB_OVERRIDE`` env var (ABI-test escape hatch).
       2. ``libamd_smi_python.so`` next to this file (pip wheel).
-      3. SONAME via the dynamic linker (system rpm / deb); skipped when
+      3. ``<root>/lib/<SONAME>`` relative to this file (relocatable ROCm tree).
+      4. SONAME via the dynamic linker (system rpm / deb); skipped when
          _AMDSMI_ALLOW_SYSTEM_FALLBACK is False (pip wheel).
     """
     mode = getattr(ctypes, "RTLD_LOCAL", 0)
@@ -224,6 +234,15 @@ def _load_library():
             "bundled libamd_smi_python.so is missing from this amdsmi wheel; "
             "refusing to fall back to a system libamd_smi.so"
         )
+
+    # Relocatable ROCm tree: <root>/lib/<SONAME>, one fixed location relative
+    # to this file, tried before the bare-SONAME linker lookup (not a search).
+    # amdsmi_interface.py resolves librocm-core.so the same way.
+    here = Path(__file__).resolve()
+    if len(here.parents) > 3:
+        relocatable = here.parents[3] / "lib" / _AMDSMI_LIB_SONAME
+        if relocatable.exists():
+            return ctypes.CDLL(str(relocatable), mode=mode), str(relocatable)
 
     return ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode), _AMDSMI_LIB_SONAME
 
@@ -265,6 +284,7 @@ try:
 except OSError as _load_err:
     _libraries['libamd_smi.so'] = _MissingLibrary(_load_err)
     _loaded_lib_path = None
+
 
 #Add support for amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
