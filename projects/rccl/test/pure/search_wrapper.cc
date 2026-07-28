@@ -5,3 +5,9 @@
 int test_gpuPciBw(struct ncclTopoNode* gpu) {
   return gpuPciBw(gpu);
 }
+
+ncclResult_t test_ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c,
+                                            struct ncclTopoSystem* system,
+                                            struct ncclTopoGraph* graph) {
+  return ncclTopoGetChannelFromXml(xmlChannel, c, system, graph);
+}
