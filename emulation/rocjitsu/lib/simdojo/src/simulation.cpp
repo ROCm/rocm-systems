@@ -298,8 +298,15 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // Phase 4: Barrier (completion function computes new global_lbts).
       barrier_->arrive_and_wait();
       if (done_.load(std::memory_order_acquire)) {
-        // After arrive_and_wait, if done_ was set by the completion function,
-        // ALL threads see it simultaneously and ALL exit.
+        // When the completion function sets done_, every thread observes it
+        // here and they all exit together. request_exit() can also set it from
+        // an unrelated thread at any instant, in which case threads released
+        // from this same phase may disagree: one still reads false, loops, and
+        // commits to the next arrive_and_wait(). Drop rather than plain return,
+        // so a thread leaving now cannot strand that one at a phase whose
+        // expected count still counts us.
+        ctx.local_next.store(TICK_MAX, std::memory_order_relaxed);
+        barrier_->arrive_and_drop();
         return;
       }
     }
