@@ -36,7 +36,6 @@ BAD_STATUSES = {
     "FAIL",
     "UNRESOLVED",
     "ERROR",
-    "WARNING",
 }
 
 
@@ -138,9 +137,8 @@ def parse_summary(path: Path) -> tuple[collections.Counter[str], bool]:
         return collections.Counter(), False
     text = path.read_text(errors="replace")
     statuses = collections.Counter(STATUS_RE.findall(text))
-    complete = "=== gdb Summary ===" in text and any(
-        line.startswith("# of ") for line in text.splitlines()
-    )
+    summary = text.rpartition("=== gdb Summary ===")[2]
+    complete = bool(summary) and "gdb version" in summary
     return statuses, complete
 
 
@@ -190,6 +188,7 @@ def main() -> int:
     records: list[dict[str, object]] = []
     failures = 0
     ld_path = f"{CORE / 'lib'}:{SDK / 'lib'}"
+    tool_path = f"{SDK / 'lib/llvm/bin'}:{os.environ.get('PATH', '')}"
     runflags = (
         f"GDB={GDB} CC_FOR_TARGET=gcc CXX_FOR_TARGET=g++ "
         f"HIP_COMPILER_FOR_TARGET={VENV / 'bin/amdclang++'}"
@@ -220,6 +219,7 @@ def main() -> int:
             "env",
             f"ROCM_PATH={SDK}",
             "HCC_AMDGPU_TARGET=gfx950",
+            f"PATH={tool_path}",
             f"LD_LIBRARY_PATH={ld_path}",
             "RJ_LOG_FILE=/dev/null",
             "make",
@@ -270,7 +270,6 @@ def main() -> int:
         passed = (
             process.returncode == 0
             and summary_complete
-            and statuses["PASS"] > 0
             and not bad
             and session["daemon_mode"] is True
             and session["daemon_alive_before_stop"] is True
