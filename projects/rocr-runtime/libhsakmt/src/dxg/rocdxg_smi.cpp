@@ -1,17 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- */
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+//
+// SPDX-License-Identifier: MIT
 
 #include "hsakmt/rocdxg_smi.h"
 
@@ -116,6 +105,10 @@ struct D3DKMT_ENUMPROCESSES {
   uint64_t Buffer;
   uint64_t BufferCount;
 };
+// Size must match the dxgkrnl ioctl ABI: LX_DXENUMPROCESSES (nr=72, size=0x18 = 24 bytes).
+// Verified by decoding ioctl code 0xc0184748 from libdxcore.so D3DKMTEnumProcesses.
+static_assert(sizeof(D3DKMT_ENUMPROCESSES) == 0x18,
+              "D3DKMT_ENUMPROCESSES size mismatch vs dxgkrnl ioctl ABI");
 
 uint64_t target_graphics_version(wsl::thunk::WDDMDevice& device) {
   return (static_cast<uint64_t>(device.Major()) << 16) |
@@ -506,7 +499,7 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_device_info(uint32_t node_id,
   {
     uint32_t idx = 0;
     if (wdev->GetL1CacheSize() > 0)
-      info->cache.cache[idx++] = {wdev->GetL1CacheSize() / 1024, 1, 0x2, 2, 0};
+      info->cache.cache[idx++] = {wdev->GetL1CacheSize() / 1024, 1, 0x2, 2, 1};
     if (wdev->GetL2CacheSize() > 0)
       info->cache.cache[idx++] = {wdev->GetL2CacheSize() / 1024, 2, 0x3,
                                    wdev->ComputeUnitCount(), 1};
