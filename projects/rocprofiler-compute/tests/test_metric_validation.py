@@ -98,10 +98,12 @@ VALIDATE_METRICS = {
         "get_actual_func": get_hbm_bandwidth_peak,
         # Expected value measured on MI300X (gfx942). MI300 series may need
         # additional expected values for other SKUs (e.g. MI300A, MI308).
+        # MI300X: 4916 GB/s
+        # MI308X: 4225 GB/s
         "MI300": [
             {
                 "profile_metric_id": ["4.1.9"],
-                "expected_values": [4916.0],
+                "expected_values": [4916.0, 4225.0],
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI300",
