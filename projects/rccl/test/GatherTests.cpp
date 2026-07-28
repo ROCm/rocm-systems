@@ -141,10 +141,9 @@ namespace RcclUnitTesting
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
-}
 
 #if HIP_VERSION >= 71260540
-  TEST(AllReduce, SingleProcMemReg)
+  TEST(Gather, SingleProcMemReg)
   {
     TestBed testBed;
 
@@ -152,7 +151,7 @@ namespace RcclUnitTesting
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
     std::vector<ncclDataType_t> const dataTypes       = {ncclUint8, ncclUint32,ncclUint64};
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
-    std::vector<int>            const roots           = {0};
+    std::vector<int>            const roots           = {1};
     std::vector<int>            const numElements     = {1,4314};
     std::vector<bool>           const inPlaceList     = {true,false};
     std::vector<bool>           const managedMemList  = {false};
@@ -168,3 +167,5 @@ namespace RcclUnitTesting
     unsetenv("NCCL_CUMEM_ENABLE");
   }
 #endif
+}
+
