@@ -5,6 +5,11 @@ These let us iterate on policies WITHOUT pushing branches or running workflows:
   • Unit tests   — exercise individual validators / regex patterns.
   • Integration  — feed blobs of [branch, title, description, files] through
                    the higher-level ensure_* functions.
+
+Run locally:
+    python -m unittest .github/therock_pr_bot/test_policy_check_ut.py -v
+    # or
+    pytest .github/therock_pr_bot/test_policy_check_ut.py
 """
 
 import re
@@ -48,20 +53,10 @@ def make_policy(**overrides: Any) -> pc.Policy:
     if the shipped config changes.
     """
     defaults: Dict[str, Any] = dict(
-        branch_patterns=[
-            re.compile(r"^users\/[A-Za-z0-9][A-Za-z0-9\-]*\/.+"),
-            re.compile(r"^shared\/.+"),
-            re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-_]*$"),
-            re.compile(r"^dependabot\/.+"),
-            re.compile(r"^revert-[0-9]+-.+"),
-        ],
-        title_min_length=10,
-        title_max_length=80,
         description_min_length=30,
         description_issue_patterns=[re.compile(p) for p in _ISSUE_PATTERNS],
         description_checklist_patterns=[re.compile(p) for p in _CHECKLIST_PATTERNS],
         block_draft=True,
-        forbidden_title_patterns=[re.compile(r"(?i)\bWIP\b")],
         forbidden_paths=["**/*.pem", "**/.env", "**/id_rsa"],
         unit_test_code_extensions=[".py", ".cpp"],
         unit_test_patterns=[
@@ -70,6 +65,7 @@ def make_policy(**overrides: Any) -> pc.Policy:
             "*_test.*",
             "*_tests.*",
             "*_gtest.*",
+            "Test*",
             "**/test/gtest/**",
         ],
         unit_test_exempt_paths=[],
@@ -97,59 +93,8 @@ def make_file(
     }
 
 
-# ----------------------------- branch name -----------------------------------
-
-
-class BranchNameTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.policy = make_policy()
-
-    def _errs(self, branch: str) -> List[str]:
-        e: List[str] = []
-        pc.ensure_branch_name(self.policy, branch, e)
-        return e
-
-    def test_valid_branches(self) -> None:
-        for branch in [
-            "users/chi/ucicd_setup_visible_devices",
-            # Nested namespace/feature after the username is allowed.
-            "users/dgaliffi/fix/remove-build-boost-option",
-            # Uppercase letters are allowed (acronyms / module names).
-            "users/frepaul/ROCm-end-user-project-workflow",
-            "users/agunashe/hipModuleGetLoadingMode_test",
-            "compiler-ww-24-SMP-2",
-            "ZIP-packaging-RFC",
-            "shared/add-runner-health",
-            "shared/team/feature",
-            "bump-rocm-libraries-936a6c7",
-            "dependabot/github_actions/github-actions-3dfd2199fc",
-            "revert-5217-users/derobins/add_hipfile_support",
-        ]:
-            with self.subTest(branch=branch):
-                self.assertEqual(self._errs(branch), [])
-
-    def test_invalid_branches(self) -> None:
-        # "Feature/Bad" -> unknown prefix; "users//missing"/"users/" -> empty
-        # segments; "bad branch name" -> spaces are not allowed.
-        for branch in ["Feature/Bad", "users//missing", "bad branch name", "users/"]:
-            with self.subTest(branch=branch):
-                self.assertTrue(self._errs(branch))
-
-    def test_fork_pr_branch_name_is_enforced(self) -> None:
-        # All policies — including branch name — are enforced for fork PRs too.
-        # The validator always runs; there is no fork-based skip.
-        policy = make_policy()
-        e: List[str] = []
-        pc.ensure_branch_name(policy, "BadBranch", e)
-        self.assertTrue(e, "Branch name must be validated for fork PRs too")
-
-        # A valid branch name passes for both same-repo and fork PRs.
-        e = []
-        pc.ensure_branch_name(policy, "users/sam/my-feature", e)
-        self.assertEqual(e, [])
-
-
 # ----------------------------- PR description --------------------------------
+
 
 class DescriptionTests(unittest.TestCase):
     def test_too_short(self) -> None:
@@ -314,6 +259,7 @@ class ForbiddenFileTests(unittest.TestCase):
         body = pc.build_policy_table_comment([result], marker, ready=True)
         self.assertIn("⚠️ Warning", body)
         self.assertIn("secret.pem", body)
+        # Forbidden Files must NOT be in the label-triggering set.
         self.assertNotIn("Forbidden Files", pc.LABEL_TRIGGER_CHECKS)
 
 
@@ -366,9 +312,24 @@ class UnitTestRuleTests(unittest.TestCase):
                 files = [make_file("src/module.py"), make_file(test_path)]
                 self.assertEqual(self._errs(files), [])
 
+    def test_test_prefix_capitalized_satisfies_requirement(self) -> None:
+        # The 'Test*' pattern recognises capitalised test files (e.g.
+        # TestUtils.cpp, TestParser.py) as valid test files.
+        for test_path in [
+            "TestUtils.cpp",
+            "tests/TestParser.py",
+            "deep/nested/TestFeature.cpp",
+        ]:
+            with self.subTest(test_path=test_path):
+                files = [make_file("src/module.py"), make_file(test_path)]
+                self.assertEqual(self._errs(files), [])
+
     def test_path_based_pattern_satisfies_requirement(self) -> None:
         # Patterns containing '/' are matched against the full file path, not
-        # just the basename, so entire test directories can be recognised.
+        # just the basename. This allows entire test directories to be
+        # recognised as test locations even if their files use no special naming
+        # convention (e.g. hip-tests files named after the API they test:
+        # atomicAdd.cc, acquire_release.cc).
         policy = make_policy(
             unit_test_patterns=[
                 "test_*",
@@ -378,6 +339,9 @@ class UnitTestRuleTests(unittest.TestCase):
             ]
         )
         errs: List[str] = []
+
+        # A .cpp file under projects/hip-tests/ satisfies the requirement even
+        # though its basename ('atomicAdd.cpp') matches no name-based pattern.
         files = [
             make_file("projects/clr/hipamd/src/hip_memory.cpp"),
             make_file("projects/hip-tests/catch/unit/memory/atomicAdd.cpp"),
@@ -410,6 +374,7 @@ class UnitTestRuleTests(unittest.TestCase):
         body = pc.build_policy_table_comment([result], marker, ready=True)
         self.assertIn("⚠️ Warning", body)
         self.assertIn("missing test", body)
+        # Unit Test must NOT be in the label-triggering set anymore.
         self.assertNotIn("Unit Test", pc.LABEL_TRIGGER_CHECKS)
 
 
@@ -440,26 +405,51 @@ class DraftAndBumpTests(unittest.TestCase):
         self.assertFalse(pc.is_bump_pr(policy, ""))
 
 
+# ----------------------------- skip tag --------------------------------------
+
+
+class SkipTagTests(unittest.TestCase):
+    def test_skip_tag_detected(self) -> None:
+        for body in [
+            "@skip-pr-bot",
+            "Please skip this one @skip-pr-bot thanks",
+            "line one\n@SKIP-PR-BOT\nline three",  # case-insensitive
+            "Skipping: @Skip-PR-Bot",
+        ]:
+            with self.subTest(body=body):
+                self.assertTrue(pc.pr_wants_skip(body))
+
+    def test_skip_tag_absent(self) -> None:
+        for body in [
+            "",
+            "A normal description with a JIRA ID : ABC-1",
+            "email me at skip-pr-bot@example.com",  # not the @-prefixed tag
+            "@skip-pr-bottling",  # not a whole-word match
+        ]:
+            with self.subTest(body=body):
+                self.assertFalse(pc.pr_wants_skip(body))
+
+    def test_skip_tag_ignored_inside_comment(self) -> None:
+        # Tags inside HTML comments (e.g. a PR template) do not trigger a skip.
+        self.assertFalse(pc.pr_wants_skip("<!-- @skip-pr-bot -->"))
+
+
 # ----------------------------- integration -----------------------------------
 
 
 class IntegrationBlobTests(unittest.TestCase):
-    """Feed full [branch, title, description, files] blobs through validators."""
+    """Feed full [title, description, files] blobs through validators."""
 
     def setUp(self) -> None:
         self.policy = make_policy()
 
     def _evaluate(
-        self, *, branch: str, title: str, body: str, files: List[Dict[str, Any]]
+        self, *, title: str, body: str, files: List[Dict[str, Any]]
     ) -> Dict[str, List[str]]:
         out: Dict[str, List[str]] = {}
 
         e: List[str] = []
-        pc.ensure_branch_name(self.policy, branch, e)
-        out["branch"] = e
 
-        e = []
-        pc.ensure_pr_title(self.policy, title, e)
         pc.ensure_pr_description(self.policy, body, e)
         out["title_desc"] = e
 
@@ -474,7 +464,6 @@ class IntegrationBlobTests(unittest.TestCase):
 
     def test_fully_compliant_pr(self) -> None:
         result = self._evaluate(
-            branch="users/sam/add-feature",
             title="feat(ci): add policy unit tests",
             body=(
                 "Adds unit tests for the policy checker.\n"
@@ -489,19 +478,16 @@ class IntegrationBlobTests(unittest.TestCase):
 
     def test_fully_noncompliant_pr(self) -> None:
         result = self._evaluate(
-            branch="BadBranch",
             title="wip",
             body="too short",
             files=[make_file("secret.pem"), make_file("src/module.py")],
         )
-        self.assertTrue(result["branch"])
         self.assertTrue(result["title_desc"])
         self.assertTrue(result["forbidden"])
         self.assertTrue(result["unit"])
 
     def test_docs_only_pr_is_compliant(self) -> None:
         result = self._evaluate(
-            branch="shared/update-docs",
             title="docs: clarify contributing guide",
             body=(
                 "Improves the contributing docs.\n"
@@ -526,9 +512,10 @@ class LoadPolicyTests(unittest.TestCase):
         if not policy_path.exists():
             self.skipTest("policy.yml not present next to tests")
         policy = pc.load_policy(policy_path)
-        self.assertGreater(len(policy.branch_patterns), 0)
         self.assertIn("pre-commit", policy.required_checks)
-        self.assertGreaterEqual(policy.title_max_length, policy.title_min_length)
+        # Title policy has been removed from policy.yml — the description
+        # min-length is the meaningful text-length gate now.
+        self.assertGreaterEqual(policy.description_min_length, 0)
 
     def test_multiline_jira_issue_patterns_loaded(self) -> None:
         """Verify multiline JIRA/ISSUE ID patterns are in the loaded policy."""
@@ -567,11 +554,12 @@ class LoadPolicyTests(unittest.TestCase):
         # Per team lead request, 'unit/**' was removed from unit_test_patterns.
         # Test files are now recognized ONLY by basename (test_*, *_test.*, Test*).
         self.assertNotIn("unit/**", policy.unit_test_patterns)
-        # Verify the three allowed patterns ARE present.
+        # Verify the allowed patterns ARE present.
         self.assertIn("test_*", policy.unit_test_patterns)
         self.assertIn("*_test.*", policy.unit_test_patterns)
         self.assertIn("*_tests.*", policy.unit_test_patterns)
         self.assertIn("*_gtest.*", policy.unit_test_patterns)
+        self.assertIn("Test*", policy.unit_test_patterns)
         self.assertIn("**/test/gtest/**", policy.unit_test_patterns)
 
 

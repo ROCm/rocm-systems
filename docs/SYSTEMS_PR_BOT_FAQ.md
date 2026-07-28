@@ -33,39 +33,19 @@ please reach out to the **ROCm Policy Council**.
 Include your PR link, the check(s) you want overridden, and a short
 justification so the council can review your request.
 
-______________________________________________________________________
+## 🛑 Skip the PR Bot entirely (`@skip-pr-bot`)
 
-## 🌿 Branch Name
+If you want to opt a PR **out of the bot completely**, add the tag
+**`@skip-pr-bot`** anywhere in the PR description. When present:
 
-**What does it check?**
-Your branch name must follow the agreed naming convention so PRs are easy to trace back to a contributor and topic.
+- The bot runs **no policy checks** at all.
+- Any existing **`Not ready to Review`** label is **removed**.
+- The bot posts a short notice:
+  *"Author chose to skip pr bot run hence removing label."*
 
-**Allowed formats**
-
-| Pattern                         | Example                                             |
-| ------------------------------- | --------------------------------------------------- |
-| `users/<username>/<anything>`   | users/dgaliffi/fix/remove-build-boost-option        |
-| `users/<username>/<anything>`   | users/frepaul/ROCm-end-user-project-workflow        |
-| `shared/<anything>`             | shared/add-runner-health                            |
-| `<single-segment-name>`         | bump-rocm-libraries-936a6c7                         |
-| `<single-segment-name>`         | ZIP-packaging-RFC                                   |
-| `dependabot/<anything>`         | dependabot/github_actions/github-actions-3dfd2199fc |
-| `revert-<pr-number>-<anything>` | revert-5217-users/derobins/add_hipfile_support      |
-
-Rules:
-
-- A recognised **prefix** must be present (`users/`, `shared/`, `dependabot/`, `revert-…`) — or the branch must be a single segment.
-- **Uppercase letters are allowed** (acronyms and module names are common, e.g. `ROCm`, `SMP`, `RFC`).
-- For `users/`, the `<username>` segment may contain letters (upper or lower), digits, and hyphens.
-- **Anything after the prefix is allowed**, including nested `namespace/feature` paths (e.g. `users/dgaliffi/fix/remove-build-boost-option`).
-
-**How to fix**
-Rename your branch before opening the PR:
-
-```bash
-git branch -m old-name users/<your-username>/<topic>
-git push origin -u users/<your-username>/<topic>
-```
+This works both when the tag is present at PR creation **and** when it is added
+later via a description edit. Removing the tag (and pushing/editing again)
+re-enables the normal checks.
 
 ______________________________________________________________________
 
@@ -294,18 +274,18 @@ The label is added when:
 
 1. **JIRA/ISSUE ID reference is missing** — your PR description does not include a tracking reference.
 
-The Unit Test and Forbidden Files checks are **warning-only** and do **not**
-add the label. All other policy failures (branch name, title format,
-description length, etc.) also do **not** add the label; they are still
-reported in the table but do not block the PR.
+The Unit Test check is **warning-only** and does **not** add the label. All
+other policy failures (branch name, title format, description length, forbidden
+files, etc.) also do **not** add the label; they are still reported in the table but
+do not block the PR.
 
 **What is the "Not ready to Review" label?**
 
 When the **JIRA/ISSUE ID reference** is missing from the PR description, the bot
 adds a **`Not ready to Review`** label to the PR so it is clearly gated.
 The label is removed automatically once that reference is added.
-The **Unit Test** and **Forbidden Files** checks (⚠️ warning-only) and other
-failures (Branch Name, Draft PR, pre-commit, CodeQL) do **not** add the label.
+The **Unit Test** check (⚠️ warning-only) and other failures (Branch Name,
+Draft PR, pre-commit, CodeQL) do **not** add the label.
 
 **How are pre-commit and CodeQL shown?**
 
@@ -325,3 +305,5 @@ git push
 
 Push any commit (including `--allow-empty`) to the PR branch.
 The `synchronize` event triggers a fresh policy check automatically.
+
+______________________________________________________________________

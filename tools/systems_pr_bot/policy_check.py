@@ -1,7 +1,7 @@
 """
 Main script to policy-check PRs and report results in a comment. This is the
 core of the bot's logic: it loads policy.yml, validates the pull request
-(branch name, title, description, forbidden files, unit tests), waits for the
+(title, description, forbidden files, unit tests), waits for the
 required CI checks, posts a single results-table comment, and manages the
 "Not ready to Review" label.
 """
@@ -24,6 +24,11 @@ import requests
 import yaml
 
 NOT_READY_LABEL = "Not ready to Review"
+
+# Authors can opt a PR OUT of the bot entirely by putting this tag anywhere in
+# the PR description. When present, the bot does NOT run any checks — it simply
+# removes the "Not ready to Review" label and posts a short skip notice.
+SKIP_TAG = "@skip-pr-bot"
 
 # Anchor file paths to THIS script's location rather than the current working
 # directory or a ".git"/".github" walk-up (which breaks with nested repos /
@@ -58,15 +63,14 @@ CAN_MUTATE_PR = _env_flag("MUTATE_PR")
 #     in main() via `jira_issue_failed`).
 # The Unit Test check is now WARNING-ONLY: it never blocks the workflow and
 # never adds the label — it just shows a ⚠️ Warning row with details.
-# All other failures (Branch Name, title format, description length/checklist,
+# All other failures (title format, description length/checklist,
 # Forbidden Files, pre-commit, …) do NOT add the label either.
 LABEL_TRIGGER_CHECKS: Set[str] = set()
 
 # Fixed display order for rows in the results table (by check name). Any row
 # whose name is not listed here is appended after these, in its original order.
 TABLE_ORDER = [
-    "Branch Name",
-    "PR Title/Description",
+    "PR Description",
     "Forbidden Files",
     "Unit Test",
     "pre-commit",
@@ -98,7 +102,6 @@ class CheckResult:
 
 @dataclass(frozen=True)
 class Policy:
-    branch_patterns: List[re.Pattern[str]]
     title_min_length: int
     title_max_length: int
     description_min_length: int
@@ -129,9 +132,6 @@ def load_policy(policy_path: Path) -> Policy:
     pr = raw.get("pr", {}) or {}
     diff = raw.get("diff", {}) or {}
     checks = raw.get("checks", {}) or {}
-
-    patterns_raw = pr.get("branch_name_patterns", []) or []
-    branch_patterns = [re.compile(str(p)) for p in patterns_raw]
 
     # PR title rules now live under the nested `title:` mapping.
     title_cfg = pr.get("title", {}) or {}
@@ -181,7 +181,6 @@ def load_policy(policy_path: Path) -> Policy:
         )
 
     return Policy(
-        branch_patterns=branch_patterns,
         title_min_length=title_min_length,
         title_max_length=title_max_length,
         description_min_length=description_min_length,
@@ -288,70 +287,6 @@ def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str
     return runs if isinstance(runs, list) else []
 
 
-def ensure_branch_name(policy: Policy, branch_name: str, errors: List[str]) -> None:
-    """Validate the branch name against the allowed patterns.
-
-    Appends a descriptive message to `errors` if the name matches none of
-    `policy.branch_patterns`.
-    """
-    if not policy.branch_patterns:
-        return
-    if any(p.match(branch_name) for p in policy.branch_patterns):
-        return
-
-    allowed = "\n".join([f"- `{p.pattern}`" for p in policy.branch_patterns])
-    errors.append(
-        "Branch name does not match allowed patterns.\n"
-        f"Branch: `{branch_name}`\n"
-        "Allowed patterns:\n"
-        f"{allowed}"
-    )
-
-
-def _short(value: str, limit: int = 80) -> str:
-    """Truncate a value for display so one long field can't bloat the table."""
-    value = (value or "").strip()
-    if len(value) <= limit:
-        return value
-    return value[:limit] + "…"
-
-
-def ensure_pr_title(policy: Policy, title: str, errors: List[str]) -> None:
-    """Validate the PR title (length and forbidden words).
-
-    Appends a structured Error/Expected message to `errors` for each rule that
-    fails.
-    """
-    title = (title or "").strip()
-    fmt = "**Desired format:** `type(optional-scope): short description`"
-
-    if policy.title_min_length and len(title) < policy.title_min_length:
-        errors.append(
-            f"**Error:** Title is too short ({len(title)} characters).\n"
-            f"**Expected:** at least {policy.title_min_length} characters.\n"
-            f"{fmt}"
-        )
-
-    if policy.title_max_length and len(title) > policy.title_max_length:
-        errors.append(
-            f"**Error:** Title is too long ({len(title)} characters).\n"
-            f"**Expected:** at most {policy.title_max_length} characters.\n"
-            f"{fmt}"
-        )
-
-    if policy.forbidden_title_patterns:
-        matched = [
-            p.pattern for p in policy.forbidden_title_patterns if p.search(title)
-        ]
-        if matched:
-            blocked = ", ".join([f"`{m}`" for m in matched])
-            errors.append(
-                "**Error:** Title contains forbidden text (e.g. WIP / do not merge).\n"
-                f"**Expected:** remove the matched term(s): {blocked}.\n"
-                f"{fmt}"
-            )
-
-
 def ensure_pr_not_draft(policy: Policy, is_draft: bool, errors: List[str]) -> None:
     """Block draft PRs when `policy.block_draft` is enabled.
 
@@ -380,6 +315,7 @@ def ensure_pr_description(policy: Policy, body: str, errors: List[str]) -> None:
     # Strip comments so we only check the visible text against the policies.
     # This lets pull request templates use examples that _would_ pass the check.
     body = _strip_markdown_comments(body or "").strip()
+
     if policy.description_min_length and len(body) < policy.description_min_length:
         errors.append(
             f"**Error:** PR description is too short ({len(body)} characters).\n"
@@ -762,7 +698,7 @@ def build_policy_table_comment(
     else:
         footer = "\n\n> 🎉 All policy checks passed!"
 
-    faq_url = "https://github.com/ROCm/rocm-systems/tree/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
+    faq_url = "https://github.com/ROCm/rocm-systems/blob/develop/docs/SYSTEMS_PR_BOT_FAQ.md"
 
     faq_link = (
         "\n\n📖 **Need help?** See the "
@@ -932,11 +868,23 @@ def is_bump_pr(policy: Policy, author_login: str) -> bool:
     return target in {norm(a) for a in policy.bump_bot_authors}
 
 
+def pr_wants_skip(body: str) -> bool:
+    """True if the PR description opts out of the bot via the skip tag.
+
+    Matches `@skip-pr-bot` as a whole word, case-insensitively, anywhere in the
+    (comment-stripped) description.
+    """
+    text = _strip_markdown_comments(body or "")
+    return (
+        re.search(rf"(?<!\w){re.escape(SKIP_TAG)}(?!\w)", text, re.IGNORECASE)
+        is not None
+    )
+
+
 def build_bump_pr_results(policy: Policy) -> List[CheckResult]:
     """All-pass table rows for an automated dependency bump PR."""
     bump_note = "Bump PR — check auto-approved (automated dependency update)"
     rows: List[CheckResult] = [
-        CheckResult("Branch Name", "🌿", True, [], note=bump_note),
         CheckResult("PR Description", "📝", True, [], note=bump_note),
         CheckResult("Draft PR", "🚫", True, [], note=bump_note),
         CheckResult("Forbidden Files", "⛔", True, [], note=bump_note),
@@ -1017,9 +965,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     policy = load_policy(policy_path)
 
     pr = get_pr(owner=owner, repo=repo, pr_number=pr_number, token=token)  # type: ignore[arg-type]
-    branch_name = str((pr.get("head") or {}).get("ref") or "")
     title = str(pr.get("title") or "")
     body = str(pr.get("body") or "")
+
+    # --- Opt-out: '@skip-pr-bot' in the PR description ---
+    # If the author tagged the description with '@skip-pr-bot', do NOT run any
+    # checks. This covers BOTH cases: the tag was present when the PR was
+    # created, and the tag was added later via a description edit. In either
+    # case we remove the "Not ready to Review" label and leave a short notice.
+    if pr_wants_skip(body):
+        skip_marker = "<!-- therock-pr-bot-skipped -->"
+        skip_note = (
+            f"{skip_marker}\n"
+            f"🛑 Author chose to skip pr bot run hence removing label "
+            f"(`{SKIP_TAG}` found in the PR description)."
+        )
+        upsert_comment(owner, repo, pr_number, token, skip_marker, skip_note)  # type: ignore[arg-type]
+        remove_label(owner, repo, pr_number, token, NOT_READY_LABEL)  # type: ignore[arg-type]
+        print(f"🛑 '{SKIP_TAG}' present — skipping all policy checks.")
+        return 0
 
     # --- Special case: automated dependency "bump" PRs ---
     # If the author is a configured bump bot, bypass all policy checks.
@@ -1048,7 +1012,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "<!-- therock-pr-bot-fix-policies -->\n"
             "✅ Auto-approved — this is an automated dependency bump PR.",
         )
-        print(f"✅ Bump PR by @{author} — all checks auto-passed.")
+        print(f"��� Bump PR by @{author} — all checks auto-passed.")
         return 0
 
     pr_files = list(iter_pr_files(owner, repo, pr_number, token))  # type: ignore[arg-type]
@@ -1057,25 +1021,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Each check appends its failure messages to `check_errors`; an empty list
     # means the check passed. We reset it before every check.
-    # NOTE: all policies — including branch name — are enforced for BOTH
-    # same-repo PRs and fork PRs. `pull_request_target` gives us write access
-    # for forks, so there is no reason to skip any check.
+    # NOTE: all policies are enforced for BOTH same-repo PRs and fork PRs.
+    # `pull_request_target` gives us secret access (required for posting PR
+    # comments) for forks, so there is no reason to skip the policy checks.
     check_errors: List[str] = []
-    ensure_branch_name(policy, branch_name, check_errors)
-    results.append(CheckResult("Branch Name", "🌿", not check_errors, check_errors))
 
     check_errors = []
-    ensure_pr_title(policy, title, check_errors)
-    desc_errors: List[str] = []
-    ensure_pr_description(policy, body, desc_errors)
-    check_errors.extend(desc_errors)
-    results.append(
-        CheckResult("PR Description", "📝", not check_errors, check_errors)
-    )
+    ensure_pr_description(policy, body, check_errors)
+    results.append(CheckResult("PR Description", "📝", not check_errors, check_errors))
 
     # Only the JIRA/ISSUE ID reference rule of the description triggers the
     # "Not ready to Review" label — not the title, length, or checklist rules.
-    jira_issue_failed = any("must reference a JIRA ID" in e for e in desc_errors)
+    jira_issue_failed = any("must reference a JIRA ID" in e for e in check_errors)
 
     # Draft PR check is "Enabled soon" — logic kept in ensure_pr_not_draft but
     # not enforced yet (no check is performed).
@@ -1083,8 +1040,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     check_errors = []
     ensure_no_forbidden_files(policy, pr_files, check_errors)
-    # Forbidden Files is WARNING-ONLY: passed=True + warn=True when a forbidden
-    # file is present, so it never blocks the workflow or adds the label.
+    # Forbidden Files is WARNING-ONLY.
+    #
+    # NOTE on the two emojis (they are NOT a contradiction):
+    #   • icon="⛔"  -> the row's IDENTITY emoji in the "Check" column
+    #                   (always shown for the Forbidden Files row).
+    #   • status ⚠️  -> the "Status" column value that build_policy_table_comment
+    #                   renders because warn=True (see the `if r.warn:` branch).
+    #
+    # So the row always reads:  ⛔ Forbidden Files | ⚠️ Warning | <details>
+    # passed=True guarantees it never turns the workflow red or adds a label;
+    # warn=True just surfaces the offending file(s) as a warning.
     results.append(
         CheckResult(
             name="Forbidden Files",
@@ -1101,8 +1067,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     ut_warn = bool(check_errors)
     if not check_errors and not pr_has_code_files(policy, pr_files):
         ut_note = "PR does not contain code files — Unit Test auto-passed"
-    # Unit Test is WARNING-ONLY: passed=True means it never fails the workflow
-    # or adds a label; a missing test surfaces a ⚠️ Warning row instead.
+    # Unit Test is WARNING-ONLY (same icon-vs-status distinction as above):
+    #   • icon="🧪"  -> the row's identity emoji in the "Check" column.
+    #   • status ⚠️  -> rendered in the "Status" column when warn=True.
+    # passed=True means it never fails the workflow or adds a label; when a test
+    # is missing we surface a ⚠️ Warning row (with details) instead.
     results.append(
         CheckResult(
             name="Unit Test",
@@ -1122,8 +1091,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Build the policy table; on failure we ALSO append the current
     # pre-commit / CodeQL rows so the table is always complete.
-    # NOTE: warning-only rows (e.g. Unit Test, Forbidden Files) are excluded
-    # from the blocking `errors` — they show a ⚠️ Warning but never fail.
+    # NOTE: warning-only rows (e.g. Unit Test) are excluded from the blocking
+    # `errors` — they show a ⚠️ Warning but never fail the workflow.
     errors = [d for r in results for d in r.details if not r.warn]
     marker = "<!-- therock-pr-bot-policy-check -->"
 
@@ -1141,8 +1110,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # Add "Not ready to Review" ONLY when Unit Test fails OR the JIRA/ISSUE
         # ID reference is missing from the description. All other failures
-        # (title format, description length/checklist, branch name, forbidden
-        # files, PR size, pre-commit) do NOT add the label.
+        # (title format, description length/checklist, forbidden files, PR size,
+        # pre-commit) do NOT add the label.
         should_label = jira_issue_failed or any(
             not r.passed and r.name in LABEL_TRIGGER_CHECKS for r in results
         )

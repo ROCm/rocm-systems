@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file semantic/gfx1250_b0_to_a0.cpp
-/// @brief Handwritten semantic expansions for gfx1250 B0-to-A0 errata.
+/// @brief Handwritten semantic expansions for gfx1250 B0-to-A0 translation.
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
@@ -89,8 +89,9 @@ void append_gfx1250_vgpr_msb_transition(std::vector<uint32_t> &words, uint8_t &c
 /// immediate. Semantic spill storage is non-negative and dword aligned, so the
 /// largest usable dword offset is 0x7ffffc. The caller selects VGPR-MSB mode
 /// zero before using this helper.
-bool append_gfx1250_scratch_preservation(std::vector<uint32_t> &words,
-                                         const SemanticScratchLease &lease, bool restore) {
+[[nodiscard]] bool append_gfx1250_scratch_preservation(std::vector<uint32_t> &words,
+                                                       const SemanticScratchLease &lease,
+                                                       bool restore) {
   if (!lease.spilled)
     return true;
   if (lease.reg_class != RegClass::VGPR || lease.count == 0 ||
@@ -200,10 +201,10 @@ struct Gfx1250Ds2Shape {
 
 /// @brief Expand a gfx1250 B0 two-address DS operation for A0.
 ///
-/// @details A0 requires DS2 offsets to satisfy alignment restrictions which B0
-/// relaxed. Two ordinary DS operations accept byte offsets and avoid that
-/// erratum. A local DSCNT drain preserves the completion semantics of the one
-/// original DS instruction without having to rewrite downstream wait counts.
+/// @details A0 and B0 use different DS2 offset alignment rules. The B0-to-A0
+/// profile translates the operation into two ordinary DS operations with byte
+/// offsets. A local DSCNT drain preserves the completion semantics of the
+/// original instruction without rewriting downstream wait counts.
 ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
                                 std::span<const uint8_t>, const LivenessAnalysis &liveness,
                                 TranslationContext &, const LaneLayout *, const LaneLayout *) {
@@ -390,16 +391,15 @@ void set_word_field(uint32_t &word, uint32_t value, uint32_t shift, uint32_t wid
   word = (word & ~mask) | ((value << shift) & mask);
 }
 
-/// @brief Apply the A0 regular-scale fixes, including the B0-only M=32 split.
+/// @brief Apply the B0-to-A0 regular-scale translation, including the M=32 split.
 ///
-/// @details VOP3PX2 bits [58:50] are an unused `scale_src2` encoding which SQ
-/// nevertheless decodes as a source register. Encoding VGPR0 (0x100) prevents
-/// the zero-filled B0 encoding from creating a false SGPR dependency. This is
-/// an encoding erratum only for the common M=16 form.
+/// @details The translation profile encodes VGPR0 (0x100) in the VOP3PX2
+/// `scale_src2` field for the M=16 form.
 ///
-/// gfx1250 B0 additionally introduces the M=32 FP4 form. A0 has only the M=16
-/// F8F6F4 operation, so split M into two independent halves. The scale layout
-/// assigns M=0..15 and M=16..31 to lanes 0..15 and 16..31 of the same
+/// gfx1250 B0 additionally introduces the M=32 FP4 form. A0 has the M=16
+/// F8F6F4 operation, so the profile translates M=32 into two independent
+/// halves. The scale layout assigns M=0..15 and M=16..31 to lanes 0..15 and
+/// 16..31 of the same
 /// A-scale VGPR; SCL_OPSEL selects the corresponding lane half. Matrix B and
 /// its scale are shared. D, A, and a VGPR C are sliced by eight dwords. Both
 /// replacement matrix-format fields are forced to FP4, and reuse promises are
@@ -520,13 +520,10 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
   return ExpandResult::success(std::move(words));
 }
 
-/// @brief Split the standalone B0 32x16 FP4 WMMA for A0.
-/// @details Fails closed. The split would emit bare low-precision WMMA halves,
-/// which are exactly the forms the legalizer rejects on input (their standalone
-/// two-dword base encoding is not safe to emit for A0). The safe replacement is
-/// the regular-Scale-prefixed encoding with neutral inline scales, but that
-/// lowering is not yet implemented, so the whole instruction fails closed rather
-/// than emitting a form that would itself need re-legalization.
+/// @brief Translate the standalone B0 32x16 FP4 WMMA for A0.
+/// @details The profile represents this operation as regular-Scale-prefixed
+/// halves with neutral inline scales. That lowering is not yet implemented, so
+/// this rule fails closed.
 ExpandResult expand_gfx1250_wmma_32x16_f4(const Instruction &inst, uint32_t, uint64_t,
                                           std::span<const uint8_t>, const LivenessAnalysis &,
                                           TranslationContext &, const LaneLayout *,
@@ -1064,7 +1061,11 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
                                                            .src2 = gfx1250_inline_u32(20)}));
 
   if (is_store) {
-    const uint8_t ds_mode = static_cast<uint8_t>(*src0_bank << 2);
+    // The emitted ds_store_b32 keeps the original store-data VGPR in data0, and
+    // data0 is a Src1-role operand in both ds_store_addtid_b32 and ds_store_b32,
+    // so its high bank is src1_bank. The address VGPR is a fresh low-bank
+    // scratch, so only the Src1 field needs the original store-data bank.
+    const uint8_t ds_mode = static_cast<uint8_t>(*src1_bank << 2);
     append_gfx1250_vgpr_msb_transition(words, current_mode, ds_mode);
     append_words(words, gfx1250::build_vds(gfx1250::kDsStoreB32Vds,
                                            {.offset0 = static_cast<uint8_t>(source.offset0),
@@ -1119,7 +1120,9 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   const std::optional<uint16_t> exp31_mask =
       nan_mask ? liveness.find_free_sgpr(&inst, static_cast<uint16_t>(*nan_mask + 1u))
                : std::nullopt;
-  if (!nan_mask || !exp31_mask || *exp31_mask > 105) {
+  // The allocator searches only REGISTER_SET_ALLOCATABLE_SGPRS, so successful
+  // results are already ordinary encodable SGPRs.
+  if (!nan_mask || !exp31_mask) {
     return ExpandResult::failed("gfx1250 E5M3 unpack could not allocate two dead SGPR masks");
   }
 
@@ -1141,8 +1144,10 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   };
   const auto append_compare_literal = [](std::vector<uint32_t> &words, uint16_t opcode,
                                          uint8_t sdst, uint16_t src1, uint32_t literal) {
-    append_words(words,
-                 gfx1250::build_vop3_sdst_enc(opcode, {.sdst = sdst, .src0 = 255, .src1 = src1}));
+    // gfx1250 VOP3 compares encode their scalar mask destination in the ordinary
+    // VOP3 vdst field. Vop3SdstEnc is a different format whose sdst bits overlap
+    // modifiers here; using it leaves vdst=0 and corrupts live s0.
+    append_words(words, gfx1250::build_vop3(opcode, {.vdst = sdst, .src0 = 255, .src1 = src1}));
     words.push_back(literal);
   };
 
@@ -1207,11 +1212,11 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
 ///
 /// @details gfx1250 A0 cannot safely expose the bare F8F6F4 matrix instruction to
 /// trap/CWSR recovery. The documented workaround is the regular-Scale four-DWORD
-/// form with inline-zero scale operands, which the ISA defines as scale 1.0 and
-/// which requires no temporary GPR. Keep the original two-DWORD matrix body
-/// byte-for-byte so its formats, accumulator, modifiers, and register operands
-/// retain their source semantics. The prefix's otherwise-unused SRC2 must encode
-/// VGPR0 to avoid the documented false scalar dependency.
+/// form. In the scale-source context, inline integer zero selects the neutral
+/// E8M0 scale. Keep the original two-DWORD matrix body byte-for-byte so its
+/// formats, accumulator, modifiers, and register operands retain their source
+/// semantics. The prefix's otherwise-unused SRC2 must encode VGPR0 to avoid the
+/// documented false scalar dependency.
 ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, uint64_t,
                                              std::span<const uint8_t>, const LivenessAnalysis &,
                                              TranslationContext &, const LaneLayout *,
@@ -1223,9 +1228,9 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
         "gfx1250 bare F8F6F4 WMMA rule received an unsupported instruction");
   }
 
-  constexpr uint16_t kVgprEncoding = 256;
   std::vector<uint32_t> words;
   words.reserve(4);
+  constexpr uint16_t kVgprEncoding = 256;
   append_words(words, gfx1250::build_vop3p(kWmmaScaleSrc2PrefixOp, {.src0 = kGfx1250InlineZero,
                                                                     .src1 = kGfx1250InlineZero,
                                                                     .src2 = kVgprEncoding}));
@@ -1236,16 +1241,17 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
 /// @brief Lower a B0-only K=128 FP8/BF8 WMMA for A0.
 ///
 /// @details A0's regular-Scale mixed-format WMMA implements the same f32 K=128
-/// operation when both four-byte E8M0 scale words contain 0x7f (2^(127-127)).
-/// Materialize that neutral word in one dead SGPR and select the FP8/BF8 matrix
-/// formats in the mixed base instruction. The regular-Scale prefix also carries
-/// the required VGPR0 encoding in its architecturally unused SRC2 field.
+/// operation when both scale sources use the context-sensitive inline-zero
+/// encoding for neutral E8M0 scaling. This avoids a temporary SGPR and a
+/// scalar-to-vector ALU dependency. Select the FP8/BF8 matrix formats in the
+/// mixed base instruction and encode VGPR0 in the regular-Scale prefix's
+/// architecturally unused SRC2 field.
 ///
 /// The regular-Scale instruction only has an f32 output. The f16 forms remain
 /// fail-closed because chaining two K=64 instructions would round the
 /// intermediate accumulator to f16 instead of preserving one final f16 round.
 ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_t,
-                                      std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                      std::span<const uint8_t>, const LivenessAnalysis &,
                                       TranslationContext &, const LaneLayout *,
                                       const LaneLayout *) {
   uint8_t matrix_a_fmt = 0;
@@ -1284,20 +1290,11 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     return ExpandResult::failed("gfx1250 K=128 WMMA matrix operands are not ordinary VGPR ranges");
   }
 
-  const std::optional<uint16_t> scale_sgpr = liveness.find_free_sgpr(&inst);
-  if (!scale_sgpr) {
-    return ExpandResult::failed("gfx1250 K=128 WMMA could not allocate a dead neutral-scale SGPR");
-  }
-
   std::vector<uint32_t> words;
-  words.reserve(6);
-  append_words(words,
-               gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
-                                   {.ssrc0 = 255, .sdst = static_cast<uint8_t>(*scale_sgpr)}));
-  words.push_back(0x7f7f7f7fu);
-  append_words(words, gfx1250::build_vop3p(
-                          kWmmaScaleSrc2PrefixOp,
-                          {.src0 = *scale_sgpr, .src1 = *scale_sgpr, .src2 = kVgprEncoding}));
+  words.reserve(4);
+  append_words(words, gfx1250::build_vop3p(kWmmaScaleSrc2PrefixOp, {.src0 = kGfx1250InlineZero,
+                                                                    .src1 = kGfx1250InlineZero,
+                                                                    .src2 = kVgprEncoding}));
   append_words(words, gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
                                            {.vdst = static_cast<uint8_t>(source.vdst),
                                             .neg_hi = static_cast<uint8_t>(source.neg_hi),
@@ -1328,21 +1325,21 @@ inline constexpr std::array<TranslationRule, 38> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kVop3p, gfx1250::kVSwmmacI3216x16x128Iu8Vop3p, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3232x16x128F4Vop3p, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_wmma_32x16_f4, nullptr, nullptr, false},
     {gfx1250::encoding::kVimage, gfx1250::kTensorLoadToLdsVimage, RuleAction::Expand, 0, 0, nullptr,

@@ -99,15 +99,23 @@ set(HIP_VERSION_GITHASH "0000000")
 
 # FIXME: Two different version strings used.
 # Below we use UNIX commands, not compatible with Windows.
-if(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS AND GIT_FOUND)
-  # use the commit date, instead of build date
-  execute_process(COMMAND ${GIT_EXECUTABLE} show -s --format=%ct
+if(GIT_FOUND)
+  # TheROCk builds perform shallow cloning having only latest single commit & without any commit history
+  # Fetch commit history for current branch
+  execute_process(COMMAND ${GIT_EXECUTABLE} fetch --unshallow
+    RESULT_VARIABLE git_result
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    ERROR_QUIET)
+
+  # use the clr commit date, instead of build date
+  execute_process(COMMAND ${GIT_EXECUTABLE} log -1 --format=%ct -- ${CMAKE_SOURCE_DIR}
     RESULT_VARIABLE git_result
     OUTPUT_VARIABLE git_output
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     OUTPUT_STRIP_TRAILING_WHITESPACE)
   if(git_result EQUAL 0)
     set(HIP_VERSION_UNIXDATE ${git_output})
+    message(STATUS "HIP_VERSION_UNIXDATE: ${HIP_VERSION_UNIXDATE}")
   endif()
 
   # get date information based on UTC
@@ -121,21 +129,23 @@ if(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS AND GIT_FOUND)
     set(HIP_VERSION_GITDATE ${git_output})
   endif()
 
-  # get commit short hash
-  execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    RESULT_VARIABLE git_result
-    OUTPUT_VARIABLE git_output
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(git_result EQUAL 0)
-    set(HIP_VERSION_GITHASH ${git_output})
+  if(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS)
+	  # get commit short hash
+	  execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+	    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        RESULT_VARIABLE git_result
+        OUTPUT_VARIABLE git_output
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(git_result EQUAL 0)
+        set(HIP_VERSION_GITHASH ${git_output})
+      endif()
   endif()
 
 endif()
 
-if(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS AND HIP_VERSION_PATCH EQUAL 0 AND HIP_VERSION_UNIXDATE GREATER 0)
+if(HIP_VERSION_PATCH EQUAL 0 AND HIP_VERSION_UNIXDATE GREATER 0)
   set(HIP_VERSION_PATCH ${HIP_VERSION_GITDATE})
-  message(STATUS "Using HIP major, minor versions from VERSION file & patch version from git commit date: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
+  message(STATUS "Using HIP major, minor versions from VERSION file & patch version from clr commit date: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
 else()
   message(STATUS "Using HIP version from VERSION file: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
 endif()

@@ -25,7 +25,7 @@ pytestmark = [pytest.mark.gpu]
 
 @pytest.fixture
 def sdma_env() -> dict[str, str]:
-    """Environment variables for SDMA tests (sdma_usage metric only, legacy trace)."""
+    """Environment variables for SDMA tests (sdma_usage metric only)."""
     return {
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api",
         "ROCPROFSYS_AMD_SMI_METRICS": "sdma_usage",
