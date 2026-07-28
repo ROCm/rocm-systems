@@ -88,9 +88,14 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
-             comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 131072) {
-    // Change LL protocol threshold
-    info->protocol = NCCL_PROTO_LL;
+             comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 1048576) {
+#ifdef ENABLE_WARP_SPEED
+    if (sizePerRank <= 131072)
+#endif
+    {
+      // Change LL protocol threshold
+      info->protocol = NCCL_PROTO_LL;
+    }
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") &&
              comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
     // Change LL protocol threshold
