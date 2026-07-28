@@ -134,9 +134,18 @@ pub const AMDSMI_MAX_NUM_CLKS_PER_AID: u32 = 2;
 pub const AMDSMI_MAX_NUM_CLKS_PER_MID: u32 = 2;
 pub const AMDSMI_TIME_FORMAT: &[u8; 20] = b"%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0";
-pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 26;
-pub const AMDSMI_LIB_VERSION_MINOR: u32 = 5;
+pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 27;
+pub const AMDSMI_LIB_VERSION_MINOR: u32 = 0;
 pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
+pub const AMDSMI_MAX_VF_COUNT: u32 = 32;
+pub const AMDSMI_MAX_DRIVER_NUM: u32 = 2;
+pub const AMDSMI_DFC_FW_NUMBER_OF_ENTRIES: u32 = 9;
+pub const AMDSMI_MAX_WHITE_LIST_ELEMENTS: u32 = 16;
+pub const AMDSMI_MAX_BLACK_LIST_ELEMENTS: u32 = 64;
+pub const AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS: u32 = 8;
+pub const AMDSMI_MAX_ERR_RECORDS: u32 = 10;
+pub const AMDSMI_MAX_PROFILE_COUNT: u32 = 16;
+pub const AMDSMI_PF_INDEX: u32 = 31;
 pub const AMDSMI_MAX_DRIVER_INFO_RSVD: u32 = 64;
 pub const AMDSMI_MAX_UUID_ELEMENTS: u32 = 16;
 pub const AMDSMI_MAX_NUM_FREQUENCIES: u32 = 33;
@@ -2931,8 +2940,8 @@ pub struct AmdsmiGpuMetricsT {
     pub current_fan_speed: u16,
     pub pcie_link_width: u16,
     pub pcie_link_speed: u16,
-    pub gfx_activity_acc: u32,
-    pub mem_activity_acc: u32,
+    pub gfx_activity_acc: u64,
+    pub mem_activity_acc: u64,
     pub temperature_hbm: [u16; 4usize],
     pub firmware_timestamp: u64,
     pub voltage_soc: u16,
@@ -2956,8 +2965,8 @@ pub struct AmdsmiGpuMetricsT {
     pub current_vclk0s: [u16; 4usize],
     pub current_dclk0s: [u16; 4usize],
     pub jpeg_activity: [u16; 32usize],
-    pub pcie_nak_sent_count_acc: u32,
-    pub pcie_nak_rcvd_count_acc: u32,
+    pub pcie_nak_sent_count_acc: u64,
+    pub pcie_nak_rcvd_count_acc: u64,
     pub accumulation_counter: u64,
     pub prochot_residency_acc: u64,
     pub ppt_residency_acc: u64,
@@ -2966,7 +2975,7 @@ pub struct AmdsmiGpuMetricsT {
     pub hbm_thm_residency_acc: u64,
     pub num_partition: u16,
     pub xcp_stats: [AmdsmiGpuXcpMetricsT; 8usize],
-    pub pcie_lc_perf_other_end_recovery: u32,
+    pub pcie_lc_perf_other_end_recovery: u64,
     pub vram_max_bandwidth: u64,
     pub xgmi_link_status: [u16; 8usize],
     pub temperature_hbm_stacks: [u16; 12usize],
@@ -2978,7 +2987,7 @@ pub struct AmdsmiGpuMetricsT {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiGpuMetricsT"][::std::mem::size_of::<AmdsmiGpuMetricsT>() - 4720usize];
+    ["Size of AmdsmiGpuMetricsT"][::std::mem::size_of::<AmdsmiGpuMetricsT>() - 4736usize];
     ["Alignment of AmdsmiGpuMetricsT"][::std::mem::align_of::<AmdsmiGpuMetricsT>() - 8usize];
     ["Offset of field: AmdsmiGpuMetricsT::common_header"]
         [::std::mem::offset_of!(AmdsmiGpuMetricsT, common_header) - 0usize];
@@ -3045,91 +3054,91 @@ const _: () = {
     ["Offset of field: AmdsmiGpuMetricsT::gfx_activity_acc"]
         [::std::mem::offset_of!(AmdsmiGpuMetricsT, gfx_activity_acc) - 80usize];
     ["Offset of field: AmdsmiGpuMetricsT::mem_activity_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, mem_activity_acc) - 84usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, mem_activity_acc) - 88usize];
     ["Offset of field: AmdsmiGpuMetricsT::temperature_hbm"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, temperature_hbm) - 88usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, temperature_hbm) - 96usize];
     ["Offset of field: AmdsmiGpuMetricsT::firmware_timestamp"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, firmware_timestamp) - 96usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, firmware_timestamp) - 104usize];
     ["Offset of field: AmdsmiGpuMetricsT::voltage_soc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, voltage_soc) - 104usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, voltage_soc) - 112usize];
     ["Offset of field: AmdsmiGpuMetricsT::voltage_gfx"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, voltage_gfx) - 106usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, voltage_gfx) - 114usize];
     ["Offset of field: AmdsmiGpuMetricsT::voltage_mem"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, voltage_mem) - 108usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, voltage_mem) - 116usize];
     ["Offset of field: AmdsmiGpuMetricsT::indep_throttle_status"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, indep_throttle_status) - 112usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, indep_throttle_status) - 120usize];
     ["Offset of field: AmdsmiGpuMetricsT::current_socket_power"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_socket_power) - 120usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_socket_power) - 128usize];
     ["Offset of field: AmdsmiGpuMetricsT::vcn_activity"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, vcn_activity) - 122usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, vcn_activity) - 130usize];
     ["Offset of field: AmdsmiGpuMetricsT::gfxclk_lock_status"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, gfxclk_lock_status) - 132usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, gfxclk_lock_status) - 140usize];
     ["Offset of field: AmdsmiGpuMetricsT::xgmi_link_width"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xgmi_link_width) - 136usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xgmi_link_width) - 144usize];
     ["Offset of field: AmdsmiGpuMetricsT::xgmi_link_speed"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xgmi_link_speed) - 138usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xgmi_link_speed) - 146usize];
     ["Offset of field: AmdsmiGpuMetricsT::pcie_bandwidth_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_bandwidth_acc) - 144usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_bandwidth_acc) - 152usize];
     ["Offset of field: AmdsmiGpuMetricsT::pcie_bandwidth_inst"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_bandwidth_inst) - 152usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_bandwidth_inst) - 160usize];
     ["Offset of field: AmdsmiGpuMetricsT::pcie_l0_to_recov_count_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_l0_to_recov_count_acc) - 160usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_l0_to_recov_count_acc) - 168usize];
     ["Offset of field: AmdsmiGpuMetricsT::pcie_replay_count_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_replay_count_acc) - 168usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_replay_count_acc) - 176usize];
     ["Offset of field: AmdsmiGpuMetricsT::pcie_replay_rover_count_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_replay_rover_count_acc) - 176usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_replay_rover_count_acc) - 184usize];
     ["Offset of field: AmdsmiGpuMetricsT::xgmi_read_data_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xgmi_read_data_acc) - 184usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xgmi_read_data_acc) - 192usize];
     ["Offset of field: AmdsmiGpuMetricsT::xgmi_write_data_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xgmi_write_data_acc) - 248usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xgmi_write_data_acc) - 256usize];
     ["Offset of field: AmdsmiGpuMetricsT::current_gfxclks"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_gfxclks) - 312usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_gfxclks) - 320usize];
     ["Offset of field: AmdsmiGpuMetricsT::current_socclks"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_socclks) - 328usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_socclks) - 336usize];
     ["Offset of field: AmdsmiGpuMetricsT::current_vclk0s"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_vclk0s) - 336usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_vclk0s) - 344usize];
     ["Offset of field: AmdsmiGpuMetricsT::current_dclk0s"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_dclk0s) - 344usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_dclk0s) - 352usize];
     ["Offset of field: AmdsmiGpuMetricsT::jpeg_activity"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, jpeg_activity) - 352usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, jpeg_activity) - 360usize];
     ["Offset of field: AmdsmiGpuMetricsT::pcie_nak_sent_count_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_nak_sent_count_acc) - 416usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_nak_sent_count_acc) - 424usize];
     ["Offset of field: AmdsmiGpuMetricsT::pcie_nak_rcvd_count_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_nak_rcvd_count_acc) - 420usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_nak_rcvd_count_acc) - 432usize];
     ["Offset of field: AmdsmiGpuMetricsT::accumulation_counter"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, accumulation_counter) - 424usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, accumulation_counter) - 440usize];
     ["Offset of field: AmdsmiGpuMetricsT::prochot_residency_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, prochot_residency_acc) - 432usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, prochot_residency_acc) - 448usize];
     ["Offset of field: AmdsmiGpuMetricsT::ppt_residency_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, ppt_residency_acc) - 440usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, ppt_residency_acc) - 456usize];
     ["Offset of field: AmdsmiGpuMetricsT::socket_thm_residency_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, socket_thm_residency_acc) - 448usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, socket_thm_residency_acc) - 464usize];
     ["Offset of field: AmdsmiGpuMetricsT::vr_thm_residency_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, vr_thm_residency_acc) - 456usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, vr_thm_residency_acc) - 472usize];
     ["Offset of field: AmdsmiGpuMetricsT::hbm_thm_residency_acc"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, hbm_thm_residency_acc) - 464usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, hbm_thm_residency_acc) - 480usize];
     ["Offset of field: AmdsmiGpuMetricsT::num_partition"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, num_partition) - 472usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, num_partition) - 488usize];
     ["Offset of field: AmdsmiGpuMetricsT::xcp_stats"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xcp_stats) - 480usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xcp_stats) - 496usize];
     ["Offset of field: AmdsmiGpuMetricsT::pcie_lc_perf_other_end_recovery"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_lc_perf_other_end_recovery) - 4640usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, pcie_lc_perf_other_end_recovery) - 4656usize];
     ["Offset of field: AmdsmiGpuMetricsT::vram_max_bandwidth"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, vram_max_bandwidth) - 4648usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, vram_max_bandwidth) - 4664usize];
     ["Offset of field: AmdsmiGpuMetricsT::xgmi_link_status"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xgmi_link_status) - 4656usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, xgmi_link_status) - 4672usize];
     ["Offset of field: AmdsmiGpuMetricsT::temperature_hbm_stacks"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, temperature_hbm_stacks) - 4672usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, temperature_hbm_stacks) - 4688usize];
     ["Offset of field: AmdsmiGpuMetricsT::temperature_mid"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, temperature_mid) - 4696usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, temperature_mid) - 4712usize];
     ["Offset of field: AmdsmiGpuMetricsT::temperature_aid"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, temperature_aid) - 4700usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, temperature_aid) - 4716usize];
     ["Offset of field: AmdsmiGpuMetricsT::current_uclk_aid"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_uclk_aid) - 4704usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_uclk_aid) - 4720usize];
     ["Offset of field: AmdsmiGpuMetricsT::current_socclks_mid"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_socclks_mid) - 4708usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, current_socclks_mid) - 4724usize];
     ["Offset of field: AmdsmiGpuMetricsT::apu_metrics"]
-        [::std::mem::offset_of!(AmdsmiGpuMetricsT, apu_metrics) - 4712usize];
+        [::std::mem::offset_of!(AmdsmiGpuMetricsT, apu_metrics) - 4728usize];
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -4071,6 +4080,12 @@ extern "C" {
     pub fn amdsmi_get_gpu_busy_percent(
         processor_handle: AmdsmiProcessorHandle,
         gpu_busy_percent: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_vcn_busy_percent(
+        processor_handle: AmdsmiProcessorHandle,
+        vcn_busy_percent: *mut u32,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

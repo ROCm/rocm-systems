@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "util/log.h"
@@ -43,6 +44,23 @@ uint32_t for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, 
 }
 
 } // namespace
+
+L1VectorCache::L1VectorCache(L2Cache *l2)
+    : l2_(l2), coherence_epoch_(DeviceCacheCoherence::instance().current_epoch()) {}
+
+L1VectorCache::~L1VectorCache() = default;
+
+void L1VectorCache::set_l2(L2Cache *l2) {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
+  l2_ = l2;
+}
+
+void L1VectorCache::set_memory(GpuMemory *mem) {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
+  memory_ = mem;
+}
 
 void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
   if (cache_.lookup(addr, nullptr, vmid))
@@ -176,6 +194,8 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
 void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                          uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
                          bool request_l1_bypass, uint32_t wf_size, uint32_t vmid) {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
   uint32_t stride = num_elems * elem_size;
   for_each_coalesced_lane_run(
       addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
@@ -187,6 +207,8 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
 void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                           uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
                           uint32_t wf_size, uint32_t vmid) {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
   uint32_t stride = num_elems * elem_size;
   const uint32_t active_lanes = std::popcount(lane_mask);
   ++store_count_;
@@ -199,7 +221,33 @@ void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t el
       });
 }
 
-void L1VectorCache::flush_all() { cache_.invalidate_all(); }
+void L1VectorCache::invalidate(uint64_t addr, uint32_t vmid) {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
+  cache_.invalidate(addr, vmid);
+}
+
+void L1VectorCache::invalidate_all() {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
+  invalidate_all_locked();
+}
+
+void L1VectorCache::flush_all() {
+  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
+  synchronize_epoch_locked();
+  invalidate_all_locked();
+}
+
+void L1VectorCache::invalidate_all_locked() { cache_.invalidate_all(); }
+
+void L1VectorCache::synchronize_epoch_locked() {
+  const uint64_t current_epoch = DeviceCacheCoherence::instance().current_epoch();
+  if (coherence_epoch_ == current_epoch)
+    return;
+  invalidate_all_locked();
+  coherence_epoch_ = current_epoch;
+}
 
 } // namespace amdgpu
 } // namespace rocjitsu

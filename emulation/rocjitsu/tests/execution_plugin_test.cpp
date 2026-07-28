@@ -1469,7 +1469,50 @@ TEST(HookOrderingTest, FiveDispatchLifecycle) {
   }
 }
 
-// -- formatTrace tests -------------------------------------------------------
+// -- Race trace tests --------------------------------------------------------
+
+TEST(FindConflictTest, UsesRecordedConflictingEvent) {
+  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0),
+                        [](RaceViolation) {});
+  EventId first = detector.allocateEventId(WaveId{0}, /*pc=*/0x100, MemoryEventType::GLOBAL_TO_VGPR,
+                                           {2}, /*execMask=*/1);
+  EventId second = detector.allocateEventId(WaveId{0}, /*pc=*/0x200,
+                                            MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
+  ASSERT_NE(first, second);
+
+  RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), second};
+  MarkedPc conflict = findConflict(violation, detector);
+
+  EXPECT_EQ(conflict.pc, 0x200u);
+}
+
+TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
+  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0),
+                        [](RaceViolation) {});
+  RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), EventId{}};
+
+  EXPECT_THROW(findConflict(violation, detector), std::out_of_range);
+}
+
+TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
+  RaceDetector detector(/*nWaves=*/1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0),
+                        [](RaceViolation) {});
+  EventId first = detector.allocateEventId(WaveId{0}, /*pc=*/10, MemoryEventType::GLOBAL_TO_VGPR,
+                                           {2}, /*execMask=*/1);
+  EventId second = detector.allocateEventId(WaveId{0}, /*pc=*/20, MemoryEventType::GLOBAL_TO_VGPR,
+                                            {2}, /*execMask=*/1);
+  ASSERT_NE(first, second);
+
+  RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), second};
+  std::vector<std::string> source_lines(64, "instruction");
+  std::string report = detector.decorateException(
+      violation, /*wavePc=*/30, static_cast<int>(source_lines.size()),
+      [&](int line) -> std::string_view { return source_lines.at(static_cast<size_t>(line)); });
+
+  EXPECT_NE(report.find("20 --> |"), std::string::npos);
+  EXPECT_NE(report.find("30 --> |"), std::string::npos);
+  EXPECT_EQ(report.find("10 --> |"), std::string::npos);
+}
 
 auto make_trace(std::initializer_list<uint64_t> pcs) {
   plugins::race_detector::RingBuffer<uint64_t, 256> rb;
@@ -1593,12 +1636,37 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
 
 TEST(DisasmCacheTest, HandlesNonMonotonicPcOrder) {
   plugins::race_detector::DisasmCache cache;
-  cache.record(0x540024b100, "s_nop 0");
-  cache.record(0x100002a100, "s_endpgm");
+  Instruction high_instruction("s_nop 0", nullptr);
+  Instruction low_instruction("s_endpgm", nullptr);
+  cache.record(0x540024b100, high_instruction);
+  cache.record(0x100002a100, low_instruction);
 
   auto disasm = cache.to_map();
   EXPECT_EQ(disasm.at(0x540024b100), "s_nop 0");
   EXPECT_EQ(disasm.at(0x100002a100), "s_endpgm");
+}
+
+TEST(DisasmCacheTest, DisassemblesOnlyFirstInstructionAtPc) {
+  class ObservableInstruction final : public Instruction {
+  public:
+    ObservableInstruction() : Instruction("s_count", nullptr) {}
+    bool was_disassembled() const { return !disassembly_.empty(); }
+  };
+
+  plugins::race_detector::DisasmCache cache;
+  ObservableInstruction first;
+  ObservableInstruction duplicate;
+
+  // DisasmCache is keyed by the absolute instruction PC. The value itself is
+  // arbitrary here; using the same synthetic PC proves that a newly decoded
+  // instruction at an already-cached address is not disassembled again.
+  constexpr uint64_t synthetic_pc = 0x100;
+  cache.record(synthetic_pc, first);
+  cache.record(synthetic_pc, duplicate);
+
+  EXPECT_TRUE(first.was_disassembled());
+  EXPECT_FALSE(duplicate.was_disassembled());
+  EXPECT_EQ(cache.to_map().at(synthetic_pc), "s_count");
 }
 
 TEST(RaceDetectorPluginOutputTest, DispatchLineUsesQuestionMarksForUnresolvedKernel) {
