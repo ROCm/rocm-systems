@@ -529,19 +529,21 @@ Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 Interactive Roofline HTML:
 
-* **AI axis dropdown:** Use the *AI axis* selector at the top of the page to choose which memory level supplies each kernel's arithmetic intensity, plotting one point per kernel, or pick *All peaks* to plot every level at once. The selected level is marked ``(AI axis)`` in the *Bandwidth rooflines* panel. Each kernel is drawn in its own color, cycling once there are more kernels than palette colors. Isolating a single kernel shows it across every memory level, colored by level; the selector locks to *All peaks* while that is the case, since no single level owns the axis.
-* **Kernels panel:** The *Kernels* panel on the right lists every kernel, heaviest first. Click a kernel row -- or click one of its dots in the plot -- to isolate just that kernel; click it again to show all. Ctrl-click (Cmd-click on macOS) to add or remove kernels from the selection, and use *Show all kernels* to reset. The *Runtime shown* slider filters to the heaviest kernels whose combined percentage of GPU resident time reaches the chosen cutoff; its rightmost stop shows every plotted kernel. The slider and the selection are independent filters that both apply, so the slider stays live while kernels are isolated, and a kernel the slider excludes is dropped from the list whether or not it is selected.
-* **Bandwidth rooflines panel:** The *Bandwidth rooflines* panel lists the memory-bandwidth ceilings. Click a roofline to isolate it (dimming the others); click it again, or use *Show all rooflines*, to reset. The flat compute peaks (VALU and matrix) always cap the diagonals; their values appear in each roofline's hover. The diagonals and ceilings are drawn as extrapolated lines, so they continue as you pan.
-* **Hover details:** Hover over a kernel dot to see its arithmetic intensity, achieved and peak throughput, percent of roofline achieved, performance limiter, dispatch count, and runtime. Hover over a roofline for its bandwidth and the compute peaks it caps against.
-* **Navigation:** Drag to pan and scroll to zoom. The chart opens framed on the kernels currently shown along with the rooflines they sit under, sized so the diagonals read as diagonals at whatever width and height the page has, and it re-frames when the window changes size. Once you zoom or pan, that view is left alone; use the *Reset zoom* button in the toolbar at the top of the page to return to the framed view, or double-click the chart.
-* **Export PNG:** The *Export PNG* button saves the plot as a ``.png`` at the zoom and pan currently on screen, with the kernel and roofline legend and the active AI axis and runtime thresholds captured alongside it. Isolate the kernels you care about before exporting: the legend is truncated with a ``+N more`` row when it would otherwise outgrow the image.
-* **Theme toggle:** The *Theme toggle* button at the top of the page toggles the plot's theme between light and dark. The button's label changes to match the current theme, and the plot's theme is persisted in local storage.
+* Use the *AI axis* selector to choose one memory level per kernel, or *All peaks* to plot every level at once. Isolating one kernel shows it across all available memory levels.
+* Use the *Kernels* and *Bandwidth rooflines* panels to isolate, multi-select, or reset plotted items. The *Runtime shown* slider filters to the heaviest kernels that reach the selected GPU resident-time cutoff.
+* Hover over kernel dots and rooflines to see arithmetic intensity, throughput, roofline percentage, limiter, runtime, bandwidth, and compute-peak details.
+* Drag to pan, scroll to zoom, double-click or use *Reset zoom* to re-frame the chart, use *Export PNG* to save the current view, and use *Theme toggle* to switch between light and dark modes.
 
-Below is an example of the interactive HTML plot:
+Below are examples of the interactive HTML plot in light and dark modes:
 
 .. image:: ../../data/analyze/cli/roofline_html_interact.png
    :align: center
    :alt: HTML interactive plot
+   :width: 800
+
+.. image:: ../../data/analyze/cli/roofline_html_interact_dark.png
+   :align: center
+   :alt: HTML interactive plot in dark mode
    :width: 800
 
 .. _analysis-baseline-comparison:
