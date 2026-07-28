@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.20)
 
 project(aie_tests)
 
+# Required for ctest to pick up the tests registered by gtest_discover_tests().
+enable_testing()
+
 include(FetchContent)
 
 FetchContent_Declare(
