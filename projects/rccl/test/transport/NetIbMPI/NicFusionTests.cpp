@@ -1780,10 +1780,15 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
 // =============================================================================
 // Test: MergeMultipleDevices
 //
-// Tests makeVDevice() with increasing numbers of physical devices:
-//   - 3 devices: should succeed (within NCCL_NET_MAX_DEVS_PER_NIC = 4 limit)
-//   - 4 devices: should succeed (at the limit)
-//   - 5 devices: should fail (exceeds the limit)
+// Exercises makeVDevice() around the NCCL_NET_MAX_DEVS_PER_NIC boundary:
+//   - below the limit:  succeeds
+//   - at the limit:     succeeds
+//   - above the limit:  rejected, no device added
+//   - duplicate device indices: deduplicated into a single-NIC vNIC
+//
+// The limit is a compile-time property of the plugin API version, not an env var:
+// NCCL_NET_MAX_DEVS_PER_NIC tracks the negotiated net API (4 for v9..v11, 8 for v12).
+// Never hardcode it here.
 //
 // makeVDevice() is additive — each successful call appends a new merged device
 // to the device list. Physical devices remain visible (hiding is done by the
@@ -1801,6 +1806,8 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
     ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
     ASSERT_GT(ndev, 0);
 
+    constexpr int kMaxDevsPerNic = NCCL_NET_MAX_DEVS_PER_NIC;
+
     // --- Collect all device properties and identify physical (non-merged) devices ---
     std::vector<ncclNetProperties_t> allProps(ndev);
     std::vector<int> physicalDevices;
@@ -1815,160 +1822,154 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
         }
     }
 
-    if (physicalDevices.size() < 5) {
-        GTEST_SKIP() << "Need at least 5 physical (non-merged) IB devices, found "
-                     << physicalDevices.size();
+    if (physicalDevices.empty()) {
+        GTEST_SKIP() << "No physical (non-merged) IB devices found";
     }
 
-    // --- Find 5 physical devices with matching speed ---
-    int targetSpeed = allProps[physicalDevices[0]].speed;
+    // --- Take up to kMaxDevsPerNic physical devices sharing one speed ---
+    const int targetSpeed = allProps[physicalDevices[0]].speed;
     std::vector<int> selected;
 
-    for (size_t i = 0; i < physicalDevices.size() && selected.size() < 5; i++) {
+    for (size_t i = 0; i < physicalDevices.size() && (int)selected.size() < kMaxDevsPerNic; i++) {
         int devIdx = physicalDevices[i];
         if (allProps[devIdx].speed == targetSpeed) {
             selected.push_back(devIdx);
         }
     }
 
-    if (selected.size() < 5) {
-        GTEST_SKIP() << "Could not find 5 physical devices with matching speed. "
-                     << "Found " << selected.size() << " devices at speed " << targetSpeed;
+    const int mergeCount = (int)selected.size();
+    if (mergeCount < 2) {
+        GTEST_SKIP() << "Need at least 2 physical devices at a common speed, found " << mergeCount
+                     << " at speed " << targetSpeed;
     }
 
-    // =========================================================================
-    // Sub-test 1: Merge 3 devices (should succeed, under limit of 4)
-    // =========================================================================
-    {
+    // Merge selected[0..count-1] and check the resulting vNIC. Distinct indices only,
+    // so the merged device must report exactly `count` constituents.
+    auto expectMergeSucceeds = [&](int count) {
+        SCOPED_TRACE(testing::Message() << "merging " << count << " devices, limit " << kMaxDevsPerNic);
+
         int ndevBefore = 0;
         ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
 
         ncclNetVDeviceProps_t vProps;
         memset(&vProps, 0, sizeof(vProps));
-        vProps.ndevs = 3;
-        vProps.devs[0] = selected[0];
-        vProps.devs[1] = selected[1];
-        vProps.devs[2] = selected[2];
-
-        int vdev = -1;
-        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
-
-        EXPECT_EQ(result, ncclSuccess)
-            << "Merging 3 devices should succeed (within limit of 4)";
-
-        if (result == ncclSuccess) {
-            EXPECT_GE(vdev, 0) << "Virtual device index should be non-negative";
-
-            // Device count should increase by 1
-            int ndevAfter = 0;
-            ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
-            EXPECT_EQ(ndevAfter, ndevBefore + 1)
-                << "makeVDevice should add exactly one device";
-
-            // Verify the new merged device properties
-            ncclNetProperties_t vdevProps;
-            memset(&vdevProps, 0, sizeof(vdevProps));
-            ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
-
-            // Name should contain two '+' separators (3 devices)
-            ASSERT_NE(vdevProps.name, nullptr);
-            std::string mergedName(vdevProps.name);
-            int plusCount = 0;
-            for (char c : mergedName) {
-                if (c == '+') plusCount++;
-            }
-            EXPECT_EQ(plusCount, 2)
-                << "3-device merge should have 2 '+' separators, got " << plusCount
-                << " in name '" << mergedName << "'";
-
-            // Speed should be sum of 3 constituents
-            int expectedSpeed = allProps[selected[0]].speed +
-                                allProps[selected[1]].speed +
-                                allProps[selected[2]].speed;
-            EXPECT_EQ(vdevProps.speed, expectedSpeed)
-                << "Merged speed should be " << expectedSpeed << ", got " << vdevProps.speed;
+        vProps.ndevs = count;
+        int expectedSpeed = 0;
+        for (int i = 0; i < count; i++) {
+            vProps.devs[i] = selected[i];
+            expectedSpeed += allProps[selected[i]].speed;
         }
-    }
-
-    // =========================================================================
-    // Sub-test 2: Merge 4 devices (should succeed, at the limit)
-    // =========================================================================
-    {
-        int ndevBefore = 0;
-        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
-
-        ncclNetVDeviceProps_t vProps;
-        memset(&vProps, 0, sizeof(vProps));
-        vProps.ndevs = 4;
-        vProps.devs[0] = selected[0];
-        vProps.devs[1] = selected[1];
-        vProps.devs[2] = selected[2];
-        vProps.devs[3] = selected[3];
 
         int vdev = -1;
-        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+        ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+            << "Merging " << count << " devices should succeed";
+        ASSERT_GE(vdev, 0) << "Virtual device index should be non-negative";
 
-        EXPECT_EQ(result, ncclSuccess)
-            << "Merging 4 devices should succeed (at the limit of NCCL_NET_MAX_DEVS_PER_NIC)";
-
-        if (result == ncclSuccess) {
-            EXPECT_GE(vdev, 0);
-
-            int ndevAfter = 0;
-            ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
-            EXPECT_EQ(ndevAfter, ndevBefore + 1);
-
-            ncclNetProperties_t vdevProps;
-            memset(&vdevProps, 0, sizeof(vdevProps));
-            ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
-
-            // Name should contain three '+' separators (4 devices)
-            ASSERT_NE(vdevProps.name, nullptr);
-            std::string mergedName(vdevProps.name);
-            int plusCount = 0;
-            for (char c : mergedName) {
-                if (c == '+') plusCount++;
-            }
-            EXPECT_EQ(plusCount, 3)
-                << "4-device merge should have 3 '+' separators, got " << plusCount
-                << " in name '" << mergedName << "'";
-
-            // Speed should be sum of 4 constituents
-            int expectedSpeed = allProps[selected[0]].speed +
-                                allProps[selected[1]].speed +
-                                allProps[selected[2]].speed +
-                                allProps[selected[3]].speed;
-            EXPECT_EQ(vdevProps.speed, expectedSpeed)
-                << "Merged speed should be " << expectedSpeed << ", got " << vdevProps.speed;
-        }
-    }
-
-    // =========================================================================
-    // Sub-test 3: Merge 5 devices (should FAIL, exceeds limit of 4)
-    // =========================================================================
-    {
-        int ndevBefore = 0;
-        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
-
-        ncclNetVDeviceProps_t vProps;
-        memset(&vProps, 0, sizeof(vProps));
-        vProps.ndevs = 5;
-        vProps.devs[0] = selected[0];
-        vProps.devs[1] = selected[1];
-        vProps.devs[2] = selected[2];
-        vProps.devs[3] = selected[3];
-
-        int vdev = -1;
-        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
-
-        EXPECT_NE(result, ncclSuccess)
-            << "Merging 5 devices should fail (exceeds NCCL_NET_MAX_DEVS_PER_NIC = 4)";
-
-        // Device count should NOT have changed
         int ndevAfter = 0;
         ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
-        EXPECT_EQ(ndevAfter, ndevBefore)
-            << "Failed merge should not add any devices";
+        EXPECT_EQ(ndevAfter, ndevBefore + 1) << "makeVDevice should add exactly one device";
+
+        ncclNetProperties_t vdevProps;
+        memset(&vdevProps, 0, sizeof(vdevProps));
+        ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
+        ASSERT_NE(vdevProps.name, nullptr);
+
+        std::string mergedName(vdevProps.name);
+        int plusCount = 0;
+        for (char c : mergedName) {
+            if (c == '+') plusCount++;
+        }
+        EXPECT_EQ(plusCount, count - 1)
+            << count << "-device merge should have " << count - 1 << " '+' separators, got "
+            << plusCount << " in name '" << mergedName << "'";
+        EXPECT_EQ(vdevProps.speed, expectedSpeed)
+            << "Merged speed should be " << expectedSpeed << ", got " << vdevProps.speed;
+    };
+
+    // =========================================================================
+    // Sub-test 1: below the limit
+    // =========================================================================
+    if (mergeCount >= 3) {
+        expectMergeSucceeds(mergeCount - 1);
+    }
+
+    // =========================================================================
+    // Sub-test 2: at the limit (or at the node's maximum, when it has fewer NICs)
+    // =========================================================================
+    expectMergeSucceeds(mergeCount);
+
+    // =========================================================================
+    // Sub-test 3: above the limit — must be rejected, no device added
+    //
+    // ncclNetVDeviceProps_t::devs[] holds exactly NCCL_NET_MAX_DEVS_PER_NIC entries, so an
+    // over-limit request cannot be expressed in that struct. Use a layout-compatible
+    // oversized buffer: the plugin must reject on the ndevs count alone, before it ever
+    // indexes devs[]. Backing the extra entries with real memory keeps this test free of
+    // out-of-bounds access even if the guard regresses.
+    // =========================================================================
+    {
+        int ndevBefore = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
+
+        constexpr int kOverLimit = kMaxDevsPerNic + 1;
+        struct {
+            int ndevs;
+            int devs[kOverLimit];
+        } oversized;
+        oversized.ndevs = kOverLimit;
+        for (int i = 0; i < kOverLimit; i++) {
+            oversized.devs[i] = selected[i % mergeCount];
+        }
+
+        int vdev = -1;
+        ncclResult_t result =
+            MakeVirtualDevice(&vdev, reinterpret_cast<ncclNetVDeviceProps_t*>(&oversized));
+
+        EXPECT_EQ(result, ncclInvalidUsage)
+            << "Merging " << kOverLimit << " devices must be rejected (limit is "
+            << kMaxDevsPerNic << ")";
+
+        int ndevAfter = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+        EXPECT_EQ(ndevAfter, ndevBefore) << "Failed merge should not add any devices";
+    }
+
+    // =========================================================================
+    // Sub-test 4: duplicate indices collapse into a single-NIC vNIC
+    //
+    // This is the dedup that masked the original ROCM-28479 failure: a props array with a
+    // repeated index yields fewer constituents than ndevs suggests. Pin the behaviour so a
+    // future test cannot mistake "deduplicated" for "over the limit".
+    // =========================================================================
+    {
+        int ndevBefore = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
+
+        ncclNetVDeviceProps_t vProps;
+        memset(&vProps, 0, sizeof(vProps));
+        vProps.ndevs = 2;
+        vProps.devs[0] = selected[0];
+        vProps.devs[1] = selected[0];
+
+        int vdev = -1;
+        ASSERT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclSuccess)
+            << "A duplicate-index merge is a valid single-NIC request";
+        ASSERT_GE(vdev, 0);
+
+        int ndevAfter = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+        EXPECT_EQ(ndevAfter, ndevBefore + 1);
+
+        ncclNetProperties_t vdevProps;
+        memset(&vdevProps, 0, sizeof(vdevProps));
+        ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
+        ASSERT_NE(vdevProps.name, nullptr);
+
+        EXPECT_EQ(strchr(vdevProps.name, '+'), nullptr)
+            << "Duplicate indices should collapse to one constituent, got name '"
+            << vdevProps.name << "'";
+        EXPECT_EQ(vdevProps.speed, allProps[selected[0]].speed)
+            << "Deduplicated merge must not double-count speed";
     }
 }
 
