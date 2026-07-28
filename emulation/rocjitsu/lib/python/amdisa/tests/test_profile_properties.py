@@ -81,19 +81,20 @@ def test_max_addressable_vgprs_per_wf(profile, expected):
 
 
 @pytest.mark.parametrize(
-    ('profile', 'expected'),
+    ('profile', 'expected_wave32', 'expected_wave64'),
     [
-        (Cdna1Profile(), 4),
-        (Cdna2Profile(), 4),
-        (CdnaProfile(), 8),
-        (Rdna1Profile(), 8),
-        (Rdna3Profile(), 8),
-        (Rdna4Profile(), 8),
-        (Gfx1250Profile(), 16),
+        (Cdna1Profile(), 4, 4),
+        (Cdna2Profile(), 4, 4),
+        (CdnaProfile(), 8, 8),
+        (Rdna1Profile(), 8, 4),
+        (Rdna3Profile(), 8, 4),
+        (Rdna4Profile(), 8, 4),
+        (Gfx1250Profile(), 16, 16),
     ],
 )
-def test_descriptor_vgpr_count_granule(profile, expected):
-    assert profile.descriptor_vgpr_count_granule == expected
+def test_descriptor_vgpr_count_granule(profile, expected_wave32, expected_wave64):
+    assert profile.descriptor_vgpr_count_granule_wave32 == expected_wave32
+    assert profile.descriptor_vgpr_count_granule_wave64 == expected_wave64
 
 
 def test_only_gfx1250_splits_execution_sources():
@@ -150,7 +151,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     output = emit_isa_properties(str(tmp_path), specs).read_text()
 
     assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
-    assert 'uint32_t descriptor_vgpr_count_granule = 4;' in output
+    assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 4;' in output
+    assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 4;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
     assert (
         'case ROCJITSU_CODE_ARCH_CDNA3:\n'
@@ -160,7 +162,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
-        '        .descriptor_vgpr_count_granule = 8,\n'
+        '        .descriptor_vgpr_count_granule_wave32 = 8,\n'
+        '        .descriptor_vgpr_count_granule_wave64 = 8,\n'
         '    };'
     ) in output
     assert (
@@ -171,7 +174,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
-        '        .descriptor_vgpr_count_granule = 8,\n'
+        '        .descriptor_vgpr_count_granule_wave32 = 8,\n'
+        '        .descriptor_vgpr_count_granule_wave64 = 4,\n'
         '    };'
     ) in output
     assert (
@@ -182,7 +186,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
         '        .max_addressable_vgprs_per_wf = 1024,\n'
-        '        .descriptor_vgpr_count_granule = 16,\n'
+        '        .descriptor_vgpr_count_granule_wave32 = 16,\n'
+        '        .descriptor_vgpr_count_granule_wave64 = 16,\n'
         '    };'
     ) in output
 

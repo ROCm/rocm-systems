@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -468,18 +469,11 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   // If/when occupancy modeling needs the physical allocation block size, add a
   // separate helper for that policy. Reusing this descriptor helper for
   // occupancy would mix two different hardware contracts.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA1)
-    return 4;
-  if (arch_is_cdna(arch))
-    return 8;
-  // gfx1250 exposes four 256-VGPR banks selected by WAVE_MODE.VGPR_MSB. Its
-  // AMDHSA descriptor allocates that combined Wave32 namespace in blocks of
-  // 16 VGPRs, unlike the 8-VGPR Wave32 granule used by generic RDNA targets.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
-    return 16;
-  if (arch_is_rdna(arch))
-    return wavefront_size == 32 ? 8 : 4;
-  return 1;
+  const auto properties = isa_properties(arch);
+  if (properties.max_addressable_vgprs_per_wf == 0)
+    return 1;
+  return wavefront_size == 32 ? properties.descriptor_vgpr_count_granule_wave32
+                              : properties.descriptor_vgpr_count_granule_wave64;
 }
 
 [[nodiscard]] uint32_t granulated_count_to_registers(uint32_t granulated, uint32_t granularity) {

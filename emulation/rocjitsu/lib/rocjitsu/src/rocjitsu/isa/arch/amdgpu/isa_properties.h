@@ -19,7 +19,8 @@ struct IsaProperties {
   bool uses_ttmp_workgroup_ids = false;
   bool uses_cluster_ttmp_workgroup_ids = false;
   uint32_t max_addressable_vgprs_per_wf = 0;
-  uint32_t descriptor_vgpr_count_granule = 4;
+  uint32_t descriptor_vgpr_count_granule_wave32 = 4;
+  uint32_t descriptor_vgpr_count_granule_wave64 = 4;
 };
 
 inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
@@ -33,7 +34,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule = 4,
+        .descriptor_vgpr_count_granule_wave32 = 4,
+        .descriptor_vgpr_count_granule_wave64 = 4,
     };
   case ROCJITSU_CODE_ARCH_CDNA2:
     return {
@@ -42,7 +44,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule = 4,
+        .descriptor_vgpr_count_granule_wave32 = 4,
+        .descriptor_vgpr_count_granule_wave64 = 4,
     };
   case ROCJITSU_CODE_ARCH_CDNA3:
     return {
@@ -51,7 +54,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule = 8,
+        .descriptor_vgpr_count_granule_wave32 = 8,
+        .descriptor_vgpr_count_granule_wave64 = 8,
     };
   case ROCJITSU_CODE_ARCH_CDNA4:
     return {
@@ -60,7 +64,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule = 8,
+        .descriptor_vgpr_count_granule_wave32 = 8,
+        .descriptor_vgpr_count_granule_wave64 = 8,
     };
   case ROCJITSU_CODE_ARCH_RDNA1:
     return {
@@ -69,7 +74,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule = 8,
+        .descriptor_vgpr_count_granule_wave32 = 8,
+        .descriptor_vgpr_count_granule_wave64 = 4,
     };
   case ROCJITSU_CODE_ARCH_RDNA2:
     return {
@@ -78,7 +84,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule = 8,
+        .descriptor_vgpr_count_granule_wave32 = 8,
+        .descriptor_vgpr_count_granule_wave64 = 4,
     };
   case ROCJITSU_CODE_ARCH_RDNA3:
     return {
@@ -87,7 +94,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule = 8,
+        .descriptor_vgpr_count_granule_wave32 = 8,
+        .descriptor_vgpr_count_granule_wave64 = 4,
     };
   case ROCJITSU_CODE_ARCH_RDNA3_5:
     return {
@@ -96,7 +104,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule = 8,
+        .descriptor_vgpr_count_granule_wave32 = 8,
+        .descriptor_vgpr_count_granule_wave64 = 4,
     };
   case ROCJITSU_CODE_ARCH_RDNA4:
     return {
@@ -105,7 +114,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = false,
         .max_addressable_vgprs_per_wf = 256,
-        .descriptor_vgpr_count_granule = 8,
+        .descriptor_vgpr_count_granule_wave32 = 8,
+        .descriptor_vgpr_count_granule_wave64 = 4,
     };
   case ROCJITSU_CODE_ARCH_GFX1250:
     return {
@@ -114,7 +124,8 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = true,
         .max_addressable_vgprs_per_wf = 1024,
-        .descriptor_vgpr_count_granule = 16,
+        .descriptor_vgpr_count_granule_wave32 = 16,
+        .descriptor_vgpr_count_granule_wave64 = 16,
     };
   default:
     return {};
