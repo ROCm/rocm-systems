@@ -30,7 +30,6 @@ namespace {
 /// NOT-YET-SUPPORTED (classified as needing an expansion but with no semantic
 /// expander, so translating a kernel that uses them fails closed rather than
 /// passing the instruction through unchanged):
-///   * s_barrier_signal_isfirst,
 ///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
 ///     mode; the ordinary form stays on the copy path),
 ///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
@@ -42,8 +41,7 @@ namespace {
 /// warning rather than fail-closed (see is_deferred_gfx1250_family).
 /// Classifying the fail-closed cases keeps the failure explicit and located; add
 /// the semantic rule (and update this note) once each expansion is implemented.
-inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemonics = {
-    "s_barrier_signal_isfirst",
+inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",
     "ds_load_2addr_stride64_b32",
