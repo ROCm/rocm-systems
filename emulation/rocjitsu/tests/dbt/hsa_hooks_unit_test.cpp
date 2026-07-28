@@ -139,21 +139,60 @@ TEST(ConSanTransformMemoryTest, DerivesMajorImageReservationFromEitherGrowthPoli
       .absolute_bytes = 4,
   };
   EXPECT_EQ(rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(8, absolute),
-            96u);
+            76u);
 
   const rocjitsu::ConSanPatchedImageGrowthLimit relative = {
       .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent,
       .input_percent = 50,
   };
   EXPECT_EQ(rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(8, relative),
-            96u);
+            76u);
 
-  const rocjitsu::ConSanPatchedImageGrowthLimit overflowing = {
+  const rocjitsu::ConSanPatchedImageGrowthLimit default_policy = {
+      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+      .absolute_bytes = rocjitsu::kConSanDefaultMaxPatchedImageGrowthBytes,
+  };
+  EXPECT_EQ(
+      rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(8, default_policy),
+      603979840u);
+
+  const rocjitsu::ConSanPatchedImageGrowthLimit sum_overflow = {
       .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
       .absolute_bytes = std::numeric_limits<uint64_t>::max(),
   };
   EXPECT_FALSE(
-      rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(8, overflowing));
+      rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(8, sum_overflow));
+
+  const rocjitsu::ConSanPatchedImageGrowthLimit maximum_image_multiply_overflow = {
+      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+      .absolute_bytes = std::numeric_limits<uint64_t>::max() /
+                        rocjitsu::consan_hook::kConSanTransformMaximumImageCopies,
+  };
+  EXPECT_FALSE(rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(
+      8, maximum_image_multiply_overflow));
+
+  const rocjitsu::ConSanPatchedImageGrowthLimit no_growth = {
+      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+      .absolute_bytes = 0,
+  };
+  EXPECT_FALSE(rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(
+      std::numeric_limits<uint64_t>::max() /
+          rocjitsu::consan_hook::kConSanTransformInputImageCopies,
+      no_growth));
+
+  const rocjitsu::ConSanPatchedImageGrowthLimit exact_maximum_component = {
+      .kind = rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
+      .absolute_bytes = std::numeric_limits<uint64_t>::max() /
+                        rocjitsu::consan_hook::kConSanTransformMaximumImageCopies,
+  };
+  EXPECT_EQ(rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(
+                0, exact_maximum_component),
+            std::optional<uint64_t>(std::numeric_limits<uint64_t>::max()));
+
+  const rocjitsu::ConSanPatchedImageGrowthLimit invalid = {
+      .kind = static_cast<rocjitsu::ConSanPatchedImageGrowthLimitKind>(255),
+  };
+  EXPECT_FALSE(rocjitsu::consan_hook::consan_transform_major_image_reservation_bytes(8, invalid));
 }
 
 rocjitsu::ConSanLdsSite make_supported_sc_lds_site(uint64_t file_offset) {
@@ -286,11 +325,12 @@ struct FakeMemoryReader {
   uint64_t handle = 0;
   const uint8_t *bytes = nullptr;
   size_t size = 0;
+  bool replacement = false;
 };
 std::vector<FakeMemoryReader> g_memory_code_object_readers;
 std::vector<uint64_t> g_destroyed_code_object_readers;
 std::vector<uint64_t> g_destroyed_executables;
-bool g_replacement_storage_valid_at_executable_destroy = false;
+std::vector<std::pair<uint64_t, bool>> g_replacement_storage_valid_by_executable;
 std::vector<uint64_t> g_loaded_code_object_readers;
 std::vector<std::pair<uint64_t, uint64_t>> g_loaded_executable_readers;
 rocjitsu::ConSanResult g_transform_override_result;
@@ -582,7 +622,12 @@ hsa_status_t HSA_API fake_code_object_reader_create_from_memory(
   const auto *begin = static_cast<const uint8_t *>(bytes);
   g_code_object_reader_inputs.emplace_back(begin, begin == nullptr ? begin : begin + size);
   code_object_reader->handle = 100u + static_cast<uint64_t>(g_code_object_reader_create_calls);
-  g_memory_code_object_readers.push_back({code_object_reader->handle, begin, size});
+  const bool replacement = !g_transform_override_uses_production &&
+                           !g_transform_override_result.elf_bytes.empty() &&
+                           g_transform_override_result.elf_bytes.size() == size &&
+                           std::equal(g_transform_override_result.elf_bytes.begin(),
+                                      g_transform_override_result.elf_bytes.end(), begin);
+  g_memory_code_object_readers.push_back({code_object_reader->handle, begin, size, replacement});
   return HSA_STATUS_SUCCESS;
 }
 
@@ -593,23 +638,34 @@ hsa_status_t HSA_API fake_code_object_reader_destroy(hsa_code_object_reader_t re
 
 hsa_status_t HSA_API fake_executable_destroy(hsa_executable_t executable) {
   g_destroyed_executables.push_back(executable.handle);
-  const auto loaded =
-      std::ranges::find_if(g_loaded_executable_readers.rbegin(), g_loaded_executable_readers.rend(),
-                           [&](const auto &entry) { return entry.first == executable.handle; });
-  if (loaded != g_loaded_executable_readers.rend()) {
+  bool saw_replacement = false;
+  bool all_replacements_valid = true;
+  for (const auto &[loaded_executable, loaded_reader] : g_loaded_executable_readers) {
+    if (loaded_executable != executable.handle)
+      continue;
     const auto replacement =
-        std::ranges::find(g_memory_code_object_readers, loaded->second, &FakeMemoryReader::handle);
+        std::ranges::find(g_memory_code_object_readers, loaded_reader, &FakeMemoryReader::handle);
+    if (replacement == g_memory_code_object_readers.end() || !replacement->replacement)
+      continue;
+    saw_replacement = true;
     const size_t index = static_cast<size_t>(replacement - g_memory_code_object_readers.begin());
-    if (replacement == g_memory_code_object_readers.end() ||
-        index >= g_code_object_reader_inputs.size()) {
-      return HSA_STATUS_SUCCESS;
-    }
-    const std::vector<uint8_t> &expected = g_code_object_reader_inputs[index];
-    g_replacement_storage_valid_at_executable_destroy =
-        replacement->bytes != nullptr && replacement->size == expected.size() &&
-        std::equal(expected.begin(), expected.end(), replacement->bytes);
+    const bool valid = index < g_code_object_reader_inputs.size() &&
+                       replacement->bytes != nullptr &&
+                       replacement->size == g_code_object_reader_inputs[index].size() &&
+                       std::equal(g_code_object_reader_inputs[index].begin(),
+                                  g_code_object_reader_inputs[index].end(), replacement->bytes);
+    all_replacements_valid = all_replacements_valid && valid;
   }
+  if (saw_replacement)
+    g_replacement_storage_valid_by_executable.emplace_back(executable.handle,
+                                                           all_replacements_valid);
   return HSA_STATUS_SUCCESS;
+}
+
+bool replacement_storage_valid_at_destroy(uint64_t executable) {
+  const auto result = std::ranges::find(g_replacement_storage_valid_by_executable, executable,
+                                        &std::pair<uint64_t, bool>::first);
+  return result != g_replacement_storage_valid_by_executable.end() && result->second;
 }
 
 hsa_status_t HSA_API fake_system_get_extension_table(uint16_t, uint16_t, uint16_t, void *) {
@@ -1280,7 +1336,7 @@ void reset_code_object_observations() {
   g_memory_code_object_readers.clear();
   g_destroyed_code_object_readers.clear();
   g_destroyed_executables.clear();
-  g_replacement_storage_valid_at_executable_destroy = false;
+  g_replacement_storage_valid_by_executable.clear();
   g_loaded_code_object_readers.clear();
   g_loaded_executable_readers.clear();
   g_transform_override_flavors.clear();
@@ -1601,11 +1657,12 @@ TEST(HsaHooksUnitTest, ConSanWarnsWhenTransformLimitCannotAdmitAnyNonemptyObject
     ASSERT_TRUE(hook.installed()) << hook.error();
   }
   const std::string log = testing::internal::GetCapturedStderr();
-  EXPECT_NE(log.find("cannot admit any nonempty code object under the configured per-object "
-                     "growth policy"),
+  EXPECT_NE(log.find("cannot admit any nonempty code object; "
+                     "the smallest possible reservation is 20 bytes"),
             std::string::npos)
       << log;
-  EXPECT_NE(log.find("reservation is 8 * (input bytes + maximum growth bytes)"), std::string::npos)
+  EXPECT_NE(log.find("5 * input bytes + 3 * (input bytes + maximum growth bytes)"),
+            std::string::npos)
       << log;
 }
 
@@ -1622,8 +1679,8 @@ TEST(HsaHooksUnitTest, ConSanWarnsWhenRelativeGrowthTransformLimitCannotAdmitAny
     ASSERT_TRUE(hook.installed()) << hook.error();
   }
   const std::string log = testing::internal::GetCapturedStderr();
-  EXPECT_NE(log.find("cannot admit any nonempty code object under the configured per-object "
-                     "growth policy"),
+  EXPECT_NE(log.find("cannot admit any nonempty code object; "
+                     "the smallest possible reservation is 8 bytes"),
             std::string::npos)
       << log;
 }
@@ -1632,7 +1689,7 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitFailsOpenBeforeTransform) {
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "95");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "75");
 
   g_transform_override_result = process_growth_replacement_result();
 
@@ -1656,7 +1713,7 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitFailsOpenBeforeTransform) {
   EXPECT_TRUE(g_transform_override_flavors.empty());
   EXPECT_EQ(g_loaded_code_object_readers, (std::vector<uint64_t>{reader.handle}));
   EXPECT_NE(log.find("process concurrent transform limit exceeded: reader=101 input_image=8 "
-                     "live=0 reservation=96 required=96 limit=95"),
+                     "live=0 reservation=76 required=76 limit=75"),
             std::string::npos)
       << log;
   EXPECT_NE(log.find("analysis_complete=false static_complete=false "
@@ -1670,7 +1727,7 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitFailsClosedBeforeTransform)
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], true);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "95");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "75");
 
   g_transform_override_result = process_growth_replacement_result();
 
@@ -1698,7 +1755,7 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitTracksAndRefundsReservation
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "96");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "76");
 
   g_transform_override_result = process_growth_replacement_result();
   g_block_first_transform = true;
@@ -1754,9 +1811,9 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitTracksAndRefundsReservation
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{9}), HSA_STATUS_SUCCESS);
   hook.unload();
   const std::string log = testing::internal::GetCapturedStderr();
-  EXPECT_NE(log.find("live=96 reservation=96 required=192 limit=96"), std::string::npos) << log;
+  EXPECT_NE(log.find("live=76 reservation=76 required=152 limit=76"), std::string::npos) << log;
   EXPECT_NE(log.find("transform admission memory live_bytes=0 "
-                     "peak_reserved_bytes=96 process_ceiling=96"),
+                     "peak_reserved_bytes=76 process_ceiling=76"),
             std::string::npos)
       << log;
 }
@@ -1787,7 +1844,7 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformTracksUnlimitedPeak) {
 
   EXPECT_EQ(g_transform_override_flavors.size(), 1u);
   EXPECT_NE(log.find("transform admission memory live_bytes=0 "
-                     "peak_reserved_bytes=96 process_ceiling=unlimited"),
+                     "peak_reserved_bytes=76 process_ceiling=unlimited"),
             std::string::npos)
       << log;
 }
@@ -1856,7 +1913,7 @@ TEST(HsaHooksUnitTest, ConSanReleasesTransformReservationBeforeOriginalLoad) {
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "96");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "76");
   g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
   g_block_first_loader_call = true;
 
@@ -1908,7 +1965,7 @@ TEST(HsaHooksUnitTest, ConSanReleasesTransformReservationBeforeRetentionFallback
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "96");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "76");
   ScopedEnvVar process_image_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES", "0");
   g_transform_override_result = process_growth_replacement_result();
   g_block_first_loader_call = true;
@@ -1961,7 +2018,7 @@ TEST(HsaHooksUnitTest, ConSanReleasesTransformReservationOnEarlyRejection) {
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "96");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "76");
   rocjitsu::ConSanResult unresolved = process_growth_replacement_result();
   unresolved.arch = ROCJITSU_CODE_ARCH_INVALID;
   unresolved.semantic_arch_required = true;
@@ -1994,7 +2051,7 @@ TEST(HsaHooksUnitTest, ConSanPreservesLiveTransformReservationAcrossUnloadAndRel
   reset_code_object_observations();
   configure_consan_profile(kConSanHookProfiles[1], false);
   ScopedEnvVar object_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "4");
-  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "96");
+  ScopedEnvVar transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", "76");
   g_transform_override_result = process_growth_replacement_result();
   g_block_first_transform = true;
 
@@ -2072,9 +2129,9 @@ TEST(HsaHooksUnitTest, ConSanPreservesLiveTransformReservationAcrossUnloadAndRel
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{9}), HSA_STATUS_SUCCESS);
   hook.unload();
   const std::string log = testing::internal::GetCapturedStderr();
-  EXPECT_NE(log.find("live_bytes=96 peak_reserved_bytes=96 process_ceiling=96"), std::string::npos)
+  EXPECT_NE(log.find("live_bytes=76 peak_reserved_bytes=76 process_ceiling=76"), std::string::npos)
       << log;
-  EXPECT_NE(log.find("live=96 reservation=96 required=192 limit=96"), std::string::npos) << log;
+  EXPECT_NE(log.find("live=76 reservation=76 required=152 limit=76"), std::string::npos) << log;
   EXPECT_EQ(log.find("transform reservation refund exceeded the live total"), std::string::npos)
       << log;
 }
@@ -2455,6 +2512,12 @@ TEST(HsaHooksUnitTest, ConSanPreservesRetainedReplacementAcrossUnloadAndReload) 
   }
 
   hook.unload();
+  const std::string unload_log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(unload_log.find("patched-image memory live_bytes=12 peak_image_bytes=12 "
+                            "process_ceiling=12"),
+            std::string::npos)
+      << unload_log;
+  testing::internal::CaptureStderr();
   if (!hook.reload(api)) {
     {
       std::lock_guard lock(g_loader_block_mutex);
@@ -2487,7 +2550,7 @@ TEST(HsaHooksUnitTest, ConSanPreservesRetainedReplacementAcrossUnloadAndReload) 
   EXPECT_EQ(g_loaded_code_object_readers, (std::vector<uint64_t>{102u, 103u}));
 
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
-  EXPECT_TRUE(g_replacement_storage_valid_at_executable_destroy);
+  EXPECT_TRUE(replacement_storage_valid_at_destroy(7u));
 
   // Destroying the first executable releases both retained charges, allowing
   // a subsequent replacement under the reloaded hook.
@@ -2499,15 +2562,19 @@ TEST(HsaHooksUnitTest, ConSanPreservesRetainedReplacementAcrossUnloadAndReload) 
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{9}), HSA_STATUS_SUCCESS);
 
   hook.unload();
-  const std::string log = testing::internal::GetCapturedStderr();
-  EXPECT_NE(log.find("patched-image memory live_bytes=12 peak_image_bytes=12 "
-                     "process_ceiling=12"),
+  const std::string final_log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(final_log.find("patched-image memory live_bytes=0 peak_image_bytes=12 "
+                           "process_ceiling=12"),
             std::string::npos)
-      << log;
-  EXPECT_NE(log.find("process patched-image growth limit exceeded: "
-                     "live=4 replacement_growth=4 replacement_image=12"),
+      << final_log;
+  EXPECT_NE(final_log.find("patched-image growth memory live_bytes=0 peak_growth_bytes=4 "
+                           "process_ceiling=4"),
             std::string::npos)
-      << log;
+      << final_log;
+  EXPECT_NE(final_log.find("process patched-image growth limit exceeded: "
+                           "live=4 replacement_growth=4 replacement_image=12"),
+            std::string::npos)
+      << final_log;
 }
 
 TEST(HsaHooksUnitTest, RecordReplayBankSaturationIsTypedByEngine) {
@@ -2745,7 +2812,7 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
   ASSERT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_destroyed_executables, std::vector<uint64_t>{7u}) << profile.name;
   if (!expected_replacement.empty()) {
-    EXPECT_TRUE(g_replacement_storage_valid_at_executable_destroy) << profile.name;
+    EXPECT_TRUE(replacement_storage_valid_at_destroy(7u)) << profile.name;
   }
 }
 

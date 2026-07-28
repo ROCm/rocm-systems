@@ -551,16 +551,25 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (config.process_concurrent_transform_limit_bytes) {
     const std::optional<uint64_t> minimum_reservation =
         consan_transform_major_image_reservation_bytes(1, config.patched_image_growth_limit);
-    if (!minimum_reservation ||
-        *config.process_concurrent_transform_limit_bytes < *minimum_reservation) {
+    if (!minimum_reservation) {
       std::fprintf(
           stderr,
           "[rocjitsu-dbi-hooks] warning: "
           "RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=%llu cannot admit any nonempty "
-          "code object under the configured per-object growth policy; the major-image "
-          "reservation is %llu * (input bytes + maximum growth bytes)\n",
+          "code object because the configured per-object growth policy makes the smallest "
+          "major-image reservation overflow uint64\n",
+          static_cast<unsigned long long>(*config.process_concurrent_transform_limit_bytes));
+    } else if (*config.process_concurrent_transform_limit_bytes < *minimum_reservation) {
+      std::fprintf(
+          stderr,
+          "[rocjitsu-dbi-hooks] warning: "
+          "RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES=%llu cannot admit any nonempty "
+          "code object; the smallest possible reservation is %llu bytes "
+          "(%llu * input bytes + %llu * (input bytes + maximum growth bytes))\n",
           static_cast<unsigned long long>(*config.process_concurrent_transform_limit_bytes),
-          static_cast<unsigned long long>(kConSanTransformMajorImageCopies));
+          static_cast<unsigned long long>(*minimum_reservation),
+          static_cast<unsigned long long>(kConSanTransformInputImageCopies),
+          static_cast<unsigned long long>(kConSanTransformMaximumImageCopies));
     }
   }
 

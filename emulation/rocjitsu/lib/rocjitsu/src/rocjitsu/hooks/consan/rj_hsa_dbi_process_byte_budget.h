@@ -87,11 +87,6 @@ public:
   /// Starts a new reporting interval without invalidating live charges.
   void reset_peak_to_live() { peak_bytes_ = live_bytes_; }
 
-  void clear() {
-    live_bytes_ = 0;
-    peak_bytes_ = 0;
-  }
-
 private:
   uint64_t live_bytes_ = 0;
   uint64_t peak_bytes_ = 0;

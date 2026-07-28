@@ -603,16 +603,28 @@ void AmdGpuCodeObject::load_sections() {
         std::string(shstrtab_data + shdr.sh_name, strnlen(shstrtab_data + shdr.sh_name, max_len));
   }
 
+  // Section payloads are copied into owning Section objects. Bound their
+  // aggregate before allocating so duplicate or overlapping headers cannot
+  // amplify one input image into an unbounded parser working set.
+  uint64_t copied_section_bytes = 0;
+  for (size_t i = 0; i < section_hdrs.size(); ++i) {
+    const auto &shdr = section_hdrs[i];
+    if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS || section_names[i].empty())
+      continue;
+    if (!fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size()) ||
+        shdr.sh_size > image_.size() - copied_section_bytes) {
+      is_valid_ = false;
+      return;
+    }
+    copied_section_bytes += shdr.sh_size;
+  }
+
   for (size_t i = 0; i < section_hdrs.size(); ++i) {
     const auto &shdr = section_hdrs[i];
     if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS)
       continue;
     if (section_names[i].empty())
       continue;
-    if (!fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size())) {
-      is_valid_ = false;
-      return;
-    }
 
     const std::string &sec_name = section_names[i];
 

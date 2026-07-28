@@ -693,7 +693,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
 
   // Emit and build patch summaries.
-  result.elf_bytes = patcher.emit();
+  result.elf_bytes = std::move(patcher).emit();
   for (const auto &a : applied) {
     InstrumentationPatch patch;
     patch.anchor_offset = a.site->anchor_offset;

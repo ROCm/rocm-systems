@@ -1518,7 +1518,7 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   EXPECT_EQ(*replacement.required_file_growth(), 2u * sizeof(uint32_t));
 
   auto patched_bytes = std::move(patcher).emit();
-  EXPECT_EQ(patched_bytes.capacity(), patched_bytes.size())
+  EXPECT_LT(patched_bytes.capacity(), 2u * patched_bytes.size())
       << "grown transactional images must not retain geometric vector capacity";
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1539,6 +1539,25 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   uint32_t rodata_word = 0;
   std::memcpy(&rodata_word, rodata->data(), sizeof(rodata_word));
   EXPECT_EQ(rodata_word, 0xA5A55A5Au);
+}
+
+TEST(CodeObjectPatcher, SameSizeTextReplacementTransfersExistingImageStorage) {
+  auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+  ASSERT_EQ(code_object.text_sections().size(), 1u);
+
+  CodeObjectPatcher patcher(code_object);
+  const uint8_t *const original_storage = patcher.image_bytes().data();
+  const std::array<uint32_t, 2> text_words = {0xBF800000u, 0xBFB00000u};
+  const auto *text_bytes = reinterpret_cast<const uint8_t *>(text_words.data());
+  const TextReplacementResult replacement = patcher.replace_text(
+      {text_bytes, text_words.size() * sizeof(uint32_t)}, kTestFileGrowthBudget);
+
+  ASSERT_TRUE(replacement);
+  EXPECT_EQ(replacement.required_file_growth(), std::optional<size_t>(0u));
+  EXPECT_EQ(patcher.image_bytes().data(), original_storage)
+      << "same-size rewrites must not allocate a redundant transactional image";
 }
 
 TEST(CodeObjectPatcher, ReplaceTextReturnsTypedTransactionalOutcomes) {

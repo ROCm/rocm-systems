@@ -209,5 +209,25 @@ TEST(AmdGpuCodeObjectSgpr, NoKernelDescriptorReturnsNullopt) {
   EXPECT_FALSE(obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2).has_value());
 }
 
+TEST(AmdGpuCodeObjectValidation, RejectsAggregateCopiedSectionsLargerThanImage) {
+  auto image = make_elf_with_kds({{"k", 0}});
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+
+  // Each range is individually in bounds, but copying both overlapping
+  // sections would retain twice the full input image.
+  for (const size_t section_index : {size_t{1}, size_t{2}}) {
+    const size_t header_offset = header.e_shoff + section_index * sizeof(Elf64_Shdr);
+    Elf64_Shdr section{};
+    std::memcpy(&section, image.data() + header_offset, sizeof(section));
+    section.sh_offset = 0;
+    section.sh_size = image.size();
+    std::memcpy(image.data() + header_offset, &section, sizeof(section));
+  }
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_FALSE(obj.is_valid());
+}
+
 } // namespace
 } // namespace rocjitsu

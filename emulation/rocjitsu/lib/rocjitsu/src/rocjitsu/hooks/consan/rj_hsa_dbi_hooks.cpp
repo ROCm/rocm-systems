@@ -1148,6 +1148,14 @@ public:
     reservation_bytes_ = 0;
   }
 
+  void discard_image_and_release(std::vector<uint8_t> &image) {
+    // clear() and initializer-list assignment may retain capacity. Swap with an
+    // explicit empty vector so the backing allocation is gone before its
+    // accounting reservation is refunded.
+    std::vector<uint8_t>{}.swap(image);
+    release();
+  }
+
 private:
   ProcessTransformAdmissionRegistry *registry_ = nullptr;
   uint64_t reservation_bytes_ = 0;
@@ -1197,7 +1205,8 @@ public:
     // The HSA runtime may call OnUnload from a shared-library finalizer after
     // ordinary function-local statics have already been destroyed. Keep both
     // the registry and retained executable storage alive for the process
-    // lifetime; executable destruction remains the ownership release point.
+    // lifetime; executable destruction observed while the hook is active
+    // remains the ownership release point.
     static auto *registry = new ReplacementCodeObjectStorageRegistry;
     return *registry;
   }
@@ -1312,7 +1321,10 @@ public:
     };
     // OnUnload does not quiesce runtime-owned load callbacks or invalidate
     // executables that already refer to these bytes. Preserve ownership and
-    // live charges across reinstall while starting a fresh peak interval.
+    // live charges across reinstall while starting a fresh peak interval. New
+    // HSA calls made after OnUnload are outside the hook lifetime; a destroy
+    // only in that interval cannot be observed and leaves this process-lifetime
+    // storage charged until exit.
     growth_budget_.reset_peak_to_live();
     image_budget_.reset_peak_to_live();
     return summary;
@@ -3076,6 +3088,18 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       const std::optional<uint64_t> reservation_bytes =
           consan_transform_major_image_reservation_bytes(size,
                                                          patch_options.patched_image_growth_limit);
+      const bool relative_growth = patch_options.patched_image_growth_limit.kind ==
+                                   rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent;
+      log_message(kLogInfo,
+                  "ConSan transform admission reader=%llu input_image=%zu reservation=%s "
+                  "growth_policy=%s growth_value=%llu",
+                  static_cast<unsigned long long>(code_object_reader.handle), size,
+                  reservation_bytes ? std::to_string(*reservation_bytes).c_str()
+                                    : "uint64-overflow",
+                  relative_growth ? "input-percent" : "absolute-bytes",
+                  static_cast<unsigned long long>(
+                      relative_growth ? patch_options.patched_image_growth_limit.input_percent
+                                      : patch_options.patched_image_growth_limit.absolute_bytes));
       std::optional<ProcessTransformAdmissionRegistry::AdmissionResult> admission;
       if (reservation_bytes) {
         admission = transform_reservation.acquire(*reservation_bytes,
@@ -4443,8 +4467,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       // All metadata consumers above are finished. Discard the unused final
       // image and its reservation together before invoking the original
       // loader, which may block or re-enter the hook.
-      patch_result_storage->elf_bytes.clear();
-      transform_reservation.release();
+      transform_reservation.discard_image_and_release(patch_result_storage->elf_bytes);
     }
   } else {
     log_message(kLogInfo, "ConSan pass-through reader=%llu bytes=unavailable",
@@ -4555,8 +4578,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                      "[rocjitsu-dbi-hooks] failed to retain replacement code-object storage\n");
       }
       replacement_storage.reset();
-      patch_result_storage->elf_bytes = {};
-      transform_reservation.release();
+      transform_reservation.discard_image_and_release(patch_result_storage->elf_bytes);
       if (config->fail_closed) {
         record_static_coverage(false);
         return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,

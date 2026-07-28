@@ -99,19 +99,21 @@ enum class FileInsertionOutcome : uint8_t {
   AllocationFailure,
 };
 
+template <typename InsertBytes>
 [[nodiscard]] FileInsertionOutcome
-insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr, std::vector<Elf64_Shdr> &shdrs,
-                  std::vector<Elf64_Phdr> &phdrs, uint64_t file_offset,
-                  std::span<const uint8_t> bytes, std::optional<size_t> grown_section_index,
-                  bool grow_load_at_segment_end) {
+insert_file_bytes_impl(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
+                       std::vector<Elf64_Shdr> &shdrs, std::vector<Elf64_Phdr> &phdrs,
+                       uint64_t file_offset, size_t byte_count,
+                       std::optional<size_t> grown_section_index, bool grow_load_at_segment_end,
+                       InsertBytes insert_bytes) {
   if (file_offset > image.size())
     return FileInsertionOutcome::MalformedInput;
-  if (bytes.size() > image.max_size() - image.size())
+  if (byte_count > image.max_size() - image.size())
     return FileInsertionOutcome::AllocationFailure;
-  if (bytes.empty())
+  if (byte_count == 0)
     return FileInsertionOutcome::Success;
 
-  const uint64_t delta = bytes.size();
+  const uint64_t delta = byte_count;
   if ((ehdr.e_shoff >= file_offset && !can_add_u64(ehdr.e_shoff, delta)) ||
       (ehdr.e_phoff != 0 && ehdr.e_phoff >= file_offset && !can_add_u64(ehdr.e_phoff, delta)))
     return FileInsertionOutcome::MalformedInput;
@@ -139,8 +141,11 @@ insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr, std::vector<Elf
   }
 
   try {
-    image.insert(image.begin() + static_cast<std::ptrdiff_t>(file_offset), bytes.begin(),
-                 bytes.end());
+    // Every insertion has a known final size. Reserve it before taking the
+    // iterator so callers cannot accidentally add a geometric full-image
+    // reallocation to the transform ownership peak.
+    image.reserve(image.size() + byte_count);
+    insert_bytes(image, static_cast<std::ptrdiff_t>(file_offset));
   } catch (const std::bad_alloc &) {
     return FileInsertionOutcome::AllocationFailure;
   } catch (const std::length_error &) {
@@ -181,6 +186,30 @@ insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr, std::vector<Elf
     }
   }
   return FileInsertionOutcome::Success;
+}
+
+[[nodiscard]] FileInsertionOutcome
+insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr, std::vector<Elf64_Shdr> &shdrs,
+                  std::vector<Elf64_Phdr> &phdrs, uint64_t file_offset,
+                  std::span<const uint8_t> bytes, std::optional<size_t> grown_section_index,
+                  bool grow_load_at_segment_end) {
+  return insert_file_bytes_impl(
+      image, ehdr, shdrs, phdrs, file_offset, bytes.size(), grown_section_index,
+      grow_load_at_segment_end, [bytes](std::vector<uint8_t> &output, std::ptrdiff_t offset) {
+        output.insert(output.begin() + offset, bytes.begin(), bytes.end());
+      });
+}
+
+[[nodiscard]] FileInsertionOutcome
+insert_zero_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
+                       std::vector<Elf64_Shdr> &shdrs, std::vector<Elf64_Phdr> &phdrs,
+                       uint64_t file_offset, size_t byte_count,
+                       std::optional<size_t> grown_section_index, bool grow_load_at_segment_end) {
+  return insert_file_bytes_impl(image, ehdr, shdrs, phdrs, file_offset, byte_count,
+                                grown_section_index, grow_load_at_segment_end,
+                                [byte_count](std::vector<uint8_t> &output, std::ptrdiff_t offset) {
+                                  output.insert(output.begin() + offset, byte_count, uint8_t{0});
+                                });
 }
 
 [[nodiscard]] std::optional<uint64_t> checked_lcm_u64(uint64_t lhs, uint64_t rhs) {
@@ -940,8 +969,6 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
       // vector's geometric reallocation during the insertion below.
       image.reserve(image_.size() + *padded_file_delta);
       image.assign(image_.begin(), image_.end());
-      std::vector<uint8_t> inserted;
-      inserted.resize(*padded_file_delta, 0);
       std::vector<bool> shift_segment_vaddr(phdrs.size(), false);
       for (size_t i = 0; i < phdrs.size(); ++i) {
         if (phdrs[i].p_vaddr >= old_text_end_vaddr && phdrs[i].p_offset >= old_text_end_file) {
@@ -952,8 +979,8 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
         }
       }
 
-      const FileInsertionOutcome insertion = insert_file_bytes(
-          image, header, shdrs, phdrs, old_text_end_file, inserted, *text_index, true);
+      const FileInsertionOutcome insertion = insert_zero_file_bytes(
+          image, header, shdrs, phdrs, old_text_end_file, *padded_file_delta, *text_index, true);
       if (insertion == FileInsertionOutcome::AllocationFailure)
         return TextReplacementResult::allocation_failure(required_file_growth);
       if (insertion != FileInsertionOutcome::Success)
@@ -997,7 +1024,10 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
     }
   } else {
     required_file_growth = 0;
-    image = image_;
+    // All fallible validation is complete and the remaining same-size edits
+    // cannot invalidate the ELF. Transfer ownership instead of retaining a
+    // redundant transactional image for the common no-growth rewrite.
+    image = std::move(image_);
   }
 
   std::memcpy(image.data() + text_offset_, new_text.data(), new_text.size());
