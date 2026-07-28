@@ -2099,7 +2099,9 @@ bool VirtualGPU::upgradeToDeviceMemQueue() {
 
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
   hsa_queue_t* new_queue = roc_device_.acquireQueue(
-      queue_size, cooperative_, cuMask_, priority_, false, dedicated_queue_, true);
+      queue_size, cooperative_, cuMask_, priority_, false, dedicated_queue_,
+      /*preferred=*/nullptr, /*excluded_ids=*/nullptr, /*metadata_ring_buffer=*/nullptr,
+      /*device_mem=*/true);
   if (new_queue == nullptr) {
     device_mem_queue_ = false;
     return false;

@@ -3302,6 +3302,11 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
     if (status != hipSuccess) return status;
   }
 
+  // Attach a completion/profiling signal to the last uncaptured node when this
+  // segment needs one (e.g. leaf segment or a downstream segment on a different
+  // stream/device). Mirrors the pre-refactor out_attach_signal parameter.
+  bool out_attach_signal = segment.needs_completion_signal;
+
   // Process all nodes in this segment
   for (size_t i = 0; i < segment.nodes.size(); ++i) {
     auto& node = segment.nodes[i];
@@ -3311,11 +3316,11 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
         node->stream_id_ = stream->GetStreamId();
         node->hw_queue_id_ = stream->getQueueID();
       }
-      *out_attach_signal = *out_attach_signal && (i == (segment.nodes.size() - 1));
+      out_attach_signal = out_attach_signal && (i == (segment.nodes.size() - 1));
       // Node doesn't support capture - execute individually
       node->SetStream(stream);
       status = node->CreateCommand(node->GetQueue());
-      if (*out_attach_signal) {
+      if (out_attach_signal) {
         if (node->GetCommands().size() > 0) {
           node->GetCommands().back()->SetProfiling();
         }
