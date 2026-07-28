@@ -194,8 +194,7 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
 
     for(const auto& itr : _paths)
     {
-        if(std::string_view{ ::basename(itr.c_str()) }.find("lib") ==
-               std::string_view::npos &&
+        if(path::filename(itr).find("lib") == std::string::npos &&
            !parent_path(itr).empty())
         {
             for(const auto* sitr : { "lib", "lib64", "../lib", "../lib64" })

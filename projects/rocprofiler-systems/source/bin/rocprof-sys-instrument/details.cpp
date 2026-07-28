@@ -1037,7 +1037,7 @@ filter_modules(std::vector<module_t*>* app_modules)
         if(!mod) continue;
 
         auto _module_name = std::string{ get_name(mod) };
-        auto _module_base = std::string{ tim::filepath::basename(_module_name) };
+        auto _module_base = rocprofsys::path::filename(_module_name);
         auto _module_real = rocprofsys::path::realpath(_module_name);
 
         bool _is_excluded = false;
@@ -1053,7 +1053,7 @@ filter_modules(std::vector<module_t*>* app_modules)
         {
             for(const auto& [lib_path, sub_map] : _internal_libs)
             {
-                auto _lib_base = std::string{ tim::filepath::basename(lib_path) };
+                auto _lib_base = rocprofsys::path::filename(lib_path);
                 if(_module_base == _lib_base || _module_real == lib_path ||
                    sub_map.find(_module_base) != sub_map.end() ||
                    sub_map.find(_module_real) != sub_map.end() ||
@@ -1255,10 +1255,8 @@ process_modules(const std::vector<module_t*>& _app_modules)
 
     for(auto* itr : symtab_data.modules)
     {
-        const auto* _base_name = tim::filepath::basename(itr->fullName());
-        auto        _real_name = rocprofsys::path::realpath(itr->fullName());
-
-        if(!_base_name) continue;
+        auto _base_name = rocprofsys::path::filename(itr->fullName());
+        auto _real_name = rocprofsys::path::realpath(itr->fullName());
 
         if(_names.count(_base_name) == 0 && _names.count(_real_name) == 0)
         {

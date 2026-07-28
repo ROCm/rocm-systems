@@ -24,7 +24,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <gnu/lib-names.h>
 #include <iostream>
 #include <regex>
@@ -299,7 +298,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
         - Note: source scope requires debug info
     )desc";
 
-    auto parser = parser_t{ basename(argv[0]), _desc };
+    auto parser = parser_t{ path::filename(argv[0]), _desc };
 
     parser.on_error([](parser_t&, const parser_err_t& _err) {
         stream(std::cerr, color::fatal()) << _err << "\n";
