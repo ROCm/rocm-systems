@@ -413,15 +413,15 @@ void GraphExecSegmented::BuildSyncPlan() {
 
   auto* device = g_devices[captureDeviceId_]->devices()[0];
 
-  // PASS 0: Barrier-ROI collapse. When multi-stream's cross-stream sync would not
-  // pay for the overlap it unlocks (see ShouldCollapseToSingleStream), fold every
-  // segment onto stream 0. EnqueueSegmentedGraph resolves stream 0 to the launch
-  // stream (streams_[0]), so the whole graph runs on that one in-order queue: the
-  // subsequent passes then emit zero cross-stream barriers and zero completion
-  // signals, and graph completion is observed through the launch stream itself.
+  // PASS 0: Barrier-ROI collapse. Only runs in mode 0 (default) and only when
+  // the graph is shallow (max_level<=4). Modes 1 (round-robin) and 2 (DFS)
+  // never collapse. When collapse fires, every segment is folded onto stream 0
+  // so the whole graph runs on the launch stream with no cross-stream barriers.
   // Init() reads collapsed_to_single_stream_ to create just one stream per device.
   collapsed_to_single_stream_ = false;
-  if (ShouldCollapseToSingleStream()) {
+  const bool collapse_eligible = (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 0) &&
+                                 (max_dependency_level_ <= 4);
+  if (collapse_eligible && ShouldCollapseToSingleStream()) {
     for (auto& seg : segments_) {
       seg.stream_id = 0;
       seg.needs_completion_signal = false;
@@ -1348,52 +1348,41 @@ void GraphExecSegmented::DFSStreamAssignment() {
 
 // ================================================================================================
 // Select stream assignment algorithm (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING):
-//   0 = Hybrid/auto: complex graphs (16+ segs, avg length < 8) → DFS; else round-robin
-//   1 = Force round-robin
-//   2 = Force DFS
+//   0 = Collapse (with existing ROI check + max_level<=4 guard) then round-robin
+//   1 = Round-robin only, no collapse
+//   2 = DFS only, no collapse
 void GraphExecSegmented::SelectStreamAssignment() {
   if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 1) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: forced round-robin (%zu segs)", segments_.size());
+            "[hipGraph] SelectStreamAssignment: round-robin, no collapse (%zu segs)",
+            segments_.size());
     RoundRobinStreamAssignment();
     return;
   }
   if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: forced DFS (%zu segs)", segments_.size());
+            "[hipGraph] SelectStreamAssignment: DFS, no collapse (%zu segs)", segments_.size());
     DFSStreamAssignment();
     return;
   }
 
-  // 0 = Hybrid: auto-select based on graph complexity
-  const size_t kSegmentSizeThreshold = 16;
-  const double kAvgSegmentLengthThreshold = 8.0;
-
-  bool use_dfs = false;
-  if (segments_.size() >= kSegmentSizeThreshold) {
-    size_t total_nodes = 0;
-    for (const auto& seg : segments_) {
-      total_nodes += seg.nodes.size();
-    }
-    double avg = static_cast<double>(total_nodes) / segments_.size();
-    if (avg < kAvgSegmentLengthThreshold) {
-      use_dfs = true;
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] SelectStreamAssignment: complex graph (%zu segs, avg %.2f nodes) "
-              "-> DFS stream assignment",
-              segments_.size(), avg);
-    }
-  }
-
-  if (use_dfs) {
+  // 0 = collapse-eligible (ROI heuristic + max_level<=4) then round-robin.
+  // ShouldCollapseToSingleStream() is called later in BuildSyncPlan; the extra
+  // max_level guard here prevents collapse on deep graphs where multi-stream
+  // overlap is genuinely valuable.
+  const bool deep_graph = max_dependency_level_ > 4;
+  if (deep_graph) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: hybrid->DFS (%zu segs)", segments_.size());
-    DFSStreamAssignment();
+            "[hipGraph] SelectStreamAssignment: deep graph (max_level=%d>4), skip collapse -> "
+            "round-robin (%zu segs)",
+            max_dependency_level_, segments_.size());
   } else {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: hybrid->round-robin (%zu segs)", segments_.size());
-    RoundRobinStreamAssignment();
+            "[hipGraph] SelectStreamAssignment: collapse-eligible (max_level=%d) -> round-robin "
+            "(%zu segs)",
+            max_dependency_level_, segments_.size());
   }
+  RoundRobinStreamAssignment();
 }
 
 // ================================================================================================
