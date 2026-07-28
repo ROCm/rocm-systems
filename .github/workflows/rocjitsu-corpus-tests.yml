@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA containing the packaged-HSACO DBT suite"
-        # Last updated on 2026/07/27.
-        default: "e1a9a1f7ac9b1d38c7eddf486b529bc3cfcb0c95"
+        # Last updated on 2026/07/28.
+        default: "4c232fc5da6e42bb8fb16e2d8797b3415afeca47"
         required: true
       legacy_corpus_ref:
         description: "Branch, tag, or SHA for the existing corpus tests"
@@ -143,8 +143,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/27.
-          ref: ${{ github.event.inputs.corpus_ref || 'e1a9a1f7ac9b1d38c7eddf486b529bc3cfcb0c95' }}
+          # Last updated on 2026/07/28.
+          ref: ${{ github.event.inputs.corpus_ref || '4c232fc5da6e42bb8fb16e2d8797b3415afeca47' }}
           path: rocjitsu-dbt-test-corpus
 
       - name: Set up Python
