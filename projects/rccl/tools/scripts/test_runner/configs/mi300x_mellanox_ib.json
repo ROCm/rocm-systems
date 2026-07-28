@@ -904,6 +904,20 @@
         {"name": "PluginCompatV11.CollNetLazyInitialization", "description": "AICOMRCCL-1532: v11 collnet plugin compat layer initializes lazily", "test_filter": "PluginCompatV11.CollNetLazyInitialization"}
       ]
     },
+    "net_plugin_reload": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "NetPluginReload.CustomPluginReloadsAfterCommDestroy", "description": "AICOMRCCL-1534: a non-default NCCL_NET_PLUGIN must remain reloadable after the communicator that first used it is destroyed", "test_filter": "NetPluginReload.CustomPluginReloadsAfterCommDestroy"}
+      ]
+    },
     "debug_tests": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -3395,6 +3409,12 @@
       "name": "Asymmetric Visibility",
       "description": "Comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
       "config": "asymmetric_visibility",
+      "enabled": true
+    },
+    {
+      "name": "Net Plugin Reload",
+      "description": "AICOMRCCL-1534: custom NCCL_NET_PLUGIN reloads after comm destroy",
+      "config": "net_plugin_reload",
       "enabled": true
     },
     {

@@ -1520,8 +1520,8 @@ typedef struct {
   /*
    * v1.1 additions
    */
-  uint32_t gfx_activity_acc;                         // new in v1
-  uint32_t mem_activity_acc;                         // new in v1
+  uint64_t gfx_activity_acc;                         // new in v1
+  uint64_t mem_activity_acc;                         // new in v1
   uint16_t temperature_hbm[RSMI_NUM_HBM_INSTANCES];  // new in v1
 
   /*
@@ -1589,10 +1589,10 @@ typedef struct {
   uint16_t jpeg_activity[RSMI_MAX_NUM_JPEG_ENGS];
 
   // PCIE NAK sent accumulated count
-  uint32_t pcie_nak_sent_count_acc;
+  uint64_t pcie_nak_sent_count_acc;
 
   // PCIE NAK received accumulated count
-  uint32_t pcie_nak_rcvd_count_acc;
+  uint64_t pcie_nak_rcvd_count_acc;
 
   /*
    * v1.6 additions
@@ -1646,7 +1646,7 @@ typedef struct {
   struct amdgpu_xcp_metrics_t xcp_stats[RSMI_MAX_NUM_XCP];
 
   /* PCIE other end recovery counter */
-  uint32_t pcie_lc_perf_other_end_recovery;
+  uint64_t pcie_lc_perf_other_end_recovery;
 
   /*
    * v1.7 additions
