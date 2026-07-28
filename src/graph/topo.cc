@@ -402,8 +402,8 @@ ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, int rank, float*
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* system, struct ncclTopoNode* nic,
-                            int systemId) {
+static ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclXmlNode* parent,
+                                   struct ncclTopoSystem* system, struct ncclTopoNode* nic, int systemId) {
   int dev;
   NCCLCHECK(xmlGetAttrInt(xmlNet, "dev", &dev));
 
@@ -434,16 +434,14 @@ ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* s
   net->net.planeId = planeId;
 
   // build the PCI id using the parent PCI link
-  uint64_t hacc[2] = {1, 1};
   const char* busId = NULL;
-  struct ncclXmlNode* parent = xmlNet->parent;
-  while (parent != NULL && strcmp(parent->name, "pci") != 0) parent = parent->parent;
-  if (parent) NCCLCHECK(xmlGetAttr(parent, "busid", &busId));
   if (parent) {
+    NCCLCHECK(xmlGetAttr(parent, "busid", &busId));
     NCCLCHECK(xmlGetAttrUint64Default(parent, "vendor", &net->net.vendor, UINT64_MAX));
     NCCLCHECK(xmlGetAttrUint64Default(parent, "device", &net->net.device, UINT64_MAX));
   }
   // If we fail to find the PCIe path, we use the GUID instead.
+  uint64_t hacc[2] = {1, 1};
   if (busId) eatHash(hacc, busId, strlen(busId));
   else eatHash(hacc, &net->net.asic);
   net->net.pciId = digestHash(hacc);
@@ -453,8 +451,8 @@ ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* s
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoAddGin(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* system, struct ncclTopoNode* nic,
-                            int systemId) {
+static ncclResult_t ncclTopoAddGin(struct ncclXmlNode* xmlNet, struct ncclXmlNode* parent,
+                                   struct ncclTopoSystem* system, struct ncclTopoNode* nic, int systemId) {
   int dev;
   NCCLCHECK(xmlGetAttrInt(xmlNet, "dev", &dev));
 
@@ -468,13 +466,18 @@ ncclResult_t ncclTopoAddGin(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* s
   if (mbps <= 0) mbps = 10000; // Some NICs define speed = -1
   net->net.bw = mbps / 8000.0;
 
+  if (parent) {
+    NCCLCHECK(xmlGetAttrUint64Default(parent, "vendor", &net->net.vendor, UINT64_MAX));
+    NCCLCHECK(xmlGetAttrUint64Default(parent, "device", &net->net.device, UINT64_MAX));
+  }
+
   NCCLCHECK(ncclTopoConnectNodes(nic, net, LINK_NET, net->net.bw));
   NCCLCHECK(ncclTopoConnectNodes(net, nic, LINK_NET, net->net.bw));
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoAddRma(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* system, struct ncclTopoNode* nic,
-                            int systemId) {
+static ncclResult_t ncclTopoAddRma(struct ncclXmlNode* xmlNet, struct ncclXmlNode* parent,
+                                   struct ncclTopoSystem* system, struct ncclTopoNode* nic, int systemId) {
   int dev;
   NCCLCHECK(xmlGetAttrInt(xmlNet, "dev", &dev));
 
@@ -488,6 +491,11 @@ ncclResult_t ncclTopoAddRma(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* s
   if (mbps <= 0) mbps = 10000; // Some NICs define speed = -1
   net->net.bw = mbps / 8000.0;
 
+  if (parent) {
+    NCCLCHECK(xmlGetAttrUint64Default(parent, "vendor", &net->net.vendor, UINT64_MAX));
+    NCCLCHECK(xmlGetAttrUint64Default(parent, "device", &net->net.device, UINT64_MAX));
+  }
+
   NCCLCHECK(ncclTopoConnectNodes(nic, net, LINK_NET, net->net.bw));
   NCCLCHECK(ncclTopoConnectNodes(net, nic, LINK_NET, net->net.bw));
   return ncclSuccess;
@@ -495,6 +503,10 @@ ncclResult_t ncclTopoAddRma(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* s
 
 ncclResult_t ncclTopoAddNic(struct ncclXmlNode* xmlNic, struct ncclTopoSystem* system, struct ncclTopoNode* nic,
                             int systemId) {
+  // Find the closest PCI ancestor to the NIC
+  struct ncclXmlNode* parent = xmlNic->parent;
+  while (parent != NULL && strcmp(parent->name, "pci") != 0) parent = parent->parent;
+
   for (int s = 0; s < xmlNic->nSubs; s++) {
     struct ncclXmlNode* xmlNet = xmlNic->subs[s];
     if (strcmp(xmlNet->name, "net") != 0) continue;
@@ -509,9 +521,9 @@ ncclResult_t ncclTopoAddNic(struct ncclXmlNode* xmlNic, struct ncclTopoSystem* s
     NCCLCHECK(xmlGetAttrIntDefault(xmlNet, "net", &net, 1));
     NCCLCHECK(xmlGetAttrIntDefault(xmlNet, "gin", &gin, 0));
     NCCLCHECK(xmlGetAttrIntDefault(xmlNet, "rma", &rma, 0));
-    if (net) NCCLCHECK(ncclTopoAddNet(xmlNet, system, nic, systemId));
-    if (gin) NCCLCHECK(ncclTopoAddGin(xmlNet, system, nic, systemId));
-    if (rma) NCCLCHECK(ncclTopoAddRma(xmlNet, system, nic, systemId));
+    if (net) NCCLCHECK(ncclTopoAddNet(xmlNet, parent, system, nic, systemId));
+    if (gin) NCCLCHECK(ncclTopoAddGin(xmlNet, parent, system, nic, systemId));
+    if (rma) NCCLCHECK(ncclTopoAddRma(xmlNet, parent, system, nic, systemId));
   }
   return ncclSuccess;
 }
