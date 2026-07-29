@@ -639,9 +639,20 @@ if(BUILD_TESTS)
       if(NOT _ROCSHMEM_DRM_AMDGPU)
         set(_ROCSHMEM_DRM_AMDGPU drm_amdgpu)
       endif()
-      # Enable the GIN device backend in the test kernels so ncclGinCall has a
-      # dispatch case for the corresponding runtime GIN type.
+      # Enable the rocshmem-gda GIN backend in the test kernels so ncclGinCall
+      # has a dispatch case for it.
       target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ROCSHMEM_GDA_ENABLE=1)
+
+      # Enable anvil-sdma only for the TU that launches its kernels, to avoid a
+      # device-link duplicate-symbol clash. That TU also needs rocSHMEM src included.
+      if(ROCSHMEM_SOURCE_DIR)
+        set(_ANVIL_ROCSHMEM_SRC ${ROCSHMEM_SOURCE_DIR}/src)
+      else()
+        set(_ANVIL_ROCSHMEM_SRC ${CMAKE_SOURCE_DIR}/../rocshmem/src)
+      endif()
+      set_source_files_properties(transport/GinDeviceMPITests.cpp PROPERTIES
+          COMPILE_DEFINITIONS NCCL_GIN_ANVIL_SDMA_ENABLE=1
+          INCLUDE_DIRECTORIES ${_ANVIL_ROCSHMEM_SRC})
       target_compile_options(${test_executable} PRIVATE -fgpu-rdc)
       target_link_libraries(${test_executable} PRIVATE
           ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a

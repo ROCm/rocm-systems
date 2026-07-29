@@ -36,19 +36,29 @@ std::string ginEnvDisabledReason() {
   return "";
 }
 
-// GIN type requested for this run (2=proxy, 4=rocshmem-gda); 0 if unset.
+// GIN type requested for this run (proxy / rocshmem-gda / anvil-sdma), 0 if unset.
 int requestedGinType() {
   const char* t = std::getenv("NCCL_GIN_TYPE");
   return t ? std::atoi(t) : 0;
 }
 
+// Valid NCCL_GIN_TYPE values, derived from the enum so the numbers stay correct
+// if the type numbering ever changes.
+std::string ginTypeUsage() {
+  return "required NCCL_GIN_TYPE=" +
+         std::to_string(NCCL_NET_DEVICE_GIN_PROXY) + " [proxy], " +
+         std::to_string(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) + " [rocshmem-gda] or " +
+         std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA) + " [anvil-sdma]";
+}
+
 std::string ginTypeReason() {
   const char* ginType = std::getenv("NCCL_GIN_TYPE");
   if (!ginType)
-    return "GIN type not set (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
+    return "GIN type not set (" + ginTypeUsage() + ")";
   int t = requestedGinType();
-  if (t != 2 && t != 4)
-    return std::string("Invalid GIN type: ") + ginType + " (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
+  if (t != NCCL_NET_DEVICE_GIN_PROXY && t != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA &&
+      t != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    return std::string("Invalid GIN type: ") + ginType + " (" + ginTypeUsage() + ")";
   return "";
 }
 
@@ -78,6 +88,8 @@ std::string intranetReason() {
   int worldSize = 0;
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
   if (nodeLocalRanks() != worldSize) return "";
+  // anvil-sdma works single-node without intranet mode
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
   const char* intra = std::getenv("RCCL_ENABLE_INTRANET");
   if (!intra || std::strcmp(intra, "1") != 0)
     return "Intranet mode required for single-node run (RCCL_ENABLE_INTRANET=1)";
@@ -93,9 +105,21 @@ std::string crossNodeReason() {
   return "";
 }
 
+// anvil-SDMA is a single-node backend. Skip (rather than fail/hang) if it is
+// accidentally launched with ranks spanning more than one physical node.
+std::string anvilSingleNodeReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
+  int worldSize = 0;
+  MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
+  if (nodeLocalRanks() != worldSize)
+    return "anvil-SDMA is a single-node backend; skipping multi-node run";
+  return "";
+}
+
 // First failing prerequisite, or "" if all met.
 std::string ginProxyTestSkipReason() {
-  for (auto check : {ginEnvDisabledReason, ginTypeReason, cuMemReason, intranetReason}) {
+  for (auto check : {ginEnvDisabledReason, ginTypeReason, cuMemReason, intranetReason,
+                     anvilSingleNodeReason}) {
     if (auto reason = check(); !reason.empty()) return reason;
   }
   return "";
@@ -655,9 +679,21 @@ TEST_F(GinMPIDeviceTests, Signal_NoPayload) {
   constexpr ncclGinSignal_t kSigIdx = 1;
   constexpr int             kPeer   = 1;  // rank 0 -> rank 1
 
-  // No buffers, no windows: gin.signal is a zero-byte put. The runtime's
-  // own signal pool is the only memory touched by the GFD; it's allocated
-  // and registered by ncclDevCommCreate based on ginSignalCount.
+  // anvil-sdma binds signal routes only when >=1 window is registered
+  // (dev_runtime.cc gates on winSortedCount>0). Proxy backends need no window.
+  void*            scratchBuf   = nullptr;
+  ncclWindow_t     scratchWin   = nullptr;
+  constexpr size_t kScratchBytes = 4 * 1024;
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA) {
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&scratchBuf, kScratchBytes));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, scratchBuf, kScratchBytes,
+                                                      &scratchWin, NCCL_WIN_COLL_SYMMETRIC));
+  }
+  auto scratchCleanup = makeScopeGuard([&]() {
+    if (scratchWin) (void)ncclCommWindowDeregister(comm, scratchWin);
+    if (scratchBuf) (void)ncclMemFree(scratchBuf);
+  });
+
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 2;
@@ -718,6 +754,21 @@ TEST_F(GinMPIDeviceTests, Signal_HighIdNoOverflow) {
   constexpr ncclGinSignal_t kSigIdx          = 65536;  // > 0xFFFF
   constexpr uint32_t        kSignalPoolCount = 65537;
   constexpr int             kPeer            = 1;       // rank 0 -> rank 1
+
+  // anvil-sdma needs >=1 window for signal routes to bind (see
+  // Signal_NoPayload). Proxy backends keep the no-window path.
+  void*            scratchBuf   = nullptr;
+  ncclWindow_t     scratchWin   = nullptr;
+  constexpr size_t kScratchBytes = 4 * 1024;
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA) {
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&scratchBuf, kScratchBytes));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, scratchBuf, kScratchBytes,
+                                                      &scratchWin, NCCL_WIN_COLL_SYMMETRIC));
+  }
+  auto scratchCleanup = makeScopeGuard([&]() {
+    if (scratchWin) (void)ncclCommWindowDeregister(comm, scratchWin);
+    if (scratchBuf) (void)ncclMemFree(scratchBuf);
+  });
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
@@ -1882,41 +1933,47 @@ TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 1;
-  ncclDevComm devComm{};
-  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
-  auto devCommCleanup = makeScopeGuard([&]() {
-    (void)ncclDevCommDestroy(comm, &devComm);
-  });
 
   // 1 (alignment/tail edges), 1024 (medium), 65536 (saturating).
   const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
   constexpr int kCTAs          = 1;   // == railGinBarrierCount
   constexpr int kThreadsPerCTA = 512; // matches the production example launch
 
+  // Register windows ONCE (largest count) and reuse, BEFORE ncclDevCommCreate
+  // activates GIN: some backends resolve a buffer's address at registration,
+  // which only succeeds pre-activation.
+  const size_t maxBytes = counts.back() * static_cast<size_t>(nRanks) * sizeof(float);
+
+  void* dSend = nullptr;
+  void* dRecv = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, maxBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, maxBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSend) (void)ncclMemFree(dSend);
+    if (dRecv) (void)ncclMemFree(dRecv);
+  });
+
+  ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dSend, maxBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dRecv, maxBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+    if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+  });
+
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
   for (size_t count : counts) {
     SCOPED_TRACE(::testing::Message() << "count=" << count);
 
     const size_t totalElements = count * static_cast<size_t>(nRanks);
     const size_t sizeBytes     = totalElements * sizeof(float);
-
-    void* dSend = nullptr;
-    void* dRecv = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, sizeBytes));
-    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, sizeBytes));
-    auto memCleanup = makeScopeGuard([&]() {
-      if (dSend) (void)ncclMemFree(dSend);
-      if (dRecv) (void)ncclMemFree(dRecv);
-    });
-
-    ncclWindow_t sendWin = nullptr, recvWin = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess,
-        ncclCommWindowRegister(comm, dSend, sizeBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
-    ASSERT_MPI_EQ(ncclSuccess,
-        ncclCommWindowRegister(comm, dRecv, sizeBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
-    auto winCleanup = makeScopeGuard([&]() {
-      if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
-      if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
-    });
 
     // Per-source/per-dest pattern: every byte of every slice has a unique
     // expected value, so a misrouted slice surfaces as a mismatch.
@@ -2056,40 +2113,46 @@ TEST_F(GinMPIDeviceTests, AlltoallHybrid_Reference) {
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.barrierCount        = 1;
   reqs.ginSignalCount      = 1;
+
+  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
+  constexpr int kCTAs          = 1;
+  constexpr int kThreadsPerCTA = 512;
+
+  // Register windows ONCE (largest count) and reuse, BEFORE ncclDevCommCreate
+  // activates GIN: some backends resolve a buffer's address at registration,
+  // which only succeeds pre-activation.
+  const size_t maxBytes = counts.back() * static_cast<size_t>(nRanks) * sizeof(float);
+
+  void* dSend = nullptr;
+  void* dRecv = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, maxBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, maxBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSend) (void)ncclMemFree(dSend);
+    if (dRecv) (void)ncclMemFree(dRecv);
+  });
+
+  ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dSend, maxBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dRecv, maxBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+    if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+  });
+
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
 
-  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
-  constexpr int kCTAs          = 1;
-  constexpr int kThreadsPerCTA = 512;
-
   for (size_t count : counts) {
     SCOPED_TRACE(::testing::Message() << "count=" << count);
 
     const size_t totalElements = count * static_cast<size_t>(nRanks);
     const size_t sizeBytes     = totalElements * sizeof(float);
-
-    void* dSend = nullptr;
-    void* dRecv = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, sizeBytes));
-    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, sizeBytes));
-    auto memCleanup = makeScopeGuard([&]() {
-      if (dSend) (void)ncclMemFree(dSend);
-      if (dRecv) (void)ncclMemFree(dRecv);
-    });
-
-    ncclWindow_t sendWin = nullptr, recvWin = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess,
-        ncclCommWindowRegister(comm, dSend, sizeBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
-    ASSERT_MPI_EQ(ncclSuccess,
-        ncclCommWindowRegister(comm, dRecv, sizeBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
-    auto winCleanup = makeScopeGuard([&]() {
-      if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
-      if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
-    });
 
     // Same deterministic pattern as Alltoall_PureReference.
     std::vector<float> hostSend(totalElements, 0.0f);
@@ -2859,7 +2922,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_CrossNode) {
 
 // =====================================================================
 // Coverage for the new NCCL 2.29.7 GIN device-API features. All run on the
-// device-API NCCL_GIN_TYPE=2 path with cross-node placement (2 ranks on 2
+// device-API GIN proxy path with cross-node placement (2 ranks on 2
 // nodes). Tests for features that depend on topology/library support that
 // may be unavailable skip gracefully rather than fail.
 // =====================================================================
@@ -2880,7 +2943,7 @@ TEST_F(GinMPIDeviceTests, Properties_NLsaTeams) {
   ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
   ASSERT_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
 
-  // Backend type must match the requested NCCL_GIN_TYPE (2=proxy, 4=rocshmem-gda).
+  // Backend type must match the requested NCCL_GIN_TYPE (proxy / rocshmem-gda / anvil-sdma).
   EXPECT_EQ(requestedGinType(), (int)props.ginType);
 
   // nLsaTeams = nRanks / lsaSize: >= 1 and must evenly divide nRanks.
@@ -3889,8 +3952,11 @@ std::string intraNodeSymReason() {
 // symmetric-memory RS kernel (RailA2A_LsaLD) eligible, so this drives the
 // production kernel path -- not a hand-written reference kernel.
 TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric) {
-  if (requestedGinType() == 4)
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
     GTEST_SKIP() << "Skipping symmetric ReduceScatter (RailA2A_LsaLD) for rocSHMEM-GDA";
+  // anvil-sdma is single-node. Symmetric ReduceScatter is a multi-node test.
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    GTEST_SKIP() << "Symmetric ReduceScatter not supported for anvil-sdma: single-node backend";
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
@@ -3978,8 +4044,11 @@ TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric) {
 // Same as ReduceScatter_Symmetric but exercises ncclAvg, which drives the
 // FuncSumPostDiv post-divide path on the symmetric RS kernel (RailA2A_LsaLD).
 TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric_Avg) {
-  if (requestedGinType() == 4)
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
     GTEST_SKIP() << "Skipping symmetric ReduceScatter (RailA2A_LsaLD) for rocSHMEM-GDA";
+  // anvil-sdma is single-node. Symmetric ReduceScatter is a multi-node test.
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    GTEST_SKIP() << "Symmetric ReduceScatter not supported for anvil-sdma: single-node backend";
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
