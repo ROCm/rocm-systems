@@ -698,8 +698,10 @@ WriteInterceptor(const void* packets,
                     {
                         // Page size is constant for the process; cache it rather
                         // than syscall on every dispatch.
-                        static const uint64_t _page_size =
-                            static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
+                        static const uint64_t _page_size = []() {
+                            long ps = sysconf(_SC_PAGESIZE);
+                            return (ps > 0) ? static_cast<uint64_t>(ps) : 4096ull;
+                        }();
                         const uint32_t _slot = kfd::doorbell_ptr_to_page_slot(_hwptr, _page_size);
 
                         // bind_and_resolve binds once per queue (write lock on the
