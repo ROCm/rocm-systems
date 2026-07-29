@@ -854,6 +854,32 @@ class TestGpuBenchmark(unittest.TestCase):
 
         self._log_performance_summary("amdsmi_get_gpu_device_uuid", "GPUs", "get_gpu_device_uuid")
 
+    def test_performance_get_gpu_device_cuid(self):
+        self.common.print_func_name("")
+
+        for i, processor in enumerate(self.processors):
+            self._log_test_start("amdsmi_get_gpu_device_cuid", "GPU", i)
+
+            self._print_api_result(amdsmi.amdsmi_get_gpu_device_cuid, i, processor)
+
+            stats = self._measure_api_performance(
+                amdsmi.amdsmi_get_gpu_device_cuid, f"get_gpu_device_cuid_gpu_{i}", processor
+            )
+
+            self.perf_results[f"get_gpu_device_cuid_gpu_{i}"] = stats
+
+            if stats["successful_runs"] > 0:
+                self._print_performance_results(stats)
+
+            else:
+                self.common.print(
+                    f"  GPU {i}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
+                )
+
+            self._log_test_completion("GPU", i)
+
+        self._log_performance_summary("amdsmi_get_gpu_device_cuid", "GPUs", "get_gpu_device_cuid")
+
     def test_performance_get_gpu_driver_info(self):
         self.common.print_func_name("")
 

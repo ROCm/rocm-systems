@@ -18,7 +18,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 # Library Version is the tool/amdsmi_interface version
-from ._version import __version__
+from ._version import __commit__, __version__
 
 # Library Initialization
 from .amdsmi_interface import amdsmi_init
@@ -117,6 +117,7 @@ except AttributeError:
 from .amdsmi_interface import amdsmi_get_processor_handle_from_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_uuid
+from .amdsmi_interface import amdsmi_get_gpu_device_cuid
 from .amdsmi_interface import amdsmi_get_gpu_enumeration_info
 
 # # Functions not dependent on ESMI library

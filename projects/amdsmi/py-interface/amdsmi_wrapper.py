@@ -191,8 +191,6 @@ from pathlib import Path
 # alternate .so explicitly.
 # ---------------------------------------------------------------------------
 
-_libraries = {}
-
 
 # SONAME the system rpm/deb ships and the relocatable tree names. Always the
 # system lib, never the wheel-private libamd_smi_python.so, even when the
@@ -237,12 +235,17 @@ def _load_library():
 
     # Relocatable ROCm tree: <root>/lib/<SONAME>, one fixed location relative
     # to this file, tried before the bare-SONAME linker lookup (not a search).
-    # amdsmi_interface.py resolves librocm-core.so the same way.
+    # amdsmi_interface.py resolves librocm-core.so the same way. A
+    # present-but-unloadable file (missing deps) must not shadow the system
+    # linker lookup, so fall through on OSError.
     here = Path(__file__).resolve()
     if len(here.parents) > 3:
         relocatable = here.parents[3] / "lib" / _AMDSMI_LIB_SONAME
         if relocatable.exists():
-            return ctypes.CDLL(str(relocatable), mode=mode), str(relocatable)
+            try:
+                return ctypes.CDLL(str(relocatable), mode=mode), str(relocatable)
+            except OSError:
+                pass
 
     return ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode), _AMDSMI_LIB_SONAME
 
@@ -3168,6 +3171,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_device_cuid = _libraries['libamd_smi.so'].amdsmi_get_gpu_device_cuid
+    amdsmi_get_gpu_device_cuid.restype = amdsmi_status_t
+    amdsmi_get_gpu_device_cuid.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_enumeration_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_enumeration_info
     amdsmi_get_gpu_enumeration_info.restype = amdsmi_status_t
     amdsmi_get_gpu_enumeration_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_enumeration_info_t)]
@@ -5311,9 +5320,10 @@ __all__ = \
     'amdsmi_get_gpu_compute_process_info',
     'amdsmi_get_gpu_compute_process_info_by_pid',
     'amdsmi_get_gpu_cper_entries', 'amdsmi_get_gpu_device_bdf',
-    'amdsmi_get_gpu_device_uuid', 'amdsmi_get_gpu_driver_info',
-    'amdsmi_get_gpu_ecc_count', 'amdsmi_get_gpu_ecc_enabled',
-    'amdsmi_get_gpu_ecc_status', 'amdsmi_get_gpu_enumeration_info',
+    'amdsmi_get_gpu_device_cuid', 'amdsmi_get_gpu_device_uuid',
+    'amdsmi_get_gpu_driver_info', 'amdsmi_get_gpu_ecc_count',
+    'amdsmi_get_gpu_ecc_enabled', 'amdsmi_get_gpu_ecc_status',
+    'amdsmi_get_gpu_enumeration_info',
     'amdsmi_get_gpu_event_notification', 'amdsmi_get_gpu_fabric_info',
     'amdsmi_get_gpu_fan_rpms', 'amdsmi_get_gpu_fan_speed',
     'amdsmi_get_gpu_fan_speed_max', 'amdsmi_get_gpu_id',

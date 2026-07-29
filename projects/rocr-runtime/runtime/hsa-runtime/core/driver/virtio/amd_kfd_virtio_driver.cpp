@@ -322,7 +322,7 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
     // no need to map
     // For local memory, only map it to the owning GPU. Mapping to other GPU,
     // if the access is allowed, is performed on AllowAccess.
-    HsaMemMapFlags map_flag = m_region.map_flags();
+    HsaMemFlags mem_flags = m_region.mem_flags();
     size_t map_node_count = 1;
     const uint32_t owner_node_id = m_region.owner()->node_id();
     const uint32_t* map_node_id = &owner_node_id;
@@ -348,7 +348,7 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
 
     uint64_t alternate_va = 0;
     const bool is_resident =
-        (MakeMemoryResident(mem, size, &alternate_va, &map_flag, map_node_count, map_node_id) ==
+        (MakeMemoryResident(mem, size, &alternate_va, &mem_flags, map_node_count, map_node_id) ==
          HSA_STATUS_SUCCESS);
 
     const bool require_pinning =
@@ -422,7 +422,7 @@ hsa_status_t KfdVirtioDriver::AvailableMemory(uint32_t node_id, uint64_t* availa
 
 hsa_status_t KfdVirtioDriver::MakeMemoryResident(const void* mem, size_t size,
                                                  uint64_t* alternate_va,
-                                                 const HsaMemMapFlags* mem_flags,
+                                                 const HsaMemFlags* mem_flags,
                                                  uint32_t num_nodes, const uint32_t* nodes) const {
   assert(mem != nullptr);
   assert(size != 0);

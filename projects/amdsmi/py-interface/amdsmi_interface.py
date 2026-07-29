@@ -83,6 +83,7 @@ AMDSMI_MAX_CONTAINER_TYPE = 2
 AMDSMI_MAX_CACHE_TYPES = 10
 AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK = 64
 AMDSMI_GPU_UUID_SIZE = 38
+AMDSMI_GPU_CUID_SIZE = AMDSMI_GPU_UUID_SIZE
 _AMDSMI_STRING_LENGTH = 80
 _AMDSMI_MAX_STRING_LENGTH = 256
 
@@ -2772,6 +2773,35 @@ def amdsmi_get_gpu_device_uuid(processor_handle: processor_handle_t) -> str:
     )
 
     return uuid.value.decode("utf-8")
+
+
+def amdsmi_get_gpu_device_cuid(processor_handle: processor_handle_t) -> str:
+    """
+    Retrieves GPU CUID (Component Unified ID) for a given device.
+
+    Parameters:
+        processor_handle (amdsmi_processor_handle_t): The processor handle for the GPU device whose CUID is to be retrieved.
+
+    Returns:
+        str: The retrieved GPU CUID as a UUIDv8 string.
+
+    Raises:
+        AmdSmiParameterException: If the input parameters are invalid.
+        AmdSmiLibraryException: If the library reports an error retrieving the CUID.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    cuid = ctypes.create_string_buffer(AMDSMI_GPU_CUID_SIZE)
+
+    cuid_length = ctypes.c_uint32()
+    cuid_length.value = AMDSMI_GPU_CUID_SIZE
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_device_cuid(processor_handle, ctypes.byref(cuid_length), cuid)
+    )
+
+    return cuid.value.decode("utf-8")
 
 
 def amdsmi_get_gpu_enumeration_info(processor_handle: processor_handle_t) -> Dict[str, Any]:

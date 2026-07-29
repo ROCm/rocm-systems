@@ -1020,13 +1020,14 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
   auto& driver = agents[0]->driver();
 
   uint64_t altAddress;
-  HsaMemMapFlags map_flags;
-  map_flags.Value = 0;
-  map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-  if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
+  HsaMemFlags mem_flags;
+  mem_flags.Value = 0;
+  mem_flags.ui32.CoarseGrain = 1;
+  mem_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
+  if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &mem_flags,
                                 num_agents, nodes) != HSA_STATUS_SUCCESS) {
-    map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-    if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
+    mem_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
+    if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &mem_flags,
                                   num_agents, nodes) != HSA_STATUS_SUCCESS) {
       driver.DeregisterMemory(info.MemoryAddress);
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1760,14 +1761,15 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
     } else {
-      HsaMemMapFlags map_flags;
-      map_flags.Value = 0;
-      map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags,
-                                                numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
-        map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags,
-                                                  numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
+      HsaMemFlags mem_flags;
+      mem_flags.Value = 0;
+      mem_flags.ui32.CoarseGrain = 1;
+      mem_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
+      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
+                                    nodes)) != HSAKMT_STATUS_SUCCESS) {
+        mem_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
+        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
+                                      nodes)) != HSAKMT_STATUS_SUCCESS) {
           HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
