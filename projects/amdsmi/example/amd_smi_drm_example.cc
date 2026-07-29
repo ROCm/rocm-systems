@@ -742,18 +742,9 @@ int main() {
             std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
                       << memoryPartitionString(updatePartition) << "): " << err_str << "\n\n";
 
-            // Reload only if the memory partition was set successfully
             if (ret_set == AMDSMI_STATUS_SUCCESS) {
-              std::cout << "\t**Reloading GPU driver to apply memory "
-                        << "partition change, this may take some time... **\n";
-              amdsmi_status_t reload_status = amdsmi_gpu_driver_reload();
-              amdsmi_status_code_to_string(reload_status, &err_str);
-              if (reload_status == AMDSMI_STATUS_SUCCESS) {
-                PRINT_AMDSMI_RET(reload_status)
-                std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
-              } else {
-                std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
-              }
+              std::cout << "\t** Memory partition staged. Run to apply:\n"
+                        << "\t   sudo modprobe -r amdgpu && sudo modprobe amdgpu\n\n";
             }
 
             // Get the current memory partition
@@ -841,18 +832,9 @@ int main() {
         }
         std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
                   << memoryPartitionString(orig_partition) << "): " << err_str << "\n\n";
-        // Reload only if the memory partition was set successfully
         if (ret_set == AMDSMI_STATUS_SUCCESS) {
-          std::cout << "\t**Reloading GPU driver to apply memory "
-                    << "partition change, this may take some time... **\n";
-          amdsmi_status_t reload_status = amdsmi_gpu_driver_reload();
-          amdsmi_status_code_to_string(reload_status, &err_str);
-          if (reload_status == AMDSMI_STATUS_SUCCESS) {
-            PRINT_AMDSMI_RET(reload_status)
-            std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
-          } else {
-            std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
-          }
+          std::cout << "\t** Memory partition staged. Run to apply:\n"
+                    << "\t   sudo modprobe -r amdgpu && sudo modprobe amdgpu\n\n";
         }
         // Get the current memory partition
         char current_memory_partition[AMDSMI_MAX_STRING_LENGTH];

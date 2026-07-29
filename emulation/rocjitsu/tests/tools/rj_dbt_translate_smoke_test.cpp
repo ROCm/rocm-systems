@@ -196,6 +196,55 @@ std::vector<uint8_t> make_gfx1250_smoke_code_object() {
   return make_gfx1250_smoke_code_object(text_words);
 }
 
+void clear_smoke_kernel_descriptor_symbol(std::vector<uint8_t> &image) {
+  rocjitsu::Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+
+  auto section_offset = [&](size_t index) {
+    return header.e_shoff + index * sizeof(rocjitsu::Elf64_Shdr);
+  };
+  rocjitsu::Elf64_Shdr symtab{};
+  std::memcpy(&symtab, image.data() + section_offset(3), sizeof(symtab));
+  rocjitsu::Elf64_Sym descriptor{};
+  std::memcpy(&descriptor, image.data() + symtab.sh_offset + sizeof(rocjitsu::Elf64_Sym),
+              sizeof(descriptor));
+  descriptor.st_name = 0;
+  descriptor.st_info = 0;
+  descriptor.st_shndx = rocjitsu::SHN_UNDEF;
+  descriptor.st_value = 0;
+  descriptor.st_size = 0;
+  std::memcpy(image.data() + symtab.sh_offset + sizeof(rocjitsu::Elf64_Sym), &descriptor,
+              sizeof(descriptor));
+}
+
+std::vector<uint8_t> make_descriptorless_code_object() {
+  constexpr std::array<uint32_t, 2> text_words = {0xbf800000u, 0};
+  auto image = make_gfx1250_smoke_code_object(text_words);
+  clear_smoke_kernel_descriptor_symbol(image);
+  return image;
+}
+
+std::vector<uint8_t> make_empty_text_code_object() {
+  auto image = make_descriptorless_code_object();
+
+  rocjitsu::Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+
+  rocjitsu::Elf64_Phdr executable_load{};
+  std::memcpy(&executable_load, image.data() + header.e_phoff, sizeof(executable_load));
+  executable_load.p_filesz = 0;
+  executable_load.p_memsz = 0;
+  std::memcpy(image.data() + header.e_phoff, &executable_load, sizeof(executable_load));
+
+  const uint64_t text_section = header.e_shoff + sizeof(rocjitsu::Elf64_Shdr);
+  rocjitsu::Elf64_Shdr text{};
+  std::memcpy(&text, image.data() + text_section, sizeof(text));
+  text.sh_size = 0;
+  std::memcpy(image.data() + text_section, &text, sizeof(text));
+
+  return image;
+}
+
 std::string shell_quote(std::string_view text) {
   std::string quoted = "'";
   for (const char ch : text) {
@@ -355,6 +404,71 @@ TEST(RjDbtTranslate, Smoke) {
         << "missing expected output fragment: " << needle << "\noutput:\n"
         << stdout_text;
   }
+}
+
+TEST(RjDbtTranslate, EmptyTextSameArchWarnsAndCopiesInput) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_empty_text_");
+  const std::filesystem::path temp_path(temp_dir.path());
+
+  const auto input = temp_path / "data_only_gfx1250.co";
+  const auto output = temp_path / "translated.co";
+  const auto error = temp_path / "stderr.txt";
+  const auto image = make_empty_text_code_object();
+
+  {
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+                              "--output-revision a0 --output-mode code-object > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string output_bytes = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << stderr_text;
+  EXPECT_EQ(output_bytes, std::string(reinterpret_cast<const char *>(image.data()), image.size()));
+  EXPECT_TRUE(contains(stderr_text, "warning: data-only: code object has no executable sections, "
+                                    "segments, or callable symbols; leaving unchanged"))
+      << stderr_text;
+}
+
+TEST(RjDbtTranslate, DescriptorlessExecutableWarnsAndCopiesInput) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_descriptorless_");
+  const std::filesystem::path temp_path(temp_dir.path());
+
+  const auto input = temp_path / "descriptorless_gfx1250.co";
+  const auto output = temp_path / "translated.co";
+  const auto error = temp_path / "stderr.txt";
+  const auto image = make_descriptorless_code_object();
+
+  {
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+                              "--output-revision a0 --output-mode code-object > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string output_bytes = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << stderr_text;
+  EXPECT_EQ(output_bytes, std::string(reinterpret_cast<const char *>(image.data()), image.size()));
+  EXPECT_TRUE(contains(stderr_text,
+                       "warning: nothing-to-translate: code object has no kernel descriptors; "
+                       "leaving executable text unchanged"))
+      << stderr_text;
 }
 
 TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {

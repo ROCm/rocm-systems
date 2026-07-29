@@ -232,6 +232,16 @@ def check_junit_publication(
         "build-group workflow must not contain an internal matrix setup job",
     )
     require(
+        "rhel-compiler-check" in orchestrator_jobs,
+        "build workflow is missing top-level job 'rhel-compiler-check'",
+    )
+    require(
+        "rhel-compiler-check" not in workflow_jobs,
+        "rhel-compiler-check must live in the orchestrator, not the shared "
+        "build-group workflow — otherwise it reappears as a phantom skipped "
+        "job with an unresolved matrix name under the other 3 groups",
+    )
+    require(
         "primary-build" in workflow_jobs,
         "build group workflow is missing job 'primary-build'",
     )
@@ -431,7 +441,7 @@ def check_build_matrix_file() -> None:
     expected_counts = {
         "ubuntu-22.04": (5, 2),
         "ubuntu-24.04": (5, 2),
-        "debian": (4, 0),
+        "debian": (4, 2),
         "rhel": (12, 4),
     }
     for group, (primary_count, system_deps_count) in expected_counts.items():
@@ -897,6 +907,40 @@ def check_summarize_junit_results_unit(verbose: bool) -> None:
     ok("summarize-junit-results.py buckets system-deps and skips malformed XML")
 
 
+def check_cdash_link_and_notes_unit(verbose: bool) -> None:
+    """A literal '+' in a URL query string decodes as a space, so a
+    buildname containing "g++" silently breaks CDash's exact-match filter
+    unless percent-encoded. Also: under CTEST_USE_LAUNCHERS, a passing
+    build submits no log content to CDash at all, so the build stage's
+    generated script must attach LastBuild.log as a CDash Note."""
+    run_ci = _load_run_ci_module()
+
+    url = run_ci._cdash_link_url("PR_8928_ROCm-rhel-9-g++-python-mpip-rocm-7.2")
+    require(
+        "value1=PR_8928_ROCm-rhel-9-g%2B%2B-python-mpip-rocm-7.2" in url,
+        f"g++ must be percent-encoded in the CDash link, got: {url}",
+    )
+
+    class _Args:
+        binary_dir = "/tmp/rocprofsys-cdash-notes-check"
+        mode = "Continuous"
+
+    script = run_ci.generate_build_script(_Args())
+    require(
+        "CTEST_NOTES_FILES" in script and "LastBuild_*.log" in script,
+        "build stage script must glob LastBuild*.log into CTEST_NOTES_FILES",
+    )
+    require(
+        "safe_submit(PARTS Build Notes)" in script,
+        "build stage script must submit the Notes part alongside Build",
+    )
+
+    if verbose:
+        print(url)
+        print(script)
+    ok("CDash link is percent-encoded and the build script submits Notes")
+
+
 def check_run_ci_split_stage_contract(verbose: bool) -> None:
     with tempfile.TemporaryDirectory(prefix="rocprofsys-ci-check-") as temp_dir:
         temp_path = Path(temp_dir)
@@ -1101,8 +1145,9 @@ def check_run_ci_failure_colored_log(verbose: bool) -> None:
 
 def check_run_ci_build_success_annotation(verbose: bool) -> None:
     """A successful build stage that still emitted a warning must annotate
-    it from LastBuild*.log (which does exist on success), and must not
-    print a failure-log color group since nothing failed."""
+    it from LastBuild*.log (which does exist on success), and must also
+    print that log — otherwise, unlike configure/test, nothing surfaces the
+    compiler output at all under CTEST_USE_LAUNCHERS."""
     with tempfile.TemporaryDirectory(prefix="rocprofsys-ci-warn-check-") as temp_dir:
         temp_path = Path(temp_dir)
         binary_dir = temp_path / "build"
@@ -1135,8 +1180,9 @@ def check_run_ci_build_success_annotation(verbose: bool) -> None:
             "run-ci.py must annotate warning counts from LastBuild*.log on success",
         )
         require(
-            "build log:" not in build.stdout,
-            "run-ci.py must not print a failure-log color group on a successful build",
+            "build log: LastBuild.log" in build.stdout
+            and _WARNING_SENTINEL in build.stdout,
+            "run-ci.py must print LastBuild.log on a successful build",
         )
 
         if verbose:
@@ -1169,6 +1215,7 @@ def run_checks(args: argparse.Namespace) -> None:
     check_summarize_skipped_tests_unit(args.verbose)
     check_run_ci_skipped_tests_summary(args.verbose)
     check_summarize_junit_results_unit(args.verbose)
+    check_cdash_link_and_notes_unit(args.verbose)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

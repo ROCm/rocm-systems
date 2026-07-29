@@ -1101,12 +1101,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   TranslatedCodeObject result;
   result.host_arch = host_arch_;
 
-  CodeObjectPatcher patcher(obj);
   auto leave_unchanged = [&]() {
     const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
-    result.elf_bytes.assign(image, image + obj.image_size());
+    if (obj.image_size() != 0)
+      result.elf_bytes.assign(image, image + obj.image_size());
     return result;
   };
+
+  if (obj.image_size() < sizeof(Elf64_Ehdr)) {
+    append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                 "code object is too small to contain an ELF header");
+    return leave_unchanged();
+  }
+
+  CodeObjectPatcher patcher(obj);
 
   // A same-architecture gfx1250 translation is direction-specific: A0 and B0
   // share an ELF machine ID, so both revisions must be given. Enforce this here
@@ -1130,6 +1138,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
   auto text = patcher.text_bytes();
   if (text.empty()) {
+    Elf64_Ehdr header{};
+    std::memcpy(&header, obj.image_data(), sizeof(header));
+    const uint32_t source_mach = header.e_flags & EF_AMDGPU_MACH;
+    if (guest_arch_ == host_arch_ && source_mach == (target_mach_ & EF_AMDGPU_MACH)) {
+      append_warning(result.diagnostics, DiagnosticKind::DataOnly,
+                     "code object has no executable sections, segments, or callable symbols; "
+                     "leaving unchanged");
+      return leave_unchanged();
+    }
     append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
                  "code object does not expose a non-empty .text section for translation");
     return leave_unchanged();
@@ -1199,8 +1216,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
 
   if (descriptor_translations.empty()) {
-    append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                 "kernel descriptors are required for kernel-level translation");
+    const bool descriptorless_gfx1250_b0_to_a0 =
+        guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+        options_.input_revision == ProcessorRevision::Gfx1250B0 &&
+        options_.output_revision == ProcessorRevision::Gfx1250A0;
+    if (!descriptorless_gfx1250_b0_to_a0) {
+      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                   "kernel descriptors are required for kernel-level translation");
+      return leave_unchanged();
+    }
+    append_warning(result.diagnostics, DiagnosticKind::NothingToTranslate,
+                   "code object has no kernel descriptors; leaving executable text unchanged");
     return leave_unchanged();
   }
 
