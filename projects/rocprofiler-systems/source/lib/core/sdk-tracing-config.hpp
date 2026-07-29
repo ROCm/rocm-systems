@@ -45,7 +45,7 @@ struct version_info
     }
 
     // Inverse of formatted(): decodes a `major*10000 + minor*100 + patch` value
-    // (e.g. Wrapper::compile_time_version) back into a version_info, so
+    // (e.g. SdkApi::compile_time_version) back into a version_info, so
     // compile-time and runtime version gates can share the same comparison style.
     [[nodiscard]] static constexpr version_info from_formatted(std::uint32_t formatted)
     {
@@ -62,10 +62,10 @@ struct version_info
 namespace concepts
 {
 
-template <typename Wrapper, typename TracingKind>
+template <typename SdkApi, typename TracingKind>
 concept tracing_kind_for =
-    std::same_as<TracingKind, typename Wrapper::callback_tracing_kind> ||
-    std::same_as<TracingKind, typename Wrapper::buffer_tracing_kind>;
+    std::same_as<TracingKind, typename SdkApi::callback_tracing_kind> ||
+    std::same_as<TracingKind, typename SdkApi::buffer_tracing_kind>;
 
 // Constrains Externals to sdk_tracing_config's DI surface (settings, feature
 // flags, ROCm domain/event config, finalize-on-error state). A mismatch fails
@@ -92,7 +92,7 @@ concept sdk_tracing_config_externals =
     };
 }  // namespace concepts
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 class sdk_tracing_config
 {
@@ -101,29 +101,29 @@ public:
 
     static version_info& get_version();
 
-    static std::unordered_set<typename Wrapper::callback_tracing_kind>
+    static std::unordered_set<typename SdkApi::callback_tracing_kind>
     get_callback_domains();
 
-    static std::unordered_set<typename Wrapper::buffer_tracing_kind>
+    static std::unordered_set<typename SdkApi::buffer_tracing_kind>
     get_buffered_domains();
 
     static std::vector<std::int32_t> get_operations(
-        typename Wrapper::callback_tracing_kind kindv);
+        typename SdkApi::callback_tracing_kind kindv);
 
     static std::vector<std::int32_t> get_operations(
-        typename Wrapper::buffer_tracing_kind kindv);
+        typename SdkApi::buffer_tracing_kind kindv);
 
     static std::vector<std::string> get_rocm_events();
 
     static std::unordered_set<std::int32_t> get_backtrace_operations(
-        typename Wrapper::callback_tracing_kind kindv);
+        typename SdkApi::callback_tracing_kind kindv);
 
     static std::unordered_set<std::int32_t> get_backtrace_operations(
-        typename Wrapper::buffer_tracing_kind kindv);
+        typename SdkApi::buffer_tracing_kind kindv);
 
 private:
     static constexpr version_info compile_time_sdk_version =
-        version_info::from_formatted(Wrapper::compile_time_version);
+        version_info::from_formatted(SdkApi::compile_time_version);
 
     static std::vector<std::int32_t> filter_operations(
         const std::unordered_set<std::int32_t>& complete,
@@ -135,7 +135,7 @@ private:
     static std::string get_setting_name(const std::string& val);
 
     template <typename TracingKind>
-        requires concepts::tracing_kind_for<Wrapper, TracingKind>
+        requires concepts::tracing_kind_for<SdkApi, TracingKind>
     static std::unordered_set<std::int32_t> get_operations_impl(
         TracingKind tracing_kind, const std::string& operations_setting = {});
 
@@ -161,15 +161,15 @@ private:
         std::string operations_annotate_backtrace = {};
     };
 
-    static std::unordered_map<typename Wrapper::callback_tracing_kind, operation_options>
+    static std::unordered_map<typename SdkApi::callback_tracing_kind, operation_options>
         s_callback_operation_option_names;
-    static std::unordered_map<typename Wrapper::buffer_tracing_kind, operation_options>
+    static std::unordered_map<typename SdkApi::buffer_tracing_kind, operation_options>
         s_buffered_operation_option_names;
 
     static version_info s_version;
 
-    static std::optional<typename Wrapper::callback_name_info_t> s_callback_names;
-    static std::optional<typename Wrapper::buffer_name_info_t>   s_buffer_names;
+    static std::optional<typename SdkApi::callback_name_info_t> s_callback_names;
+    static std::optional<typename SdkApi::buffer_name_info_t>   s_buffer_names;
 };
 
 }  // namespace rocprofsys::rocprofiler_sdk
@@ -181,11 +181,11 @@ namespace rocprofsys::rocprofiler_sdk
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 template <typename Tp>
 std::string
-sdk_tracing_config<Wrapper, Externals>::to_lower(const Tp& value)
+sdk_tracing_config<SdkApi, Externals>::to_lower(const Tp& value)
 {
     auto str_copy = std::string{ value };
 
@@ -197,10 +197,10 @@ sdk_tracing_config<Wrapper, Externals>::to_lower(const Tp& value)
     return str_copy;
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::string
-sdk_tracing_config<Wrapper, Externals>::get_setting_name(const std::string& value)
+sdk_tracing_config<SdkApi, Externals>::get_setting_name(const std::string& value)
 {
     constexpr auto prefix             = std::string_view{ "rocprofsys_" };
     const auto     lower_setting_name = to_lower(value);
@@ -215,36 +215,36 @@ sdk_tracing_config<Wrapper, Externals>::get_setting_name(const std::string& valu
 
 // ─── Static data members ─────────────────────────────────────────────────────
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::unordered_map<typename Wrapper::callback_tracing_kind,
-                   typename sdk_tracing_config<Wrapper, Externals>::operation_options>
-    sdk_tracing_config<Wrapper, Externals>::s_callback_operation_option_names{};
+std::unordered_map<typename SdkApi::callback_tracing_kind,
+                   typename sdk_tracing_config<SdkApi, Externals>::operation_options>
+    sdk_tracing_config<SdkApi, Externals>::s_callback_operation_option_names{};
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::unordered_map<typename Wrapper::buffer_tracing_kind,
-                   typename sdk_tracing_config<Wrapper, Externals>::operation_options>
-    sdk_tracing_config<Wrapper, Externals>::s_buffered_operation_option_names{};
+std::unordered_map<typename SdkApi::buffer_tracing_kind,
+                   typename sdk_tracing_config<SdkApi, Externals>::operation_options>
+    sdk_tracing_config<SdkApi, Externals>::s_buffered_operation_option_names{};
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::optional<typename Wrapper::callback_name_info_t>
-    sdk_tracing_config<Wrapper, Externals>::s_callback_names{};
+std::optional<typename SdkApi::callback_name_info_t>
+    sdk_tracing_config<SdkApi, Externals>::s_callback_names{};
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::optional<typename Wrapper::buffer_name_info_t>
-    sdk_tracing_config<Wrapper, Externals>::s_buffer_names{};
+std::optional<typename SdkApi::buffer_name_info_t>
+    sdk_tracing_config<SdkApi, Externals>::s_buffer_names{};
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-version_info sdk_tracing_config<Wrapper, Externals>::s_version{};
+version_info sdk_tracing_config<SdkApi, Externals>::s_version{};
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 void
-sdk_tracing_config<Wrapper, Externals>::finalize_and_throw(
+sdk_tracing_config<SdkApi, Externals>::finalize_and_throw(
     std::string_view exception_message)
 {
     Externals::set_state(Externals::StateFinalized);
@@ -252,11 +252,11 @@ sdk_tracing_config<Wrapper, Externals>::finalize_and_throw(
 }
 
 // ─── get_operations_impl (tracing kind + optional setting) ───────────────────
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 template <typename TracingKind, typename TracingNameTable, typename LoadTracingNamesFn>
 std::unordered_set<std::int32_t>
-sdk_tracing_config<Wrapper, Externals>::operation_ids_for_tracing_kind(
+sdk_tracing_config<SdkApi, Externals>::operation_ids_for_tracing_kind(
     TracingKind tracing_kind, const std::string& operations_setting,
     std::optional<TracingNameTable>& cached_tracing_names,
     LoadTracingNamesFn&&             load_tracing_names)
@@ -328,32 +328,32 @@ sdk_tracing_config<Wrapper, Externals>::operation_ids_for_tracing_kind(
     return matched_operation_ids;
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 template <typename TracingKind>
-    requires concepts::tracing_kind_for<Wrapper, TracingKind>
+    requires concepts::tracing_kind_for<SdkApi, TracingKind>
 std::unordered_set<std::int32_t>
-sdk_tracing_config<Wrapper, Externals>::get_operations_impl(
+sdk_tracing_config<SdkApi, Externals>::get_operations_impl(
     TracingKind tracing_kind, const std::string& operations_setting)
 {
-    if constexpr(std::same_as<TracingKind, typename Wrapper::callback_tracing_kind>)
+    if constexpr(std::same_as<TracingKind, typename SdkApi::callback_tracing_kind>)
     {
         return operation_ids_for_tracing_kind(
             tracing_kind, operations_setting, s_callback_names,
-            [] { return Wrapper::get_callback_tracing_names(); });
+            [] { return SdkApi::get_callback_tracing_names(); });
     }
     else
     {
         return operation_ids_for_tracing_kind(
             tracing_kind, operations_setting, s_buffer_names,
-            [] { return Wrapper::get_buffer_tracing_names(); });
+            [] { return SdkApi::get_buffer_tracing_names(); });
     }
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::vector<std::int32_t>
-sdk_tracing_config<Wrapper, Externals>::filter_operations(
+sdk_tracing_config<SdkApi, Externals>::filter_operations(
     const std::unordered_set<std::int32_t>& complete_set,
     const std::unordered_set<std::int32_t>& to_include,
     const std::unordered_set<std::int32_t>& to_exclude)
@@ -381,11 +381,11 @@ sdk_tracing_config<Wrapper, Externals>::filter_operations(
     return convert_to_vector(result);
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 template <typename Tp>
 auto
-sdk_tracing_config<Wrapper, Externals>::insert_config_setting(
+sdk_tracing_config<SdkApi, Externals>::insert_config_setting(
     const std::shared_ptr<typename Externals::Settings>& config,
     std::string_view env_name, std::string_view description, Tp initial_value,
     const std::initializer_list<std::string_view>& extra_categories)
@@ -410,27 +410,27 @@ sdk_tracing_config<Wrapper, Externals>::insert_config_setting(
 
 /// @brief Return the version of the rocprofiler-sdk
 /// @return The version of the rocprofiler-sdk or 0 if not initialized
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 version_info&
-sdk_tracing_config<Wrapper, Externals>::get_version()
+sdk_tracing_config<SdkApi, Externals>::get_version()
 {
     if(s_version.formatted() == 0)
     {
-        Wrapper::get_version(&s_version.major, &s_version.minor, &s_version.patch);
+        SdkApi::get_version(&s_version.major, &s_version.minor, &s_version.patch);
     }
 
     return s_version;
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 void
-sdk_tracing_config<Wrapper, Externals>::config_settings(
+sdk_tracing_config<SdkApi, Externals>::config_settings(
     const std::shared_ptr<typename Externals::Settings>& _config)
 {
-    const auto buffered_tracing_info = Wrapper::get_buffer_tracing_names();
-    const auto callback_tracing_info = Wrapper::get_callback_tracing_names();
+    const auto buffered_tracing_info = SdkApi::get_buffer_tracing_names();
+    const auto callback_tracing_info = SdkApi::get_callback_tracing_names();
 
     auto domains_to_skip =
         std::unordered_set<std::string_view>{ "none",
@@ -574,7 +574,7 @@ sdk_tracing_config<Wrapper, Externals>::config_settings(
     domains_to_skip.emplace("page_migration");
 
     add_operation_settings_f(
-        "MARKER_API", callback_tracing_info[Wrapper::CALLBACK_TRACING_MARKER_CORE_API],
+        "MARKER_API", callback_tracing_info[SdkApi::CALLBACK_TRACING_MARKER_CORE_API],
         s_callback_operation_option_names);
 
     for(const auto& itr : callback_tracing_info)
@@ -605,22 +605,22 @@ sdk_tracing_config<Wrapper, Externals>::config_settings(
     }
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::unordered_set<typename Wrapper::callback_tracing_kind>
-sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
+std::unordered_set<typename SdkApi::callback_tracing_kind>
+sdk_tracing_config<SdkApi, Externals>::get_callback_domains()
 {
-    using kind_t             = typename Wrapper::callback_tracing_kind;
-    const auto callback_info = Wrapper::get_callback_tracing_names();
+    using kind_t             = typename SdkApi::callback_tracing_kind;
+    const auto callback_info = SdkApi::get_callback_tracing_names();
     auto       supported     = std::unordered_set<kind_t>{
-        Wrapper::CALLBACK_TRACING_HSA_CORE_API,
-        Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API,
-        Wrapper::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-        Wrapper::CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-        Wrapper::CALLBACK_TRACING_HIP_RUNTIME_API,
-        Wrapper::CALLBACK_TRACING_HIP_COMPILER_API,
-        Wrapper::CALLBACK_TRACING_MARKER_CORE_API,
-        Wrapper::CALLBACK_TRACING_CODE_OBJECT,
+        SdkApi::CALLBACK_TRACING_HSA_CORE_API,
+        SdkApi::CALLBACK_TRACING_HSA_AMD_EXT_API,
+        SdkApi::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+        SdkApi::CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+        SdkApi::CALLBACK_TRACING_HIP_RUNTIME_API,
+        SdkApi::CALLBACK_TRACING_HIP_COMPILER_API,
+        SdkApi::CALLBACK_TRACING_MARKER_CORE_API,
+        SdkApi::CALLBACK_TRACING_CODE_OBJECT,
     };
 
     const auto& sdk_runtime_version = get_version();
@@ -635,9 +635,9 @@ sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
         if(sdk_runtime_version >= version_info{ .major = 0, .minor = 6, .patch = 0 })
         {
             // Argument tracing is supported in rocprofiler-sdk 0.6.0 and later
-            supported.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
-            supported.emplace(Wrapper::CALLBACK_TRACING_OMPT);
-            supported.emplace(Wrapper::CALLBACK_TRACING_ROCDECODE_API);
+            supported.emplace(SdkApi::CALLBACK_TRACING_RCCL_API);
+            supported.emplace(SdkApi::CALLBACK_TRACING_OMPT);
+            supported.emplace(SdkApi::CALLBACK_TRACING_ROCDECODE_API);
         }
     }
     if constexpr(compile_time_sdk_version >=
@@ -645,7 +645,7 @@ sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
     {
         if(sdk_runtime_version >= version_info{ .major = 0, .minor = 7, .patch = 0 })
         {
-            supported.emplace(Wrapper::CALLBACK_TRACING_ROCJPEG_API);
+            supported.emplace(SdkApi::CALLBACK_TRACING_ROCJPEG_API);
         }
     }
 
@@ -654,7 +654,7 @@ sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
     {
         if(sdk_runtime_version >= version_info{ .major = 1, .minor = 3, .patch = 4 })
         {
-            supported.emplace(Wrapper::CALLBACK_TRACING_ROCSHMEM_API);
+            supported.emplace(SdkApi::CALLBACK_TRACING_ROCSHMEM_API);
         }
     }
     if constexpr(compile_time_sdk_version >=
@@ -662,7 +662,7 @@ sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
     {
         if(sdk_runtime_version >= version_info{ .major = 1, .minor = 3, .patch = 5 })
         {
-            supported.emplace(Wrapper::CALLBACK_TRACING_HIPFILE_API);
+            supported.emplace(SdkApi::CALLBACK_TRACING_HIPFILE_API);
         }
     }
 
@@ -677,13 +677,13 @@ sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
            sdk_runtime_version >= version_info{ .major = 0, .minor = 6, .patch = 0 })
         {
             // Translate ROCPROFSYS_USE_RCCLP to entry in ROCPROFSYS_ROCM_DOMAINS
-            callback_domains.emplace(Wrapper::CALLBACK_TRACING_RCCL_API);
+            callback_domains.emplace(SdkApi::CALLBACK_TRACING_RCCL_API);
         }
         if(Externals::get_use_ompt() &&
            sdk_runtime_version >= version_info{ .major = 0, .minor = 6, .patch = 0 })
         {
             // Translate some configuration settings to rocprofiler domains
-            callback_domains.emplace(Wrapper::CALLBACK_TRACING_OMPT);
+            callback_domains.emplace(SdkApi::CALLBACK_TRACING_OMPT);
         }
     }
 
@@ -706,21 +706,21 @@ sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
 
         if(itr == "hsa_api")
         {
-            for(auto eitr : { Wrapper::CALLBACK_TRACING_HSA_CORE_API,
-                              Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API,
-                              Wrapper::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-                              Wrapper::CALLBACK_TRACING_HSA_FINALIZE_EXT_API })
+            for(auto eitr : { SdkApi::CALLBACK_TRACING_HSA_CORE_API,
+                              SdkApi::CALLBACK_TRACING_HSA_AMD_EXT_API,
+                              SdkApi::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                              SdkApi::CALLBACK_TRACING_HSA_FINALIZE_EXT_API })
                 callback_domains.emplace(eitr);
         }
         else if(itr == "hip_api")
         {
-            for(auto eitr : { Wrapper::CALLBACK_TRACING_HIP_RUNTIME_API,
-                              Wrapper::CALLBACK_TRACING_HIP_COMPILER_API })
+            for(auto eitr : { SdkApi::CALLBACK_TRACING_HIP_RUNTIME_API,
+                              SdkApi::CALLBACK_TRACING_HIP_COMPILER_API })
                 callback_domains.emplace(eitr);
         }
         else if(itr == "marker_api" || itr == "roctx")
         {
-            callback_domains.emplace(Wrapper::CALLBACK_TRACING_MARKER_CORE_API);
+            callback_domains.emplace(SdkApi::CALLBACK_TRACING_MARKER_CORE_API);
         }
         else
         {
@@ -740,41 +740,41 @@ sdk_tracing_config<Wrapper, Externals>::get_callback_domains()
     return callback_domains;
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-std::unordered_set<typename Wrapper::buffer_tracing_kind>
-sdk_tracing_config<Wrapper, Externals>::get_buffered_domains()
+std::unordered_set<typename SdkApi::buffer_tracing_kind>
+sdk_tracing_config<SdkApi, Externals>::get_buffered_domains()
 {
-    using kind_t           = typename Wrapper::buffer_tracing_kind;
-    const auto buffer_info = Wrapper::get_buffer_tracing_names();
+    using kind_t           = typename SdkApi::buffer_tracing_kind;
+    const auto buffer_info = SdkApi::get_buffer_tracing_names();
 
     auto supported = std::unordered_set<kind_t>{
-        Wrapper::BUFFER_TRACING_KERNEL_DISPATCH,
-        Wrapper::BUFFER_TRACING_MEMORY_COPY,
-        Wrapper::BUFFER_TRACING_SCRATCH_MEMORY,
+        SdkApi::BUFFER_TRACING_KERNEL_DISPATCH,
+        SdkApi::BUFFER_TRACING_MEMORY_COPY,
+        SdkApi::BUFFER_TRACING_SCRATCH_MEMORY,
     };
 
     if constexpr(compile_time_sdk_version >=
                  version_info{ .major = 0, .minor = 6, .patch = 0 })
     {
-        supported.emplace(Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION);
+        supported.emplace(SdkApi::BUFFER_TRACING_MEMORY_ALLOCATION);
     }
 
     if constexpr(compile_time_sdk_version <
                  version_info{ .major = 1, .minor = 0, .patch = 0 })
     {
-        supported.emplace(Wrapper::BUFFER_TRACING_PAGE_MIGRATION);
+        supported.emplace(SdkApi::BUFFER_TRACING_PAGE_MIGRATION);
     }
 
     if constexpr(compile_time_sdk_version >=
                  version_info{ .major = 1, .minor = 0, .patch = 0 })
     {
-        supported.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
-        supported.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE);
-        supported.emplace(Wrapper::BUFFER_TRACING_KFD_QUEUE);
-        supported.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE);
-        supported.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
-        supported.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
+        supported.emplace(SdkApi::BUFFER_TRACING_KFD_PAGE_FAULT);
+        supported.emplace(SdkApi::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+        supported.emplace(SdkApi::BUFFER_TRACING_KFD_QUEUE);
+        supported.emplace(SdkApi::BUFFER_TRACING_KFD_EVENT_QUEUE);
+        supported.emplace(SdkApi::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
+        supported.emplace(SdkApi::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
     }
 
     // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with undefined
@@ -814,37 +814,37 @@ sdk_tracing_config<Wrapper, Externals>::get_buffered_domains()
 
         if(itr == "hsa_api")
         {
-            for(const auto& eitr : { Wrapper::BUFFER_TRACING_HSA_CORE_API,
-                                     Wrapper::BUFFER_TRACING_HSA_AMD_EXT_API,
-                                     Wrapper::BUFFER_TRACING_HSA_IMAGE_EXT_API,
-                                     Wrapper::BUFFER_TRACING_HSA_FINALIZE_EXT_API })
+            for(const auto& eitr : { SdkApi::BUFFER_TRACING_HSA_CORE_API,
+                                     SdkApi::BUFFER_TRACING_HSA_AMD_EXT_API,
+                                     SdkApi::BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                                     SdkApi::BUFFER_TRACING_HSA_FINALIZE_EXT_API })
             {
                 data.emplace(eitr);
             }
         }
         else if(itr == "hip_api")
         {
-            for(const auto& eitr : { Wrapper::BUFFER_TRACING_HIP_COMPILER_API,
-                                     Wrapper::BUFFER_TRACING_HIP_RUNTIME_API })
+            for(const auto& eitr : { SdkApi::BUFFER_TRACING_HIP_COMPILER_API,
+                                     SdkApi::BUFFER_TRACING_HIP_RUNTIME_API })
             {
                 data.emplace(eitr);
             }
         }
         else if(itr == "marker_api" || itr == "roctx")
         {
-            data.emplace(Wrapper::BUFFER_TRACING_MARKER_CORE_API);
+            data.emplace(SdkApi::BUFFER_TRACING_MARKER_CORE_API);
         }
         else if(itr == "memory_allocation")
         {
             if constexpr(compile_time_sdk_version >=
                          version_info{ .major = 0, .minor = 6, .patch = 0 })
             {
-                data.emplace(Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION);
+                data.emplace(SdkApi::BUFFER_TRACING_MEMORY_ALLOCATION);
             }
         }
         else if(itr == "memory_copy")
         {
-            data.emplace(Wrapper::BUFFER_TRACING_MEMORY_COPY);
+            data.emplace(SdkApi::BUFFER_TRACING_MEMORY_COPY);
         }
         else if(itr == "kfd_events" || itr == "kfd_page_fault" ||
                 itr == "kfd_page_migrate" || itr == "kfd_queue" ||
@@ -870,12 +870,12 @@ sdk_tracing_config<Wrapper, Externals>::get_buffered_domains()
                 }
                 if(itr == "kfd_events")
                 {
-                    for(auto eitr : { Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT,
-                                      Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE,
-                                      Wrapper::BUFFER_TRACING_KFD_QUEUE,
-                                      Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE,
-                                      Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-                                      Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS })
+                    for(auto eitr : { SdkApi::BUFFER_TRACING_KFD_PAGE_FAULT,
+                                      SdkApi::BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                                      SdkApi::BUFFER_TRACING_KFD_QUEUE,
+                                      SdkApi::BUFFER_TRACING_KFD_EVENT_QUEUE,
+                                      SdkApi::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                                      SdkApi::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS })
 
                     {
                         data.emplace(eitr);
@@ -883,27 +883,27 @@ sdk_tracing_config<Wrapper, Externals>::get_buffered_domains()
                 }
                 else if(itr == "kfd_page_fault")
                 {
-                    data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
+                    data.emplace(SdkApi::BUFFER_TRACING_KFD_PAGE_FAULT);
                 }
                 else if(itr == "kfd_page_migrate")
                 {
-                    data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+                    data.emplace(SdkApi::BUFFER_TRACING_KFD_PAGE_MIGRATE);
                 }
                 else if(itr == "kfd_queue")
                 {
-                    data.emplace(Wrapper::BUFFER_TRACING_KFD_QUEUE);
+                    data.emplace(SdkApi::BUFFER_TRACING_KFD_QUEUE);
                 }
                 else if(itr == "kfd_event_queue")
                 {
-                    data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE);
+                    data.emplace(SdkApi::BUFFER_TRACING_KFD_EVENT_QUEUE);
                 }
                 else if(itr == "kfd_event_unmap_from_gpu")
                 {
-                    data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
+                    data.emplace(SdkApi::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
                 }
                 else if(itr == "kfd_event_dropped_events")
                 {
-                    data.emplace(Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
+                    data.emplace(SdkApi::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
                 }
             }
         }
@@ -933,8 +933,8 @@ sdk_tracing_config<Wrapper, Externals>::get_buffered_domains()
                 LOG_INFO(
                     "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON: implicitly enabling "
                     "KFD page_fault and page_migrate buffered tracing domains");
-                data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT);
-                data.emplace(Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE);
+                data.emplace(SdkApi::BUFFER_TRACING_KFD_PAGE_FAULT);
+                data.emplace(SdkApi::BUFFER_TRACING_KFD_PAGE_MIGRATE);
             }
             else
             {
@@ -949,19 +949,19 @@ sdk_tracing_config<Wrapper, Externals>::get_buffered_domains()
     return data;
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::vector<std::string>
-sdk_tracing_config<Wrapper, Externals>::get_rocm_events()
+sdk_tracing_config<SdkApi, Externals>::get_rocm_events()
 {
     return rocprofsys::delimit(Externals::get_rocm_events_setting(), " ,;\t\n");
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::vector<std::int32_t>
-sdk_tracing_config<Wrapper, Externals>::get_operations(
-    typename Wrapper::callback_tracing_kind kind)
+sdk_tracing_config<SdkApi, Externals>::get_operations(
+    typename SdkApi::callback_tracing_kind kind)
 {
     if(s_callback_operation_option_names.count(kind) == 0)
     {
@@ -988,11 +988,11 @@ sdk_tracing_config<Wrapper, Externals>::get_operations(
     return filter_operations(complete_set, include_operations, exclude_operations);
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::vector<std::int32_t>
-sdk_tracing_config<Wrapper, Externals>::get_operations(
-    typename Wrapper::buffer_tracing_kind kind)
+sdk_tracing_config<SdkApi, Externals>::get_operations(
+    typename SdkApi::buffer_tracing_kind kind)
 {
     if(s_buffered_operation_option_names.count(kind) == 0)
     {
@@ -1016,11 +1016,11 @@ sdk_tracing_config<Wrapper, Externals>::get_operations(
     return filter_operations(complete_set, include_operations, exclude_operations);
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::unordered_set<std::int32_t>
-sdk_tracing_config<Wrapper, Externals>::get_backtrace_operations(
-    typename Wrapper::callback_tracing_kind kind)
+sdk_tracing_config<SdkApi, Externals>::get_backtrace_operations(
+    typename SdkApi::callback_tracing_kind kind)
 {
     if(s_callback_operation_option_names.count(kind) == 0)
     {
@@ -1041,11 +1041,11 @@ sdk_tracing_config<Wrapper, Externals>::get_backtrace_operations(
     return { result.begin(), result.end() };
 }
 
-template <typename Wrapper, typename Externals>
+template <typename SdkApi, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::unordered_set<std::int32_t>
-sdk_tracing_config<Wrapper, Externals>::get_backtrace_operations(
-    typename Wrapper::buffer_tracing_kind kind)
+sdk_tracing_config<SdkApi, Externals>::get_backtrace_operations(
+    typename SdkApi::buffer_tracing_kind kind)
 {
     if(s_buffered_operation_option_names.count(kind) == 0)
     {
