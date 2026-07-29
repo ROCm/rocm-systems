@@ -47,6 +47,7 @@ class gfx12_cntx_prim
 {
 public:
     static const uint32_t     GFXIP_LEVEL         = 12;
+    static const bool         SPM_DELAY_PROGRAMMING_REQUIRED = false;
     static const uint32_t     NUMBER_OF_BLOCKS    = LastCounterBlockId + 1;
     static constexpr Register GRBM_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
 #if GFX12_VARIANT == GFX12_VARIANT_1250
@@ -76,7 +77,9 @@ public:
         REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL);
     static constexpr Register SQ_PERFCOUNTER_CTRL2_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL2);
-    static constexpr Register SQ_PERFCOUNTER_MASK_ADDR = Register(0xD9E1);
+    static constexpr Register SQG_PERFCOUNTER_CTRL2_ADDR =
+        REG_32B_ADDR(GC, 0, regSQG_PERFCOUNTER_CTRL2);
+    static constexpr Register SQ_PERFCOUNTER_MASK_ADDR{};
     static constexpr Register SQ_THREAD_TRACE_MASK_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_MASK);
     static constexpr Register SQ_THREAD_TRACE_PERF_MASK_ADDR{};
@@ -132,6 +135,8 @@ public:
         REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_RING_SIZE);
     static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE__ADDR =
         REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_SEGMENT_SIZE);
+    static constexpr Register RLC_SPM_SAMPLE_CNT__ADDR =
+        REG_32B_ADDR(GC, 0, regRLC_SPM_SAMPLE_CNT);
     static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE_CORE1__ADDR{};
     static constexpr Register RLC_SPM_GLOBAL_MUXSEL_ADDR__ADDR =
         REG_32B_ADDR(GC, 0, regRLC_SPM_GLOBAL_MUXSEL_ADDR);
@@ -164,13 +169,13 @@ public:
         uint16_t data;
         struct
         {
-            uint16_t counter  : 6;
+            uint16_t counter  : 5;
+            uint16_t instance : 6;
             uint16_t block    : 5;
-            uint16_t instance : 5;
         } gfx;
     };
 
-    static const uint32_t SQ_BLOCK_ID     = __BLOCK_ID_HSA(SQ);
+    static const uint32_t SQ_BLOCK_ID     = __BLOCK_ID(SQG);
     static const uint32_t SQ_BLOCK_SPM_ID = SPM_SE_BLOCK_NAME_SQG;
 
     static const uint32_t COPY_DATA_SEL_REG_PRM = COPY_DATA_SEL_REG;
@@ -354,18 +359,17 @@ public:
     static uint32_t sq_select_value(const counter_des_t& counter_des)
     {
         uint32_t sq_perfcounter0_sel =
-            // SET_REG_FIELD_BITS(SQ_PERFCOUNTER0_SELECT, SQC_BANK_MASK, 0xF) |
             SET_REG_FIELD_BITS(SQ_PERFCOUNTER0_SELECT, PERF_SEL, counter_des.id);
         return sq_perfcounter0_sel;
     }
 
-    static uint32_t sq_spm_select_value(const counter_des_t& counter_des)
+    static uint32_t sq_spm_select_value(const counter_des_t& counter_des,
+                                        const uint32_t&      bit_depth = 32)
     {
-        uint32_t sq_perfcounter0_sel =
-            // SET_REG_FIELD_BITS(SQ_PERFCOUNTER0_SELECT, SQC_BANK_MASK, 0xF) |
+        const uint32_t spm_mode = (bit_depth == 16) ? 1 : 3;  // PERFMON_SPM_MODE_16/32BIT_CLAMP
+        uint32_t       sq_perfcounter0_sel =
             SET_REG_FIELD_BITS(SQ_PERFCOUNTER0_SELECT, PERF_SEL, counter_des.id) |
-            SET_REG_FIELD_BITS(
-                SQ_PERFCOUNTER0_SELECT, SPM_MODE, 3);  // PERFMON_SPM_MODE_32BIT_CLAMP
+            SET_REG_FIELD_BITS(SQ_PERFCOUNTER0_SELECT, SPM_MODE, spm_mode);
         return sq_perfcounter0_sel;
     }
 
@@ -456,7 +460,7 @@ public:
         uint32_t tcp_perfcounter0_select =
             SET_REG_FIELD_BITS(TCP_PERFCOUNTER0_SELECT, PERF_SEL, counter_des.id) |
             SET_REG_FIELD_BITS(
-                TCP_PERFCOUNTER0_SELECT, CNTR_MODE, 3);  // PERFMON_SPM_MODE_32BIT_CLAMP
+                TCP_PERFCOUNTER0_SELECT, CNTR_MODE, 1);  // PERFMON_SPM_MODE_16BIT_CLAMP
         return tcp_perfcounter0_select;
     }
 
@@ -465,7 +469,7 @@ public:
         uint32_t tcp_perfcounter0_select =
             SET_REG_FIELD_BITS(TCP_PERFCOUNTER0_SELECT, PERF_SEL1, counter_des.id) |
             SET_REG_FIELD_BITS(
-                TCP_PERFCOUNTER0_SELECT, CNTR_MODE, 3);  // PERFMON_SPM_MODE_32BIT_CLAMP
+                TCP_PERFCOUNTER0_SELECT, CNTR_MODE, 1);  // PERFMON_SPM_MODE_16BIT_CLAMP
         return tcp_perfcounter0_select;
     }
     static mux_info_t spm_mux_ram_value(const counter_des_t& counter_des)
@@ -483,6 +487,12 @@ public:
         mxinfo.gfx.block    = block;
         mxinfo.gfx.instance = instance;
         return mxinfo;
+    }
+    static uint32_t decode_spm_instance_index(const GpuBlockInfo* block_info, uint32_t block_index)
+    {
+        if(block_info && (block_info->attr & CounterBlockWgpAttr)) return block_index & 0x1;
+        if(block_info && (block_info->attr & CounterBlockSaAttr)) return block_index & 0x1F;
+        return block_index;
     }
     static uint32_t spm_mux_ram_idx_incr(uint32_t idx)
     {
@@ -526,29 +536,31 @@ public:
     {
         return 0;
     }
-    static uint32_t rlc_spm_perfmon_cntl_value(const uint32_t& sampling_rate)
+    static uint32_t rlc_spm_perfmon_cntl_value(const uint32_t& sampling_rate,
+                                               const uint32_t& sample_interval_type = 0)
     {
-        uint32_t rlc_spm_perfmon_cntl{0};
+        const uint32_t ring_mode = 3;  // Stall and send Interrupt
+        uint32_t       rlc_spm_perfmon_cntl{0};
         rlc_spm_perfmon_cntl =
-            SET_REG_FIELD_BITS(RLC_SPM_PERFMON_CNTL, PERFMON_SAMPLE_INTERVAL, sampling_rate);
+            SET_REG_FIELD_BITS(RLC_SPM_PERFMON_CNTL, PERFMON_SAMPLE_INTERVAL, sampling_rate - 1) |
+            SET_REG_FIELD_BITS(RLC_SPM_PERFMON_CNTL, PERFMON_RING_MODE, ring_mode) |
+            SET_REG_FIELD_BITS(
+                RLC_SPM_PERFMON_CNTL, PERFMON_SAMPLE_INTERVAL_TYPE, sample_interval_type) |
+            SET_REG_FIELD_BITS(RLC_SPM_PERFMON_CNTL, PERFMON_SAMPLE_INTERVAL_START_MODE, 0);
         return rlc_spm_perfmon_cntl;
     }
     static uint32_t rlc_spm_perfmon_segment_size_value(const uint32_t& global_count,
-                                                       const uint32_t& se_count)
+                                                       const uint32_t& se_count,
+                                                       const uint32_t& se_number)
     {
         const uint32_t global_nlines = global_count;
         const uint32_t se_nlines     = se_count;
-        const uint32_t segment_size  = (global_nlines + (4 * se_nlines));
+        const uint32_t segment_size  = (global_nlines + (se_number * se_nlines));
         uint32_t       rlc_spm_perfmon_segment_size{0};
         rlc_spm_perfmon_segment_size =
             SET_REG_FIELD_BITS(RLC_SPM_PERFMON_SEGMENT_SIZE, TOTAL_NUM_SEGMENT, segment_size) |
-            SET_REG_FIELD_BITS(RLC_SPM_PERFMON_SEGMENT_SIZE, GLOBAL_NUM_SEGMENT, global_nlines);
-        // rlc_spm_perfmon_segment_size = SET_REG_FIELD_BITS(RLC_SPM_PERFMON_SEGMENT_SIZE,
-        // SE0_NUM_LINE, se_nlines) |
-        //         SET_REG_FIELD_BITS(RLC_SPM_PERFMON_SEGMENT_SIZE, SE1_NUM_LINE, se_nlines) |
-        //         SET_REG_FIELD_BITS(RLC_SPM_PERFMON_SEGMENT_SIZE, SE2_NUM_LINE, se_nlines) |
-        //         SET_REG_FIELD_BITS(RLC_SPM_PERFMON_SEGMENT_SIZE, PERFMON_SEGMENT_SIZE,
-        //         segment_size);
+            SET_REG_FIELD_BITS(RLC_SPM_PERFMON_SEGMENT_SIZE, GLOBAL_NUM_SEGMENT, global_nlines) |
+            SET_REG_FIELD_BITS(RLC_SPM_PERFMON_SEGMENT_SIZE, SE_NUM_SEGMENT, se_nlines);
         return rlc_spm_perfmon_segment_size;
     }
 
@@ -718,7 +730,10 @@ public:
     }
 
     // SPM primitives
-    static uint16_t spm_timestamp_muxsel() { return 0xF0F0; }
+    static uint16_t spm_timestamp_muxsel(uint16_t index)
+    {
+        return spm_mux_ram_value(index, 31, 1).data;
+    }
 
     enum ESQTT_STATUS_MASK
     {
