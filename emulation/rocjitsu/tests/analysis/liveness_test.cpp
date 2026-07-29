@@ -482,6 +482,68 @@ TEST(CfgAnalysis, DirectCallToImplicitNonreturningTargetDropsFallthrough) {
   EXPECT_FALSE(has_successor_start(*caller, continuation->start_offset()));
   EXPECT_FALSE(has_predecessor(*continuation, caller));
 }
+
+TEST(CfgAnalysis, PreviousInstructionReturnsPrecedingInstructionInBlock) {
+  auto blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  ASSERT_EQ(blocks.size(), 1u);
+  auto instruction = blocks[0]->instructions().begin();
+  ASSERT_NE(instruction, blocks[0]->instructions().end());
+  const Instruction *first = &*instruction;
+  ++instruction;
+  ASSERT_NE(instruction, blocks[0]->instructions().end());
+  const Instruction *second = &*instruction;
+
+  EXPECT_EQ(first->previous_instruction(), nullptr);
+  EXPECT_EQ(second->previous_instruction(), first);
+}
+
+TEST(CfgAnalysis, PreviousInstructionIsNullAtBranchTargetBlockEntry) {
+  auto blocks = build_test_blocks(
+      {TestOpcode::CBranchToElse, TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  BasicBlock *target = block_starting_at(blocks, 8);
+  ASSERT_NE(target, nullptr);
+  ASSERT_NE(target->instructions().begin(), target->instructions().end());
+  const Instruction &entry = *target->instructions().begin();
+  EXPECT_EQ(entry.previous_instruction(), nullptr);
+}
+
+TEST(CfgAnalysis, NextInstructionReturnsFollowingInstructionInBlock) {
+  auto blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  ASSERT_EQ(blocks.size(), 1u);
+  auto instruction = blocks[0]->instructions().begin();
+  ASSERT_NE(instruction, blocks[0]->instructions().end());
+  const Instruction *first = &*instruction;
+  ++instruction;
+  ASSERT_NE(instruction, blocks[0]->instructions().end());
+  const Instruction *second = &*instruction;
+
+  EXPECT_EQ(first->next_instruction(), second);
+}
+
+TEST(CfgAnalysis, NextInstructionIsNullAtBlockTerminator) {
+  auto blocks = build_test_blocks(
+      {TestOpcode::CBranchToElse, TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  ASSERT_FALSE(blocks.empty());
+  const Instruction *terminator = blocks[0]->terminator();
+  ASSERT_NE(terminator, nullptr);
+  EXPECT_EQ(terminator->next_instruction(), nullptr);
+}
+
+TEST(CfgAnalysis, StandaloneInstructionHasNoDecodedNeighbors) {
+  constexpr uint32_t kNop = 0xbf800000u;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> instruction(decoder->decode(&kNop));
+
+  ASSERT_NE(instruction, nullptr);
+  EXPECT_EQ(instruction->previous_instruction(), nullptr);
+  EXPECT_EQ(instruction->next_instruction(), nullptr);
+}
+
 TEST(CfgAnalysis, IfElseSuccessorsAndPredecessorsAreInverse) {
   auto blocks = build_test_blocks(
       {TestOpcode::CBranchToElse, TestOpcode::BranchToJoin, TestOpcode::Nop, TestOpcode::End});
