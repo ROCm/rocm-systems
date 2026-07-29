@@ -665,16 +665,18 @@ sdk_tracing_config<SdkApi, Externals>::get_callback_domains()
         }
     }
 
-    if constexpr(Wrapper::compile_time_version >= 10304)
+    if constexpr(compile_time_sdk_version >=
+                 version_info{ .major = 1, .minor = 3, .patch = 4 })
     {
-        if(formatted_version >= 10304)
+        if(sdk_runtime_version >= version_info{ .major = 1, .minor = 3, .patch = 4 })
         {
             supported.emplace(Wrapper::CALLBACK_TRACING_ROCSHMEM_API);
         }
     }
-    if constexpr(Wrapper::compile_time_version >= 10305)
+    if constexpr(compile_time_sdk_version >=
+                 version_info{ .major = 1, .minor = 3, .patch = 5 })
     {
-        if(formatted_version >= 10305)
+        if(sdk_runtime_version >= version_info{ .major = 1, .minor = 3, .patch = 5 })
         {
             supported.emplace(Wrapper::CALLBACK_TRACING_HIPFILE_API);
         }
