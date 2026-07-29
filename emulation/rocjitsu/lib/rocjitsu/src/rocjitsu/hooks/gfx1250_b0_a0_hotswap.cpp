@@ -14,7 +14,9 @@
 
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
+#include "rocjitsu/hooks/translation_disk_cache.h"
 
 #include <algorithm>
 #include <atomic>
@@ -45,6 +47,25 @@ using Blob = std::shared_ptr<std::vector<uint8_t>>;
 using VendorReaderCreate = hsa_status_t (*)(hsa_file_t, size_t, size_t, hsa_code_object_reader_t *);
 
 constexpr uint32_t kAmdAgentInfoAsicRevision = 0xA012;
+
+using rocjitsu::hotswap::cache_key_for;
+using rocjitsu::hotswap::cache_lookup;
+using rocjitsu::hotswap::cache_store;
+using rocjitsu::hotswap::CacheKey;
+using rocjitsu::hotswap::TranslationIdentity;
+
+/// @brief The single configuration this hook translates under.
+///
+/// @details The translation entry point takes no options, so every request from
+/// this hook shares one identity. It is still recorded and re-checked so a
+/// stored object can never satisfy a request from a hook built around a
+/// different profile.
+constexpr TranslationIdentity kTranslationIdentity{
+    .profile_id = 1,
+    .input_revision = 1,
+    .output_revision = 0,
+    .target_isa = "gfx1250",
+};
 
 // Minimal mirror through the sole AMD loader entry intercepted by this hook.
 struct VendorLoaderTable {
@@ -1191,6 +1212,33 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
       return reused_status;
     }
 
+    // Only a load this process has not already answered reaches the store, which
+    // is what keeps its cost off the repeat path: a digest over the whole source
+    // and a file read, once per distinct object rather than once per load.
+    const CacheKey cache_key = cache_key_for(*source, kTranslationIdentity);
+    if (std::vector<uint8_t> cached = cache_lookup(cache_key, kTranslationIdentity);
+        !cached.empty()) {
+      Blob reused = copy_bytes(cached.data(), cached.size());
+      if (reused != nullptr) {
+        // Remember what the store gave us. Without this, every later load of these
+        // bytes would read the file again -- the repetition the memo exists to
+        // remove, moved from the translator to the filesystem. The source id is
+        // derived the way the translator derives it, so an entry that came from the
+        // store reports exactly as one translated here would.
+        TranslationRecord stored;
+        stored.output = reused;
+        stored.info.source_code_object_id =
+            rocjitsu::stable_code_object_id(source->data(), source->size());
+        remember(stored);
+
+        const hsa_status_t reused_status =
+            load_owned_bytes(executable, agent, reused, options, loaded, *api, original_load);
+        log("reused input_bytes=%zu output_bytes=%zu status=%d", source->size(), cached.size(),
+            static_cast<int>(reused_status));
+        return reused_status;
+      }
+    }
+
     uint8_t *translated_data = nullptr;
     size_t translated_size = 0;
     g_state.translations.fetch_add(1, std::memory_order_relaxed);
@@ -1215,6 +1263,8 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     }
 
     translation.output = copy_bytes(translated_data, translated_size);
+    // Offer it to the next process before the translator's buffer is released.
+    cache_store(cache_key, {translated_data, translated_size}, kTranslationIdentity);
     rj_gfx1250_b0_to_a0_free(translated_data);
     if (translation.output == nullptr) {
       // Deliberately NOT remembered: running out of memory says nothing about
@@ -1438,5 +1488,25 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_translation_memo_bytes() {
 extern "C" RJ_HOOK_EXPORT void rj_test_log_translation(uint64_t source_id, size_t changed) {
   log_translation(source_id, "translated", changed, 64, 96, ROCJITSU_STATUS_SUCCESS,
                   HSA_STATUS_SUCCESS);
+}
+
+// Test-only seam onto the translation store. Production derives its location
+// entirely from the runtime directory and takes no configuration, so a test that
+// wants an isolated store, a known capacity, or the current occupancy has no
+// other way to ask.
+extern "C" RJ_HOOK_EXPORT void rj_test_set_cache_root(const char *root) {
+  rocjitsu::hotswap::set_cache_root_for_test(root);
+}
+
+extern "C" RJ_HOOK_EXPORT uint64_t rj_test_cache_size() {
+  return rocjitsu::hotswap::cache_size_for_test();
+}
+
+extern "C" RJ_HOOK_EXPORT uint64_t rj_test_cache_hits() {
+  return rocjitsu::hotswap::cache_hits_for_test();
+}
+
+extern "C" RJ_HOOK_EXPORT void rj_test_set_cache_capacity(uint64_t bytes) {
+  rocjitsu::hotswap::set_cache_capacity_for_test(bytes);
 }
 #endif // RJ_HOTSWAP_TEST_HOOKS

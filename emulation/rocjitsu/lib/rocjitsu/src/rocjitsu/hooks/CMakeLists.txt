@@ -108,7 +108,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # target stay identical except for those two axes -- the production target's ABI
     # and compile definitions must be invariant across BUILD_TESTING.
     function(rj_add_hotswap_hook _target _export_map _test_hooks)
-        add_library(${_target} SHARED gfx1250_b0_a0_hotswap.cpp)
+        add_library(
+            ${_target}
+            SHARED
+            gfx1250_b0_a0_hotswap.cpp
+            translation_disk_cache.cpp
+        )
         set_target_properties(${_target} PROPERTIES OUTPUT_NAME ${_target})
         target_link_libraries(
             ${_target}
@@ -129,9 +134,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         endif()
         set(_map ${CMAKE_CURRENT_SOURCE_DIR}/${_export_map})
         set_property(TARGET ${_target} APPEND PROPERTY LINK_DEPENDS ${_map})
+        # --build-id is not decoration here: the translation store keys entries on
+        # this note so a rebuilt library can never read what the previous one
+        # wrote. Without it the store finds no identity and disables itself.
         target_link_options(
             ${_target}
-            PRIVATE "LINKER:--gc-sections" "LINKER:--version-script=${_map}"
+            PRIVATE
+                "LINKER:--gc-sections"
+                "LINKER:--version-script=${_map}"
+                "LINKER:--build-id=sha1"
         )
     endfunction()
 

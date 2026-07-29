@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
@@ -40,6 +41,10 @@ extern "C" void rj_test_force_next_translation_status(int status);
 extern "C" uint64_t rj_test_sample_fingerprint(const void *bytes, size_t size);
 extern "C" void rj_test_retain_completed_claims(bool retain);
 extern "C" void rj_test_fail_next_memo_admission(int stage);
+extern "C" void rj_test_set_cache_root(const char *root);
+extern "C" uint64_t rj_test_cache_size();
+extern "C" uint64_t rj_test_cache_hits();
+extern "C" void rj_test_set_cache_capacity(uint64_t bytes);
 
 namespace {
 
@@ -250,6 +255,34 @@ std::vector<uint8_t> read_translation_fixture() {
 }
 #endif
 
+/// @brief Redirect the translation store into a private directory.
+///
+/// @details Without this every test would share the real per-user store, so one
+/// test's output could satisfy another's load and results would depend on run
+/// order and on whatever a previous run left behind.
+class ScopedCacheRoot {
+public:
+  ScopedCacheRoot() {
+    std::strcpy(path_, "/tmp/rj-hotswap-cache-XXXXXX");
+    if (mkdtemp(path_) == nullptr)
+      path_[0] = '\0';
+    rj_test_set_cache_root(path_[0] == '\0' ? nullptr : path_);
+  }
+  ~ScopedCacheRoot() {
+    rj_test_set_cache_root(nullptr);
+    rj_test_set_cache_capacity(0);
+    if (path_[0] != '\0')
+      std::filesystem::remove_all(path_);
+  }
+  ScopedCacheRoot(const ScopedCacheRoot &) = delete;
+  ScopedCacheRoot &operator=(const ScopedCacheRoot &) = delete;
+
+  [[nodiscard]] const char *path() const { return path_; }
+
+private:
+  char path_[64] = {};
+};
+
 struct FakeApi {
   CoreApiTable core{};
   HsaApiTable table{};
@@ -284,6 +317,7 @@ protected:
   }
   void TearDown() override { OnUnload(); }
 
+  ScopedCacheRoot cache_root;
   FakeApi api;
 };
 
@@ -427,6 +461,164 @@ TEST_F(HsaHotswapHookTest, TranslatesGfx1250AndRetainsOutputUntilDestroy) {
 
   EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(rj_test_retained_executable_buffer_count(), 0u);
+}
+
+// --- translation store -----------------------------------------------------
+//
+// Every case below asserts the same background property: the load succeeds. The
+// store is an optimisation, and no state it can be left in -- absent, damaged,
+// wrongly owned, or full -- may turn a working load into a failing one.
+
+class HsaHotswapCacheTest : public HsaHotswapHookTest {
+protected:
+  void SetUp() override {
+    HsaHotswapHookTest::SetUp();
+    ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
+    source = read_translation_fixture();
+    ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
+  }
+
+  /// @brief Run one A0 load of @p bytes and return the bytes handed to the loader.
+  std::vector<uint8_t> load(const std::vector<uint8_t> &bytes) {
+    hsa_code_object_reader_t reader{};
+    EXPECT_EQ(
+        api.core.hsa_code_object_reader_create_from_memory_fn(bytes.data(), bytes.size(), &reader),
+        HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(kExecutable, kA0Agent, reader,
+                                                                nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    const std::vector<uint8_t> loaded = g_loaded_bytes;
+    EXPECT_EQ(api.core.hsa_executable_destroy_fn(kExecutable), HSA_STATUS_SUCCESS);
+    return loaded;
+  }
+
+  [[nodiscard]] std::filesystem::path entries() const {
+    return std::filesystem::path(cache_root.path()) / "gfx1250-b0-a0" / "v1";
+  }
+
+  /// @brief The single stored object, or an empty path when there is none.
+  [[nodiscard]] std::filesystem::path stored_object() const {
+    std::error_code error;
+    for (const auto &item : std::filesystem::directory_iterator(entries(), error))
+      if (item.path().extension() == ".obj")
+        return item.path();
+    return {};
+  }
+
+  std::vector<uint8_t> source;
+};
+
+TEST_F(HsaHotswapCacheTest, ALoadThisProcessHasNotSeenIsServedFromTheStore) {
+  const std::vector<uint8_t> first = load(source);
+  ASSERT_FALSE(first.empty());
+  EXPECT_EQ(rj_test_cache_hits(), 0u);
+  EXPECT_GT(rj_test_cache_size(), 0u);
+
+  // Drop what this process remembers. The memo sits in front of the store and
+  // answers a repeat load itself, so the store's turn comes only for bytes this
+  // process has not already translated -- which in production means another
+  // process wrote them. Clearing the memo is how that is reached from one test.
+  rj_test_clear_retained_storage();
+
+  EXPECT_EQ(load(source), first);
+  EXPECT_EQ(rj_test_cache_hits(), 1u);
+}
+
+TEST_F(HsaHotswapCacheTest, TruncatedObjectIsRejectedAndTheLoadStillSucceeds) {
+  const std::vector<uint8_t> first = load(source);
+  const std::filesystem::path object = stored_object();
+  ASSERT_FALSE(object.empty());
+  std::filesystem::resize_file(object, std::filesystem::file_size(object) / 2);
+
+  EXPECT_EQ(load(source), first);
+  EXPECT_EQ(rj_test_cache_hits(), 0u);
+}
+
+TEST_F(HsaHotswapCacheTest, DisagreeingManifestIsRejectedAndTheLoadStillSucceeds) {
+  const std::vector<uint8_t> first = load(source);
+  const std::filesystem::path object = stored_object();
+  ASSERT_FALSE(object.empty());
+  std::filesystem::path manifest = object;
+  manifest.replace_extension(".man");
+
+  std::string text;
+  {
+    std::ifstream input(manifest, std::ios::binary);
+    text.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+  }
+  const size_t at = text.find("\nisa=");
+  ASSERT_NE(at, std::string::npos);
+  text.insert(at + 5, "x");
+  {
+    std::ofstream output(manifest, std::ios::binary | std::ios::trunc);
+    output << text;
+  }
+
+  EXPECT_EQ(load(source), first);
+  EXPECT_EQ(rj_test_cache_hits(), 0u);
+}
+
+TEST_F(HsaHotswapCacheTest, SymlinkedEntryIsRefusedAndTheLoadStillSucceeds) {
+  const std::vector<uint8_t> first = load(source);
+  const std::filesystem::path object = stored_object();
+  ASSERT_FALSE(object.empty());
+  const std::filesystem::path elsewhere = object.string() + ".moved";
+  std::filesystem::rename(object, elsewhere);
+  std::filesystem::create_symlink(elsewhere, object);
+
+  EXPECT_EQ(load(source), first);
+  EXPECT_EQ(rj_test_cache_hits(), 0u);
+}
+
+TEST_F(HsaHotswapCacheTest, WorldWritableRootDisablesTheStore) {
+  ASSERT_FALSE(load(source).empty());
+  ASSERT_GT(rj_test_cache_size(), 0u);
+
+  std::filesystem::permissions(entries(), std::filesystem::perms::all);
+  rj_test_set_cache_root(cache_root.path()); // Re-runs the ownership checks.
+
+  EXPECT_EQ(rj_test_cache_size(), 0u);
+  EXPECT_FALSE(load(source).empty());
+  EXPECT_EQ(rj_test_cache_hits(), 0u);
+}
+
+TEST_F(HsaHotswapCacheTest, ObjectLargerThanTheEntryLimitIsNotStored) {
+  // One entry may occupy at most a sixteenth of capacity, so a capacity of
+  // sixteen times the source size leaves the (larger) output over the line.
+  rj_test_set_cache_capacity(source.size() * 16);
+  EXPECT_FALSE(load(source).empty());
+  EXPECT_EQ(rj_test_cache_size(), 0u);
+}
+
+TEST_F(HsaHotswapCacheTest, EntriesAreDisplacedOnceTheStoreReachesCapacity) {
+  ASSERT_FALSE(load(source).empty());
+  const uint64_t one_entry = rj_test_cache_size();
+  ASSERT_GT(one_entry, 0u);
+
+  // A single entry may occupy a sixteenth of capacity, so the store must hold
+  // well over sixteen of them before anything is displaced. Writing comfortably
+  // past that is what makes this a test of eviction rather than of headroom.
+  constexpr int kVariants = 30;
+  const uint64_t capacity = one_entry * 20;
+  rj_test_set_cache_capacity(capacity);
+
+  for (int extra = 1; extra <= kVariants; ++extra) {
+    // Trailing bytes past the last section change the digest without changing
+    // anything the translator reads, which is the cheapest way to produce
+    // distinct entries from one fixture.
+    std::vector<uint8_t> variant = source;
+    variant.resize(variant.size() + static_cast<size_t>(extra));
+    ASSERT_FALSE(load(variant).empty()) << "variant " << extra;
+    ASSERT_LE(rj_test_cache_size(), capacity) << "variant " << extra;
+  }
+
+  size_t kept = 0;
+  for (const auto &item : std::filesystem::directory_iterator(entries()))
+    kept += item.path().extension() == ".obj" ? 1 : 0;
+  // Bounded above because entries were displaced, and below because they were
+  // genuinely stored rather than refused for exceeding the per-entry limit.
+  EXPECT_LT(kept, static_cast<size_t>(kVariants));
+  EXPECT_GT(kept, static_cast<size_t>(kVariants) / 4);
 }
 #endif
 
@@ -725,6 +917,17 @@ TEST_F(HsaHotswapHookTest, CallbackApiSnapshotIsSafeDuringUnload) {
 // distinguishes reuse from repetition.
 class HsaHotswapMemoTest : public HsaHotswapHookTest {
 protected:
+  void SetUp() override {
+    HsaHotswapHookTest::SetUp();
+    // These cases ask what the MEMO did, and several work by defeating it --
+    // switching it off, shrinking it below one entry, failing an admission. The
+    // store would answer in its place and the translation counts would then say
+    // only that something cached, not which. A root that cannot be created leaves
+    // the store inert; its own behaviour is covered by the cache cases, which
+    // point it at a real directory.
+    rj_test_set_cache_root("/dev/null/no-store-for-memo-cases");
+  }
+
   // Loads @p source through a fresh reader, the way a caller that re-registers the
   // same object does -- a new handle every time, so nothing but the content itself
   // can connect one load to the next.
