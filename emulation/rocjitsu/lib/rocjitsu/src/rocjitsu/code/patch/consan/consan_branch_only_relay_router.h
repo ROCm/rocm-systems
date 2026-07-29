@@ -42,7 +42,7 @@ struct BranchOnlyRelayRoute {
   std::vector<uint64_t> return_relay_offsets;
   /// Offered words that overlap committed branch endpoints. They are not
   /// emitted as relays, but commit retires them from future plans.
-  std::vector<uint64_t> retired_relay_offsets;
+  std::vector<BranchOnlyRelayClaim> retired_relay_claims;
   std::vector<BranchOnlyRelayClaim> claims;
 };
 
@@ -57,6 +57,7 @@ enum class BranchOnlyRelayPlanFailure : uint8_t {
   None,
   EntryRoute,
   ReturnRoute,
+  RelayContention,
   SearchBudget,
   Reservation,
 };
@@ -67,13 +68,35 @@ enum class BranchOnlyRelayPairRejection : uint8_t {
   InvalidReturnCoordinates,
   EntryUnreachable,
   ReturnUnreachable,
+  RelayContention,
   SearchBudget,
+  Count,
 };
 
 enum class BranchOnlyRelayPlanStrategy : uint8_t {
   ExactBatch,
   ExactPairFallback,
   GreedyPairFallback,
+};
+
+struct BranchOnlyRelaySearchLimits {
+  /// Search states and feasible alternatives allowed for a complete batch.
+  size_t batch_base_search_work = 100'000u;
+  size_t batch_search_work_per_demand = 4'096u;
+  /// Relay inspections allowed for a complete batch.
+  size_t batch_scan_work = 2'000'000u;
+  /// Per-pair fallback allowances. Total fallback work scales linearly with
+  /// the number of pairs rather than with the number of route combinations.
+  size_t pair_search_work = 8'192u;
+  size_t pair_scan_work = 100'000u;
+};
+
+struct BranchOnlyRelayPlanOutcome {
+  BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
+  BranchOnlyRelayPlanStrategy strategy = BranchOnlyRelayPlanStrategy::ExactBatch;
+  bool search_budget_exhausted = false;
+  size_t search_work_consumed = 0u;
+  size_t scan_work_consumed = 0u;
 };
 
 struct BranchOnlyRelayBatchPlan {
@@ -83,6 +106,8 @@ struct BranchOnlyRelayBatchPlan {
   BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
   BranchOnlyRelayPlanStrategy strategy = BranchOnlyRelayPlanStrategy::ExactBatch;
   bool search_budget_exhausted = false;
+  size_t search_work_consumed = 0u;
+  size_t scan_work_consumed = 0u;
 
   [[nodiscard]] bool complete() const {
     return failure == BranchOnlyRelayPlanFailure::None && rejected_pair_indices.empty();
@@ -120,8 +145,9 @@ public:
   [[nodiscard]] std::optional<BranchOnlyRelayRoute>
   plan_pair(DbiPatchPlacementPlanner &tentative_planner, uint64_t entry_source,
             uint64_t entry_target, uint64_t return_source, uint64_t return_target,
-            std::string *error_out = nullptr,
-            BranchOnlyRelayPlanFailure *failure_out = nullptr) const;
+            std::string *error_out = nullptr, BranchOnlyRelayPlanFailure *failure_out = nullptr,
+            BranchOnlyRelayPlanOutcome *outcome_out = nullptr,
+            const BranchOnlyRelaySearchLimits &limits = {}) const;
 
   /// Plans fixed request pairs and transactionally reserves pristine relay
   /// words in @p tentative_planner. Exact backtracking has a deterministic work
@@ -138,8 +164,8 @@ public:
   /// copy together with the plan.
   [[nodiscard]] BranchOnlyRelayBatchPlan
   plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
-             std::span<const BranchOnlyRelayPairRequest> requests,
-             std::string *error_out = nullptr) const;
+             std::span<const BranchOnlyRelayPairRequest> requests, std::string *error_out = nullptr,
+             const BranchOnlyRelaySearchLimits &limits = {}) const;
 
   [[nodiscard]] bool commit(const BranchOnlyRelayRoute &route, std::string *error_out = nullptr);
   [[nodiscard]] bool commit(std::span<const BranchOnlyRelayRoute> routes,
