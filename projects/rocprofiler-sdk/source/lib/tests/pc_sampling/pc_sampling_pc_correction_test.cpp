@@ -142,11 +142,9 @@ TEST(pc_correction_classify, Classify_EndPgmIsExt)
     EXPECT_EQ(classify("s_endpgm"), Kind::EXT);
 }
 
-TEST(pc_correction_classify, Classify_SetPrioIsExt_Today)
+TEST(pc_correction_classify, Classify_SetPrioIsRegularInternal)
 {
-    // s_setprio is a candidate internal pending hardware confirmation; until
-    // then it must classify as EXT (the safe direction).
-    EXPECT_EQ(classify("s_setprio 1"), Kind::EXT);
+    EXPECT_EQ(classify("s_setprio 1"), Kind::REGULAR_INTERNAL);
 }
 
 // ------------------------------------------------------------------
