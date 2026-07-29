@@ -14,7 +14,7 @@ SMTP_SERVERS = ["smtp.amd.com", "aussmtp.amd.com", "mail.amd.com", "localhost"]
 
 
 def quarantine_rocm_sysdeps(artifact_lib_dir: Path) -> None:
-    """Replace the bundled librocm_sysdeps_nl_genl_3 with the system's libnl-genl.
+    """Delete the bundled librocm_sysdeps_nl_genl_3 to prevent exit-time SIGSEGV.
 
     TheRock CI flattens artifacts into build/lib/, which places libamd_smi.so
     alongside librccl.so.  libamd_smi has RPATH $ORIGIN/rocm_sysdeps/lib that
@@ -22,27 +22,15 @@ def quarantine_rocm_sysdeps(artifact_lib_dir: Path) -> None:
     destructor (genl_unregister_family) crashes on process exit, causing every
     pytest/JAX worker to exit with SIGSEGV (exit code -11).
 
-    We replace the buggy bundled library with a copy of the system's
-    libnl-genl-3.so.200 (which has a working destructor).  The file keeps
-    the rocm_sysdeps_* filename so libamd_smi's NEEDED entry resolves.
+    libamd_smi lists nl_genl as NEEDED but never calls any genl_* functions
+    during our test flow.  Deleting the file is safe — verified locally on
+    MI300X with torch import, GPU detection, and c10d collective tests.
     """
-    import shutil
-
-    system_lib = Path("/lib/x86_64-linux-gnu/libnl-genl-3.so.200")
-    if not system_lib.exists():
-        system_lib = Path("/usr/lib/x86_64-linux-gnu/libnl-genl-3.so.200")
-    if not system_lib.exists():
-        system_lib = Path("/usr/lib64/libnl-genl-3.so.200")
-
-    for buggy in artifact_lib_dir.rglob("librocm_sysdeps_nl_genl_3.so.200"):
+    for buggy in artifact_lib_dir.rglob("librocm_sysdeps_nl_genl_3.so*"):
         if not buggy.is_file():
             continue
-        if system_lib.exists():
-            shutil.copy2(str(system_lib), str(buggy))
-            log.info("Replaced %s with system %s", buggy, system_lib)
-        else:
-            buggy.unlink()
-            log.info("Deleted %s (no system libnl-genl found)", buggy)
+        buggy.unlink()
+        log.info("Deleted %s (buggy nl_genl destructor workaround)", buggy)
 
 
 def find_rccl_library(artifact_dir: Path) -> Path:
