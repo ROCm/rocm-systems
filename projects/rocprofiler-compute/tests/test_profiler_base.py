@@ -813,6 +813,49 @@ def test_sanitize_pc_sampling_interval(
         assert args.pc_sampling_interval == expected_interval
 
 
+def test_sanitize_pc_sampling_default_interval_out_of_range(monkeypatch):
+    """The method default is validated too, not just a user-supplied value."""
+    monkeypatch.setattr(
+        "rocprof_compute_base.pc_sampling_interval_limits",
+        lambda _method, _sdk_tool_path=None: {
+            "min_interval": 256,
+            "max_interval": 65536,
+            "interval_pow2": True,
+        },
+    )
+    args = _make_rpc_args(
+        pc_sampling=True,
+        experimental=True,
+        filter_blocks=[],
+        pc_sampling_method="stochastic",
+        pc_sampling_interval=None,
+    )
+    instance = _make_rpc_with_args(args)
+
+    with pytest.raises(SystemExit):
+        instance.sanitize()
+
+
+@pytest.mark.parametrize("interval", [None, 262144], ids=["default", "explicit"])
+def test_sanitize_pc_sampling_method_unsupported(interval, monkeypatch):
+    """A method no agent reports is rejected before the workload launches."""
+    monkeypatch.setattr(
+        "rocprof_compute_base.pc_sampling_interval_limits",
+        lambda _method, _sdk_tool_path=None: None,
+    )
+    args = _make_rpc_args(
+        pc_sampling=True,
+        experimental=True,
+        filter_blocks=[],
+        pc_sampling_method="stochastic",
+        pc_sampling_interval=interval,
+    )
+    instance = _make_rpc_with_args(args)
+
+    with pytest.raises(SystemExit):
+        instance.sanitize()
+
+
 # ---------------------------------------------------------------------------
 # run_profiling(): native_tool_path reaches get_pc_sampling_profiler_options
 # ---------------------------------------------------------------------------

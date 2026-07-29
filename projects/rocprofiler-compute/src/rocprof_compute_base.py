@@ -630,29 +630,36 @@ class RocProfCompute:
             return
 
         method = args.pc_sampling_method
-        if args.pc_sampling_interval is None:
-            args.pc_sampling_interval = PC_SAMPLING_DEFAULT_INTERVALS[method]
-            return
-
         limits = pc_sampling_interval_limits(
             method, getattr(args, "rocprofiler_sdk_tool_path", None)
         )
+        if limits is None:
+            console_error(
+                f"PC sampling method '{method}' is not supported on any of the "
+                "agents on this system. See supported configurations with "
+                "'rocprofv3-avail info --pc-sampling'."
+            )
+            return
+
+        if args.pc_sampling_interval is None:
+            args.pc_sampling_interval = PC_SAMPLING_DEFAULT_INTERVALS[method]
+
+        interval = args.pc_sampling_interval
         min_interval = limits["min_interval"]
         max_interval = limits["max_interval"]
 
-        interval = args.pc_sampling_interval
         if interval < min_interval or interval > max_interval:
             console_error(
-                f"--pc-sampling-interval for {method} sampling must be between "
-                f"{min_interval} and {max_interval} (got {interval}). "
+                f"PC sampling interval {interval} is outside the range "
+                f"{min_interval} to {max_interval} reported for {method} sampling. "
                 "See supported configurations with "
                 "'rocprofv3-avail info --pc-sampling'."
             )
 
         if limits["interval_pow2"] and interval & (interval - 1) != 0:
             console_error(
-                f"--pc-sampling-interval for {method} sampling must be a "
-                f"power of 2 (got {interval})."
+                f"PC sampling interval {interval} must be a power of 2 for "
+                f"{method} sampling."
             )
 
     def _validate_list_option_exclusions(self) -> None:

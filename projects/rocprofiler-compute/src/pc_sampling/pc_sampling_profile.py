@@ -26,10 +26,15 @@ PC_SAMPLING_DEFAULT_INTERVALS = {"stochastic": 1048576, "host_trap": 512}
 def pc_sampling_interval_limits(
     method: str,
     sdk_tool_path: Optional[str] = None,
-) -> dict[str, int]:
+) -> Optional[dict[str, int]]:
     """Return the interval limits the GPUs report for one sampling method.
 
     Mirrors `rocprofv3-avail info --pc-sampling`.
+
+    None means the agents were queried and none of them offers a configuration
+    for `method`. That is distinct from being unable to query at all, which
+    yields the SDK fallback limits: rocprofiler-sdk rejects a configuration no
+    agent accepts, so the caller has to stop rather than guess a range.
     """
     # Limits rocprofiler-sdk falls back to, see its
     # source/lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.cpp
@@ -44,7 +49,7 @@ def pc_sampling_interval_limits(
         return fallback
 
     try:
-        return _query_agent_interval_limits(library).get(method, fallback)
+        return _query_agent_interval_limits(library).get(method)
     except (AttributeError, OSError, ValueError) as err:
         console_debug(f"PC sampling interval limit query failed: {err}")
         return fallback
@@ -114,7 +119,8 @@ def _query_agent_interval_limits(library: ctypes.CDLL) -> dict[str, dict[str, in
     agent_handles = (ctypes.c_ulong * agent_count)()
     library.agent_handles(agent_handles, agent_count)
 
-    # (method, unit) ids from rocprofiler-sdk/pc_sampling.h
+    # Keyed on (method id, unit id) from rocprofiler-sdk/fwd.h, since the SDK
+    # matches a requested configuration on both fields.
     supported = {(1, 2): "stochastic", (2, 3): "host_trap"}
     limits: dict[str, dict[str, int]] = {}
     for agent_handle in agent_handles:

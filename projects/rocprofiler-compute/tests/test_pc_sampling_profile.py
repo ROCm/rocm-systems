@@ -242,8 +242,20 @@ def test_run_launches_and_logs(monkeypatch):
         pytest.param(
             {0: [(1, 3, 256, 4096, 0)]},
             "stochastic",
-            STOCHASTIC_FALLBACK,
-            id="mismatched_unit_ignored",
+            None,
+            id="mismatched_unit_unsupported",
+        ),
+        pytest.param(
+            {0: [(2, 3, 1, 1048576, 0)]},
+            "stochastic",
+            None,
+            id="method_absent_from_every_agent",
+        ),
+        pytest.param(
+            {0: []},
+            "host_trap",
+            None,
+            id="agent_reports_no_configs",
         ),
     ],
 )
@@ -259,5 +271,17 @@ def test_interval_limits_from_agent_configs(
 def test_interval_limits_fall_back_without_avail_library(monkeypatch):
     """An unloadable avail library yields the SDK fallback limits."""
     monkeypatch.setattr(f"{MODULE}._load_avail_library", lambda _path: None)
+
+    assert pc_sampling_interval_limits("stochastic") == STOCHASTIC_FALLBACK
+
+
+def test_interval_limits_fall_back_when_query_raises(monkeypatch):
+    """A failed query is unknown support, not unsupported."""
+    monkeypatch.setattr(f"{MODULE}._load_avail_library", lambda _path: Mock())
+
+    def raise_os_error(_library):
+        raise OSError("agent enumeration failed")
+
+    monkeypatch.setattr(f"{MODULE}._query_agent_interval_limits", raise_os_error)
 
     assert pc_sampling_interval_limits("stochastic") == STOCHASTIC_FALLBACK
