@@ -160,7 +160,7 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
 
 
 # ---------------------------------------------------------------------------
-# sanitize() rejects ML API tracing for PC-sampling-only runs
+# sanitize() rejects ML API tracing flags for PC-sampling-only runs
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "filter_blocks, trace_flags, expect_error, expected_frameworks",
