@@ -4917,8 +4917,8 @@ TEST(ConSanMoi, Rdna4SpillBackedTwoSiteDenseDispatcherIncludesSharedHostArm) {
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
-  const ConSanResult result =
-      try_patch_consan(make_rdna4_lds_code_object(words, "rdna4_spill_dense_two"), options);
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(words, "rdna4_spill_dense_two");
+  const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
@@ -4927,6 +4927,17 @@ TEST(ConSanMoi, Rdna4SpillBackedTwoSiteDenseDispatcherIncludesSharedHostArm) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
+  const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size != 0u;
+  });
+  ASSERT_NE(dense_host, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> entry_island = text_words_at_offset(
+      patched, dense_host->anchor_offset + sizeof(uint32_t), 8u * sizeof(uint32_t));
+  ASSERT_EQ(entry_island.size(), 8u);
+  EXPECT_EQ(entry_island.back(), build_s_nop(0u, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_TRUE(result.final_validation_passed);
 }
 

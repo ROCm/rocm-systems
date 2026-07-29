@@ -291,8 +291,8 @@ constexpr uint32_t kMoiSampledStandardRuntimeStride = 16384u;
     return "trampoline-sc-dense-entry-host";
   case rocjitsu::ConSanPatchKind::TrampolineScBranchRelayDonor:
     return "trampoline-sc-branch-relay-donor";
-  case rocjitsu::ConSanPatchKind::TrampolineScRelayReservoir:
-    return "trampoline-sc-relay-reservoir";
+  case rocjitsu::ConSanPatchKind::TrampolineBranchRelayReservoir:
+    return "trampoline-branch-relay-reservoir";
   case rocjitsu::ConSanPatchKind::TrampolineNopBranchRelay:
     return "trampoline-nop-branch-relay";
   case rocjitsu::ConSanPatchKind::TrampolineMoiIndirectBranchIsland:

@@ -1017,24 +1017,6 @@ first_sequence_event(const SyncEventIdentityIndex &events,
   return true;
 }
 
-[[nodiscard]] bool is_sc_relay_reservoir_instruction(const Instruction &instruction,
-                                                     uint64_t offset, std::span<const uint8_t> text,
-                                                     rj_code_arch_t arch) {
-  const int size = instruction.size();
-  const std::string_view mnemonic = instruction.mnemonic();
-  if (size <= 0 || size % static_cast<int>(sizeof(uint32_t)) != 0 ||
-      instruction.raw_encoding() == nullptr || offset % sizeof(uint32_t) != 0 ||
-      mnemonic.starts_with("ds_") || mnemonic == "s_clause" || mnemonic == "s_delay_alu")
-    return false;
-  if (size == static_cast<int>(sizeof(uint32_t)) || size == 2 * static_cast<int>(sizeof(uint32_t)))
-    return is_relocatable_anchor(instruction, offset, text, arch);
-  constexpr uint64_t kControlFlowFlags =
-      BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
-  return size == 3 * static_cast<int>(sizeof(uint32_t)) &&
-         (mnemonic.starts_with("flat_load") || mnemonic.starts_with("flat_store")) &&
-         !(instruction.flags() & kControlFlowFlags) && !instruction.branch_offset_bytes();
-}
-
 struct StructuredExecDiamondProof {
   uint32_t guard_block_index = 0;
   uint32_t destination_block_index = 0;

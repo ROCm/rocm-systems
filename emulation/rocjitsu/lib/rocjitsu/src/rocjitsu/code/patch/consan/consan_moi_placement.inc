@@ -24,6 +24,12 @@ struct MoiLocalNopIsland {
 }
 
 constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
+constexpr uint32_t kMoiRecordReplayIndirectIslandWords = 7u;
+
+[[nodiscard]] constexpr uint32_t
+moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
+  return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
+}
 
 class MoiLocalNopIslandAllocator {
 public:
@@ -1066,6 +1072,11 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
   if (saw_unassigned_owner)
     return false;
   options.moi_exec_save_sgpr = selected->exec_save_sgpr;
+  // A component assignment replaces the object-wide scalar ABI. Its exact
+  // persistent outputs are represented by the fields copied below, so the
+  // broad object-wide persistence marker must not reject a spill-backed
+  // window whose incoming contents are deliberately backed up at entry.
+  options.moi_exec_save_sgprs_persistent = false;
   options.moi_dispatch_id_sgpr = selected->dispatch_id_sgpr;
   options.moi_inline_indirect_pc_sgpr = selected->indirect_pc_sgpr;
   options.moi_inline_indirect_scc_sgpr = selected->indirect_scc_sgpr;

@@ -17,6 +17,41 @@ constexpr std::array<SampledTarget, 2> kSampledCdnaTargets = {{
     {ROCJITSU_CODE_ARCH_CDNA4, "gfx950/cdna4"},
 }};
 
+void expect_sampled_barrier_exact_existing_metadata_path(
+    const ConSanResult &result, const ConSanPatchInfo &patch, rj_code_arch_t arch,
+    ConSanMoiSampledSyncScope scope = ConSanMoiSampledSyncScope::Workgroup) {
+  ASSERT_TRUE(patch.scratch_vgpr);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+  const uint16_t base = *patch.scratch_vgpr;
+  const uint16_t value = static_cast<uint16_t>(base + 2u);
+  const uint16_t expected = static_cast<uint16_t>(base + 3u);
+  const auto encoded = encode_consan_moi_sampled_sync_metadata({
+      .kind = ConSanMoiSampledSyncKind::Barrier,
+      .role = ConSanMoiSampledSyncRole::AcquireRelease,
+      .scope = scope,
+      .outcome = ConSanMoiSampledSyncOutcome::NotApplicable,
+      .epoch_before = 0u,
+      .epoch_after = 1u,
+  });
+  ASSERT_EQ(encoded.classification, ConSanMoiSampledSyncClassification::Valid);
+  const auto existing_descriptor =
+      instrumentation::build_v_mov_b32_literal(expected, encoded.packed.descriptor, arch);
+  ASSERT_TRUE(existing_descriptor);
+  EXPECT_TRUE(contains_subsequence(cave, *existing_descriptor));
+  for (uint32_t offset : {offsetof(ConSanMoiSampledSyncMetadataPacked, address),
+                          offsetof(ConSanMoiSampledSyncMetadataPacked, address) + sizeof(uint32_t),
+                          offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count),
+                          offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
+                          offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after)}) {
+    const auto load = instrumentation::build_flat_load_b32(base, value, arch, offset);
+    ASSERT_TRUE(load);
+    EXPECT_TRUE(contains_subsequence(cave, *load)) << "missing metadata field offset " << offset;
+  }
+}
+
 TEST(ConSanMoi, SampledEngineInventoriesCodeObjectWithoutModification) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
@@ -2427,6 +2462,7 @@ TEST(ConSanMoi, CdnaSampledBarrierMaterializesNonzeroAbsoluteSlot) {
         result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
     ASSERT_NE(barrier_patch, result.patches.end());
     ASSERT_TRUE(barrier_patch->scratch_vgpr);
+    expect_sampled_barrier_exact_existing_metadata_path(result, *barrier_patch, target.arch);
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(patched.is_valid());
@@ -4007,6 +4043,7 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
       /*vdst=*/10, descriptor.packed.descriptor, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(descriptor_literal);
   EXPECT_TRUE(contains_subsequence(trampoline, *descriptor_literal));
+  expect_sampled_barrier_exact_existing_metadata_path(result, *patch, ROCJITSU_CODE_ARCH_RDNA4);
 
   const auto select_owner_zero = build_v_cmp_eq_u32_e32_vcc(
       scalar_positive_inline_u32(0), *options.moi_owner_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
@@ -4804,6 +4841,7 @@ TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
            item.anchor_offset == 401u * sizeof(uint32_t);
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  expect_sampled_barrier_exact_existing_metadata_path(result, *patch, ROCJITSU_CODE_ARCH_GFX1250);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> trampoline =

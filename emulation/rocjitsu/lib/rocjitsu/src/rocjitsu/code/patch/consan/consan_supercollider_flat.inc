@@ -298,17 +298,16 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   uint32_t max_uncovered_nop_cave_words = 0;
   for (const LocalNopCave &cave : local_nop_caves)
     max_uncovered_nop_cave_words = std::max(max_uncovered_nop_cave_words, cave.word_count);
-  std::vector<uint64_t> available_branch_relay_offsets;
   size_t branch_relay_word_count = 0;
   for (const LocalNopCave &cave : local_nop_caves)
     branch_relay_word_count += cave.word_count;
-  available_branch_relay_offsets.reserve(branch_relay_word_count);
+  BranchOnlyRelayRouter branch_router;
   for (const LocalNopCave &cave : local_nop_caves) {
-    for (uint64_t word = 0; word < cave.word_count; ++word)
-      available_branch_relay_offsets.push_back(cave.text_offset + word * sizeof(uint32_t));
+    for (uint64_t word = 0; word < cave.word_count; ++word) {
+      (void)branch_router.offer(cave.text_offset + word * sizeof(uint32_t),
+                                BranchOnlyRelayProvenance::PristineNop);
+    }
   }
-  const std::unordered_set<uint64_t> pristine_nop_branch_relay_offsets(
-      available_branch_relay_offsets.begin(), available_branch_relay_offsets.end());
 
   struct FlatOwnerPlanningContext {
     uint64_t descriptor_file_offset = 0;
@@ -366,8 +365,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     bool use_local_cave = false;
     bool use_appended_cave = false;
     bool branch_only_continuation = false;
-    std::vector<uint64_t> entry_relay_offsets;
-    std::vector<uint64_t> return_relay_offsets;
+    std::optional<BranchOnlyRelayRoute> branch_only_route;
     std::optional<LdsCheckTrapIndirectScalarScratch> indirect_scratch;
     std::vector<uint64_t> owner_descriptor_file_offsets;
     std::optional<DbiPatchPlacement> placement;
@@ -907,7 +905,70 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   std::vector<FlatCheckTrapCandidate> selected_candidates;
   selected_candidates.reserve(std::min(max_patches, supported_candidate_count));
   DbiPatchPlacementPlanner placement_planner(arch, appended_cave_offset);
-  std::vector<uint64_t> remaining_branch_relay_offsets = available_branch_relay_offsets;
+  BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
+  const auto prepare_direct_branch_reservoirs = [&]() {
+    if (selected_candidates.size() >= max_patches || branch_only_appended_candidates.empty() ||
+        pristine_text.empty()) {
+      return true;
+    }
+    std::vector<std::pair<uint64_t, uint64_t>> protected_ranges;
+    protected_ranges.reserve(canonical_sites.size() + local_nop_caves.size() +
+                             result.kernels.size() + result.functions.size() +
+                             options.preapplied_reserved_ranges.size() + result.patches.size());
+    for (const CanonicalFlatSite &canonical : canonical_sites) {
+      protected_ranges.emplace_back(canonical.site.text_offset,
+                                    canonical.site.text_offset + canonical.site.size);
+    }
+    for (const LocalNopCave &cave : local_nop_caves) {
+      protected_ranges.emplace_back(
+          cave.text_offset,
+          cave.text_offset + static_cast<uint64_t>(cave.word_count) * sizeof(uint32_t));
+    }
+    const auto protect_sync_sites = [&](const auto &container) {
+      const auto append = [&](const auto &sites) {
+        for (const auto &site : sites)
+          protected_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
+      };
+      append(container.barrier_sites);
+      append(container.atomic_sites);
+      append(container.fence_sites);
+    };
+    for (const ConSanKernelInfo &kernel : result.kernels) {
+      protect_sync_sites(kernel);
+      protected_ranges.emplace_back(
+          kernel.entry_text_offset,
+          std::min<uint64_t>(pristine_text.size(), kernel.entry_text_offset + 256u));
+    }
+    for (const ConSanFunctionInfo &function : result.functions)
+      protect_sync_sites(function);
+    for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges)
+      protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
+    for (const ConSanPatchInfo &patch : result.patches) {
+      protected_ranges.emplace_back(
+          patch.anchor_offset,
+          patch.anchor_offset + std::max<uint32_t>(patch.original_size, sizeof(uint32_t)));
+      if (patch.trampoline_size != 0u) {
+        protected_ranges.emplace_back(patch.trampoline_offset,
+                                      patch.trampoline_offset + patch.trampoline_size);
+      }
+    }
+    const auto latest_candidate =
+        std::ranges::max_element(branch_only_appended_candidates, {}, [](const auto &candidate) {
+          return candidate.site->text_offset;
+        });
+    const uint64_t latest_source = latest_candidate->site->text_offset;
+    const uint64_t route_midpoint =
+        latest_source + (placement_planner.appended_end() - latest_source) / 2u;
+    std::string relay_error;
+    if (!branch_router.plan_direct_reservoirs(
+            block_ptrs, pristine_text, protected_ranges, arch, route_midpoint,
+            2u * (max_patches - selected_candidates.size()), placement_planner,
+            direct_branch_reservoirs, &relay_error)) {
+      result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
+      return false;
+    }
+    return true;
+  };
   std::unordered_set<uint64_t> selected_flat_anchor_relay_offsets;
   size_t branch_only_placement_failures = 0;
   size_t branch_only_entry_route_failures = 0;
@@ -916,19 +977,23 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   size_t branch_only_selected = 0;
   const auto publish_flat_anchor_relays = [&](const FlatCheckTrapCandidate &candidate,
                                               uint32_t original_size) {
+    branch_router.retire_range(candidate.site->text_offset, original_size);
     if (candidate.entry_island_at_anchor || original_size <= sizeof(uint32_t))
       return;
     for (uint64_t offset = candidate.site->text_offset + sizeof(uint32_t);
          offset < candidate.site->text_offset + original_size; offset += sizeof(uint32_t)) {
-      if (selected_flat_anchor_relay_offsets.insert(offset).second)
-        remaining_branch_relay_offsets.push_back(offset);
+      if (selected_flat_anchor_relay_offsets.insert(offset).second) {
+        (void)branch_router.offer(offset, BranchOnlyRelayProvenance::OwnedAnchor);
+      }
     }
-    std::ranges::sort(remaining_branch_relay_offsets);
   };
+  std::unordered_set<uint64_t> selected_flat_site_offsets;
   auto try_select_candidate = [&](FlatCheckTrapCandidate candidate) {
     if (selected_candidates.size() >= max_patches)
       return;
     const ConSanFlatSite &site = *candidate.site;
+    if (selected_flat_site_offsets.contains(site.text_offset))
+      return;
     const uint64_t body_bytes =
         (candidate.requested_words +
          (candidate.entry_island_at_anchor
@@ -979,73 +1044,60 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         return;
       }
 
-      const std::array<uint64_t, 1> entry_sources = {site.text_offset};
-      const std::array<uint64_t, 1> entry_targets = {placement->body_offset};
       std::string relay_error;
-      const auto entry_plan = plan_forward_sopp_branch_relays(
-          entry_sources, remaining_branch_relay_offsets, entry_targets, &relay_error);
-      if (!entry_plan || entry_plan->routes.size() != 1u ||
-          !entry_plan->rejected_source_indices.empty()) {
-        ++branch_only_entry_route_failures;
-        return;
-      }
-      candidate.entry_relay_offsets = entry_plan->routes.front().relay_offsets;
-
-      std::vector<uint64_t> return_relay_candidates;
-      return_relay_candidates.reserve(remaining_branch_relay_offsets.size());
-      for (uint64_t relay : remaining_branch_relay_offsets) {
-        if (std::ranges::find(candidate.entry_relay_offsets, relay) ==
-            candidate.entry_relay_offsets.end())
-          return_relay_candidates.push_back(relay);
-      }
-      const std::array<uint64_t, 1> return_sources = {
-          placement->body_offset + body_bytes,
-      };
-      const std::array<uint64_t, 1> return_targets = {
-          site.text_offset + original_size,
-      };
-      const auto return_plan = plan_backward_sopp_branch_relays(
-          return_sources, return_relay_candidates, return_targets, &relay_error);
-      if (!return_plan || return_plan->routes.size() != 1u ||
-          !return_plan->rejected_source_indices.empty()) {
-        ++branch_only_return_route_failures;
-        return;
-      }
-      candidate.return_relay_offsets = return_plan->routes.front().relay_offsets;
-
-      std::vector<uint64_t> claimed_relays = candidate.entry_relay_offsets;
-      claimed_relays.insert(claimed_relays.end(), candidate.return_relay_offsets.begin(),
-                            candidate.return_relay_offsets.end());
-      for (uint64_t relay : claimed_relays) {
-        if (!selected_flat_anchor_relay_offsets.contains(relay) &&
-            !tentative_planner.reserve_existing_range(relay, sizeof(uint32_t))) {
+      BranchOnlyRelayPlanFailure relay_failure = BranchOnlyRelayPlanFailure::None;
+      auto route = branch_router.plan_pair(
+          tentative_planner, site.text_offset, placement->body_offset,
+          placement->body_offset + body_bytes, site.text_offset + original_size,
+          &relay_error, &relay_failure);
+      if (!route) {
+        if (relay_failure == BranchOnlyRelayPlanFailure::ReturnRoute)
+          ++branch_only_return_route_failures;
+        else if (relay_failure == BranchOnlyRelayPlanFailure::Reservation)
           ++branch_only_reservation_failures;
-          return;
-        }
+        else
+          ++branch_only_entry_route_failures;
+        return;
       }
-      std::erase_if(remaining_branch_relay_offsets, [&](uint64_t relay) {
-        return std::ranges::find(claimed_relays, relay) != claimed_relays.end();
-      });
+      if (!branch_router.commit(*route, &relay_error)) {
+        ++branch_only_reservation_failures;
+        return;
+      }
+      if (!direct_branch_reservoirs.mark_claims_used(route->claims, &relay_error)) {
+        result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
+        return;
+      }
+      candidate.branch_only_route = std::move(*route);
       placement_planner = std::move(tentative_planner);
       candidate.placement = placement;
       selected_candidates.push_back(std::move(candidate));
+      selected_flat_site_offsets.insert(site.text_offset);
       publish_flat_anchor_relays(selected_candidates.back(), original_size);
       ++branch_only_selected;
       return;
     }
 
     if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor) {
-      const auto placement = placement_planner.plan_indirect_appended(
+      DbiPatchPlacementPlanner tentative_planner = placement_planner;
+      const auto placement = tentative_planner.plan_indirect_appended(
           site.text_offset, original_size,
           body_bytes + kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t));
-      if (!placement || (candidate.entry_island != nullptr &&
-                         !placement_planner.reserve_existing_range(
-                             candidate.entry_island->text_offset,
-                             kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t))))
+      if (!placement ||
+          (candidate.entry_island != nullptr &&
+           !tentative_planner.reserve_existing_range(
+               candidate.entry_island->text_offset,
+               kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t)))) {
         return;
+      }
+      placement_planner = std::move(tentative_planner);
       candidate.placement = placement;
       selected_candidates.push_back(std::move(candidate));
+      selected_flat_site_offsets.insert(site.text_offset);
       publish_flat_anchor_relays(selected_candidates.back(), original_size);
+      if (selected_candidates.back().entry_island != nullptr) {
+        branch_router.retire_range(selected_candidates.back().entry_island->text_offset,
+                                   kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t));
+      }
       return;
     }
 
@@ -1056,22 +1108,35 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     request.inline_capacity =
         (candidate.use_local_cave || candidate.use_appended_cave) ? 0u : body_bytes;
     request.allow_appended_cave = candidate.use_appended_cave;
-    if (candidate.use_local_cave)
+    if (candidate.use_local_cave) {
       request.local_cave = DbiPatchLocalCave{
           candidate.local_cave->text_offset,
           static_cast<uint64_t>(candidate.local_cave->word_count) * sizeof(uint32_t)};
-    const auto placement = placement_planner.plan(request);
+    }
+    DbiPatchPlacementPlanner tentative_planner = placement_planner;
+    const auto placement = tentative_planner.plan(request);
     if (!placement)
       return;
     if ((candidate.use_local_cave && placement->kind != DbiPatchPlacementKind::LocalCave) ||
         (candidate.use_appended_cave && placement->kind != DbiPatchPlacementKind::AppendedCave) ||
         (!candidate.use_local_cave && !candidate.use_appended_cave &&
-         placement->kind != DbiPatchPlacementKind::Inline))
+         placement->kind != DbiPatchPlacementKind::Inline)) {
       return;
+    }
+    placement_planner = std::move(tentative_planner);
     candidate.placement = placement;
-    selected_candidates.push_back(candidate);
-    if (placement->kind != DbiPatchPlacementKind::Inline)
+    selected_candidates.push_back(std::move(candidate));
+    selected_flat_site_offsets.insert(site.text_offset);
+    if (placement->kind == DbiPatchPlacementKind::Inline) {
+      branch_router.retire_range(placement->body_offset, placement->body_size);
+    } else {
       publish_flat_anchor_relays(selected_candidates.back(), original_size);
+      if (placement->kind == DbiPatchPlacementKind::LocalCave) {
+        branch_router.retire_range(
+            placement->body_offset,
+            placement->return_branch_offset + sizeof(uint32_t) - placement->body_offset);
+      }
+    }
   };
 
   for (const FlatCheckTrapCandidate &candidate : inline_candidates)
@@ -1080,8 +1145,31 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     try_select_candidate(candidate);
   for (const FlatCheckTrapCandidate &candidate : local_cave_candidates)
     try_select_candidate(candidate);
+
+  const auto branch_failure_baseline =
+      std::tuple{branch_only_placement_failures, branch_only_entry_route_failures,
+                 branch_only_return_route_failures, branch_only_reservation_failures};
   for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
     try_select_candidate(candidate);
+  if (selected_candidates.size() < max_patches && !branch_only_appended_candidates.empty()) {
+    BranchOnlyRelayRouter router_without_direct_reservoirs = branch_router;
+    DbiPatchPlacementPlanner planner_without_direct_reservoirs = placement_planner;
+    const size_t selected_before_direct_reservoirs = branch_only_selected;
+    if (!prepare_direct_branch_reservoirs())
+      return;
+
+    std::tie(branch_only_placement_failures, branch_only_entry_route_failures,
+             branch_only_return_route_failures, branch_only_reservation_failures) =
+        branch_failure_baseline;
+    for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
+      try_select_candidate(candidate);
+
+    if (branch_only_selected == selected_before_direct_reservoirs) {
+      branch_router = std::move(router_without_direct_reservoirs);
+      placement_planner = std::move(planner_without_direct_reservoirs);
+      direct_branch_reservoirs = {};
+    }
+  }
   for (const FlatCheckTrapCandidate &candidate : indirect_appended_candidates)
     try_select_candidate(candidate);
 
@@ -1105,7 +1193,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       .branch_only_entry_route_failure_count = branch_only_entry_route_failures,
       .branch_only_return_route_failure_count = branch_only_return_route_failures,
       .branch_only_reservation_failure_count = branch_only_reservation_failures,
-      .original_nop_relay_slot_count = available_branch_relay_offsets.size(),
+      .original_nop_relay_slot_count = branch_relay_word_count,
       .selected_anchor_relay_slot_count = selected_flat_anchor_relay_offsets.size(),
   };
   if (selected_candidates.size() < selection_target) {
@@ -1158,8 +1246,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     bool use_local_cave = false;
     bool use_appended_cave = false;
     bool branch_only_continuation = false;
-    std::vector<uint64_t> entry_relay_offsets;
-    std::vector<uint64_t> return_relay_offsets;
+    std::optional<BranchOnlyRelayRoute> branch_only_route;
     std::optional<DbiPatchPlacement> placement;
     bool entry_island_at_anchor = false;
     std::vector<uint32_t> displaced_tail_words;
@@ -1224,8 +1311,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     planned.use_local_cave = candidate.use_local_cave;
     planned.use_appended_cave = candidate.use_appended_cave;
     planned.branch_only_continuation = candidate.branch_only_continuation;
-    planned.entry_relay_offsets = candidate.entry_relay_offsets;
-    planned.return_relay_offsets = candidate.return_relay_offsets;
+    planned.branch_only_route = candidate.branch_only_route;
     planned.placement = candidate.placement;
     planned.entry_island_at_anchor = candidate.entry_island_at_anchor;
     planned.displaced_tail_words = candidate.displaced_tail_words;
@@ -1240,8 +1326,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     planned.info.scalar_vcc_spill_vgpr_count = candidate.scalar_vcc_spill_vgpr_count;
     planned.info.owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets;
     planned.info.branch_only_continuation = candidate.branch_only_continuation;
-    planned.info.branch_only_entry_relay_offsets = candidate.entry_relay_offsets;
-    planned.info.branch_only_return_relay_offsets = candidate.return_relay_offsets;
+    if (candidate.branch_only_route) {
+      planned.info.branch_only_entry_relay_offsets =
+          candidate.branch_only_route->entry_relay_offsets;
+      planned.info.branch_only_return_relay_offsets =
+          candidate.branch_only_route->return_relay_offsets;
+    }
     planned.info.required_sgpr_count = static_cast<uint16_t>(candidate.vcc_save_sgpr + 2u);
     if (candidate.vgpr_spill) {
       planned.info.spilled_vgpr_count = candidate.vgpr_spill->vgpr_count;
@@ -1554,7 +1644,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       uint64_t entry_target = candidate.placement->body_offset;
       if (candidate.branch_only_continuation) {
         if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor ||
-            candidate.indirect_scratch ||
+            candidate.indirect_scratch || !candidate.branch_only_route ||
             candidate.placement->body_size !=
                 planned.words.size() * sizeof(uint32_t) + sizeof(uint32_t)) {
           result.errors.emplace_back(
@@ -1563,9 +1653,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         }
         const uint64_t return_source =
             candidate.placement->body_offset + planned.words.size() * sizeof(uint32_t);
-        const uint64_t return_target = candidate.return_relay_offsets.empty()
-                                           ? candidate.placement->return_target
-                                           : candidate.return_relay_offsets.front();
+        const uint64_t return_target =
+            candidate.branch_only_route->return_relay_offsets.empty()
+                ? candidate.placement->return_target
+                : candidate.branch_only_route->return_relay_offsets.front();
         const auto ret = compute_sopp_branch_simm16(return_source, return_target);
         if (!ret) {
           result.errors.emplace_back(
@@ -1573,9 +1664,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
           return;
         }
         planned.cave_words.push_back(build_s_branch(*ret, arch));
-        entry_target = candidate.entry_relay_offsets.empty()
+        entry_target = candidate.branch_only_route->entry_relay_offsets.empty()
                            ? candidate.placement->body_offset
-                           : candidate.entry_relay_offsets.front();
+                           : candidate.branch_only_route->entry_relay_offsets.front();
       } else if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor) {
         if (!candidate.indirect_scratch) {
           result.errors.emplace_back("ConSan flat check/trap proof lost indirect scalar scratch");
@@ -1684,14 +1775,18 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   }
   for (size_t index = 0; index < planned_patches.size(); ++index) {
     const PlannedFlatCheckTrapPatch &planned = planned_patches[index];
+    if (!planned.branch_only_route)
+      continue;
     const auto donor_precedes_borrower = [&](uint64_t relay) {
       if (!selected_flat_anchor_relay_offsets.contains(relay))
         return true;
       const auto donor = flat_anchor_relay_donors.find(relay);
       return donor != flat_anchor_relay_donors.end() && donor->second < index;
     };
-    if (!std::ranges::all_of(planned.entry_relay_offsets, donor_precedes_borrower) ||
-        !std::ranges::all_of(planned.return_relay_offsets, donor_precedes_borrower)) {
+    if (!std::ranges::all_of(planned.branch_only_route->entry_relay_offsets,
+                             donor_precedes_borrower) ||
+        !std::ranges::all_of(planned.branch_only_route->return_relay_offsets,
+                             donor_precedes_borrower)) {
       result.errors.emplace_back(
           "ConSan flat check/trap proof planned an anchor-tail relay before its donor");
       return;
@@ -1739,21 +1834,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
 
     new_patch_infos.push_back(planned.info);
-    const auto append_relay_info = [&](uint64_t relay) {
-      if (!pristine_nop_branch_relay_offsets.contains(relay))
-        return;
-      ConSanPatchInfo relay_info;
-      relay_info.kind = ConSanPatchKind::TrampolineNopBranchRelay;
-      relay_info.anchor_offset = relay;
-      relay_info.trampoline_offset = relay;
-      relay_info.original_size = sizeof(uint32_t);
-      relay_info.trampoline_size = sizeof(uint32_t);
-      new_patch_infos.push_back(std::move(relay_info));
-    };
-    for (uint64_t relay : planned.entry_relay_offsets)
-      append_relay_info(relay);
-    for (uint64_t relay : planned.return_relay_offsets)
-      append_relay_info(relay);
     if (planned.entry_island != nullptr && !planned.entry_island_at_anchor) {
       ConSanPatchInfo island_info;
       island_info.kind = ConSanPatchKind::TrampolineScIndirectBranchIsland;
@@ -1805,6 +1885,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       }
     }
     std::vector<uint8_t> new_text(patcher.text_bytes().begin(), patcher.text_bytes().end());
+    for (const BranchOnlyDirectRelayReservoir &reservoir :
+         direct_branch_reservoirs.reservoirs) {
+      std::string relay_error;
+      if (!BranchOnlyRelayRouter::emit_direct_reservoir(
+              new_text, reservoir, arch, new_patch_infos, &relay_error)) {
+        result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
+        return;
+      }
+    }
     for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
       const ConSanFlatSite &site = *planned.site;
       const uint64_t anchor_bytes = planned.entry_island_at_anchor
@@ -1841,24 +1930,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         std::memcpy(new_text.data() + site.text_offset, planned.words.data(),
                     planned.words.size() * sizeof(uint32_t));
       }
-      if (planned.branch_only_continuation) {
-        const auto emit_route = [&](std::span<const uint64_t> relays, uint64_t target) {
-          for (size_t index = 0; index < relays.size(); ++index) {
-            const uint64_t source = relays[index];
-            const uint64_t hop_target = index + 1u < relays.size() ? relays[index + 1u] : target;
-            const auto delta = compute_sopp_branch_simm16(source, hop_target);
-            if (!delta || source > new_text.size() || sizeof(uint32_t) > new_text.size() - source)
-              return false;
-            const uint32_t branch = build_s_branch(*delta, arch);
-            std::memcpy(new_text.data() + source, &branch, sizeof(branch));
-          }
-          return true;
-        };
-        if (!emit_route(planned.entry_relay_offsets, planned.info.trampoline_offset) ||
-            !emit_route(planned.return_relay_offsets,
-                        planned.info.anchor_offset + planned.info.original_size)) {
-          result.errors.emplace_back(
-              "ConSan flat check/trap proof could not emit branch-only relay route");
+      if (planned.branch_only_route) {
+        std::string relay_error;
+        if (!BranchOnlyRelayRouter::emit_and_record(
+                new_text, *planned.branch_only_route, planned.info.trampoline_offset,
+                planned.info.anchor_offset + planned.info.original_size, arch,
+                new_patch_infos, &relay_error)) {
+          result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
           return;
         }
       }

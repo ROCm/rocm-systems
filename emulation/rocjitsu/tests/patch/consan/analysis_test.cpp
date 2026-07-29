@@ -2220,6 +2220,13 @@ TEST(ConSan, Cdna4SuperColliderFarGroupFlatFallsBackToDeadScalarWindow) {
   options.probe_flat_check_trap = true;
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
   options.max_patches = 1;
+  // Keep this test specific to the scalar-indirect fallback. The first five
+  // filler words remain available for the displaced entry island; the rest models
+  // text already owned by an earlier composition phase and cannot donate a
+  // direct branch reservoir.
+  options.preapplied_reserved_ranges.push_back(
+      {.text_offset = sizeof(uint32_t) + kFunctionDelta + 10u * sizeof(uint32_t),
+       .size = static_cast<uint32_t>((function_words.size() - 11u) * sizeof(uint32_t))});
 
   const ConSanResult result = try_patch_consan(bytes, options);
 

@@ -123,7 +123,7 @@ enum class ConSanPatchKind : uint8_t {
   TrampolineScDenseCallDispatcher,
   TrampolineScDenseEntryHost,
   TrampolineScBranchRelayDonor,
-  TrampolineScRelayReservoir,
+  TrampolineBranchRelayReservoir,
   TrampolineMoiIndirectBranchIsland,
   TrampolineNop,
   /// Appended after the original patch-kind sequence so existing numeric

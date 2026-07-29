@@ -187,7 +187,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   const uint64_t original_text_size =
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   DbiPatchPlacementPlanner placement_planner(arch, original_text_size);
-  constexpr uint64_t kIndirectIslandWords = 7u;
+  constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
   // The fast gate has 21 fixed worst-case words: dispatch/workgroup mixing for
   // all three gfx1250 coordinates, branches, SCC preservation, and the long
   // jump.  Add the displaced instruction and one subtract per 64 positions in
@@ -240,7 +240,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   if (use_indirect_appended && !original_text.empty()) {
     const uint32_t local_entry_island_words =
-        has_spill_backed_scalar_assignment ? kIndirectIslandWords + 1u : kIndirectIslandWords;
+        moi_record_replay_entry_island_words(has_spill_backed_scalar_assignment);
     local_entry_islands.emplace(original_text, result, arch, local_entry_island_words,
                                 options.preapplied_reserved_ranges);
   }
@@ -298,9 +298,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       if (group_resource != nullptr)
         (void)apply_moi_transient_sgpr_assignment(group_options,
                                                   group_resource->owner_descriptor_file_offsets);
-      const uint32_t group_entry_island_words = group_options.automatic_moi_record_replay_sgpr_spill
-                                                    ? kIndirectIslandWords + 1u
-                                                    : kIndirectIslandWords;
+      const uint32_t group_entry_island_words = moi_record_replay_entry_island_words(
+          group_options.automatic_moi_record_replay_sgpr_spill);
       bool has_dense_neighbors = false;
       for (size_t index = 1; index < group.candidates.size(); ++index) {
         has_dense_neighbors |=
@@ -525,9 +524,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           candidate, resources->base, resources->count, ignored_overlap_errors);
       candidate_options.moi_spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     }
-    const uint32_t candidate_entry_island_words =
-        candidate_options.automatic_moi_record_replay_sgpr_spill ? kIndirectIslandWords + 1u
-                                                                 : kIndirectIslandWords;
+    const uint32_t candidate_entry_island_words = moi_record_replay_entry_island_words(
+        candidate_options.automatic_moi_record_replay_sgpr_spill);
     std::optional<InlineSgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
       scalar_spill = build_inline_sgpr_spill_sequence(
@@ -833,8 +831,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                             : static_cast<uint16_t>(base + 6u);
       const bool collapsed_spill_router =
           group_options.automatic_moi_record_replay_sgpr_spill && call_return_sgpr == pc_sgpr;
-      const uint32_t dense_entry_island_words =
-          collapsed_spill_router ? kIndirectIslandWords + 1u : kIndirectIslandWords;
+      const uint32_t dense_entry_island_words = moi_record_replay_entry_island_words(
+          group_options.automatic_moi_record_replay_sgpr_spill);
       const bool explicit_dense_key = arch != ROCJITSU_CODE_ARCH_GFX1250;
       const uint64_t island_offset = *group.front()->entry_island_offset;
       const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(group_options);

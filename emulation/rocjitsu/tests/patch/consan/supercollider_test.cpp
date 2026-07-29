@@ -180,10 +180,12 @@ TEST(ConSan, FlatCheckTrapReusesDirectAnchorTailForFarBranchRoutes) {
       0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
   };
   std::vector<uint32_t> first_kernel_words(flat_prefix.begin(), flat_prefix.end());
-  first_kernel_words.resize(16000u, build_s_mov_b32(100u, 100u, ROCJITSU_CODE_ARCH_RDNA4));
+  const uint32_t ineligible_reservoir_word =
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  first_kernel_words.resize(16000u, ineligible_reservoir_word);
   first_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
   std::vector<uint32_t> second_kernel_words(flat_prefix.begin(), flat_prefix.end());
-  second_kernel_words.resize(17000u, build_s_mov_b32(100u, 100u, ROCJITSU_CODE_ARCH_RDNA4));
+  second_kernel_words.resize(17000u, ineligible_reservoir_word);
   second_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
   const std::vector<uint8_t> bytes =
       make_rdna4_two_kernel_code_object(first_kernel_words, second_kernel_words);
@@ -524,7 +526,8 @@ TEST(ConSan, FlatCheckTrapProofRelocatesPrefixForFarAppendedCave) {
       0xBE880088u,                           // s_mov_b32 s8, s8
       0xBE890089u,                           // s_mov_b32 s9, s9
   };
-  text_words.resize(kLargeTextWords - 1u, build_s_mov_b32(10, 10, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words.resize(kLargeTextWords - 1u,
+                    build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
   text_words.push_back(0xBFB00000u); // s_endpgm
 
   const uint64_t original_text_size = text_words.size() * sizeof(uint32_t);
@@ -6503,7 +6506,7 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
   EXPECT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
   EXPECT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
   const auto reservoir = std::ranges::find(
-      result.patches, ConSanPatchKind::TrampolineScRelayReservoir, &ConSanPatchInfo::kind);
+      result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(reservoir, result.patches.end());
 }
 
@@ -6603,9 +6606,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
                                &ConSanPatchInfo::kind),
             3u);
   const auto reservoir = std::ranges::find(
-      result.patches, ConSanPatchKind::TrampolineScRelayReservoir, &ConSanPatchInfo::kind);
+      result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(reservoir, result.patches.end());
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineScRelayReservoir,
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
                                &ConSanPatchInfo::kind),
             1u);
   EXPECT_EQ(reservoir->anchor_offset, kReservoirOffset);

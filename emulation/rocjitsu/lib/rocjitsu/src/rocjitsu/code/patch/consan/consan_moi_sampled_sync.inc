@@ -179,6 +179,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
   ConSanMoiRecordEmitter record(words, base, value, arch);
+  const auto existing_label = sequence.make_label();
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
   const auto fast_return_label = sequence.make_label();
@@ -445,7 +446,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   }
   words.push_back(*claimed);
   words.push_back(*narrow_claimed);
-  if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
+  if (!sequence.emit_branch(existing_label, InstructionSequence::BranchKind::SccZero))
     return std::nullopt;
 
   const auto increment = instrumentation::build_v_add_u32(next_epoch, scalar_positive_inline_u32(1),
@@ -512,6 +513,60 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   }
   if (!sequence.emit_branch(restore_label, InstructionSequence::BranchKind::Unconditional))
     return std::nullopt;
+
+  // The host model admits an exact pre-existing metadata record as an
+  // idempotent publication. Shared barrier helpers can expose several
+  // equivalent physical sequences for one logical transition, so the device
+  // path must implement the same contract instead of treating every failed
+  // empty-slot claim as lost coverage. A different or partially published
+  // record remains a collision.
+  if (!sequence.bind(existing_label))
+    return std::nullopt;
+  const auto restore_existing_exec =
+      instrumentation::build_s_mov_b64(kRdna4ExecLo, temporary_exec, arch);
+  const auto existing_descriptor = instrumentation::build_v_mov_b32_literal(
+      expected, encoded.packed.descriptor, arch);
+  const auto descriptor_equal = instrumentation::build_v_cmp_eq_u32_vcc(
+      vector_source_vgpr(expected), value, arch);
+  if (!restore_existing_exec || !existing_descriptor || !descriptor_equal) {
+    errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata descriptor");
+    return std::nullopt;
+  }
+  words.push_back(*restore_existing_exec);
+  words.insert(words.end(), existing_descriptor->begin(), existing_descriptor->end());
+  words.push_back(*descriptor_equal);
+  if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::VccZero))
+    return std::nullopt;
+  words.insert(words.end(), increment->begin(), increment->end());
+  if (!append_sampled_indexed_address(words, first_metadata_address,
+                                      sizeof(ConSanMoiSampledSyncMetadataPacked), bank_vgpr, base,
+                                      value, arch)) {
+    errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata addressing");
+    return std::nullopt;
+  }
+  const auto require_existing_vgpr = [&](uint32_t offset, uint16_t expected_vgpr) -> bool {
+    if (!record.load(offset, value))
+      return false;
+    const auto equal = instrumentation::build_v_cmp_eq_u32_vcc(
+        vector_source_vgpr(expected_vgpr), value, arch);
+    return equal && sequence.emit(equal) &&
+           sequence.emit_branch(collision_label, InstructionSequence::BranchKind::VccZero);
+  };
+  const auto require_existing_literal = [&](uint32_t offset, uint32_t literal) -> bool {
+    const auto materialize = instrumentation::build_v_mov_b32_literal(expected, literal, arch);
+    return sequence.emit(materialize) && require_existing_vgpr(offset, expected);
+  };
+  if (!require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, address), 0u) ||
+      !require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u, 0u) ||
+      !require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 0u) ||
+      !require_existing_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
+                             *options.moi_epoch_vgpr) ||
+      !require_existing_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
+                             next_epoch) ||
+      !sequence.emit_branch(restore_label, InstructionSequence::BranchKind::Unconditional)) {
+    errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata comparison");
+    return std::nullopt;
+  }
 
   if (!sequence.bind(collision_label))
     return std::nullopt;

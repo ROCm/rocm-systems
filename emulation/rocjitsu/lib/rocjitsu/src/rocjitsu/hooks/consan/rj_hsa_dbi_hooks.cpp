@@ -3494,6 +3494,32 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 rocjitsu::consan_transform_outcome_name(patch_result.outcome),
                 patch_result.errors.size(), patch_result.warnings.size(),
                 patch_result.patches.size());
+    if (patch_result.flat_selection_telemetry) {
+      const rocjitsu::ConSanFlatSelectionTelemetry &selection =
+          *patch_result.flat_selection_telemetry;
+      log_message(
+          kLogInfo,
+          "ConSan SC flat selection reader=%llu supported=%zu target=%zu selected=%zu "
+          "branch_only_candidates=%zu branch_only_selected=%zu placement_failed=%zu "
+          "entry_route_failed=%zu return_route_failed=%zu reservation_failed=%zu "
+          "fixed_stack=%zu dynamic_stack=%zu mixed_stack=%zu missing_vcc_save=%zu "
+          "missing_scratch=%zu spill_backed=%zu mixed_stack_spill_rejected=%zu "
+          "dynamic_stack_spill_failed=%zu private_spill_failed=%zu original_relays=%zu "
+          "selected_anchor_relays=%zu",
+          static_cast<unsigned long long>(code_object_reader.handle),
+          selection.supported_candidate_count, selection.selection_target,
+          selection.selected_candidate_count, selection.branch_only_candidate_count,
+          selection.branch_only_selected_count, selection.branch_only_placement_failure_count,
+          selection.branch_only_entry_route_failure_count,
+          selection.branch_only_return_route_failure_count,
+          selection.branch_only_reservation_failure_count, selection.fixed_stack_candidate_count,
+          selection.dynamic_stack_candidate_count, selection.mixed_stack_candidate_count,
+          selection.missing_vcc_save_candidate_count, selection.missing_scratch_candidate_count,
+          selection.spill_backed_candidate_count, selection.mixed_stack_spill_rejection_count,
+          selection.dynamic_stack_spill_encoding_failure_count,
+          selection.private_spill_encoding_failure_count, selection.original_nop_relay_slot_count,
+          selection.selected_anchor_relay_slot_count);
+    }
 
     for (const std::string &warning : patch_result.warnings)
       log_message(kLogVerbose, "%s", warning.c_str());

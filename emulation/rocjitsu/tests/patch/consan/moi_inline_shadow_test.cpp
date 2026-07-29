@@ -1775,35 +1775,58 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughIsolatedNopWords) {
   })) << testing::PrintToString(unused_errors);
 }
 
-TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackFailsClosedWithoutRelayHosts) {
+TEST(ConSanMoi,
+     Rdna4BranchOnlyDynamicStackRelocatesInstructionReservoirsAndFailsClosedWithoutThem) {
   constexpr size_t kTextWords = 45'000u;
   constexpr size_t kAccessWord = 7u;
   constexpr size_t kScalarUseWord = 40'000u;
-  const uint32_t filler = build_s_mov_b32(/*sdst=*/105u, /*ssrc0=*/105u, ROCJITSU_CODE_ARCH_RDNA4);
-  std::vector<uint32_t> text_words(kTextWords, filler);
-  text_words[kAccessWord] = 0xD8340000u;
-  text_words[kAccessWord + 1u] = 0x00000000u; // ds_store_b32 v0, v0
-  size_t cursor = kScalarUseWord;
-  for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
-    text_words[cursor++] = build_s_mov_b32(105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
-  text_words[cursor] = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
-      text_words, "branch_only_without_relays", kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
-      /*uses_dynamic_stack=*/true);
-  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.moi_report_buffer_address = 0x123456780000ull;
-  options.moi_report_dispatch_id = 0x1122334455667788ull;
-  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  options.max_patches = 1u;
+  const auto run = [&](uint32_t filler, std::string_view kernel_name) {
+    std::vector<uint32_t> text_words(kTextWords, filler);
+    text_words[kAccessWord] = 0xD8340000u;
+    text_words[kAccessWord + 1u] = 0x00000000u; // ds_store_b32 v0, v0
+    size_t cursor = kScalarUseWord;
+    for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
+      text_words[cursor++] = build_s_mov_b32(105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+    text_words[cursor] = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+    const std::vector<uint8_t> bytes =
+        make_rdna4_lds_code_object(text_words, kernel_name, kRdna4Wave64AllVgprsGranulated,
+                                   /*wave32=*/false, /*uses_dynamic_stack=*/true);
+    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_dispatch_id = 0x1122334455667788ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+    options.max_patches = 1u;
+    return try_patch_consan(bytes, options);
+  };
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult relocated =
+      run(build_s_mov_b32(/*sdst=*/105u, /*ssrc0=*/105u, ROCJITSU_CODE_ARCH_RDNA4),
+          "branch_only_instruction_reservoir");
+  ASSERT_TRUE(consan_patch_succeeded(relocated)) << testing::PrintToString(relocated.errors);
+  ASSERT_TRUE(relocated.modified) << testing::PrintToString(relocated.warnings);
+  ASSERT_TRUE(relocated.final_validation_passed);
+  const auto branch_only =
+      std::ranges::find(relocated.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  ASSERT_NE(branch_only, relocated.patches.end());
+  const auto reservoir = std::ranges::find(
+      relocated.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
+  ASSERT_NE(reservoir, relocated.patches.end());
+  ASSERT_GE(reservoir->original_size, 16u * sizeof(uint32_t));
+  const auto in_reservoir = [&](uint64_t relay) {
+    return relay > reservoir->anchor_offset &&
+           relay < reservoir->anchor_offset + reservoir->original_size;
+  };
+  EXPECT_TRUE(std::ranges::any_of(branch_only->branch_only_entry_relay_offsets, in_reservoir));
+  EXPECT_TRUE(std::ranges::any_of(branch_only->branch_only_return_relay_offsets, in_reservoir));
 
-  EXPECT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-  EXPECT_EQ(std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
-            result.patches.end());
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+  const ConSanResult rejected = run(build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+                                    "branch_only_without_admissible_reservoir");
+  EXPECT_TRUE(rejected.errors.empty()) << testing::PrintToString(rejected.errors);
+  EXPECT_EQ(std::ranges::find(rejected.patches, true, &ConSanPatchInfo::branch_only_continuation),
+            rejected.patches.end());
+  EXPECT_TRUE(std::ranges::any_of(rejected.warnings, [](const std::string &warning) {
     return warning.find("could not route its branch-only dynamic-stack body") != std::string::npos;
-  })) << testing::PrintToString(result.warnings);
+  })) << testing::PrintToString(rejected.warnings);
 }
 
 TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughSelectedAnchorTails) {

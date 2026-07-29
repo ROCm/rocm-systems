@@ -110,7 +110,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   const uint64_t original_text_size =
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   DbiPatchPlacementPlanner placement_planner(arch, original_text_size);
-  constexpr uint64_t kIndirectIslandWords = 7u;
+  constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
   const bool has_spill_backed_scalar_assignment = std::ranges::any_of(
       options.moi_transient_sgpr_assignments, &ConSanMoiTransientSgprAssignment::spill_backed);
   // Spill-backed groups need room for the extra scalar-save arm, while truly
@@ -168,7 +168,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
     original_text = text_bytes;
     const uint32_t local_entry_island_words =
-        has_spill_backed_scalar_assignment ? kIndirectIslandWords + 1u : kIndirectIslandWords;
+        moi_record_replay_entry_island_words(has_spill_backed_scalar_assignment);
     local_entry_islands.emplace(text_bytes, result, arch, local_entry_island_words);
   }
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_entry_islands;
@@ -253,9 +253,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (group_resource != nullptr)
         (void)apply_moi_transient_sgpr_assignment(group_options,
                                                   group_resource->owner_descriptor_file_offsets);
-      const uint32_t group_entry_island_words = group_options.automatic_moi_record_replay_sgpr_spill
-                                                    ? kIndirectIslandWords + 1u
-                                                    : kIndirectIslandWords;
+      const uint32_t group_entry_island_words = moi_record_replay_entry_island_words(
+          group_options.automatic_moi_record_replay_sgpr_spill);
       bool has_dense_neighbors = false;
       for (size_t index = 1; index < group.candidates.size(); ++index) {
         has_dense_neighbors |=
@@ -528,9 +527,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           candidate, resources->base, resources->count, ignored_overlap_errors);
       candidate_options.moi_spill_overlaps_guest_operands = spill_overlaps_guest_operands;
     }
-    const uint32_t candidate_entry_island_words =
-        candidate_options.automatic_moi_record_replay_sgpr_spill ? kIndirectIslandWords + 1u
-                                                                 : kIndirectIslandWords;
+    const uint32_t candidate_entry_island_words = moi_record_replay_entry_island_words(
+        candidate_options.automatic_moi_record_replay_sgpr_spill);
     std::optional<InlineSgprSpillSequence> scalar_spill;
     if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
       scalar_spill = build_inline_sgpr_spill_sequence(
@@ -820,8 +818,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       const bool collapsed_spill_router = !explicit_dense_key &&
                                           group_options.automatic_moi_record_replay_sgpr_spill &&
                                           call_return_sgpr == pc_sgpr;
-      const uint32_t dense_entry_island_words =
-          collapsed_spill_router ? kIndirectIslandWords + 1u : kIndirectIslandWords;
+      const uint32_t dense_entry_island_words = moi_record_replay_entry_island_words(
+          group_options.automatic_moi_record_replay_sgpr_spill);
       const uint64_t island_offset = *group.front()->entry_island_offset;
       const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(group_options);
 
@@ -1124,9 +1122,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
           const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(candidate_options);
-          const uint32_t candidate_entry_island_words =
-              candidate_options.automatic_moi_record_replay_sgpr_spill ? kIndirectIslandWords + 1u
-                                                                       : kIndirectIslandWords;
+          const uint32_t candidate_entry_island_words = moi_record_replay_entry_island_words(
+              candidate_options.automatic_moi_record_replay_sgpr_spill);
           std::vector<uint32_t> island_words;
           if (!append_moi_scc_preserving_indirect_jump(
                   island_words, *planned_patch.entry_island_offset, cave_text_offset,
