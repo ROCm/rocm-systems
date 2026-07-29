@@ -658,7 +658,7 @@ void GDABackend::buffer_unregister_all() {
 }
 
 void GDABackend::setup_symm_registration() {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   /*
    * The GDA device-side registration state (the flat per-QP entry table and
    * the shared count) is allocated in setup_gpu_qps() so every QP captures a
@@ -678,7 +678,7 @@ void GDABackend::setup_symm_registration() {
 }
 
 void GDABackend::cleanup_symm_registration() {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   /* Unregister anything the user left registered. */
   symmetric_buffer_unregister_all();
 
@@ -687,7 +687,7 @@ void GDABackend::cleanup_symm_registration() {
 #endif
 }
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 struct ibv_mr *GDABackend::register_symm_buffer_mr(
     struct ibv_pd *pd, hipMemGenericAllocationHandle_t gen_handle,
     bool use_dmabuf, void *iova, size_t length, int *out_fd) {
@@ -739,7 +739,7 @@ struct ibv_mr *GDABackend::register_symm_buffer_mr(
 int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
                                           [[maybe_unused]] size_t length,
                                           [[maybe_unused]] void **registered_addr) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   if (registered_addr == nullptr || symm_entries_ == nullptr) {
     return ROCSHMEM_ERROR;
   }
@@ -929,7 +929,7 @@ int GDABackend::buffer_register_symmetric([[maybe_unused]] void *addr,
 }
 
 int GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   auto it = gda_symm_records_.find(key);
   if (it == gda_symm_records_.end()) {
     return ROCSHMEM_ERROR;
@@ -989,7 +989,7 @@ int GDABackend::gda_nic_unregister([[maybe_unused]] uintptr_t key) {
 
 void GDABackend::release_symm_record_nic_resources(
     [[maybe_unused]] GdaSymmRecord &rec) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   /*
    * Deregister the per-NIC MRs, then close their dmabuf fds. The fd must
    * outlive the MR (the NIC references the dmabuf), so it is closed only after
@@ -1012,7 +1012,7 @@ void GDABackend::release_symm_record_nic_resources(
 }
 
 void GDABackend::symmetric_buffer_unregister_all() {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   if (gda_symm_records_.empty()) {
     return;
   }
@@ -1048,7 +1048,7 @@ void GDABackend::symmetric_buffer_unregister_all() {
 }
 
 int GDABackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   if (addr == nullptr || symm_entries_ == nullptr) {
     return ROCSHMEM_ERROR;
   }
@@ -1707,7 +1707,7 @@ void GDABackend::setup_gpu_qps() {
   host_qps = (QueuePair*) malloc(qp_objs_mem_size);
   CHECK_NNULL(host_qps, "malloc (host_qps)");
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   /*
    * Allocate the device-side symmetric-registration state shared by every QP:
    * a flat entry table pre-sliced per (dest_pe, nic_idx) plus a shared count.
@@ -1753,7 +1753,7 @@ void GDABackend::cleanup_gpu_qps() {
   CHECK_HIP(hipFree(gpu_qps));
   gpu_qps = nullptr;
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
   if (symm_entries_ != nullptr) {
     CHECK_HIP(hipFree(symm_entries_));
     symm_entries_ = nullptr;
