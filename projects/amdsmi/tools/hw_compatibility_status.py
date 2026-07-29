@@ -455,6 +455,8 @@ def run_tests():
 
     test_api("amdsmi_get_gpu_device_uuid", lambda: amdsmi.amdsmi_get_gpu_device_uuid(gpu_handle))
 
+    test_api("amdsmi_get_gpu_device_cuid", lambda: amdsmi.amdsmi_get_gpu_device_cuid(gpu_handle))
+
     test_api("amdsmi_get_gpu_bdf_id", lambda: amdsmi.amdsmi_get_gpu_bdf_id(gpu_handle))
 
     test_api(
@@ -597,12 +599,6 @@ def run_tests():
     test_api("amdsmi_get_energy_count", lambda: amdsmi.amdsmi_get_energy_count(gpu_handle))
 
     test_api("amdsmi_get_violation_status", lambda: amdsmi.amdsmi_get_violation_status(gpu_handle))
-
-    test_api(
-        "amdsmi_gpu_driver_reload",
-        None,
-        skip_reason="Risky - reloads GPU driver, could crash system",
-    )
 
     # ========================================================================
     # SECTION 7: PCIe INFO (12 APIs)
@@ -1785,6 +1781,7 @@ def run_tests():
         sanity_apis = [
             ("amdsmi_get_gpu_device_bdf", lambda h: amdsmi.amdsmi_get_gpu_device_bdf(h)),
             ("amdsmi_get_gpu_device_uuid", lambda h: amdsmi.amdsmi_get_gpu_device_uuid(h)),
+            ("amdsmi_get_gpu_device_cuid", lambda h: amdsmi.amdsmi_get_gpu_device_cuid(h)),
             ("amdsmi_get_gpu_asic_info", lambda h: amdsmi.amdsmi_get_gpu_asic_info(h)),
             ("amdsmi_get_gpu_board_info", lambda h: amdsmi.amdsmi_get_gpu_board_info(h)),
             ("amdsmi_get_gpu_vram_usage", lambda h: amdsmi.amdsmi_get_gpu_vram_usage(h)),

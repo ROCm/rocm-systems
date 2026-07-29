@@ -27,6 +27,7 @@
 #include "functional/gpu/clock/frequencies_read.h"
 #include "functional/gpu/clock/frequencies_read_write.h"
 #include "functional/gpu/events/evt_notif_read_write.h"
+#include "functional/gpu/identity/device_cuid_read.h"
 #include "functional/gpu/identity/id_info_read.h"
 #include "functional/gpu/identity/version_read.h"
 #include "functional/gpu/memory/mem_page_info_read.h"
@@ -38,6 +39,7 @@
 #include "functional/gpu/metrics/gpu_partition_metrics_read.h"
 #include "functional/gpu/metrics/metrics_counter_read.h"
 #include "functional/gpu/metrics/process_info_read.h"
+#include "functional/gpu/metrics/process_list_read.h"
 #include "functional/gpu/partition/computepartition_memallocmode_read_write.h"
 #include "functional/gpu/partition/computepartition_read_write.h"
 #include "functional/gpu/partition/memorypartition_read_write.h"
@@ -222,6 +224,10 @@ TEST(GpuFunctionalReadOnly, TestIdInfoRead) {
   TestIdInfoRead tst;
   RunGenericTest(&tst);
 }
+TEST(GpuFunctionalReadOnly, TestDeviceCuidRead) {
+  TestDeviceCuidRead tst;
+  RunGenericTest(&tst);
+}
 TEST(GpuFunctionalReadWrite, TestPerfCntrReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -230,6 +236,11 @@ TEST(GpuFunctionalReadWrite, TestPerfCntrReadWrite) {
 }
 TEST(GpuFunctionalReadOnly, TestProcInfoRead) {
   TestProcInfoRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadOnly, TestProcessListRead) {
+  TestProcessListRead tst;
   RunGenericTest(&tst);
 }
 

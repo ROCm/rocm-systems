@@ -2064,6 +2064,13 @@ void SCvtF16F32Sop1::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void SCvtF16F32Sop1::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop1::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
+}
+
 SCvtF32F16Sop1::SCvtF32F16Sop1(const MachineInst *inst)
     : Sop1("s_cvt_f32_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(85)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -2136,6 +2143,12 @@ void SCeilF16Sop1::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void SCeilF16Sop1::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop1::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
+}
+
 SFloorF16Sop1::SFloorF16Sop1(const MachineInst *inst)
     : Sop1("s_floor_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(88)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -2162,6 +2175,13 @@ void SFloorF16Sop1::implicit_uses(RegisterSet &uses) const {
   Sop1::implicit_uses(uses);
   if (auto r = sdst.to_register_ref())
     uses.expand(*r);
+}
+
+void SFloorF16Sop1::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop1::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
 }
 
 STruncF16Sop1::STruncF16Sop1(const MachineInst *inst)
@@ -2192,6 +2212,13 @@ void STruncF16Sop1::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void STruncF16Sop1::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop1::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
+}
+
 SRndneF16Sop1::SRndneF16Sop1(const MachineInst *inst)
     : Sop1("s_rndne_f16", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(90)),
       sdst(16, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -2218,6 +2245,13 @@ void SRndneF16Sop1::implicit_uses(RegisterSet &uses) const {
   Sop1::implicit_uses(uses);
   if (auto r = sdst.to_register_ref())
     uses.expand(*r);
+}
+
+void SRndneF16Sop1::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Sop1::implicit_use_operands(operands);
+  if (sdst.to_register_ref())
+    operands.push_back(&sdst);
 }
 
 } // namespace gfx1250

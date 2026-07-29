@@ -22,7 +22,7 @@ def main(argv: List[str]) -> None:
     if len(argv) != 2:
         sys.exit(f"usage: {argv[0]} <staged amdsmi_wrapper.py>")
     path = pathlib.Path(argv[1])
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     count = text.count(ANCHOR)
     if count != 1:
         sys.exit(

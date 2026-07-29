@@ -61,15 +61,16 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
-#define AMDSMI_MAX_MM_IP_COUNT 8             //!< Maximum number of multimedia IP blocks
-#define AMDSMI_MAX_STRING_LENGTH 256         //!< Maximum length for string buffers
-#define AMDSMI_MAX_DEVICES 32                //!< Maximum number of devices supported
-#define AMDSMI_MAX_CACHE_TYPES 10            //!< Maximum number of cache types
-#define AMDSMI_MAX_ACCELERATOR_PROFILE 32    //!< Maximum number of accelerator profiles
-#define AMDSMI_MAX_CP_PROFILE_RESOURCES 32   //!< Maximum number of compute profile resources
-#define AMDSMI_MAX_ACCELERATOR_PARTITIONS 8  //!< Maximum number of accelerator partitions
-#define AMDSMI_MAX_NUM_NUMA_NODES 32         //!< Maximum number of NUMA nodes
-#define AMDSMI_GPU_UUID_SIZE 38              //!< Size of GPU UUID string
+#define AMDSMI_MAX_MM_IP_COUNT 8                   //!< Maximum number of multimedia IP blocks
+#define AMDSMI_MAX_STRING_LENGTH 256               //!< Maximum length for string buffers
+#define AMDSMI_MAX_DEVICES 32                      //!< Maximum number of devices supported
+#define AMDSMI_MAX_CACHE_TYPES 10                  //!< Maximum number of cache types
+#define AMDSMI_MAX_ACCELERATOR_PROFILE 32          //!< Maximum number of accelerator profiles
+#define AMDSMI_MAX_CP_PROFILE_RESOURCES 32         //!< Maximum number of compute profile resources
+#define AMDSMI_MAX_ACCELERATOR_PARTITIONS 8        //!< Maximum number of accelerator partitions
+#define AMDSMI_MAX_NUM_NUMA_NODES 32               //!< Maximum number of NUMA nodes
+#define AMDSMI_GPU_UUID_SIZE 38                    //!< Size of GPU UUID string
+#define AMDSMI_GPU_CUID_SIZE AMDSMI_GPU_UUID_SIZE  //!< Size of GPU CUID string
 
 /**
  * @brief Common defines
@@ -225,10 +226,10 @@ typedef enum {
 
 //! Major version should be changed for every header change that breaks ABI
 //! Such as adding/deleting APIs, changing names, fields of structures, etc.
-#define AMDSMI_LIB_VERSION_MAJOR 26
+#define AMDSMI_LIB_VERSION_MAJOR 27
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 5
+#define AMDSMI_LIB_VERSION_MINOR 0
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
@@ -2381,8 +2382,8 @@ typedef struct {
   /*
    * v1.1 additions
    */
-  uint32_t gfx_activity_acc;                           //!< new in v1
-  uint32_t mem_activity_acc;                           //!< new in v1
+  uint64_t gfx_activity_acc;                           //!< new in v1
+  uint64_t mem_activity_acc;                           //!< new in v1
   uint16_t temperature_hbm[AMDSMI_NUM_HBM_INSTANCES];  //!< new in v1
 
   /*
@@ -2435,8 +2436,8 @@ typedef struct {
    * @brief v1.5 additions
    */
   uint16_t jpeg_activity[AMDSMI_MAX_NUM_JPEG];  //!< JPEG activity percent (encode/decode)
-  uint32_t pcie_nak_sent_count_acc;             //!< PCIE NAK sent accumulated count
-  uint32_t pcie_nak_rcvd_count_acc;             //!< PCIE NAK received accumulated count
+  uint64_t pcie_nak_sent_count_acc;             //!< PCIE NAK sent accumulated count
+  uint64_t pcie_nak_rcvd_count_acc;             //!< PCIE NAK received accumulated count
 
   /**
    * @brief v1.6 additions
@@ -2489,7 +2490,7 @@ typedef struct {
   amdsmi_gpu_xcp_metrics_t xcp_stats[AMDSMI_MAX_NUM_XCP]; /**< XCP (Graphic Cluster Partitions)
                                                                metrics stats */
 
-  uint32_t pcie_lc_perf_other_end_recovery;  //!< PCIE other end recovery counter
+  uint64_t pcie_lc_perf_other_end_recovery;  //!< PCIE other end recovery counter
 
   /**
    * @brief v1.7 additions
@@ -3472,6 +3473,28 @@ amdsmi_status_t amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_hand
  */
 amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
                                            unsigned int* uuid_length, char* uuid);
+
+/**
+ *  @brief Returns the CUID of the device
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
+ *  @platform{guest_windows}
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[in,out] cuid_length Length of the cuid string. As input, must be
+ *                 equal or greater than AMDSMI_GPU_CUID_SIZE and be allocated by
+ *                 user. As output it is the length of the cuid string.
+ *
+ *  @param[out] cuid Pointer to string to store the CUID. Must be
+ *              allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_handle,
+                                           unsigned int* cuid_length, char* cuid);
 
 /**
  *  @brief          Returns the Enumeration information for the device
@@ -7112,7 +7135,7 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
  *  Device must be idle and have no workloads when performing set partition operations.
  *
  *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
- *  the new memory partition setting. Refer to `amdsmi_gpu_driver_reload()` for more details.
+ *  the new memory partition setting.
  *
  *  @param[in] processor_handle Device which to query
  *
@@ -7163,10 +7186,10 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
  *  Device must be idle and have no workloads when performing set partition operations.
  *
  *  @details On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating
- *  to the new memory partition setting. Refer to `amdsmi_gpu_driver_reload()` for more details.
+ *  to the new memory partition setting.
  *
  *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
- *  the new memory partition setting. Refer to `amdsmi_gpu_driver_reload()` for more details.
+ *  the new memory partition setting.
  *
  *  @param[in] processor_handle A processor handle
  *
@@ -7858,62 +7881,6 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
                                                    uint32_t* max_processes);
 
 /** @} End tagProcessInfo */
-
-/*****************************************************************************/
-/** @defgroup tagDriverControl Driver control mechanisms
- *  These functions provide control over the driver. Users should use with
- *  caution as they may cause the driver to become unstable.
- *  @{
- */
-/**
- *  @brief Restart the device driver (kmod module) for all AMD GPUs on the
- *  system.
- *
- *  @ingroup tagDriverControl
- *
- *  @platform{gpu_bm_linux} @platform{guest_1vf} @platform{guest_mvf}
- *
- *  @details This function will reload the AMD GPU driver as described in
- *  the Linux kernel documentation -
- *  https://docs.kernel.org/admin-guide/sysctl/kernel.html#modprobe
- *  with no extra parameters as specified in
- *  https://docs.kernel.org/gpu/amdgpu/module-parameters.html.
- *
- *  Use this function with caution, as it will unload and reload the AMD GPU
- *  driver: `modprobe -r amdgpu && modprobe amdgpu`.
- *
- *  Any process or workload using the AMD GPU driver is REQUIRED to be
- *  stopped before calling this function. Otherwise, function will return
- *  ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver.
- *
- *  User is REQUIRED to have root/admin privileges to call this function.
- *  Otherwise, this function will return ::AMDSMI_STATUS_NO_PERM.
- *
- *  This API will take time to complete, as we are checking the driver's
- *  loading status to confirm it reloaded properly. If
- *  ::AMDSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
- *  did not reload properly and the user should check dmesg logs.
- *
- *  This function has been created in order to conveniently reload the
- *  AMD GPU driver once `amdsmi_set_gpu_memory_partition()` or
- *  `amdsmi_set_gpu_memory_partition_mode()` successfully has been changed
- *  on Baremetal systems. Now users can control the reload once all GPU
- *  processes/workloads have been stopped on the AMD GPU driver.
- *  A (AMD GPU) driver reload is REQUIRED to complete changing
- *  to the new memory partition configuration
- *  (`amdsmi_set_gpu_memory_partition()`/`amdsmi_set_gpu_memory_partition_mode()`)
- *  operation MUST be successful. This function WILL EFFECT all GPUs in the
- *  hive to be reconfigured with the specified memory partition configuration.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success
- *  @return                   | ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
- *  @return                   | ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *                                the amdgpu driver.
- */
-amdsmi_status_t amdsmi_gpu_driver_reload(void);
-
-/** @} End tagDriverControl */
 
 /*****************************************************************************/
 /** @defgroup tagPTL Peak Tops Limiter
