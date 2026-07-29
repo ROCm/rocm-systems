@@ -24,30 +24,16 @@ struct nic_track_description
     const char* units;
 };
 
-// Helper function to create enabled_metrics value from bit positions
-// See enabled_metrics definition in pmc/collectors/nic/types.hpp for bit position
-// documentation
-inline constexpr std::uint32_t
-make_nic_metric_value(std::initializer_list<std::uint8_t> bit_positions)
-{
-    std::uint32_t value = 0;
-    for(auto bit : bit_positions)
-    {
-        value |= (std::uint32_t{ 1 } << bit);
-    }
-    return value;
-}
-
-inline constexpr auto RX_RDMA_UCAST_BYTES_VALUE     = make_nic_metric_value({ 0 });
-inline constexpr auto TX_RDMA_UCAST_BYTES_VALUE     = make_nic_metric_value({ 1 });
-inline constexpr auto RX_RDMA_UCAST_PKTS_VALUE      = make_nic_metric_value({ 2 });
-inline constexpr auto TX_RDMA_UCAST_PKTS_VALUE      = make_nic_metric_value({ 3 });
-inline constexpr auto RX_RDMA_CNP_PKTS_VALUE        = make_nic_metric_value({ 4 });
-inline constexpr auto TX_RDMA_CNP_PKTS_VALUE        = make_nic_metric_value({ 5 });
-inline constexpr auto TX_RDMA_ACK_TIMEOUT_VALUE     = make_nic_metric_value({ 6 });
-inline constexpr auto RESP_TX_PKT_SEQ_ERR_VALUE     = make_nic_metric_value({ 7 });
-inline constexpr auto REQ_RX_PKT_SEQ_ERR_VALUE      = make_nic_metric_value({ 8 });
-inline constexpr auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = make_nic_metric_value({ 9 });
+inline constexpr auto RX_RDMA_UCAST_BYTES_VALUE     = std::uint32_t(1) << 0;
+inline constexpr auto TX_RDMA_UCAST_BYTES_VALUE     = std::uint32_t(1) << 1;
+inline constexpr auto RX_RDMA_UCAST_PKTS_VALUE      = std::uint32_t(1) << 2;
+inline constexpr auto TX_RDMA_UCAST_PKTS_VALUE      = std::uint32_t(1) << 3;
+inline constexpr auto RX_RDMA_CNP_PKTS_VALUE        = std::uint32_t(1) << 4;
+inline constexpr auto TX_RDMA_CNP_PKTS_VALUE        = std::uint32_t(1) << 5;
+inline constexpr auto TX_RDMA_ACK_TIMEOUT_VALUE     = std::uint32_t(1) << 6;
+inline constexpr auto RESP_TX_PKT_SEQ_ERR_VALUE     = std::uint32_t(1) << 7;
+inline constexpr auto REQ_RX_PKT_SEQ_ERR_VALUE      = std::uint32_t(1) << 8;
+inline constexpr auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = std::uint32_t(1) << 9;
 
 // Default track labels and units, keyed by metric bit value. Adding a metric
 // touches several ordered lists that must stay in sync: the *_VALUE bit constant
