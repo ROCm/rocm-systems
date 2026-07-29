@@ -482,6 +482,18 @@ ncclResult_t ncclCommMemSuspend(struct ncclComm* comm) {
       continue;
     }
 
+    // RCCL fix (cross-process cuMem reclaim leak): keep buffers that were exported
+    // to a peer resident across Suspend. Their physical is imported (mapped) by a
+    // peer, and on this HIP/ROCm VMM the owner's cuMemRelease does not reclaim such
+    // a cross-process-shared allocation -- so tearing it down and re-creating it on
+    // Resume leaks the exported buffer set (~1 GiB) every cycle. Leaving them Active
+    // (no CPU offload, no unmap/release) makes the owner keep the backing physical;
+    // Resume then skips re-creation and the peer simply re-maps the same physical.
+    if (entry->desc.local.numExportedPeers > 0) {
+      entry = entry->next;
+      continue;
+    }
+
     // For OFFLOAD type: copy to CPU backup first
     if (entry->memType == ncclMemOffload) {
       NCCLCHECKGOTO(ncclCudaHostCalloc((char**)&entry->cpuBackup, entry->size), ret, fail);
