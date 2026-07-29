@@ -210,8 +210,8 @@ struct perfetto_policy
 
         auto& samples = *bundle_it->second;
 
-        const auto& thread_info = thread_info::get(0, InternalTID);
-        if(!thread_info)
+        const auto& tinfo = thread_info::get(0, InternalTID);
+        if(!tinfo)
         {
             return;
         }
@@ -260,7 +260,7 @@ struct perfetto_policy
         {
             const auto ts = sample.timestamp;
 
-            if(!thread_info->is_valid_time(ts))
+            if(!tinfo->is_valid_time(ts))
             {
                 LOG_WARNING("Invalid timestamp {} for NIC sample", ts);
                 continue;
