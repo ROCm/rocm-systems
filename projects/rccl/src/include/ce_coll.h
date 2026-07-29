@@ -35,6 +35,35 @@
 #define NCCL_CE_REDUCE_ALL_OPS 0
 #endif
 
+// Per-rank staging capacity in ceARTmpBuf. ncclCeInit sizes the buffer from this
+// value, so every runtime offset must stay within it.
+inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {
+  return (size_t)NCCL_CE_AR_MAX_MSG_BYTES / (size_t)nRanks;
+}
+
+// Per-rank slot size in ceARTmpBuf. The host scatter addresses slots in bytes
+// (rank * slotChunkBytes) while the reduce kernel addresses them in elements
+// (rank * slotChunkElems), so a slot must hold a whole number of elements. 16 is
+// a multiple of every supported element size and also keeps each rank boundary
+// aligned for the kernel's 16B vector loads, so one round-down satisfies both.
+inline size_t ncclCeAllReduceSlotChunkBytes(size_t maxChunkBytes) {
+  return alignDown(maxChunkBytes, (size_t)16);
+}
+
+// Chunk size for the pipelined path, i.e. when a shard does not fit in one slot.
+// A chunk must fit its slot, and needs the same 16B rounding as the slot itself:
+// the host walks chunks in bytes (ch * chunkBytes) while the kernel walks them in
+// elements (ch * baseChunkElems).
+inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChunkBytes) {
+  const size_t MIN_CHUNK_BYTES = 4 * 1024 * 1024ULL;
+  const size_t MAX_CHUNK_BYTES = 256 * 1024 * 1024ULL;
+  size_t targetChunkBytes = shardBytes / 4;
+  if (targetChunkBytes > MAX_CHUNK_BYTES) targetChunkBytes = MAX_CHUNK_BYTES;
+  if (targetChunkBytes < MIN_CHUNK_BYTES) targetChunkBytes = MIN_CHUNK_BYTES;
+  if (targetChunkBytes > slotChunkBytes) targetChunkBytes = slotChunkBytes;
+  return alignDown(targetChunkBytes, (size_t)16);
+}
+
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
   uint8_t* baseUCSymComplPtr;

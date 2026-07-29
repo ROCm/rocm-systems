@@ -3669,8 +3669,6 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || !rcclParamForceCeAllReduce() ||
               !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
-            INFO(NCCL_COLL, "CE AllReduce: forced %d, msg %zu Max %zu B, falling back to standard NCCL AllReduce",
-                 rcclParamForceCeAllReduce(), totalBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
           } else {
             ceAllReduceFits = true;
           }

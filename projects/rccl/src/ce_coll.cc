@@ -104,7 +104,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* arWinDevHost = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
-  size_t maxChunkBytes = NCCL_CE_AR_MAX_MSG_BYTES / comm->nRanks;
+  size_t maxChunkBytes = ncclCeAllReduceMaxChunkBytes(comm->nRanks);
   size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   int i = 0;
   int targetStreams = 0;
@@ -869,17 +869,6 @@ ncclResult_t ncclCeQueueDoorbellWrite(struct ncclComm* comm, void* peerAddr, uin
   return ncclMemOpWriteValue(comm, (uint32_t*)peerAddr, value, stream);
 }
 
-inline size_t chooseChunkBytes(size_t shardBytes, size_t maxChunkBytes) {
-  const size_t MIN_CHUNK_BYTES = 4 * 1024 * 1024ULL;
-  const size_t MAX_CHUNK_BYTES = 256 * 1024 * 1024ULL;
-  if (shardBytes <= MIN_CHUNK_BYTES) return shardBytes;
-  size_t targetChunkBytes = shardBytes / 4;
-  if (targetChunkBytes > MAX_CHUNK_BYTES) targetChunkBytes = MAX_CHUNK_BYTES;
-  if (targetChunkBytes < MIN_CHUNK_BYTES) targetChunkBytes = MIN_CHUNK_BYTES;
-  if (targetChunkBytes > maxChunkBytes) targetChunkBytes = maxChunkBytes;
-  return targetChunkBytes;
-}
-
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin) {
@@ -887,24 +876,24 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
 
   const size_t eltSize = ncclTypeSize(datatype);
   const size_t totalBytes = count * eltSize;
-  const size_t shardBytes = totalBytes / comm->nRanks;
   const size_t shardElems = count / comm->nRanks;
+  const size_t shardBytes = shardElems * eltSize;
   const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
-  const size_t maxChunkBytes = (NCCL_CE_AR_MAX_MSG_BYTES) / comm->nRanks;
-  size_t chunkBytes = 0;
-  if (shardBytes <= maxChunkBytes) {
-    chunkBytes = shardBytes;
-  } else {
-    chunkBytes = chooseChunkBytes(shardBytes, maxChunkBytes);
+  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(ncclCeAllReduceMaxChunkBytes(comm->nRanks));
+  if (shardElems == 0 || slotChunkBytes < eltSize) {
+    WARN("CE AllReduce: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
+    return ncclInvalidArgument;
   }
+  const size_t chunkBytes =
+    (shardBytes <= slotChunkBytes) ? shardBytes : ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
   size_t baseChunkElems = chunkBytes / eltSize;
-  size_t slotChunkElems = maxChunkBytes / eltSize;
+  size_t slotChunkElems = slotChunkBytes / eltSize;
   size_t chunksPerShard = shardElems / baseChunkElems;
   size_t tailChunkElems = shardElems % baseChunkElems;
   if (tailChunkElems != 0) chunksPerShard++;
   size_t totalSteps = chunksPerShard;
-  // ceARTmpBuf slots are spaced by maxChunkBytes (init-time layout).
-  const size_t slotStrideBytes = maxChunkBytes * (size_t)comm->nRanks;
+  // ceARTmpBuf slots are spaced by slotChunkBytes (<= maxChunkBytes at init).
+  const size_t slotStrideBytes = slotChunkBytes * (size_t)comm->nRanks;
   int startCh = (int)chunksPerShard - (int)NUM_SLOTS;
   // Unique call verification tracking sequence
   uint32_t* basePeerSignalAddr[comm->nRanks];
@@ -1009,7 +998,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
       CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0));
     }
       // Batched doorbell: all peers' + local slot signals stream memop.
-    const size_t dstSlotOffsetBytes = (size_t)slot * slotStrideBytes + (size_t)comm->rank * maxChunkBytes;
+    const size_t dstSlotOffsetBytes = (size_t)slot * slotStrideBytes + (size_t)comm->rank * slotChunkBytes;
     const size_t srcChunkOffsetBytes = ch * chunkBytes;
     batchOpsParams.numOps = 0;
     for (int r = 0; r < comm->nRanks; r++) {
