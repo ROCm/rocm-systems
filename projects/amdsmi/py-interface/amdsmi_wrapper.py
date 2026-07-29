@@ -3244,6 +3244,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_vram_vendor = _libraries['libamd_smi.so'].amdsmi_get_gpu_vram_vendor
+    amdsmi_get_gpu_vram_vendor.restype = amdsmi_status_t
+    amdsmi_get_gpu_vram_vendor.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_char), uint32_t]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_subsystem_id = _libraries['libamd_smi.so'].amdsmi_get_gpu_subsystem_id
     amdsmi_get_gpu_subsystem_id.restype = amdsmi_status_t
     amdsmi_get_gpu_subsystem_id.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint16)]
@@ -5009,9 +5015,8 @@ __all__ = \
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE',
     'AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN',
     'AMDSMI_FABRIC_TYPE_UALINK', 'AMDSMI_FABRIC_TYPE_UALLINK',
-    'AMDSMI_FABRIC_TYPE_UALOE',
-    'AMDSMI_FABRIC_TYPE_UNKNOWN', 'AMDSMI_FINE_DECODER_ACTIVITY',
-    'AMDSMI_FINE_GRAIN_GFX_ACTIVITY',
+    'AMDSMI_FABRIC_TYPE_UALOE', 'AMDSMI_FABRIC_TYPE_UNKNOWN',
+    'AMDSMI_FINE_DECODER_ACTIVITY', 'AMDSMI_FINE_GRAIN_GFX_ACTIVITY',
     'AMDSMI_FINE_GRAIN_MEM_ACTIVITY', 'AMDSMI_FREQ_IND_INVALID',
     'AMDSMI_FREQ_IND_MAX', 'AMDSMI_FREQ_IND_MIN', 'AMDSMI_FW_ID_ASD',
     'AMDSMI_FW_ID_CP_CE', 'AMDSMI_FW_ID_CP_ME',
@@ -5373,8 +5378,8 @@ __all__ = \
     'amdsmi_get_gpu_vendor_name',
     'amdsmi_get_gpu_virtualization_mode',
     'amdsmi_get_gpu_volt_metric', 'amdsmi_get_gpu_vram_info',
-    'amdsmi_get_gpu_vram_usage', 'amdsmi_get_gpu_xcd_counter',
-    'amdsmi_get_gpu_xgmi_link_status',
+    'amdsmi_get_gpu_vram_usage', 'amdsmi_get_gpu_vram_vendor',
+    'amdsmi_get_gpu_xcd_counter', 'amdsmi_get_gpu_xgmi_link_status',
     'amdsmi_get_hsmp_metrics_table',
     'amdsmi_get_hsmp_metrics_table_version', 'amdsmi_get_lib_version',
     'amdsmi_get_link_metrics', 'amdsmi_get_link_topology_nearest',

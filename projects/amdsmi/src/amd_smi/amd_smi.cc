@@ -2700,6 +2700,22 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
   return rsmi_wrapper(rsmi_dev_vendor_name_get, processor_handle, 0, name, len);
 }
 
+amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle, char* brand,
+                                           uint32_t len) {
+  // Deprecated: delegates to amdsmi_get_gpu_vram_info(); slated for removal in a
+  // future ROCm release.
+  if (brand == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  amdsmi_vram_info_t info = {};
+  amdsmi_status_t r = amdsmi_get_gpu_vram_info(processor_handle, &info);
+  if (r != AMDSMI_STATUS_SUCCESS) {
+    return r;
+  }
+  snprintf(brand, len, "%s", info.vram_vendor);
+  return r;
+}
+
 amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle,
                                          amdsmi_vram_info_t* info) {
   AMDSMI_CHECK_INIT();

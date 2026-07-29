@@ -3858,6 +3858,13 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_gpu_vram_vendor(
+        processor_handle: AmdsmiProcessorHandle,
+        brand: *mut ::std::os::raw::c_char,
+        len: u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_gpu_subsystem_id(
         processor_handle: AmdsmiProcessorHandle,
         id: *mut u16,
@@ -4424,7 +4431,8 @@ pub enum AmdsmiFabricSizeConstantsT {
     AmdsmiFabricMaxLocalGpus = 16,
 }
 impl AmdsmiFabricTypeT {
-    pub const AmdsmiFabricTypeUallink: AmdsmiFabricTypeT = AmdsmiFabricTypeT::AmdsmiFabricTypeUalink;
+    pub const AmdsmiFabricTypeUallink: AmdsmiFabricTypeT =
+        AmdsmiFabricTypeT::AmdsmiFabricTypeUalink;
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]

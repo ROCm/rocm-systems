@@ -54,7 +54,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Deduplicated the `amdsmi_fabric_telemetry_category_t` enumerators**.  
   - `AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID` is now the canonical `0xFFFFFFFF` value; the previous `AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN` name (same value) is retained as a deprecated alias and is slated for removal in a future ROCm release.
 
-- **Removed `amdsmi_get_gpu_vram_vendor()`** (breaking). Use `amdsmi_get_gpu_vram_info()` and read the `vram_vendor` field instead.
+- **Deprecated `amdsmi_get_gpu_vram_vendor()`**. Use `amdsmi_get_gpu_vram_info()` and read the `vram_vendor` field instead. The function is retained (it now delegates to `amdsmi_get_gpu_vram_info()`, and the Python binding emits a `DeprecationWarning`) and is slated for removal in a future ROCm release.
 
 - **Removed `amdsmi_get_cpusocket_handles()` from the Python interface** (breaking). Use `amdsmi_get_cpu_handles()` instead.
 

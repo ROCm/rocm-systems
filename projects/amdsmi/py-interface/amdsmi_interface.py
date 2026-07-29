@@ -4103,6 +4103,29 @@ def amdsmi_get_gpu_vendor_name(processor_handle: processor_handle_t) -> str:
     return vendor_name.value.decode("utf-8")
 
 
+def amdsmi_get_gpu_vram_vendor(processor_handle: processor_handle_t):
+    """Deprecated: use amdsmi_get_gpu_vram_info() instead.
+
+    This API is slated for removal in a future ROCm release.
+    """
+    warnings.warn(
+        "amdsmi_get_gpu_vram_vendor() is deprecated, use amdsmi_get_gpu_vram_info() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    length = ctypes.c_uint32()
+    length.value = AMDSMI_MAX_STRING_LENGTH
+
+    vram_vendor = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
+
+    _check_res(amdsmi_wrapper.amdsmi_get_gpu_vram_vendor(processor_handle, vram_vendor, length))
+
+    return vram_vendor.value.decode("utf-8")
+
+
 def amdsmi_get_gpu_id(processor_handle: processor_handle_t):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
