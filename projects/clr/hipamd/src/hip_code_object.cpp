@@ -624,13 +624,18 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
       return err;
     }
     if (*module != nullptr) {
+      // Read-only fast path: GetDeviceVarPtr only reads dMem_[deviceId], it does not lazily
+      // initialize it. Lazy init writes dMem_ and must run under the exclusive lock (see the
+      // slow path below), so it is not safe to call GetStatDeviceVar here under the shared lock.
       amd::Memory* mem = nullptr;
-      IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
-
-      // Handle size-0 globals: return null device pointer and size 0.
-      *dev_ptr = (mem == nullptr) ? 0 : memDevPtr(mem);
-      *size_ptr = (mem == nullptr) ? 0 : mem->getSize();
-      return hipSuccess;
+      IHIP_RETURN_ONFAIL(var->GetDeviceVarPtr(&mem, deviceId));
+      if (mem != nullptr) {
+        *dev_ptr = memDevPtr(mem);
+        *size_ptr = mem->getSize();
+        return hipSuccess;
+      }
+      // mem == nullptr: either not yet initialized, or a size-0 global. Fall through to the
+      // exclusive-lock slow path, which lazily initializes dMem_ via GetStatDeviceVar.
     }
   }
 
