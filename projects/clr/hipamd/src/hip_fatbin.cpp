@@ -804,9 +804,9 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
                                arch_ptrs.size(), &code_object, &code_object_size);
 
     if (err != KPACK_SUCCESS) {
-      LogPrintfError("kpack_load_code_object failed with error: %d; isa name: %s", err,
-                     device_name.c_str());
-      return hipErrorInvalidImage;
+      LogPrintfWarning("Could not load kpack object for %s, err: %d",
+                     device_name.c_str(), err);
+      continue;
     }
 
     // Add device type specific kpack code object buffer for each similar type of device.
@@ -817,8 +817,8 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
           AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
       if (hip_err != hipSuccess) {
         LogPrintfError(
-            "AddDevProgram failed with error: %d; isa name: %s; device id: %d", hip_err,
-            device_name.c_str(), device->deviceId());
+            "Could not add kpack object for %s, device id: %d, err: %d",
+            device_name.c_str(), device->deviceId(), hip_err);
         kpack_free_code_object(code_object);
         return hip_err;
       }
