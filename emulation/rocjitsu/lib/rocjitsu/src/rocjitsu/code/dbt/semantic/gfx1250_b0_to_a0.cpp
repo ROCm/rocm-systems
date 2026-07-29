@@ -543,25 +543,46 @@ ExpandResult expand_gfx1250_get_barrier_state(const Instruction &inst, uint32_t,
   return ExpandResult::success(std::move(words));
 }
 
-/// @brief Follow a lookup-table permute with a fixed filler.
+/// @brief Run a lookup-table permute and its filler only under a live mask.
 ///
 /// @details This profile restricts which instruction may issue in the single
-/// slot immediately after the permute to a limited set. The restriction covers
-/// that one slot only, so exactly one filler satisfies it; this is not a
-/// multi-slot spacing requirement and must not be widened into one. The source
-/// may already comply, but once relocation and expansion have run the
-/// translator no longer controls what follows, so the filler is appended
-/// unconditionally.
+/// slot immediately after the permute. The restriction covers that one slot
+/// only, so exactly one filler satisfies it; this is not a multi-slot spacing
+/// rule and must not be widened into one.
 ///
-/// V_NOP is the filler because it issues regardless of the exec mask. An
-/// ordinary VALU is skipped when the mask is zero and would leave the slot
-/// unoccupied in exactly the divergent regions that are hardest to reason about.
+/// The filler occupies that slot only while the exec mask is non-zero; with an
+/// empty mask it degenerates to a scalar no-op and leaves the slot unclaimed.
+/// An ordinary VALU is worse still, being skipped outright.
 ///
-/// A filler already in that slot is left alone so a second pass over translated
-/// text produces the same bytes. The successor is matched as a decoded
-/// instruction in the same block rather than as the following word, so a
-/// trailing literal that happens to equal the filler's encoding is not mistaken
-/// for one, and a slot that belongs to a different block is not assumed.
+/// The mask cannot simply be forced, because the permute itself must keep the
+/// original masking and no instruction may be placed between the two. Branching
+/// over both instead satisfies all of that: the permute writes only a vector
+/// register, so under an empty mask it has no architectural effect and skipping
+/// it matches executing it, while the path that does run is guaranteed a live
+/// mask.
+///
+/// The branch is relative to the instruction after it, and its distance is the
+/// body length plus the filler, so the target is the first instruction past this
+/// sequence rather than one inside it. Both endpoints move together with the
+/// emitted code, so the displacement stays correct wherever the sequence lands
+/// and needs no relocation.
+///
+/// A v_nop already occupying the slot is the filler, whether this rule put it
+/// there or the source did, so it is adopted rather than doubled: exactly one
+/// slot is claimed either way, and the branch distance is the same because the
+/// adopted filler sits immediately after the emitted words.
+///
+/// A sequence already in this shape is left alone so a second pass over
+/// translated text produces the same bytes. The filler is matched as a decoded
+/// instruction in the same block, so a trailing literal equal to its encoding is
+/// not mistaken for it. The guard cannot be matched that way: it is a branch, so
+/// it ends its own block and is never the permute's in-block predecessor, and it
+/// is compared as the preceding word instead. That comparison is only meaningful
+/// where a block boundary says the word can be a branch at all; without the
+/// boundary test, a literal payload equal to the guard's encoding would pass for
+/// one and leave the permute unguarded. Both have to be present before the
+/// sequence is judged already guarded, so a stray word alone does not suppress
+/// the rewrite.
 ExpandResult expand_gfx1250_perm_pk16(const Instruction &inst, uint32_t, uint64_t offset,
                                       std::span<const uint8_t> source_text,
                                       const LivenessAnalysis &, TranslationContext &,
@@ -573,16 +594,41 @@ ExpandResult expand_gfx1250_perm_pk16(const Instruction &inst, uint32_t, uint64_
   if (offset > source_text.size() || size > source_text.size() - offset)
     return ExpandResult::failed("gfx1250 permute rule received an unsupported instruction");
 
+  const size_t instruction_dwords = size / sizeof(uint32_t);
   const auto filler = gfx1250::build_vop1(gfx1250::kVNopVop1);
-  const Instruction *following = inst.next_instruction();
-  if (following != nullptr && following->size() == static_cast<int>(sizeof(uint32_t)) &&
-      following->raw_encoding() != nullptr && following->raw_encoding()[0] == filler[0]) {
-    return ExpandResult::not_handled();
-  }
+  // SOPP carries a signed dword offset, so refuse a body it cannot reach
+  // forward rather than narrowing into a backward branch.
+  const size_t skipped_dwords = instruction_dwords + 1;
+  if (skipped_dwords > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
+    return ExpandResult::failed("gfx1250 permute is too long for its guard branch");
+  const auto guard = gfx1250::build_sopp(gfx1250::kSCbranchExeczSopp,
+                                         {.simm16 = static_cast<uint16_t>(skipped_dwords)});
 
-  std::vector<uint32_t> words(size / sizeof(uint32_t));
-  std::memcpy(words.data(), source_text.data() + offset, size);
-  append_words(words, filler);
+  const Instruction *following = inst.next_instruction();
+  const bool filler_follows =
+      following != nullptr && following->size() == static_cast<int>(sizeof(uint32_t)) &&
+      following->raw_encoding() != nullptr && following->raw_encoding()[0] == filler[0];
+  // The guard is a branch, so it terminates its block and is never the permute's
+  // in-block predecessor. It therefore has to be matched as the preceding word,
+  // but only where the permute starts a block: otherwise the preceding word is
+  // an operand or a literal of the instruction before it, not a branch.
+  const bool guard_precedes =
+      inst.previous_instruction() == nullptr && offset >= sizeof(uint32_t) &&
+      std::memcmp(source_text.data() + offset - sizeof(uint32_t), guard.data(), sizeof(uint32_t)) ==
+          0;
+  if (filler_follows && guard_precedes)
+    return ExpandResult::not_handled();
+
+  std::vector<uint32_t> words;
+  words.reserve(instruction_dwords + 2);
+  append_words(words, guard);
+  const size_t body = words.size();
+  words.resize(body + instruction_dwords);
+  std::memcpy(words.data() + body, source_text.data() + offset, size);
+  // A filler already in the slot is copied through by the caller, so appending
+  // one here would claim a second slot the contract does not ask for.
+  if (!filler_follows)
+    append_words(words, filler);
   return ExpandResult::success(std::move(words));
 }
 

@@ -12408,18 +12408,36 @@ TEST(BinaryTranslatorE2E, Gfx1250RepointsPcRelativeDataRangeBoundsAfterRelocatio
   ASSERT_NO_FATAL_FAILURE(verify_target(true));
 }
 
-// Each lookup-table permute gains a filler in the slot immediately after it,
-// and the rest of the stream is left in place.
-TEST(BinaryTranslatorE2E, Gfx1250AppendsFillerAfterPermPk16ForA0) {
+// Each lookup-table permute runs under a guard so its filler is always
+// effective: an empty mask skips both, a live mask runs both.
+TEST(BinaryTranslatorE2E, Gfx1250GuardsPermPk16FillerWithMaskBranchForA0) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   const auto filler = gfx1250::build_vop1(gfx1250::kVNopVop1);
-  for (const uint16_t opcode :
-       {gfx1250::kVPermPk16B4U4Vop3, gfx1250::kVPermPk16B6U4Vop3, gfx1250::kVPermPk16B8U4Vop3}) {
-    SCOPED_TRACE(opcode);
-    const auto permute =
-        gfx1250::build_vop3(opcode, {.vdst = 4, .src0 = 256 + 8, .src1 = 256 + 12});
-    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
-        {permute[0], permute[1], kGfx1250SEndpgm});
+  constexpr uint16_t kScalarLiteral = 255;
+  constexpr uint32_t kLiteralPayload = 0x0badf00du;
+  struct PermuteCase {
+    uint16_t opcode;
+    bool literal;
+  };
+  // The literal form is twelve bytes, so it also proves the branch distance is
+  // derived from the instruction rather than fixed for the eight-byte one.
+  const std::vector<PermuteCase> cases = {{gfx1250::kVPermPk16B4U4Vop3, false},
+                                          {gfx1250::kVPermPk16B6U4Vop3, false},
+                                          {gfx1250::kVPermPk16B8U4Vop3, false},
+                                          {gfx1250::kVPermPk16B4U4Vop3, true}};
+  for (const PermuteCase &test_case : cases) {
+    SCOPED_TRACE(test_case.opcode);
+    SCOPED_TRACE(test_case.literal ? "literal" : "no literal");
+    const auto permute = gfx1250::build_vop3(
+        test_case.opcode,
+        {.vdst = 4,
+         .src0 = test_case.literal ? kScalarLiteral : static_cast<uint16_t>(256 + 8),
+         .src1 = 256 + 12});
+    std::vector<uint32_t> text = {permute[0], permute[1]};
+    if (test_case.literal)
+      text.push_back(kLiteralPayload);
+    text.push_back(kGfx1250SEndpgm);
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(text);
     rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
     rocjitsu::BinaryTranslator translator(
         ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
@@ -12432,41 +12450,34 @@ TEST(BinaryTranslatorE2E, Gfx1250AppendsFillerAfterPermPk16ForA0) {
     rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_FALSE(translated.text_sections().empty());
     const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-    EXPECT_EQ(out[0], permute[0]) << "the permute itself must be unchanged";
-    EXPECT_EQ(out[1], permute[1]);
-    EXPECT_EQ(out[2], filler[0]) << "a filler must occupy the following slot";
-    EXPECT_EQ(out[3], kGfx1250SEndpgm) << "the rest of the stream must be preserved";
+    const size_t body_dwords = test_case.literal ? 3u : 2u;
+    const auto expected_guard = gfx1250::build_sopp(
+        gfx1250::kSCbranchExeczSopp, {.simm16 = static_cast<uint16_t>(body_dwords + 1)});
+    EXPECT_EQ(out[0], expected_guard[0]) << "the guard must precede the permute";
+    EXPECT_EQ(out[1], permute[0]) << "the permute itself must be unchanged";
+    EXPECT_EQ(out[2], permute[1]);
+    if (test_case.literal) {
+      EXPECT_EQ(out[3], kLiteralPayload) << "the literal must stay with its instruction";
+    }
+    EXPECT_EQ(out[1 + body_dwords], filler[0]) << "the filler must directly follow the permute";
+    EXPECT_EQ(out[2 + body_dwords], kGfx1250SEndpgm) << "the rest of the stream is preserved";
+
+    // Read the sequence back through the decoder so the hand-built guard is
+    // checked against the ISA definition rather than against its own builder.
+    const auto decoded =
+        decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_GE(decoded.size(), 4u);
+    EXPECT_EQ(decoded[0]->mnemonic(), "s_cbranch_execz");
+    EXPECT_TRUE(decoded[1]->mnemonic().starts_with("v_perm_pk16_"));
+    EXPECT_EQ(decoded[2]->mnemonic(), "v_nop_e32");
+    // The branch is relative to the instruction after it, so its target is the
+    // first instruction past the filler.
+    const auto branch_delta = decoded[0]->branch_offset_bytes();
+    ASSERT_TRUE(branch_delta.has_value());
+    EXPECT_EQ(static_cast<int64_t>(decoded[0]->src_loc()) + sizeof(uint32_t) + *branch_delta,
+              static_cast<int64_t>(decoded[3]->src_loc()))
+        << "the guard must skip exactly the permute and its filler";
   }
-}
-
-// A permute carrying a trailing literal keeps it, and the filler goes after the
-// whole instruction rather than between it and its literal.
-TEST(BinaryTranslatorE2E, Gfx1250AppendsFillerAfterLiteralBearingPermPk16ForA0) {
-  constexpr uint16_t kScalarLiteral = 255;
-  constexpr uint32_t kLiteralPayload = 0x0badf00du;
-  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  const auto permute = gfx1250::build_vop3(gfx1250::kVPermPk16B4U4Vop3,
-                                           {.vdst = 4, .src0 = kScalarLiteral, .src1 = 256 + 12});
-  const auto filler = gfx1250::build_vop1(gfx1250::kVNopVop1);
-  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
-      {permute[0], permute[1], kLiteralPayload, kGfx1250SEndpgm});
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
-  auto result = translator.translate(source);
-  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
-                                                          : result.diagnostics.front().message);
-
-  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_FALSE(translated.text_sections().empty());
-  const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  EXPECT_EQ(out[0], permute[0]);
-  EXPECT_EQ(out[1], permute[1]);
-  EXPECT_EQ(out[2], kLiteralPayload) << "the literal must stay with its instruction";
-  EXPECT_EQ(out[3], filler[0]);
-  EXPECT_EQ(out[4], kGfx1250SEndpgm);
 }
 
 // A distinguishable successor shows the filler is inserted before it rather
@@ -12491,14 +12502,188 @@ TEST(BinaryTranslatorE2E, Gfx1250KeepsExistingSuccessorAfterPermPk16FillerForA0)
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_FALSE(translated.text_sections().empty());
   const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  EXPECT_EQ(out[2], filler[0]) << "the filler takes the slot after the permute";
-  EXPECT_EQ(out[3], successor[0]) << "the original follower must be kept";
-  EXPECT_EQ(out[4], kGfx1250SEndpgm);
+  EXPECT_EQ(out[3], filler[0]) << "the filler takes the slot after the permute";
+  EXPECT_EQ(out[4], successor[0]) << "the original follower must be kept";
+  EXPECT_EQ(out[5], kGfx1250SEndpgm);
+
+  // The skipped span must end on the original follower, not short of it.
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_GE(decoded.size(), 4u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_cbranch_execz");
+  EXPECT_EQ(decoded[3]->mnemonic(), "v_mov_b32_e32");
+  const auto branch_delta = decoded[0]->branch_offset_bytes();
+  ASSERT_TRUE(branch_delta.has_value());
+  EXPECT_EQ(static_cast<int64_t>(decoded[0]->src_loc()) + sizeof(uint32_t) + *branch_delta,
+            static_cast<int64_t>(decoded[3]->src_loc()))
+      << "the guard must land on the original follower";
 }
 
-// A permute whose slot is already filled is left alone, so a second pass over
+// A permute already in the guarded shape is left alone, so a second pass over
 // translated text produces the same bytes.
-TEST(BinaryTranslatorE2E, Gfx1250PermPk16FillerIsStableOnSecondPassForA0) {
+// Inserting the guard and filler grows the text, so any branch spanning the
+// permute has to be repaired. A back edge must re-enter at the guard rather than
+// at the permute, or the body would run once with an unchecked mask.
+TEST(BinaryTranslatorE2E, Gfx1250RepairsLoopBackEdgeAroundGuardedPermPk16ForA0) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto permute = gfx1250::build_vop3(gfx1250::kVPermPk16B4U4Vop3,
+                                           {.vdst = 4, .src0 = 256 + 8, .src1 = 256 + 10});
+  // Branch back three dwords from the instruction after it, landing on the
+  // permute: [permute lo, permute hi, back edge] is the loop body.
+  const auto back_edge =
+      gfx1250::build_sopp(gfx1250::kSCbranchExecnzSopp, {.simm16 = static_cast<uint16_t>(-3)});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {permute[0], permute[1], back_edge[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  // Pin the inserted sequence, not just the back edge: without these the rule
+  // could decline the input entirely and the retarget check would still hold,
+  // because decoded[0] would be the pre-existing branch.
+  ASSERT_GE(decoded.size(), 4u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_cbranch_execz") << "the guard heads the loop body";
+  EXPECT_TRUE(decoded[1]->mnemonic().starts_with("v_perm_pk16_"));
+  EXPECT_EQ(decoded[2]->mnemonic(), "v_nop_e32") << "the rule must have inserted its own filler";
+
+  const rocjitsu::Instruction *edge = nullptr;
+  for (const auto &inst : decoded) {
+    if (inst->mnemonic() == "s_cbranch_execnz")
+      edge = inst.get();
+  }
+  ASSERT_NE(edge, nullptr);
+  const auto delta = edge->branch_offset_bytes();
+  ASSERT_TRUE(delta.has_value());
+  EXPECT_EQ(static_cast<int64_t>(edge->src_loc()) + sizeof(uint32_t) + *delta,
+            static_cast<int64_t>(decoded[0]->src_loc()))
+      << "the back edge must re-enter at the guard, not inside the guarded body";
+}
+
+// A guard already present but not in this rule's exact shape is not recognized,
+// so the rule wraps its own. The pre-existing branch must still reach what it
+// originally skipped once the text has grown.
+TEST(BinaryTranslatorE2E, Gfx1250RepairsNoncanonicalGuardAroundPermPk16ForA0) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto permute = gfx1250::build_vop3(gfx1250::kVPermPk16B4U4Vop3,
+                                           {.vdst = 4, .src0 = 256 + 8, .src1 = 256 + 10});
+  // Skips the two permute dwords only, so it is not the encoding this rule emits.
+  const auto existing = gfx1250::build_sopp(gfx1250::kSCbranchExeczSopp, {.simm16 = 2});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {existing[0], permute[0], permute[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_GE(decoded.size(), 2u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_cbranch_execz");
+
+  const auto delta = decoded[0]->branch_offset_bytes();
+  ASSERT_TRUE(delta.has_value());
+  const int64_t target = static_cast<int64_t>(decoded[0]->src_loc()) + sizeof(uint32_t) + *delta;
+  EXPECT_EQ(target, static_cast<int64_t>(decoded.back()->src_loc()))
+      << "the pre-existing branch must still land past the permute it skipped";
+  EXPECT_EQ(decoded.back()->mnemonic(), "s_endpgm");
+}
+
+// The guard is recognized as the preceding word, so a literal payload equal to
+// its encoding would masquerade as one and suppress the rewrite. Only a real
+// branch ends a block, so the permute must also start one for the match to
+// stand.
+TEST(BinaryTranslatorE2E, Gfx1250GuardsPermPk16AfterLiteralMatchingGuardEncodingForA0) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint16_t kScalarLiteral = 255;
+  const auto permute =
+      gfx1250::build_vop3(gfx1250::kVPermPk16B4U4Vop3, {.vdst = 4, .src0 = 256 + 8});
+  const auto filler = gfx1250::build_vop1(gfx1250::kVNopVop1);
+  // The payload is the exact guard this rule emits for a two-dword permute, and
+  // it lands in the word directly before one.
+  const auto guard = gfx1250::build_sopp(gfx1250::kSCbranchExeczSopp, {.simm16 = 3});
+  const auto carrier = gfx1250::build_vop3(gfx1250::kVAddF32Vop3,
+                                           {.vdst = 2, .src0 = kScalarLiteral, .src1 = 256 + 1});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {carrier[0], carrier[1], guard[0], permute[0], permute[1], filler[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  const auto permute_at = std::ranges::find_if(
+      decoded, [](const auto &inst) { return inst->mnemonic().starts_with("v_perm_pk16_"); });
+  ASSERT_NE(permute_at, decoded.end());
+  ASSERT_NE(permute_at, decoded.begin());
+  EXPECT_EQ((*std::prev(permute_at))->mnemonic(), "s_cbranch_execz")
+      << "a literal that merely looks like the guard must not suppress the rewrite";
+}
+
+// A source v_nop already in the slot is the filler, so the rule must adopt it
+// rather than append a second one: the contract is exactly one claimed slot.
+TEST(BinaryTranslatorE2E, Gfx1250AdoptsExistingVNopAsPermPk16FillerForA0) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto permute =
+      gfx1250::build_vop3(gfx1250::kVPermPk16B4U4Vop3, {.vdst = 4, .src0 = 256 + 8});
+  const auto filler = gfx1250::build_vop1(gfx1250::kVNopVop1);
+  const auto guard = gfx1250::build_sopp(gfx1250::kSCbranchExeczSopp, {.simm16 = 3});
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {permute[0], permute[1], filler[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  const auto *out = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  const size_t count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+  ASSERT_GE(count, 5u);
+  EXPECT_EQ(out[0], guard[0]) << "the guard is still added, because none was present";
+  EXPECT_EQ(out[1], permute[0]);
+  EXPECT_EQ(out[2], permute[1]);
+  EXPECT_EQ(out[3], filler[0]);
+  EXPECT_EQ(out[4], kGfx1250SEndpgm) << "the source v_nop must serve as the filler, not be doubled";
+
+  // The guard still has to skip the whole sequence, adopted filler included.
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_GE(decoded.size(), 4u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_cbranch_execz");
+  EXPECT_EQ(decoded[3]->mnemonic(), "s_endpgm");
+  const auto delta = decoded[0]->branch_offset_bytes();
+  ASSERT_TRUE(delta.has_value());
+  EXPECT_EQ(static_cast<int64_t>(decoded[0]->src_loc()) + sizeof(uint32_t) + *delta,
+            static_cast<int64_t>(decoded[3]->src_loc()));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250PermPk16GuardIsStableOnSecondPassForA0) {
   const auto permute =
       gfx1250::build_vop3(gfx1250::kVPermPk16B4U4Vop3, {.vdst = 4, .src0 = 256 + 8});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -12524,7 +12709,7 @@ TEST(BinaryTranslatorE2E, Gfx1250PermPk16FillerIsStableOnSecondPassForA0) {
     if (pass == 0)
       first_pass = words;
     else
-      EXPECT_EQ(words, first_pass) << "the second pass must not add another filler";
+      EXPECT_EQ(words, first_pass) << "the second pass must not add another guard or filler";
     current = result.elf_bytes;
   }
 }
