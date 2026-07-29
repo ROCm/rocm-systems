@@ -230,17 +230,17 @@ analysis options are available to accommodate different workflows.
     - Links to docs
   * - :doc:`CLI (Command Line Interface) </how-to/analyze/cli>`
     - Fast, scriptable insights; great for automation and quick checks.
-    - `CLI analysis <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst>`_
+    - :doc:`CLI analysis </how-to/analyze/cli>`
   * - :doc:`GUI (Standalone Graphical Interface) </how-to/analyze/standalone-gui>`
     - Interactive exploration, visual drill-down, and detailed charts.
-    - `Standalone GUI analysis <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/standalone-gui.rst>`_
+    - :doc:`Standalone GUI analysis </how-to/analyze/standalone-gui>`
   * - :doc:`TUI (Textual User Interface) </how-to/analyze/tui>`
     - Lightweight, keyboard-driven experience for terminals.
-    - `Text-based User Interface (TUI) analysis <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/tui.rst>`_
-  * - :doc:`ROCm Optiq (Beta) </how-to/analyze/optiq>`
+    - :doc:`Text-based User Interface (TUI) analysis </how-to/analyze/tui>`
+  * - :doc:`ROCm Optiq </how-to/analyze/optiq>`
     - Interactive graphical exploration of generated ROCm Compute Profiler
-      analysis databases in a separate application.
-    - `ROCm Optiq (Beta) <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/optiq.rst>`_
+      analysis databases.
+    - :doc:`ROCm Optiq analysis </how-to/analyze/optiq>`
 
 **Analysis Command:**
 
