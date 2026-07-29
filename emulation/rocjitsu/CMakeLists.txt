@@ -427,8 +427,11 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # The translator ships alongside the hook: both must resolve to the SAME
+    # shared object, or the cache identity they derive from it would differ and
+    # neither could read what the other wrote.
     install(
-        TARGETS hsa_hotswap_rocjitsu
+        TARGETS hsa_hotswap_rocjitsu rocjitsu_gfx1250_b0_to_a0
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()

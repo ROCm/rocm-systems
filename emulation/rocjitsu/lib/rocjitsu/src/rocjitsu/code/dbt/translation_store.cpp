@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file hooks/translation_disk_cache.cpp
-/// @brief Session-scoped store for translated gfx1250 code objects.
+/// @file dbt/translation_store.cpp
+/// @brief Session-scoped store for translated code objects.
 
-#include "rocjitsu/hooks/translation_disk_cache.h"
+#include "rocjitsu/code/dbt/translation_store.h"
 
 #include <algorithm>
 #include <atomic>
@@ -18,7 +18,6 @@
 #include <utility>
 
 #include <dirent.h>
-#include <dlfcn.h>
 #include <elf.h>
 #include <fcntl.h>
 #include <link.h>
@@ -27,7 +26,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-namespace rocjitsu::hotswap {
+namespace rocjitsu {
 namespace {
 
 /// @brief Bumped by hand to invalidate every entry a deployment already holds.
@@ -201,30 +200,46 @@ struct Sha256 {
 // Build identity
 // ---------------------------------------------------------------------------
 
-/// @brief GNU build identity of this shared object.
+/// @brief GNU build identity of the object holding this code.
 ///
 /// @details The linker derives it from object content, so any rebuild that
 /// changes emitted bytes changes it without anyone having to remember. That is
 /// the property the store depends on to never serve an entry produced by a
 /// different translator. Returns empty when the note is absent, which disables
 /// the store rather than falling back to a weaker identity.
-[[nodiscard]] std::string read_own_build_id() {
-  Dl_info info{};
-  if (dladdr(reinterpret_cast<const void *>(&read_own_build_id), &info) == 0 ||
-      info.dli_fbase == nullptr) {
-    return {};
-  }
-
+///
+/// The object is identified by the loaded segment that contains @p address
+/// rather than by comparing load bases, because a load base only equals the
+/// iterator's reported address for a position-independent object. Whether a
+/// consumer is a shared library or a non-relocatable executable is not something
+/// this component should care about.
+///
+/// Probing by a caller-supplied address rather than by this function's own is
+/// what lets the key name the TRANSLATOR instead of whichever binary happens to
+/// embed the store. Two programs calling the same translator derive the same id
+/// and so agree on keys; one linking a different build of it derives a different
+/// id and simply misses.
+[[nodiscard]] std::string read_build_id_of(const void *address) {
   struct Query {
-    const void *base;
+    const uint8_t *self;
     std::string result;
-  } query{info.dli_fbase, {}};
+  } query{static_cast<const uint8_t *>(address), {}};
 
   dl_iterate_phdr(
       [](struct dl_phdr_info *phdr_info, size_t, void *data) -> int {
         auto *q = static_cast<Query *>(data);
-        if (reinterpret_cast<const void *>(phdr_info->dlpi_addr) != q->base)
+        bool holds_self = false;
+        for (int i = 0; i < phdr_info->dlpi_phnum && !holds_self; ++i) {
+          const ElfW(Phdr) &segment = phdr_info->dlpi_phdr[i];
+          if (segment.p_type != PT_LOAD)
+            continue;
+          const auto *begin =
+              reinterpret_cast<const uint8_t *>(phdr_info->dlpi_addr + segment.p_vaddr);
+          holds_self = q->self >= begin && q->self < begin + segment.p_memsz;
+        }
+        if (!holds_self)
           return 0;
+
         for (int i = 0; i < phdr_info->dlpi_phnum; ++i) {
           const ElfW(Phdr) &segment = phdr_info->dlpi_phdr[i];
           if (segment.p_type != PT_NOTE)
@@ -306,11 +321,26 @@ struct Entry {
   time_t used = 0;
 };
 
-class Store {
-public:
-  static Store &instance() {
-    static Store store;
-    return store;
+/// @brief True when @p domain names exactly one directory beneath the root.
+///
+/// @details The domain reaches a path, so a caller that passed a separator or a
+/// traversal component could place entries outside the verified directory. It is
+/// a compile-time constant at every call site today, which is why rejecting it
+/// outright is preferable to sanitising it.
+[[nodiscard]] bool is_single_path_component(std::string_view domain) {
+  return !domain.empty() && domain != "." && domain != ".." &&
+         domain.find('/') == std::string_view::npos;
+}
+
+} // namespace
+
+struct TranslationStore::Impl {
+  Impl(std::string_view domain, const void *translator)
+      : domain_(domain), translator_(translator) {}
+
+  ~Impl() {
+    if (dir_fd_ >= 0)
+      close(dir_fd_);
   }
 
   [[nodiscard]] bool available() {
@@ -330,7 +360,7 @@ public:
   void store(const std::string &key, std::span<const uint8_t> object,
              const TranslationIdentity &identity);
 
-#if defined(RJ_HOTSWAP_TEST_HOOKS)
+#if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
   void set_root_for_test(const char *root) {
     std::lock_guard lock(mutex_);
     if (dir_fd_ >= 0)
@@ -364,22 +394,23 @@ public:
   }
 #endif
 
-private:
   void ensure_open_locked() {
     if (opened_)
       return;
     opened_ = true;
-    build_id_ = read_own_build_id();
+    if (!is_single_path_component(domain_))
+      return;
+    build_id_ = read_build_id_of(translator_);
     if (build_id_.empty())
       return; // No stable identity: refuse to key on anything weaker.
 
     std::string base;
-#if defined(RJ_HOTSWAP_TEST_HOOKS)
+#if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
     base = root_override_.empty() ? runtime_dir() : root_override_;
 #else
     base = runtime_dir();
 #endif
-    const std::string path = base + "/gfx1250-b0-a0/" + std::string(kSchemaDir);
+    const std::string path = base + "/" + domain_ + "/" + std::string(kSchemaDir);
     if (!make_directory_path(path))
       return;
     dir_fd_ = open_verified_directory(path);
@@ -394,18 +425,23 @@ private:
   void sweep_abandoned_locked() const;
 
   [[nodiscard]] uint64_t headroom_locked() const {
-#if defined(RJ_HOTSWAP_TEST_HOOKS)
+#if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
     if (headroom_override_ != 0)
       return headroom_override_;
 #endif
     return kHeadroomBytes;
   }
 
+  const std::string domain_;
+  // An address inside the translator whose output these entries are. Its module's
+  // build id becomes part of every key, so the entries name what produced them
+  // rather than whichever binary happened to be running.
+  const void *const translator_;
   std::mutex mutex_;
   bool opened_ = false;
   int dir_fd_ = -1;
   std::string build_id_;
-#if defined(RJ_HOTSWAP_TEST_HOOKS)
+#if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
   std::string root_override_;
   uint64_t capacity_override_ = 0;
   uint64_t headroom_override_ = 0;
@@ -413,7 +449,7 @@ private:
 #endif
 };
 
-std::vector<Entry> Store::scan_locked() const {
+std::vector<Entry> TranslationStore::Impl::scan_locked() const {
   std::vector<Entry> entries;
   if (dir_fd_ < 0)
     return entries;
@@ -438,7 +474,7 @@ std::vector<Entry> Store::scan_locked() const {
   return entries;
 }
 
-void Store::sweep_abandoned_locked() const {
+void TranslationStore::Impl::sweep_abandoned_locked() const {
   if (dir_fd_ < 0)
     return;
   const int scan_fd = openat(dir_fd_, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
@@ -462,7 +498,7 @@ void Store::sweep_abandoned_locked() const {
   closedir(dir);
 }
 
-uint64_t Store::capacity_locked() const {
+uint64_t TranslationStore::Impl::capacity_locked() const {
   struct statvfs vfs {};
   if (dir_fd_ < 0 || fstatvfs(dir_fd_, &vfs) != 0)
     return 0;
@@ -472,7 +508,7 @@ uint64_t Store::capacity_locked() const {
   // that protects the rest of the runtime directory rather than the store.
   if (free_now < headroom_locked())
     return 0;
-#if defined(RJ_HOTSWAP_TEST_HOOKS)
+#if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
   if (capacity_override_ != 0)
     return capacity_override_;
 #endif
@@ -482,7 +518,7 @@ uint64_t Store::capacity_locked() const {
   return cap;
 }
 
-bool Store::reserve_space_locked(uint64_t needed) {
+bool TranslationStore::Impl::reserve_space_locked(uint64_t needed) {
   const uint64_t cap = capacity_locked();
   if (cap == 0 || needed > cap / kMaxEntryDivisor)
     return false;
@@ -510,6 +546,8 @@ bool Store::reserve_space_locked(uint64_t needed) {
   }
   return used + needed <= cap;
 }
+
+namespace {
 
 /// @brief Serialise the fields a reader re-checks before trusting an object.
 [[nodiscard]] std::string build_manifest(const std::string &key, std::span<const uint8_t> object,
@@ -605,7 +643,10 @@ bool Store::reserve_space_locked(uint64_t needed) {
   return true;
 }
 
-std::vector<uint8_t> Store::lookup(const std::string &key, const TranslationIdentity &identity) {
+} // namespace
+
+std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
+                                                    const TranslationIdentity &identity) {
   std::lock_guard lock(mutex_);
   ensure_open_locked();
   if (dir_fd_ < 0)
@@ -652,14 +693,14 @@ std::vector<uint8_t> Store::lookup(const std::string &key, const TranslationIden
   const timespec now[2] = {{0, UTIME_NOW}, {0, UTIME_NOW}};
   (void)utimensat(dir_fd_, object_name.c_str(), now, AT_SYMLINK_NOFOLLOW);
 
-#if defined(RJ_HOTSWAP_TEST_HOOKS)
+#if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
   ++hits_;
 #endif
   return std::vector<uint8_t>(object->begin(), object->end());
 }
 
-void Store::store(const std::string &key, std::span<const uint8_t> object,
-                  const TranslationIdentity &identity) {
+void TranslationStore::Impl::store(const std::string &key, std::span<const uint8_t> object,
+                                   const TranslationIdentity &identity) {
   std::lock_guard lock(mutex_);
   ensure_open_locked();
   if (dir_fd_ < 0 || object.empty())
@@ -677,14 +718,18 @@ void Store::store(const std::string &key, std::span<const uint8_t> object,
     unlinkat(dir_fd_, (key + ".man").c_str(), 0);
 }
 
-} // namespace
+TranslationStore::TranslationStore(std::string_view domain, const void *translator)
+    : impl_(std::make_unique<Impl>(domain, translator)) {}
 
-CacheKey cache_key_for(std::span<const uint8_t> source, const TranslationIdentity &identity) {
+TranslationStore::~TranslationStore() = default;
+
+CacheKey TranslationStore::key_for(std::span<const uint8_t> source,
+                                   const TranslationIdentity &identity) {
   CacheKey key;
   if (source.empty())
     return key;
-  const std::string build_id = Store::instance().build_id();
-  if (build_id.empty() || !Store::instance().available())
+  const std::string build_id = impl_->build_id();
+  if (build_id.empty() || !impl_->available())
     return key;
 
   Sha256 hash;
@@ -702,25 +747,30 @@ CacheKey cache_key_for(std::span<const uint8_t> source, const TranslationIdentit
   return key;
 }
 
-std::vector<uint8_t> cache_lookup(const CacheKey &key, const TranslationIdentity &identity) {
+std::vector<uint8_t> TranslationStore::lookup(const CacheKey &key,
+                                              const TranslationIdentity &identity) {
   if (!key.valid)
     return {};
-  return Store::instance().lookup(to_hex(key.digest), identity);
+  return impl_->lookup(to_hex(key.digest), identity);
 }
 
-void cache_store(const CacheKey &key, std::span<const uint8_t> translated,
-                 const TranslationIdentity &identity) {
+void TranslationStore::store(const CacheKey &key, std::span<const uint8_t> translated,
+                             const TranslationIdentity &identity) {
   if (!key.valid || translated.empty())
     return;
-  Store::instance().store(to_hex(key.digest), translated, identity);
+  impl_->store(to_hex(key.digest), translated, identity);
 }
 
-#if defined(RJ_HOTSWAP_TEST_HOOKS)
-void set_cache_root_for_test(const char *root) { Store::instance().set_root_for_test(root); }
-uint64_t cache_size_for_test() { return Store::instance().size_for_test(); }
-uint64_t cache_hits_for_test() { return Store::instance().hits_for_test(); }
-void set_cache_capacity_for_test(uint64_t bytes) { Store::instance().set_capacity_for_test(bytes); }
-void set_cache_headroom_for_test(uint64_t bytes) { Store::instance().set_headroom_for_test(bytes); }
+#if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
+void TranslationStore::set_root_for_test(const char *root) { impl_->set_root_for_test(root); }
+uint64_t TranslationStore::size_for_test() { return impl_->size_for_test(); }
+uint64_t TranslationStore::hits_for_test() { return impl_->hits_for_test(); }
+void TranslationStore::set_capacity_for_test(uint64_t bytes) {
+  impl_->set_capacity_for_test(bytes);
+}
+void TranslationStore::set_headroom_for_test(uint64_t bytes) {
+  impl_->set_headroom_for_test(bytes);
+}
 #endif
 
-} // namespace rocjitsu::hotswap
+} // namespace rocjitsu

@@ -15,8 +15,8 @@
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/code_object_identity.h"
+#include "rocjitsu/code/dbt/translation_store.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
-#include "rocjitsu/hooks/translation_disk_cache.h"
 
 #include <algorithm>
 #include <atomic>
@@ -48,11 +48,9 @@ using VendorReaderCreate = hsa_status_t (*)(hsa_file_t, size_t, size_t, hsa_code
 
 constexpr uint32_t kAmdAgentInfoAsicRevision = 0xA012;
 
-using rocjitsu::hotswap::cache_key_for;
-using rocjitsu::hotswap::cache_lookup;
-using rocjitsu::hotswap::cache_store;
-using rocjitsu::hotswap::CacheKey;
-using rocjitsu::hotswap::TranslationIdentity;
+using rocjitsu::CacheKey;
+using rocjitsu::TranslationIdentity;
+using rocjitsu::TranslationStore;
 
 /// @brief The single configuration this hook translates under.
 ///
@@ -66,6 +64,22 @@ constexpr TranslationIdentity kTranslationIdentity{
     .output_revision = 0,
     .target_isa = "gfx1250",
 };
+
+/// @brief This hook's entries, kept apart from any other consumer's.
+///
+/// @details Constructed on first use and never destroyed, matching the rest of
+/// this hook's state: the store may be consulted from a load that arrives after
+/// static destructors would otherwise have run.
+///
+/// The store is told which translator produced its entries by being handed an
+/// address inside it. Naming the translator rather than this library is what lets
+/// a translation performed by another program -- one done ahead of time, before
+/// this process existed -- be found here.
+TranslationStore &translation_store() {
+  static TranslationStore &store = *new TranslationStore(
+      "gfx1250-b0-a0", reinterpret_cast<const void *>(&rj_gfx1250_b0_to_a0_translate_with_info));
+  return store;
+}
 
 // Minimal mirror through the sole AMD loader entry intercepted by this hook.
 struct VendorLoaderTable {
@@ -1225,10 +1239,10 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     // Only a load this process has not already answered reaches the store, which
     // is what keeps its cost off the repeat path: a digest over the whole source
     // and a file read, once per distinct object rather than once per load.
-    const CacheKey cache_key = cache_key_for(*source, kTranslationIdentity);
+    const CacheKey cache_key = translation_store().key_for(*source, kTranslationIdentity);
     // Adopting the store's buffer rather than copying it again keeps a hit to one
     // allocation; the bytes have already been read once.
-    std::vector<uint8_t> cached = cache_lookup(cache_key, kTranslationIdentity);
+    std::vector<uint8_t> cached = translation_store().lookup(cache_key, kTranslationIdentity);
     const size_t cached_size = cached.size();
     if (Blob reused = adopt_bytes(std::move(cached)); reused != nullptr) {
       // Remember what the store gave us. Without this, every later load of these
@@ -1274,7 +1288,7 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
 
     translation.output = copy_bytes(translated_data, translated_size);
     // Offer it to the next process before the translator's buffer is released.
-    cache_store(cache_key, {translated_data, translated_size}, kTranslationIdentity);
+    translation_store().store(cache_key, {translated_data, translated_size}, kTranslationIdentity);
     rj_gfx1250_b0_to_a0_free(translated_data);
     if (translation.output == nullptr) {
       // Deliberately NOT remembered: running out of memory says nothing about
@@ -1505,23 +1519,23 @@ extern "C" RJ_HOOK_EXPORT void rj_test_log_translation(uint64_t source_id, size_
 // wants an isolated store, a known capacity, or the current occupancy has no
 // other way to ask.
 extern "C" RJ_HOOK_EXPORT void rj_test_set_cache_root(const char *root) {
-  rocjitsu::hotswap::set_cache_root_for_test(root);
+  translation_store().set_root_for_test(root);
 }
 
 extern "C" RJ_HOOK_EXPORT uint64_t rj_test_cache_size() {
-  return rocjitsu::hotswap::cache_size_for_test();
+  return translation_store().size_for_test();
 }
 
 extern "C" RJ_HOOK_EXPORT uint64_t rj_test_cache_hits() {
-  return rocjitsu::hotswap::cache_hits_for_test();
+  return translation_store().hits_for_test();
 }
 
 extern "C" RJ_HOOK_EXPORT void rj_test_set_cache_capacity(uint64_t bytes) {
-  rocjitsu::hotswap::set_cache_capacity_for_test(bytes);
+  translation_store().set_capacity_for_test(bytes);
 }
 
 extern "C" RJ_HOOK_EXPORT void rj_test_set_cache_headroom(uint64_t bytes) {
-  rocjitsu::hotswap::set_cache_headroom_for_test(bytes);
+  translation_store().set_headroom_for_test(bytes);
 }
 
 // Test-only: drive the store with an identity of the caller's choosing. The hook
@@ -1533,8 +1547,8 @@ extern "C" RJ_HOOK_EXPORT void rj_test_cache_store(uint32_t profile, uint32_t in
                                                    const void *object, size_t object_size) {
   const TranslationIdentity identity{profile, input_revision, output_revision, isa};
   const std::span<const uint8_t> source_bytes(static_cast<const uint8_t *>(source), source_size);
-  cache_store(cache_key_for(source_bytes, identity),
-              {static_cast<const uint8_t *>(object), object_size}, identity);
+  translation_store().store(translation_store().key_for(source_bytes, identity),
+                            {static_cast<const uint8_t *>(object), object_size}, identity);
 }
 
 /// Returns the stored size, or 0 on a miss. Copies at most out_capacity bytes.
@@ -1544,7 +1558,8 @@ extern "C" RJ_HOOK_EXPORT size_t rj_test_cache_lookup(uint32_t profile, uint32_t
                                                       void *out, size_t out_capacity) {
   const TranslationIdentity identity{profile, input_revision, output_revision, isa};
   const std::span<const uint8_t> source_bytes(static_cast<const uint8_t *>(source), source_size);
-  const std::vector<uint8_t> found = cache_lookup(cache_key_for(source_bytes, identity), identity);
+  const std::vector<uint8_t> found =
+      translation_store().lookup(translation_store().key_for(source_bytes, identity), identity);
   if (!found.empty() && out != nullptr)
     std::memcpy(out, found.data(), std::min(found.size(), out_capacity));
   return found.size();
