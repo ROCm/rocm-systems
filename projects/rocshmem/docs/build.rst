@@ -137,12 +137,11 @@ Memory allocator options
 rocSHMEM provides several GPU memory allocator options that control how the symmetric heap is allocated.
 The allocator is selected at runtime via the ``ROCSHMEM_HEAP_ALLOCATOR_TYPE`` environment variable:
 
-* **finegrained**: GPU memory with fine-grained coherency. Provides CPU access to GPU memory with cache coherency.
-  This is the default on gfx1100 and gfx1201 architectures.
+* **finegrained** (default): GPU memory with fine-grained coherency. Provides CPU access to GPU memory with cache coherency.
 
 * **coarsegrained**: GPU memory with coarse-grained coherency. Better performance for GPU-only access patterns.
 
-* **uncached** (default on most architectures): GPU memory in uncached mode. May provide better performance on some architectures.
+* **uncached**: GPU memory in uncached mode. May provide better performance on some architectures.
 
 * **vmm_posix**: GPU memory using Virtual Memory Management (VMM) with POSIX file descriptor-based IPC (requires ROCm 7.2+).
   This allocator uses advanced HIP VMM APIs (``hipMemCreate``, ``hipMemAddressReserve``, ``hipMemMap``) and

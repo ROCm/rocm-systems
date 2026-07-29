@@ -26,7 +26,6 @@
 #define LIBRARY_SRC_MEMORY_DEFAULT_ALLOCATOR_HPP_
 
 #include <algorithm>
-#include <cstring>
 #include <string>
 
 #include <hip/hip_runtime_api.h>
@@ -40,38 +39,17 @@ namespace rocshmem {
 
   static void set_default_allocator()
   {
-    int hip_dev_id{};
-    hipError_t err = hipGetDevice(&hip_dev_id);
-    if (err != hipSuccess) {
-      LOG_ERROR_ABORT("Could not get current device. Aborting");
-    }
-
-    char arch_name[256];
-    hipDeviceProp_t prop;
-    err = hipGetDeviceProperties(&prop, hip_dev_id);
-    if (err != hipSuccess) {
-      LOG_ERROR_ABORT("Could not get device properties. Aborting");
-    }
-    strncpy(arch_name, prop.gcnArchName, sizeof(arch_name) - 1);
-    arch_name[sizeof(arch_name) - 1] = '\0';
-
-    // Arch-based default: finegrained for RDNA3/RDNA4 (gfx1100, gfx1201),
-    // uncached for everything else.
-    bool arch_wants_finegrained =
-        (strncmp(arch_name, "gfx1100", strlen("gfx1100")) == 0 ||
-         strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0);
-
     std::string requested = envvar::heap_allocator_type.get_value();
     // Normalise to lower-case for case-insensitive matching.
     std::transform(requested.begin(), requested.end(), requested.begin(), ::tolower);
 
     // Resolve the effective allocator type.
-    // Priority: envvar > arch default.
+    // Priority: envvar > default (finegrained).
     enum class AllocChoice { finegrained, coarsegrained, uncached, vmm_posix, vmm_fabric };
     AllocChoice choice;
 
     if (requested.empty()) {
-      choice = arch_wants_finegrained ? AllocChoice::finegrained : AllocChoice::uncached;
+      choice = AllocChoice::finegrained;
     } else if (requested == "finegrained") {
       choice = AllocChoice::finegrained;
     } else if (requested == "coarsegrained") {
