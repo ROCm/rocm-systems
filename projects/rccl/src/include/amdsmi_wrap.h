@@ -487,6 +487,24 @@ static_assert(offsetof(amdsmi_fabric_info_t, reserved) == 256, "amdsmi fabric pa
 #define AMDSMI_FABRIC_INFO_VERSION_1 1
 #define AMDSMI_FABRIC_INFO_CURRENT_VERSION AMDSMI_FABRIC_INFO_VERSION_1
 
+// Sentinel amd_smi leaves in numeric fabric fields it could not source from sysfs
+constexpr uint32_t kAmdSmiFabricVersionUnreported = 0xFFFFFFFFu;
+
+// amd_smi never populates amdsmi_fabric_info_t's version field, so an unreported value
+// has to be read as v1 rather than as a reason to discard an otherwise valid payload.
+// A version the library does claim, but that we cannot interpret, is still refused.
+inline bool amdSmiFabricVersionUsable(uint32_t version) {
+  return version == kAmdSmiFabricVersionUnreported || version == AMDSMI_FABRIC_INFO_CURRENT_VERSION;
+}
+
+// Fabric is usable only over a link type we drive, and only once the accelerator has
+// reached a state where its vPoD can carry traffic.
+inline bool amdSmiFabricStateUsable(amdsmi_fabric_type_t type, amdsmi_fabric_accelerator_vpod_state_t state) {
+  return (type == AMDSMI_FABRIC_TYPE_UALOE || type == AMDSMI_FABRIC_TYPE_UALLINK) &&
+         (state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
+          state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
+}
+
 struct amdsmiFabricDeviceInfo {
   bool fabricSupported; //!< Whether UALoE fabric is available
   amdsmi_fabric_type_t fabricType; //!< Fabric type (UALOE or UALLINK)

@@ -428,6 +428,46 @@ if(BUILD_TESTS)
     endif()
   endif()
 
+  # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
+  #
+  # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
+  # amdsmi_wrap.h. Those are header-inline, so they need no librccl.so symbols and
+  # run in both Release and Debug.
+  #
+  # AmdSmiWrapTests.cpp drives the amd_smi_* API itself, so it needs symbols that
+  # src/CMakeLists.txt only exports under -fvisibility=default in Debug. Adding it
+  # in Release would fail to link, so it joins the target only where they exist.
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsAmdSmi)
+
+    # main_altrsmi.cpp is a plain InitGoogleTest/RUN_ALL_TESTS entry point, reused here.
+    set(TEST_AMDSMI_SOURCE_FILES
+      AmdSmiFabricTests.cpp
+      common/main_altrsmi.cpp
+    )
+
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+      list(APPEND TEST_AMDSMI_SOURCE_FILES
+        AmdSmiWrapTests.cpp
+        common/ProcessIsolatedTestRunner.cpp
+      )
+    endif()
+
+    add_executable(rccl-UnitTestsAmdSmi ${TEST_AMDSMI_SOURCE_FILES})
+
+    # amdsmi_wrap.h needs both halves of this pairing: the include path so its
+    # __has_include finds amdsmi, and AMDSMI_FABRIC_DIRECT, which is PRIVATE to the
+    # rccl target and so does not reach test TUs. With the headers reachable but the
+    # define absent, the header's fabric compat block compiles on top of the real
+    # declarations and every fabric type collides.
+    if(DEFINED SMI_INCLUDE_DIR)
+      target_include_directories(rccl-UnitTestsAmdSmi PRIVATE ${SMI_INCLUDE_DIR})
+    endif()
+    if(AMDSMI_FABRIC_API)
+      target_compile_definitions(rccl-UnitTestsAmdSmi PRIVATE AMDSMI_FABRIC_DIRECT)
+    endif()
+  endif()
+
   # Create separate MPI test binary if MPI tests are enabled
   if(ENABLE_MPI_TESTS)
     set(MPI_TEST_SOURCE_FILES
@@ -616,6 +656,19 @@ if(BUILD_TESTS)
             )
         else()
             message(WARNING "Skipping test categories for rccl-UnitTestsAltRsmi: missing ${_rccl_test_categories_altrsmi_yaml}")
+        endif()
+
+        set(_rccl_test_categories_amdsmi_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_amdsmi.yaml")
+        if(EXISTS "${_rccl_test_categories_amdsmi_yaml}")
+            message(STATUS "Applying test categories for rccl-UnitTestsAmdSmi")
+            apply_test_category_labels(
+                rccl-UnitTestsAmdSmi
+                "${_rccl_test_categories_amdsmi_yaml}"
+                "${PROJECT_BINARY_DIR}"
+                "${INSTALL_TEST_FILE}"
+            )
+        else()
+            message(WARNING "Skipping test categories for rccl-UnitTestsAmdSmi: missing ${_rccl_test_categories_amdsmi_yaml}")
         endif()
     endif()
 

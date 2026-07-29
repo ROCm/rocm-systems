@@ -128,8 +128,6 @@ int amdsmiFabricDeviceCount = 0;
 struct amdsmiFabricDeviceInfo amdsmiFabricDevices[amdsmiFabricMaxDevices];
 
 namespace {
-// Sentinel amd_smi leaves in numeric fabric fields it could not read from sysfs
-constexpr uint32_t kAmdSmiFabricVersionUnreported = 0xFFFFFFFFu;
 std::mutex fabricLock; // Thread safety for fabric operations
 bool fabricInitialized = false;
 thread_local bool threadFabricInitialized = false;
@@ -643,20 +641,15 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
         devInfo->fabricSupported = false;
         continue;
       }
-      // amd_smi does not populate version: fields it cannot read keep a sentinel of all-ones,
-      // so treat that as "unreported" and assume v1 rather than discarding valid fabric data.
       const uint32_t fabricVersion = fabricInfo.fabric_version;
-      if (fabricVersion != kAmdSmiFabricVersionUnreported && fabricVersion != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
+      if (!amdSmiFabricVersionUsable(fabricVersion)) {
         WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u", fabricVersion, d,
              AMDSMI_FABRIC_INFO_CURRENT_VERSION);
         devInfo->fabricSupported = false;
         continue;
       }
       const amdsmi_fabric_info_v1_t* v1 = &fabricInfo.fabric_info.v1;
-      devInfo->fabricSupported =
-        ((v1->fabric_type == AMDSMI_FABRIC_TYPE_UALOE || v1->fabric_type == AMDSMI_FABRIC_TYPE_UALLINK) &&
-         (v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
-          v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY));
+      devInfo->fabricSupported = amdSmiFabricStateUsable(v1->fabric_type, v1->accel_state);
       devInfo->fabricType = v1->fabric_type;
       devInfo->state = v1->accel_state;
       devInfo->acceleratorId = v1->accelerator_id;
