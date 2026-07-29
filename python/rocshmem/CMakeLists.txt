@@ -144,6 +144,54 @@ message(STATUS "ROCSHMEM found via find_package: ${rocshmem_DIR}")
 message(STATUS "  ROCSHMEM_INCLUDE_DIRS: ${ROCSHMEM_INCLUDE_DIRS}")
 
 ###############################################################################
+# GPU architecture selection for device code objects
+#
+# rocSHMEM is compiled with relocatable device code (-fgpu-rdc), so the *final*
+# device link that produces GPU code objects happens here, in this extension.
+# Without an explicit --offload-arch, hipcc finalizes device code for a single
+# default architecture (typically gfx942); the resulting wheel then aborts on
+# any other GPU with hipErrorInvalidKernelFile (218). We therefore emit code
+# objects for every architecture the linked rocSHMEM was built for.
+#
+# Default: discover the arches from the installed rocSHMEM device bitcode
+# (<prefix>/lib/librocshmem_device_<arch>.bc) so the wheel matches that rocSHMEM
+# build. Override explicitly with -DROCSHMEM_GPU_TARGETS=gfx942,gfx950,...
+#
+# NOTE: we deliberately use our own ROCSHMEM_GPU_TARGETS cache variable rather
+# than the ambient GPU_TARGETS: find_package(hip) above sets GPU_TARGETS to the
+# *build host's* GPU, which would otherwise silently pin the wheel to a single
+# arch and defeat the auto-detection.
+set(ROCSHMEM_GPU_TARGETS "" CACHE STRING
+    "GPU architectures to emit device code objects for (default: auto-detect from the rocSHMEM install)")
+
+set(_ROCSHMEM_ARCHES "${ROCSHMEM_GPU_TARGETS}")
+if(NOT _ROCSHMEM_ARCHES)
+  get_filename_component(_ROCSHMEM_LIBDIR "${rocshmem_DIR}/../.." ABSOLUTE)
+  file(GLOB _ROCSHMEM_DEVICE_BC "${_ROCSHMEM_LIBDIR}/librocshmem_device_*.bc")
+  foreach(_bc ${_ROCSHMEM_DEVICE_BC})
+    get_filename_component(_bc_name "${_bc}" NAME)
+    string(REGEX REPLACE "^librocshmem_device_(.+)\\.bc$" "\\1" _arch "${_bc_name}")
+    list(APPEND _ROCSHMEM_ARCHES "${_arch}")
+  endforeach()
+endif()
+
+set(_ROCSHMEM_OFFLOAD_FLAGS "")
+if(_ROCSHMEM_ARCHES)
+  string(REPLACE "," ";" _ROCSHMEM_ARCHES "${_ROCSHMEM_ARCHES}")
+  list(REMOVE_DUPLICATES _ROCSHMEM_ARCHES)
+  message(STATUS "rocshmem4py: building device code objects for: ${_ROCSHMEM_ARCHES}")
+  foreach(_arch ${_ROCSHMEM_ARCHES})
+    list(APPEND _ROCSHMEM_OFFLOAD_FLAGS "--offload-arch=${_arch}")
+  endforeach()
+else()
+  message(WARNING
+    "rocshmem4py: could not determine GPU architectures from the rocSHMEM "
+    "install and -DROCSHMEM_GPU_TARGETS was not set; device code will target "
+    "the compiler default only (likely a single arch). Pass "
+    "-DROCSHMEM_GPU_TARGETS=gfx942,gfx950,... to build a portable multi-arch wheel.")
+endif()
+
+###############################################################################
 # Build Extension Module
 ###############################################################################
 
@@ -208,11 +256,13 @@ target_link_libraries(_rocshmem4py PRIVATE
 
 target_compile_options(_rocshmem4py PRIVATE
   -D__HIP_PLATFORM_AMD__
+  ${_ROCSHMEM_OFFLOAD_FLAGS}
 )
 
 target_link_options(_rocshmem4py PRIVATE
   -fgpu-rdc
   --hip-link
+  ${_ROCSHMEM_OFFLOAD_FLAGS}
   -lamdhip64
   -lhsa-runtime64
 )

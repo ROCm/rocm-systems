@@ -55,6 +55,13 @@ class CMakeBuild(build_ext):
             )
         if "ROCSHMEM_HOME" in os.environ:
             cmake_args.append(f'-DROCSHMEM_HOME={os.environ["ROCSHMEM_HOME"]}')
+        # Optional override of the GPU architectures the device code objects are
+        # built for. When unset, CMake auto-detects them from the installed
+        # rocSHMEM device bitcode so the wheel matches that rocSHMEM build.
+        if os.environ.get("ROCSHMEM_GPU_TARGETS"):
+            cmake_args.append(
+                f'-DROCSHMEM_GPU_TARGETS={os.environ["ROCSHMEM_GPU_TARGETS"]}'
+            )
 
         build_args = ["--config", cfg, "--", f"-j{os.cpu_count() or 4}"]
 
