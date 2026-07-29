@@ -362,13 +362,9 @@ def run_prof(
         )
         for db_path in db_paths:
             pid = db_path.stem.split("_")[0]
-            shutil.copyfile(
-                db_path,
-                workload_dir + f"/{fbase}_{pid}.db",
-            )
-            console_warning(
-                f"Retaining large raw rocpd database: {workload_dir}/{fbase}_{pid}.db"
-            )
+            dest = Path(workload_dir) / f"{fbase}_{pid}.db"
+            shutil.copyfile(db_path, dest)
+            console_warning(f"Retaining large raw rocpd database: {dest}")
     # Remove temp directory
     shutil.rmtree(str(out_dir), ignore_errors=True)
 
