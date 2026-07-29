@@ -202,10 +202,10 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
         ),
     ],
 )
-def test_sanitize_pc_sampling_only_rejects_ml_api_trace(
+def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
     tmp_path, filter_blocks, trace_flags, expect_error, expected_frameworks
 ):
-    """ML API tracing is rejected for PC-sampling-only runs and retained when a
+    """ML API tracing flags are rejected for PC-sampling-only runs and retained when a
     counter block is also requested."""
     remaining = _setup_test_files(tmp_path, ["{binary}"], "binary")
     args = _make_sanitize_args(remaining, filter_blocks=filter_blocks, **trace_flags)
