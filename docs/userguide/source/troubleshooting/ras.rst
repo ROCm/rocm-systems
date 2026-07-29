@@ -374,8 +374,8 @@ the graph is recaptured.
 RAS Diagnostics
 ---------------
 
-RAS diagnostics report health indicators and configuration differences across ranks to aid investigation of problems
-in NCCL jobs.
+RAS diagnostics provide a readiness probe for NCCL jobs by checking the selected GPU, CUDA driver, and NCCL
+configuration information across ranks.
 
 The report includes results for the following checks:
 
@@ -405,8 +405,9 @@ Initialization-triggered diagnostics are disabled by default. To run them, set
 
   NCCL_RUN_RAS_DIAGNOSTICS=1 <application> [arguments]
 
-When ``NCCL_RUN_RAS_DIAGNOSTICS=1`` is set, rank 0 of each communicator starts a diagnostics request as the communicator
-is initialized. The report is printed to the standard output of the process hosting that rank.
+Setting ``NCCL_RUN_RAS_DIAGNOSTICS=1`` triggers diagnostics at each communicator initialization. Each request is scoped
+to the newly initialized communicator, and the report is printed to the standard output of the process hosting rank 0
+for that communicator.
 
 Running On Demand
 ^^^^^^^^^^^^^^^^^
