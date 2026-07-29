@@ -954,6 +954,73 @@ TEST(ConSanBranchOnlyRelayRouter, RecordsBatchedPlanAndFailureTelemetryWithShare
   EXPECT_EQ(telemetry.return_route_failure_count, 0u);
 }
 
+TEST(ConSanBranchOnlyRelayRouter, ComputesTelemetryDeltaAcrossEveryCounter) {
+  const ConSanBranchOnlyRoutingTelemetry before{
+      .pair_attempt_count = 1u,
+      .plan_call_count = 2u,
+      .entry_route_failure_count = 3u,
+      .return_route_failure_count = 4u,
+      .relay_contention_failure_count = 5u,
+      .work_budget_failure_count = 6u,
+      .work_budget_exhaustion_count = 7u,
+      .reservation_failure_count = 8u,
+      .exact_pair_fallback_attempt_count = 9u,
+      .greedy_pair_fallback_attempt_count = 3u,
+      .search_work_count = 11u,
+      .scan_work_count = 12u,
+  };
+  const ConSanBranchOnlyRoutingTelemetry after{
+      .pair_attempt_count = 13u,
+      .plan_call_count = 15u,
+      .entry_route_failure_count = 17u,
+      .return_route_failure_count = 19u,
+      .relay_contention_failure_count = 21u,
+      .work_budget_failure_count = 23u,
+      .work_budget_exhaustion_count = 25u,
+      .reservation_failure_count = 27u,
+      .exact_pair_fallback_attempt_count = 29u,
+      .greedy_pair_fallback_attempt_count = 11u,
+      .search_work_count = 33u,
+      .scan_work_count = 35u,
+  };
+
+  const ConSanBranchOnlyRoutingTelemetry delta = branch_only_relay_telemetry_delta(after, before);
+
+  EXPECT_EQ(delta.pair_attempt_count, 12u);
+  EXPECT_EQ(delta.plan_call_count, 13u);
+  EXPECT_EQ(delta.entry_route_failure_count, 14u);
+  EXPECT_EQ(delta.return_route_failure_count, 15u);
+  EXPECT_EQ(delta.relay_contention_failure_count, 16u);
+  EXPECT_EQ(delta.work_budget_failure_count, 17u);
+  EXPECT_EQ(delta.work_budget_exhaustion_count, 18u);
+  EXPECT_EQ(delta.reservation_failure_count, 19u);
+  EXPECT_EQ(delta.exact_pair_fallback_attempt_count, 20u);
+  EXPECT_EQ(delta.greedy_pair_fallback_attempt_count, 8u);
+  EXPECT_EQ(delta.search_work_count, 22u);
+  EXPECT_EQ(delta.scan_work_count, 23u);
+  EXPECT_FALSE(branch_only_relay_telemetry_is_empty(delta));
+  EXPECT_TRUE(branch_only_relay_telemetry_is_empty({}));
+}
+
+#ifdef NDEBUG
+TEST(ConSanBranchOnlyRelayRouter, ClampsRegressiveTelemetryDeltaFieldsInReleaseBuilds) {
+  const ConSanBranchOnlyRoutingTelemetry before{
+      .plan_call_count = 7u,
+      .scan_work_count = 100u,
+  };
+  const ConSanBranchOnlyRoutingTelemetry after{
+      .pair_attempt_count = 3u,
+      .plan_call_count = 3u,
+  };
+
+  const ConSanBranchOnlyRoutingTelemetry delta = branch_only_relay_telemetry_delta(after, before);
+
+  EXPECT_EQ(delta.pair_attempt_count, 3u);
+  EXPECT_EQ(delta.plan_call_count, 0u);
+  EXPECT_EQ(delta.scan_work_count, 0u);
+}
+#endif
+
 TEST(ConSanBranchOnlyRelayRouter, ZeroTierLimitsAreNormalizedInsteadOfDisablingRouting) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   BranchOnlyRelayRouter router;

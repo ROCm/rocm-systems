@@ -453,7 +453,6 @@ void record_branch_only_relay_rejection(ConSanBranchOnlyRoutingTelemetry &teleme
                                         BranchOnlyRelayPairRejection rejection) {
   switch (rejection) {
   case BranchOnlyRelayPairRejection::None:
-  case BranchOnlyRelayPairRejection::Count:
     break;
   case BranchOnlyRelayPairRejection::InvalidEntryCoordinates:
   case BranchOnlyRelayPairRejection::EntryUnreachable:
@@ -469,7 +468,45 @@ void record_branch_only_relay_rejection(ConSanBranchOnlyRoutingTelemetry &teleme
   case BranchOnlyRelayPairRejection::WorkBudget:
     add_saturated(telemetry.work_budget_failure_count, 1u);
     break;
+  case BranchOnlyRelayPairRejection::Count:
+    assert(false && "rejection count sentinel is not a rejection reason");
+    break;
   }
+}
+
+static_assert(
+    sizeof(ConSanBranchOnlyRoutingTelemetry) == 12u * sizeof(size_t),
+    "add new routing counters to branch_only_relay_telemetry_delta and its exhaustive unit test");
+
+ConSanBranchOnlyRoutingTelemetry
+branch_only_relay_telemetry_delta(const ConSanBranchOnlyRoutingTelemetry &after,
+                                  const ConSanBranchOnlyRoutingTelemetry &before) {
+  const auto delta = [](size_t after_value, size_t before_value) {
+    assert(after_value >= before_value && "routing telemetry must accumulate monotonically");
+    return after_value >= before_value ? after_value - before_value : 0u;
+  };
+  return {
+      .pair_attempt_count = delta(after.pair_attempt_count, before.pair_attempt_count),
+      .plan_call_count = delta(after.plan_call_count, before.plan_call_count),
+      .entry_route_failure_count =
+          delta(after.entry_route_failure_count, before.entry_route_failure_count),
+      .return_route_failure_count =
+          delta(after.return_route_failure_count, before.return_route_failure_count),
+      .relay_contention_failure_count =
+          delta(after.relay_contention_failure_count, before.relay_contention_failure_count),
+      .work_budget_failure_count =
+          delta(after.work_budget_failure_count, before.work_budget_failure_count),
+      .work_budget_exhaustion_count =
+          delta(after.work_budget_exhaustion_count, before.work_budget_exhaustion_count),
+      .reservation_failure_count =
+          delta(after.reservation_failure_count, before.reservation_failure_count),
+      .exact_pair_fallback_attempt_count =
+          delta(after.exact_pair_fallback_attempt_count, before.exact_pair_fallback_attempt_count),
+      .greedy_pair_fallback_attempt_count = delta(after.greedy_pair_fallback_attempt_count,
+                                                  before.greedy_pair_fallback_attempt_count),
+      .search_work_count = delta(after.search_work_count, before.search_work_count),
+      .scan_work_count = delta(after.scan_work_count, before.scan_work_count),
+  };
 }
 
 bool is_consan_branch_relay_reservoir_instruction(const Instruction &instruction, uint64_t offset,
@@ -815,6 +852,8 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
     for (BranchOnlyRelayPairRejection reason : batch.rejection_reasons) {
       const size_t index = static_cast<size_t>(reason);
       assert(index < rejection_counts.size());
+      if (index >= rejection_counts.size())
+        continue;
       ++rejection_counts[index];
     }
     const size_t invalid_entry_count = rejection_counts[static_cast<size_t>(

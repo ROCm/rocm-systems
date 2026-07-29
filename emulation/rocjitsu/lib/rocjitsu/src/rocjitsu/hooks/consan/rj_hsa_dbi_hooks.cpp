@@ -3497,6 +3497,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (patch_result.flat_selection_telemetry) {
       const rocjitsu::ConSanFlatSelectionTelemetry &selection =
           *patch_result.flat_selection_telemetry;
+      const bool has_discarded_branch_work =
+          selection.discarded_branch_only_placement_failure_count != 0u ||
+          !rocjitsu::branch_only_relay_telemetry_is_empty(selection.discarded_branch_only_routing);
       log_message(
           kLogInfo,
           "ConSan SC flat selection reader=%llu supported=%zu target=%zu selected=%zu "
@@ -3505,6 +3508,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           "work_budget_failed=%zu work_budget_exhaustions=%zu reservation_failed=%zu "
           "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
           "pair_attempts=%zu plan_calls=%zu search_work=%zu scan_work=%zu "
+          "discarded_branch_work=%s "
           "fixed_stack=%zu dynamic_stack=%zu mixed_stack=%zu missing_vcc_save=%zu "
           "missing_scratch=%zu spill_backed=%zu mixed_stack_spill_rejected=%zu "
           "dynamic_stack_spill_failed=%zu private_spill_failed=%zu original_relays=%zu "
@@ -3524,7 +3528,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           selection.branch_only_routing.pair_attempt_count,
           selection.branch_only_routing.plan_call_count,
           selection.branch_only_routing.search_work_count,
-          selection.branch_only_routing.scan_work_count, selection.fixed_stack_candidate_count,
+          selection.branch_only_routing.scan_work_count,
+          has_discarded_branch_work ? "true" : "false", selection.fixed_stack_candidate_count,
           selection.dynamic_stack_candidate_count, selection.mixed_stack_candidate_count,
           selection.missing_vcc_save_candidate_count, selection.missing_scratch_candidate_count,
           selection.spill_backed_candidate_count, selection.mixed_stack_spill_rejection_count,
@@ -3533,30 +3538,31 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           selection.selected_anchor_relay_slot_count);
       const rocjitsu::ConSanBranchOnlyRoutingTelemetry &discarded_routing =
           selection.discarded_branch_only_routing;
-      if (discarded_routing.plan_call_count != 0u) {
-        log_message(
-            kLogInfo,
-            "ConSan SC flat discarded branch routing reader=%llu pair_attempts=%zu plan_calls=%zu "
-            "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
-            "work_budget_failed=%zu work_budget_exhaustions=%zu reservation_failed=%zu "
-            "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
-            "search_work=%zu scan_work=%zu",
-            static_cast<unsigned long long>(code_object_reader.handle),
-            discarded_routing.pair_attempt_count, discarded_routing.plan_call_count,
-            discarded_routing.entry_route_failure_count,
-            discarded_routing.return_route_failure_count,
-            discarded_routing.relay_contention_failure_count,
-            discarded_routing.work_budget_failure_count,
-            discarded_routing.work_budget_exhaustion_count,
-            discarded_routing.reservation_failure_count,
-            discarded_routing.exact_pair_fallback_attempt_count,
-            discarded_routing.greedy_pair_fallback_attempt_count,
-            discarded_routing.search_work_count, discarded_routing.scan_work_count);
+      if (has_discarded_branch_work) {
+        log_message(kLogInfo,
+                    "ConSan SC flat discarded branch routing reader=%llu placement_failed=%zu "
+                    "pair_attempts=%zu plan_calls=%zu "
+                    "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
+                    "work_budget_failed=%zu work_budget_exhaustions=%zu reservation_failed=%zu "
+                    "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
+                    "search_work=%zu scan_work=%zu",
+                    static_cast<unsigned long long>(code_object_reader.handle),
+                    selection.discarded_branch_only_placement_failure_count,
+                    discarded_routing.pair_attempt_count, discarded_routing.plan_call_count,
+                    discarded_routing.entry_route_failure_count,
+                    discarded_routing.return_route_failure_count,
+                    discarded_routing.relay_contention_failure_count,
+                    discarded_routing.work_budget_failure_count,
+                    discarded_routing.work_budget_exhaustion_count,
+                    discarded_routing.reservation_failure_count,
+                    discarded_routing.exact_pair_fallback_attempt_count,
+                    discarded_routing.greedy_pair_fallback_attempt_count,
+                    discarded_routing.search_work_count, discarded_routing.scan_work_count);
       }
     }
     const rocjitsu::ConSanBranchOnlyRoutingTelemetry &lds_routing =
         patch_result.lds_branch_only_routing_telemetry;
-    if (lds_routing.plan_call_count != 0u) {
+    if (!rocjitsu::branch_only_relay_telemetry_is_empty(lds_routing)) {
       log_message(kLogInfo,
                   "ConSan SC LDS branch routing reader=%llu pair_attempts=%zu plan_calls=%zu "
                   "entry_route_failed=%zu "
@@ -3575,8 +3581,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     const rocjitsu::ConSanBranchOnlyRoutingTelemetry &moi_routing =
         patch_result.moi_branch_only_routing_telemetry;
-    if (moi_routing.plan_call_count != 0u ||
-        patch_result.moi_branch_only_placement_failure_count != 0u) {
+    if (patch_result.moi_branch_only_placement_failure_count != 0u ||
+        !rocjitsu::branch_only_relay_telemetry_is_empty(moi_routing)) {
       log_message(kLogInfo,
                   "ConSan MOI branch routing reader=%llu placement_failed=%zu "
                   "pair_attempts=%zu plan_calls=%zu "

@@ -88,11 +88,13 @@ struct ConSanPatchedImageGrowthRejection {
 /// counters count submitted and rejected request pairs, respectively. Plan
 /// calls count router invocations, including LDS convergence iterations.
 /// Fallback counters count pairs that reached the corresponding tier, whether
-/// or not that tier produced a route. Work-limit exhaustion counts plan calls
-/// that reached any configured limit, including calls recovered by fallback.
-/// Reservation failures count failed reservations and commits. LDS convergence
-/// iterations remain in this aggregate; a losing FLAT direct-reservoir retry
-/// is moved to `discarded_branch_only_routing`.
+/// or not that tier produced a route. Greedy fallback attempts are a subset of
+/// exact-pair fallback attempts; the two counters must not be summed.
+/// Work-limit exhaustion counts plan calls that reached any configured limit,
+/// including calls recovered by fallback. Reservation failures count failed
+/// reservations and commits. LDS convergence iterations remain in this
+/// aggregate; a losing FLAT direct-reservoir retry is moved to
+/// `discarded_branch_only_routing`.
 struct ConSanBranchOnlyRoutingTelemetry {
   size_t pair_attempt_count = 0;
   size_t plan_call_count = 0;
@@ -106,7 +108,14 @@ struct ConSanBranchOnlyRoutingTelemetry {
   size_t greedy_pair_fallback_attempt_count = 0;
   size_t search_work_count = 0;
   size_t scan_work_count = 0;
+
+  bool operator==(const ConSanBranchOnlyRoutingTelemetry &) const = default;
 };
+
+[[nodiscard]] inline bool
+branch_only_relay_telemetry_is_empty(const ConSanBranchOnlyRoutingTelemetry &telemetry) {
+  return telemetry == ConSanBranchOnlyRoutingTelemetry{};
+}
 
 /// Machine-readable outcome of SuperCollider group-FLAT candidate selection.
 /// This remains available for successful partial transforms without forcing
@@ -128,9 +137,11 @@ struct ConSanFlatSelectionTelemetry {
   size_t branch_only_selected_count = 0;
   size_t branch_only_placement_failure_count = 0;
   ConSanBranchOnlyRoutingTelemetry branch_only_routing;
-  /// Routing activity from a losing direct-reservoir retry that was
-  /// transactionally discarded. Kept separate so primary attempt/failure
-  /// rates describe the selection path retained in the emitted patch.
+  /// Placement failures and routing activity from a losing direct-reservoir
+  /// retry that was transactionally discarded. Kept separate so primary
+  /// attempt/failure rates describe the selection path retained in the
+  /// emitted patch.
+  size_t discarded_branch_only_placement_failure_count = 0;
   ConSanBranchOnlyRoutingTelemetry discarded_branch_only_routing;
   size_t original_nop_relay_slot_count = 0;
   size_t selected_anchor_relay_slot_count = 0;
@@ -149,6 +160,8 @@ struct ConSanResult {
   bool staged_composition_validated = false;
   /// Internal second-stage proof over a mutation image using a pristine plan.
   bool carried_composite_instrumentation_stage = false;
+  /// MOI branch-only candidates skipped because their appended body could not
+  /// be reserved without overlapping an accepted placement.
   size_t moi_branch_only_placement_failure_count = 0;
   ConSanBranchOnlyRoutingTelemetry moi_branch_only_routing_telemetry;
   ConSanBranchOnlyRoutingTelemetry lds_branch_only_routing_telemetry;

@@ -1619,6 +1619,108 @@ TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay
   EXPECT_EQ(g_transform_override_engines.front(), rocjitsu::ConSanMoiEngine::RecordReplay);
 }
 
+TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
+  configure_consan_profile(kConSanHookProfiles[0], false);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  rocjitsu::ConSanFlatSelectionTelemetry &selection =
+      g_transform_override_result.flat_selection_telemetry.emplace();
+  selection.branch_only_routing = {
+      .pair_attempt_count = 47u,
+      .plan_call_count = 43u,
+      .entry_route_failure_count = 2u,
+      .return_route_failure_count = 3u,
+      .relay_contention_failure_count = 5u,
+      .work_budget_failure_count = 7u,
+      .work_budget_exhaustion_count = 11u,
+      .reservation_failure_count = 13u,
+      .exact_pair_fallback_attempt_count = 41u,
+      .greedy_pair_fallback_attempt_count = 37u,
+      .search_work_count = 17u,
+      .scan_work_count = 19u,
+  };
+  selection.discarded_branch_only_routing = {
+      .pair_attempt_count = 109u,
+      .plan_call_count = 107u,
+      .entry_route_failure_count = 53u,
+      .return_route_failure_count = 59u,
+      .relay_contention_failure_count = 61u,
+      .work_budget_failure_count = 67u,
+      .work_budget_exhaustion_count = 71u,
+      .reservation_failure_count = 73u,
+      .exact_pair_fallback_attempt_count = 101u,
+      .greedy_pair_fallback_attempt_count = 97u,
+      .search_work_count = 79u,
+      .scan_work_count = 83u,
+  };
+  selection.discarded_branch_only_placement_failure_count = 89u;
+  g_transform_override_result.moi_branch_only_placement_failure_count = 127u;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+
+  testing::internal::CaptureStderr();
+  const hsa_status_t load_status = api.core.hsa_executable_load_agent_code_object_fn(
+      hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(load_status, HSA_STATUS_SUCCESS);
+  EXPECT_NE(log.find("entry_route_failed=2 return_route_failed=3 relay_contention_failed=5 "
+                     "work_budget_failed=7 work_budget_exhaustions=11 reservation_failed=13 "
+                     "exact_pair_fallback_attempts=41 greedy_pair_fallback_attempts=37 "
+                     "pair_attempts=47 plan_calls=43 search_work=17 scan_work=19 "
+                     "discarded_branch_work=true"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("placement_failed=89 pair_attempts=109 plan_calls=107 "
+                     "entry_route_failed=53 "
+                     "return_route_failed=59 relay_contention_failed=61 work_budget_failed=67 "
+                     "work_budget_exhaustions=71 reservation_failed=73 "
+                     "exact_pair_fallback_attempts=101 greedy_pair_fallback_attempts=97 "
+                     "search_work=79 scan_work=83"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("ConSan MOI branch routing reader="), std::string::npos) << log;
+  EXPECT_NE(log.find("placement_failed=127 pair_attempts=0 plan_calls=0"), std::string::npos)
+      << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanLogsDiscardedBranchWorkWithoutCompletedPlanCalls) {
+  configure_consan_profile(kConSanHookProfiles[0], false);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  rocjitsu::ConSanFlatSelectionTelemetry &selection =
+      g_transform_override_result.flat_selection_telemetry.emplace();
+  selection.discarded_branch_only_routing.scan_work_count = 17u;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+
+  testing::internal::CaptureStderr();
+  const hsa_status_t load_status = api.core.hsa_executable_load_agent_code_object_fn(
+      hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(load_status, HSA_STATUS_SUCCESS);
+  EXPECT_NE(log.find("discarded_branch_work=true"), std::string::npos) << log;
+  EXPECT_NE(log.find("placement_failed=0 pair_attempts=0 plan_calls=0"), std::string::npos) << log;
+  EXPECT_NE(log.find("search_work=0 scan_work=17"), std::string::npos) << log;
+}
+
 TEST(HsaHooksUnitTest, ConSanThreadsAbsoluteAndRelativePatchedImageGrowthLimits) {
   struct GrowthCase {
     const char *absolute;

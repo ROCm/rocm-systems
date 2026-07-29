@@ -246,6 +246,48 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   })) << testing::PrintToString(malformed_errors);
 }
 
+TEST(ConSan, FlatDirectReservoirLosingRetryReportsDiscardedRouting) {
+  std::vector<uint32_t> first_kernel_words = {
+      0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
+      0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
+      0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
+      0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
+  };
+  for (uint16_t sgpr = 2u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    first_kernel_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
+  // One reservoir pair cannot bridge both directions across this text size.
+  first_kernel_words.resize(
+      100'000u, build_s_mov_b32(/*sdst=*/100u, /*ssrc=*/100u, ROCJITSU_CODE_ARCH_RDNA4));
+  first_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const std::array<uint32_t, 1> second_kernel_words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_two_kernel_code_object(first_kernel_words, second_kernel_words);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.scratch_vgpr = 5u;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_FALSE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.flat_selection_telemetry);
+  const ConSanFlatSelectionTelemetry &selection = *result.flat_selection_telemetry;
+  EXPECT_EQ(selection.branch_only_selected_count, 0u);
+  EXPECT_EQ(selection.branch_only_routing.pair_attempt_count, 1u);
+  EXPECT_EQ(selection.branch_only_routing.plan_call_count, 1u);
+  EXPECT_EQ(selection.branch_only_routing.entry_route_failure_count, 1u);
+  EXPECT_EQ(selection.discarded_branch_only_routing.pair_attempt_count, 1u);
+  EXPECT_EQ(selection.discarded_branch_only_routing.plan_call_count, 1u);
+  EXPECT_EQ(selection.discarded_branch_only_routing.entry_route_failure_count, 1u);
+  EXPECT_GT(selection.discarded_branch_only_routing.search_work_count, 0u);
+  EXPECT_GT(selection.discarded_branch_only_routing.scan_work_count, 0u);
+}
+
 TEST(ConSan, FlatDirectReservoirRetryRetainsEarlierRoutingTelemetry) {
   const std::array<uint32_t, 8> flat_access = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base

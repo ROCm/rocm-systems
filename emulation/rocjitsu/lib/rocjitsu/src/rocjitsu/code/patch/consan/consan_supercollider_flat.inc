@@ -966,38 +966,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   };
   std::unordered_set<uint64_t> selected_flat_anchor_relay_offsets;
   ConSanBranchOnlyRoutingTelemetry branch_only_routing;
+  size_t discarded_branch_only_placement_failures = 0u;
   ConSanBranchOnlyRoutingTelemetry discarded_branch_only_routing;
-  const auto counter_delta = [](size_t after, size_t before) {
-    return after >= before ? after - before : 0u;
-  };
-  const auto routing_delta = [&counter_delta](const ConSanBranchOnlyRoutingTelemetry &after,
-                                              const ConSanBranchOnlyRoutingTelemetry &before) {
-    return ConSanBranchOnlyRoutingTelemetry{
-        .pair_attempt_count = counter_delta(after.pair_attempt_count, before.pair_attempt_count),
-        .plan_call_count = counter_delta(after.plan_call_count, before.plan_call_count),
-        .entry_route_failure_count =
-            counter_delta(after.entry_route_failure_count, before.entry_route_failure_count),
-        .return_route_failure_count =
-            counter_delta(after.return_route_failure_count, before.return_route_failure_count),
-        .relay_contention_failure_count =
-            counter_delta(after.relay_contention_failure_count,
-                          before.relay_contention_failure_count),
-        .work_budget_failure_count =
-            counter_delta(after.work_budget_failure_count, before.work_budget_failure_count),
-        .work_budget_exhaustion_count =
-            counter_delta(after.work_budget_exhaustion_count, before.work_budget_exhaustion_count),
-        .reservation_failure_count =
-            counter_delta(after.reservation_failure_count, before.reservation_failure_count),
-        .exact_pair_fallback_attempt_count =
-            counter_delta(after.exact_pair_fallback_attempt_count,
-                          before.exact_pair_fallback_attempt_count),
-        .greedy_pair_fallback_attempt_count =
-            counter_delta(after.greedy_pair_fallback_attempt_count,
-                          before.greedy_pair_fallback_attempt_count),
-        .search_work_count = counter_delta(after.search_work_count, before.search_work_count),
-        .scan_work_count = counter_delta(after.scan_work_count, before.scan_work_count),
-    };
-  };
   size_t branch_only_placement_failures = 0u;
   size_t branch_only_selected = 0;
   const auto publish_flat_anchor_relays = [&](const FlatCheckTrapCandidate &candidate,
@@ -1183,8 +1153,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       try_select_candidate(candidate);
 
     if (branch_only_selected == selected_before_direct_reservoirs) {
+      assert(branch_only_placement_failures >= branch_placement_failures_after_first_pass);
+      discarded_branch_only_placement_failures =
+          branch_only_placement_failures >= branch_placement_failures_after_first_pass
+              ? branch_only_placement_failures - branch_placement_failures_after_first_pass
+              : 0u;
       discarded_branch_only_routing =
-          routing_delta(branch_only_routing, branch_routing_after_first_pass);
+          branch_only_relay_telemetry_delta(branch_only_routing, branch_routing_after_first_pass);
       branch_router = std::move(router_without_direct_reservoirs);
       placement_planner = std::move(planner_without_direct_reservoirs);
       direct_branch_reservoirs = {};
@@ -1213,6 +1188,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       .branch_only_selected_count = branch_only_selected,
       .branch_only_placement_failure_count = branch_only_placement_failures,
       .branch_only_routing = branch_only_routing,
+      .discarded_branch_only_placement_failure_count = discarded_branch_only_placement_failures,
       .discarded_branch_only_routing = discarded_branch_only_routing,
       .original_nop_relay_slot_count = branch_relay_word_count,
       .selected_anchor_relay_slot_count = selected_flat_anchor_relay_offsets.size(),
