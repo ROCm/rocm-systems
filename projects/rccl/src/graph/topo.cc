@@ -1314,6 +1314,11 @@ ncclResult_t ncclTopoForceMerge(struct ncclXml* xml, struct ncclTopoNetInfo* net
            "NET/IB : Invalid NCCL_NET_FORCE_MERGE specified %s. Couldn't parse substring %s. Please provide a "
            "semicolon-delimited list of comma-delimited NIC groups.",
            ncStr, semi);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      // RCCL: the loop advances semi at the bottom, so continuing without a step of its own
+      // re-parses the same unparsable substring forever. ":" and "," both parse to zero NICs.
+      semi = strtok_r(NULL, ";", &semi_token);
+#endif
       continue;
     }
 
