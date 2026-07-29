@@ -89,8 +89,9 @@ void append_gfx1250_vgpr_msb_transition(std::vector<uint32_t> &words, uint8_t &c
 /// immediate. Semantic spill storage is non-negative and dword aligned, so the
 /// largest usable dword offset is 0x7ffffc. The caller selects VGPR-MSB mode
 /// zero before using this helper.
-bool append_gfx1250_scratch_preservation(std::vector<uint32_t> &words,
-                                         const SemanticScratchLease &lease, bool restore) {
+[[nodiscard]] bool append_gfx1250_scratch_preservation(std::vector<uint32_t> &words,
+                                                       const SemanticScratchLease &lease,
+                                                       bool restore) {
   if (!lease.spilled)
     return true;
   if (lease.reg_class != RegClass::VGPR || lease.count == 0 ||
@@ -328,15 +329,60 @@ ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
   return ExpandResult::success(std::move(words));
 }
 
+/// @brief Canonical save/clear/restore words emitted around one tensor load.
+struct TensorMaskWrapper {
+  uint32_t save = 0;
+  uint32_t clear = 0;
+  uint32_t restore = 0;
+};
+
+/// @brief Build the canonical descriptor-mask clear word.
+[[nodiscard]] uint32_t build_tensor_mask_clear(uint8_t descriptor_base) {
+  return gfx1250::build_sop2(
+      gfx1250::kSPackHhB32B16Sop2,
+      {.ssrc0 = kGfx1250InlineZero, .ssrc1 = descriptor_base, .sdst = descriptor_base})[0];
+}
+
+/// @brief Build the canonical save/clear/restore words around one tensor load.
+[[nodiscard]] TensorMaskWrapper build_tensor_mask_wrapper(uint8_t descriptor_base,
+                                                          uint8_t scratch) {
+  return {
+      .save = gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                                  {.ssrc0 = descriptor_base, .sdst = scratch})[0],
+      .clear = build_tensor_mask_clear(descriptor_base),
+      .restore = gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                                     {.ssrc0 = scratch, .sdst = descriptor_base})[0],
+  };
+}
+
+/// @brief Check for one exact, contiguous predecessor in the same basic block.
+[[nodiscard]] bool has_canonical_predecessor(const Instruction &inst, uint32_t expected_word) {
+  const Instruction *previous = inst.previous_instruction();
+  return previous != nullptr && previous->size() == static_cast<int>(sizeof(uint32_t)) &&
+         previous->src_loc() + sizeof(uint32_t) == inst.src_loc() &&
+         previous->raw_encoding() != nullptr && previous->raw_encoding()[0] == expected_word;
+}
+
+/// @brief Check whether every path to a tensor load executes the canonical mask clear.
+[[nodiscard]] bool has_tensor_mask_clear(const Instruction &inst, uint8_t descriptor_base) {
+  return has_canonical_predecessor(inst, build_tensor_mask_clear(descriptor_base));
+}
+
 /// @brief Disable Tensor-DMA multicast for one A0 tensor load.
 ///
 /// @details TENSOR_LOAD_TO_LDS does not encode multicast in the instruction.
 /// Descriptor group 1 bits [15:0], held in the first SGPR named by VADDR1,
-/// select the workgroups which receive a multicast load.  On A0 those bits
-/// must therefore be cleared for every tensor load; inspecting only the
-/// instruction cannot prove that the runtime descriptor mask is zero.
-/// Preserve the guest descriptor value around the load because later tensor
-/// instructions commonly reuse and update the same descriptor.
+/// select the workgroups which receive a multicast load. On A0 those bits must
+/// therefore be cleared for every tensor load; inspecting only the instruction
+/// cannot prove that the runtime descriptor mask is zero. Preserve the guest
+/// descriptor value around the load because later tensor instructions commonly
+/// reuse and update the same descriptor.
+///
+/// A second translation preserves the load when its immediately preceding
+/// decoded instruction in the same basic block is the canonical mask clear.
+/// This proves that no control-flow edge can bypass the clear. The clear
+/// instruction currently has no B0-to-A0 semantic rule and is copied unchanged;
+/// this reuse condition must be revisited if such a rule is added.
 ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t, uint64_t,
                                                std::span<const uint8_t>,
                                                const LivenessAnalysis &liveness,
@@ -359,6 +405,12 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
         {"Provide TENSOR_LOAD_TO_LDS VADDR1 as an ordinary eight-SGPR descriptor."});
   }
 
+  if (has_tensor_mask_clear(inst, descriptor_base)) {
+    return ExpandResult::success(std::vector<uint32_t>(
+        inst.raw_encoding(),
+        inst.raw_encoding() + sizeof(gfx1250::VimageMachineInst) / sizeof(uint32_t)));
+  }
+
   const std::optional<uint16_t> scratch = liveness.find_free_sgpr(&inst);
   if (!scratch || *scratch > kLastOrdinarySgpr) {
     return ExpandResult::failed(
@@ -368,19 +420,15 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
 
   std::vector<uint32_t> words;
   words.reserve(6);
-  append_words(
-      words, gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = descriptor_base,
-                                                         .sdst = static_cast<uint8_t>(*scratch)}));
+  const TensorMaskWrapper wrapper =
+      build_tensor_mask_wrapper(descriptor_base, static_cast<uint8_t>(*scratch));
+  words.push_back(wrapper.save);
   // PACK_HH forms {SRC1[31:16], SRC0[31:16]}. Inline zero as SRC0 clears
   // D1[15:0] while preserving all descriptor fields in D1[31:16].
-  append_words(words, gfx1250::build_sop2(
-                          gfx1250::kSPackHhB32B16Sop2,
-                          {.ssrc0 = 128, .ssrc1 = descriptor_base, .sdst = descriptor_base}));
+  words.push_back(wrapper.clear);
   words.insert(words.end(), inst.raw_encoding(),
                inst.raw_encoding() + sizeof(gfx1250::VimageMachineInst) / sizeof(uint32_t));
-  append_words(words,
-               gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(*scratch),
-                                                           .sdst = descriptor_base}));
+  words.push_back(wrapper.restore);
   return ExpandResult::success(std::move(words));
 }
 
@@ -893,9 +941,11 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
 ///
 /// @details gfx1250 requires nine separating V_NOPs when dense IU8 WMMA feeds a
 /// following XDL matrix input, and five for sparse IU8 SWMMAC. These bounds also
-/// cover their shorter WMMA-to-VALU hazard windows. This temporary local
-/// lowering does not inspect following control-flow successors, so it appends
-/// the full instruction-family bound unconditionally.
+/// cover their shorter WMMA-to-VALU hazard windows. Count exact canonical V_NOPs
+/// already following the instruction in the same basic block and append only
+/// the missing slots. Limiting credit to the block guarantees that every
+/// credited word remains adjacent after layout. Noncanonical NOPs and following
+/// control-flow successors conservatively receive no credit.
 ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, uint64_t,
                                              std::span<const uint8_t>, const LivenessAnalysis &,
                                              TranslationContext &, const LaneLayout *,
@@ -909,10 +959,20 @@ ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, 
   std::vector<uint32_t> words(inst.raw_encoding(),
                               inst.raw_encoding() + inst.size() / sizeof(uint32_t));
   const int required_slots = inst.mnemonic() == "v_wmma_i32_16x16x64_iu8" ? 9 : 5;
-  // TODO: Replace fixed padding with a whole-kernel lookahead that counts
-  // existing V_NOPs/independent VALU and inserts exactly the required slots.
-  for (int slot = 0; slot < required_slots; ++slot)
-    append_words(words, gfx1250::build_vop1(gfx1250::kVNopVop1));
+  const uint32_t v_nop = gfx1250::build_vop1(gfx1250::kVNopVop1)[0];
+  int existing_slots = 0;
+  const Instruction *next = inst.next_instruction();
+  while (existing_slots < required_slots && next != nullptr &&
+         next->size() == static_cast<int>(sizeof(uint32_t)) && next->raw_encoding() != nullptr &&
+         next->raw_encoding()[0] == v_nop) {
+    ++existing_slots;
+    next = next->next_instruction();
+  }
+
+  // TODO: Replace canonical V_NOP counting with whole-kernel scheduling that
+  // can also credit independent VALU in each reachable successor.
+  for (int slot = existing_slots; slot < required_slots; ++slot)
+    words.push_back(v_nop);
   return ExpandResult::success(std::move(words));
 }
 
@@ -933,12 +993,24 @@ ExpandResult expand_gfx1250_wmma_iu8_spacing(const Instruction &inst, uint32_t, 
   }
 }
 
+/// @brief Build the canonical M0 = 0 word emitted before a cluster load.
+[[nodiscard]] constexpr uint32_t build_cluster_m0_clear() {
+  return gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
+                             {.ssrc0 = kGfx1250InlineZero, .sdst = kGfx1250M0})[0];
+}
+
 /// @brief Rewrite a gfx1250 cluster load to run with M0 = 0.
 ///
 /// @details Every cluster-load form (both SADDR and off/NULL-saddr, all widths)
 /// is left as a cluster load and wrapped so it executes with M0 forced to zero:
 /// save M0 to a dead SGPR, set M0 = 0, run the load, then restore M0. The opcode
 /// is not changed.
+///
+/// A second translation preserves the load when its immediately preceding
+/// decoded instruction in the same basic block is the canonical M0 clear. This
+/// proves that no control-flow edge can bypass the clear. The clear instruction
+/// currently has no B0-to-A0 semantic rule and is copied unchanged; this reuse
+/// condition must be revisited if such a rule is added.
 ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint64_t,
                                          std::span<const uint8_t>, const LivenessAnalysis &liveness,
                                          TranslationContext &, const LaneLayout *,
@@ -946,6 +1018,11 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
   if (!is_gfx1250_cluster_load(inst.opcode()) ||
       inst.size() != 3 * static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr) {
     return ExpandResult::failed("gfx1250 cluster-load rule received an unsupported instruction");
+  }
+
+  if (has_canonical_predecessor(inst, build_cluster_m0_clear())) {
+    return ExpandResult::success(
+        std::vector<uint32_t>(inst.raw_encoding(), inst.raw_encoding() + 3));
   }
 
   const std::optional<uint16_t> scratch = liveness.find_free_sgpr(&inst);
@@ -961,14 +1038,12 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
   // Inline constant 0 encodes as 128 in a scalar source. Every M0 reference here
   // MUST use kGfx1250M0 (125): on gfx1250 M0 encodes as 125 and NULL as 124 (the
   // inverse of CDNA), so a write to 124 would be a discarded NULL write.
-  constexpr uint8_t kInlineZero = 128;
   std::vector<uint32_t> words;
   words.reserve(6);
   append_words(words,
                gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
                                    {.ssrc0 = kGfx1250M0, .sdst = static_cast<uint8_t>(*scratch)}));
-  append_words(words, gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
-                                          {.ssrc0 = kInlineZero, .sdst = kGfx1250M0}));
+  words.push_back(build_cluster_m0_clear());
   words.insert(words.end(), inst.raw_encoding(), inst.raw_encoding() + 3);
   append_words(words,
                gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
@@ -1060,7 +1135,11 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
                                                            .src2 = gfx1250_inline_u32(20)}));
 
   if (is_store) {
-    const uint8_t ds_mode = static_cast<uint8_t>(*src0_bank << 2);
+    // The emitted ds_store_b32 keeps the original store-data VGPR in data0, and
+    // data0 is a Src1-role operand in both ds_store_addtid_b32 and ds_store_b32,
+    // so its high bank is src1_bank. The address VGPR is a fresh low-bank
+    // scratch, so only the Src1 field needs the original store-data bank.
+    const uint8_t ds_mode = static_cast<uint8_t>(*src1_bank << 2);
     append_gfx1250_vgpr_msb_transition(words, current_mode, ds_mode);
     append_words(words, gfx1250::build_vds(gfx1250::kDsStoreB32Vds,
                                            {.offset0 = static_cast<uint8_t>(source.offset0),
@@ -1115,7 +1194,9 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   const std::optional<uint16_t> exp31_mask =
       nan_mask ? liveness.find_free_sgpr(&inst, static_cast<uint16_t>(*nan_mask + 1u))
                : std::nullopt;
-  if (!nan_mask || !exp31_mask || *exp31_mask > 105) {
+  // The allocator searches only REGISTER_SET_ALLOCATABLE_SGPRS, so successful
+  // results are already ordinary encodable SGPRs.
+  if (!nan_mask || !exp31_mask) {
     return ExpandResult::failed("gfx1250 E5M3 unpack could not allocate two dead SGPR masks");
   }
 
@@ -1137,8 +1218,10 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   };
   const auto append_compare_literal = [](std::vector<uint32_t> &words, uint16_t opcode,
                                          uint8_t sdst, uint16_t src1, uint32_t literal) {
-    append_words(words,
-                 gfx1250::build_vop3_sdst_enc(opcode, {.sdst = sdst, .src0 = 255, .src1 = src1}));
+    // gfx1250 VOP3 compares encode their scalar mask destination in the ordinary
+    // VOP3 vdst field. Vop3SdstEnc is a different format whose sdst bits overlap
+    // modifiers here; using it leaves vdst=0 and corrupts live s0.
+    append_words(words, gfx1250::build_vop3(opcode, {.vdst = sdst, .src0 = 255, .src1 = src1}));
     words.push_back(literal);
   };
 
@@ -1199,14 +1282,15 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   return ExpandResult::success(std::move(words));
 }
 
-/// @brief Wrap a standalone low-precision WMMA in the neutral scale prefix.
+/// @brief Wrap a standalone low-precision WMMA in an A0-safe neutral scale prefix.
 ///
-/// @details The B0-to-A0 profile represents the bare F8F6F4 matrix instruction
-/// as a regular-Scale four-DWORD form with inline-zero scale operands, which
-/// encode scale 1.0 and require no temporary GPR. Keep the original two-DWORD
-/// matrix body byte-for-byte so its formats, accumulator, modifiers, and
-/// register operands retain their source semantics. The prefix's
-/// otherwise-unused SRC2 encodes VGPR0.
+/// @details gfx1250 A0 cannot safely expose the bare F8F6F4 matrix instruction to
+/// trap/CWSR recovery. The documented workaround is the regular-Scale four-DWORD
+/// form. In the scale-source context, inline integer zero selects the neutral
+/// E8M0 scale. Keep the original two-DWORD matrix body byte-for-byte so its
+/// formats, accumulator, modifiers, and register operands retain their source
+/// semantics. The prefix's otherwise-unused SRC2 must encode VGPR0 to avoid the
+/// documented false scalar dependency.
 ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, uint64_t,
                                              std::span<const uint8_t>, const LivenessAnalysis &,
                                              TranslationContext &, const LaneLayout *,
@@ -1218,9 +1302,9 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
         "gfx1250 bare F8F6F4 WMMA rule received an unsupported instruction");
   }
 
-  constexpr uint16_t kVgprEncoding = 256;
   std::vector<uint32_t> words;
   words.reserve(4);
+  constexpr uint16_t kVgprEncoding = 256;
   append_words(words, gfx1250::build_vop3p(kWmmaScaleSrc2PrefixOp, {.src0 = kGfx1250InlineZero,
                                                                     .src1 = kGfx1250InlineZero,
                                                                     .src2 = kVgprEncoding}));
@@ -1231,16 +1315,17 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
 /// @brief Lower a B0-only K=128 FP8/BF8 WMMA for A0.
 ///
 /// @details A0's regular-Scale mixed-format WMMA implements the same f32 K=128
-/// operation when both four-byte E8M0 scale words contain 0x7f (2^(127-127)).
-/// Materialize that neutral word in one dead SGPR and select the FP8/BF8 matrix
-/// formats in the mixed base instruction. The regular-Scale prefix also carries
-/// the required VGPR0 encoding in its architecturally unused SRC2 field.
+/// operation when both scale sources use the context-sensitive inline-zero
+/// encoding for neutral E8M0 scaling. This avoids a temporary SGPR and a
+/// scalar-to-vector ALU dependency. Select the FP8/BF8 matrix formats in the
+/// mixed base instruction and encode VGPR0 in the regular-Scale prefix's
+/// architecturally unused SRC2 field.
 ///
 /// The regular-Scale instruction only has an f32 output. The f16 forms remain
 /// fail-closed because chaining two K=64 instructions would round the
 /// intermediate accumulator to f16 instead of preserving one final f16 round.
 ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_t,
-                                      std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                      std::span<const uint8_t>, const LivenessAnalysis &,
                                       TranslationContext &, const LaneLayout *,
                                       const LaneLayout *) {
   uint8_t matrix_a_fmt = 0;
@@ -1279,20 +1364,11 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     return ExpandResult::failed("gfx1250 K=128 WMMA matrix operands are not ordinary VGPR ranges");
   }
 
-  const std::optional<uint16_t> scale_sgpr = liveness.find_free_sgpr(&inst);
-  if (!scale_sgpr) {
-    return ExpandResult::failed("gfx1250 K=128 WMMA could not allocate a dead neutral-scale SGPR");
-  }
-
   std::vector<uint32_t> words;
-  words.reserve(6);
-  append_words(words,
-               gfx1250::build_sop1(gfx1250::kSMovB32Sop1,
-                                   {.ssrc0 = 255, .sdst = static_cast<uint8_t>(*scale_sgpr)}));
-  words.push_back(0x7f7f7f7fu);
-  append_words(words, gfx1250::build_vop3p(
-                          kWmmaScaleSrc2PrefixOp,
-                          {.src0 = *scale_sgpr, .src1 = *scale_sgpr, .src2 = kVgprEncoding}));
+  words.reserve(4);
+  append_words(words, gfx1250::build_vop3p(kWmmaScaleSrc2PrefixOp, {.src0 = kGfx1250InlineZero,
+                                                                    .src1 = kGfx1250InlineZero,
+                                                                    .src2 = kVgprEncoding}));
   append_words(words, gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
                                            {.vdst = static_cast<uint8_t>(source.vdst),
                                             .neg_hi = static_cast<uint8_t>(source.neg_hi),
@@ -1323,21 +1399,21 @@ inline constexpr std::array<TranslationRule, 38> kGfx1250B0ToA0ExpandRules = {{
     {gfx1250::encoding::kVop3p, gfx1250::kVSwmmacI3216x16x128Iu8Vop3p, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_wmma_iu8_spacing, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Bf8Fp8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF1616x16x128Bf8Bf8Vop3p, RuleAction::Expand, 0,
-     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr},
+     0, nullptr, expand_gfx1250_k128_wmma, nullptr, nullptr, false},
     {gfx1250::encoding::kVop3pOpHi1, gfx1250::kVWmmaF3232x16x128F4Vop3p, RuleAction::Expand, 0, 0,
      nullptr, expand_gfx1250_wmma_32x16_f4, nullptr, nullptr, false},
     {gfx1250::encoding::kVimage, gfx1250::kTensorLoadToLdsVimage, RuleAction::Expand, 0, 0, nullptr,

@@ -117,6 +117,7 @@ except AttributeError:
 from .amdsmi_interface import amdsmi_get_processor_handle_from_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_uuid
+from .amdsmi_interface import amdsmi_get_gpu_device_cuid
 from .amdsmi_interface import amdsmi_get_gpu_enumeration_info
 
 # # Functions not dependent on ESMI library
@@ -188,7 +189,6 @@ from .amdsmi_interface import amdsmi_set_gpu_od_volt_info
 from .amdsmi_interface import amdsmi_set_gpu_perf_level
 from .amdsmi_interface import amdsmi_get_gpu_power_profile_presets
 from .amdsmi_interface import amdsmi_reset_gpu
-from .amdsmi_interface import amdsmi_gpu_driver_reload
 from .amdsmi_interface import amdsmi_set_gpu_perf_determinism_mode
 from .amdsmi_interface import amdsmi_set_gpu_fan_speed
 from .amdsmi_interface import amdsmi_reset_gpu_fan

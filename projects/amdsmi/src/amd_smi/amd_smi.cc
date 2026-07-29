@@ -48,6 +48,10 @@
 #include <string>
 #include <vector>
 
+#ifdef BUILD_CUID
+#include "amd_cuid.h"
+#endif
+
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_cper.h"
@@ -1331,6 +1335,51 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
      << "; amdsmi_uuid_gen() status: " << smi_amdgpu_get_status_string(status, false) << "\n";
   LOG_INFO(ss);
   return status;
+}
+
+amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_handle,
+                                           unsigned int* cuid_length, char* cuid) {
+  AMDSMI_CHECK_INIT();
+
+  if (cuid_length == nullptr || cuid == nullptr || *cuid_length < AMDSMI_GPU_CUID_SIZE) {
+    return AMDSMI_STATUS_INVAL;
+  }
+#ifdef BUILD_CUID
+  amdsmi_status_t smi_status;
+  amdcuid_status_t cuid_status;
+
+  amdsmi_bdf_t bdf = {};
+  // find the cuid by bdf
+  smi_status = amdsmi_get_gpu_device_bdf(processor_handle, &bdf);
+  if (smi_status != AMDSMI_STATUS_SUCCESS) {
+    return smi_status;
+  }
+  std::string bdf_str = stringify_bdf(bdf);
+
+  amdcuid_id_t device_cuid;
+  cuid_status = amdcuid_get_handle_by_bdf(bdf_str.c_str(), AMDCUID_DEVICE_TYPE_GPU, &device_cuid);
+  if (cuid_status != AMDCUID_STATUS_SUCCESS) {
+    *cuid_length = 0;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  const char* cuid_str = amdcuid_id_to_string(device_cuid);
+  if (!cuid_str) {
+    *cuid_length = 0;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  size_t cuid_str_len = std::strlen(cuid_str);
+  if (cuid_str_len >= *cuid_length) {
+    *cuid_length = cuid_str_len;
+    return AMDSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  snprintf(cuid, *cuid_length, "%s", cuid_str);
+  *cuid_length = cuid_str_len;
+
+  return AMDSMI_STATUS_SUCCESS;
+#else
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
 }
 
 // Add a static cache for KFD nodes with initialization flag
@@ -4616,26 +4665,6 @@ amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle) {
   return ret;
 }
 
-amdsmi_status_t amdsmi_gpu_driver_reload(void) {
-  std::ostringstream ss;
-  AMDSMI_CHECK_INIT();
-
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | ======= start =======";
-    LOG_INFO(ss);
-  }
-  rsmi_status_t ret = rsmi_dev_amdgpu_driver_reload();
-  amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(ret);
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__
-       << " | Returning: " << smi_amdgpu_get_status_string(amdsmi_status, false);
-    LOG_INFO(ss);
-  }
-  return amdsmi_status;
-}
-
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* gpu_busy_percent) {
   auto status = rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
@@ -5898,23 +5927,8 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
   info->pcie_metric.pcie_replay_count = metric_info.pcie_replay_count_acc;
   info->pcie_metric.pcie_l0_to_recovery_count = metric_info.pcie_l0_to_recov_count_acc;
   info->pcie_metric.pcie_replay_roll_over_count = metric_info.pcie_replay_rover_count_acc;
-  /**
-   * pcie_metric.pcie_nak_received_count: (uint64_t)
-   * metric_info.pcie_nak_rcvd_count_acc: (uint32_t)
-   */
-  info->pcie_metric.pcie_nak_received_count =
-      translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_nak_received_count)>(
-          metric_info.pcie_nak_rcvd_count_acc, (metric_info.pcie_nak_rcvd_count_acc));
-  /**
-   * pcie_metric.pcie_nak_sent_count:     (uint64_t)
-   * metric_info.pcie_nak_sent_count_acc: (uint32_t)
-   */
-  info->pcie_metric.pcie_nak_sent_count =
-      translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_nak_sent_count)>(
-          metric_info.pcie_nak_sent_count_acc, (metric_info.pcie_nak_sent_count_acc));
-  /**
-   * pcie_metric.pcie_lc_perf_other_end_recovery: (uint32_t)
-   */
+  info->pcie_metric.pcie_nak_received_count = metric_info.pcie_nak_rcvd_count_acc;
+  info->pcie_metric.pcie_nak_sent_count = metric_info.pcie_nak_sent_count_acc;
   info->pcie_metric.pcie_lc_perf_other_end_recovery_count = translate_umax_or_assign_value<
       decltype(info->pcie_metric.pcie_lc_perf_other_end_recovery_count)>(
       metric_info.pcie_lc_perf_other_end_recovery, (metric_info.pcie_lc_perf_other_end_recovery));

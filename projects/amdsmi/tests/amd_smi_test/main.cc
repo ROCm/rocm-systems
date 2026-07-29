@@ -28,6 +28,7 @@
 #include "functional/gpu/clock/frequencies_read.h"
 #include "functional/gpu/clock/frequencies_read_write.h"
 #include "functional/gpu/events/evt_notif_read_write.h"
+#include "functional/gpu/identity/device_cuid_read.h"
 #include "functional/gpu/identity/id_info_read.h"
 #include "functional/gpu/identity/version_read.h"
 #include "functional/gpu/memory/mem_page_info_read.h"
@@ -223,6 +224,10 @@ TEST(GpuFunctionalReadOnly, TestMemUtilRead) {
 TEST(GpuFunctionalReadOnly, TestIdInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestIdInfoRead tst;
+  RunGenericTest(&tst);
+}
+TEST(GpuFunctionalReadOnly, TestDeviceCuidRead) {
+  TestDeviceCuidRead tst;
   RunGenericTest(&tst);
 }
 TEST(GpuFunctionalReadWrite, TestPerfCntrReadWrite) {
