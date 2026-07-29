@@ -580,8 +580,6 @@ Examples:
    :width: 800
 
 
-.. _analysis-output-format:
-
 Analysis output format
 ======================
 
