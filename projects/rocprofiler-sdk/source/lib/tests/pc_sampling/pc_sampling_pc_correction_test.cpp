@@ -132,15 +132,9 @@ TEST(pc_correction_classify, Classify_SAluIsExt)
     EXPECT_EQ(classify("s_mov_b32 s0, 1"), Kind::EXT);
 }
 
-TEST(pc_correction_classify, Classify_BranchIsExt)
-{
-    EXPECT_EQ(classify("s_branch 8"), Kind::EXT);
-}
+TEST(pc_correction_classify, Classify_BranchIsExt) { EXPECT_EQ(classify("s_branch 8"), Kind::EXT); }
 
-TEST(pc_correction_classify, Classify_EndPgmIsExt)
-{
-    EXPECT_EQ(classify("s_endpgm"), Kind::EXT);
-}
+TEST(pc_correction_classify, Classify_EndPgmIsExt) { EXPECT_EQ(classify("s_endpgm"), Kind::EXT); }
 
 TEST(pc_correction_classify, Classify_SetPrioIsRegularInternal)
 {
@@ -250,8 +244,7 @@ TEST(pc_correction_build, BackToBackEXTs)
 {
     // EXT@0 EXT@4 EXT@8 s_nop@12 EXT@16: only the single internal yields an
     // entry, in the window opened by EXT@8 and closed by EXT@16.
-    auto c =
-        build_single_symbol({{"v_a", 4}, {"v_b", 4}, {"v_c", 4}, {"s_nop", 4}, {"v_d", 4}});
+    auto c = build_single_symbol({{"v_a", 4}, {"v_b", 4}, {"v_c", 4}, {"s_nop", 4}, {"v_d", 4}});
     ASSERT_EQ(c.entries.size(), 1u);
     const auto& w = *c.entries[0].window;
     EXPECT_EQ(w.M, 1u);
@@ -303,9 +296,8 @@ namespace
 // publish()/lookup()/erase() directly and never call build().
 struct ManagerFixture
 {
-    rocprofiler::tool::pc_correction::code_obj_decoder_t        decoder_value{};
-    rocprofiler::common::Synchronized<
-        rocprofiler::tool::pc_correction::code_obj_decoder_t, true>
+    rocprofiler::tool::pc_correction::code_obj_decoder_t decoder_value{};
+    rocprofiler::common::Synchronized<rocprofiler::tool::pc_correction::code_obj_decoder_t, true>
                         decoder{std::move(decoder_value)};
     PCCorrectionManager mgr{decoder};
 
@@ -370,8 +362,8 @@ TEST(pc_correction_concurrency, ManyReadersOneWriter)
     ManagerFixture f;
     f.mgr.publish(1, f.make_classification());
 
-    constexpr int          kReaders = 8;
-    std::atomic<bool>      stop{false};
+    constexpr int            kReaders = 8;
+    std::atomic<bool>        stop{false};
     std::vector<std::thread> readers;
     readers.reserve(kReaders);
     for(int i = 0; i < kReaders; ++i)
@@ -406,10 +398,10 @@ stochastic_record_t
 make_record(bool wave_issued, uint32_t reason_not_issued, uint64_t co_id = 0, uint64_t offset = 0)
 {
     rocprofiler_pc_sampling_record_stochastic_v0_t rec{};
-    rec.wave_issued                 = wave_issued ? 1 : 0;
-    rec.snapshot.reason_not_issued  = reason_not_issued;
-    rec.pc.code_object_id           = co_id;
-    rec.pc.code_object_offset       = offset;
+    rec.wave_issued                = wave_issued ? 1 : 0;
+    rec.snapshot.reason_not_issued = reason_not_issued;
+    rec.pc.code_object_id          = co_id;
+    rec.pc.code_object_offset      = offset;
     return stochastic_record_t{rec, /*inst_index*/ 0};
 }
 
@@ -564,8 +556,7 @@ TEST(pc_correction_cascade, BackwardToEXT1_AtOffsetZero)
     // EXT@0 inv@4 EXT@8; sample at 4 -> backward to EXT1 (0), NOT a drop.
     ManagerFixture      f;
     stochastic_record_t rec{make_record(false, 0)};
-    auto                result =
-        correct_at(f.mgr, 1, {{"v_add", 4}, {"s_icache_inv", 4}, {"v_mov", 4}}, 4, rec);
+    auto result = correct_at(f.mgr, 1, {{"v_add", 4}, {"s_icache_inv", 4}, {"v_mov", 4}}, 4, rec);
     EXPECT_EQ(result, CorrectionResult::Keep);
     EXPECT_EQ(rec.pc_sample_record.pc.code_object_offset, 0u);
 }
@@ -574,7 +565,7 @@ TEST(pc_correction_cascade, LookupMiss_PassThroughKeep)
 {
     // gate said yes but no classification exists for this CO -> keep unchanged.
     ManagerFixture      f;
-    stochastic_record_t rec = make_record(/*wave_issued*/ true, kReasonInternalOk, /*co*/ 99, 4);
+    stochastic_record_t rec    = make_record(/*wave_issued*/ true, kReasonInternalOk, /*co*/ 99, 4);
     auto                result = f.mgr.correct(rec);
     EXPECT_EQ(result, CorrectionResult::Keep);
     EXPECT_EQ(rec.pc_sample_record.pc.code_object_offset, 4u);  // unchanged

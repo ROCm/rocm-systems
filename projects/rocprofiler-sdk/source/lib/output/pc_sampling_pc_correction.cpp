@@ -86,9 +86,8 @@ build_classification(code_obj_decoder_t& decoder, rocprofiler_code_object_id_t c
 
     for(const auto& [_, sym] : symbols)
     {
-        classification->add_symbol(sym.vaddr, sym.mem_size, [&](uint64_t voffset) {
-            return decoder.get(co_id, voffset);
-        });
+        classification->add_symbol(
+            sym.vaddr, sym.mem_size, [&](uint64_t voffset) { return decoder.get(co_id, voffset); });
     }
 
     classification->sort();
@@ -207,8 +206,8 @@ PCCorrectionManager::build(const rocprofiler_callback_tracing_code_object_load_d
 
     // Decode under the decoder's lock; the symbol walk only reads, but the
     // synced decoder exposes mutation via wlock, so we take the writer lock.
-    auto classification = decoder_.wlock(
-        [&](auto& decoder) { return build_classification(decoder, co_id); });
+    auto classification =
+        decoder_.wlock([&](auto& decoder) { return build_classification(decoder, co_id); });
 
     if(classification->entries.empty())
     {
