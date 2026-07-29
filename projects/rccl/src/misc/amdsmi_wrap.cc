@@ -141,7 +141,7 @@ std::atomic<bool> amdSmiInitCalled{false}; // Track if amd_smi_init has been cal
  ************************************************************************/
 static ncclResult_t getProcessorHandle(uint32_t deviceIndex, amdsmi_processor_handle* procHandle) {
   if (!rcclParamUseAmdSmiLib()) {
-    return ncclSystemError; // Fabric only supported with amd_smi_lib
+    return ncclSystemError; // processor handles are amd_smi_lib-only
   }
 
   uint32_t socket_count = 0;
@@ -241,13 +241,13 @@ ncclResult_t amd_smi_init() {
     AMDSMITRY(amdsmi_get_lib_version, &version);
     INFO(NCCL_INIT, "amdsmi_lib: version %d.%d.%d.%s", version.major, version.minor, version.release, version.build);
   } else {
-#ifdef HIP_FABRIC_API
-    WARN("RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD "
-         "SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.");
-#endif
     // initialize alternate rsmi
     ARSMICHECK(ARSMI_init());
-    INFO(NCCL_INIT, "initialized internal alternative rsmi functionality");
+    // RCCL_USE_AMD_SMI_LIB only selects who performs fabric *discovery*: amd_smi_lib, or the
+    // ualink sysfs nodes via ARSMI_get_fabric_info(). Both populate amdsmiFabricDevices
+    // identically, so UALoE/UALLink works on this path.
+    INFO(NCCL_INIT, "initialized internal alternative rsmi functionality; UALoE/UALLink fabric discovery uses sysfs "
+                    "(set RCCL_USE_AMD_SMI_LIB=1 to use amd_smi_lib instead)");
   }
   return ncclSuccess;
 }
