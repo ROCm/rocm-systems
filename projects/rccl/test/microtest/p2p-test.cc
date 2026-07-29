@@ -177,18 +177,26 @@ ScopedHook(std::function<R(Args...)>&, Callable) -> ScopedHook<R(Args...)>;
 // ncclCudaCallocAsync default registers it there), so this guard
 // deliberately doesn't touch it.
 //
-// Use this on any test that drives the fresh-registration arm so that an
-// ASSERT_* between the call and the explicit cleanup doesn't leak.
-// Construct *after* the regRecord so destruction order is correct.
+// MakeHeapIpcInfo -- allocate a zeroed ncclIpcRegInfo the same way
+// ipcRegisterBuffer's fresh-registration arm does (ncclCalloc == malloc +
+// memset)
+inline ncclIpcRegInfo* MakeHeapIpcInfo(int peerRank, uintptr_t rmtRegAddr,
+                                       bool legacyIpcCap)
+{
+    auto* info = static_cast<ncclIpcRegInfo*>(
+        std::calloc(1, sizeof(ncclIpcRegInfo)));
+    info->peerRank             = peerRank;
+    info->impInfo.rmtRegAddr   = reinterpret_cast<void*>(rmtRegAddr);
+    info->impInfo.legacyIpcCap = legacyIpcCap;
+    return info;
+}
+
+// RegRecordCleaner -- RAII guard that owns and frees the heap allocations a
+// ncclReg accumulates
 struct RegRecordCleaner {
     ncclReg& reg;
     explicit RegRecordCleaner(ncclReg& r) : reg(r) {}
     ~RegRecordCleaner() {
-        // ipcInfos is a dynamically-sized pointer (ncclIpcRegInfo**) sized to
-        // reg.ipcInfosSize; iterate by index rather than range-for. Tests that
-        // install stack-owned ncclIpcRegInfo into a slot null it out before
-        // this cleaner runs, so only heap-allocated (production newInfo) slots
-        // survive to be freed here.
         for (int i = 0; i < reg.ipcInfosSize; ++i) {
             if (reg.ipcInfos[i]) { std::free(reg.ipcInfos[i]); reg.ipcInfos[i] = nullptr; }
         }
@@ -1635,10 +1643,8 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTabl
     // Peer 0's prior-registration state: reusable ipcInfo + host-table
     // slot. The host table was allocated by that prior fresh-reg, so it
     // is non-null going into this call (the contract we want to drive).
-    ncclIpcRegInfo info0{};
-    info0.peerRank             = kPeer0Rank;
-    info0.impInfo.rmtRegAddr   = reinterpret_cast<void*>(kRmt0);
-    info0.impInfo.legacyIpcCap = true;
+    ncclIpcRegInfo* info0 = MakeHeapIpcInfo(kPeer0Rank, kRmt0,
+                                            /*legacyIpcCap=*/true);
 
     // hostPeerRmtAddrs has to be heap-allocated (production code path
     // uses ncclCalloc / free, and RegRecordCleaner free()s it).
@@ -1658,7 +1664,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTabl
     IpcInfosBacking ipcInfosBacking{regRecord};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
-    regRecord.ipcInfos[kPeer0LocalRank]    = &info0;
+    regRecord.ipcInfos[kPeer0LocalRank]    = info0;
     regRecord.regIpcAddrs.hostPeerRmtAddrs = hostTable;
     regRecord.regIpcAddrs.devPeerRmtAddrs  = devTable.data();
     RegRecordCleaner regCleanup(regRecord);
@@ -1710,7 +1716,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTabl
     EXPECT_EQ(out.peerRmtAddrs, devTable.data());
 
     // Peer 0's existing ipcInfo untouched.
-    EXPECT_EQ(regRecord.ipcInfos[kPeer0LocalRank], &info0);
+    EXPECT_EQ(regRecord.ipcInfos[kPeer0LocalRank], info0);
     // Peer 1's bookkeeping populated.
     ASSERT_NE(regRecord.ipcInfos[kPeer1LocalRank], nullptr);
     EXPECT_EQ(regRecord.ipcInfos[kPeer1LocalRank]->peerRank, kPeer1Rank);
@@ -1733,13 +1739,6 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTabl
 
     // legacyIpcCap reflects the *last* peer (peer 1, fresh-reg legacy arm).
     EXPECT_TRUE(isLegacyIpc);
-
-    // RegRecordCleaner will free hostTable and the peer-1 ipcInfo.
-    // Peer 0's ipcInfo is stack-allocated (&info0) -- null its slot so
-    // the cleaner doesn't free() it. devTable is stack-owned; cleaner
-    // doesn't touch devPeerRmtAddrs anyway, but the comment is here so
-    // the next maintainer doesn't get surprised.
-    regRecord.ipcInfos[kPeer0LocalRank] = nullptr;
 }
 
 // Reuse-COLLECTIVE with a missing dev table but no fresh registrations:
