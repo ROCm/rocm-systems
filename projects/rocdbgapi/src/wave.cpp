@@ -790,30 +790,7 @@ wave_t::write_register (amdgpu_regnum_t regnum, size_t offset,
 std::pair<agent_address_t /* address */, amd_dbgapi_size_t /* size */>
 wave_t::scratch_memory_region () const
 {
-  auto [address, size]
-    = queue ().scratch_memory_region (*m_cwsr_record.get ());
-
-  /* On architectures with an architected flat_scratch register, check that the
-     computed slot scratch address matches the content of the register.  */
-  if (architecture ().has_architected_flat_scratch ())
-    {
-      agent_address_t flat_scratch;
-      read_register (amdgpu_regnum_t::flat_scratch, &flat_scratch);
-
-      if (address != flat_scratch && size != 0)
-        {
-          warning ("flat_scratch may be corrupted, "
-                   "private memory access is disabled");
-
-          /* If the computed scratch address differs from the content of the
-             flat_scratch register, either the calculation is incorrect or the
-             register is corrupted.  Disable access to the scratch memory
-             region by returning a 0 size.  */
-          size = 0;
-        }
-    }
-
-  return { address, size };
+  return queue ().scratch_memory_region (*m_cwsr_record.get ());
 }
 
 size_t

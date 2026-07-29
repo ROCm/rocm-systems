@@ -1017,10 +1017,25 @@ std::pair<agent_address_t /* address */, amd_dbgapi_size_t /* size */>
 aql_queue_t::scratch_memory_region (
   const architecture_t::cwsr_record_t &cwsr_record) const
 {
-  auto [offset, size] = architecture ().scratch_memory_region (
-    agent (), m_compute_tmpring_size, cwsr_record);
+  if (architecture ().has_architected_flat_scratch ())
+    {
+      agent_address_t flat_scratch;
+      auto flat_scratch_address
+        = cwsr_record.register_address (amdgpu_regnum_t::flat_scratch);
+      dbgapi_assert (flat_scratch_address.has_value ());
+      agent ().read_agent_memory (flat_scratch_address.value (),
+                                  &flat_scratch);
 
-  return { m_scratch_backing_memory_address + offset, size };
+      return { flat_scratch,
+               architecture ().scratch_memory_size (m_compute_tmpring_size) };
+    }
+  else
+    {
+      auto [offset, size] = architecture ().scratch_memory_region (
+        agent (), m_compute_tmpring_size, cwsr_record);
+
+      return { m_scratch_backing_memory_address + offset, size };
+    }
 }
 
 void
