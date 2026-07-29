@@ -3,13 +3,22 @@
 
 # ------------------------------------------------------------------------------#
 #
-# rocprofiler-systems common API headers: types shared by the core public API
-# (rocprofsys_push_category_region, rocprofsys_progress, etc.) that used to live
-# alongside the deprecated rocprof-sys-user library.
+# rocprofiler-systems common API headers: types shared across rocprof-sys's
+# internal category/tracing machinery and the causal API. Used to live alongside
+# the deprecated rocprof-sys-user library.
+#
+# categories.h: rocprofsys_category_t, used internally by the category/trait
+# system (source/lib/core/categories.hpp) and by the Python profiler bindings.
+#
+# annotation.h: rocprofsys_annotation_t, the payload type for annotated regions
+# and progress points (rocprof-sys-causal-api, rocprofsys_push_category_region).
 #
 # ------------------------------------------------------------------------------#
 
-set(_common_api_headers ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/categories.h)
+set(_common_api_headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/categories.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/annotation.h
+)
 
 foreach(_HEADER ${_common_api_headers})
     string(

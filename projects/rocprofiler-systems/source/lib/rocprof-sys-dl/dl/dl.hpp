@@ -12,6 +12,8 @@
 #    endif
 #endif
 
+#include "rocprofiler-systems/annotation.h"
+#include "rocprofiler-systems/categories.h"
 #include "rocprofiler-systems/causal_api.h"
 
 #include <atomic>
@@ -62,6 +64,10 @@ extern "C"
     int  rocprofsys_pop_category_region(rocprofsys_category_t, const char*,
                                         rocprofsys_annotation_t*,
                                         size_t) ROCPROFSYS_PUBLIC_API;
+    int  rocprofsys_push_category_region_python(const char*, rocprofsys_annotation_t*,
+                                                size_t) ROCPROFSYS_PUBLIC_API;
+    int  rocprofsys_pop_category_region_python(const char*, rocprofsys_annotation_t*,
+                                               size_t) ROCPROFSYS_PUBLIC_API;
 
     void rocprofsys_register_source(const char* file, const char* func, size_t line,
                                     size_t      address,
@@ -163,7 +169,7 @@ enum class InstrumentMode : int
     PythonProfile = 2,  // python setprofile
     Last,
 };
-}
+}  // namespace dl
 }  // namespace rocprofsys
 
 #endif  // ROCPROFSYS_DL_HPP_ 1

@@ -87,6 +87,40 @@ rocprofsys_pop_category_region(rocprofsys_category_t _category, const char* _nam
     return 0;
 }
 
+extern "C" int
+rocprofsys_push_category_region_python(const char*              _name,
+                                       rocprofsys_annotation_t* _annotations,
+                                       size_t                   _annotation_count)
+{
+    try
+    {
+        rocprofsys_push_category_region_python_hidden(_name, _annotations,
+                                                      _annotation_count);
+    } catch(std::exception& _e)
+    {
+        LOG_WARNING("Exception caught: {}", _e.what());
+        return -1;
+    }
+    return 0;
+}
+
+extern "C" int
+rocprofsys_pop_category_region_python(const char*              _name,
+                                      rocprofsys_annotation_t* _annotations,
+                                      size_t                   _annotation_count)
+{
+    try
+    {
+        rocprofsys_pop_category_region_python_hidden(_name, _annotations,
+                                                     _annotation_count);
+    } catch(std::exception& _e)
+    {
+        LOG_WARNING("Exception caught: {}", _e.what());
+        return -1;
+    }
+    return 0;
+}
+
 extern "C" void
 rocprofsys_progress(const char* _name)
 {
