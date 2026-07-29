@@ -7,7 +7,7 @@
 #include "dl/dl.hpp"
 #include "library/coverage.hpp"
 #include "library/coverage/impl.hpp"
-#include "rocprofiler-systems/categories.h"
+#include "rocprofiler-systems/annotation.h"
 
 #include "common/environment.hpp"
 #include <spdlog/fmt/fmt.h>
@@ -511,15 +511,13 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         }
 
         _config.records.emplace_back([&_label_ref, _annotate]() {
-            rocprofsys_pop_category_region(ROCPROFSYS_CATEGORY_PYTHON, _label_ref.c_str(),
-                                           (_annotate) ? _config.annotations.data()
-                                                       : nullptr,
-                                           _config.annotations.size());
+            rocprofsys_pop_category_region_python(
+                _label_ref.c_str(), (_annotate) ? _config.annotations.data() : nullptr,
+                _config.annotations.size());
         });
-        rocprofsys_push_category_region(ROCPROFSYS_CATEGORY_PYTHON, _label_ref.c_str(),
-                                        (_annotate) ? _config.annotations.data()
-                                                    : nullptr,
-                                        _config.annotations.size());
+        rocprofsys_push_category_region_python(
+            _label_ref.c_str(), (_annotate) ? _config.annotations.data() : nullptr,
+            _config.annotations.size());
     };
 
     // stop function

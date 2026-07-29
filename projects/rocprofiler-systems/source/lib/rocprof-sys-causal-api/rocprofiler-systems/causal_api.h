@@ -46,7 +46,7 @@
 #    endif
 #endif
 
-#include "rocprofiler-systems/categories.h"
+#include "rocprofiler-systems/annotation.h"
 
 #include <stddef.h>
 

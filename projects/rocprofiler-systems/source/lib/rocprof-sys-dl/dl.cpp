@@ -21,6 +21,7 @@
 #include "common/path.hpp"
 #include "common/setup.hpp"
 #include "dl/dl.hpp"
+#include "rocprofiler-systems/annotation.h"
 #include "rocprofiler-systems/categories.h"
 
 #include <spdlog/fmt/fmt.h>
@@ -303,6 +304,10 @@ struct ROCPROFSYS_INTERNAL_API indirect
                          "rocprofsys_push_category_region");
         ROCPROFSYS_DLSYM(rocprofsys_pop_category_region_f, m_omnihandle,
                          "rocprofsys_pop_category_region");
+        ROCPROFSYS_DLSYM(rocprofsys_push_category_region_python_f, m_omnihandle,
+                         "rocprofsys_push_category_region_python");
+        ROCPROFSYS_DLSYM(rocprofsys_pop_category_region_python_f, m_omnihandle,
+                         "rocprofsys_pop_category_region_python");
         ROCPROFSYS_DLSYM(rocprofsys_register_source_f, m_omnihandle,
                          "rocprofsys_register_source");
         ROCPROFSYS_DLSYM(rocprofsys_register_coverage_f, m_omnihandle,
@@ -410,6 +415,10 @@ public:
                                              rocprofsys_annotation_t*, size_t) = nullptr;
     int (*rocprofsys_pop_category_region_f)(rocprofsys_category_t, const char*,
                                             rocprofsys_annotation_t*, size_t)  = nullptr;
+    int (*rocprofsys_push_category_region_python_f)(const char*, rocprofsys_annotation_t*,
+                                                    size_t)                    = nullptr;
+    int (*rocprofsys_pop_category_region_python_f)(const char*, rocprofsys_annotation_t*,
+                                                   size_t)                     = nullptr;
     void (*rocprofsys_progress_f)(const char*)                                 = nullptr;
     void (*rocprofsys_annotated_progress_f)(const char*, rocprofsys_annotation_t*,
                                             size_t)                            = nullptr;
@@ -775,6 +784,42 @@ extern "C"
         {
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_category_region_f,
                                         _category, name, _annotations, _annotation_count);
+        }
+        else
+        {
+            ++dl::get_thread_count();
+        }
+        return 0;
+    }
+
+    int rocprofsys_push_category_region_python(const char*              name,
+                                               rocprofsys_annotation_t* _annotations,
+                                               size_t                   _annotation_count)
+    {
+        if(!dl::get_active()) return 0;
+        if(dl::get_thread_enabled())
+        {
+            return ROCPROFSYS_DL_INVOKE(
+                get_indirect().rocprofsys_push_category_region_python_f, name,
+                _annotations, _annotation_count);
+        }
+        else
+        {
+            ++dl::get_thread_count();
+        }
+        return 0;
+    }
+
+    int rocprofsys_pop_category_region_python(const char*              name,
+                                              rocprofsys_annotation_t* _annotations,
+                                              size_t                   _annotation_count)
+    {
+        if(!dl::get_active()) return 0;
+        if(dl::get_thread_enabled())
+        {
+            return ROCPROFSYS_DL_INVOKE(
+                get_indirect().rocprofsys_pop_category_region_python_f, name,
+                _annotations, _annotation_count);
         }
         else
         {

@@ -262,6 +262,26 @@ rocprofsys_pop_category_region_hidden(rocprofsys_category_t _category, const cha
         rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
 }
 
+extern "C" void
+rocprofsys_push_category_region_python_hidden(const char*              name,
+                                              rocprofsys_annotation_t* _annotations,
+                                              size_t                   _annotation_count)
+{
+    rocprofsys::impl::invoke_category_region_start(
+        ROCPROFSYS_CATEGORY_PYTHON, name, _annotations, _annotation_count,
+        rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
+}
+
+extern "C" void
+rocprofsys_pop_category_region_python_hidden(const char*              name,
+                                             rocprofsys_annotation_t* _annotations,
+                                             size_t                   _annotation_count)
+{
+    rocprofsys::impl::invoke_category_region_stop(
+        ROCPROFSYS_CATEGORY_PYTHON, name, _annotations, _annotation_count,
+        rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
+}
+
 #if defined(__GNUC__) && (__GNUC__ == 7)
 #    pragma GCC diagnostic pop
 #endif
