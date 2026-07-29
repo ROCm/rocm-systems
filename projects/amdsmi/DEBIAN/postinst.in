@@ -87,11 +87,9 @@ do_activate_argcomplete() {
 }
 
 do_install_python_module() {
-  # Install the shipped amdsmi wheel into the target interpreter's
-  # site-packages so a plain `import amdsmi` resolves. The helper prefers pip
-  # and falls back to a stdlib extraction, so python3-pip is not required. The
-  # amd-smi CLI itself does not depend on this; it resolves the module from
-  # share/amd_smi regardless.
+  # Install the shipped amdsmi wheel into the target interpreter's site-packages
+  # so a plain `import amdsmi` resolves. pip preferred, stdlib extraction as
+  # fallback; the amd-smi CLI works regardless via share/amd_smi.
   local helper="@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/amdsmi_install_wheel.py"
   local py=/usr/bin/python3
   [ -x /usr/libexec/platform-python ] && py=/usr/libexec/platform-python

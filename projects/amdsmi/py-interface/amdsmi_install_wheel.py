@@ -5,55 +5,64 @@
 
 Invoked by the DEB/RPM post-install and pre-remove scriptlets, running under the
 target system interpreter. Prefers pip; falls back to a stdlib zip extraction so
-no python3-pip dependency is required. Detecting the interpreter and its
-site-packages at install time (on the target host) avoids the build-host vs
-target-host python mismatch that a build-time baked path suffers from.
+python3-pip is not a hard dependency. Both paths install into the same detected
+site-packages directory, so uninstall is deterministic. Detecting the
+interpreter and its site-packages here (on the target host, at install time)
+avoids the build-host vs target-host python mismatch a build-time baked path
+suffers from.
 
 Usage: amdsmi_install_wheel.py {install|uninstall}
 """
 
-import glob
+import argparse
 import os
+import re
 import shutil
 import site
 import subprocess
 import sys
 import sysconfig
 import zipfile
+from pathlib import Path
 
 
-def _find_wheel():
-    here = os.path.dirname(os.path.abspath(__file__))
-    matches = sorted(glob.glob(os.path.join(here, "wheels", "amdsmi-*.whl")))
+def _find_wheel() -> "Path | None":
+    matches = sorted(Path(__file__).resolve().parent.glob("wheels/amdsmi-*.whl"))
     return matches[-1] if matches else None
 
 
-def _target_sitelib():
+def _wheel_version(wheel: Path) -> "str | None":
+    match = re.match(r"amdsmi-(.+)-py3-none-any\.whl$", wheel.name)
+    return match.group(1) if match else None
+
+
+def _target_sitelib() -> Path:
     # Prefer a site-packages directory guaranteed to be on the interpreter's
     # sys.path. On Debian/Ubuntu that is /usr/lib/python3/dist-packages; on
-    # RHEL/SLES/Fedora it is the versioned .../site-packages. Avoid
-    # sysconfig purelib, which on Debian points at a path not on sys.path.
+    # RHEL/SLES/Fedora it is the versioned .../site-packages under /usr/lib.
     try:
         candidates = site.getsitepackages()
-    except Exception:
+    except AttributeError:
         candidates = []
     if "/usr/lib/python3/dist-packages" in candidates:
-        return "/usr/lib/python3/dist-packages"
+        return Path("/usr/lib/python3/dist-packages")
     for candidate in candidates:
         if candidate.endswith("/dist-packages"):
-            return candidate
+            return Path(candidate)
+    # A noarch wheel belongs in purelib (/usr/lib/...), not platlib
+    # (/usr/lib64/...); the trailing slash keeps /usr/lib64 from matching.
     for candidate in candidates:
-        if candidate.endswith("/site-packages") and candidate.startswith("/usr/lib"):
-            return candidate
+        if candidate.endswith("/site-packages") and candidate.startswith("/usr/lib/"):
+            return Path(candidate)
     for candidate in candidates:
         if candidate.endswith("/site-packages"):
-            return candidate
+            return Path(candidate)
     if candidates:
-        return candidates[0]
-    return sysconfig.get_paths()["purelib"]
+        return Path(candidates[0])
+    return Path(sysconfig.get_paths()["purelib"])
 
 
-def _pip_env():
+def _pip_env() -> dict:
     env = dict(os.environ)
     # PEP 668: allow writing into an externally-managed system interpreter.
     env["PIP_BREAK_SYSTEM_PACKAGES"] = "1"
@@ -62,7 +71,7 @@ def _pip_env():
     return env
 
 
-def _pip_available():
+def _pip_available() -> bool:
     try:
         subprocess.run(
             [sys.executable, "-m", "pip", "--version"],
@@ -71,27 +80,34 @@ def _pip_available():
             stderr=subprocess.DEVNULL,
         )
         return True
-    except Exception:
+    except (subprocess.SubprocessError, FileNotFoundError):
         return False
 
 
-def _extract(wheel, dest):
-    os.makedirs(dest, exist_ok=True)
-    prior = os.path.join(dest, "amdsmi")
-    if os.path.isdir(prior):
+def _extract(wheel: Path, dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    prior = dest / "amdsmi"
+    if prior.is_dir():
         shutil.rmtree(prior, ignore_errors=True)
-    with zipfile.ZipFile(wheel) as zf:
-        for name in zf.namelist():
+    dest_root = str(dest.resolve())
+    with zipfile.ZipFile(wheel) as archive:
+        for name in archive.namelist():
             top = name.split("/", 1)[0]
-            if name.startswith("amdsmi/") or top.endswith(".dist-info"):
-                zf.extract(name, dest)
+            if not (name.startswith("amdsmi/") or top.endswith(".dist-info")):
+                continue
+            # Defense in depth: ZipFile.extract() already strips traversal, but
+            # skip anything that would still resolve outside dest.
+            if not str((dest / name).resolve()).startswith(dest_root):
+                continue
+            archive.extract(name, dest)
 
 
-def install():
+def install() -> int:
     wheel = _find_wheel()
     if not wheel:
         sys.stderr.write("[amdsmi] no packaged wheel found; skipping module install\n")
         return 0
+    sitelib = _target_sitelib()
     if _pip_available():
         cmd = [
             sys.executable,
@@ -100,37 +116,42 @@ def install():
             "install",
             "--no-index",
             "--no-deps",
+            "--no-cache-dir",
             "--force-reinstall",
-            wheel,
+            "--target",
+            str(sitelib),
+            str(wheel),
         ]
-        result = subprocess.run(cmd, env=_pip_env())
-        if result.returncode == 0:
+        if subprocess.run(cmd, env=_pip_env()).returncode == 0:
             return 0
         sys.stderr.write("[amdsmi] pip install failed; falling back to stdlib extract\n")
-    _extract(wheel, _target_sitelib())
+    _extract(wheel, sitelib)
     return 0
 
 
-def uninstall():
-    if _pip_available():
-        subprocess.run(
-            [sys.executable, "-m", "pip", "uninstall", "-y", "amdsmi"],
-            env=_pip_env(),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    dest = _target_sitelib()
-    shutil.rmtree(os.path.join(dest, "amdsmi"), ignore_errors=True)
-    for distinfo in glob.glob(os.path.join(dest, "amdsmi-*.dist-info")):
-        shutil.rmtree(distinfo, ignore_errors=True)
+def uninstall() -> int:
+    wheel = _find_wheel()
+    sitelib = _target_sitelib()
+    version = _wheel_version(wheel) if wheel else None
+    # Only remove what this package installed: the amdsmi tree plus the
+    # dist-info matching our shipped version. If a different version is present
+    # (a user pip-installed their own amdsmi over ours), leave it untouched.
+    our_distinfo = sitelib / "amdsmi-{}.dist-info".format(version) if version else None
+    if our_distinfo is not None and our_distinfo.is_dir():
+        shutil.rmtree(sitelib / "amdsmi", ignore_errors=True)
+        shutil.rmtree(our_distinfo, ignore_errors=True)
+    elif version is None:
+        # No shipped wheel to identify our version: remove only the module tree
+        # we would have installed, not any dist-info we cannot attribute here.
+        shutil.rmtree(sitelib / "amdsmi", ignore_errors=True)
     return 0
 
 
-def main(argv):
-    if len(argv) != 2 or argv[1] not in ("install", "uninstall"):
-        sys.stderr.write("usage: {} {{install|uninstall}}\n".format(argv[0]))
-        return 2
-    return install() if argv[1] == "install" else uninstall()
+def main(argv: "list[str]") -> int:
+    parser = argparse.ArgumentParser(description="Install or remove the amdsmi Python module.")
+    parser.add_argument("action", choices=["install", "uninstall"])
+    args = parser.parse_args(argv[1:])
+    return install() if args.action == "install" else uninstall()
 
 
 if __name__ == "__main__":

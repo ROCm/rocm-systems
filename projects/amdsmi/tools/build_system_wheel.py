@@ -56,7 +56,7 @@ def main() -> int:
     wheel_path = os.path.join(args.output_dir, "amdsmi-{}-py3-none-any.whl".format(version))
 
     with zipfile.ZipFile(wheel_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(amdsmi_dir):
+        for root, dirs, files in os.walk(amdsmi_dir, followlinks=False):
             dirs[:] = sorted(d for d in dirs if d != "__pycache__")
             for name in sorted(files):
                 # A pure-python wheel: never ship a bundled .so or stale bytecode.

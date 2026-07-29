@@ -185,17 +185,35 @@ endif()
 # its own .so-bundled wheel.
 if(NOT BUILD_PYTHON_WHEEL)
     set(_amdsmi_wheelhouse ${CMAKE_CURRENT_BINARY_DIR}/wheelhouse)
-    add_custom_target(
-        python_system_wheel
-        ALL
-        DEPENDS python_package
-        COMMAND ${CMAKE_COMMAND} -E rm -rf ${_amdsmi_wheelhouse}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${_amdsmi_wheelhouse}
+    set(_amdsmi_wheel_stamp ${_amdsmi_wheelhouse}/.built)
+    # Model the wheel as a generated artifact (OUTPUT) so it is a real build
+    # dependency, not just an ALL side effect. VERBATIM + quoting keeps paths
+    # with spaces/special chars intact.
+    add_custom_command(
+        OUTPUT ${_amdsmi_wheel_stamp}
+        DEPENDS python_package ${PROJECT_SOURCE_DIR}/tools/build_system_wheel.py
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_amdsmi_wheelhouse}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_amdsmi_wheelhouse}"
         COMMAND
-            ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/build_system_wheel.py --package-dir
-            ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR} --version ${amd_smi_lib_WHEEL_VERSION} --output-dir
-            ${_amdsmi_wheelhouse}
+            ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/tools/build_system_wheel.py" --package-dir
+            "${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}" --version "${amd_smi_lib_WHEEL_VERSION}" --output-dir
+            "${_amdsmi_wheelhouse}"
+        COMMAND ${CMAKE_COMMAND} -E touch "${_amdsmi_wheel_stamp}"
+        VERBATIM
         COMMENT "Building relocatable amdsmi system wheel"
+    )
+    add_custom_target(python_system_wheel ALL DEPENDS ${_amdsmi_wheel_stamp})
+
+    # Fail loudly at install time if the wheel was never built (e.g. a bare
+    # `cmake --install` with no preceding `cmake --build`), instead of silently
+    # shipping a package with no importable module.
+    install(
+        CODE
+            "file(GLOB _amdsmi_whl \"${_amdsmi_wheelhouse}/amdsmi-*.whl\")
+if(NOT _amdsmi_whl)
+    message(FATAL_ERROR \"amdsmi system wheel missing from ${_amdsmi_wheelhouse}; run 'cmake --build' before install so the python_system_wheel target produces it.\")
+endif()"
+        COMPONENT dev
     )
 
     # Ship the wheel and the scriptlet-invoked installer under share/amd_smi.
@@ -203,6 +221,8 @@ if(NOT BUILD_PYTHON_WHEEL)
         DIRECTORY ${_amdsmi_wheelhouse}/
         DESTINATION ${SHARE_INSTALL_PREFIX}/wheels
         COMPONENT dev
+        FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+        DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         FILES_MATCHING
         PATTERN "amdsmi-*.whl"
     )

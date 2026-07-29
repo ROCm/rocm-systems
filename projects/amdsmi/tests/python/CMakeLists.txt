@@ -30,6 +30,15 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# test_wheel_install.py loads tools/build_system_wheel.py relative to REPO_ROOT,
+# so ship it under tools/ too -- otherwise the builder half of that test raises
+# SkipTest in the installed test run.
+install(
+    PROGRAMS ${PROJECT_SOURCE_DIR}/tools/build_system_wheel.py
+    DESTINATION ${SHARE_INSTALL_PREFIX}/tools/
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # test_dual_copy_guard.py loads run_amdsmi_dual_copy_test.py relative to its
 # REPO_ROOT (SHARE_INSTALL_PREFIX in the installed layout), so the runner must
 # ship under tests/ -- otherwise the guard's four unit tests raise SkipTest and

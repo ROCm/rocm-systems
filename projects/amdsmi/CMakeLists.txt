@@ -530,8 +530,15 @@ configure_file(
     FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 )
 
-# Assign control scripts to the AMDSMI Lib & Tests packages
-set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
+# Assign control scripts to the AMDSMI Lib & Tests packages. The dev package
+# needs the postinst too: it runs do_install_python_module, which installs the
+# shipped amdsmi wheel into site-packages. Without it `import amdsmi` would not
+# work from a component-split .deb (a component CONTROL_EXTRA replaces, not
+# merges with, the generic one).
+set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst"
+    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm"
+)
 set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm")
 
 # install copyright file into share/doc/amd-smi-lib/copyright
