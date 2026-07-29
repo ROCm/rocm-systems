@@ -92,6 +92,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipIpcGetMemHandle,        hipIpcGetMemHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocationHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,             hipMemRelease);
+ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,    hipPointerGetAttribute);
 // ncclCuMemEnable: header declares `int ncclCuMemEnable()` (rocmwrap.h).
 ASSERT_HOOK_MATCHES_PROD(g_cuMemEnable,               ncclCuMemEnable);
 // Note: g_loadParam, g_fakeCudaCallocAsync, g_fakeCudaMemcpyAsync

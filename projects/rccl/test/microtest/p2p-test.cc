@@ -80,6 +80,11 @@
 #define hipMemRelease(handle) \
     g_hipMemRelease((handle))
 
+// hipPointerGetAttribute: HIP_VERSION >= 71260540 fresh-reg arm queries
+// legacy-IPC capability through this instead of ncclParamLegacyCudaRegister().
+#define hipPointerGetAttribute(data, attribute, ptr) \
+    g_hipPointerGetAttribute((data), (attribute), (ptr))
+
 // Pull in the hipified copy of p2p.cc (cudaXxx -> hipXxx rewrites already
 // applied by the hipify pass that runs as part of the main RCCL build).
 // P2P_CC_PATH is defined by this target's CMakeLists.txt as a string
@@ -374,6 +379,24 @@ auto ForceLegacyCudaRegister()
     };
 }
 
+// ForceLegacyIpcCapable -- the HIP_VERSION >= 71260540 analogue of
+// ForceLegacyCudaRegister. On that HIP the fresh-registration arm reads
+// legacy-IPC capability from hipPointerGetAttribute (p2p.cc line 1152)
+// rather than from ncclParamLegacyCudaRegister(). Tests that need the
+// `else if (legacyIpcCap)` legacy-export arm install this hook (in addition
+// to ForceLegacyCudaRegister, which drives the < 71260540 branch) so they
+// pass regardless of the toolchain's HIP version. Returns hipSuccess and
+// reports the buffer as legacy-IPC-capable.
+auto ForceLegacyIpcCapable()
+{
+    return [](void* data, hipPointer_attribute attribute,
+              hipDeviceptr_t) -> hipError_t {
+        if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE)
+            *static_cast<int*>(data) = 1;
+        return hipSuccess;
+    };
+}
+
 // CallIpcRegisterBuffer -- thin wrapper so test bodies aren't dominated by
 // a 12-line argument list. `isLegacyIpc` is in/out: callers initialise it
 // to whatever value they want to see overwritten (or kept).
@@ -450,6 +473,8 @@ protected:
     // long-sig...>> pattern the older fixture in this file has to use.
     std::optional<RegRecordCleaner> regCleanup;
     std::optional<ScopedHook<int64_t(const char*, int64_t)>> loadParam;
+    std::optional<ScopedHook<hipError_t(void*, hipPointer_attribute,
+                                        hipDeviceptr_t)>> pointerAttr;
 
     const void* const kUserbuff =
         reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
@@ -468,6 +493,7 @@ protected:
         // Hooks first (restore the global slots), then the regRecord
         // cleaner (frees per-peer allocations the call may have made).
         loadParam.reset();
+        pointerAttr.reset();
         regCleanup.reset();
         P2pMicrotest::TearDown();
     }
@@ -476,7 +502,11 @@ protected:
     // need to reach the `else if (legacyIpcCap)` block call this in their
     // body before invoking ipcRegisterBuffer.
     void InstallLegacyCudaRegisterHook() {
+        // Drive both HIP branches: ForceLegacyCudaRegister for
+        // HIP_VERSION < 71260540 (param-gated) and ForceLegacyIpcCapable
+        // for >= 71260540 (hipPointerGetAttribute-gated).
         loadParam.emplace(g_loadParam, ForceLegacyCudaRegister());
+        pointerAttr.emplace(g_hipPointerGetAttribute, ForceLegacyIpcCapable());
     }
 
     // Standard happy-path hooks for the two HIP driver entry points the
@@ -747,6 +777,7 @@ protected:
     std::unique_ptr<IpcInfosBacking>   ipcInfosBacking;
     std::unique_ptr<RegRecordCleaner>  regCleanup;
     std::unique_ptr<ScopedHook<int64_t(const char*, int64_t)>> loadParam;
+    std::unique_ptr<ScopedHook<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)>> pointerAttr;
     std::unique_ptr<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>> memGet;
     std::unique_ptr<ScopedHook<hipError_t(hipIpcMemHandle_t*, void*)>> ipcGet;
     std::unique_ptr<ScopedHook<ncclResult_t(struct ncclComm*, int, int, int, struct ncclProxyConnector*)>> connect;
@@ -776,6 +807,9 @@ protected:
         // for why this is required under HIP_VERSION < 71260540).
         loadParam = std::make_unique<ScopedHook<int64_t(const char*, int64_t)>>(
             g_loadParam, ForceLegacyCudaRegister());
+        // ...and the HIP_VERSION >= 71260540 analogue (legacy-IPC capable).
+        pointerAttr = std::make_unique<ScopedHook<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)>>(
+            g_hipPointerGetAttribute, ForceLegacyIpcCapable());
 
         // hipMemGetAddressRange: returns baseAddr + baseSize. Production
         // contract: called with dptr == userbuff.
@@ -854,6 +888,7 @@ protected:
         connect.reset();
         ipcGet.reset();
         memGet.reset();
+        pointerAttr.reset();
         loadParam.reset();
         regCleanup.reset();
         ipcInfosBacking.reset();
@@ -1670,6 +1705,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTabl
     RegRecordCleaner regCleanup(regRecord);
 
     ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+    ScopedHook pointerAttr(g_hipPointerGetAttribute, ForceLegacyIpcCapable());
 
     const void* const kUserbuff =
         reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
@@ -1853,6 +1889,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerFreshRegistrationReusesBaseAddrA
     RegRecordCleaner regCleanup(regRecord);
 
     ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+    ScopedHook pointerAttr(g_hipPointerGetAttribute, ForceLegacyIpcCapable());
 
     const void* const kUserbuff =
         reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
@@ -2294,6 +2331,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureFallsBackToLegacyExport)
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
     // Required for the inner fallback guard not to short-circuit.
     ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+    ScopedHook pointerAttr(g_hipPointerGetAttribute, ForceLegacyIpcCapable());
 
     const void* const kUserbuff =
         reinterpret_cast<const void*>(kBegAddr + kBuffOffset);

@@ -51,6 +51,19 @@ extern std::function<hipError_t(void* /*shareableHandle*/,
 extern std::function<hipError_t(hipMemGenericAllocationHandle_t /*handle*/)>
     g_hipMemRelease;
 
+// hipPointerGetAttribute: on HIP_VERSION >= 71260540 the fresh-registration
+// arm of ipcRegisterBuffer queries legacy-IPC capability
+// (HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) through this call
+// instead of consulting ncclParamLegacyCudaRegister(). The default returns
+// hipSuccess and reports the buffer as NOT legacy-capable (writes 0), which
+// keeps the cuMem and nothing-works arms reachable. Tests that need the
+// legacy-export arm install ForceLegacyIpcCapable() (see p2p-test.cc), the
+// HIP-branch analogue of ForceLegacyCudaRegister().
+extern std::function<hipError_t(void* /*data*/,
+                                hipPointer_attribute /*attribute*/,
+                                hipDeviceptr_t /*ptr*/)>
+    g_hipPointerGetAttribute;
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();

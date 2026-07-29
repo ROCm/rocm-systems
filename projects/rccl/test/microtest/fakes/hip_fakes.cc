@@ -89,6 +89,23 @@ std::function<hipError_t(void*, hipMemGenericAllocationHandle_t,
 std::function<hipError_t(hipMemGenericAllocationHandle_t)>
     g_hipMemRelease = DefaultHipMemRelease;
 
+// --- hipPointerGetAttribute (legacy-IPC capability query) ---------------
+// Default: succeed and report NOT legacy-capable, so the cuMem-export and
+// nothing-works arms stay reachable. Tests force the legacy arm by
+// installing ForceLegacyIpcCapable() (p2p-test.cc).
+static hipError_t DefaultHipPointerGetAttribute(void* data,
+                                                hipPointer_attribute attribute,
+                                                hipDeviceptr_t)
+{
+    if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) {
+        *static_cast<int*>(data) = 0;   // matches `int legacyIpcCap` in p2p.cc
+    }
+    return hipSuccess;
+}
+
+std::function<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)>
+    g_hipPointerGetAttribute = DefaultHipPointerGetAttribute;
+
 // Restore every HIP hook to its default. Called from ResetP2pFakes().
 void ResetHipFakes()
 {
@@ -97,6 +114,7 @@ void ResetHipFakes()
     g_hipMemRetainAllocationHandle  = DefaultHipMemRetainAllocationHandle;
     g_hipMemExportToShareableHandle = DefaultHipMemExportToShareableHandle;
     g_hipMemRelease                 = DefaultHipMemRelease;
+    g_hipPointerGetAttribute        = DefaultHipPointerGetAttribute;
 }
 
 // ===========================================================================
@@ -274,14 +292,10 @@ hipError_t hipMemsetAsync(void*, int, size_t, hipStream_t)
     return hipErrorInvalidValue;
 }
 
-hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute,
-                                  hipDeviceptr_t)
+hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute,
+                                  hipDeviceptr_t ptr)
 {
-    // Zero the out param so a caller that ignores the error code (or a
-    // future happy-path test that forgets to hook it) sees a benign value
-    // rather than uninitialised stack.
-    if (data) *static_cast<unsigned int*>(data) = 0;
-    return hipErrorInvalidValue;
+    return g_hipPointerGetAttribute(data, attribute, ptr);
 }
 
 hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int)
