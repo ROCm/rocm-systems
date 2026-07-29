@@ -41,13 +41,13 @@ class DeviceProxy {
   DeviceProxy() = default;
 
   DeviceProxy(size_t num_elems, MemoryAllocator& alloc)
-      : allocator_{&alloc}, num_elems_{num_elems} {
+      : num_elems_{num_elems} {
     size_t size_bytes = sizeof(T) * num_elems_;
     T* temp{nullptr};
-    allocator_->allocate(reinterpret_cast<void**>(&temp), size_bytes);
+    alloc.allocate(reinterpret_cast<void**>(&temp), size_bytes);
     assert(temp);
     memset(static_cast<void*>(temp), 0, size_bytes);
-    std::unique_ptr<T, Deleter> up{temp, Deleter{allocator_}};
+    std::unique_ptr<T, Deleter> up{temp, Deleter{alloc}};
     up_ = std::move(up);
     ptr_ = up_.get();
   }
@@ -69,25 +69,15 @@ class DeviceProxy {
   __host__ __device__ T* get() { return ptr_; }
 
  private:
-  /**
-   * @brief Internal Deleter functor is required by up_ member.
-   * The allocator pointer must outlive this Deleter.
-   */
   class Deleter {
    public:
     Deleter() = default;
-    explicit Deleter(MemoryAllocator* a) : a_{a} {}
-    void operator()(void* x) { if (a_) a_->deallocate(x); }
+    explicit Deleter(const MemoryAllocator& a) : a_{a} {}
+    void operator()(void* x) { a_.deallocate(x); }
 
    private:
-    MemoryAllocator* a_{nullptr};
+    MemoryAllocator a_{};
   };
-
-  /**
-   * @brief Pointer to the externally owned allocator.
-   * Must outlive this DeviceProxy instance.
-   */
-  MemoryAllocator* allocator_{nullptr};
 
   /**
    * @brief Unique pointer for tracking the proxy.
