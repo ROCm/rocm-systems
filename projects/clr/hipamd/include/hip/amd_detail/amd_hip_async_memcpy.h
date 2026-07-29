@@ -2,20 +2,6 @@
 
 #include <hip/amd_detail/amd_hip_runtime.h>
 
-// Accelerated global<->LDS async copy primitives.
-//
-// These are plain builtin loops with no dependency on cooperative groups, so they can be included
-// on their own without pulling in <hip/amd_detail/amd_hip_cooperative_groups.h>.
-//
-// The functions are only defined when the underlying builtins exist. Callers must guard their uses
-// with the same condition:
-//
-//   #if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and \
-//       __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
-//
-// Availability of the builtins does not imply they are invocable on the target; each individual
-// copy below is additionally wrapped in __builtin_amdgcn_is_invocable.
-
 namespace details {
 
 #if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
