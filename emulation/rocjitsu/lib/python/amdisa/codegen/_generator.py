@@ -7287,21 +7287,33 @@ class CodeGenerator:
                                 unsupported_dpp_markers = []
                                 if _dpp_struct and not _supports_dpp_encoding:
                                     unsupported_dpp_markers.append(
-                                        'reinterpret_cast<const OpEncoding*>(inst)->src0 == '
-                                        'amdgpu::SRC_DPP'
+                                        (
+                                            'reinterpret_cast<const OpEncoding*>(inst)->src0 == '
+                                            'amdgpu::SRC_DPP',
+                                            'DPP',
+                                        )
                                     )
                                 if (
                                     _recognizes_dpp8_marker
                                     and not _supports_dpp8_encoding
                                 ):
                                     unsupported_dpp_markers.append(
-                                        'amdgpu::dpp::is_src_dpp8('
-                                        'reinterpret_cast<const OpEncoding*>(inst)->src0)'
+                                        (
+                                            'amdgpu::dpp::is_src_dpp8('
+                                            'reinterpret_cast<const OpEncoding*>(inst)->src0)',
+                                            'DPP8',
+                                        )
                                     )
                                 if unsupported_dpp_markers:
+                                    unsupported_dpp_label = (
+                                        unsupported_dpp_markers[0][1]
+                                        if len(unsupported_dpp_markers) == 1
+                                        else 'DPP'
+                                    )
                                     ctor_body_parts.append(
-                                        f'if ({" || ".join(unsupported_dpp_markers)}) '
-                                        f'throw util::InvalidInst("{inst.name} does not support DPP", "");'
+                                        f'if ({" || ".join(marker for marker, _ in unsupported_dpp_markers)}) '
+                                        f'throw util::InvalidInst("{inst.name} does not support '
+                                        f'{unsupported_dpp_label}", "");'
                                     )
                                 # SDWA (src0 == amdgpu::SRC_SDWA): CDNA and RDNA1/2 only.
                                 _has_sdwa = any(

@@ -2099,6 +2099,43 @@ def test_cdna4_generated_vop1_sdwa_availability_is_instruction_specific(
     )
 
 
+def test_gfx1250_generated_vop1_dpp8_availability_is_instruction_specific(
+    gfx1250_generated_root: Path,
+):
+    vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
+    constructor = _generated_constructor_body(vop1, 'VCvtF64I32Vop1')
+
+    assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' in constructor
+    assert 'reinterpret_cast<const Vop1VopDpp8MachineInst *>' not in constructor
+    assert (
+        'throw util::InvalidInst("V_CVT_F64_I32 does not support DPP8", "");'
+        in constructor
+    )
+
+
+def test_rdna4_generated_vop3_dpp_availability_is_instruction_specific(
+    rdna4_generated_root: Path,
+):
+    vop3 = (rdna4_generated_root / 'vop3.cpp').read_text()
+    vop3p = (rdna4_generated_root / 'vop3p.cpp').read_text()
+
+    supported = _generated_constructor_body(vop3, 'VAddF32Vop3')
+    unsupported_vop3 = _generated_constructor_body(vop3, 'VAddF64Vop3')
+    unsupported_vop3p = _generated_constructor_body(vop3p, 'VPkAddF16Vop3p')
+
+    assert 'reinterpret_cast<const Vop3VopDpp16MachineInst *>' in supported
+    assert 'reinterpret_cast<const Vop3VopDpp8MachineInst *>' in supported
+    assert 'V_ADD_F32 does not support DPP' not in supported
+    assert (
+        'throw util::InvalidInst("V_ADD_F64 does not support DPP", "");'
+        in unsupported_vop3
+    )
+    assert (
+        'throw util::InvalidInst("V_PK_ADD_F16 does not support DPP", "");'
+        in unsupported_vop3p
+    )
+
+
 def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16(
     amdgpu_generated_root: Path,
 ):

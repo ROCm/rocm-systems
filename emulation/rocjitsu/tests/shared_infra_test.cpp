@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
@@ -51,8 +52,11 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
@@ -2970,6 +2974,81 @@ void cdna4_vop1_sdwa_availability_is_instruction_specific() {
                util::InvalidInst);
 }
 
+void cdna4_unsupported_sdwa_decode_halts_wave() {
+  cdna4::Vop1VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.op = cdna4::kVCvtF64I32Vop1;
+  raw.vsrc0 = 4;
+  raw.vdst = 8;
+  raw.encoding = cdna4::encoding::kVop1 >> 2;
+  raw.src0_sel = amdgpu::sdwa::DWORD;
+  raw.dst_sel = amdgpu::sdwa::DWORD;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+
+  static_assert(sizeof(raw) == 2 * sizeof(uint32_t));
+  const auto encoded = std::bit_cast<std::array<uint32_t, 2>>(raw);
+  const std::array<uint32_t, 4> words{encoded[0], encoded[1], 0, 0};
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_THROW(
+      { std::unique_ptr<Instruction> inst(decoder->decode(words.data())); }, util::InvalidInst);
+
+  amdgpu::GpuMemory mem("cdna4_unsupported_sdwa_mem");
+  amdgpu::L2Cache l2("cdna4_unsupported_sdwa_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_unsupported_sdwa_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  for (uint32_t index = 0; index < words.size(); ++index)
+    mem.write32(index * sizeof(uint32_t), words[index]);
+
+  EXPECT_NO_THROW(static_cast<void>(cu->step()));
+  EXPECT_TRUE(wf->is_halted());
+}
+
+template <typename Raw> void rdna4_vop3_dpp_marker_is_instruction_specific(uint32_t marker) {
+  Raw raw{};
+  raw.src0 = marker;
+  raw.op = rdna4::kVAddF32Vop3;
+  raw.encoding = rdna4::encoding::kVop3 >> 3;
+  raw.vsrc0 = 4;
+  raw.src1 = 5;
+  raw.vdst = 8;
+
+  EXPECT_NO_THROW(rdna4::VAddF32Vop3(reinterpret_cast<const rdna4::MachineInst *>(&raw)));
+  raw.op = rdna4::kVAddF64Vop3;
+  EXPECT_THROW(rdna4::VAddF64Vop3(reinterpret_cast<const rdna4::MachineInst *>(&raw)),
+               util::InvalidInst);
+}
+
+template <typename Raw> void rdna4_vop3p_dpp_marker_is_unsupported(uint32_t marker) {
+  Raw raw{};
+  raw.src0 = marker;
+  raw.op = rdna4::kVPkAddF16Vop3p;
+  raw.encoding = rdna4::encoding::kVop3p >> 1;
+  raw.vsrc0 = 4;
+  raw.src1 = 5;
+  raw.vdst = 8;
+  EXPECT_THROW(rdna4::VPkAddF16Vop3p(reinterpret_cast<const rdna4::MachineInst *>(&raw)),
+               util::InvalidInst);
+}
+
+void rdna4_vop3_dpp_availability_is_instruction_specific() {
+  rdna4_vop3_dpp_marker_is_instruction_specific<rdna4::Vop3VopDpp16MachineInst>(amdgpu::SRC_DPP);
+  rdna4_vop3_dpp_marker_is_instruction_specific<rdna4::Vop3VopDpp8MachineInst>(
+      amdgpu::SRC_DPP8_FI_0);
+  rdna4_vop3p_dpp_marker_is_unsupported<rdna4::Vop3pVopDpp16MachineInst>(amdgpu::SRC_DPP);
+  rdna4_vop3p_dpp_marker_is_unsupported<rdna4::Vop3pVopDpp8MachineInst>(amdgpu::SRC_DPP8_FI_0);
+}
+
 TEST(DppPermuteTest, CdnaGeneratedVop1UsesSharedRowBroadcast) {
   cdna_generated_vop1_uses_shared_row_broadcast<Cdna1DppTraits>();
   cdna_generated_vop1_uses_shared_row_broadcast<Cdna2DppTraits>();
@@ -2993,6 +3072,14 @@ TEST(DppPermuteTest, CdnaVopcDppThrowsUnsupported) {
 
 TEST(DppPermuteTest, Cdna4Vop1SdwaAvailabilityIsInstructionSpecific) {
   cdna4_vop1_sdwa_availability_is_instruction_specific();
+}
+
+TEST(DppPermuteTest, Cdna4UnsupportedSdwaDecodeHaltsWave) {
+  cdna4_unsupported_sdwa_decode_halts_wave();
+}
+
+TEST(DppPermuteTest, Rdna4Vop3DppAvailabilityIsInstructionSpecific) {
+  rdna4_vop3_dpp_availability_is_instruction_specific();
 }
 
 TEST(DppPermuteTest, RdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
