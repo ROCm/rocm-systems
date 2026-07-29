@@ -43,6 +43,7 @@
  *
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -1197,9 +1198,26 @@ AcquireAndDisplayAgentInfo(hsa_agent_t agent, void* data) {
   return HSA_STATUS_SUCCESS;
 }
 
-int CheckInitialState(void) {
-  // Check kernel module for ROCk is loaded
+// Returns true when ROCm reaches the GPU through the virtio-gpu guest backend
+// rather than the native KFD/DRM stack. Mirrors the ROCr thunk loader selection
+// driven by HSA_ENABLE_VIRTIO: "1" forces virtio, "0" forces KFD, and the default
+// auto mode uses virtio only when the native /dev/kfd node is absent.
+static bool UsingVirtioBackend(void) {
+  const char *virtio = getenv("HSA_ENABLE_VIRTIO");
+  if (virtio) {
+    if (!strcmp(virtio, "1")) return true;
+    if (!strcmp(virtio, "0")) return false;
+  }
+  return access("/dev/kfd", F_OK) != 0;
+}
 
+int CheckInitialState(void) {
+  // On a virtio-gpu guest the GPU is reached over virtio, so the native amdgpu
+  // module and /dev/kfd node are absent by design; skip the KFD/DRM checks.
+  if (UsingVirtioBackend())
+    return 0;
+
+  // Check kernel module for ROCk is loaded
   std::ifstream amdgpu_initstate("/sys/module/amdgpu/initstate");
   if (amdgpu_initstate){
     std::stringstream buffer;
