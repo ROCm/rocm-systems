@@ -26,8 +26,9 @@ All commands are shown relative to the rocDecode project root (the directory con
 
 ## `build_samples.sh` — build all sample apps
 
-Configures and cleanly rebuilds every sample app under `samples/` (running `make clean`
-before `make`) into its own `build/` subdirectory.
+Configures and cleanly rebuilds every sample app under `samples/` (a `clean` target build
+followed by a fresh build) into its own `build/` subdirectory. Uses `cmake --build`, so it
+works regardless of the configured CMake generator (Make, Ninja, etc.).
 
 ```shell
 test/build_samples.sh [JOBS]

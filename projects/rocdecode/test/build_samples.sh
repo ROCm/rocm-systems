@@ -32,8 +32,8 @@ for sample in rocdecDecode videoDecode videoDecodeBatch videoDecodeMem \
   echo "=== Building $sample ==="
   mkdir -p "$PROJECT_ROOT/samples/${sample}/build"
   cmake -S "$PROJECT_ROOT/samples/${sample}" -B "$PROJECT_ROOT/samples/${sample}/build" 2>&1 | tail -2
-  make clean -C "$PROJECT_ROOT/samples/${sample}/build" 2>&1 | tail -2
-  make -j"$JOBS" -C "$PROJECT_ROOT/samples/${sample}/build" 2>&1 | tail -2
+  cmake --build "$PROJECT_ROOT/samples/${sample}/build" --target clean 2>&1 | tail -2
+  cmake --build "$PROJECT_ROOT/samples/${sample}/build" --parallel "$JOBS" 2>&1 | tail -2
 done
 
 echo "=== All sample apps built ==="
