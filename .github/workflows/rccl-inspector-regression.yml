@@ -1,0 +1,50 @@
+name: RCCL inspector regression
+
+# Native collInfo lifecycle tests (NCCL issue #2000) run on every PR touching
+# inspector code. Optional functional stress + ASAN plugin build run manually
+# on GPU runners via workflow_dispatch (RUN_FUNCTIONAL=1).
+
+on:
+  pull_request:
+    paths:
+      - 'projects/rccl/plugins/profiler/inspector/**'
+      - 'projects/rccl/test/ext-plugins/tests/ext-inspector/**'
+      - 'projects/rccl/test/ext-plugins/scripts/run_inspector_asan_stress.sh'
+      - '.github/workflows/rccl-inspector-regression.yml'
+  workflow_dispatch:
+    inputs:
+      run_functional:
+        description: 'Run GPU functional stress tests (requires self-hosted GPU runner env)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  native-lifecycle:
+    name: Inspector collInfo lifecycle (native)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and run native lifecycle tests
+        run: |
+          make -C projects/rccl/plugins/profiler/inspector/test test
+
+      - name: Build and run native lifecycle tests (ASAN)
+        run: |
+          make -C projects/rccl/plugins/profiler/inspector/test clean
+          make -C projects/rccl/plugins/profiler/inspector/test ASAN=1 test
+
+  asan-stress:
+    name: Inspector ASAN stress (optional)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_functional
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ASAN regression script (native only on this runner)
+        run: |
+          chmod +x projects/rccl/test/ext-plugins/scripts/run_inspector_asan_stress.sh
+          projects/rccl/test/ext-plugins/scripts/run_inspector_asan_stress.sh
