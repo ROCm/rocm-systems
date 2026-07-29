@@ -125,7 +125,6 @@ const AMDGpuVerbList_t amdgpu_verb_check_list{
     {AMDGpuVerbTypes_t::kSetGpuPciBandwidth, "amdsmi_set_gpu_pci_bandwidth"},
     {AMDGpuVerbTypes_t::kSetPowerCap, "amdsmi_set_power_cap"},
     {AMDGpuVerbTypes_t::kSetGpuPowerProfile, "amdsmi_set_gpu_power_profile"},
-    {AMDGpuVerbTypes_t::kSetGpuClkRange, "amdsmi_set_gpu_clk_range"},
     {AMDGpuVerbTypes_t::kSetGpuOdClkInfo, "amdsmi_set_gpu_od_clk_info"},
     {AMDGpuVerbTypes_t::kSetGpuOdVoltInfo, "amdsmi_set_gpu_od_volt_info"},
     {AMDGpuVerbTypes_t::kSetGpuPerfLevelV1, "amdsmi_set_gpu_perf_level_v1"},

@@ -85,13 +85,6 @@ typedef enum {
  */
 
 /**
- * @brief Unit conversion factor for HBM temperatures
- *
- * @cond @tag{gpu_bm_linux} @endcond
- */
-#define CENTRIGRADE_TO_MILLI_CENTIGRADE 1000
-
-/**
  * @brief This should match NUM_HBM_INSTANCES
  *
  * @cond @tag{gpu_bm_linux} @endcond
@@ -197,7 +190,7 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
-#define MAX_NUMBER_OF_AFIDS_PER_RECORD 12  //!< Maximum AFIDs per CPER record
+#define AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD 12  //!< Maximum AFIDs per CPER record
 
 /**
  * @brief Introduced in gpu metrics v1.9+
@@ -317,10 +310,10 @@ typedef struct {
 #define AMDSMI_MAX_SPD_REG_OFFSET 0x7FF        //!< Maximum SPD register offset [22:12]
 #define AMDSMI_MAX_SPD_REG_SPACE 0x1           //!< Maximum SPD register space [23]
 #define AMDSMI_MAX_SPD_WRITE_DATA 0xFF         //!< Maximum SPD write data [31:24]
-#define MAX_SVI3_RAIL_INDEX 4                  //!< Maximum SVI3 rail index
-#define MAX_SVI3_RAIL_SELECTION 1              //!< Maximum SVI3 rail selection
-#define POWER_EFFICIENCY_MODE_4 0x4            //!< Power Efficiency mode selection
-#define POWER_EFFICIENCY_MODE_5 0x5            //!< Power Efficiency mode selection
+#define AMDSMI_MAX_SVI3_RAIL_INDEX 4           //!< Maximum SVI3 rail index
+#define AMDSMI_MAX_SVI3_RAIL_SELECTION 1       //!< Maximum SVI3 rail selection
+#define AMDSMI_POWER_EFFICIENCY_MODE_4 0x4     //!< Power Efficiency mode selection
+#define AMDSMI_POWER_EFFICIENCY_MODE_5 0x5     //!< Power Efficiency mode selection
 #define AMDSMI_MAX_POWER_EFFICIENCY_UTIL 0x7F  //!< [9:3]=Balanced core mode utilization point(%)
 #define AMDSMI_MAX_POWER_EFFICIENCY_PPTLIMIT 0x1FFFFF  //!< [30:10]=Balanced core mode PPT limit(mW)
 #define AMDSMI_RAIL_INDEX_NONE 0xFFFFFFFF  //!< Rail Index value defined as maximum when not passed
@@ -481,6 +474,9 @@ typedef enum {
  * @brief Compute Partition. This enum is used to identify
  * various compute partitioning settings.
  *
+ * @deprecated This enum is slated for removal in a future ROCm release;
+ * use amdsmi_accelerator_partition_type_t instead
+ *
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 typedef enum {
@@ -501,6 +497,9 @@ typedef enum {
  * @brief Compute Partition Memory Allocation Mode. Controls how GPU memory
  * is allocated across XCPs within a memory partition.
  *
+ * @deprecated This enum is slated for removal in a future ROCm release;
+ * use amdsmi_accelerator_partition_mem_alloc_mode_t instead
+ *
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
@@ -509,6 +508,19 @@ typedef enum {
   AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL           //!< Each XCP in the partition may
                                                    //!< use the full partition memory
 } amdsmi_compute_partition_mem_alloc_mode_t;
+
+/**
+ * @brief Accelerator Partition Memory Allocation Mode. Controls how GPU memory
+ * is allocated across XCPs within a memory partition.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID = 0,  //!< Invalid mode
+  AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING,      //!< Memory is evenly capped per XCP
+  AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL           //!< Each XCP in the partition may
+                                                       //!< use the full partition memory
+} amdsmi_accelerator_partition_mem_alloc_mode_t;
 
 /**
  * @brief Memory Partitions
@@ -1781,8 +1793,10 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
-  CLK_LIMIT_MIN,  //!< Min Clock value in MHz
-  CLK_LIMIT_MAX   //!< Max Clock value in MHz
+  AMDSMI_CLK_LIMIT_MIN,                  //!< Min Clock value in MHz
+  AMDSMI_CLK_LIMIT_MAX,                  //!< Max Clock value in MHz
+  CLK_LIMIT_MIN = AMDSMI_CLK_LIMIT_MIN,  //!< Deprecated, use AMDSMI_CLK_LIMIT_MIN instead
+  CLK_LIMIT_MAX = AMDSMI_CLK_LIMIT_MAX   //!< Deprecated, use AMDSMI_CLK_LIMIT_MAX instead
 } amdsmi_clk_limit_type_t;
 
 /**
@@ -2767,9 +2781,12 @@ typedef struct {
  * @cond @tag{cpu_bm} @endcond
  */
 typedef enum {
-  AGG_BW0 = 1,  //!< Aggregate Bandwidth
-  RD_BW0 = 2,   //!< Read Bandwidth
-  WR_BW0 = 4    //!< Write Bandwidth
+  AMDSMI_AGG_BW0 = 1,        //!< Aggregate Bandwidth
+  AMDSMI_RD_BW0 = 2,         //!< Read Bandwidth
+  AMDSMI_WR_BW0 = 4,         //!< Write Bandwidth
+  AGG_BW0 = AMDSMI_AGG_BW0,  //!< Deprecated, use AMDSMI_AGG_BW0 instead
+  RD_BW0 = AMDSMI_RD_BW0,    //!< Deprecated, use AMDSMI_RD_BW0 instead
+  WR_BW0 = AMDSMI_WR_BW0     //!< Deprecated, use AMDSMI_WR_BW0 instead
 } amdsmi_io_bw_encoding_t;
 
 /**
@@ -3706,38 +3723,6 @@ amdsmi_status_t amdsmi_get_gpu_revision(amdsmi_processor_handle processor_handle
  */
 amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_handle, char* name,
                                            size_t len);
-
-/**
- *  @brief Get the vram vendor string of a device.
- *
- *  @deprecated This API is slated for removal in a future ROCm release;
- *  ::amdsmi_get_gpu_vram_info() should be used instead
- *
- *  @ingroup tagIdentQuery
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details This function retrieves the vram vendor name given a processor handle
- *  @p processor_handle, a pointer to a caller provided
- *  char buffer @p brand, and a length of this buffer @p len, this function
- *  will write the vram vendor of the device (up to @p len characters) to the
- *  buffer @p brand.
- *
- *  If the vram vendor for the device is not found as one of the values
- *  contained within amdsmi_get_gpu_vram_vendor, then this function will return
- *  the string 'unknown' instead of the vram vendor.
- *
- *  @param[in] processor_handle a processor handle
- *
- *  @param[in,out] brand a pointer to a caller provided char buffer to which the
- *  vram vendor will be written
- *
- *  @param[in] len the length of the caller provided buffer @p brand.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle, char* brand,
-                                           uint32_t len);
 
 /**
  *  @brief Get the subsystem device id associated with the device with
@@ -5127,37 +5112,6 @@ amdsmi_status_t amdsmi_get_gpu_reg_table_info(amdsmi_processor_handle processor_
                                               uint32_t* num_of_metrics);
 
 /**
- *  @brief This function sets the clock range information. It is not supported on virtual
- *  machine guest
- *
- *  @deprecated ::amdsmi_set_gpu_clk_limit() should be used, with an
- *  interface that set the min_value and then max_value.
- *
- *  @ingroup tagClkPowerPerfQuery
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details Given a processor handle @p processor_handle, a minimum clock value @p minclkvalue,
- *  a maximum clock value @p maxclkvalue and a clock type @p clkType this function
- *  will set the sclk|mclk range
- *
- *  @param[in] processor_handle a processor handle
- *
- *  @param[in] minclkvalue value to apply to the clock range. Frequency values
- *  are in MHz.
- *
- *  @param[in] maxclkvalue value to apply to the clock range. Frequency values
- *  are in MHz.
- *
- *  @param[in] clkType AMDSMI_CLK_TYPE_SYS | AMDSMI_CLK_TYPE_MEM range type
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_set_gpu_clk_range(amdsmi_processor_handle processor_handle,
-                                         uint64_t minclkvalue, uint64_t maxclkvalue,
-                                         amdsmi_clk_type_t clkType);
-
-/**
  *  @brief This function sets the clock sets the clock min/max level
  *
  *  @ingroup tagClkPowerPerfQuery
@@ -6105,8 +6059,8 @@ typedef struct {
  *  uint64_t that may be safely written to the memory pointed to by @p afids. This is the limit
  *  on how many AF IDs will be written to @p afids. On return, @p num_afids will contain the
  *  number of AF IDs written to @p afids, or the number of AF IDs that could have been written
- *  if enough memory had been provided. It is suggest to pass MAX_NUMBER_OF_AFIDS_PER_RECORD for all
- *  AF Ids.
+ *  if enough memory had been provided. It is suggest to pass AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD
+ * for all AF Ids.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -6937,13 +6891,16 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
 /**
  *  @brief Retrieves the current compute partitioning for a desired device
  *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_get_gpu_accelerator_partition_profile() should be used instead
+ *
  *  @ingroup tagComputePartition
  *
  *  @platform{gpu_bm_linux}
  *
  *  @details
- *  Given a processor handle @p processor_handle and a string @p compute_partition ,
- *  and uint32 @p len , this function will attempt to obtain the device's
+ *  Given a processor handle @p processor_handle and a string @p compute_partition,
+ *  and uint32 @p len, this function will attempt to obtain the device's
  *  current compute partition setting string. Upon successful retrieval,
  *  the obtained device's compute partition settings string shall be stored in
  *  the passed @p compute_partition char string variable.
@@ -6971,6 +6928,9 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
 
 /**
  *  @brief Modifies a selected device's compute partition setting.
+ *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_set_gpu_accelerator_partition_profile() should be used instead
  *
  *  @ingroup tagComputePartition
  *
@@ -7003,6 +6963,9 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle process
  *  @brief Retrieves the current compute partition memory allocation mode
  *  for a desired device.
  *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_get_gpu_accelerator_partition_mem_alloc_mode() should be used instead
+ *
  *  @ingroup tagComputePartition
  *
  *  @platform{gpu_bm_linux}
@@ -7011,9 +6974,9 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle process
  *  @p mode, this function will attempt to obtain the device's current
  *  compute partition memory allocation mode. The mode controls how HBM
  *  capacity is distributed across XCPs within each memory partition:
- *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
  *    to an even share.
- *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL — each XCP may use the
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL — each XCP may use the
  *    full memory partition size (useful when only one XCP is active).
  *
  *  @param[in] processor_handle Device which to query
@@ -7033,7 +6996,43 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t* mode);
 
 /**
+ *  @brief Retrieves the current accelerator partition memory allocation mode
+ *  for a desired device.
+ *
+ *  @ingroup tagComputePartition
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle and a pointer
+ *  @p mode, this function will attempt to obtain the device's current
+ *  accelerator partition memory allocation mode. The mode controls how HBM
+ *  capacity is distributed across XCPs within each memory partition:
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
+ *    to an even share.
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL — each XCP may use the
+ *    full memory partition size (useful when only one XCP is active).
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] mode a pointer to an ::amdsmi_accelerator_partition_mem_alloc_mode_t
+ *  variable, into which the device's current memory allocation mode will
+ *  be written.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::AMDSMI_STATUS_FILE_ERROR problem accessing the sysfs file
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ */
+amdsmi_status_t amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_mem_alloc_mode_t* mode);
+
+/**
  *  @brief Modifies a selected device's compute partition memory allocation mode.
+ *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_set_gpu_accelerator_partition_mem_alloc_mode() should be used instead
  *
  *  @ingroup tagComputePartition
  *
@@ -7064,6 +7063,38 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
 amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode);
 
+/**
+ *  @brief Modifies a selected device's compute partition memory allocation mode.
+ *
+ *  @ingroup tagComputePartition
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle and a mode
+ *  @p mode, this function will attempt to update the selected device's
+ *  compute partition memory allocation mode. The mode controls how HBM
+ *  capacity is distributed across XCPs within each memory partition:
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
+ *    to an even share. This is the default.
+ *  - ::AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL — each XCP may use the
+ *    full memory partition size.
+ *
+ *  @param[in] processor_handle Device which to modify
+ *
+ *  @param[in] mode using enum ::amdsmi_accelerator_partition_mem_alloc_mode_t,
+ *  define what the selected device's memory allocation mode should be
+ *  updated to.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_FILE_ERROR problem accessing the sysfs file
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ */
+amdsmi_status_t amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_mem_alloc_mode_t mode);
+
 /** @} End tagComputePartition */
 
 /*****************************************************************************/
@@ -7081,8 +7112,8 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
  *  @platform{gpu_bm_linux}
  *
  *  @details
- *  Given a processor handle @p processor_handle and a string @p memory_partition ,
- *  and uint32 @p len , this function will attempt to obtain the device's
+ *  Given a processor handle @p processor_handle and a string @p memory_partition,
+ *  and uint32 @p len, this function will attempt to obtain the device's
  *  memory partition string. Upon successful retrieval, the obtained device's
  *  memory partition string shall be stored in the passed @p memory_partition
  *  char string variable.
@@ -7092,7 +7123,7 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
  *  @param[inout] memory_partition a pointer to a char string variable,
  *  which the device's memory partition will be written to.
  *
- *  @param[in] len the length of the caller provided buffer @p memory_partition ,
+ *  @param[in] len the length of the caller provided buffer @p memory_partition,
  *  suggested length is 5 or greater.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
@@ -7110,6 +7141,9 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
 
 /**
  *  @brief Modifies a selected device's current memory partition setting.
+ *
+ *  @deprecated This API is slated for removal in a future ROCm release;
+ *  ::amdsmi_set_gpu_memory_partition_mode() should be used instead
  *
  *  @ingroup tagMemoryPartition
  *

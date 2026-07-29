@@ -128,6 +128,7 @@ pub const AMDSMI_APU_MAX_CORES: u32 = 16;
 pub const AMDSMI_APU_V24_CORES: u32 = 8;
 pub const AMDSMI_APU_MAX_L3: u32 = 2;
 pub const AMDSMI_APU_MAX_IPU: u32 = 8;
+pub const AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD: u32 = 12;
 pub const AMDSMI_MAX_NUM_HBM_STACKS: u32 = 12;
 pub const AMDSMI_MAX_NUM_AID: u32 = 2;
 pub const AMDSMI_MAX_NUM_MID: u32 = 2;
@@ -328,6 +329,13 @@ pub enum AmdsmiComputePartitionMemAllocModeT {
     AmdsmiComputePartitionMemAllocInvalid = 0,
     AmdsmiComputePartitionMemAllocCapping = 1,
     AmdsmiComputePartitionMemAllocAll = 2,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiAcceleratorPartitionMemAllocModeT {
+    AmdsmiAcceleratorPartitionMemAllocInvalid = 0,
+    AmdsmiAcceleratorPartitionMemAllocCapping = 1,
+    AmdsmiAcceleratorPartitionMemAllocAll = 2,
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -2257,11 +2265,17 @@ pub enum AmdsmiGpuBlockT {
     AmdsmiGpuBlockMpio = 262144,
     AmdsmiGpuBlockReserved = 9223372036854775808,
 }
+impl AmdsmiClkLimitTypeT {
+    pub const ClkLimitMin: AmdsmiClkLimitTypeT = AmdsmiClkLimitTypeT::AmdsmiClkLimitMin;
+}
+impl AmdsmiClkLimitTypeT {
+    pub const ClkLimitMax: AmdsmiClkLimitTypeT = AmdsmiClkLimitTypeT::AmdsmiClkLimitMax;
+}
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiClkLimitTypeT {
-    ClkLimitMin = 0,
-    ClkLimitMax = 1,
+    AmdsmiClkLimitMin = 0,
+    AmdsmiClkLimitMax = 1,
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -3853,13 +3867,6 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
-    pub fn amdsmi_get_gpu_vram_vendor(
-        processor_handle: AmdsmiProcessorHandle,
-        brand: *mut ::std::os::raw::c_char,
-        len: u32,
-    ) -> AmdsmiStatusT;
-}
-extern "C" {
     pub fn amdsmi_get_gpu_subsystem_id(
         processor_handle: AmdsmiProcessorHandle,
         id: *mut u16,
@@ -4176,14 +4183,6 @@ extern "C" {
         reg_type: AmdsmiRegTypeT,
         reg_metrics: *mut *mut AmdsmiNameValueT,
         num_of_metrics: *mut u32,
-    ) -> AmdsmiStatusT;
-}
-extern "C" {
-    pub fn amdsmi_set_gpu_clk_range(
-        processor_handle: AmdsmiProcessorHandle,
-        minclkvalue: u64,
-        maxclkvalue: u64,
-        clkType: AmdsmiClkTypeT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
@@ -4953,9 +4952,21 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(
+        processor_handle: AmdsmiProcessorHandle,
+        mode: *mut AmdsmiAcceleratorPartitionMemAllocModeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_set_gpu_compute_partition_mem_alloc_mode(
         processor_handle: AmdsmiProcessorHandle,
         mode: AmdsmiComputePartitionMemAllocModeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
+        processor_handle: AmdsmiProcessorHandle,
+        mode: AmdsmiAcceleratorPartitionMemAllocModeT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

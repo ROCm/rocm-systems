@@ -6,6 +6,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 7.15.0
 
+### Added
+
+- **Added accelerator partition memory allocation mode API**.  
+  - New APIs: `amdsmi_get_gpu_accelerator_partition_mem_alloc_mode()`, `amdsmi_set_gpu_accelerator_partition_mem_alloc_mode()`.
+  - New enum: `amdsmi_accelerator_partition_mem_alloc_mode_t` (`AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING`, `AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL`).
+  - Supersedes the equivalent `compute_partition` memory allocation mode APIs, which are now deprecated.
+
 ### Changed
 
 - **Bumped the library major version to 27.0.0** (breaking).  
@@ -24,12 +31,34 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Field access simplifies from `fabric_info.fabric_version.v1.<field>` to `fabric_info.v1.<field>`, and `fabric_info.version` becomes `fabric_version`.
   - The change is ABI-preserving: field offsets and the overall structure size are unchanged. The Python `amdsmi_get_gpu_fabric_info()` dictionary keys are also unchanged.
 
+- **Prefixed public preprocessor macros with `AMDSMI_` in `amdsmi.h`** (breaking).  
+  - `MAX_SVI3_RAIL_INDEX`, `MAX_SVI3_RAIL_SELECTION`, `POWER_EFFICIENCY_MODE_4`, `POWER_EFFICIENCY_MODE_5`, and `MAX_NUMBER_OF_AFIDS_PER_RECORD` are now `AMDSMI_MAX_SVI3_RAIL_INDEX`, `AMDSMI_MAX_SVI3_RAIL_SELECTION`, `AMDSMI_POWER_EFFICIENCY_MODE_4`, `AMDSMI_POWER_EFFICIENCY_MODE_5`, and `AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD`. The unused `CENTRIGRADE_TO_MILLI_CENTIGRADE` macro was removed. Update references to the new names.
+
+- **Deprecated the `compute_partition` APIs in favor of `accelerator_partition` equivalents**.  
+  - `amdsmi_get_gpu_compute_partition()`, `amdsmi_set_gpu_compute_partition()`, `amdsmi_get_gpu_compute_partition_mem_alloc_mode()`, and `amdsmi_set_gpu_compute_partition_mem_alloc_mode()` are slated for removal in a future ROCm release. They now emit a `DeprecationWarning` from the Python interface and delegate to their `accelerator_partition` counterparts.
+  - The `amdsmi_compute_partition_type_t` and `amdsmi_compute_partition_mem_alloc_mode_t` enums are deprecated in favor of `amdsmi_accelerator_partition_type_t` and `amdsmi_accelerator_partition_mem_alloc_mode_t`.
+
+- **Deprecated `amdsmi_set_gpu_memory_partition()` in favor of `amdsmi_set_gpu_memory_partition_mode()`**.  
+  - `amdsmi_set_gpu_memory_partition` is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and functions as a wrapper of `amdsmi_set_gpu_memory_partition_mode()`.
+
+- **Namespaced `amdsmi_clk_limit_type_t` and `amdsmi_io_bw_encoding_t` enumerators with an `AMDSMI_` prefix**.  
+  - Added `AMDSMI_CLK_LIMIT_MIN`/`AMDSMI_CLK_LIMIT_MAX` and `AMDSMI_AGG_BW0`/`AMDSMI_RD_BW0`/`AMDSMI_WR_BW0`.
+  - The unprefixed names (`CLK_LIMIT_MIN`, `CLK_LIMIT_MAX`, `AGG_BW0`, `RD_BW0`, `WR_BW0`) are retained as deprecated aliases with unchanged values and are slated for removal in a future ROCm release.
+
 - **Removed the `amdsmi_gpu_driver_reload()` API and its Python binding** (breaking).  
   - Reload the amdgpu driver out of band with `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to apply memory partition changes instead.
 
 - **Removed unused public macros and a duplicate fabric telemetry enumerator to match the unified ABI** (breaking).  
   - Dropped the `AMDSMI_MAX_VF_COUNT`, `AMDSMI_MAX_DRIVER_NUM`, `AMDSMI_DFC_FW_NUMBER_OF_ENTRIES`, `AMDSMI_MAX_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_BLACK_LIST_ELEMENTS`, `AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_ERR_RECORDS`, and `AMDSMI_MAX_PROFILE_COUNT` defines, which were unreferenced by any API or struct.
   - Removed the redundant `AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN` enumerator from `amdsmi_fabric_telemetry_category_t`; `AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID` carries the same `0xFFFFFFFF` value.
+
+- **Removed `amdsmi_get_gpu_vram_vendor()`** (breaking). Use `amdsmi_get_gpu_vram_info()` and read the `vram_vendor` field instead.
+
+- **Removed `amdsmi_get_cpusocket_handles()` from the Python interface** (breaking). Use `amdsmi_get_cpu_handles()` instead.
+
+- **Removed the `plpds` key from `amdsmi_get_xgmi_plpd()` Python output** (breaking). Use the `policies` key instead.
+
+- **Removed `amdsmi_set_gpu_clk_range()`** (breaking). Use `amdsmi_set_gpu_clk_limit()` instead.
 
 - **Restructured AMD SMI C++ tests into unit and functional suites**.  
   - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
@@ -47,7 +76,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Optimized `amdsmi_get_gpu_process_list()` to skip redundant KFD topology discovery**.  
   - The per-process KFD lookup rebuilt the entire KFD node topology (an expensive sysfs walk) on every call just to translate the device BDF into its KFD GPU id.
   - The caller already knows this value, so it is now passed through to `gpuvsmi_get_pid_info()`, eliminating one full topology discovery per process per refresh. Falls back to the original discovery path when the id is unavailable.
-
 
 ### Resolved Issues
 
