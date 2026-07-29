@@ -634,10 +634,6 @@ class KernelBlitManager : public DmaBlitManager {
   //! Copies a batch of raw virtual-address ranges using the shader path
   bool ShaderCopyBufferBatchRaw(const std::vector<BatchRawCopyOp>& copy_ops) const;
 
-  //! Re-issues the pinned-host ops of a failed SDMA batch using the shader path.
-  bool ShaderCopyPinnedBatch(const std::vector<amd::BatchCopyOp>& pinned_ops,
-                             bool needs_system_scope, bool attach_signal) const;
-
   //! Atomically updates a memory location (i.e. writes, increments or decrements the memory).
   bool streamOpsUpdate(uint blitType, device::Memory& memory, uint64_t value, size_t offset,
                        size_t sizeBytes) const;

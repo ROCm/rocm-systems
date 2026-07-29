@@ -2933,29 +2933,6 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
 }
 
 // ================================================================================================
-bool KernelBlitManager::ShaderCopyPinnedBatch(
-    const std::vector<amd::BatchCopyOp>& pinned_ops, bool needs_system_scope,
-    bool attach_signal) const {
-  std::vector<BatchRawCopyOp> raw_copy_ops;
-  raw_copy_ops.reserve(pinned_ops.size());
-
-  for (const amd::BatchCopyOp& op : pinned_ops) {
-    Memory* src_memory = dev().getRocMemory(op.srcMemory);
-    Memory* dst_memory = dev().getRocMemory(op.dstMemory);
-    if (src_memory == nullptr || dst_memory == nullptr) {
-      LogError("KernelBlitManager::ShaderCopyPinnedBatch: Invalid memory objects!");
-      return false;
-    }
-
-    raw_copy_ops.push_back({src_memory->getDeviceMemory() + op.srcOffset,
-                            dst_memory->getDeviceMemory() + op.dstOffset, op.size, op.metadata,
-                            needs_system_scope, attach_signal});
-  }
-
-  return ShaderCopyBufferBatchRaw(raw_copy_ops);
-}
-
-// ================================================================================================
 bool KernelBlitManager::WriteBufferBatch(
     const std::vector<amd::BatchWriteMemoryOp>& write_ops) const {
   for (const amd::BatchWriteMemoryOp& op : write_ops) {
@@ -2971,6 +2948,12 @@ bool KernelBlitManager::WriteBufferBatch(
 
   for (const amd::BatchWriteMemoryOp& op : write_ops) {
     Memory* dst_memory = dev().getRocMemory(op.dst_memory);
+    if (dst_memory == nullptr) {
+      LogError("KernelBlitManager::WriteBufferBatch: Invalid destination memory!");
+      gpu().releaseGpuMemoryFence();
+      gpu().command()->ReleasePinnedMemory();
+      return false;
+    }
 
     const_address src_addr = reinterpret_cast<const_address>(op.src_host);
     size_t copy_offset = 0;
@@ -3036,10 +3019,12 @@ bool KernelBlitManager::WriteBufferBatch(
       // to the pinned source.
       constexpr bool kNeedsSystemScope = true;
       constexpr bool kAttachSignal = false;
-      if (!ShaderCopyPinnedBatch(pinned_copy_ops, kNeedsSystemScope, kAttachSignal)) {
-        gpu().releaseGpuMemoryFence();
-        gpu().command()->ReleasePinnedMemory();
-        return false;
+      for (const amd::BatchCopyOp& op : pinned_copy_ops) {
+        Memory* src_memory = dev().getRocMemory(op.srcMemory);
+        Memory* dst_memory = dev().getRocMemory(op.dstMemory);
+        staging_copy_ops.push_back({src_memory->getDeviceMemory() + op.srcOffset,
+                                    dst_memory->getDeviceMemory() + op.dstOffset, op.size,
+                                    op.metadata, kNeedsSystemScope, kAttachSignal});
       }
     }
     pinned_copy_ops.clear();
@@ -3142,10 +3127,12 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       // reads once this command completes, so it needs a system scope release.
       constexpr bool kNeedsSystemScope = true;
       constexpr bool kAttachSignal = true;
-      if (!ShaderCopyPinnedBatch(pinned_copy_ops, kNeedsSystemScope, kAttachSignal)) {
-        gpu().releaseGpuMemoryFence();
-        gpu().command()->ReleasePinnedMemory();
-        return false;
+      for (const amd::BatchCopyOp& op : pinned_copy_ops) {
+        Memory* src_memory = dev().getRocMemory(op.srcMemory);
+        Memory* dst_memory = dev().getRocMemory(op.dstMemory);
+        staging_copy_ops.push_back({src_memory->getDeviceMemory() + op.srcOffset,
+                                    dst_memory->getDeviceMemory() + op.dstOffset, op.size,
+                                    op.metadata, kNeedsSystemScope, kAttachSignal});
       }
     }
     pinned_copy_ops.clear();
@@ -3157,9 +3144,14 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       gpu().command()->ReleasePinnedMemory();
       return false;
     }
-    gpu().Barriers().WaitCurrent();
-    for (const StagingReadBack& read_back : staging_read_backs) {
-      memcpy(read_back.dst, read_back.staging, read_back.size);
+    // Only staged ops need the host read-back; a pinned op writes straight into
+    // the caller's buffer, so keep the copy asynchronous when the batch is all
+    // pinned fallback ops.
+    if (!staging_read_backs.empty()) {
+      gpu().Barriers().WaitCurrent();
+      for (const StagingReadBack& read_back : staging_read_backs) {
+        memcpy(read_back.dst, read_back.staging, read_back.size);
+      }
     }
   }
 
