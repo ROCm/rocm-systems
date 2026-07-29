@@ -1209,30 +1209,41 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
                       std::min(gang_factor, properties_.NumSdmaXgmiEngines);
   }
 
+  // For non-gang H2D/D2H copies, bypass the gang lock entirely.
+  // H2D uses BlitHostToDev, D2H uses BlitDevToHost. Since they use separate engines 
+  // and separate blit objects, no serialization needed.
+  if (gang_factor == 1) {
+    const bool is_h2d = (src_agent.device_type() == core::Agent::kAmdCpuDevice);
+    SetCopyRequestRefCount(true);
+    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
+    lazy_ptr<core::Blit>& blit = GetBlitObject(is_h2d ? BlitHostToDev : BlitDevToHost);
+    std::vector<core::Signal*> no_gang;
+    return blit->SubmitLinearCopyCommand(dst, src, size, dep_signals, out_signal, no_gang);
+  }
+
+  // Gang copy path
   std::lock_guard<std::mutex> lock(sdma_gang_lock_);
   // Manage internal gang signals
   std::vector<core::Signal*> gang_signals;
-  if (gang_factor > 1) {
-    for (int i = 0; i < gang_factor - 1; i++) {
-      core::Signal *gang_signal;
+  for (int i = 0; i < gang_factor - 1; i++) {
+    core::Signal *gang_signal;
 
-      // Initial value is 2 where 1 is for gang-leader to ack and
-      // 1 for non-leader gang item to decrement
-      gang_signal = new core::DefaultSignal(2);
+    // Initial value is 2 where 1 is for gang-leader to ack and
+    // 1 for non-leader gang item to decrement
+    gang_signal = new core::DefaultSignal(2);
 
-      // Fall back to non-gang copy
-      if (!gang_signal->IsValid()) {
-        for (int j = 0; j < gang_signals.size(); j++) gang_signals[j]->DestroySignal();
-        gang_factor = 1;
-        break;
-      }
-
-      core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
-                                         core::Signal::Convert(gang_signal),
-                                         HSA_SIGNAL_CONDITION_EQ, 0, GangCopyCompleteHandler,
-                                         reinterpret_cast<void*>(gang_signal));
-      gang_signals.push_back(gang_signal);
+    // Fall back to non-gang copy
+    if (!gang_signal->IsValid()) {
+      for (int j = 0; j < gang_signals.size(); j++) gang_signals[j]->DestroySignal();
+      gang_factor = 1;
+      break;
     }
+
+    core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
+                                       core::Signal::Convert(gang_signal),
+                                       HSA_SIGNAL_CONDITION_EQ, 0, GangCopyCompleteHandler,
+                                       reinterpret_cast<void*>(gang_signal));
+    gang_signals.push_back(gang_signal);
   }
 
   // Bind the Blit object that will drive this copy operation
