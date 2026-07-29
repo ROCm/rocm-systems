@@ -265,8 +265,8 @@ class AmdSmiClkType(IntEnum):
 
 
 class AmdSmiClkLimitType(IntEnum):
-    MIN = amdsmi_wrapper.CLK_LIMIT_MIN
-    MAX = amdsmi_wrapper.CLK_LIMIT_MAX
+    MIN = amdsmi_wrapper.AMDSMI_CLK_LIMIT_MIN
+    MAX = amdsmi_wrapper.AMDSMI_CLK_LIMIT_MAX
 
 
 class AmdSmiTemperatureType(IntEnum):
@@ -5143,9 +5143,9 @@ def amdsmi_set_gpu_clk_limit(
         raise AmdSmiParameterException(f"Unsupported clock type: {clk_type}", str)
 
     if limit_type.lower() == "min":
-        limit_type_conversion = amdsmi_wrapper.CLK_LIMIT_MIN
+        limit_type_conversion = amdsmi_wrapper.AMDSMI_CLK_LIMIT_MIN
     elif limit_type.lower() == "max":
-        limit_type_conversion = amdsmi_wrapper.CLK_LIMIT_MAX
+        limit_type_conversion = amdsmi_wrapper.AMDSMI_CLK_LIMIT_MAX
     else:
         raise AmdSmiParameterException(f"Unsupported limit type: {limit_type}", str)
     _check_res(
