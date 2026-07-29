@@ -2,41 +2,66 @@
 # SPDX-License-Identifier: MIT
 
 """
-Regression tests for the shared tool_runner used by rocprof-sys-run and
-rocprof-sys-sample. Each test pins behavior that previously broke or that the
-unification refactor consolidated; failures here indicate a regression in
-tool_runner, argparse env-update semantics, or the conflict-detection path.
-
-The classes further down add plain CLI flag -> env var checks for config/output,
-trace/profile, host/device, and wait/duration/periods flags. Both binaries parse
-args through the same tool_runner path, so each case is parametrized over both
-instead of written twice.
+Regression tests for the tool_runner shared by rocprof-sys-run and
+rocprof-sys-sample. Both binaries parse args through the same path, so each
+case runs against both. A failure here points at tool_runner, argparse env
+handling, or conflict detection.
 """
 
 from __future__ import annotations
 import json
-import shutil
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.presets]
+pytestmark = [pytest.mark.tool_runner]
 
 TARGETS = [
     pytest.param("rocprof-sys-run", marks=pytest.mark.sys_run, id="run"),
     pytest.param("rocprof-sys-sample", marks=pytest.mark.sampling, id="sample"),
 ]
 
-# Shared tail for the CLI-flag tests below: "-v 2" so the tool echoes its
-# resolved env, and "-- ls" as a minimal child process to instrument.
-VERBOSE_LS_ARGS = ["-v", "2", "--", "ls"]
+# Args for parallel-overhead: <nfib> <nthreads> <nitr>. Big enough to run for
+# about a second and get sampled a bunch, small enough to keep tests quick.
+WORKLOAD_ARGS = ["18", "2", "100000"]
+
+# Args for transpose (the GPU workload): <matrix-size> <iterations> <num-inputs>.
+# Enough kernel launches and runtime for the -D device sampler to poll GPU
+# metrics at least once, while still finishing quickly.
+GPU_WORKLOAD_ARGS = ["4", "300", "50"]
+
+
+@pytest.fixture
+def instrumentable_child(rocprof_config) -> str:
+    """CPU workload with real, instrumentable functions. Used by most tests here."""
+    try:
+        return str(rocprof_config.get_target_executable("parallel-overhead"))
+    except FileNotFoundError:
+        pytest.skip("parallel-overhead example not built")
+
+
+@pytest.fixture
+def gpu_workload(rocprof_config) -> str:
+    """HIP workload that dispatches real GPU kernels.
+
+    parallel-overhead is CPU-only and can't exercise -D, so the GPU test uses
+    transpose instead.
+    """
+    try:
+        return str(rocprof_config.get_target_executable("transpose"))
+    except FileNotFoundError:
+        pytest.skip("transpose example not built")
+
+
+def workload_args(workload: str) -> list[str]:
+    """Trailing "-- <workload>" so the flags under test act on real work."""
+    return ["--", workload, *WORKLOAD_ARGS]
 
 
 def _parse_metadata_settings(metadata_file) -> dict:
-    """Read a metadata-*.json's settings block into {ROCPROFSYS_KEY: resolved value}.
+    """Parse a metadata-*.json settings block into {KEY: resolved value}.
 
-    metadata.json is the tool's own record of what a setting actually resolved
-    to, so checking it catches regressions in storage/serialization that a
-    -v 2 log echo wouldn't necessarily show.
+    metadata.json records what each setting actually resolved to, so it catches
+    storage/serialization bugs the stdout echo might miss.
     """
     settings = json.loads(metadata_file.read_text())["rocprofiler-systems"]["metadata"][
         "settings"
@@ -56,14 +81,25 @@ def _resolved_settings(result) -> dict:
     return _parse_metadata_settings(metadata_file)
 
 
+def _profile_has_label(result, needle: str) -> bool:
+    """True if a function named `needle` was profiled in sampling_wall_clock.json.
+
+    We read the profile's function list instead of grepping raw bytes. Sample
+    counts vary run to run, so we only check the function is there.
+    """
+    profile = result.output_dir / "sampling_wall_clock.json"
+    if not profile.exists():
+        pytest.fail(f"No sampling_wall_clock.json found under {result.output_dir}")
+    graph = json.loads(profile.read_text())["timemory"]["sampling_wall_clock"]["ranks"][
+        0
+    ]["graph"]
+    return any(needle in node["prefix"] for node in graph)
+
+
 # ============================================================================
-# update_env(REPLACE) must not leave duplicate KEY= entries
-# ----------------------------------------------------------------------------
-# Regression for the bug fixed in this refactor: a shell-exported value plus a
-# preset that REPLACEs the same key used to produce "KEY=preset_value:shell_value"
-# after consolidate_env_entries joined the two surviving entries. The original
-# reproducer was ROCPROFSYS_TRACE=true + --preset=profile-only, which silently
-# turned tracing back on under "profile only".
+# A preset must fully override a matching env var, not merge with it.
+# Old bug: `ROCPROFSYS_TRACE=true` + `--preset=profile-only` merged into
+# `ROCPROFSYS_TRACE=true:false`, which silently re-enabled tracing.
 # ============================================================================
 
 
@@ -71,12 +107,15 @@ def _resolved_settings(result) -> dict:
 @pytest.mark.class_name("tool-runner-replace-env")
 class TestReplaceEnvNoDuplicates(RocprofsysTest):
     @pytest.mark.parametrize("target", TARGETS)
-    def test_preset_replaces_shell_env(self, target):
+    def test_preset_overrides_shell_value(self, target, instrumentable_child):
         result = self.run_test(
             "baseline",
             target=target,
             env={"ROCPROFSYS_TRACE": "true"},
-            run_args=["--preset=profile-only", *VERBOSE_LS_ARGS],
+            run_args=[
+                "--preset=profile-only",
+                *workload_args(instrumentable_child),
+            ],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -97,12 +136,9 @@ class TestReplaceEnvNoDuplicates(RocprofsysTest):
 
 
 # ============================================================================
-# --profile and --flat-profile must not be accepted together
-# ----------------------------------------------------------------------------
-# argparse declares the conflict via .conflicts({"flat-profile"}); tool_runner's
-# apply_post_parse keeps a defensive throw as a second line of defense. Either
-# layer must reject the combination with a non-zero exit code and a message
-# mentioning the conflict.
+# --profile and --flat-profile conflict and must be rejected.
+# argparse declares it via .conflicts({"flat-profile"}), and tool_runner keeps a
+# defensive check too. Either way: non-zero exit and a message naming both flags.
 # ============================================================================
 
 
@@ -121,16 +157,14 @@ class TestProfileFlatProfileConflict(RocprofsysTest):
         self.assert_regex(
             result,
             pass_regex=[r"--profile.*conflicts.*--flat-profile"],
+            use_abort_fail_regex=False,
         )
 
 
 # ============================================================================
-# --output-format selects backends authoritatively
-# ----------------------------------------------------------------------------
-# --output-format names the exact set of outputs to produce: listed formats are
-# enabled and every unlisted backend is explicitly disabled. A lone "rocpd" must
-# not leave tracing on through the perfetto/profile default derivation, where
-# ROCPROFSYS_TRACE otherwise defaults to the negation of ROCPROFSYS_PROFILE.
+# --output-format lists exactly which outputs to produce: named ones on, the
+# rest off. A lone "rocpd" must not leave tracing on via the default where
+# ROCPROFSYS_TRACE falls back to the negation of ROCPROFSYS_PROFILE.
 # ============================================================================
 
 
@@ -138,11 +172,17 @@ class TestProfileFlatProfileConflict(RocprofsysTest):
 @pytest.mark.class_name("tool-runner-output-format")
 class TestOutputFormatSelection(RocprofsysTest):
     @pytest.mark.parametrize("target", TARGETS)
-    def test_proto_rocpd_enables_both(self, target):
+    def test_proto_rocpd_enables_both(self, target, instrumentable_child):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["--output-format", "proto", "rocpd", *VERBOSE_LS_ARGS],
+            env={"ROCPROFSYS_TRACE": "OFF"},
+            run_args=[
+                "--output-format",
+                "proto",
+                "rocpd",
+                *workload_args(instrumentable_child),
+            ],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -160,13 +200,22 @@ class TestOutputFormatSelection(RocprofsysTest):
         assert settings["ROCPROFSYS_PROFILE"] is False
         assert result.perfetto_file is not None, "expected a perfetto trace file"
         assert result.rocpd_files, "expected at least one rocpd database file"
+        self.assert_perfetto(
+            result,
+            label_substrings=["fib"],
+            subtest_name="proto trace records workload fib frames",
+        )
 
     @pytest.mark.parametrize("target", TARGETS)
-    def test_rocpd_only_disables_perfetto(self, target):
+    def test_rocpd_only_disables_perfetto(self, target, instrumentable_child):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["--output-format", "rocpd", *VERBOSE_LS_ARGS],
+            run_args=[
+                "--output-format",
+                "rocpd",
+                *workload_args(instrumentable_child),
+            ],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -209,6 +258,7 @@ class TestOutputFormatSelection(RocprofsysTest):
         self.assert_regex(
             result,
             pass_regex=[r"--output-format.*conflicts.*"],
+            use_abort_fail_regex=False,
         )
 
 
@@ -217,37 +267,19 @@ class TestOutputFormatSelection(RocprofsysTest):
 # =============================================================================
 
 
-@pytest.fixture
-def instrumentable_child(rocprof_config) -> str:
-    """Child executable that actually has instrumentable functions.
-
-    "ls" doesn't work here — the runtime never gets far enough into init to
-    validate the config and reject a bad setting (same reason test_config.py's
-    config_target fixture avoids it). Falls back to "ls" if parallel-overhead
-    isn't built, at which point the malformed-config test just won't catch
-    anything meaningful.
-    """
-    try:
-        return str(rocprof_config.get_target_executable("parallel-overhead"))
-    except FileNotFoundError:
-        return shutil.which("ls") or "ls"
-
-
 @pytest.mark.timeout(30)
 @pytest.mark.class_name("tool-runner-config-output")
 @pytest.mark.parametrize("target", TARGETS)
 class TestConfigOutput(RocprofsysTest):
     """-c/--config and -o/--output actually load from and write to the given paths."""
 
-    def test_values_reach_env_and_metadata_file(self, target, test_output_dir):
-        config_dir = test_output_dir / "config"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        empty_cfg = config_dir / "empty.cfg"
-        empty_cfg.write_text("#\n# empty config file\n#\n")
+    def test_values_reach_env_and_metadata_file(
+        self, target, test_output_dir, instrumentable_child, create_config_file
+    ):
+        empty_cfg = create_config_file({}, "empty.cfg", skip_filter=True)
 
-        # Has to be a subdir, not test_output_dir itself — the harness already
-        # points ROCPROFSYS_OUTPUT_PATH there, so reusing it wouldn't actually
-        # prove -o overrides the default.
+        # Use a subdir, not test_output_dir itself: the harness already points
+        # ROCPROFSYS_OUTPUT_PATH there, so reusing it wouldn't prove -o works.
         output_dir = test_output_dir / "custom_output"
         output_prefix = "tool-runner-config-output-"
         result = self.run_test(
@@ -259,7 +291,7 @@ class TestConfigOutput(RocprofsysTest):
                 "-o",
                 str(output_dir),
                 output_prefix,
-                *VERBOSE_LS_ARGS,
+                *workload_args(instrumentable_child),
             ],
             fail_on_not_found=True,
         )
@@ -290,10 +322,9 @@ class TestConfigOutput(RocprofsysTest):
     def test_malformed_file_is_rejected(
         self, target, create_config_file, instrumentable_child
     ):
-        """-c should feed a bad config into the same validation path as
-        ROCPROFSYS_CONFIG_FILE. test_config.py already covers that env var in
-        depth but only through rocprof-sys-run; here we just want to confirm
-        the -c flag itself hits the same path, on both binaries.
+        """-c should hit the same config validation as ROCPROFSYS_CONFIG_FILE.
+        test_config.py covers that env var in depth (run only); here we just
+        confirm -c reaches the same path on both binaries.
         """
         malformed_cfg = create_config_file(
             {"ROCPROFSYS_TRACE_DURATION": "not-a-number"},
@@ -315,9 +346,8 @@ class TestConfigOutput(RocprofsysTest):
 
 # =============================================================================
 # Trace/profile and host/device flags
-# ----------------------------------------------------------------------------
-# -T/-L/-P/-F and -H/-D all fan a single flag out to a handful of env vars, so
-# they share one parametrized class instead of two near-identical ones.
+# -T/-L/-P/-F and -H/-D each fan one flag out to a few env vars, so they share
+# one parametrized class instead of several near-identical ones.
 # =============================================================================
 
 CLI_FLAG_ENV_CASES = [
@@ -367,20 +397,28 @@ CLI_FLAG_ENV_CASES = [
 @pytest.mark.class_name("tool-runner-cli-flag-env-mapping")
 @pytest.mark.parametrize("target", TARGETS)
 class TestCliFlagEnvMapping(RocprofsysTest):
-    """Each flag sets its documented env var(s) — checked against both the
-    -v 2 echo and metadata.json — and produces whatever artifact it implies.
+    """Each flag sets its documented env var(s), verified via the stdout echo
+    and metadata.json, and produces the artifact it implies.
     """
+
+    BASE_INJECTED = ("ROCPROFSYS_TRACE", "ROCPROFSYS_PROFILE")
 
     @pytest.mark.parametrize(
         "flag_args, expected_settings, artifact_kind", CLI_FLAG_ENV_CASES
     )
     def test_sets_expected_settings_and_artifacts(
-        self, target, flag_args, expected_settings, artifact_kind
+        self, target, flag_args, expected_settings, artifact_kind, instrumentable_child
     ):
+        seed_env = {
+            key: "OFF"
+            for key, value in expected_settings.items()
+            if key in self.BASE_INJECTED and value is True
+        }
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=[*flag_args, *VERBOSE_LS_ARGS],
+            env=seed_env,
+            run_args=[*flag_args, *workload_args(instrumentable_child)],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -404,9 +442,21 @@ class TestCliFlagEnvMapping(RocprofsysTest):
                 f"{flag_args} should produce a perfetto trace under "
                 f"{result.output_dir}"
             )
+            # A real trace has the workload's fib() frames as slices, not just
+            # start/exit. Validate through trace_processor rather than raw bytes.
+            self.assert_perfetto(
+                result,
+                label_substrings=["fib"],
+                subtest_name=f"{flag_args}: trace records workload fib frames",
+            )
         elif artifact_kind == "profile":
             assert result.timemory_files, (
                 f"{flag_args} should produce timemory profile output under "
+                f"{result.output_dir}"
+            )
+            # Same check for the profile: fib() must be a recorded sample entry.
+            assert _profile_has_label(result, "fib(long)"), (
+                f"{flag_args}: no fib() frames in sampling profile under "
                 f"{result.output_dir}"
             )
 
@@ -424,11 +474,11 @@ class TestWaitDuration(RocprofsysTest):
     env vars.
     """
 
-    def test_wait_sets_delay_envs(self, target):
+    def test_wait_sets_delay_envs(self, target, instrumentable_child):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["-w", "1.5", *VERBOSE_LS_ARGS],
+            run_args=["-w", "1.5", *workload_args(instrumentable_child)],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -443,11 +493,11 @@ class TestWaitDuration(RocprofsysTest):
         assert settings["ROCPROFSYS_TRACE_DELAY"] == 1.5
         assert settings["ROCPROFSYS_SAMPLING_DELAY"] == 1.5
 
-    def test_duration_sets_duration_envs(self, target):
+    def test_duration_sets_duration_envs(self, target, instrumentable_child):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["-d", "2.5", *VERBOSE_LS_ARGS],
+            run_args=["-d", "2.5", *workload_args(instrumentable_child)],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -476,22 +526,80 @@ class TestTracePeriods(RocprofsysTest):
     space-joined rather than overwriting each other.
     """
 
-    def test_single_period_sets_env(self, target):
+    def test_single_period_sets_env(self, target, instrumentable_child):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["--periods", "0:2", *VERBOSE_LS_ARGS],
+            run_args=["--periods", "0:2", *workload_args(instrumentable_child)],
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2"])
         assert _resolved_settings(result)["ROCPROFSYS_TRACE_PERIODS"] == "0:2"
 
-    def test_repeated_periods_are_space_joined(self, target):
+    def test_repeated_periods_are_space_joined(self, target, instrumentable_child):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["--periods", "0:2", "--periods", "3:2", *VERBOSE_LS_ARGS],
+            run_args=[
+                "--periods",
+                "0:2",
+                "--periods",
+                "3:2",
+                *workload_args(instrumentable_child),
+            ],
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2 3:2"])
         assert _resolved_settings(result)["ROCPROFSYS_TRACE_PERIODS"] == "0:2 3:2"
+
+
+# =============================================================================
+# -D device sampling (GPU)
+# The CPU cases above only prove -D sets ROCPROFSYS_USE_AMD_SMI; on a CPU-only
+# workload there's nothing to sample. This runs -D against a real HIP workload
+# and checks the device sampler actually wrote GPU counters. gpu/rocm marked,
+# so it skips when there's no GPU.
+# =============================================================================
+
+
+@pytest.mark.gpu
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("tool-runner-device-sampling")
+@pytest.mark.parametrize("target", TARGETS)
+class TestDeviceSamplingArtifacts(RocprofsysTest):
+    """-D on a real GPU workload records device metric counters, not just the
+    ROCPROFSYS_USE_AMD_SMI env var.
+    """
+
+    def test_records_gpu_counters(self, target, gpu_workload):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            # Trace HIP/kernels so we can see the workload ran, and list the
+            # AMD-SMI metrics -D should collect.
+            env={
+                "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch",
+                "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,mem_usage",
+            },
+            run_args=["-D", "--", gpu_workload, *GPU_WORKLOAD_ARGS],
+            fail_on_not_found=True,
+        )
+
+        # -D must set the device-sampling env var.
+        self.assert_regex(result, pass_regex=[r"ROCPROFSYS_USE_AMD_SMI=true"])
+        assert _resolved_settings(result)["ROCPROFSYS_USE_AMD_SMI"] is True
+
+        assert (
+            result.perfetto_file is not None
+        ), f"-D should produce a perfetto trace under {result.output_dir}"
+        trace = result.perfetto_file.read_bytes()
+
+        # The transpose kernel shows the GPU workload actually ran.
+        assert (
+            b"transpose" in trace
+        ), f"-D trace at {result.perfetto_file} has no transpose kernel"
+        # GPU counters like "GPU [0] GFX Busy (S)" only appear when AMD-SMI
+        # sampling ran, so this is the real proof -D worked, not just the env var.
+        assert (
+            b"GFX Busy" in trace
+        ), f"-D trace at {result.perfetto_file} has no GPU device counters"
