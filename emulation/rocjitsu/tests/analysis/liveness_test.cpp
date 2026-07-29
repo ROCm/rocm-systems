@@ -2891,7 +2891,8 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDestinationBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -2924,7 +2925,8 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDespiteExplicitBank0Alias) 
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -2955,7 +2957,8 @@ TEST(LivenessAnalysis, Gfx1250SwapImplicitReadsResolvePerRole) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3006,7 +3009,8 @@ TEST(LivenessAnalysis, Gfx1250DppPreserveReadResolvesToDstBank) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
@@ -3038,7 +3042,8 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseUnknownBankReadsEveryCandidate) {
   options.arch = ROCJITSU_CODE_ARCH_GFX1250;
   options.entry_block = scope.front();
   options.text = text_span(co);
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), exec, options);
 
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
