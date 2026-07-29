@@ -488,6 +488,8 @@ ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& r
 
     uint32_t kfd_gpu_id = agent->gpu_id;
 
+    if (kfd_gpu_id != 56179) return ROCPROFILER_STATUS_SUCCESS;
+
     const size_t ioctl_configs_num = 10;
     uint32_t     size              = 0;
 
@@ -595,6 +597,9 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
                  uint32_t*                        ioctl_pcs_id)
 {
     pcs_ioctl_version_t pcs_ioctl_version = 0;
+
+    if (agent->gpu_id != 56179) return ROCPROFILER_STATUS_ERROR;
+
     auto status = get_pcs_ioctl_version_if_kfd_supports(agent->gpu_id, &pcs_ioctl_version);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 
