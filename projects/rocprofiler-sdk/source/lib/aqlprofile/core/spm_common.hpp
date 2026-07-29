@@ -15,6 +15,12 @@ operator<(const aqlprofile_handle_t& a, const aqlprofile_handle_t& b)
 
 #define SPM_DESC_SIZE 0x1000
 
+static constexpr uint16_t SPM_COUNTER_MAP_GLOBAL_FLAG = 0x8000;
+static constexpr uint16_t SPM_COUNTER_MAP_SA_FLAG     = 0x4000;
+static constexpr uint16_t SPM_COUNTER_MAP_WGP_FLAG    = 0x2000;
+static constexpr uint16_t SPM_COUNTER_MAP_32BIT_FLAG  = 0x1000;
+static constexpr uint16_t SPM_COUNTER_MAP_INDEX_MASK  = 0x0FFF;
+
 // Once KFD change is merged, we should use the definition from linux/include/uapi/linux/kfd_ioctl.h
 struct kfd_ioctl_spm_buffer_header
 {
@@ -31,6 +37,7 @@ typedef struct SpmBufferDesc_
     uint32_t se_num_line{0};
     uint32_t num_se{0};
     uint32_t num_sa{0};
+    uint32_t num_wgp{0};
     uint32_t num_xcc{0};
     size_t   num_events{0};
 

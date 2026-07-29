@@ -224,8 +224,11 @@ public:
         // Trace only masked
         builder.BuildWriteUConfigRegPacket(
             cmd_buffer, Primitives::SQ_THREAD_TRACE_PERF_MASK_ADDR, config->perfMASK);
-        builder.BuildWriteUConfigRegPacket(
-            cmd_buffer, Primitives::SQ_PERFCOUNTER_MASK_ADDR, config->perfMASK);
+        if(!(Primitives::SQ_PERFCOUNTER_MASK_ADDR == Register()))
+        {
+            builder.BuildWriteUConfigRegPacket(
+                cmd_buffer, Primitives::SQ_PERFCOUNTER_MASK_ADDR, config->perfMASK);
+        }
         builder.BuildWriteConfigRegPacket(
             cmd_buffer, Primitives::SQ_PERFCOUNTER_CTRL_ADDR, config->perfCTRL);
         builder.BuildWriteUConfigRegPacket(cmd_buffer,

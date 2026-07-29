@@ -168,6 +168,38 @@ static const uint32_t McVmL2CounterBlockNumCounters = 16;
 static const uint32_t RpbCounterBlockNumCounters = 4;
 static const uint32_t RmiCounterBlockNumCounters = 4;
 
+namespace spm {
+static const uint32_t CbCounterBlockNumCounters = 1 * 4;
+static const uint32_t CpcCounterBlockNumCounters = 1 * 4;
+static const uint32_t CpfCounterBlockNumCounters = 1 * 4;
+static const uint32_t CpgCounterBlockNumCounters = 1 * 4;
+static const uint32_t DbCounterBlockNumCounters = 2 * 4;
+static const uint32_t GdsCounterBlockNumCounters = 1 * 4;
+static const uint32_t GrbmCounterBlockNumCounters = 0;
+static const uint32_t GrbmSeCounterBlockNumCounters = 0;
+static const uint32_t IaCounterBlockNumCounters = 1 * 4;
+static const uint32_t PaSuCounterBlockNumCounters = 2 * 4;
+static const uint32_t PaScCounterBlockNumCounters = 1 * 4;
+static const uint32_t RlcCounterBlockNumCounters = 0;
+static const uint32_t SdmaCounterBlockNumCounters = 0;
+static const uint32_t SpiCounterBlockNumCounters = 4 * 4;
+static const uint32_t SqCounterBlockNumCounters = 16;
+static const uint32_t SxCounterBlockNumCounters = 2 * 4;
+static const uint32_t TaCounterBlockNumCounters = 1 * 4;
+static const uint32_t TcaCounterBlockNumCounters = 2 * 4;
+static const uint32_t TccCounterBlockNumCounters = 2 * 4;
+static const uint32_t TcpCounterBlockNumCounters = 2 * 4;
+static const uint32_t TdCounterBlockNumCounters = 1 * 4;
+static const uint32_t VgtCounterBlockNumCounters = 2 * 4;
+static const uint32_t WdCounterBlockNumCounters = 0;
+static const uint32_t GceaCounterBlockNumCounters = 0;
+static const uint32_t AtcCounterBlockNumCounters = 0;
+static const uint32_t AtcL2CounterBlockNumCounters = 0;
+static const uint32_t McVmL2CounterBlockNumCounters = 0;
+static const uint32_t RpbCounterBlockNumCounters = 0;
+static const uint32_t RmiCounterBlockNumCounters = 2 * 4;
+}  // namespace spm
+
 // Block counters max event value
 static const uint32_t CbCounterBlockMaxEvent     = CB_PERF_SEL_CC_BB_BLEND_PIXEL_VLD;
 static const uint32_t CpcCounterBlockMaxEvent    = CPC_PERF_SEL_ME2_DC1_SPI_BUSY;

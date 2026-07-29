@@ -52,14 +52,16 @@ struct TraceConfig
     uint32_t sa_number  = 0;
     uint32_t xcc_number = 0;
     // SPM mode
-    bool     spm_sq_32bit_mode    = true;
     bool     spm_has_core1        = false;
     uint32_t spm_sample_delay_max = 0;
+    // SPM sample interval type: 0 = GFXCLK/SCLK, 1 = GPUCLK/REFCLK interval
+    uint32_t spm_sample_interval_type = 0;
 
     void*    control_buffer_ptr  = nullptr;
     uint32_t control_buffer_size = 0;
     void*    data_buffer_ptr     = nullptr;
     uint64_t data_buffer_size    = 0;
+    void*    spm_sample_count_ptr = nullptr;
 
     // concurrent kernels mode
     uint32_t concurrent = 0;

@@ -60,6 +60,7 @@ class gfx10_cntx_prim
 {
 public:
     static const uint32_t     GFXIP_LEVEL          = 10;
+    static const bool         SPM_DELAY_PROGRAMMING_REQUIRED = false;
     static const uint32_t     NUMBER_OF_BLOCKS     = LastCounterBlockId + 1;
     static constexpr Register GRBM_GFX_INDEX_ADDR  = REG_32B_ADDR(GC, 0, mmGRBM_GFX_INDEX);
     static constexpr Register GRBMA_GFX_INDEX_ADDR = REG_32B_NULL;
@@ -78,6 +79,7 @@ public:
     static constexpr Register SPI_SQG_EVENT_CTL_ADDR{};
     static constexpr Register SQ_PERFCOUNTER_CTRL_ADDR = REG_32B_ADDR(GC, 0, mmSQ_PERFCOUNTER_CTRL);
     static constexpr Register SQ_PERFCOUNTER_CTRL2_ADDR{};
+    static constexpr Register SQG_PERFCOUNTER_CTRL2_ADDR{};
     static constexpr Register SQ_PERFCOUNTER_MASK_ADDR{};
     static constexpr Register SQ_THREAD_TRACE_MASK_ADDR =
         REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_MASK);
@@ -131,6 +133,7 @@ public:
         REG_32B_ADDR(GC, 0, mmRLC_SPM_PERFMON_RING_SIZE);
     static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE__ADDR =
         REG_32B_ADDR(GC, 0, mmRLC_SPM_PERFMON_SEGMENT_SIZE);
+    static constexpr Register RLC_SPM_SAMPLE_CNT__ADDR = REG_32B_ADDR(GC, 0, mmRLC_SPM_SAMPLE_CNT);
     static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE_CORE1__ADDR{};
     static constexpr Register RLC_SPM_GLOBAL_MUXSEL_ADDR__ADDR =
         REG_32B_ADDR(GC, 0, mmRLC_SPM_GLOBAL_MUXSEL_ADDR);
@@ -271,6 +274,11 @@ public:
         return 0;
     }
 
+    static uint32_t decode_spm_instance_index(const GpuBlockInfo*, uint32_t block_index)
+    {
+        return block_index;
+    }
+
     // CP_PERFMON_CNTL value to reset counters
     static uint32_t cp_perfmon_cntl_reset_value()
     {
@@ -337,7 +345,8 @@ public:
         return sq_perfcounter0_select;
     }
 
-    static uint32_t sq_spm_select_value(const counter_des_t& counter_des)
+    static uint32_t sq_spm_select_value(const counter_des_t& counter_des,
+                                        const uint32_t&)
     {
         uint32_t sq_perfcounter0_select{0};
         sq_perfcounter0_select =
@@ -566,7 +575,8 @@ public:
     {
         return 0;
     }
-    static uint32_t rlc_spm_perfmon_cntl_value(const uint32_t& sampling_rate)
+    static uint32_t rlc_spm_perfmon_cntl_value(const uint32_t& sampling_rate,
+                                               const uint32_t&)
     {
         uint32_t rlc_spm_perfmon_cntl{0};
         rlc_spm_perfmon_cntl =
@@ -574,7 +584,8 @@ public:
         return rlc_spm_perfmon_cntl;
     }
     static uint32_t rlc_spm_perfmon_segment_size_value(const uint32_t& global_count,
-                                                       const uint32_t& se_count)
+                                                       const uint32_t& se_count,
+                                                       const uint32_t&)
     {
         const uint32_t global_nlines = global_count;
         const uint32_t se_nlines     = se_count;
@@ -752,7 +763,7 @@ public:
     }
 
     // SPM primitives
-    static uint16_t spm_timestamp_muxsel() { return 0xF0F0; }
+    static uint16_t spm_timestamp_muxsel(uint16_t) { return 0xF0F0; }
 
     enum ESQTT_STATUS_MASK
     {

@@ -168,6 +168,36 @@ static const uint32_t TcpCounterBlockNumCounters      = 4;
 static const uint32_t TdCounterBlockNumCounters       = 2;
 static const uint32_t Utcl1CounterBlockNumCounters    = 4;
 
+namespace spm {
+static const uint32_t ChaCounterBlockNumCounters      = 4 * 4;
+static const uint32_t ChcCounterBlockNumCounters      = 4 * 4;
+static const uint32_t CpcCounterBlockNumCounters      = 1 * 4;
+static const uint32_t CpfCounterBlockNumCounters      = 1 * 4;
+static const uint32_t CpgCounterBlockNumCounters      = 1 * 4;
+static const uint32_t GcmcVmL2CounterBlockNumCounters = 0;
+static const uint32_t GcrCounterBlockNumCounters      = 2 * 4;
+static const uint32_t Gcutcl2CounterBlockNumCounters  = 0;
+static const uint32_t Gcvml2CounterBlockNumCounters   = 2 * 4;
+static const uint32_t GcEaCpwdCounterBlockNumCounters = 1 * 4;
+static const uint32_t GcEaSeCounterBlockNumCounters   = 1 * 4;
+static const uint32_t Gl1aCounterBlockNumCounters     = 4 * 4;
+static const uint32_t Gl1cCounterBlockNumCounters     = 4 * 4;
+static const uint32_t Gl2aCounterBlockNumCounters     = 4 * 4;
+static const uint32_t Gl2cCounterBlockNumCounters     = 4 * 4;
+static const uint32_t GrbmCounterBlockNumCounters     = 0;
+static const uint32_t GrbmhCounterBlockNumCounters    = 0;
+static const uint32_t RlcCounterBlockNumCounters      = 0;
+static const uint32_t RpbCounterBlockNumCounters      = 0;
+static const uint32_t SdmaCounterBlockNumCounters     = 4 * 4;
+static const uint32_t SpiCounterBlockNumCounters      = 6 * 4;
+static const uint32_t SqcCounterBlockNumCounters      = 16;
+static const uint32_t SqgCounterBlockNumCounters      = 16;
+static const uint32_t TaCounterBlockNumCounters       = 1 * 4;
+static const uint32_t TcpCounterBlockNumCounters      = 2 * 4;
+static const uint32_t TdCounterBlockNumCounters       = 1 * 4;
+static const uint32_t Utcl1CounterBlockNumCounters    = 0;
+}  // namespace spm
+
 // Block counters max event value - Auto-generated from chip_enum.h, edit with extra caution
 // Reference: chip_enum.h (from gfxip header file package)
 static const uint32_t ChaCounterBlockMaxEvent      = 25;
@@ -295,6 +325,44 @@ static const uint32_t TcpCounterBlockNumCounters           = 8;
 static const uint32_t TdCounterBlockNumCounters            = 2;
 static const uint32_t Utcl1CounterBlockNumCounters         = 4;
 static const uint32_t SpCounterBlockNumCounters            = 4;
+
+namespace spm {
+static const uint32_t AtcCounterBlockNumCounters           = 0;
+static const uint32_t ChaCounterBlockNumCounters           = 4 * 4;
+static const uint32_t ChcCounterBlockNumCounters           = 4 * 4;
+static const uint32_t CpcCounterBlockNumCounters           = 1 * 4;
+static const uint32_t CpfCounterBlockNumCounters           = 1 * 4;
+static const uint32_t CpgCounterBlockNumCounters           = 1 * 4;
+static const uint32_t GcmcVmL2CounterBlockNumCounters      = 0;
+static const uint32_t GcrCounterBlockNumCounters           = 2 * 4;
+static const uint32_t Gcutcl2CounterBlockNumCounters       = 0;
+static const uint32_t Gcutcl2FfbmCounterBlockNumCounters   = 0;
+static const uint32_t Gcutcl2NhttlbCounterBlockNumCounters = 0;
+static const uint32_t GcAtcL2CounterBlockNumCounters       = 0;
+static const uint32_t GcCaneCounterBlockNumCounters        = 1 * 4;
+static const uint32_t GcEaCpwdCounterBlockNumCounters      = 1 * 4;
+static const uint32_t GcEaSeCounterBlockNumCounters        = 1 * 4;
+static const uint32_t GcL2tlbCounterBlockNumCounters       = 0;
+static const uint32_t Gl1aCounterBlockNumCounters          = 4 * 4;
+static const uint32_t Gl1cCounterBlockNumCounters          = 4 * 4;
+static const uint32_t Gl2aCounterBlockNumCounters          = 4 * 4;
+static const uint32_t Gl2cCounterBlockNumCounters          = 4 * 4;
+static const uint32_t GlarbaCounterBlockNumCounters        = 4 * 4;
+static const uint32_t GlarbcCounterBlockNumCounters        = 4 * 4;
+static const uint32_t GrbmCounterBlockNumCounters          = 0;
+static const uint32_t GrbmaCounterBlockNumCounters         = 0;
+static const uint32_t GrbmhCounterBlockNumCounters         = 0;
+static const uint32_t RlcCounterBlockNumCounters           = 0;
+static const uint32_t RpbCounterBlockNumCounters           = 0;
+static const uint32_t SdmaCounterBlockNumCounters          = 6 * 4;
+static const uint32_t SpiCounterBlockNumCounters           = 6 * 4;
+static const uint32_t SqcCounterBlockNumCounters           = 16;
+static const uint32_t SqgCounterBlockNumCounters           = 16;
+static const uint32_t TaCounterBlockNumCounters            = 1 * 4;
+static const uint32_t TcpCounterBlockNumCounters           = 4 * 4;
+static const uint32_t TdCounterBlockNumCounters            = 1 * 4;
+static const uint32_t Utcl1CounterBlockNumCounters         = 2 * 4;
+}  // namespace spm
 
 // Block counters max event value - Auto-generated from chip_enum.h, edit with extra caution
 // Reference: chip_enum.h (from gfxip header file package)
