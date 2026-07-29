@@ -253,6 +253,13 @@ void AgentPropTest::QueryAgentExecutionIsa() {
         gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_EXECUTION_ISA),
         &execution_isa);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+    uint32_t isa_name_length = 0;
+    err = hsa_isa_get_info_alt(execution_isa, HSA_ISA_INFO_NAME_LENGTH,
+                               &isa_name_length);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+    EXPECT_GT(isa_name_length, 0u);
+
     EXPECT_EQ(execution_isa.handle, isa.handle);
   }
 }
