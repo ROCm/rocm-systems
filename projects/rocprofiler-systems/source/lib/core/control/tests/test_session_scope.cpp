@@ -3,9 +3,15 @@
 
 #include "core/control/session.hpp"
 
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <gtest/gtest.h>
+#include <memory>
 #include <string>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -174,4 +180,68 @@ TEST_F(session_scope_test, unregister_removes_only_the_matching_scope)
     }
     EXPECT_FALSE(s.is_active(scope::sampling))
         << "unregistering the global window must not remove the same-named sampling one";
+}
+
+// The failure mode is a deadlock, not a wrong value, so the publish runs on a
+// worker thread against a deadline. Everything that thread touches is
+// shared_ptr-owned and captured by the thread itself: a deadlocked worker can
+// only be detached, and must not be left holding references into this frame.
+TEST(session_callback_test, callback_may_re_enter_the_session)
+{
+    auto sess = std::make_shared<session>();
+    auto gate =
+        std::make_shared<mock_trigger>(*sess, "gate", scope::global, action::trace);
+    auto reentered = std::make_shared<std::atomic<int>>(0);
+
+    sess->subscribe({ [owner = sess.get(), reentered]() {
+                         owner->subscribe({ nullptr, nullptr, "added_from_callback" });
+                         reentered->fetch_add(1);
+                     },
+                      nullptr, "reentrant_sub" });
+
+    std::packaged_task<void()> publish{ [sess, gate]() {
+        gate->set_action(action::pause);
+    } };
+    auto        done = publish.get_future();
+    std::thread worker{ std::move(publish) };
+
+    if(done.wait_for(std::chrono::seconds{ 5 }) != std::future_status::ready)
+    {
+        worker.detach();
+        FAIL() << "subscriber callback deadlocked re-entering the session";
+    }
+
+    worker.join();
+    EXPECT_EQ(reentered->load(), 1);
+}
+
+// Finalization tears down the subsystems these callbacks touch well before it
+// joins the trigger threads that can fire them, so a callback that outlives
+// shutdown() reaches freed state.
+TEST(session_callback_test, shutdown_waits_for_an_in_flight_callback)
+{
+    auto sess = std::make_shared<session>();
+    auto gate =
+        std::make_shared<mock_trigger>(*sess, "gate", scope::global, action::trace);
+
+    std::atomic<bool> callback_entered{ false };
+    std::atomic<bool> callback_finished{ false };
+
+    sess->subscribe({ [&callback_entered, &callback_finished]() {
+                         callback_entered.store(true);
+                         std::this_thread::sleep_for(std::chrono::milliseconds{ 200 });
+                         callback_finished.store(true);
+                     },
+                      nullptr, "slow_sub" });
+
+    std::thread publisher{ [gate]() { gate->set_action(action::pause); } };
+
+    while(!callback_entered.load())
+        std::this_thread::sleep_for(std::chrono::milliseconds{ 1 });
+
+    sess->shutdown();
+    EXPECT_TRUE(callback_finished.load())
+        << "shutdown() returned while a subscriber callback was still running";
+
+    publisher.join();
 }
