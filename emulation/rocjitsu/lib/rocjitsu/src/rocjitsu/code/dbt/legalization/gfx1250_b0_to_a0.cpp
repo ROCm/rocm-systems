@@ -87,9 +87,9 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
     return true;
 
   // The eight K=128 FP8/BF8 forms and the standalone 32x16 FP4 WMMA exist on B0
-  // but not A0, so they require semantic expansion. The f32 K=128 family has an
-  // exact neutral regular-Scale lowering; f16 and standalone 32x16 FP4 still fail
-  // closed in their semantic rules.
+  // but not A0, so they require semantic expansion. The f32 K=128 forms split
+  // into two native K=64 FP8/BF8 operations; f16 and standalone 32x16 FP4 still
+  // fail closed in their semantic rules.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
@@ -106,10 +106,10 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
     return true;
 
   // K=64 FP8/BF8 WMMA is present on A0 and retains its architectural encoding.
-  // It stays on the ordinary copy path. K=128 F8F6F4 is also present on A0, but
-  // the A0 profile uses its scaled wrapper in software-visible code. Semantic
-  // lowerings may still use it as the matrix body of that atomic four-DWORD
-  // wrapper.
+  // It stays on the ordinary copy path. It is distinct from the scale-capable
+  // K=128 F8F6F4 matrix body: only that body consumes an immediately preceding
+  // LD_SCALE. The A0 profile therefore wraps bare F8F6F4 input in the scaled
+  // four-DWORD form, while native K=64 FP8/BF8 remains unscaled.
   //
   // FP8/BF8 SWMMAC is present on both A0 and B0. Unlike dense K=128 WMMA,
   // the gfx1250 A0-to-B0 change table does not classify these sparse forms as

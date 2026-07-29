@@ -8957,14 +8957,6 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
       (static_cast<uint32_t>(gfx1250::encoding::kVop3p) << 16) |
           gfx1250::kVSwmmacI3216x16x128Iu8Vop3p,
       (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
-          gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p,
-      (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
           gfx1250::kVWmmaF1616x16x128Fp8Fp8Vop3p,
       (static_cast<uint32_t>(gfx1250::encoding::kVop3pOpHi1) << 16) |
           gfx1250::kVWmmaF1616x16x128Fp8Bf8Vop3p,
@@ -8978,27 +8970,27 @@ TEST(SemanticTranslator, Gfx1250ClassifiesLivenessFreeExpandRules) {
   EXPECT_EQ(liveness_free_rules, expected);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250LowersF32K128Fp8Bf8WmmaToNeutralRegularScale) {
+TEST(BinaryTranslatorE2E, Gfx1250SplitsF32K128Fp8Bf8WmmaWithoutScratchWhenInputsDoNotOverlap) {
   struct WmmaCase {
     const char *name;
     uint16_t source_opcode;
-    uint8_t matrix_a_fmt;
-    uint8_t matrix_b_fmt;
+    uint16_t replacement_opcode;
   };
   constexpr std::array cases = {
-      WmmaCase{"fp8_fp8", gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, 0, 0},
-      WmmaCase{"fp8_bf8", gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p, 0, 1},
-      WmmaCase{"bf8_fp8", gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p, 1, 0},
-      WmmaCase{"bf8_bf8", gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p, 1, 1},
+      WmmaCase{"fp8_fp8", gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+               gfx1250::kVWmmaF3216x16x64Fp8Fp8Vop3p},
+      WmmaCase{"fp8_bf8", gfx1250::kVWmmaF3216x16x128Fp8Bf8Vop3p,
+               gfx1250::kVWmmaF3216x16x64Fp8Bf8Vop3p},
+      WmmaCase{"bf8_fp8", gfx1250::kVWmmaF3216x16x128Bf8Fp8Vop3p,
+               gfx1250::kVWmmaF3216x16x64Bf8Fp8Vop3p},
+      WmmaCase{"bf8_bf8", gfx1250::kVWmmaF3216x16x128Bf8Bf8Vop3p,
+               gfx1250::kVWmmaF3216x16x64Bf8Bf8Vop3p},
   };
   constexpr gfx1250::Vop3pBuilderFields fields{
       .vdst = 54,
-      .neg_hi = 5,
-      .clamp = 1,
       .src0 = 256 + 16,
       .src1 = 256 + 32,
       .src2 = 256 + 48,
-      .neg = 3,
   };
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
 
@@ -9020,48 +9012,89 @@ TEST(BinaryTranslatorE2E, Gfx1250LowersF32K128Fp8Bf8WmmaToNeutralRegularScale) {
     rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
     const auto decoded =
         decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
-    EXPECT_EQ(std::ranges::count_if(decoded,
-                                    [](const auto &candidate) {
-                                      return candidate->mnemonic() ==
-                                             "v_wmma_scale_f32_16x16x128_f8f6f4";
-                                    }),
-              1);
-    EXPECT_EQ(std::ranges::count_if(decoded,
-                                    [](const auto &candidate) {
-                                      return candidate->mnemonic().find("16x16x64") !=
-                                             std::string_view::npos;
-                                    }),
-              0);
+    std::vector<gfx1250::Vop3pMachineInst> replacements;
+    for (const auto &candidate : decoded) {
+      if (candidate->opcode() != test_case.replacement_opcode)
+        continue;
+      ASSERT_NE(candidate->raw_encoding(), nullptr);
+      gfx1250::Vop3pMachineInst replacement{};
+      std::memcpy(&replacement, candidate->raw_encoding(), sizeof(replacement));
+      replacements.push_back(replacement);
+    }
+    ASSERT_EQ(replacements.size(), 2u);
 
-    const auto *words = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-    const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
-    const auto prefix = std::find_if(words, words + word_count, [](uint32_t word) {
-      return ((word >> 24) & 0xffu) == 0xccu && ((word >> 16) & 0xffu) == 0x35u;
-    });
-    ASSERT_NE(prefix, words + word_count);
-    ASSERT_GE(words + word_count - prefix, 4);
-    gfx1250::Vop3pMachineInst scale_prefix{};
-    std::memcpy(&scale_prefix, prefix, sizeof(scale_prefix));
-    EXPECT_EQ(scale_prefix.src0, 128u);
-    EXPECT_EQ(scale_prefix.src1, 128u);
-    EXPECT_EQ(scale_prefix.src2, 256u);
-    EXPECT_EQ(scale_prefix.neg, 0u);
-    EXPECT_EQ(scale_prefix.neg_hi, 0u);
-    EXPECT_EQ(scale_prefix.opsel, 0u);
-    EXPECT_EQ(scale_prefix.opsel_hi, 0u);
+    EXPECT_EQ(replacements[0].vdst, fields.vdst);
+    EXPECT_EQ(replacements[0].src0, 256u + 16u);
+    EXPECT_EQ(replacements[0].src1, 256u + 32u);
+    EXPECT_EQ(replacements[0].src2, 256u + 48u);
 
-    gfx1250::Vop3pMachineInst replacement{};
-    std::memcpy(&replacement, prefix + 2, sizeof(replacement));
-    EXPECT_EQ(replacement.op, gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p);
-    EXPECT_EQ(replacement.vdst, fields.vdst);
-    EXPECT_EQ(replacement.neg_hi, fields.neg_hi);
-    EXPECT_EQ(replacement.clamp, fields.clamp);
-    EXPECT_EQ(replacement.src0, fields.src0);
-    EXPECT_EQ(replacement.src1, fields.src1);
-    EXPECT_EQ(replacement.src2, fields.src2);
-    EXPECT_EQ(replacement.opsel, test_case.matrix_a_fmt);
-    EXPECT_EQ(replacement.opsel_hi, test_case.matrix_b_fmt);
-    EXPECT_EQ(replacement.neg, fields.neg);
+    EXPECT_EQ(replacements[1].vdst, fields.vdst);
+    EXPECT_EQ(replacements[1].src0, 256u + 24u);
+    EXPECT_EQ(replacements[1].src1, 256u + 40u);
+    EXPECT_EQ(replacements[1].src2, 256u + fields.vdst);
+  }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250K128WmmaUsesScratchWhenDestinationOverlapsUpperInput) {
+  struct OverlapCase {
+    const char *name;
+    uint8_t vdst;
+    uint16_t src0;
+    uint16_t src1;
+  };
+  constexpr std::array cases = {
+      OverlapCase{"upper_a", 26, 256 + 18, 256 + 114},
+      OverlapCase{"upper_b", 122, 256 + 18, 256 + 114},
+  };
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+
+  for (const OverlapCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto source_wmma = gfx1250::build_vop3p(
+        gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+        {.vdst = test_case.vdst, .src0 = test_case.src0, .src1 = test_case.src1, .src2 = 128});
+    auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    const auto decoded =
+        decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_GFX1250);
+
+    std::vector<gfx1250::Vop3pMachineInst> replacements;
+    for (const auto &candidate : decoded) {
+      if (candidate->opcode() != gfx1250::kVWmmaF3216x16x64Fp8Fp8Vop3p)
+        continue;
+      ASSERT_NE(candidate->raw_encoding(), nullptr);
+      gfx1250::Vop3pMachineInst replacement{};
+      std::memcpy(&replacement, candidate->raw_encoding(), sizeof(replacement));
+      replacements.push_back(replacement);
+    }
+    ASSERT_EQ(replacements.size(), 2u);
+
+    const uint8_t scratch = replacements[0].vdst;
+    EXPECT_NE(scratch, test_case.vdst);
+    EXPECT_EQ(scratch % 8u, 0u);
+    EXPECT_FALSE(scratch < test_case.src0 - 256u + 16u &&
+                 test_case.src0 - 256u < static_cast<uint16_t>(scratch) + 8u);
+    EXPECT_FALSE(scratch < test_case.src1 - 256u + 16u &&
+                 test_case.src1 - 256u < static_cast<uint16_t>(scratch) + 8u);
+
+    EXPECT_EQ(replacements[0].src0, test_case.src0);
+    EXPECT_EQ(replacements[0].src1, test_case.src1);
+    EXPECT_EQ(replacements[0].src2, 128u);
+
+    EXPECT_EQ(replacements[1].vdst, test_case.vdst);
+    EXPECT_EQ(replacements[1].src0, test_case.src0 + 8u);
+    EXPECT_EQ(replacements[1].src1, test_case.src1 + 8u);
+    EXPECT_EQ(replacements[1].src2, 256u + scratch);
   }
 }
 
