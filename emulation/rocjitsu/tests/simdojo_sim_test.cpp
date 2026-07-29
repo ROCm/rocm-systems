@@ -464,24 +464,23 @@ TEST(TerminationTest, MaxTicksSentinel) {
 }
 
 TEST(TerminationTest, RequestExitWakesAllPartitions) {
-  // max_ticks as safety net. Keep low since each tick = one barrier round.
-  SimulationEngine engine({.max_ticks = 500, .num_threads = 4});
+  // Infinite work makes request_exit() the only termination path.
+  SimulationEngine engine({.num_threads = 4});
   auto root = std::make_unique<CompositeComponent>("root");
   for (int i = 0; i < 4; ++i)
     root->add_child(std::make_unique<InfiniteComponent>("inf" + std::to_string(i)));
   engine.topology().set_root(std::move(root));
   engine.create();
 
-  // Run in background, request exit after 50ms.
-  std::thread runner([&]() { engine.run(); });
+  ExitStatus exit_status;
+  std::thread runner([&]() { exit_status = engine.run(); });
+
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
   engine.request_exit("test stop");
   runner.join();
 
-  // Accept either EXIT_REQUEST (request_exit propagated) or COMPLETED
-  // (max_ticks safety net fired first).
-  auto reason = engine.last_exit().reason;
-  EXPECT_TRUE(reason == ExitReason::EXIT_REQUEST || reason == ExitReason::COMPLETED);
+  EXPECT_EQ(exit_status.reason, ExitReason::EXIT_REQUEST);
 }
 
 TEST(TerminationTest, StepModeConsistency) {
