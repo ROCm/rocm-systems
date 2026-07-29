@@ -835,6 +835,16 @@ void uninstall() {
   g_state.core = nullptr;
 }
 
+Blob adopt_bytes(std::vector<uint8_t> &&bytes) {
+  if (bytes.empty())
+    return nullptr;
+  try {
+    return std::make_shared<std::vector<uint8_t>>(std::move(bytes));
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 Blob copy_bytes(const void *data, size_t size) {
   if (data == nullptr || size == 0)
     return nullptr;
@@ -1216,27 +1226,27 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     // is what keeps its cost off the repeat path: a digest over the whole source
     // and a file read, once per distinct object rather than once per load.
     const CacheKey cache_key = cache_key_for(*source, kTranslationIdentity);
-    if (std::vector<uint8_t> cached = cache_lookup(cache_key, kTranslationIdentity);
-        !cached.empty()) {
-      Blob reused = copy_bytes(cached.data(), cached.size());
-      if (reused != nullptr) {
-        // Remember what the store gave us. Without this, every later load of these
-        // bytes would read the file again -- the repetition the memo exists to
-        // remove, moved from the translator to the filesystem. The source id is
-        // derived the way the translator derives it, so an entry that came from the
-        // store reports exactly as one translated here would.
-        TranslationRecord stored;
-        stored.output = reused;
-        stored.info.source_code_object_id =
-            rocjitsu::stable_code_object_id(source->data(), source->size());
-        remember(stored);
+    // Adopting the store's buffer rather than copying it again keeps a hit to one
+    // allocation; the bytes have already been read once.
+    std::vector<uint8_t> cached = cache_lookup(cache_key, kTranslationIdentity);
+    const size_t cached_size = cached.size();
+    if (Blob reused = adopt_bytes(std::move(cached)); reused != nullptr) {
+      // Remember what the store gave us. Without this, every later load of these
+      // bytes would read the file again -- the repetition the memo exists to
+      // remove, moved from the translator to the filesystem. The source id is
+      // derived the way the translator derives it, so an entry that came from the
+      // store reports exactly as one translated here would.
+      TranslationRecord stored;
+      stored.output = reused;
+      stored.info.source_code_object_id =
+          rocjitsu::stable_code_object_id(source->data(), source->size());
+      remember(stored);
 
-        const hsa_status_t reused_status =
-            load_owned_bytes(executable, agent, reused, options, loaded, *api, original_load);
-        log("reused input_bytes=%zu output_bytes=%zu status=%d", source->size(), cached.size(),
-            static_cast<int>(reused_status));
-        return reused_status;
-      }
+      const hsa_status_t reused_status =
+          load_owned_bytes(executable, agent, reused, options, loaded, *api, original_load);
+      log("reused input_bytes=%zu output_bytes=%zu status=%d", source->size(), cached_size,
+          static_cast<int>(reused_status));
+      return reused_status;
     }
 
     uint8_t *translated_data = nullptr;
@@ -1508,5 +1518,35 @@ extern "C" RJ_HOOK_EXPORT uint64_t rj_test_cache_hits() {
 
 extern "C" RJ_HOOK_EXPORT void rj_test_set_cache_capacity(uint64_t bytes) {
   rocjitsu::hotswap::set_cache_capacity_for_test(bytes);
+}
+
+extern "C" RJ_HOOK_EXPORT void rj_test_set_cache_headroom(uint64_t bytes) {
+  rocjitsu::hotswap::set_cache_headroom_for_test(bytes);
+}
+
+// Test-only: drive the store with an identity of the caller's choosing. The hook
+// itself only ever presents one, so without this there is no way to show that an
+// entry written under one configuration is not returned under another.
+extern "C" RJ_HOOK_EXPORT void rj_test_cache_store(uint32_t profile, uint32_t input_revision,
+                                                   uint32_t output_revision, const char *isa,
+                                                   const void *source, size_t source_size,
+                                                   const void *object, size_t object_size) {
+  const TranslationIdentity identity{profile, input_revision, output_revision, isa};
+  const std::span<const uint8_t> source_bytes(static_cast<const uint8_t *>(source), source_size);
+  cache_store(cache_key_for(source_bytes, identity),
+              {static_cast<const uint8_t *>(object), object_size}, identity);
+}
+
+/// Returns the stored size, or 0 on a miss. Copies at most out_capacity bytes.
+extern "C" RJ_HOOK_EXPORT size_t rj_test_cache_lookup(uint32_t profile, uint32_t input_revision,
+                                                      uint32_t output_revision, const char *isa,
+                                                      const void *source, size_t source_size,
+                                                      void *out, size_t out_capacity) {
+  const TranslationIdentity identity{profile, input_revision, output_revision, isa};
+  const std::span<const uint8_t> source_bytes(static_cast<const uint8_t *>(source), source_size);
+  const std::vector<uint8_t> found = cache_lookup(cache_key_for(source_bytes, identity), identity);
+  if (!found.empty() && out != nullptr)
+    std::memcpy(out, found.data(), std::min(found.size(), out_capacity));
+  return found.size();
 }
 #endif // RJ_HOTSWAP_TEST_HOOKS

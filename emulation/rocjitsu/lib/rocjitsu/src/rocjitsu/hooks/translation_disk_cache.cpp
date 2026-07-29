@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -68,6 +69,13 @@ constexpr uint64_t kMaxObjectBytes = kAbsoluteCapacityBytes / kMaxEntryDivisor;
 
 /// @brief Evict down to this share of capacity so eviction is amortised.
 constexpr uint64_t kEvictTargetPermille = 900; // 90%
+
+/// @brief Age at which an unrenamed temporary is treated as abandoned.
+/// @details A writer killed between creating its temporary and renaming it
+/// leaves bytes that no entry accounts for and nothing would ever reclaim. The
+/// threshold only has to exceed the time one write can take, which is a single
+/// buffered write and an fsync, so it is generous by orders of magnitude.
+constexpr time_t kAbandonedTempSeconds = 600;
 
 // ---------------------------------------------------------------------------
 // SHA-256. Self-contained: this library links no crypto dependency, and the
@@ -336,6 +344,10 @@ public:
     std::lock_guard lock(mutex_);
     capacity_override_ = bytes;
   }
+  void set_headroom_for_test(uint64_t bytes) {
+    std::lock_guard lock(mutex_);
+    headroom_override_ = bytes;
+  }
   [[nodiscard]] uint64_t hits_for_test() {
     std::lock_guard lock(mutex_);
     return hits_;
@@ -371,11 +383,23 @@ private:
     if (!make_directory_path(path))
       return;
     dir_fd_ = open_verified_directory(path);
+    // Once per process, and the only moment at which a temporary left by a
+    // process that died mid-write is unambiguously abandoned.
+    sweep_abandoned_locked();
   }
 
   [[nodiscard]] std::vector<Entry> scan_locked() const;
   [[nodiscard]] uint64_t capacity_locked() const;
   [[nodiscard]] bool reserve_space_locked(uint64_t needed);
+  void sweep_abandoned_locked() const;
+
+  [[nodiscard]] uint64_t headroom_locked() const {
+#if defined(RJ_HOTSWAP_TEST_HOOKS)
+    if (headroom_override_ != 0)
+      return headroom_override_;
+#endif
+    return kHeadroomBytes;
+  }
 
   std::mutex mutex_;
   bool opened_ = false;
@@ -384,6 +408,7 @@ private:
 #if defined(RJ_HOTSWAP_TEST_HOOKS)
   std::string root_override_;
   uint64_t capacity_override_ = 0;
+  uint64_t headroom_override_ = 0;
   uint64_t hits_ = 0;
 #endif
 };
@@ -413,18 +438,44 @@ std::vector<Entry> Store::scan_locked() const {
   return entries;
 }
 
+void Store::sweep_abandoned_locked() const {
+  if (dir_fd_ < 0)
+    return;
+  const int scan_fd = openat(dir_fd_, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (scan_fd < 0)
+    return;
+  DIR *dir = fdopendir(scan_fd);
+  if (dir == nullptr) {
+    close(scan_fd);
+    return;
+  }
+  const time_t now = time(nullptr);
+  while (const dirent *item = readdir(dir)) {
+    if (std::string_view(item->d_name).find(".tmp.") == std::string_view::npos)
+      continue;
+    struct stat info {};
+    if (fstatat(dir_fd_, item->d_name, &info, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(info.st_mode))
+      continue;
+    if (now - info.st_mtime > kAbandonedTempSeconds)
+      unlinkat(dir_fd_, item->d_name, 0);
+  }
+  closedir(dir);
+}
+
 uint64_t Store::capacity_locked() const {
-#if defined(RJ_HOTSWAP_TEST_HOOKS)
-  if (capacity_override_ != 0)
-    return capacity_override_;
-#endif
   struct statvfs vfs {};
   if (dir_fd_ < 0 || fstatvfs(dir_fd_, &vfs) != 0)
     return 0;
   const uint64_t total = static_cast<uint64_t>(vfs.f_blocks) * vfs.f_frsize;
   const uint64_t free_now = static_cast<uint64_t>(vfs.f_bavail) * vfs.f_frsize;
-  if (free_now < kHeadroomBytes)
-    return 0; // Memory-backed and shared; leave it alone.
+  // Checked ahead of any override, because the headroom floor is the one rule
+  // that protects the rest of the runtime directory rather than the store.
+  if (free_now < headroom_locked())
+    return 0;
+#if defined(RJ_HOTSWAP_TEST_HOOKS)
+  if (capacity_override_ != 0)
+    return capacity_override_;
+#endif
   uint64_t cap = kAbsoluteCapacityBytes;
   cap = std::min(cap, total / 1000u * kCapacityPermilleOfTotal);
   cap = std::min(cap, free_now / 1000u * kCapacityPermilleOfFree);
@@ -669,6 +720,7 @@ void set_cache_root_for_test(const char *root) { Store::instance().set_root_for_
 uint64_t cache_size_for_test() { return Store::instance().size_for_test(); }
 uint64_t cache_hits_for_test() { return Store::instance().hits_for_test(); }
 void set_cache_capacity_for_test(uint64_t bytes) { Store::instance().set_capacity_for_test(bytes); }
+void set_cache_headroom_for_test(uint64_t bytes) { Store::instance().set_headroom_for_test(bytes); }
 #endif
 
 } // namespace rocjitsu::hotswap

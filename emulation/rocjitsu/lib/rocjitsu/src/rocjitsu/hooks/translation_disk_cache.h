@@ -83,6 +83,11 @@ void set_cache_root_for_test(const char *root);
 
 /// @brief Test-only: override the byte cap so eviction can be exercised.
 void set_cache_capacity_for_test(uint64_t bytes);
+
+/// @brief Test-only: override the free-space floor below which writes stop.
+/// @details Raising it above the real free space is the only way to reach the
+/// low-space behaviour without filling the filesystem.
+void set_cache_headroom_for_test(uint64_t bytes);
 #endif // RJ_HOTSWAP_TEST_HOOKS
 
 } // namespace rocjitsu::hotswap

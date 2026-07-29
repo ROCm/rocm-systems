@@ -6,6 +6,9 @@
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -45,6 +48,14 @@ extern "C" void rj_test_set_cache_root(const char *root);
 extern "C" uint64_t rj_test_cache_size();
 extern "C" uint64_t rj_test_cache_hits();
 extern "C" void rj_test_set_cache_capacity(uint64_t bytes);
+extern "C" void rj_test_set_cache_headroom(uint64_t bytes);
+extern "C" void rj_test_cache_store(uint32_t profile, uint32_t input_revision,
+                                    uint32_t output_revision, const char *isa, const void *source,
+                                    size_t source_size, const void *object, size_t object_size);
+extern "C" size_t rj_test_cache_lookup(uint32_t profile, uint32_t input_revision,
+                                       uint32_t output_revision, const char *isa,
+                                       const void *source, size_t source_size, void *out,
+                                       size_t out_capacity);
 
 namespace {
 
@@ -271,6 +282,7 @@ public:
   ~ScopedCacheRoot() {
     rj_test_set_cache_root(nullptr);
     rj_test_set_cache_capacity(0);
+    rj_test_set_cache_headroom(0);
     if (path_[0] != '\0')
       std::filesystem::remove_all(path_);
   }
@@ -530,6 +542,10 @@ TEST_F(HsaHotswapCacheTest, TruncatedObjectIsRejectedAndTheLoadStillSucceeds) {
   ASSERT_FALSE(object.empty());
   std::filesystem::resize_file(object, std::filesystem::file_size(object) / 2);
 
+  // The memo would answer this second load itself and the store would never be
+  // consulted, leaving the assertions below true for the wrong reason. Clearing it
+  // puts the question back to the store, which is what this case is about.
+  rj_test_clear_retained_storage();
   EXPECT_EQ(load(source), first);
   EXPECT_EQ(rj_test_cache_hits(), 0u);
 }
@@ -554,6 +570,10 @@ TEST_F(HsaHotswapCacheTest, DisagreeingManifestIsRejectedAndTheLoadStillSucceeds
     output << text;
   }
 
+  // The memo would answer this second load itself and the store would never be
+  // consulted, leaving the assertions below true for the wrong reason. Clearing it
+  // puts the question back to the store, which is what this case is about.
+  rj_test_clear_retained_storage();
   EXPECT_EQ(load(source), first);
   EXPECT_EQ(rj_test_cache_hits(), 0u);
 }
@@ -566,6 +586,10 @@ TEST_F(HsaHotswapCacheTest, SymlinkedEntryIsRefusedAndTheLoadStillSucceeds) {
   std::filesystem::rename(object, elsewhere);
   std::filesystem::create_symlink(elsewhere, object);
 
+  // The memo would answer this second load itself and the store would never be
+  // consulted, leaving the assertions below true for the wrong reason. Clearing it
+  // puts the question back to the store, which is what this case is about.
+  rj_test_clear_retained_storage();
   EXPECT_EQ(load(source), first);
   EXPECT_EQ(rj_test_cache_hits(), 0u);
 }
@@ -578,6 +602,10 @@ TEST_F(HsaHotswapCacheTest, WorldWritableRootDisablesTheStore) {
   rj_test_set_cache_root(cache_root.path()); // Re-runs the ownership checks.
 
   EXPECT_EQ(rj_test_cache_size(), 0u);
+  // The memo would answer this second load itself and the store would never be
+  // consulted, leaving the assertions below true for the wrong reason. Clearing it
+  // puts the question back to the store, which is what this case is about.
+  rj_test_clear_retained_storage();
   EXPECT_FALSE(load(source).empty());
   EXPECT_EQ(rj_test_cache_hits(), 0u);
 }
@@ -621,6 +649,186 @@ TEST_F(HsaHotswapCacheTest, EntriesAreDisplacedOnceTheStoreReachesCapacity) {
   EXPECT_GT(kept, static_cast<size_t>(kVariants) / 4);
 }
 #endif
+
+// Cases that need neither the HSA surface nor a translatable fixture, because
+// they are about what the store itself will and will not hand back.
+class HsaHotswapCacheApiTest : public ::testing::Test {
+protected:
+  static constexpr uint32_t kProfile = 1;
+  static constexpr uint32_t kInputRevision = 1;
+  static constexpr uint32_t kOutputRevision = 0;
+  static constexpr const char *kIsa = "gfx1250";
+
+  const std::vector<uint8_t> source{'s', 'o', 'u', 'r', 'c', 'e'};
+  const std::vector<uint8_t> object{'o', 'b', 'j', 'e', 'c', 't', '!'};
+
+  void put(uint32_t profile, uint32_t in_rev, uint32_t out_rev, const char *isa) {
+    rj_test_cache_store(profile, in_rev, out_rev, isa, source.data(), source.size(), object.data(),
+                        object.size());
+  }
+
+  [[nodiscard]] size_t get(uint32_t profile, uint32_t in_rev, uint32_t out_rev, const char *isa) {
+    std::vector<uint8_t> out(object.size());
+    const size_t size = rj_test_cache_lookup(profile, in_rev, out_rev, isa, source.data(),
+                                             source.size(), out.data(), out.size());
+    if (size == object.size())
+      EXPECT_EQ(out, object);
+    return size;
+  }
+
+  [[nodiscard]] std::filesystem::path entries() const {
+    return std::filesystem::path(cache_root.path()) / "gfx1250-b0-a0" / "v1";
+  }
+
+  ScopedCacheRoot cache_root;
+};
+
+TEST_F(HsaHotswapCacheApiTest, EntryIsReturnedOnlyUnderTheIdentityThatWroteIt) {
+  put(kProfile, kInputRevision, kOutputRevision, kIsa);
+  ASSERT_EQ(get(kProfile, kInputRevision, kOutputRevision, kIsa), object.size());
+
+  EXPECT_EQ(get(kProfile + 1, kInputRevision, kOutputRevision, kIsa), 0u);
+  EXPECT_EQ(get(kProfile, kInputRevision + 1, kOutputRevision, kIsa), 0u);
+  EXPECT_EQ(get(kProfile, kInputRevision, kOutputRevision + 1, kIsa), 0u);
+  EXPECT_EQ(get(kProfile, kInputRevision, kOutputRevision, "gfx1250-other"), 0u);
+}
+
+TEST_F(HsaHotswapCacheApiTest, DifferentSourcesDoNotShareAnEntry) {
+  put(kProfile, kInputRevision, kOutputRevision, kIsa);
+  const std::vector<uint8_t> other{'o', 't', 'h', 'e', 'r'};
+  EXPECT_EQ(rj_test_cache_lookup(kProfile, kInputRevision, kOutputRevision, kIsa, other.data(),
+                                 other.size(), nullptr, 0),
+            0u);
+}
+
+TEST_F(HsaHotswapCacheApiTest, RecordedEpochIsReCheckedBeforeAnEntryIsUsed) {
+  put(kProfile, kInputRevision, kOutputRevision, kIsa);
+  ASSERT_EQ(get(kProfile, kInputRevision, kOutputRevision, kIsa), object.size());
+
+  size_t rewritten = 0;
+  for (const auto &item : std::filesystem::directory_iterator(entries())) {
+    if (item.path().extension() != ".man")
+      continue;
+    std::string text;
+    {
+      std::ifstream input(item.path(), std::ios::binary);
+      text.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    }
+    const size_t at = text.find("\nepoch=");
+    ASSERT_NE(at, std::string::npos);
+    text.insert(at + 7, "9");
+    std::ofstream(item.path(), std::ios::binary | std::ios::trunc) << text;
+    ++rewritten;
+  }
+  ASSERT_EQ(rewritten, 1u);
+
+  EXPECT_EQ(get(kProfile, kInputRevision, kOutputRevision, kIsa), 0u);
+}
+
+TEST_F(HsaHotswapCacheApiTest, WritesStopAndReadsContinueWhenFreeSpaceIsShort) {
+  put(kProfile, kInputRevision, kOutputRevision, kIsa);
+  ASSERT_EQ(get(kProfile, kInputRevision, kOutputRevision, kIsa), object.size());
+
+  const std::vector<uint8_t> other{'o', 't', 'h', 'e', 'r'};
+  const auto store_other = [&] {
+    rj_test_cache_store(kProfile, kInputRevision, kOutputRevision, kIsa, other.data(), other.size(),
+                        object.data(), object.size());
+    return rj_test_cache_lookup(kProfile, kInputRevision, kOutputRevision, kIsa, other.data(),
+                                other.size(), nullptr, 0);
+  };
+
+  rj_test_set_cache_headroom(UINT64_MAX);
+  EXPECT_EQ(store_other(), 0u);
+  // The entry written before space ran short is still served.
+  EXPECT_EQ(get(kProfile, kInputRevision, kOutputRevision, kIsa), object.size());
+
+  // Control: the same write succeeds once the floor is back to normal, so the
+  // refusal above was the headroom rule and not some unrelated failure.
+  rj_test_set_cache_headroom(0);
+  EXPECT_EQ(store_other(), object.size());
+}
+
+TEST_F(HsaHotswapCacheApiTest, ReadOnlyDirectoryStopsWritesAndKeepsReadsWorking) {
+  put(kProfile, kInputRevision, kOutputRevision, kIsa);
+  ASSERT_EQ(get(kProfile, kInputRevision, kOutputRevision, kIsa), object.size());
+
+  const std::vector<uint8_t> other{'o', 't', 'h', 'e', 'r'};
+  const auto store_other = [&] {
+    rj_test_cache_store(kProfile, kInputRevision, kOutputRevision, kIsa, other.data(), other.size(),
+                        object.data(), object.size());
+    return rj_test_cache_lookup(kProfile, kInputRevision, kOutputRevision, kIsa, other.data(),
+                                other.size(), nullptr, 0);
+  };
+
+  std::filesystem::permissions(entries(), std::filesystem::perms::owner_read |
+                                              std::filesystem::perms::owner_exec);
+  EXPECT_EQ(store_other(), 0u);
+  EXPECT_EQ(get(kProfile, kInputRevision, kOutputRevision, kIsa), object.size());
+
+  std::filesystem::permissions(entries(), std::filesystem::perms::owner_all);
+  EXPECT_EQ(store_other(), object.size());
+}
+
+TEST_F(HsaHotswapCacheApiTest, AbandonedTemporaryIsReclaimedWhenTheStoreIsOpened) {
+  put(kProfile, kInputRevision, kOutputRevision, kIsa);
+  const std::filesystem::path orphan = entries() / "deadbeef.obj.tmp.7.999999";
+  std::ofstream(orphan, std::ios::binary) << "partial";
+  ASSERT_TRUE(std::filesystem::exists(orphan));
+  std::filesystem::last_write_time(orphan, std::filesystem::file_time_type::clock::now() -
+                                               std::chrono::hours(2));
+
+  rj_test_set_cache_root(cache_root.path()); // Re-opens, which is when the sweep runs.
+  ASSERT_EQ(get(kProfile, kInputRevision, kOutputRevision, kIsa), object.size());
+  EXPECT_FALSE(std::filesystem::exists(orphan));
+}
+
+TEST_F(HsaHotswapCacheApiTest, RecentTemporaryIsLeftAloneForItsWriter) {
+  put(kProfile, kInputRevision, kOutputRevision, kIsa);
+  const std::filesystem::path in_flight = entries() / "deadbeef.obj.tmp.8.999999";
+  std::ofstream(in_flight, std::ios::binary) << "partial";
+
+  rj_test_set_cache_root(cache_root.path());
+  ASSERT_EQ(get(kProfile, kInputRevision, kOutputRevision, kIsa), object.size());
+  EXPECT_TRUE(std::filesystem::exists(in_flight));
+}
+
+TEST_F(HsaHotswapCacheApiTest, ConcurrentWritersLeaveExactlyOneCompleteEntry) {
+  constexpr int kWriters = 8;
+  std::vector<pid_t> children;
+  for (int i = 0; i < kWriters; ++i) {
+    const pid_t pid = fork();
+    ASSERT_NE(pid, -1);
+    if (pid == 0) {
+      // Each child re-opens the store for itself, so this exercises the
+      // cross-process path rather than one process's serialised writes.
+      rj_test_set_cache_root(cache_root.path());
+      put(kProfile, kInputRevision, kOutputRevision, kIsa);
+      _exit(0);
+    }
+    children.push_back(pid);
+  }
+  for (pid_t pid : children) {
+    int status = 0;
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+    ASSERT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+  }
+
+  size_t objects = 0;
+  size_t manifests = 0;
+  size_t temporaries = 0;
+  for (const auto &item : std::filesystem::directory_iterator(entries())) {
+    const std::string name = item.path().filename().string();
+    objects += name.ends_with(".obj") ? 1 : 0;
+    manifests += name.ends_with(".man") ? 1 : 0;
+    temporaries += name.find(".tmp.") != std::string::npos ? 1 : 0;
+  }
+  EXPECT_EQ(objects, 1u);
+  EXPECT_EQ(manifests, 1u);
+  EXPECT_EQ(temporaries, 0u);
+
+  rj_test_set_cache_root(cache_root.path());
+  EXPECT_EQ(get(kProfile, kInputRevision, kOutputRevision, kIsa), object.size());
+}
 
 TEST_F(HsaHotswapHookTest, TranslationFailureDoesNotLoadOrRetain) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
