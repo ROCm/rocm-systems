@@ -59,7 +59,15 @@ EOF
 # --- parse args ---
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --build-dir) BUILD_DIR="$2"; shift 2 ;;
+    --build-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --build-dir requires a path argument" >&2
+        echo >&2
+        usage >&2
+        exit 1
+      fi
+      BUILD_DIR="$2"; shift 2
+      ;;
     --skip-ctest) SKIP_CTEST=1; shift ;;
     --skip-conformance) SKIP_CONFORMANCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
