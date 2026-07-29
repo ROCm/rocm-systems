@@ -629,6 +629,23 @@ if(BUILD_TESTS)
         else()
             message(WARNING "Skipping test categories for rccl-UnitTestsFixtures: missing ${_rccl_test_categories_fixtures_yaml}")
         endif()
+
+        # Registered outside the Debug-only block below: this target's fabric predicate
+        # and layout cases need no librccl symbols and so run in Release too. The
+        # AmdSmiWrap* patterns in the yaml match nothing in a Release binary, where
+        # that file is left out for lack of exported amd_smi_* symbols.
+        set(_rccl_test_categories_amdsmi_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_amdsmi.yaml")
+        if(EXISTS "${_rccl_test_categories_amdsmi_yaml}")
+            message(STATUS "Applying test categories for rccl-UnitTestsAmdSmi")
+            apply_test_category_labels(
+                rccl-UnitTestsAmdSmi
+                "${_rccl_test_categories_amdsmi_yaml}"
+                "${PROJECT_BINARY_DIR}"
+                "${INSTALL_TEST_FILE}"
+            )
+        else()
+            message(WARNING "Skipping test categories for rccl-UnitTestsAmdSmi: missing ${_rccl_test_categories_amdsmi_yaml}")
+        endif()
     endif()
 
     if(ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
@@ -656,19 +673,6 @@ if(BUILD_TESTS)
             )
         else()
             message(WARNING "Skipping test categories for rccl-UnitTestsAltRsmi: missing ${_rccl_test_categories_altrsmi_yaml}")
-        endif()
-
-        set(_rccl_test_categories_amdsmi_yaml "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_amdsmi.yaml")
-        if(EXISTS "${_rccl_test_categories_amdsmi_yaml}")
-            message(STATUS "Applying test categories for rccl-UnitTestsAmdSmi")
-            apply_test_category_labels(
-                rccl-UnitTestsAmdSmi
-                "${_rccl_test_categories_amdsmi_yaml}"
-                "${PROJECT_BINARY_DIR}"
-                "${INSTALL_TEST_FILE}"
-            )
-        else()
-            message(WARNING "Skipping test categories for rccl-UnitTestsAmdSmi: missing ${_rccl_test_categories_amdsmi_yaml}")
         endif()
     endif()
 

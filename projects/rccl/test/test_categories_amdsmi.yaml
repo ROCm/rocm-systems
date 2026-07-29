@@ -1,10 +1,13 @@
-# rccl-UnitTestsAmdSmi — shared/ctest schema (ROCm 6.4+, Debug build).
+# rccl-UnitTestsAmdSmi — shared/ctest schema (ROCm 6.4+, Release and Debug).
 # RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
 #
 # Suites:
 #   AmdSmiFabric* — pure predicate and struct layout checks, no hardware needed.
+#                   Present in every build type.
 #   AmdSmiWrap*   — drives the amd_smi_* API against real GPUs; each case skips
 #                   when the devices, amd_smi library, or fabric it needs is absent.
+#                   Debug builds only: the internal amd_smi_* symbols are hidden in
+#                   Release, so these patterns match nothing there.
 #
 # Tiers:
 #   quick — canonical anchor; NCCL_DEBUG=INFO for library logging.
@@ -26,7 +29,6 @@ test_categories:
       - "smoke"
       - "precheck"
       - "amdsmi"
-      - "debug"
     env_variables:
       - "NCCL_DEBUG=INFO"
   standard:
@@ -36,7 +38,6 @@ test_categories:
       - "standard"
       - "regression"
       - "amdsmi"
-      - "debug"
   comprehensive:
     <<: *amdsmi_quick
     labels:
@@ -44,7 +45,6 @@ test_categories:
       - "comprehensive"
       - "comprehensive_regression"
       - "amdsmi"
-      - "debug"
   full:
     <<: *amdsmi_quick
     labels:
@@ -52,7 +52,6 @@ test_categories:
       - "full"
       - "full_regression"
       - "amdsmi"
-      - "debug"
 
 execution_settings:
   timeout_multiplier: 1
