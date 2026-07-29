@@ -1751,8 +1751,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
       const ExecMaskAnalysis exec(KernelBlockScope(scope.blocks),
                                   scope.translation->guest_wavefront_size, liveness_edges);
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), exec, liveness_options,
-                                  liveness_edges);
+      liveness =
+          LivenessAnalysis(KernelBlockScope(scope.blocks), exec, liveness_options, liveness_edges);
     }
 
     std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;
