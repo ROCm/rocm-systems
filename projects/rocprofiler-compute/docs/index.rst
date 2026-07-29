@@ -53,14 +53,13 @@ in practice.
       * :doc:`how-to/profile/mode`
       * :doc:`how-to/analyze/mode`
 
-        * :doc:`ROCm Optiq (Beta) <how-to/analyze/optiq>` for graphical analysis of
-          ROCm Compute Profiler analysis data
-
         * :doc:`how-to/analyze/cli`
 
         * :doc:`how-to/analyze/standalone-gui`
 
         * :doc:`how-to/analyze/tui`
+
+        * :doc:`how-to/analyze/optiq`
 
    .. grid-item-card:: Conceptual
 
