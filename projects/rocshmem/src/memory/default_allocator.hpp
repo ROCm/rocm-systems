@@ -52,7 +52,8 @@ namespace rocshmem {
     if (err != hipSuccess) {
       LOG_ERROR_ABORT("Could not get device properties. Aborting");
     }
-    std::snprintf(arch_name, sizeof(arch_name), "%s", prop.gcnArchName);
+    strncpy(arch_name, prop.gcnArchName, sizeof(arch_name) - 1);
+    arch_name[sizeof(arch_name) - 1] = '\0';
 
     // Arch-based default: finegrained for RDNA3/RDNA4 (gfx1100, gfx1201),
     // uncached for everything else.
@@ -117,7 +118,7 @@ namespace rocshmem {
 #endif
         break;
       case AllocChoice::vmm_fabric:
-#if HIP_VERSION >= 70200000 && defined HAVE_AMDSMI_GPU_FABRIC_INFO
+#if defined HAVE_AMDSMI_GPU_FABRIC_INFO
         default_allocator_ = new HIPAllocatorVMMFabric();
 #else
         LOG_ERROR_ABORT("ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_fabric requires ROCm 7.14+ "

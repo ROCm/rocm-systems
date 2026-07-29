@@ -20,7 +20,8 @@ Requirements
 
 * ROCm 6.4.0 or later, including the :doc:`HIP runtime <hip:index>`. For more information, see `ROCm installation for Linux <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_.
 
-  * ROCm 7.2 or later is required for the VMM POSIX and VMM Fabric memory allocators (``ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix`` or ``vmm_fabric``).
+  * ROCm 7.2 or later is required for the VMM POSIX memory allocator (``ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix``).
+  * ROCm 7.14 or later with AMD SMI fabric handle support is required for the VMM Fabric memory allocator (``ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_fabric``).
 
 * The following AMD GPUs have been fully tested for compatibility with rocSHMEM:
 
