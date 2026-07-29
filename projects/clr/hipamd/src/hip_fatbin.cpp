@@ -453,20 +453,18 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       foffset_ = 0;
     }
   } else {
-    size_t fsize = 0;
-    if (!amd::Os::GetFileHandle(fname_.c_str(), &fdesc, &fsize)) {
+    if (!amd::Os::GetFileHandle(fname_.c_str(), &fdesc, &readable_size)) {
       return hipErrorFileNotFound;
     }
-    if (fsize == 0) {
+    if (readable_size == 0) {
       return hipErrorInvalidImage;
     }
-    if (!amd::Os::MemoryMapFileDesc(fdesc, fsize, foffset_, &image_)) {
+    if (!amd::Os::MemoryMapFileDesc(fdesc, readable_size, foffset_, &image_)) {
       LogError("Cannot map the file descriptor");
       return hipErrorInvalidValue;
     }
-    image_size_ = fsize;
+    image_size_ = readable_size;
     image_mapped_ = true;
-    readable_size = fsize;
   }
   guarantee(image_ != nullptr, "Image cannot be nullptr, file:%s did not map for some reason",
             fname_.c_str());
