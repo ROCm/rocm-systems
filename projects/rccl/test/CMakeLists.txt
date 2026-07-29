@@ -152,6 +152,21 @@ if(BUILD_TESTS)
     dl
     fmt::fmt-header-only
   )
+
+  # Experimental: link libs for the micro-test binary.
+  # We keep the HIP *compile* requirements (device intrinsics, gfx1151
+  # codegen, headers) via $<COMPILE_ONLY:...> but deliberately drop the
+  # real HIP runtime from the *link* line, so any un-shimmed HIP API call
+  # surfaces as an undefined-symbol link error instead of silently binding
+  # to libamdhip64.so at runtime.
+  set(MICRO_TEST_LINK_LIBS
+    ${GTEST_BOTH_LIBRARIES}
+    $<COMPILE_ONLY:hip::host>
+    $<COMPILE_ONLY:hip::device>
+    Threads::Threads
+    dl
+    fmt::fmt-header-only
+  )
   if(OPENMP_TESTS_ENABLED)
     list(APPEND RCCL_COMMON_LINK_LIBS "${OpenMP_CXX_FLAGS}")
   endif()

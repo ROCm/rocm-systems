@@ -170,35 +170,6 @@ static int DefaultCuMemEnable() { return 0; }
 std::function<int()> g_cuMemEnable = DefaultCuMemEnable;
 int ncclCuMemEnable() { return g_cuMemEnable(); }
 
-// --- Controllable seams: hipMemRetainAllocationHandle /
-//                          hipMemExportToShareableHandle /
-//                          hipMemRelease --------------------------------
-// The three HIP runtime entry points the cuMem* arm of ipcRegisterBuffer
-// calls. Macro-shimmed in p2p-test.cc so the call sites route here.
-static hipError_t DefaultHipMemRetainAllocationHandle(
-    hipMemGenericAllocationHandle_t*, void*)
-{
-    return hipErrorInvalidValue;
-}
-static hipError_t DefaultHipMemExportToShareableHandle(
-    void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
-    unsigned long long)
-{
-    return hipErrorInvalidValue;
-}
-static hipError_t DefaultHipMemRelease(hipMemGenericAllocationHandle_t)
-{
-    return hipErrorInvalidValue;
-}
-
-std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*)>
-    g_hipMemRetainAllocationHandle = DefaultHipMemRetainAllocationHandle;
-std::function<hipError_t(void*, hipMemGenericAllocationHandle_t,
-                         hipMemAllocationHandleType, unsigned long long)>
-    g_hipMemExportToShareableHandle = DefaultHipMemExportToShareableHandle;
-std::function<hipError_t(hipMemGenericAllocationHandle_t)>
-    g_hipMemRelease = DefaultHipMemRelease;
-
 // --- Controllable seam: ncclProxyClientQueryFdBlocking -------------------
 // The cuMem* POSIX_FD arm of ipcRegisterBuffer calls this to ship the
 // exported fd to the remote proxy and get an imported-fd handle back.
@@ -257,26 +228,6 @@ ncclResult_t ncclProxyCallBlocking(struct ncclComm*           comm,
     return g_proxyCallBlocking(comm, proxyConn, type, reqBuff, reqSize,
                                respBuff, respSize);
 }
-
-// --- Controllable seams: hipMemGetAddressRange / hipIpcGetMemHandle ------
-// p2p-test.cc macro-shims the p2p.cc call sites onto these hooks, so the
-// test binary never reaches the real HIP runtime (no GPU). Defaults return
-// hipErrorInvalidValue so unexpected call sites surface via CUCHECKGOTO.
-static hipError_t DefaultHipMemGetAddressRange(hipDeviceptr_t*, std::size_t*,
-                                               hipDeviceptr_t)
-{
-    return hipErrorInvalidValue;
-}
-
-static hipError_t DefaultHipIpcGetMemHandle(hipIpcMemHandle_t*, void*)
-{
-    return hipErrorInvalidValue;
-}
-
-std::function<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>
-    g_hipMemGetAddressRange = DefaultHipMemGetAddressRange;
-std::function<hipError_t(hipIpcMemHandle_t*, void*)>
-    g_hipIpcGetMemHandle = DefaultHipIpcGetMemHandle;
 
 ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* /*comm*/,
                                           int              /*rank*/,
@@ -458,14 +409,10 @@ void ResetP2pFakes()
     g_fakeCudaMemcpyAsync    = DefaultFakeCudaMemcpyAsync;
     g_proxyConnect           = DefaultProxyConnect;
     g_proxyCallBlocking      = DefaultProxyCallBlocking;
-    g_hipMemGetAddressRange  = DefaultHipMemGetAddressRange;
-    g_hipIpcGetMemHandle     = DefaultHipIpcGetMemHandle;
     g_loadParam              = DefaultLoadParam;
     g_cuMemEnable                  = DefaultCuMemEnable;
-    g_hipMemRetainAllocationHandle = DefaultHipMemRetainAllocationHandle;
-    g_hipMemExportToShareableHandle= DefaultHipMemExportToShareableHandle;
-    g_hipMemRelease                = DefaultHipMemRelease;
     g_proxyClientQueryFdBlocking   = DefaultProxyClientQueryFdBlocking;
+    ResetHipFakes();  // restore the HIP hooks owned by hip_fakes.cc
     for (void* p : g_fakeAllocations) std::free(p);
     g_fakeAllocations.clear();
 }

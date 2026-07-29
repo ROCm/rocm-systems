@@ -4,20 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Microtests for src/transport/p2p.cc.
-//
-// This binary does NOT link librccl.so -- it compiles the hipified p2p.cc
-// directly into the test TU via the #include below, with everything p2p.cc
-// references (proxy, HIP driver shims, topology helpers, etc.) provided as
-// stubs in fakes/. That gives the tests visibility into static helpers like
-// ipcRegisterBuffer and the ability to drive their failure paths deterministically.
-//
-// See README.md in this directory for the full rationale, the fake-layer
-// architecture, and the recipe for adding a new test.
-
 #include <gtest/gtest.h>
 
-#include <unistd.h>  // dup, STDERR_FILENO -- POSIX_FD test hands close() a real fd
+#include <unistd.h>
 
 #include <array>
 #include <cstdint>

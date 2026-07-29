@@ -46,6 +46,8 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#include "hip_fakes.h"
+
 // ncclStrongStreamAcquire: by default returns ncclSuccess with *stream=nullptr
 // (matching the stub's prior behaviour). Tests that need to exercise the
 // strong-stream block's failure paths can install a hook that returns an
@@ -84,45 +86,11 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*,
                                   void* /*respBuff*/, int /*respSize*/)>
     g_proxyCallBlocking;
 
-// hipMemGetAddressRange / hipIpcGetMemHandle: real HIP runtime entry points
-// reached from ipcRegisterBuffer's fresh-registration arm. The microtest
-// binary links hip::host, so these symbols resolve at link time -- but at
-// runtime they need a real GPU. The macro shims in p2p-test.cc route the
-// p2p.cc call sites through these hooks instead.
-//
-// Defaults return hipErrorInvalidValue so any test that *doesn't* opt in
-// surfaces the unexpected call as ncclUnhandledCudaError via CUCHECKGOTO.
-extern std::function<hipError_t(hipDeviceptr_t* /*pbase*/, std::size_t* /*psize*/,
-                                hipDeviceptr_t /*dptr*/)>
-    g_hipMemGetAddressRange;
-extern std::function<hipError_t(hipIpcMemHandle_t* /*handle*/, void* /*devPtr*/)>
-    g_hipIpcGetMemHandle;
 
 // ncclCuMemEnable: gates the cuMem*-export arm of ipcRegisterBuffer
 // against the legacy-IPC arm. Default returns 0 so existing tests stay
 // on the legacy arm. Tests for the cuMem* arm install a hook returning 1.
 extern std::function<int()> g_cuMemEnable;
-
-// hipMemRetainAllocationHandle / hipMemExportToShareableHandle /
-// hipMemRelease: the three HIP runtime entry points the cuMem*-export
-// arm of ipcRegisterBuffer calls. The microtest binary links hip::host
-// so these symbols resolve at link time, but at runtime they need a real
-// GPU. The macro shims in p2p-test.cc route the p2p.cc call sites
-// through these hooks instead.
-//
-// Defaults return hipErrorInvalidValue so unexpected call sites surface
-// via CUCHECKGOTO; tests that want a happy path install a hook that
-// returns hipSuccess (and, for Retain, hands back a sentinel handle).
-extern std::function<hipError_t(hipMemGenericAllocationHandle_t* /*handle*/,
-                                void* /*addr*/)>
-    g_hipMemRetainAllocationHandle;
-extern std::function<hipError_t(void* /*shareableHandle*/,
-                                hipMemGenericAllocationHandle_t /*handle*/,
-                                hipMemAllocationHandleType /*handleType*/,
-                                unsigned long long /*flags*/)>
-    g_hipMemExportToShareableHandle;
-extern std::function<hipError_t(hipMemGenericAllocationHandle_t /*handle*/)>
-    g_hipMemRelease;
 
 // ncclProxyClientQueryFdBlocking: the cuMem*-export POSIX_FD arm of
 // ipcRegisterBuffer calls this to register the exported fd with the

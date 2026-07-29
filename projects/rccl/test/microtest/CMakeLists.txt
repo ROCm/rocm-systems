@@ -12,6 +12,7 @@ endif()
 set(TEST_MICRO_SOURCE_FILES
   p2p-test.cc
   fakes/p2p_fakes.cc                   # stubs for everything p2p.cc references
+  fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
   ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
   ../common/ProcessIsolatedTestRunner.cpp
 )
@@ -20,7 +21,7 @@ add_executable(rccl-UnitTestsMicro ${TEST_MICRO_SOURCE_FILES})
 
 target_include_directories(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
 target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
-target_link_libraries(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_LINK_LIBS})
+target_link_libraries(rccl-UnitTestsMicro PRIVATE ${MICRO_TEST_LINK_LIBS})
 
 # Pass the absolute path of hipified source files through as string
 # literals so the #include in the test translation unit stays independent of
@@ -33,8 +34,14 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
 add_dependencies(rccl-UnitTestsMicro hipify_all copy_nccl_device_headers)
 
 # Always build this binary with llvm source-based coverage.
+# Restrict the instrumentation to the host compilation pass: applying it to the
+# amdgcn device pass pulls in LLVM profiling runtime symbols
+# (__llvm_profile_raw_version, __start___llvm_prf_cnts, ...) that don't exist on
+# the device, which makes amdgcn-link fail.
 target_compile_options(rccl-UnitTestsMicro PRIVATE
-  -fprofile-instr-generate -fcoverage-mapping)
+  -fprofile-instr-generate -fcoverage-mapping
+  -Xarch_device -fno-profile-instr-generate
+  -Xarch_device -fno-coverage-mapping)
 target_link_options(rccl-UnitTestsMicro PRIVATE
   -fprofile-instr-generate -fcoverage-mapping)
 
