@@ -33,7 +33,8 @@ namespace {
 ///   * v_cvt_pk_fp8_f32, v_cvt_sr_fp8_f32 (only when CLAMP selects the B0-only
 ///     mode; the ordinary form stays on the copy path),
 ///   * v_wmma_scale / v_wmma_scale16 forms without an implemented rule,
-///   * integer IU8/IU4 WMMA/SWMMAC.
+///   * integer IU4 and IU8 WMMA/SWMMAC forms without an implemented spacing
+///     rule.
 /// Separately, a 64-bit source using FLAT_SCRATCH_BASE_HI is classified via
 /// operand inspection (see uses_flat_scratch_base_hi_64bit_source), and the
 /// barrier-state and sleep/monitor families are DEFERRED with a pass-through
@@ -87,9 +88,10 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
     return true;
 
   // The eight K=128 FP8/BF8 forms and the standalone 32x16 FP4 WMMA exist on B0
-  // but not A0, so they require semantic expansion. The f32 K=128 forms split
-  // into two native K=64 FP8/BF8 operations; f16 and standalone 32x16 FP4 still
-  // fail closed in their semantic rules.
+  // but not A0, so they require semantic expansion. The common f32 K=128 forms
+  // use one neutral regular-Scale mixed-format operation; encodings with source
+  // OPSEL fields that do not map to that form retain the native K=64 split.
+  // The f16 and standalone 32x16 FP4 forms still fail closed.
   const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
                                 mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
                                (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
@@ -99,9 +101,9 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
 
   // A0 trap/CWSR recovery requires every low-precision F8F6F4 WMMA to carry its
   // load-scale prefix, even when the requested scale is 1.0. Standalone input
-  // is therefore wrapped with inline-zero neutral E8M0 scales. Scale16,
-  // regular Scale, and B0-only M=32 forms have separate encoding and
-  // scale-source translations.
+  // is therefore wrapped with inline-zero neutral E8M0 scales. Native M=16
+  // Scale16 is retained with its unused prefix field normalized. B0-only M=32
+  // scaled forms split into two native M=16 operations.
   if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4" || mnemonic.starts_with("v_wmma_scale"))
     return true;
 
@@ -117,9 +119,10 @@ inline constexpr std::array<std::string_view, 18> kExactB0ToA0TranslationMnemoni
   // opcode field. They therefore stay on the same-stepping byte-copy path.
 
   // The A0 co-execution distance exceeds B0 only for integer IU8/IU4 WMMA or
-  // SWMMAC. FP16/BF16 need four spacing slots on both steppings, while floating
-  // FP8 forms need no additional A0 padding. The integer forms remain
-  // fail-closed until a CFG-aware spacing pass can inspect following VALU.
+  // SWMMAC. FP16/BF16 need four spacing slots on both revisions, while floating
+  // FP8 forms need no additional A0 padding. The implemented long-K IU8 forms
+  // use conservative fixed padding; other integer forms fail closed pending a
+  // CFG-aware spacing pass that can inspect following instructions.
   const bool is_wmma_like = mnemonic.starts_with("v_wmma_") || mnemonic.starts_with("v_swmmac_");
   return is_wmma_like && (mnemonic.find("_iu8") != std::string_view::npos ||
                           mnemonic.find("_iu4") != std::string_view::npos);
