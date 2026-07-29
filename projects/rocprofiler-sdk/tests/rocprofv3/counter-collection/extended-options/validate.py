@@ -167,4 +167,5 @@ def test_openmp_counter_collection(openmp_rows):
 
 
 if __name__ == "__main__":
-    raise SystemExit(pytest.main(["-x", __file__] + sys.argv[1:]))
+    exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
+    sys.exit(exit_code)
