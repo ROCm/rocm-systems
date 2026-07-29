@@ -286,6 +286,9 @@ NCCL_DEVICE_INLINE static void postRdmaWrite(nccl_ofi_gin_gdaki_dev_endpoint_han
       uint64_t* src = (uint64_t*)&wr;
       uint64_t* dst = (uint64_t*)(qp->sq.wq.buf + sq_idx * sizeof(efa_io_tx_wqe));
       for (int i = 0; i < 8; i++) dst[i] = src[i];
+      /* Publish this group's WQE writes to system scope so they are visible
+       * to the NIC whenever any doorbell rings a slot in this range. */
+      cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_system);
     }
     group.sync();   /* all members' WQE writes for this chunk are done */
 
