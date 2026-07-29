@@ -517,7 +517,7 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm) {
   return false;
 }
 
-RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
+RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 0);
 
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
