@@ -1138,8 +1138,7 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             if(tool::get_config().pc_sampling_stochastic &&
                tool::get_config().pc_sampling_correction)
             {
-                auto* obj_data =
-                    static_cast<tool::rocprofiler_code_object_info_t*>(record.payload);
+                auto* obj_data = static_cast<tool::rocprofiler_code_object_info_t*>(record.payload);
                 tool_metadata->pc_correction().erase(obj_data->code_object_id);
             }
         }
@@ -1743,8 +1742,8 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
                 // that passes the gate. idx < 0 means the PC could not be decoded,
                 // so there is nothing to classify -- skip correction.
                 auto& pc_correction_mgr = tool_metadata->pc_correction();
-                if(idx >= 0 &&
-                   pc_correction_mgr.should_correct(*pc_sample, tool_metadata->get_instruction(idx)))
+                if(idx >= 0 && pc_correction_mgr.should_correct(
+                                   *pc_sample, tool_metadata->get_instruction(idx)))
                 {
                     if(pc_correction_mgr.correct(pc_sample_tool_record) ==
                        rocprofiler::tool::pc_correction::CorrectionResult::Drop)
