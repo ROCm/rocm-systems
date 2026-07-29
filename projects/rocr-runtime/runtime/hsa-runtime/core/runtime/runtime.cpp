@@ -4089,13 +4089,21 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
 
     auto agentOwner = mappedHandle->mem_handle->agentOwner();
-    int mmap_fd = -1;
-    /* Do not check the return value of GetDeviceFd. We do not need mmap_fd so it is valid for mmap_fd to be -1*/
-    agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd);
+#ifdef HSAKMT_VIRTIO_ENABLED
+    // virtio-gpu guests cannot mmap the host BO into the guest address space
+    // without guest-kernel support, so skip the CPU-side mapping for the virtio
+    // driver. GPU-side access is still established via the driver Map() path below.
+    if (agentOwner->driver().kernel_driver_type_ != core::DriverType::KFD_VIRTIO)
+#endif
+    {
+      int mmap_fd = -1;
+      /* Do not check the return value of GetDeviceFd. We do not need mmap_fd so it is valid for mmap_fd to be -1*/
+      agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd);
 
-    if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
-                             mappedHandle->mem_handle->driver_handle.mmap_offset)) {
-      return HSA_STATUS_ERROR;
+      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
+                               mappedHandle->mem_handle->driver_handle.mmap_offset)) {
+        return HSA_STATUS_ERROR;
+      }
     }
   } else {
     hsa_status_t status = targetAgent->driver().Map(driver_handle, va, mappedHandle->offset, size, perms, targetAgent->node_id());

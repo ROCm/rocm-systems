@@ -50,6 +50,7 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
+#include "core/util/os.h"
 
 extern r_debug _amdgpu_r_debug;
 
@@ -603,10 +604,47 @@ hsa_status_t KfdVirtioDriver::Unmap(const core::DriverMemoryHandle& handle, void
 hsa_status_t KfdVirtioDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                                     const core::Agent& agent,
                                                     core::DriverMemoryHandle* handle, uint64_t* offset) {
-  return HSA_STATUS_ERROR;
+  (void)va;
+
+  // Create a shareable handle by exporting the owning allocation to a dmabuf,
+  // importing it into libdrm to obtain a bo handle that holds a reference, then
+  // re-exporting a durable dmabuf fd used for per-agent import in
+  // MappedHandleAllowedAgent. Mirrors KfdDriver::CreateShareableHandle but uses
+  // the virtio thunk primitives.
+  //
+  // Note: unlike the KFD path, no CPU mmap offset is computed. virtio-gpu guests
+  // cannot mmap the host BO without guest-kernel support, so CPU-side access is
+  // intentionally skipped (see Runtime::MappedHandleAllowedAgent::EnableAccess).
+  int source_fd = -1;
+  core::DriverMemoryHandle src_alloc = {};
+  src_alloc.handle = reinterpret_cast<uint64_t>(mem);
+  src_alloc.size = size;
+
+  hsa_status_t ret =
+      ExportMemoryHandle(agent, src_alloc, core::ShareType::DMABUF_FD, 0, &source_fd, offset);
+  if (ret != HSA_STATUS_SUCCESS) return ret;
+
+  core::DriverMemoryHandle target_handle = {};
+  ret = ImportMemoryHandle(agent, &target_handle, core::ShareType::DMABUF_FD, &source_fd, mem);
+  rocr::os::DmaBufClose(source_fd);
+  if (ret != HSA_STATUS_SUCCESS) return ret;
+
+  int shareable_fd = -1;
+  ret = ExportMemoryHandle(agent, target_handle, core::ShareType::DMABUF_FD, 0, &shareable_fd);
+  if (ret != HSA_STATUS_SUCCESS) {
+    DestroyMemoryHandle(&target_handle);
+    return ret;
+  }
+
+  handle->handle = target_handle.handle;
+  handle->dmabuf_fd = shareable_fd;
+  handle->size = size;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
+  if (handle->dmabuf_fd >= 0) rocr::os::DmaBufClose(handle->dmabuf_fd);
+
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle->handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -615,7 +653,7 @@ hsa_status_t KfdVirtioDriver::DestroyMemoryHandle(core::DriverMemoryHandle* hand
   if (ret)
     return HSA_STATUS_ERROR;
 
-  handle = {};
+  *handle = {};
   return HSA_STATUS_SUCCESS;
 }
 
