@@ -7,11 +7,6 @@ subtrees:
   - file: release-notes.rst
     title: Release notes
 
-- caption: Conceptual
-  entries:
-  - file: conceptual/collective-operations
-    title: Collective operations in RCCL
-
 - caption: Install
   entries:
   - file: install/installation
@@ -21,34 +16,48 @@ subtrees:
   - file: install/docker-install
     title: Run RCCL using Docker
 
+- caption: Tutorials
+  entries:
+  - file: tutorials/your-first-rccl-program
+    title: Your first RCCL program
+
 - caption: How to
   entries:
+  - file: how-to/running-rccl-tests
+    title: Run RCCL-Tests
+  - file: how-to/rccl-recorder-replayer
+    title: Use the RCCL Recorder and Replayer
   - file: how-to/using-rccl-tuner-plugin-api
-    title: Using the RCCL Tuner plugin
+    title: Use the RCCL Tuner plugin
   - file: how-to/using-nccl
-    title: Using the NCCL Net plugin
-  - file: how-to/fault-tolerance
-    title: Fault tolerance in RCCL
-  - file: how-to/troubleshooting-rccl
-    title: Troubleshoot RCCL
+    title: Use the NCCL Net plugin
   - file: how-to/rccl-usage-tips
+    title: Configure RCCL
 
-- caption: Examples
+- caption: Conceptual
   entries:
-  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/tuner/example
-    title: RCCL Tuner plugin examples
-  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/net/example
-    title: NCCL Net plugin examples
+  - file: conceptual/collective-operations
+    title: Collective operations
+  - file: conceptual/collective-algorithms
+    title: Collective algorithms
+  - file: conceptual/collective-protocols
+    title: Collective protocols
+  - file: conceptual/hardware-specific-optimizations
+    title: Hardware-specific optimizations
+  - file: conceptual/fault-tolerance
+    title: Fault tolerance
 
-- caption: API reference
+- caption: Reference
   entries:
-  - file: api-reference/library-specification
+  - file: reference/library-specification
     title: Library specification
-  - file: api-reference/api-library
-  - file: api-reference/data-type-support
+  - file: reference/api-library
+  - file: reference/data-type-support
     title: Precision support
-  - file: api-reference/env-variables
+  - file: reference/env-variables
     title: Environment variables
+  - file: reference/troubleshooting-rccl
+    title: Troubleshooting
 
 - caption: About
   entries:

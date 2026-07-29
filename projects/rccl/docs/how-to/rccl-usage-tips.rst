@@ -1,25 +1,25 @@
 .. meta::
-   :description: Usage tips for the RCCL library of collective communication primitives
-   :keywords: RCCL, ROCm, library, API, peer-to-peer, transport
+   :description: RCCL usage tips covering peer-to-peer transport, symmetric memory, CPU affinity, MI200 and MI300X performance tuning, and communicator suspend and resume.
+   :keywords: RCCL, ROCm, peer-to-peer, symmetric memory, MI300X, MI200, CPX mode, NPS4, NCCL_MIN_NCHANNELS, communicator suspend, HSA_NO_SCRATCH_RECLAIM
 
 .. _rccl-usage-tips:
 
 
 *****************************************
-RCCL usage tips
+RCCL configuration options and usage tips
 *****************************************
 
 This topic describes common RCCL configuration options and usage tips.
 
-Profiling
+Profile RCCL
 =========
 
-For fine-grained profiling of collective operations, use the RCCL **profiler plugin** API and related tooling rather than legacy in-tree profilers.
+Use the RCCL profiler plugin API for fine-grained profiling of collective operations rather than legacy in-tree profilers.
 
 MSCCL and MSCCL++ integration has been removed from RCCL. The legacy API symbols ``mscclLoadAlgo``,
 ``mscclRunAlgo``, and ``mscclUnloadAlgo`` remain as no-ops for link compatibility.
 
-Enabling peer-to-peer transport
+Enable peer-to-peer transport
 ===============================
 
 To enable peer-to-peer access on machines with PCIe-connected GPUs,
@@ -37,7 +37,7 @@ Symmetric memory and ``NCCL_P2P_LEVEL``
 
 RCCL can accelerate some collectives (for example, allreduce, allgather, and
 reduce-scatter) through a *symmetric memory* path. This path uses
-:doc:`Virtual Memory Management <../api-reference/api-library>`-backed
+:doc:`Virtual Memory Management <../reference/api-library>`-backed
 buffers that are registered as symmetric windows
 (``ncclCommWindowRegister`` with the ``NCCL_WIN_COLL_SYMMETRIC`` flag, or
 buffers allocated with ``ncclMemAlloc``) so that every participating rank can
@@ -78,7 +78,7 @@ missing (for example, ``cuMemEnable`` or ``globalGinSupport``). If you expect
 the symmetric path but it is disabled, check those prerequisites rather than
 ``NCCL_P2P_LEVEL``.
 
-Ignoring CPU affinity with multi-node
+Ignore CPU affinity with multi-node
 =====================================
 
 Depending on the job launcher and the requirements of your workload, performance as the communication workload scales
@@ -92,7 +92,7 @@ ignore the job's supplied CPU affinity and use the GPU affinity only.
 For general usage, this environment variable is not set so it doesn't interfere with the user or launcher
 supplied preferences.
 
-Improving performance on the MI200 series
+Improve performance on the MI200 series
 =========================================
 
 On MI200 series (gfx90a) systems, such as MI210, MI250, and MI250X, running
@@ -121,8 +121,8 @@ subsection.
 Configuration with fewer than eight GPUs
 ----------------------------------------
 
-On a system with eight MI300X accelerators, each pair of accelerators is
-connected with dedicated Infinity Fabric™ links in a fully connected topology.
+On a system with eight AMD Instinct™ MI300X accelerators, each pair of accelerators is
+connected with dedicated AMD Infinity Fabric™ links in a fully connected topology.
 For collective operations, this can achieve good performance when all eight
 accelerators (and all Infinity Fabric links) are used. When fewer than eight
 GPUs are used, however, this can only achieve a fraction of the potential
@@ -329,8 +329,7 @@ As of ROCm 10.0, the default communication channel count will revert back to
 
 Context tracking on GPUs
 ----------------------------------------
-Context tracking is disabled by default for optimal performance. However, enabling of context tracking can significantly improve performance
-in certain scenarios. To enable context tracking, set the following environment variable:
+Context tracking is disabled by default for optimal performance. Enabling context tracking can improve performance in certain scenarios. To enable context tracking, set the following environment variable:
 
 .. code-block:: shell
 
@@ -339,7 +338,7 @@ in certain scenarios. To enable context tracking, set the following environment 
 
 .. _suspend-resume:
 
-Suspending and resuming a communicator
+Suspend and resume a communicator
 ======================================
 
 A long-lived application can hold several RCCL communicators that are only used

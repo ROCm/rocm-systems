@@ -42,7 +42,7 @@ The Message Passing Interface
 The `Message Passing Interface (MPI) <https://www.mpi-forum.org/>`_ is the
 portable, vendor-neutral standard that defines how distributed processes
 exchange data. First published in 1994 and updated most recently with MPI 4.0
-in 2021, it is the de facto language of HPC. MPI specifies a rich set of
+in 2021, it is the de facto language of high-performance computing (HPC). MPI specifies a rich set of
 collective operations — Reduce, Broadcast, Scatter, Gather, AllReduce,
 AllGather, ReduceScatter, and AllToAll — and the semantic contracts each must
 satisfy.

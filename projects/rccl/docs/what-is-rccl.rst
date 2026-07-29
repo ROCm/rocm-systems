@@ -38,7 +38,9 @@ of operations:
 
 - ``Send`` and ``Recv`` — direct GPU-to-GPU data transfer
 
-For the full API, see the :ref:`API reference <api-library>`.
+For the full API, see the :ref:`API reference <api-library>`. For a detailed
+explanation of what each operation does and how the communicator model works,
+see :doc:`Collective operations in RCCL <./conceptual/collective-operations>`.
 
 Why RCCL is useful
 ------------------
@@ -111,9 +113,9 @@ latency-bandwidth tradeoff for the message size and hardware. Operations are
 launched from the host and executed on the GPU; a CPU proxy thread handles
 network-side progress for multi-node operations.
 
-For a deeper look at the architecture, see the
-`RCCL topology and collective operations <https://deepwiki.com/ROCm/rocm-systems/5.1-rccl-topology-and-collective-operations>`_
-page on DeepWiki.
+For a detailed breakdown of each algorithm, when RCCL selects it, and the
+trade-offs it makes, see
+:doc:`Collective algorithms in RCCL <./conceptual/collective-algorithms>`.
 
 NCCL compatibility
 ------------------
@@ -140,6 +142,6 @@ Related topics
 - :doc:`Install RCCL <./install/installation>` — get RCCL running on your system
 - :doc:`Build RCCL from source <./install/building-installing>` — build options and CMake configuration
 - :doc:`RCCL usage tips <./how-to/rccl-usage-tips>` — environment variables and tuning guidance
-- :doc:`Performance optimization guide <./how-to/rccl-usage-tips>` — algorithm and protocol tuning
+- :doc:`Collective algorithms in RCCL <./conceptual/collective-algorithms>` — algorithm and protocol tuning
 - :ref:`API reference <api-library>` — full C API documentation
 - :ref:`Environment variables <env-variables>` — complete list of runtime knobs

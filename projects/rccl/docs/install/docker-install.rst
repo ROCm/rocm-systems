@@ -1,12 +1,12 @@
 .. meta::
-   :description: Instruction on how to install the RCCL library for collective communication primitives using Docker
-   :keywords: RCCL, ROCm, library, API, install, Docker
+   :description: Run RCCL using Docker on AMD GPUs — build the Docker image from Dockerfile.ubuntu and launch a container with rccl-tests for benchmarking collectives.
+   :keywords: RCCL, ROCm, Docker, container, rccl-tests, AMD GPU, all_reduce_perf, MPI
 
 .. _install-docker:
 
-*****************************************
-Running RCCL using Docker
-*****************************************
+***********************
+Run RCCL using Docker
+***********************
 
 To use Docker to run RCCL, Docker must already be installed on the system.
 To build the Docker image and run the container, follow these steps.

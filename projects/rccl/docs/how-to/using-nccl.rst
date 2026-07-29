@@ -1,12 +1,12 @@
 .. meta::
-   :description: How to use the NCCL Net API
-   :keywords: RCCL, ROCm, library, API, NCCL Net, plugin
+   :description: Use the NCCL Net plugin API to integrate custom network transports with RCCL. Covers versioned structs, connection lifecycle, and async send and receive.
+   :keywords: RCCL, ROCm, NCCL Net plugin, librccl-net.so, ncclNet_v6_t, InfiniBand, RoCE, network transport, GPUDirect RDMA
 
 .. _using-nccl:
 
-*****************************
-Using the NCCL Net plugin API
-*****************************
+***************************
+Use the NCCL Net plugin API
+***************************
 
 NCCL provides a way to use external plugins to let NCCL run on many network types. This 
 topic describes the NCCL Net plugin API and explains how to implement a network plugin for NCCL.
@@ -331,3 +331,9 @@ then queried using ``test``. Each ``sendComm`` or ``recvComm`` must be able to h
    when data is valid or not.
 
    ``iflush`` returns a request which must be queried using ``test`` until it completes.
+
+For complete source code demonstrating how to implement the NCCL Net plugin API,
+including versioned header files and a thin compatibility layer for older API versions,
+see the
+`NCCL Net plugin examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/net/example>`_
+in the repository.

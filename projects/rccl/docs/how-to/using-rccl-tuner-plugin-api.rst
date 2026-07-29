@@ -1,17 +1,17 @@
 .. meta::
-   :description: How to use the RCCL Tuner plugin API
-   :keywords: RCCL, ROCm, library, API, Tuner, plugin
+   :description: Use the RCCL Tuner plugin API to customize algorithm, protocol, and channel selection for collective operations on AMD GPUs.
+   :keywords: RCCL, ROCm, tuner plugin, NCCL_TUNER_PLUGIN, ncclTuner_v1_t, algorithm selection, protocol selection, AMD Instinct
 
 .. _using-rccl-tuner-plugin:
 
-*******************************
-Using the RCCL Tuner plugin API
-*******************************
+*****************************
+Use the RCCL Tuner plugin API
+*****************************
 
-An external plugin enables users to hand-tailor the selection of an algorithm,
+An external plugin lets you hand-tailor the selection of an algorithm,
 protocol, and number of channels (thread blocks) based on an input configuration specifying the
-message size, number of nodes and GPUs, and link types (for instance, PCIe, XGMI, or NET).
-One advantage of this plugin is that each user can create and maintain their own hand-tailored tuner
+message size, number of nodes and GPUs, and link types (for example, PCIe, XGMI, or NET).
+You can create and maintain your own hand-tailored tuner
 without relying on RCCL to develop and maintain it. This topic describes the API required to implement
 an external tuner plugin for RCCL.
 
@@ -38,8 +38,8 @@ The following usage notes are relevant when using the RCCL Tuner plugin API:
    
    The `example plugin <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/plugin.c>`_
    uses math models to approximate the bandwidth and latency of the available selection of algorithms and protocols
-   and select the one with the lowest calculated latency. It is customized for the AMD Instinct MI300 accelerators and RoCEv2 networks
-   on a limited number of nodes. This example, which is intended for demonstration purposes only, is not meant to be inclusive of all potential AMD GPUs and network configuration.
+   and selects the one with the lowest calculated latency. It is customized for the AMD Instinct™ MI300 accelerators and RoCEv2 networks
+   on a limited number of nodes. This example is intended for demonstration purposes only and does not cover all potential AMD GPUs and network configurations.
 
 API description
 ================
@@ -117,7 +117,7 @@ To use the external plugin, implement the desired algorithm and protocol selecti
 As a reference, the `following example <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/plugin.c>`_ is based on the
 MI300 tuning table by default.
 
-Building and using the example libnccl-tuner.so file
+Build and use the example libnccl-tuner.so file
 -----------------------------------------------------
 
 #. Build the ``libnccl-tuner.so`` file following `the example Makefile <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/Makefile>`_.
@@ -133,3 +133,7 @@ Building and using the example libnccl-tuner.so file
    .. code-block:: shell
 
       export NCCL_TUNER_PLUGIN=$RCCL_HOME/plugins/tuner/example/libnccl-tuner.so
+
+For complete source code and a working reference implementation, see the
+`RCCL Tuner plugin examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/tuner/example>`_
+in the repository.
