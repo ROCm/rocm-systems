@@ -11,7 +11,6 @@
   "env_variables": {
     "HSA_NO_SCRATCH_RECLAIM": "1",
     "NCCL_SOCKET_IFNAME": "eth0,eth1",
-    "NCCL_IB_HCA": "^mlx5_1,mlx5_6",
     "NCCL_DEBUG": "INFO"
   },
   "build_configuration": {
@@ -212,6 +211,69 @@
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
           "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
+        }
+      ]
+    },
+    "gdr_flush_cumem_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_LOCAL_REGISTER": "0",
+        "NCCL_GRAPH_REGISTER": "0",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlush_CuMem_AllGatherUnregistered_MultiNode",
+          "description": "Cross-node AllGather over cuMem/DMA-BUF GDR with unregistered buffers (base GDR recv+flush path). The fix removes the redundant scratchpad RDMA_WRITE and keeps the RO=0 RDMA_READ fence, so the collective completes cleanly with correct data. Regression guard for the QP async-fatal 'invalid request local work queue error' that the pre-fix WRITE triggered on a dma-buf scratchpad. Compile-guarded pre-fix reproduction lives in GdrFlushTests.cpp (ForcedScratchpadWrite_ReproducesFault, ENABLE_FAULT_INJECTION).",
+          "test_filter": "GdrFlush_CuMem.AllGatherUnregistered_MultiNode"
+        }
+      ]
+    },
+    "net_ib_gdr_flush": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlush_CuMemDmaBuf_NoAsyncFatal",
+          "description": "Whitebox ncclIbIflush over a dma-buf (cuMem/UBR) RO=0 flush scratchpad - the exact path that used to raise the mlx5 'invalid request local work queue error'. The read-only flush (RDMA_READ fence, WRITE removed) must complete cleanly with correct data.",
+          "test_filter": "GdrFlushTest.CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal"
+        },
+        {
+          "name": "GdrFlush_Peermem_NoAsyncFatal",
+          "description": "Whitebox ncclIbIflush over a legacy peermem (ibv_reg_mr) RO=0 scratchpad. Confirms the fix keeps the peermem read path working (never regressed).",
+          "test_filter": "GdrFlushTest.Peermem_GpuRecvFlush_NoAsyncFatal",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "0"
+          }
+        },
+        {
+          "name": "GdrFlush_FeatureDisabled_Fallback",
+          "description": "Whitebox ncclIbIflush fallback branch: with the dedicated RO=0 scratchpad disabled it reads the received buffer directly (upstream-NCCL behaviour).",
+          "test_filter": "GdrFlushTest.FeatureDisabled_FallbackReadRecvBuffer",
+          "env_variables": {
+            "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+          }
+        },
+        {
+          "name": "GdrFlush_RepeatedFlushBurst",
+          "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
+          "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        },
+        {
+          "name": "GdrFlush_ForcedScratchpadWrite_ReproducesFault",
+          "description": "Regression guard (ENABLE_FAULT_INJECTION debug builds only): forces the removed scratchpad RDMA_WRITE back on a dma-buf buffer and asserts the flush QP faults, proving the WRITE was the culprit. Absent/skipped when fault injection is not compiled in.",
+          "test_filter": "GdrFlushTest.ForcedScratchpadWrite_ReproducesFault"
         }
       ]
     },
@@ -426,9 +488,10 @@
     "net_ib_vnic_validation": {
       "extends": "net_ib_base",
       "timeout": 120,
-      "description": "makeVDevice / CheckVProps validation and topology error paths. WARN_RAIL_LOCAL=1 so the rail-local mismatch arm in DisjointMergeRailLocal_VNic is reachable. Topology-dependent cases (cross-NUMA, disjoint >=5-NIC merge) GTEST_SKIP when the hardware doesn't provide them.",
+      "description": "makeVDevice / CheckVProps validation and topology error paths. WARN_RAIL_LOCAL=1 so the rail-local mismatch arm in DisjointMergeRailLocal_VNic is reachable. NCCL_IB_HCA excludes mlx5_1/mlx5_6 (one NIC per NUMA) to force the disjoint, rail-misaligned NIC layout these coverage tests need; it is scoped here (not global) because that exclusion strands GPUs 1/6 from their rail-local NIC and disables GDR for them, which breaks GDR/registration-sensitive tests in other suites. Topology-dependent cases (cross-NUMA, disjoint >=5-NIC merge) GTEST_SKIP when the hardware doesn't provide them.",
       "env_variables": {
-        "NCCL_IB_WARN_RAIL_LOCAL": "1"
+        "NCCL_IB_WARN_RAIL_LOCAL": "1",
+        "NCCL_IB_HCA": "^mlx5_1,mlx5_6"
       },
       "tests": [
         {
@@ -1063,6 +1126,44 @@
           "name": "UBR_ConcurrentRegHang_NoRegistration",
           "description": "Baseline: separate buffers without UBR registration (should pass)",
           "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_NoRegistration_SHOULD_WORK"
+        }
+      ]
+    },
+    "ubr_direct_allgather": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG,INIT,TUNING",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_LEGACY_CUDA_REGISTER": "1",
+        "NCCL_LAUNCH_ORDER_IMPLICIT": "1",
+        "RCCL_DIRECT_ALLGATHER_THRESHOLD": "2147483648",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_DirectAllGather_UbrSizeSweep",
+          "description": "Registered Direct AllGather across the LL<->SIMPLE boundary (intra-node IPC path)",
+          "test_filter": "UBR_DirectAllGather.UbrSizeSweep"
+        },
+        {
+          "name": "UBR_DirectAllGather_BaselineVsUbrEquivalence",
+          "description": "Before/after equivalence: unregistered (allowUB=false) then registered (allowUB=true) AllGather",
+          "test_filter": "UBR_DirectAllGather.BaselineVsUbrEquivalence"
+        },
+        {
+          "name": "UBR_DirectAllGather_UbrSizeSweep_MultiNode",
+          "description": "Registered Direct AllGather size sweep across nodes (net/DMA-buf registration path)",
+          "test_filter": "UBR_DirectAllGather.UbrSizeSweep_MultiNode",
+          "num_ranks": 16,
+          "num_nodes": 2,
+          "num_gpus": 8
         }
       ]
     },
@@ -3261,6 +3362,18 @@
       "enabled": true
     },
     {
+      "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
+      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard",
+      "config": "net_ib_gdr_flush",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush - cuMem AllGather (Multi-Node)",
+      "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the redundant scratchpad RDMA_WRITE removed",
+      "config": "gdr_flush_cumem_multinode",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Initialization Tests",
       "description": "InfiniBand plugin initialization and device enumeration",
       "config": "net_ib_initialization",
@@ -3372,6 +3485,12 @@
       "name": "UBR Tests - Multi Node",
       "description": "User Buffer Registration tests on multi-node (requires 2+ nodes)",
       "config": "ubr_multi_node",
+      "enabled": true
+    },
+    {
+      "name": "UBR Direct AllGather - Default Under UBR",
+      "description": "Direct AllGather running by default under UBR (NCCL_LOCAL_REGISTER=1): size sweep across LL/SIMPLE boundary, before/after (unregistered vs registered) equivalence, and a multi-node net-path sweep. Validates removal of the blanket Direct AllGather disable and per-op allowUB gating.",
+      "config": "ubr_direct_allgather",
       "enabled": true
     },
     {
