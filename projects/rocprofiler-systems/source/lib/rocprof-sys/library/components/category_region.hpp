@@ -463,6 +463,12 @@ namespace component
 using tim::is_one_of;
 using tim::type_list;
 
+// A quirk applies to a call when no quirks were specified (the default: apply
+// everything) or when QuirkT is explicitly among the ones requested.
+template <typename QuirkT, typename... OptsT>
+inline constexpr bool quirk_enabled_v =
+    (sizeof...(OptsT) == 0 || is_one_of<QuirkT, type_list<OptsT...>>::value);
+
 // these categories increment push/pop counts, which are used for sanity checks since
 // they should ALWAYS be popped if they were pushed
 // Note: There is a known imbalance in the push/pop counts for category::host when using
@@ -581,14 +587,9 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
         cache_args = region_cache::serialize_name_value_pairs(args...);
     }
 
-    constexpr bool _ct_use_timemory =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
-
-    constexpr bool _ct_use_perfetto =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::perfetto, type_list<OptsT...>>::value);
-
-    constexpr bool _ct_use_causal =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
+    constexpr bool _ct_use_timemory = quirk_enabled_v<quirk::timemory, OptsT...>;
+    constexpr bool _ct_use_perfetto = quirk_enabled_v<quirk::perfetto, OptsT...>;
+    constexpr bool _ct_use_causal   = quirk_enabled_v<quirk::causal, OptsT...>;
 
     if(tracing::debug_push)
     {
@@ -673,14 +674,9 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    constexpr bool _ct_use_timemory =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
-
-    constexpr bool _ct_use_perfetto =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::perfetto, type_list<OptsT...>>::value);
-
-    constexpr bool _ct_use_causal =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
+    constexpr bool _ct_use_timemory = quirk_enabled_v<quirk::timemory, OptsT...>;
+    constexpr bool _ct_use_perfetto = quirk_enabled_v<quirk::perfetto, OptsT...>;
+    constexpr bool _ct_use_causal   = quirk_enabled_v<quirk::causal, OptsT...>;
 
     if(tracing::debug_pop)
     {
@@ -740,8 +736,7 @@ template <typename... OptsT, typename... Args>
 void
 category_region<CategoryT>::mark(std::string_view name, Args&&...)
 {
-    constexpr bool _ct_use_causal =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
+    constexpr bool _ct_use_causal = quirk_enabled_v<quirk::causal, OptsT...>;
 
     if constexpr(!_ct_use_causal) return;
 

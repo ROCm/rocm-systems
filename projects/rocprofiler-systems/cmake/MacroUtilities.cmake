@@ -160,7 +160,7 @@ function(ROCPROFILER_SYSTEMS_STRIP_TARGET)
                     --keep-symbol="rocprofsys_set_env" --keep-symbol="rocprofsys_set_mpi"
                     --keep-symbol="rocprofsys_reset_preload"
                     --keep-symbol="rocprofsys_set_instrumented"
-                    --keep-symbol="rocprofsys_user_*" --keep-symbol="ompt_start_tool"
+                    --keep-symbol="rocprofsys_causal_*" --keep-symbol="ompt_start_tool"
                     --keep-symbol="kokkosp_*" --keep-symbol="OnLoad"
                     --keep-symbol="OnUnload" --keep-symbol="OnLoadToolProp"
                     --keep-symbol="OnUnloadTool" --keep-symbol="__libc_start_main"

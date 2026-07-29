@@ -21,7 +21,7 @@ install(
 set(PROJECT_INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
 set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
-set(PROJECT_BUILD_TARGETS user)
+set(PROJECT_BUILD_TARGETS)
 
 configure_package_config_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/rocprof-sys-config.cmake.in

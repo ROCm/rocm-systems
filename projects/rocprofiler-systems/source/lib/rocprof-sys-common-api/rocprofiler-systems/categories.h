@@ -208,13 +208,15 @@ extern "C"
     ///     double residual = tolerance;
     ///     for(size_t i = 0; i < nitr; ++i)
     ///     {
-    ///         rocprofsys_user_push_annotated_region("compute", &_annotations);
+    ///         rocprofsys_push_category_region(ROCPROFSYS_CATEGORY_USER, "compute",
+    ///                                         _annotations, 2);
     ///
     ///         residual = compute_residual(n, data);
     ///
     ///         _annotations[0].value = &i;
     ///         _annotations[1].value = &residual;
-    ///         rocprofsys_user_pop_annotated_region("compute", &_annotations);
+    ///         rocprofsys_pop_category_region(ROCPROFSYS_CATEGORY_USER, "compute",
+    ///                                        _annotations, 2);
     ///     }
     ///
     ///     return residual;
@@ -235,4 +237,4 @@ extern "C"
 }
 #endif
 
-#endif  // ROCPROFSYS_TYPES_H_
+#endif  // ROCPROFSYS_CATEGORIES_H_

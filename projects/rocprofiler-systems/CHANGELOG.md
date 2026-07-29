@@ -58,6 +58,21 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Removed `--parse-all-modules` from `rocprof-sys-instrument`. The tool iterates through objects and modules to extract the functions by default.
 
+- Removed the deprecated `rocprof-sys-user` library and its C API
+  (`rocprofsys_user_*`, `<rocprofiler-systems/user.h>`), including the `user`
+  find_package component, the `examples/user-api` example, the Python
+  `rocprofsys.user` submodule, and the associated pytest coverage. Use
+  [ROCTx](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-sdk-roctx.html)
+  (`rocprofiler-sdk-roctx`) for general-purpose manual instrumentation
+  (starting/stopping tracing, named regions) instead; see the updated
+  `examples/fork` and `examples/roctx` for usage.
+
+  Causal profiling's `ROCPROFSYS_CAUSAL_PROGRESS`/`ROCPROFSYS_CAUSAL_BEGIN`/
+  `ROCPROFSYS_CAUSAL_END` macros are unaffected: they now run on a new,
+  minimal `rocprof-sys-causal-api` library (`causal-api` find_package
+  component) instead of the removed general-purpose user API. No source
+  changes are required for existing causal profiling code.
+
 ## ROCm Systems Profiler 1.7.0 for ROCm 7.14.0
 
 ### Added

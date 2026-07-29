@@ -3,7 +3,10 @@
 
 # ------------------------------------------------------------------------------#
 #
-# rocprofiler-systems user library
+# rocprofiler-systems causal API library: minimal, near-zero-overhead library
+# backing the ROCPROFSYS_CAUSAL_* macros. An application links this directly
+# without pulling in the full profiler backend; librocprof-sys-dl.so registers
+# the real callbacks at runtime when preloaded.
 #
 # ------------------------------------------------------------------------------#
 
@@ -12,38 +15,40 @@ set(BUILD_RPATH_USE_ORIGIN ON)
 set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
-add_library(rocprofiler-systems-user-library SHARED)
+add_library(rocprofiler-systems-causal-api-library SHARED)
 add_library(
-    rocprofiler-systems::rocprofiler-systems-user-library
-    ALIAS rocprofiler-systems-user-library
+    rocprofiler-systems::rocprofiler-systems-causal-api-library
+    ALIAS rocprofiler-systems-causal-api-library
 )
 
-set(_user_headers
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/user.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/types.h
+set(_causal_api_headers
     ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/causal.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/categories.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/causal_api.h
 )
 
-set(_user_sources ${CMAKE_CURRENT_SOURCE_DIR}/user.cpp)
+set(_causal_api_sources ${CMAKE_CURRENT_SOURCE_DIR}/causal_api.cpp)
 
-target_sources(rocprofiler-systems-user-library PRIVATE ${_user_sources} ${_user_headers})
+target_sources(
+    rocprofiler-systems-causal-api-library
+    PRIVATE ${_causal_api_sources} ${_causal_api_headers}
+)
 target_include_directories(
-    rocprofiler-systems-user-library
+    rocprofiler-systems-causal-api-library
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocprof-sys-common-api>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(
-    rocprofiler-systems-user-library
+    rocprofiler-systems-causal-api-library
     PRIVATE
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
 )
 
 set_target_properties(
-    rocprofiler-systems-user-library
+    rocprofiler-systems-causal-api-library
     PROPERTIES
-        OUTPUT_NAME ${BINARY_NAME_PREFIX}-user
+        OUTPUT_NAME ${BINARY_NAME_PREFIX}-causal-api
         VERSION ${PROJECT_VERSION}
         SOVERSION ${PROJECT_VERSION_MAJOR}
         POSITION_INDEPENDENT_CODE ON
@@ -51,9 +56,9 @@ set_target_properties(
         INSTALL_RPATH "\$ORIGIN"
 )
 
-rocprofiler_systems_strip_target(rocprofiler-systems-user-library)
+rocprofiler_systems_strip_target(rocprofiler-systems-causal-api-library)
 
-foreach(_HEADER ${_user_headers})
+foreach(_HEADER ${_causal_api_headers})
     string(
         REPLACE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler-systems/"
@@ -72,10 +77,13 @@ foreach(_HEADER ${_user_headers})
     configure_file(${_HEADER} ${_DEST} COPYONLY)
 endforeach()
 
-install(FILES ${_user_headers} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME})
+install(
+    FILES ${_causal_api_headers}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
+)
 
 install(
-    TARGETS rocprofiler-systems-user-library
+    TARGETS rocprofiler-systems-causal-api-library
     EXPORT rocprofiler-systems-library-targets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )

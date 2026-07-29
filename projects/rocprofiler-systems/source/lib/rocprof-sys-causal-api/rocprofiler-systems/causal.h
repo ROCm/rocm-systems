@@ -37,7 +37,7 @@
 #endif
 
 #if ROCPROFSYS_CAUSAL_ENABLED > 0
-#    include <rocprofiler-systems/user.h>
+#    include <rocprofiler-systems/causal_api.h>
 
 #    if !defined(ROCPROFSYS_CAUSAL_LABEL)
 /** @cond ROCPROFSYS_HIDDEN_DEFINES */
@@ -50,22 +50,22 @@
 #    if !defined(ROCPROFSYS_CAUSAL_PROGRESS)
 /** Adds a throughput progress point with label `<file>:<line>` */
 #        define ROCPROFSYS_CAUSAL_PROGRESS                                               \
-            rocprofsys_user_progress(ROCPROFSYS_CAUSAL_LABEL);
+            rocprofsys_causal_progress(ROCPROFSYS_CAUSAL_LABEL);
 #    endif
 #    if !defined(ROCPROFSYS_CAUSAL_PROGRESS_NAMED)
 /** Adds a throughput progress point with user defined label. Each instance should use a
  * unique label. */
-#        define ROCPROFSYS_CAUSAL_PROGRESS_NAMED(LABEL) rocprofsys_user_progress(LABEL);
+#        define ROCPROFSYS_CAUSAL_PROGRESS_NAMED(LABEL) rocprofsys_causal_progress(LABEL);
 #    endif
 #    if !defined(ROCPROFSYS_CAUSAL_BEGIN)
 /** Starts a latency progress point (region of interest) with user defined label. Each
  * instance should use a unique label. */
-#        define ROCPROFSYS_CAUSAL_BEGIN(LABEL) rocprofsys_user_push_region(LABEL);
+#        define ROCPROFSYS_CAUSAL_BEGIN(LABEL) rocprofsys_causal_begin(LABEL);
 #    endif
 #    if !defined(ROCPROFSYS_CAUSAL_END)
 /** End the latency progress point (region of interest) for the matching user defined
  * label. */
-#        define ROCPROFSYS_CAUSAL_END(LABEL) rocprofsys_user_pop_region(LABEL);
+#        define ROCPROFSYS_CAUSAL_END(LABEL) rocprofsys_causal_end(LABEL);
 #    endif
 #else
 #    if !defined(ROCPROFSYS_CAUSAL_PROGRESS)

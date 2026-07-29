@@ -31,7 +31,8 @@ target_include_directories(
     rocprofiler-systems-dl-library
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocprof-sys-user>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocprof-sys-causal-api>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocprof-sys-common-api>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../rocprof-sys>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE ${rocprofiler-sdk_INCLUDE_DIR}

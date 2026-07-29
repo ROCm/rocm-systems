@@ -22,7 +22,6 @@
 #include "common/setup.hpp"
 #include "dl/dl.hpp"
 #include "rocprofiler-systems/categories.h"
-#include "rocprofiler-systems/types.h"
 
 #include <spdlog/fmt/fmt.h>
 
@@ -200,26 +199,28 @@ struct ROCPROFSYS_INTERNAL_API indirect
     /**
      * Delegating constructor that uses the default lib search paths.
      * @param _omnilib The path to the omnilib.
-     * @param _userlib The path to the userlib.
+     * @param _causal_lib The path to the causal API library.
      * @param _dllib The path to the dllib.
      */
-    ROCPROFSYS_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
-                               const std::string& _dllib)
-    : indirect{ _omnilib, _userlib, _dllib, common::get_default_lib_search_paths() }
+    ROCPROFSYS_INLINE indirect(const std::string& _omnilib,
+                               const std::string& _causal_lib, const std::string& _dllib)
+    : indirect{ _omnilib, _causal_lib, _dllib, common::get_default_lib_search_paths() }
     {}
 
     /**
      * Constructor that uses the provided lib search paths.
      * @param _omnilib The path to the omnilib.
-     * @param _userlib The path to the userlib.
+     * @param _causal_lib The path to the causal API library.
      * @param _dllib The path to the dllib.
      * @param _lib_paths The lib search paths.
      */
-    ROCPROFSYS_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
-                               const std::string& _dllib, const std::string& _lib_paths)
+    ROCPROFSYS_INLINE indirect(const std::string& _omnilib,
+                               const std::string& _causal_lib, const std::string& _dllib,
+                               const std::string& _lib_paths)
     : m_omnilib{ common::path::find_path(_omnilib, _rocprofsys_dl_verbose, _lib_paths) }
     , m_dllib{ common::path::find_path(_dllib, _rocprofsys_dl_verbose, _lib_paths) }
-    , m_userlib{ common::path::find_path(_userlib, _rocprofsys_dl_verbose, _lib_paths) }
+    , m_causal_api_lib{ common::path::find_path(_causal_lib, _rocprofsys_dl_verbose,
+                                                _lib_paths) }
     {
         if(_rocprofsys_dl_verbose >= 1)
         {
@@ -229,7 +230,7 @@ struct ROCPROFSYS_INTERNAL_API indirect
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
                     path::filename(_dllib).c_str(), m_dllib.c_str());
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    path::filename(_userlib).c_str(), m_userlib.c_str());
+                    path::filename(_causal_lib.c_str()), m_causal_api_lib.c_str());
             ROCPROFSYS_COMMON_LIBRARY_LOG_END
         }
 
@@ -237,8 +238,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
             fmt::format("{}:{}", path::parent_path(_omnilib), path::parent_path(_dllib));
         common::setup_environ(_rocprofsys_dl_verbose, _search_paths, _omnilib, _dllib);
 
-        m_omnihandle = open(m_omnilib);
-        m_userhandle = open(m_userlib);
+        m_omnihandle        = open(m_omnilib);
+        m_causal_api_handle = open(m_causal_api_lib);
         init();
     }
 
@@ -371,30 +372,24 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(ompt_start_tool_f, m_omnihandle, "ompt_start_tool");
 #endif
 
-        if(!m_userhandle) m_userhandle = open(m_userlib);
+        if(!m_causal_api_handle) m_causal_api_handle = open(m_causal_api_lib);
         _warn_verbose = 0;
-        ROCPROFSYS_DLSYM(rocprofsys_user_configure_f, m_userhandle,
-                         "rocprofsys_user_configure");
+        ROCPROFSYS_DLSYM(rocprofsys_causal_register_callbacks_f, m_causal_api_handle,
+                         "rocprofsys_causal_register_callbacks");
 
-        if(rocprofsys_user_configure_f)
+        if(rocprofsys_causal_register_callbacks_f)
         {
-            rocprofsys_user_callbacks_t _cb = {};
-            _cb.start_trace                 = &rocprofsys_user_start_trace_dl;
-            _cb.stop_trace                  = &rocprofsys_user_stop_trace_dl;
-            _cb.start_thread_trace          = &rocprofsys_user_start_thread_trace_dl;
-            _cb.stop_thread_trace           = &rocprofsys_user_stop_thread_trace_dl;
-            _cb.push_region                 = &rocprofsys_user_push_region_dl;
-            _cb.pop_region                  = &rocprofsys_user_pop_region_dl;
-            _cb.progress                    = &rocprofsys_user_progress_dl;
-            _cb.push_annotated_region       = &rocprofsys_user_push_annotated_region_dl;
-            _cb.pop_annotated_region        = &rocprofsys_user_pop_annotated_region_dl;
-            _cb.annotated_progress          = &rocprofsys_user_annotated_progress_dl;
-            (*rocprofsys_user_configure_f)(ROCPROFSYS_USER_REPLACE_CONFIG, _cb, nullptr);
+            rocprofsys_causal_callbacks_t _cb = {};
+            _cb.begin                         = &rocprofsys_causal_begin_dl;
+            _cb.end                           = &rocprofsys_causal_end_dl;
+            _cb.progress                      = &rocprofsys_causal_progress_dl;
+            _cb.annotated_progress            = &rocprofsys_causal_annotated_progress_dl;
+            (*rocprofsys_causal_register_callbacks_f)(_cb);
         }
     }
 
 public:
-    using user_cb_t = rocprofsys_user_callbacks_t;
+    using causal_cb_t = rocprofsys_causal_callbacks_t;
 
     // librocprof-sys functions
     void (*rocprofsys_init_library_f)(void)                                    = nullptr;
@@ -420,8 +415,8 @@ public:
                                             size_t)                            = nullptr;
     void (*rocprofsys_register_pause_callbacks_f)(void (*)(), void (*)())      = nullptr;
 
-    // librocprof-sys-user functions
-    int (*rocprofsys_user_configure_f)(int, user_cb_t, user_cb_t*) = nullptr;
+    // librocprof-sys-causal-api functions
+    void (*rocprofsys_causal_register_callbacks_f)(causal_cb_t) = nullptr;
 
     // KokkosP functions
     void (*kokkosp_print_help_f)(char*)                                        = nullptr;
@@ -473,15 +468,14 @@ public:
 #endif
 
     auto get_omni_library() const { return m_omnilib; }
-    auto get_user_library() const { return m_userlib; }
     auto get_dl_library() const { return m_dllib; }
 
 private:
-    void*       m_omnihandle = nullptr;
-    void*       m_userhandle = nullptr;
-    std::string m_omnilib    = {};
-    std::string m_dllib      = {};
-    std::string m_userlib    = {};
+    void*       m_omnihandle        = nullptr;
+    void*       m_causal_api_handle = nullptr;
+    std::string m_omnilib           = {};
+    std::string m_dllib             = {};
+    std::string m_causal_api_lib    = {};
 };
 
 inline indirect&
@@ -492,10 +486,11 @@ get_indirect()
 {
     rocprofsys_preinit_library();
 
-    static auto  _libomni = get_env(env_vars::LIBRARY, "librocprof-sys.so");
-    static auto  _libuser = get_env(env_vars::USER_LIBRARY, "librocprof-sys-user.so");
+    static auto _libomni = get_env(env_vars::LIBRARY, "librocprof-sys.so");
+    static auto _libcausal =
+        get_env(env_vars::CAUSAL_API_LIBRARY, "librocprof-sys-causal-api.so");
     static auto  _libdlib = get_env(env_vars::DL_LIBRARY, "librocprof-sys-dl.so");
-    static auto* _v       = new indirect{ _libomni, _libuser, _libdlib };
+    static auto* _v       = new indirect{ _libomni, _libcausal, _libdlib };
     return *_v;
 }
 
@@ -518,13 +513,6 @@ get_active()
 {
     static bool* _v = new bool{ false };
     return *_v;
-}
-
-auto&
-get_user_api_active()
-{
-    static bool _v{ false };
-    return _v;
 }
 
 auto&
@@ -729,7 +717,7 @@ extern "C"
         }
         else
         {
-            if(dl::get_thread_count()-- == 0) rocprofsys_user_start_thread_trace_dl();
+            if(dl::get_thread_count()-- == 0) dl::get_thread_enabled() = true;
         }
     }
 
@@ -756,7 +744,7 @@ extern "C"
         }
         else
         {
-            if(dl::get_thread_count()-- == 0) rocprofsys_user_start_thread_trace_dl();
+            if(dl::get_thread_count()-- == 0) dl::get_thread_enabled() = true;
         }
         return 0;
     }
@@ -832,73 +820,27 @@ extern "C"
                              address);
     }
 
-    int rocprofsys_user_start_trace_dl(void)
+    int rocprofsys_causal_begin_dl(const char* name)
     {
-        dl::get_enabled().store(true);
-        dl::get_user_api_active() = true;
-        return rocprofsys_user_start_thread_trace_dl();
-    }
-
-    int rocprofsys_user_stop_trace_dl(void)
-    {
-        dl::get_enabled().store(false);
-        dl::get_user_api_active() = false;
-        return rocprofsys_user_stop_thread_trace_dl();
-    }
-
-    int rocprofsys_user_start_thread_trace_dl(void)
-    {
-        dl::get_thread_enabled() = true;
-        return 0;
-    }
-
-    int rocprofsys_user_stop_thread_trace_dl(void)
-    {
-        dl::get_thread_enabled() = false;
-        return 0;
-    }
-
-    int rocprofsys_user_push_region_dl(const char* name)
-    {
-        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
+        if(!dl::get_active()) return 0;
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_region_f, name);
     }
 
-    int rocprofsys_user_pop_region_dl(const char* name)
+    int rocprofsys_causal_end_dl(const char* name)
     {
-        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
+        if(!dl::get_active()) return 0;
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_region_f, name);
     }
 
-    int rocprofsys_user_progress_dl(const char* name)
+    int rocprofsys_causal_progress_dl(const char* name)
     {
         ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_progress_f, name);
         return 0;
     }
 
-    int rocprofsys_user_push_annotated_region_dl(const char*              name,
-                                                 rocprofsys_annotation_t* _annotations,
-                                                 size_t _annotation_count)
-    {
-        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
-        return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_category_region_f,
-                                    ROCPROFSYS_CATEGORY_USER, name, _annotations,
-                                    _annotation_count);
-    }
-
-    int rocprofsys_user_pop_annotated_region_dl(const char*              name,
+    int rocprofsys_causal_annotated_progress_dl(const char*              name,
                                                 rocprofsys_annotation_t* _annotations,
                                                 size_t _annotation_count)
-    {
-        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
-        return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_category_region_f,
-                                    ROCPROFSYS_CATEGORY_USER, name, _annotations,
-                                    _annotation_count);
-    }
-
-    int rocprofsys_user_annotated_progress_dl(const char*              name,
-                                              rocprofsys_annotation_t* _annotations,
-                                              size_t                   _annotation_count)
     {
         ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_annotated_progress_f, name,
                              _annotations, _annotation_count);
