@@ -9,7 +9,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* ML API tracing is now rejected when profiling with PC sampling only, since no counters are collected to correlate markers against.
+* ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are now rejected when profiling with PC sampling only, since no counters are collected to correlate markers against.
 
 ### Removed
 
