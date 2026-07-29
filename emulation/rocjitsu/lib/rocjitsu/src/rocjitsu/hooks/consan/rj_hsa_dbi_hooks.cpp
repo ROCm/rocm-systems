@@ -3502,8 +3502,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           "ConSan SC flat selection reader=%llu supported=%zu target=%zu selected=%zu "
           "branch_only_candidates=%zu branch_only_selected=%zu placement_failed=%zu "
           "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
-          "work_budget_failed=%zu reservation_failed=%zu pair_fallback_attempts=%zu "
-          "greedy_fallback_attempts=%zu route_attempts=%zu search_work=%zu scan_work=%zu "
+          "work_budget_failed=%zu work_budget_exhaustions=%zu reservation_failed=%zu "
+          "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
+          "pair_attempts=%zu plan_calls=%zu search_work=%zu scan_work=%zu "
+          "discarded_pair_attempts=%zu discarded_plan_calls=%zu "
+          "discarded_search_work=%zu discarded_scan_work=%zu "
           "fixed_stack=%zu dynamic_stack=%zu mixed_stack=%zu missing_vcc_save=%zu "
           "missing_scratch=%zu spill_backed=%zu mixed_stack_spill_rejected=%zu "
           "dynamic_stack_spill_failed=%zu private_spill_failed=%zu original_relays=%zu "
@@ -3516,35 +3519,62 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           selection.branch_only_routing.return_route_failure_count,
           selection.branch_only_routing.relay_contention_failure_count,
           selection.branch_only_routing.work_budget_failure_count,
+          selection.branch_only_routing.work_budget_exhaustion_count,
           selection.branch_only_routing.reservation_failure_count,
           selection.branch_only_routing.exact_pair_fallback_attempt_count,
           selection.branch_only_routing.greedy_pair_fallback_attempt_count,
-          selection.branch_only_routing.plan_attempt_count,
+          selection.branch_only_routing.pair_attempt_count,
+          selection.branch_only_routing.plan_call_count,
           selection.branch_only_routing.search_work_count,
-          selection.branch_only_routing.scan_work_count, selection.fixed_stack_candidate_count,
-          selection.dynamic_stack_candidate_count, selection.mixed_stack_candidate_count,
-          selection.missing_vcc_save_candidate_count, selection.missing_scratch_candidate_count,
-          selection.spill_backed_candidate_count, selection.mixed_stack_spill_rejection_count,
+          selection.branch_only_routing.scan_work_count,
+          selection.discarded_branch_only_routing.pair_attempt_count,
+          selection.discarded_branch_only_routing.plan_call_count,
+          selection.discarded_branch_only_routing.search_work_count,
+          selection.discarded_branch_only_routing.scan_work_count,
+          selection.fixed_stack_candidate_count, selection.dynamic_stack_candidate_count,
+          selection.mixed_stack_candidate_count, selection.missing_vcc_save_candidate_count,
+          selection.missing_scratch_candidate_count, selection.spill_backed_candidate_count,
+          selection.mixed_stack_spill_rejection_count,
           selection.dynamic_stack_spill_encoding_failure_count,
           selection.private_spill_encoding_failure_count, selection.original_nop_relay_slot_count,
           selection.selected_anchor_relay_slot_count);
     }
     const rocjitsu::ConSanBranchOnlyRoutingTelemetry &lds_routing =
         patch_result.lds_branch_only_routing_telemetry;
-    if (lds_routing.plan_attempt_count != 0u) {
-      log_message(
-          kLogInfo,
-          "ConSan SC LDS branch routing reader=%llu route_attempts=%zu entry_route_failed=%zu "
-          "return_route_failed=%zu relay_contention_failed=%zu work_budget_failed=%zu "
-          "reservation_failed=%zu pair_fallback_attempts=%zu greedy_fallback_attempts=%zu "
-          "search_work=%zu scan_work=%zu",
-          static_cast<unsigned long long>(code_object_reader.handle),
-          lds_routing.plan_attempt_count, lds_routing.entry_route_failure_count,
-          lds_routing.return_route_failure_count, lds_routing.relay_contention_failure_count,
-          lds_routing.work_budget_failure_count, lds_routing.reservation_failure_count,
-          lds_routing.exact_pair_fallback_attempt_count,
-          lds_routing.greedy_pair_fallback_attempt_count, lds_routing.search_work_count,
-          lds_routing.scan_work_count);
+    if (lds_routing.plan_call_count != 0u) {
+      log_message(kLogInfo,
+                  "ConSan SC LDS branch routing reader=%llu pair_attempts=%zu plan_calls=%zu "
+                  "entry_route_failed=%zu "
+                  "return_route_failed=%zu relay_contention_failed=%zu work_budget_failed=%zu "
+                  "work_budget_exhaustions=%zu reservation_failed=%zu "
+                  "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
+                  "search_work=%zu scan_work=%zu",
+                  static_cast<unsigned long long>(code_object_reader.handle),
+                  lds_routing.pair_attempt_count, lds_routing.plan_call_count,
+                  lds_routing.entry_route_failure_count, lds_routing.return_route_failure_count,
+                  lds_routing.relay_contention_failure_count, lds_routing.work_budget_failure_count,
+                  lds_routing.work_budget_exhaustion_count, lds_routing.reservation_failure_count,
+                  lds_routing.exact_pair_fallback_attempt_count,
+                  lds_routing.greedy_pair_fallback_attempt_count, lds_routing.search_work_count,
+                  lds_routing.scan_work_count);
+    }
+    const rocjitsu::ConSanBranchOnlyRoutingTelemetry &moi_routing =
+        patch_result.moi_branch_only_routing_telemetry;
+    if (moi_routing.plan_call_count != 0u) {
+      log_message(kLogInfo,
+                  "ConSan MOI branch routing reader=%llu pair_attempts=%zu plan_calls=%zu "
+                  "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
+                  "work_budget_failed=%zu work_budget_exhaustions=%zu reservation_failed=%zu "
+                  "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
+                  "search_work=%zu scan_work=%zu",
+                  static_cast<unsigned long long>(code_object_reader.handle),
+                  moi_routing.pair_attempt_count, moi_routing.plan_call_count,
+                  moi_routing.entry_route_failure_count, moi_routing.return_route_failure_count,
+                  moi_routing.relay_contention_failure_count, moi_routing.work_budget_failure_count,
+                  moi_routing.work_budget_exhaustion_count, moi_routing.reservation_failure_count,
+                  moi_routing.exact_pair_fallback_attempt_count,
+                  moi_routing.greedy_pair_fallback_attempt_count, moi_routing.search_work_count,
+                  moi_routing.scan_work_count);
     }
 
     for (const std::string &warning : patch_result.warnings)

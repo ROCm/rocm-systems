@@ -70,10 +70,11 @@ enum class BranchOnlyRelayPairRejection : uint8_t {
   ReturnUnreachable,
   RelayContention,
   WorkBudget,
+  Count,
 };
 
 inline constexpr size_t kBranchOnlyRelayPairRejectionCount =
-    static_cast<size_t>(BranchOnlyRelayPairRejection::WorkBudget) + 1u;
+    static_cast<size_t>(BranchOnlyRelayPairRejection::Count);
 
 enum class BranchOnlyRelayPlanStrategy : uint8_t {
   ExactBatch,
@@ -124,6 +125,8 @@ struct BranchOnlyRelayBatchPlan : BranchOnlyRelayPlanOutcome {
   [[nodiscard]] bool complete() const {
     return failure == BranchOnlyRelayPlanFailure::None && rejected_pair_indices.empty();
   }
+
+  [[nodiscard]] const BranchOnlyRelayPlanOutcome &plan_outcome() const { return *this; }
 };
 
 struct BranchOnlyDirectRelayReservoir {

@@ -2833,7 +2833,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       branch_only_route_error.clear();
       BranchOnlyRelayBatchPlan route_plan =
           branch_router.plan_pairs(tentative_planner, route_requests, &route_error);
-      ++routing_telemetry.plan_attempt_count;
+      add_routing_work(routing_telemetry.pair_attempt_count, route_requests.size());
+      ++routing_telemetry.plan_call_count;
+      if (route_plan.work_budget_exhausted)
+        ++routing_telemetry.work_budget_exhaustion_count;
       add_routing_work(routing_telemetry.search_work_count, route_plan.search_work_consumed);
       add_routing_work(routing_telemetry.scan_work_count, route_plan.scan_work_consumed);
       for (BranchOnlyRelayPlanStrategy strategy : route_plan.pair_strategies) {

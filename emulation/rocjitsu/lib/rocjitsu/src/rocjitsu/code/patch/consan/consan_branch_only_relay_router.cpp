@@ -38,17 +38,6 @@ struct FixedRelayDemand {
   uint64_t target = 0u;
 };
 
-[[nodiscard]] size_t exact_batch_search_work(const BranchOnlyRelaySearchLimits &limits,
-                                             size_t demand_count) {
-  if (limits.batch_search_work_per_demand == 0u)
-    return limits.batch_base_search_work;
-  if (demand_count > (std::numeric_limits<size_t>::max() - limits.batch_base_search_work) /
-                         limits.batch_search_work_per_demand) {
-    return std::numeric_limits<size_t>::max();
-  }
-  return limits.batch_base_search_work + demand_count * limits.batch_search_work_per_demand;
-}
-
 [[nodiscard]] size_t multiply_saturated(size_t lhs, size_t rhs) {
   if (lhs != 0u && rhs > std::numeric_limits<size_t>::max() / lhs)
     return std::numeric_limits<size_t>::max();
@@ -58,6 +47,12 @@ struct FixedRelayDemand {
 [[nodiscard]] size_t saturated_sum(size_t lhs, size_t rhs) {
   return rhs > std::numeric_limits<size_t>::max() - lhs ? std::numeric_limits<size_t>::max()
                                                         : lhs + rhs;
+}
+
+[[nodiscard]] size_t exact_batch_search_work(const BranchOnlyRelaySearchLimits &limits,
+                                             size_t demand_count) {
+  return saturated_sum(limits.batch_base_search_work,
+                       multiply_saturated(demand_count, limits.batch_search_work_per_demand));
 }
 
 [[nodiscard]] size_t exact_batch_scan_work(const BranchOnlyRelaySearchLimits &limits,
@@ -80,8 +75,9 @@ public:
   explicit BoundedWorkMeter(size_t limit) : limit_(std::max<size_t>(limit, 1u)) {}
 
   [[nodiscard]] bool consume(size_t amount = 1u) {
+    if (exhausted_)
+      return false;
     if (amount > limit_ - consumed_) {
-      consumed_ = limit_;
       exhausted_ = true;
       return false;
     }
@@ -343,8 +339,8 @@ struct GreedyFixedRelayRoute {
 
 /// Exact for one validated monotonic demand. On failure the relay set is
 /// restored, so callers may use it transactionally without copying the whole
-/// inventory. Each ordered-set query is charged by its logarithmic comparison
-/// depth.
+/// inventory. Each selected relay precharges its ordered-set query, removal,
+/// and possible rollback insertion by logarithmic comparison depth.
 [[nodiscard]] GreedyFixedRelayRoute plan_greedy_fixed_relay_route(const FixedRelayDemand &demand,
                                                                   std::set<uint64_t> &unused_relays,
                                                                   BoundedWorkMeter &work) {
@@ -357,7 +353,6 @@ struct GreedyFixedRelayRoute {
   while (!compute_sopp_branch_simm16(cursor, demand.target)) {
     const size_t query_work = std::max<size_t>(std::bit_width(unused_relays.size()), 1u);
     if (!work.consume(query_work)) {
-      unused_relays.insert(route.begin(), route.end());
       return {
           .status = GreedyFixedRelayRoute::Status::WorkBudgetExhausted,
           .offsets = {},
@@ -388,16 +383,22 @@ struct GreedyFixedRelayRoute {
       }
     }
     if (relay == unused_relays.end()) {
-      unused_relays.insert(route.begin(), route.end());
       return {
           .status = GreedyFixedRelayRoute::Status::Infeasible,
           .offsets = {},
       };
     }
+    if (!work.consume(multiply_saturated(2u, query_work))) {
+      return {
+          .status = GreedyFixedRelayRoute::Status::WorkBudgetExhausted,
+          .offsets = {},
+      };
+    }
     cursor = *relay;
     route.push_back(cursor);
-    unused_relays.erase(relay);
   }
+  for (uint64_t relay : route)
+    unused_relays.erase(relay);
   return {
       .status = GreedyFixedRelayRoute::Status::Solved,
       .offsets = std::move(route),
@@ -454,7 +455,7 @@ std::optional<BranchOnlyRelayRoute> BranchOnlyRelayRouter::plan_pair(
   };
   BranchOnlyRelayBatchPlan batch = plan_pairs(tentative_planner, requests, error_out, limits);
   if (outcome_out != nullptr)
-    *outcome_out = batch;
+    *outcome_out = batch.plan_outcome();
   if (!batch.complete() || batch.routes.size() != 1u)
     return std::nullopt;
   return std::move(batch.routes.front());
@@ -624,7 +625,9 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
     // routes. Each pair gets a bounded exact solve before the final greedy tier
     // so entry routing cannot strand an otherwise feasible return route.
     BoundedWorkMeter fallback_setup_work(limits.batch_fallback_setup_work);
-    const bool fallback_inventory_available = fallback_setup_work.consume(relay_offsets.size());
+    const size_t fallback_setup_cost = multiply_saturated(
+        relay_offsets.size(), std::max<size_t>(std::bit_width(relay_offsets.size()), 1u));
+    const bool fallback_inventory_available = fallback_setup_work.consume(fallback_setup_cost);
     add_saturated(batch.scan_work_consumed, fallback_setup_work.consumed());
     std::set<uint64_t> unused_relays;
     if (fallback_inventory_available)
@@ -655,6 +658,15 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
         ExactFixedRelayBatchSolver pair_solver(pair_demands, available_relays, pair_search_work,
                                                pair_scan_work);
         pair_result = pair_solver.solve(pair_routes);
+        if (pair_result == ExactFixedRelayBatchSolver::Result::Solved) {
+          const size_t selected_relay_count = pair_routes[0].size() + pair_routes[1].size();
+          const size_t removal_work = multiply_saturated(
+              selected_relay_count, std::max<size_t>(std::bit_width(unused_relays.size()), 1u));
+          if (!pair_scan_work.consume(removal_work)) {
+            pair_result = ExactFixedRelayBatchSolver::Result::WorkBudgetExhausted;
+            pair_routes.clear();
+          }
+        }
       }
       add_saturated(batch.search_work_consumed, pair_search_work.consumed());
       add_saturated(batch.scan_work_consumed, pair_scan_work.consumed());

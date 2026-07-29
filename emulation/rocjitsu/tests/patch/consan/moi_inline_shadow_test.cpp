@@ -1633,6 +1633,9 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
                                &ConSanPatchInfo::kind),
             0u);
+  EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count, 1u);
+  EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 1u);
+  EXPECT_EQ(result.moi_branch_only_routing_telemetry.work_budget_exhaustion_count, 0u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());

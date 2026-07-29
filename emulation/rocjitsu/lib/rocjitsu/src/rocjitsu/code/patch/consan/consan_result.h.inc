@@ -84,17 +84,22 @@ struct ConSanPatchedImageGrowthRejection {
   size_t limit_bytes = 0;
 };
 
-/// Aggregate branch-only routing activity. Fallback counters count attempts
-/// that reached the corresponding tier, whether or not that attempt produced
-/// a route. Route-failure counters count rejected pairs; reservation failures
-/// count failed commits. Work counters are monotonic across retries and
-/// convergence iterations.
+/// Aggregate branch-only routing activity. Pair attempts and route-failure
+/// counters count submitted and rejected request pairs, respectively. Plan
+/// calls count router invocations, including LDS convergence iterations.
+/// Fallback counters count pairs that reached the corresponding tier, whether
+/// or not that tier produced a route. Work-limit exhaustion counts plan calls
+/// that reached any configured limit, including calls recovered by fallback.
+/// Reservation failures count failed commits. Speculative passes that are
+/// discarded transactionally do not contribute to these counters.
 struct ConSanBranchOnlyRoutingTelemetry {
-  size_t plan_attempt_count = 0;
+  size_t pair_attempt_count = 0;
+  size_t plan_call_count = 0;
   size_t entry_route_failure_count = 0;
   size_t return_route_failure_count = 0;
   size_t relay_contention_failure_count = 0;
   size_t work_budget_failure_count = 0;
+  size_t work_budget_exhaustion_count = 0;
   size_t reservation_failure_count = 0;
   size_t exact_pair_fallback_attempt_count = 0;
   size_t greedy_pair_fallback_attempt_count = 0;
@@ -122,6 +127,10 @@ struct ConSanFlatSelectionTelemetry {
   size_t branch_only_selected_count = 0;
   size_t branch_only_placement_failure_count = 0;
   ConSanBranchOnlyRoutingTelemetry branch_only_routing;
+  /// Routing activity from the direct-reservoir selection pass that was
+  /// transactionally discarded. Kept separate so primary attempt/failure
+  /// rates describe one coherent candidate set.
+  ConSanBranchOnlyRoutingTelemetry discarded_branch_only_routing;
   size_t original_nop_relay_slot_count = 0;
   size_t selected_anchor_relay_slot_count = 0;
 };
@@ -139,6 +148,7 @@ struct ConSanResult {
   bool staged_composition_validated = false;
   /// Internal second-stage proof over a mutation image using a pristine plan.
   bool carried_composite_instrumentation_stage = false;
+  ConSanBranchOnlyRoutingTelemetry moi_branch_only_routing_telemetry;
   ConSanBranchOnlyRoutingTelemetry lds_branch_only_routing_telemetry;
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
   ConSanFlavor flavor = ConSanFlavor::None;

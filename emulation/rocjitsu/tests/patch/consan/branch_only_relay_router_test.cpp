@@ -955,11 +955,12 @@ TEST(ConSanBranchOnlyRelayRouter, OverflowingHeadroomSaturatesWithoutDisablingEx
   ASSERT_TRUE(router.offer(100u, BranchOnlyRelayProvenance::OwnedReservoir));
   DbiPatchPlacementPlanner planner(kArch, 1'000u);
   constexpr size_t kMaximum = std::numeric_limits<size_t>::max();
+  constexpr size_t kWrappingMultiplier = kMaximum / 2u + 1u;
   const BranchOnlyRelaySearchLimits limits{
-      .batch_base_search_work = kMaximum - 1u,
-      .batch_search_work_per_demand = kMaximum,
-      .batch_base_scan_work = kMaximum - 1u,
-      .batch_scan_work_per_demand_relay = kMaximum,
+      .batch_base_search_work = 0u,
+      .batch_search_work_per_demand = kWrappingMultiplier,
+      .batch_base_scan_work = 0u,
+      .batch_scan_work_per_demand_relay = kWrappingMultiplier,
   };
   BranchOnlyRelayPlanOutcome outcome;
 
@@ -983,7 +984,7 @@ TEST(ConSanBranchOnlyRelayRouter, ScanBudgetBoundsLargeRelayInventory) {
       .batch_search_work_per_demand = 0u,
       .batch_base_scan_work = 512u,
       .batch_scan_work_per_demand_relay = 0u,
-      .batch_fallback_setup_work = 2'048u,
+      .batch_fallback_setup_work = 20'000u,
       .pair_search_work = 8'192u,
       .pair_base_scan_work = 512u,
       .pair_scan_work_per_relay = 0u,
@@ -997,8 +998,38 @@ TEST(ConSanBranchOnlyRelayRouter, ScanBudgetBoundsLargeRelayInventory) {
   EXPECT_EQ(plan.failure, BranchOnlyRelayPlanFailure::WorkBudget);
   EXPECT_EQ(plan.strategy, BranchOnlyRelayPlanStrategy::GreedyPairFallback);
   EXPECT_TRUE(plan.work_budget_exhausted);
-  EXPECT_EQ(plan.scan_work_consumed, limits.batch_base_scan_work + 1'024u +
-                                         limits.pair_base_scan_work + limits.pair_greedy_work);
+  EXPECT_EQ(plan.scan_work_consumed, 1'024u * 11u);
+}
+
+TEST(ConSanBranchOnlyRelayRouter, ExhaustedFallbackSetupRejectsBatchTransactionally) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  BranchOnlyRelayRouter router;
+  for (uint64_t relay : {100'000u, 200'000u, 300'000u, 400'000u})
+    ASSERT_TRUE(router.offer(relay, BranchOnlyRelayProvenance::OwnedReservoir));
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{0u, 400'004u, 500'004u, 400'008u},
+  };
+  const BranchOnlyRelaySearchLimits limits{
+      .batch_base_search_work = 1u,
+      .batch_search_work_per_demand = 0u,
+      .batch_base_scan_work = 100u,
+      .batch_scan_work_per_demand_relay = 0u,
+      .batch_fallback_setup_work = 1u,
+  };
+  DbiPatchPlacementPlanner planner(kArch, 500'008u);
+  const std::vector<std::pair<uint64_t, uint64_t>> occupied_before(
+      planner.occupied_ranges().begin(), planner.occupied_ranges().end());
+
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, nullptr, limits);
+
+  EXPECT_FALSE(plan.complete());
+  EXPECT_EQ(plan.failure, BranchOnlyRelayPlanFailure::WorkBudget);
+  EXPECT_EQ(plan.strategy, BranchOnlyRelayPlanStrategy::ExactPairFallback);
+  EXPECT_TRUE(plan.work_budget_exhausted);
+  EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u}));
+  EXPECT_EQ(plan.rejection_reasons, (std::vector{BranchOnlyRelayPairRejection::WorkBudget}));
+  EXPECT_EQ(plan.pair_strategies, (std::vector{BranchOnlyRelayPlanStrategy::ExactPairFallback}));
+  EXPECT_TRUE(std::ranges::equal(planner.occupied_ranges(), occupied_before));
 }
 
 TEST(ConSanBranchOnlyRelayRouter, GreedyFallbackFailureIsPairAtomic) {
@@ -1159,9 +1190,10 @@ TEST(ConSanBranchOnlyRelayRouter, BoundedSolverMatchesBruteForceOnSmallRandomBat
       ASSERT_NO_FATAL_FAILURE(expect_valid_complete_batch(requests, relays, plan));
     }
   }
-  // The fixed seed produces exactly 50 feasible trials, keeping both oracle
-  // outcomes represented. Update deliberately if the generator changes.
-  EXPECT_EQ(feasible_trials, 50u);
+  // Keep both oracle outcomes meaningfully represented without depending on
+  // a standard library's uniform-distribution mapping.
+  EXPECT_GE(feasible_trials, 40u);
+  EXPECT_LE(feasible_trials, 60u);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, PlansMultipleDisjointEntryAndReturnPairsAtomically) {
