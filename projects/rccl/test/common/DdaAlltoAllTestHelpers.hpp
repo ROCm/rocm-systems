@@ -65,14 +65,16 @@ inline size_t testAlltoAllDdaIpcStagingBytes(size_t count, int nRanks, size_t ty
 struct DdaAlltoAllMockComm
 {
     ncclComm comm{};
+    char archNameBuf[64]{};
 
     DdaAlltoAllMockComm() { reset("gfx950:sramecc+:xnack-"); }
 
     void reset(const char* archName)
     {
         std::memset(&comm, 0, sizeof(comm));
-        std::strncpy(comm.archName, archName, sizeof(comm.archName) - 1);
-        comm.archName[sizeof(comm.archName) - 1] = '\0';
+        std::strncpy(archNameBuf, archName, sizeof(archNameBuf) - 1);
+        archNameBuf[sizeof(archNameBuf) - 1] = '\0';
+        comm.archName = archNameBuf;
         comm.nNodes = 1;
         comm.nRanks = nccl_dda_detail::kDdaNranks;
         comm.symmetricSupport = 0;
