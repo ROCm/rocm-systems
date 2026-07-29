@@ -24,7 +24,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Aligned the fabric telemetry and NIC firmware API surface with the unified ABI** (breaking).  
   - `amdsmi_fabric_telem_id_to_string()` now returns `amdsmi_status_t` and writes the name through a `const char**` out-parameter, instead of returning a `const char*` directly.
   - Renamed `amdsmi_nic_fw_t` to `amdsmi_nic_fw_entry_t`.
-  - Renamed the `amdsmi_fabric_type_t` enumerator `AMDSMI_FABRIC_TYPE_UALLINK` to `AMDSMI_FABRIC_TYPE_UALINK`.
+  - Added the `amdsmi_fabric_type_t` enumerator `AMDSMI_FABRIC_TYPE_UALINK`; the previous spelling `AMDSMI_FABRIC_TYPE_UALLINK` is retained as a deprecated alias with the same value and is slated for removal in a future ROCm release.
 
 - **Flattened the `amdsmi_fabric_info_t` structure and removed `amdsmi_fabric_info_ver_t`**.  
   - The intermediate `amdsmi_fabric_info_ver_t` type was removed from the public header. Its payload union is now the `fabric_info` member of `amdsmi_fabric_info_t`, and its version field is exposed directly as the top-level `fabric_version` field.
@@ -48,9 +48,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed the `amdsmi_gpu_driver_reload()` API and its Python binding** (breaking).  
   - Reload the amdgpu driver out of band with `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to apply memory partition changes instead.
 
-- **Removed unused public macros and a duplicate fabric telemetry enumerator to match the unified ABI** (breaking).  
-  - Dropped the `AMDSMI_MAX_VF_COUNT`, `AMDSMI_MAX_DRIVER_NUM`, `AMDSMI_DFC_FW_NUMBER_OF_ENTRIES`, `AMDSMI_MAX_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_BLACK_LIST_ELEMENTS`, `AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_ERR_RECORDS`, and `AMDSMI_MAX_PROFILE_COUNT` defines, which were unreferenced by any API or struct.
-  - Removed the redundant `AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN` enumerator from `amdsmi_fabric_telemetry_category_t`; `AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID` carries the same `0xFFFFFFFF` value.
+- **Removed unused public macros to match the unified ABI** (breaking).  
+  - Dropped the `AMDSMI_MAX_VF_COUNT`, `AMDSMI_MAX_DRIVER_NUM`, `AMDSMI_DFC_FW_NUMBER_OF_ENTRIES`, `AMDSMI_MAX_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_BLACK_LIST_ELEMENTS`, `AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_ERR_RECORDS`, `AMDSMI_MAX_PROFILE_COUNT`, and `AMDSMI_PF_INDEX` defines, which were unreferenced by any API or struct.
+
+- **Deduplicated the `amdsmi_fabric_telemetry_category_t` enumerators**.  
+  - `AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID` is now the canonical `0xFFFFFFFF` value; the previous `AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN` name (same value) is retained as a deprecated alias and is slated for removal in a future ROCm release.
 
 - **Removed `amdsmi_get_gpu_vram_vendor()`** (breaking). Use `amdsmi_get_gpu_vram_info()` and read the `vram_vendor` field instead.
 

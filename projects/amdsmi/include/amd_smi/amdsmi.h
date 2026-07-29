@@ -5554,15 +5554,17 @@ amdsmi_status_t amdsmi_clean_gpu_local_data(amdsmi_processor_handle processor_ha
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef enum {
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE = 0,            //!< UALOE telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH = 1,           //!< Switch telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO = 2,           //!< Crypto telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC = 3,              //!< PFC telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT = 4,          //!< Network Port telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5,    //!< Derived UALOE telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6,  //!< Derived Network Port telemetry
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7,              //!< Maximum number of categories
-  AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID = 0xFFFFFFFF  //!< Unknown telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE = 0,             //!< UALOE telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH = 1,            //!< Switch telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO = 2,            //!< Crypto telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC = 3,               //!< PFC telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT = 4,           //!< Network Port telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE = 5,     //!< Derived UALOE telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6,   //!< Derived Network Port telemetry
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX = 7,               //!< Maximum number of categories
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID = 0xFFFFFFFF,  //!< Unknown telemetry
+  //!< Deprecated, use AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID instead
+  AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN = AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID
 } amdsmi_fabric_telemetry_category_t;
 
 /**
@@ -5757,7 +5759,9 @@ typedef enum {
 typedef enum {
   AMDSMI_FABRIC_TYPE_UALOE,
   AMDSMI_FABRIC_TYPE_UALINK,
-  AMDSMI_FABRIC_TYPE_UNKNOWN
+  AMDSMI_FABRIC_TYPE_UNKNOWN,
+  AMDSMI_FABRIC_TYPE_UALLINK =
+      AMDSMI_FABRIC_TYPE_UALINK  //!< Deprecated, use AMDSMI_FABRIC_TYPE_UALINK instead
 } amdsmi_fabric_type_t;
 
 /**

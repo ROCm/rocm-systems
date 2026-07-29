@@ -4272,6 +4272,10 @@ extern "C" {
 extern "C" {
     pub fn amdsmi_clean_gpu_local_data(processor_handle: AmdsmiProcessorHandle) -> AmdsmiStatusT;
 }
+impl AmdsmiFabricTelemetryCategoryT {
+    pub const AmdsmiFabricTelemetryCategoryUnknown: AmdsmiFabricTelemetryCategoryT =
+        AmdsmiFabricTelemetryCategoryT::AmdsmiFabricTelemetryCategoryInvalid;
+}
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiFabricTelemetryCategoryT {
@@ -4418,6 +4422,9 @@ extern "C" {
 pub enum AmdsmiFabricSizeConstantsT {
     AmdsmiFabricActiveAcceleratorsBitmapSize = 32,
     AmdsmiFabricMaxLocalGpus = 16,
+}
+impl AmdsmiFabricTypeT {
+    pub const AmdsmiFabricTypeUallink: AmdsmiFabricTypeT = AmdsmiFabricTypeT::AmdsmiFabricTypeUalink;
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
