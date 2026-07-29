@@ -2822,6 +2822,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         });
       }
       std::string route_error;
+      // Only retain the current convergence iteration's routing cause. A
+      // later successful route must not relabel a spill-selection failure.
+      branch_only_route_error.clear();
       BranchOnlyRelayBatchPlan route_plan =
           branch_router.plan_pairs(tentative_planner, route_requests, &route_error);
       if (!route_plan.complete())

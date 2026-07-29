@@ -125,9 +125,10 @@ TEST(ConSanBranchOnlyRelayRouter, PlansCommitsEmitsAndRecordsTypedRelayOwnership
                                       kReturnTarget, &error, &failure);
   ASSERT_TRUE(route) << error;
   EXPECT_EQ(failure, BranchOnlyRelayPlanFailure::None);
-  EXPECT_EQ(route->entry_relay_offsets, (std::vector<uint64_t>{kPristineRelay, kGeneratedRelay}));
+  EXPECT_EQ(route->entry_relay_offsets,
+            (std::vector<uint64_t>{kOwnedReservoirRelay, kGeneratedRelay}));
   EXPECT_EQ(route->return_relay_offsets,
-            (std::vector<uint64_t>{kOwnedAnchorRelay, kOwnedReservoirRelay}));
+            (std::vector<uint64_t>{kOwnedAnchorRelay, kPristineRelay}));
   ASSERT_EQ(route->claims.size(), 4u);
 
   // Only pristine capacity needs a new placement reservation. Generated
@@ -267,14 +268,51 @@ TEST(ConSanBranchOnlyRelayRouter, RejectsCrossedDestinationAssignment) {
       },
   };
   DbiPatchPlacementPlanner planner(kArch, 200'008u);
-  std::string error;
+  std::string error = "stale caller diagnostic";
 
   const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
 
   EXPECT_FALSE(plan.complete());
   EXPECT_EQ(plan.failure, BranchOnlyRelayPlanFailure::EntryRoute);
   EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u, 1u}));
+  EXPECT_EQ(error, "branch-only router could not reach every appended entry");
   EXPECT_TRUE(planner.occupied_ranges().empty());
+}
+
+TEST(ConSanBranchOnlyRelayRouter, PreservesFeasibleExactPairsWhenInterchangeableFlowWouldCross) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint64_t kFirstRelay = 100'000u;
+  constexpr uint64_t kSecondRelay = 200'000u;
+  BranchOnlyRelayRouter router;
+  ASSERT_TRUE(router.offer(kFirstRelay, BranchOnlyRelayProvenance::OwnedReservoir));
+  ASSERT_TRUE(router.offer(kSecondRelay, BranchOnlyRelayProvenance::OwnedReservoir));
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{
+          .entry_source = 0u,
+          .entry_target = 200'008u,
+          .return_source = 200'012u,
+          .return_target = 100'004u,
+      },
+      BranchOnlyRelayPairRequest{
+          .entry_source = 100'004u,
+          .entry_target = 300'012u,
+          .return_source = 300'016u,
+          .return_target = 200'016u,
+      },
+  };
+  DbiPatchPlacementPlanner planner(kArch, 300'020u);
+  std::string error;
+
+  BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
+
+  ASSERT_TRUE(plan.complete()) << error;
+  ASSERT_EQ(plan.routes.size(), requests.size());
+  EXPECT_EQ(plan.routes[0].entry_relay_offsets, (std::vector<uint64_t>{kFirstRelay}));
+  EXPECT_EQ(plan.routes[1].entry_relay_offsets, (std::vector<uint64_t>{kSecondRelay}));
+  EXPECT_TRUE(plan.routes[0].return_relay_offsets.empty());
+  EXPECT_TRUE(plan.routes[1].return_relay_offsets.empty());
+  EXPECT_TRUE(router.commit(plan.routes, &error)) << error;
+  EXPECT_EQ(router.available_count(), 0u);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, PlansMultipleDisjointEntryAndReturnPairsAtomically) {
@@ -475,17 +513,19 @@ TEST(ConSanBranchOnlyRelayRouter, DirectReservoirPlanningShortCircuitsAndAdoptsA
   RelayTestDecoder decoder;
   auto blocks = BasicBlock::build(object, decoder, kArch);
   const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
-  DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
-  BranchOnlyRelayRouter router;
-  ASSERT_TRUE(router.offer(sizeof(uint32_t), BranchOnlyRelayProvenance::PristineNop));
-  BranchOnlyDirectRelayReservoirSet reservoirs;
-  std::string error;
+  for (uint64_t occupied_word : std::array<uint64_t, 2>{0u, sizeof(uint32_t)}) {
+    DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+    BranchOnlyRelayRouter router;
+    ASSERT_TRUE(router.offer(occupied_word, BranchOnlyRelayProvenance::PristineNop));
+    BranchOnlyDirectRelayReservoirSet reservoirs;
+    std::string error;
 
-  ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch, 0u, 1u,
-                                            planner, reservoirs, &error))
-      << error;
-  EXPECT_TRUE(reservoirs.reservoirs.empty());
-  EXPECT_EQ(router.available_count(), 1u);
+    ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch, 0u,
+                                              1u, planner, reservoirs, &error))
+        << error;
+    EXPECT_TRUE(reservoirs.reservoirs.empty());
+    EXPECT_EQ(router.available_count(), 1u);
+  }
 }
 
 TEST(ConSanBranchOnlyRelayRouter, EmitsDirectReservoirAtItsOwnedAppendedOffset) {

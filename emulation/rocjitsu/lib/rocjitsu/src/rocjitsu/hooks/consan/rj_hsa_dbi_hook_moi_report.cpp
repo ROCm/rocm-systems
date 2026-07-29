@@ -1316,7 +1316,7 @@ private:
                   static_cast<unsigned long long>(entry.reader), i, fence.event_index,
                   fence.owner_id, static_cast<unsigned long long>(fence.generation), fence.epoch,
                   fence.workgroup_x, fence.workgroup_y, fence.workgroup_z, fence.instruction_offset,
-                  fence.kind, fence.scope, fence.semantics,
+                  static_cast<unsigned>(fence.kind), fence.scope, fence.semantics,
                   static_cast<unsigned long long>(fence.communication_token));
     }
     if (visible_records != 0 || visible_barriers != 0 || visible_atomics != 0 ||

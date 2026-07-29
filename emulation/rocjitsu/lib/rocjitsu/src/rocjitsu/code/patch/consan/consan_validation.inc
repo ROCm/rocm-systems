@@ -15,6 +15,8 @@ enum class BranchRelayReservoirShape : uint8_t {
       static_cast<uint32_t>(patch.indirect_saved_vcc_sgpr.has_value()) +
       static_cast<uint32_t>(patch.indirect_return_pc_sgpr.has_value()) +
       static_cast<uint32_t>(patch.indirect_return_saved_vcc_sgpr.has_value());
+  // Indirect reservoirs deliberately require the complete four-field schema.
+  // A future partial schema must receive its own explicit shape.
   if (patch.original_size == 0u)
     return indirect_field_count == 0u ? BranchRelayReservoirShape::GeneratedBank
                                       : BranchRelayReservoirShape::Invalid;
@@ -637,6 +639,8 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
         break;
       }
       case BranchRelayReservoirShape::Invalid:
+        // The reservoir semantics proof below is the sole owner of rejecting
+        // malformed shapes; they must not contribute ownership here.
         break;
       }
     }
@@ -1019,6 +1023,8 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
         relay_vertices.insert(offset);
       break;
     case BranchRelayReservoirShape::Invalid:
+      // The reservoir semantics proof is the sole owner of rejecting malformed
+      // shapes; they must not contribute continuation vertices here.
       break;
     }
   }
@@ -1279,6 +1285,8 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
           relay_vertices.insert(offset);
         break;
       case BranchRelayReservoirShape::Invalid:
+        // The reservoir semantics proof is the sole owner of rejecting
+        // malformed shapes; they must not contribute donor vertices here.
         break;
       }
     }

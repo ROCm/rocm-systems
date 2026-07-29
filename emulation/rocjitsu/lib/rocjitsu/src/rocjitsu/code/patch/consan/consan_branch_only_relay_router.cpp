@@ -14,6 +14,7 @@
 #include <limits>
 #include <numeric>
 #include <ranges>
+#include <set>
 #include <tuple>
 #include <unordered_set>
 
@@ -92,120 +93,98 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
   if (requests.empty())
     return batch;
 
-  std::vector<uint64_t> relay_offsets;
-  relay_offsets.reserve(relays_.size());
+  std::set<uint64_t> unused_relays;
   for (const auto &[offset, provenance] : relays_) {
     (void)provenance;
-    relay_offsets.push_back(offset);
+    unused_relays.insert(offset);
   }
 
-  std::vector<uint64_t> entry_sources;
-  std::vector<uint64_t> entry_targets;
-  entry_sources.reserve(requests.size());
-  entry_targets.reserve(requests.size());
-  for (const BranchOnlyRelayPairRequest &request : requests) {
-    entry_sources.push_back(request.entry_source);
-    entry_targets.push_back(request.entry_target);
-  }
-  const auto entry_plan =
-      plan_forward_sopp_branch_relays(entry_sources, relay_offsets, entry_targets, error_out);
-  if (!entry_plan) {
-    batch.failure = BranchOnlyRelayPlanFailure::EntryRoute;
-    batch.rejected_pair_indices.resize(requests.size());
-    std::iota(batch.rejected_pair_indices.begin(), batch.rejected_pair_indices.end(), 0u);
-    return batch;
-  }
+  // Fixed source/target pairs are not interchangeable flow endpoints. Route
+  // each pair directly, consuming the farthest reachable relay at every hop
+  // so successful routes use the minimum available capacity. Entry routes
+  // follow request order and return routes reverse it, preserving the
+  // deterministic donor allocation order used by appended bodies.
+  const auto plan_half = [&](bool forward) {
+    constexpr uint64_t kMaximumForwardHopBytes = 4u + 32767u * 4u;
+    constexpr uint64_t kMaximumBackwardHopBytes = 32768u * 4u - 4u;
+    std::vector<size_t> rejected_indices;
+    std::vector<size_t> order(requests.size());
+    std::iota(order.begin(), order.end(), 0u);
+    if (!forward)
+      std::ranges::reverse(order);
 
-  const auto route_reaches_exact_target = [](uint64_t source, std::span<const uint64_t> relays,
-                                             uint64_t target, bool forward) {
-    uint64_t cursor = source;
-    for (uint64_t hop : relays) {
-      if ((forward ? hop <= cursor : hop >= cursor) || !compute_sopp_branch_simm16(cursor, hop)) {
-        return false;
+    for (size_t request_index : order) {
+      const BranchOnlyRelayPairRequest &request = requests[request_index];
+      uint64_t cursor = forward ? request.entry_source : request.return_source;
+      const uint64_t target = forward ? request.entry_target : request.return_target;
+      std::vector<uint64_t> route_relays;
+      bool direction_valid = forward ? target > cursor : target < cursor;
+      while (direction_valid && !compute_sopp_branch_simm16(cursor, target)) {
+        std::set<uint64_t>::iterator relay = unused_relays.end();
+        if (forward) {
+          const uint64_t limit =
+              cursor > std::numeric_limits<uint64_t>::max() - kMaximumForwardHopBytes
+                  ? std::numeric_limits<uint64_t>::max()
+                  : cursor + kMaximumForwardHopBytes;
+          const auto reachable_end =
+              unused_relays.upper_bound(std::min(limit, target - sizeof(uint32_t)));
+          if (reachable_end != unused_relays.begin()) {
+            relay = std::prev(reachable_end);
+            if (*relay <= cursor || *relay >= target ||
+                !compute_sopp_branch_simm16(cursor, *relay)) {
+              relay = unused_relays.end();
+            }
+          }
+        } else {
+          const uint64_t limit =
+              cursor > kMaximumBackwardHopBytes ? cursor - kMaximumBackwardHopBytes : 0u;
+          const uint64_t first_after_target =
+              target > std::numeric_limits<uint64_t>::max() - sizeof(uint32_t)
+                  ? std::numeric_limits<uint64_t>::max()
+                  : target + sizeof(uint32_t);
+          relay = unused_relays.lower_bound(std::max(limit, first_after_target));
+          if (relay == unused_relays.end() || *relay >= cursor || *relay <= target ||
+              !compute_sopp_branch_simm16(cursor, *relay)) {
+            relay = unused_relays.end();
+          }
+        }
+        if (relay == unused_relays.end()) {
+          direction_valid = false;
+          break;
+        }
+        cursor = *relay;
+        route_relays.push_back(cursor);
+        unused_relays.erase(relay);
       }
-      cursor = hop;
+
+      if (!direction_valid || !compute_sopp_branch_simm16(cursor, target)) {
+        unused_relays.insert(route_relays.begin(), route_relays.end());
+        rejected_indices.push_back(request_index);
+        continue;
+      }
+      std::vector<uint64_t> &route_out = forward ? batch.routes[request_index].entry_relay_offsets
+                                                 : batch.routes[request_index].return_relay_offsets;
+      route_out = std::move(route_relays);
     }
-    return (forward ? target > cursor : target < cursor) &&
-           compute_sopp_branch_simm16(cursor, target).has_value();
+    std::ranges::sort(rejected_indices);
+    return rejected_indices;
   };
 
-  std::unordered_set<uint64_t> entry_relays;
-  std::vector<bool> entry_assigned(requests.size(), false);
-  std::unordered_map<uint64_t, size_t> entry_owner_by_target;
-  entry_owner_by_target.reserve(requests.size());
-  for (size_t index = 0; index < requests.size(); ++index)
-    entry_owner_by_target.emplace(requests[index].entry_target, index);
-  for (const SoppBranchRelayRoute &route : entry_plan->routes) {
-    const auto owner = entry_owner_by_target.find(route.island_offset);
-    if (owner == entry_owner_by_target.end())
-      continue;
-    const size_t request_index = owner->second;
-    if (!route_reaches_exact_target(requests[request_index].entry_source, route.relay_offsets,
-                                    route.island_offset, /*forward=*/true)) {
-      continue;
-    }
-    batch.routes[request_index].entry_relay_offsets = route.relay_offsets;
-    entry_assigned[request_index] = true;
-    entry_relays.insert(route.relay_offsets.begin(), route.relay_offsets.end());
-  }
-  std::unordered_set<size_t> rejected_entry_indices;
-  for (size_t index = 0; index < entry_assigned.size(); ++index) {
-    if (!entry_assigned[index])
-      rejected_entry_indices.insert(index);
-  }
-  std::erase_if(relay_offsets, [&](uint64_t offset) { return entry_relays.contains(offset); });
-
-  std::vector<uint64_t> return_sources;
-  std::vector<uint64_t> return_targets;
-  return_sources.reserve(requests.size());
-  return_targets.reserve(requests.size());
-  for (const BranchOnlyRelayPairRequest &request : requests) {
-    return_sources.push_back(request.return_source);
-    return_targets.push_back(request.return_target);
-  }
-  const auto return_plan =
-      plan_backward_sopp_branch_relays(return_sources, relay_offsets, return_targets, error_out);
-  if (!return_plan) {
-    batch.failure = BranchOnlyRelayPlanFailure::ReturnRoute;
-    batch.rejected_pair_indices.resize(requests.size());
-    std::iota(batch.rejected_pair_indices.begin(), batch.rejected_pair_indices.end(), 0u);
-    return batch;
-  }
-
-  std::vector<bool> return_assigned(requests.size(), false);
-  std::unordered_map<uint64_t, size_t> return_owner_by_target;
-  return_owner_by_target.reserve(requests.size());
-  for (size_t index = 0; index < requests.size(); ++index)
-    return_owner_by_target.emplace(requests[index].return_target, index);
-  for (const SoppBranchRelayRoute &route : return_plan->routes) {
-    const auto owner = return_owner_by_target.find(route.island_offset);
-    if (owner == return_owner_by_target.end())
-      continue;
-    const size_t request_index = owner->second;
-    if (!route_reaches_exact_target(requests[request_index].return_source, route.relay_offsets,
-                                    route.island_offset, /*forward=*/false)) {
-      continue;
-    }
-    batch.routes[request_index].return_relay_offsets = route.relay_offsets;
-    return_assigned[request_index] = true;
-  }
-  std::unordered_set<size_t> rejected_return_indices;
-  for (size_t index = 0; index < return_assigned.size(); ++index) {
-    if (!return_assigned[index])
-      rejected_return_indices.insert(index);
-  }
-  std::unordered_set<size_t> rejected(rejected_entry_indices.begin(), rejected_entry_indices.end());
-  rejected.insert(rejected_return_indices.begin(), rejected_return_indices.end());
-  batch.rejected_pair_indices.assign(rejected.begin(), rejected.end());
+  const std::vector<size_t> rejected_entry_indices = plan_half(/*forward=*/true);
+  const std::vector<size_t> rejected_return_indices = plan_half(/*forward=*/false);
+  batch.rejected_pair_indices = rejected_entry_indices;
+  batch.rejected_pair_indices.insert(batch.rejected_pair_indices.end(),
+                                     rejected_return_indices.begin(),
+                                     rejected_return_indices.end());
   std::ranges::sort(batch.rejected_pair_indices);
+  batch.rejected_pair_indices.erase(std::ranges::unique(batch.rejected_pair_indices).begin(),
+                                    batch.rejected_pair_indices.end());
   if (!batch.rejected_pair_indices.empty()) {
     batch.failure = !rejected_entry_indices.empty() ? BranchOnlyRelayPlanFailure::EntryRoute
                                                     : BranchOnlyRelayPlanFailure::ReturnRoute;
-    if (error_out == nullptr || error_out->empty()) {
-      report(error_out, batch.failure == BranchOnlyRelayPlanFailure::EntryRoute
-                            ? "branch-only router could not reach every appended entry"
-                            : "branch-only router could not reach every original continuation");
-    }
+    report(error_out, batch.failure == BranchOnlyRelayPlanFailure::EntryRoute
+                          ? "branch-only router could not reach every appended entry"
+                          : "branch-only router could not reach every original continuation");
   }
 
   for (BranchOnlyRelayRoute &route : batch.routes) {
@@ -390,9 +369,8 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
 
   size_t offered_relay_count = 0u;
   for (const Candidate &candidate : candidates) {
-    const uint64_t first_relay = candidate.offset + sizeof(uint32_t);
     const uint64_t candidate_end = candidate.offset + candidate.words.size() * sizeof(uint32_t);
-    const auto first_existing = relays_.lower_bound(first_relay);
+    const auto first_existing = relays_.lower_bound(candidate.offset);
     if (first_existing != relays_.end() && first_existing->first < candidate_end)
       continue;
 
@@ -413,15 +391,26 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
         .placement = *placement,
     };
     const size_t reservoir_index = reservoirs.reservoirs.size();
+    std::vector<uint64_t> adopted_relays;
+    adopted_relays.reserve(candidate.words.size() - 1u);
     for (uint64_t word = 1u; word < candidate.words.size(); ++word) {
       const uint64_t relay = candidate.offset + word * sizeof(uint32_t);
-      if (!offer(relay, BranchOnlyRelayProvenance::OwnedReservoir)) {
+      const bool offered = offer(relay, BranchOnlyRelayProvenance::OwnedReservoir);
+      const bool indexed =
+          offered && reservoirs.reservoir_by_relay.emplace(relay, reservoir_index).second;
+      if (!offered || !indexed) {
+        if (offered)
+          relays_.erase(relay);
+        for (uint64_t adopted : adopted_relays) {
+          relays_.erase(adopted);
+          reservoirs.reservoir_by_relay.erase(adopted);
+        }
         report(error_out, "branch-only router could not atomically adopt a direct reservoir");
         return false;
       }
-      reservoirs.reservoir_by_relay.emplace(relay, reservoir_index);
-      ++offered_relay_count;
+      adopted_relays.push_back(relay);
     }
+    offered_relay_count += adopted_relays.size();
     reservoirs.reservoirs.push_back(std::move(reservoir));
     placement_planner = std::move(tentative_planner);
     if (offered_relay_count >= target_relay_count)
@@ -493,7 +482,7 @@ bool BranchOnlyRelayRouter::emit_direct_reservoir(std::vector<uint8_t> &text,
     return false;
   }
   const uint64_t emitted_end = reservoir.placement.return_branch_offset + sizeof(uint32_t);
-  if (emitted_end > std::numeric_limits<size_t>::max()) {
+  if (emitted_end > text.max_size()) {
     report(error_out, "branch-only router direct reservoir exceeds host address space");
     return false;
   }

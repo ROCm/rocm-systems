@@ -801,7 +801,7 @@ extern std::atomic<ConSanTransformOverride> g_test_consan_transform_override;
 [[nodiscard]] std::optional<HookConfig> parse_config();
 [[nodiscard]] bool refresh_report_config_from_env(HookConfig *config);
 
-void log_message(int required_level, const char *format, ...);
+[[gnu::format(printf, 2, 3)]] void log_message(int required_level, const char *format, ...);
 
 ConSanResult run_consan_transform(std::span<const uint8_t> bytes, const ConSanOptions &options);
 
