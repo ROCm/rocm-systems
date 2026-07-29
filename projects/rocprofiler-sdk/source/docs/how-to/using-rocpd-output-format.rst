@@ -1943,11 +1943,11 @@ By default, instruction text is decoded lazily during post-processing. Each
 time the ``rocpd_gpu_pc_sample_decoded`` view is queried, ``rocpd``
 disassembles the sampled program counters on demand from the referenced code
 objects and returns the instruction text in the query result. By default this
-lazily decoded text is also written back into the database when the process 
-exits, so it is reused on the next open instead of being re-disassembled (described below). 
-Pass ``--no-cache-disassembly`` to the ``rocpd`` subcommands (or ``cache_disassembly=False`` 
-to the ``RocpdImportData`` API) to keep the input database read-only, in which case the 
-decoded text is cached only in memory for the lifetime of the process and the ``.db`` file 
+lazily decoded text is also written back into the database when the process
+exits, so it is reused on the next open instead of being re-disassembled (described below).
+Pass ``--no-cache-disassembly`` to the ``rocpd`` subcommands (or ``cache_disassembly=False``
+to the ``RocpdImportData`` API) to keep the input database read-only, in which case the
+decoded text is cached only in memory for the lifetime of the process and the ``.db`` file
 is left unchanged.
 
 Passing ``--complete-isa-decode`` to ``rocprofv3`` instead persists
@@ -2092,7 +2092,7 @@ event for the kernel being sampled when ``--kernel-trace`` is active.
     COUNT(*) AS total_samples,
     SUM(CASE WHEN E.parent_id IS NOT NULL THEN 1 ELSE 0 END) AS linked_samples
   FROM rocpd_gpu_pc_sample S
-  JOIN rocpd_event E ON E.id = S.event_id"
+  JOIN rocpd_event E ON E.id = S.event_id AND E.guid = S.guid"
 
 **VALU issue rate per kernel**:
 
@@ -2101,12 +2101,14 @@ event for the kernel being sampled when ``--kernel-trace`` is active.
   rocpd query -i profile.db --query "
   WITH per_kernel AS (
     SELECT
+      KD.guid,
       KD.kernel_id,
       SUM(CASE WHEN S.arb_state_issue_valu = 1 THEN 1 ELSE 0 END) AS issued_valu_samples,
       COUNT(*) AS total_samples
     FROM rocpd_gpu_pc_sample_decoded S
     INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id
-    GROUP BY KD.kernel_id
+      AND KD.guid = S.guid
+    GROUP BY KD.guid, KD.kernel_id
   )
   SELECT
     PK.kernel_id,
@@ -2116,6 +2118,7 @@ event for the kernel being sampled when ``--kernel-trace`` is active.
     (100.0 * PK.issued_valu_samples) / NULLIF(PK.total_samples, 0) AS issued_valu_pct
   FROM per_kernel PK
   LEFT JOIN rocpd_info_kernel_symbol KS ON KS.id = PK.kernel_id
+    AND KS.guid = PK.guid
   ORDER BY PK.issued_valu_samples DESC
   LIMIT 20"
 
@@ -2125,6 +2128,7 @@ event for the kernel being sampled when ``--kernel-trace`` is active.
 
   rocpd query -i profile.db --query "
   SELECT
+    S.guid,
     S.dispatch_id,
     COUNT(*) AS samples,
     SUM(CASE WHEN
@@ -2142,7 +2146,7 @@ event for the kernel being sampled when ``--kernel-trace`` is active.
           S.arb_state_stall_misc=1
         THEN 1 ELSE 0 END)) / NULLIF(COUNT(*), 0) AS stall_pct
   FROM rocpd_gpu_pc_sample_decoded S
-  GROUP BY S.dispatch_id
+  GROUP BY S.guid, S.dispatch_id
   ORDER BY stall_samples DESC, samples DESC
   LIMIT 20"
 
@@ -2159,6 +2163,7 @@ backpressured an issued instruction (``arb_state_stall_PIPE = 1``).
   rocpd query -i profile.db --query "
   WITH per_kernel AS (
     SELECT
+      KD.guid,
       KD.kernel_id,
       COUNT(*) AS samples,
       SUM(CASE WHEN
@@ -2173,13 +2178,15 @@ backpressured an issued instruction (``arb_state_stall_PIPE = 1``).
           THEN 1 ELSE 0 END) AS stall_samples
     FROM rocpd_gpu_pc_sample_decoded S
     INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id
-    GROUP BY KD.kernel_id
+      AND KD.guid = S.guid
+    GROUP BY KD.guid, KD.kernel_id
   )
   SELECT
     PK.kernel_id, KS.display_name, PK.samples, PK.stall_samples,
     (100.0 * PK.stall_samples) / NULLIF(PK.samples, 0) AS stall_pct
   FROM per_kernel PK
   LEFT JOIN rocpd_info_kernel_symbol KS ON KS.id = PK.kernel_id
+    AND KS.guid = PK.guid
   ORDER BY stall_pct DESC, PK.samples DESC
   LIMIT 20"
 
@@ -2189,12 +2196,14 @@ backpressured an issued instruction (``arb_state_stall_PIPE = 1``).
 
   rocpd query -i profile.db --query "
   SELECT
-    KD.kernel_id, KS.display_name, S.code_object_offset,
+    KD.guid, KD.kernel_id, KS.display_name, S.code_object_offset,
     COUNT(*) AS samples_at_offset
   FROM rocpd_gpu_pc_sample_decoded S
   INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id
+    AND KD.guid = S.guid
   LEFT JOIN rocpd_info_kernel_symbol KS ON KS.id = KD.kernel_id
-  GROUP BY KD.kernel_id, KS.display_name, S.code_object_offset
+    AND KS.guid = KD.guid
+  GROUP BY KD.guid, KD.kernel_id, KS.display_name, S.code_object_offset
   ORDER BY samples_at_offset DESC
   LIMIT 50"
 
@@ -2204,13 +2213,15 @@ backpressured an issued instruction (``arb_state_stall_PIPE = 1``).
 
   rocpd query -i profile.db --query "
   WITH per_instruction AS (
-    SELECT KD.kernel_id, S.code_object_offset, COUNT(*) AS instruction_samples
+    SELECT KD.guid, KD.kernel_id, S.code_object_offset, COUNT(*) AS instruction_samples
     FROM rocpd_gpu_pc_sample_decoded S
     INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id
-    GROUP BY KD.kernel_id, S.code_object_offset
+      AND KD.guid = S.guid
+    GROUP BY KD.guid, KD.kernel_id, S.code_object_offset
   ),
   histogram AS (
     SELECT
+      guid,
       kernel_id,
       CASE
         WHEN instruction_samples < 10   THEN '1-9'
@@ -2220,11 +2231,12 @@ backpressured an issued instruction (``arb_state_stall_PIPE = 1``).
       END AS sample_bucket,
       COUNT(*) AS instruction_count
     FROM per_instruction
-    GROUP BY kernel_id, sample_bucket
+    GROUP BY guid, kernel_id, sample_bucket
   )
   SELECT H.kernel_id, KS.display_name, H.sample_bucket, H.instruction_count
   FROM histogram H
   LEFT JOIN rocpd_info_kernel_symbol KS ON KS.id = H.kernel_id
+    AND KS.guid = H.guid
   ORDER BY H.kernel_id, H.sample_bucket"
 
 **Internal pipeline latency hole detection**:
@@ -2233,7 +2245,8 @@ backpressured an issued instruction (``arb_state_stall_PIPE = 1``).
 
   rocpd query -i profile.db --query "
   WITH sk AS (
-    SELECT KD.kernel_id, S.code_object_id, S.code_object_offset, S.inst_type,
+    SELECT KD.guid, KD.kernel_id, S.code_object_id, S.code_object_offset,
+           S.stall_reason_name,
            S.dual_issue_valu,
            S.arb_state_issue_valu, S.arb_state_stall_valu,
            S.arb_state_issue_matrix, S.arb_state_stall_matrix,
@@ -2245,12 +2258,14 @@ backpressured an issued instruction (``arb_state_stall_PIPE = 1``).
            S.arb_state_issue_misc, S.arb_state_stall_misc
     FROM rocpd_gpu_pc_sample_decoded S
     INNER JOIN rocpd_kernel_dispatch KD ON KD.dispatch_id = S.dispatch_id
+      AND KD.guid = S.guid
   ),
   per_pc AS (
-    SELECT kernel_id, code_object_id, code_object_offset,
+    SELECT guid, kernel_id, code_object_id, code_object_offset,
            COUNT(*) AS samples,
-           MIN(CASE WHEN inst_type=15 -- ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NO_INST
-                    THEN 1 ELSE 0 END) AS internal_pipeline,
+           SUM(CASE WHEN stall_reason_name =
+                         'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_INTERNAL_INSTRUCTION'
+                    THEN 1 ELSE 0 END) AS internal_instruction_samples,
            SUM(CASE WHEN dual_issue_valu=1 OR
                          arb_state_issue_valu=1 OR arb_state_issue_matrix=1 OR
                          arb_state_issue_lds=1 OR
@@ -2269,14 +2284,14 @@ backpressured an issued instruction (``arb_state_stall_PIPE = 1``).
                          (arb_state_issue_misc=1       AND arb_state_stall_misc=0)
                     THEN 1 ELSE 0 END) AS useful_issue_samples
     FROM sk
-    GROUP BY kernel_id, code_object_id, code_object_offset
+    GROUP BY guid, kernel_id, code_object_id, code_object_offset
   )
-  SELECT kernel_id, code_object_id, code_object_offset, samples,
-         internal_pipeline, any_pipeline_issue_samples, useful_issue_samples,
-         CASE WHEN internal_pipeline=1 AND useful_issue_samples=0 THEN 1 ELSE 0 END
+  SELECT guid, kernel_id, code_object_id, code_object_offset, samples,
+         internal_instruction_samples, any_pipeline_issue_samples, useful_issue_samples,
+         CASE WHEN internal_instruction_samples>0 AND useful_issue_samples=0 THEN 1 ELSE 0 END
            AS internal_latency_hole
   FROM per_pc
-  WHERE internal_pipeline=1
+  WHERE internal_instruction_samples>0
   ORDER BY internal_latency_hole DESC, any_pipeline_issue_samples DESC, samples DESC"
 
 For information about enabling PC sampling in ``rocprofv3``, see

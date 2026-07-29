@@ -76,6 +76,7 @@ rocprofiler_add_integration_validate_test(
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-input/out_results.json
          --rocpd-input ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-input/out_results.db
+         --expected-method stochastic
     TIMEOUT 120
     LABELS "integration-tests;pc-sampling;stochastic;rocpd"
     PRELOAD "${PRELOAD_ENV}"
@@ -151,6 +152,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-host-trap-input/out_results.json
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-host-trap-input/out_results.db
+         --expected-method
+         host_trap
     TIMEOUT 120
     LABELS "integration-tests;pc-sampling;host-trap;rocpd"
     PRELOAD "${PRELOAD_ENV}"

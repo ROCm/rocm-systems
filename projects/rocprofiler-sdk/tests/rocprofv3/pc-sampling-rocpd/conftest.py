@@ -47,13 +47,21 @@ def pytest_addoption(parser):
         action="store",
         help="Path to a rocPD database produced with --complete-isa-decode.",
     )
+    parser.addoption(
+        "--expected-method",
+        action="store",
+        default=None,
+        help="Expected PC-sampling method for this run: 'stochastic' or 'host_trap'.",
+    )
 
 
 @pytest.fixture
 def json_data(request):
     filename = request.config.getoption("--json-input")
-    if not filename or not os.path.isfile(filename):
-        pytest.skip("JSON input not found")
+    if not filename:
+        pytest.skip("JSON input not provided")
+    if not os.path.isfile(filename):
+        pytest.fail(f"JSON input file does not exist: {filename}")
 
     with open(filename, "r", encoding="utf-8") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
@@ -62,8 +70,10 @@ def json_data(request):
 @pytest.fixture
 def rocpd_connection(request):
     filename = request.config.getoption("--rocpd-input")
-    if not filename or not os.path.isfile(filename):
-        pytest.skip("rocPD input database not found")
+    if not filename:
+        pytest.skip("rocPD input database not provided")
+    if not os.path.isfile(filename):
+        pytest.fail(f"rocPD input database does not exist: {filename}")
 
     from rocpd.importer import RocpdImportData
 
@@ -74,10 +84,20 @@ def rocpd_connection(request):
 @pytest.fixture
 def rocpd_disasm_connection(request):
     filename = request.config.getoption("--rocpd-disasm-input")
-    if not filename or not os.path.isfile(filename):
-        pytest.skip("disassembly rocPD input database not found")
+    if not filename:
+        pytest.skip("disassembly rocPD input database not provided")
+    if not os.path.isfile(filename):
+        pytest.fail(f"disassembly rocPD input database does not exist: {filename}")
 
     from rocpd.importer import RocpdImportData
 
     with RocpdImportData(filename, cache_disassembly=False) as conn:
         yield conn
+
+
+@pytest.fixture
+def expected_method(request):
+    method = request.config.getoption("--expected-method")
+    if not method:
+        pytest.skip("expected PC-sampling method not provided")
+    return method

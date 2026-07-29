@@ -190,38 +190,13 @@ def test_json_pc_sampling_records_present(json_data):
     assert len(host_trap_records) + len(stochastic_records) > 0
 
 
-# Decoded-view columns that MUST be exposed for the full-field comparison to be
-# meaningful.  The positional comparison skips any mapped column that is absent
-# from a row (so arch-specific fields degrade gracefully); asserting these are
-# present turns a schema regression that drops them into a hard failure instead
-# of a silent false pass.
-_REQUIRED_COMMON_COLUMNS = (
-    "timestamp",
-    "dispatch_id",
-    "exec_mask",
-    "code_object_id",
-    "code_object_offset",
-    "correlation_id",
-    "external_correlation_id",
-    "wave_in_group",
-    "workgroup_id_x",
-    "workgroup_id_y",
-    "workgroup_id_z",
-    "hw_id_chiplet",
-    "hw_id_simd_id",
-    "hw_id_wave_id",
-    "hw_id_shader_array_id",
-    "hw_id_shader_engine_id",
-)
-_REQUIRED_STOCHASTIC_COLUMNS = _REQUIRED_COMMON_COLUMNS + (
-    "wave_issued",
-    "wave_count",
-    "inst_type_name",
-    "stall_reason_name",
-    "dual_issue_valu",
-    "arb_state_issue_valu",
-    "arb_state_stall_valu",
-)
+# Per-method blob-schema names and the stochastic-only columns, used to assert a
+# fixture actually exercised the sampling method it requested.
+_METHOD_SCHEMA = {
+    "stochastic": "pc_sample_extdata_stochastic",
+    "host_trap": "pc_sample_extdata_hosttrap",
+}
+_STOCHASTIC_ONLY_COLUMNS = ("wave_issued", "inst_type", "stall_reason", "wave_count")
 
 
 def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
@@ -230,7 +205,9 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
     # covers all the fields the (lossy) CSV projection omitted -- hw_id, arbiter
     # issue/stall state, workgroup coordinates, exec_mask, correlation ids, and the
     # inst_type / stall_reason enum names -- by reading the self-describing decoded
-    # view.  JSON records and DB rows are matched positionally (shared generator
+    # view.  Every column _field_pairs() maps for the method must be present in the
+    # decoded view (a dropped/renamed column fails loudly instead of being silently
+    # skipped).  JSON records and DB rows are matched positionally (shared generator
     # order); counts are asserted equal first.
     total_records = 0
     total_field_checks = 0
@@ -244,23 +221,24 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
             rows
         ), f"{method_key}: JSON has {len(records)} samples, DB has {len(rows)}"
         total_records += len(records)
-        if rows:
-            required = (
-                _REQUIRED_STOCHASTIC_COLUMNS if stochastic else _REQUIRED_COMMON_COLUMNS
-            )
-            present = set(rows[0].keys())
-            missing = [column for column in required if column not in present]
-            assert not missing, (
-                f"{method_key}: decoded view is missing expected columns {missing}; "
-                "the full-field comparison would silently skip them"
-            )
+        if not rows:
+            continue
+        # Require every column _field_pairs() maps for this method: a schema
+        # regression that drops a HW-ID or arbiter field must fail here rather than
+        # be silently skipped by the per-row comparison below.  The mapped column
+        # set depends only on the method, so probing the first record is sufficient.
+        expected_columns = [
+            column for column, _, _ in _field_pairs(records[0]["record"], stochastic)
+        ]
+        present = set(rows[0].keys())
+        missing = [column for column in expected_columns if column not in present]
+        assert not missing, (
+            f"{method_key}: decoded view is missing mapped columns {missing}; "
+            "the full-field comparison would otherwise skip them"
+        )
         for index, (sample, row) in enumerate(zip(records, rows)):
             record = sample["record"]
             for column, expected, is_name in _field_pairs(record, stochastic):
-                if column not in row:
-                    # Field not stored for this sample type (e.g. arbiter state is
-                    # absent from host-trap samples); nothing to validate.
-                    continue
                 actual = row[column]
                 if is_name:
                     assert str(actual) == str(
@@ -274,12 +252,52 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
 
     assert total_records > 0, "no PC-sample records found in JSON oracle"
     assert total_field_checks > 0, "no fields were compared"
-    # Every sample contributes well over 20 field comparisons on every
-    # architecture; a much smaller total means most fields were skipped.
-    assert total_field_checks >= total_records * 20, (
-        f"only {total_field_checks} field checks for {total_records} samples; "
-        "most fields were skipped"
-    )
+
+
+def test_rocpd_method_identity(rocpd_connection, json_data, expected_method):
+    # Guard against a fixture silently exercising the wrong sampling method: the
+    # JSON oracle and the database must contain only the requested method, the
+    # matching per-method blob schema must be registered (and the other absent),
+    # and the stochastic-only columns must be fully populated for a stochastic run
+    # and entirely NULL for a host-trap run.
+    assert expected_method in _METHOD_SCHEMA, f"unknown method {expected_method!r}"
+    conn = rocpd_connection
+    tool = _tool(json_data)
+    host_trap = tool["buffer_records"].get("pc_sample_host_trap", [])
+    stochastic = tool["buffer_records"].get("pc_sample_stochastic", [])
+
+    other_method = "host_trap" if expected_method == "stochastic" else "stochastic"
+    if expected_method == "stochastic":
+        expected_records, opposite_records = stochastic, host_trap
+    else:
+        expected_records, opposite_records = host_trap, stochastic
+    assert len(expected_records) > 0, f"no {expected_method} records in JSON oracle"
+    assert (
+        len(opposite_records) == 0
+    ), f"{expected_method} run unexpectedly produced {other_method} records"
+
+    registered_schemas = {
+        row[0]
+        for row in conn.execute(
+            "SELECT DISTINCT name FROM rocpd_info_blob_schema"
+        ).fetchall()
+    }
+    assert _METHOD_SCHEMA[expected_method] in registered_schemas
+    assert _METHOD_SCHEMA[other_method] not in registered_schemas
+
+    total = _count_rows(conn, "rocpd_gpu_pc_sample")
+    assert total > 0
+    for column in _STOCHASTIC_ONLY_COLUMNS:
+        # Column names are fixed schema identifiers, not user input.
+        non_null = conn.execute(
+            f"SELECT COUNT(*) FROM rocpd_gpu_pc_sample WHERE {column} IS NOT NULL"
+        ).fetchone()[0]
+        if expected_method == "stochastic":
+            assert (
+                non_null == total
+            ), f"{column} must be populated for every stochastic sample"
+        else:
+            assert non_null == 0, f"{column} must be NULL for every host-trap sample"
 
 
 def test_rocpd_vs_json_kernel_and_agents(rocpd_connection, json_data):
@@ -373,21 +391,18 @@ def test_rocpd_on_demand_disassembly(rocpd_connection):
     assert _count_rows(conn, "rocpd_disassembly_data") == 0
     total = _count_rows(conn, "rocpd_gpu_pc_sample")
     assert total > 0
-    # The instruction/instruction_comment columns must project from the decoded view
-    # without error (UDFs wired) and stay 1:1 with the sample rows.
+    # Materialize both decoded columns rather than a bare COUNT(*) over the
+    # projection (which the planner may satisfy without calling the UDFs at all):
+    # fetching the rows forces SQLite to evaluate rocpd_isa_instruction AND
+    # rocpd_isa_comment for every row, proving both UDFs are wired, and stays 1:1
+    # with the sample rows.
     decoded = conn.execute(
-        "SELECT COUNT(*) FROM "
-        "(SELECT instruction, instruction_comment FROM rocpd_gpu_pc_sample_decoded)"
-    ).fetchone()[0]
-    assert decoded == total
-    # The count above is satisfied as long as the query runs; also require that
-    # on-demand decoding actually resolves instruction text for some sampled PCs
-    # (the workload's code objects are decodable), so an all-NULL view fails.
-    non_null = conn.execute(
-        "SELECT COUNT(*) FROM rocpd_gpu_pc_sample_decoded "
-        "WHERE instruction IS NOT NULL"
-    ).fetchone()[0]
-    assert non_null > 0
+        "SELECT instruction, instruction_comment FROM rocpd_gpu_pc_sample_decoded"
+    ).fetchall()
+    assert len(decoded) == total
+    # On-demand decoding must resolve instruction text for some sampled PCs (the
+    # workload's code objects are decodable), so an all-NULL view fails.
+    assert any(instruction is not None for instruction, _ in decoded)
 
 
 def test_rocpd_persisted_disassembly(rocpd_disasm_connection):
@@ -398,14 +413,36 @@ def test_rocpd_persisted_disassembly(rocpd_disasm_connection):
     total = _count_rows(conn, "rocpd_gpu_pc_sample")
     assert total > 0
     assert _count_rows(conn, "rocpd_disassembly_data") > 0
+    # Materialize the decoded instruction text for every row (forces evaluation)
+    # and keep it 1:1 with the sample rows.
     decoded = conn.execute(
-        "SELECT COUNT(*) FROM (SELECT instruction FROM rocpd_gpu_pc_sample_decoded)"
-    ).fetchone()[0]
-    assert decoded == total
-    non_null = conn.execute(
-        "SELECT COUNT(*) FROM rocpd_gpu_pc_sample_decoded WHERE instruction IS NOT NULL"
-    ).fetchone()[0]
-    assert non_null > 0
+        "SELECT instruction FROM rocpd_gpu_pc_sample_decoded"
+    ).fetchall()
+    assert len(decoded) == total
+    # Prove the *persisted* path is actually used rather than the lazy UDF
+    # fallback: for every sampled PC that has a stored disassembly row the decoded
+    # view must return exactly the stored text (COALESCE(d.instruction, ...)), and
+    # at least one such stored PC must be surfaced through the view.
+    served = conn.execute("""
+        SELECT COUNT(*)
+        FROM rocpd_gpu_pc_sample_decoded v
+        JOIN rocpd_disassembly_data d
+          ON d.guid = v.guid
+         AND d.code_object_id = v.code_object_id
+         AND d.code_object_offset = v.code_object_offset
+        WHERE v.instruction IS NOT NULL
+        """).fetchone()[0]
+    assert served > 0
+    mismatched = conn.execute("""
+        SELECT COUNT(*)
+        FROM rocpd_gpu_pc_sample_decoded v
+        JOIN rocpd_disassembly_data d
+          ON d.guid = v.guid
+         AND d.code_object_id = v.code_object_id
+         AND d.code_object_offset = v.code_object_offset
+        WHERE v.instruction IS NOT d.instruction
+        """).fetchone()[0]
+    assert mismatched == 0, "decoded view did not serve the persisted disassembly text"
 
 
 if __name__ == "__main__":

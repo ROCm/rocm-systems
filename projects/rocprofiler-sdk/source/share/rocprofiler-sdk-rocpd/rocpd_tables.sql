@@ -319,10 +319,12 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
 
--- Disassembled instruction text for sampled program counters.  Only populated
--- when the --complete-isa-decode knob is enabled (opt-in).  By
--- default instructions are disassembled on demand during post-processing.  Rows
--- are deduplicated per (code_object_id, code_object_offset).
+-- Disassembled instruction text for sampled program counters.  Populated two
+-- ways: (1) at collection time when --complete-isa-decode is passed to
+-- rocprofv3, and (2) by default during post-processing, where instructions
+-- disassembled lazily are written back at process exit (disable with the rocpd
+-- --no-cache-disassembly flag / cache_disassembly=False).  Rows are deduplicated
+-- per (guid, code_object_id, code_object_offset).
 CREATE TABLE IF NOT EXISTS
     `rocpd_disassembly_data{{uuid}}` (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,

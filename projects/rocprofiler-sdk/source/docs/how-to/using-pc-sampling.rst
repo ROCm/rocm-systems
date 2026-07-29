@@ -445,7 +445,8 @@ copies, API traces) in a single, queryable ``.db`` file.
             -- <application_path>
 
 The output file is named ``<pid>_results.db`` by default. You can specify a
-custom base name with ``-o``:
+custom base name with ``-o``; ``rocprofv3`` appends ``_results.db`` to it, so
+``-o my_profile`` produces ``my_profile_results.db``:
 
 .. code-block:: bash
 
@@ -454,7 +455,7 @@ custom base name with ``-o``:
             --pc-sampling-unit cycles \
             --pc-sampling-interval 1048576 \
             --output-format rocpd \
-            -o my_profile.db \
+            -o my_profile \
             -- <application_path>
 
 PC sampling tables in ROCPD

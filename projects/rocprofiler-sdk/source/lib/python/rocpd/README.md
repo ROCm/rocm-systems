@@ -139,6 +139,11 @@ base table names only when you need to understand the schema or write custom JOI
 | rocpd_kernel_dispatch | GPU kernel launch (agent, kernel, queue, stream, grid/workgroup sizes). | id, agent_id, kernel_id, queue_id, stream_id, start, end, grid_size_*, workgroup_size_* |
 | rocpd_memory_copy | Memory copy operation (source/destination, size, time range). | id, start, end, size, name_id, src_agent_id, dst_agent_id |
 | rocpd_memory_allocate | Memory allocation or free (type: ALLOC/FREE/REALLOC/RECLAIM; level: REAL/VIRTUAL/SCRATCH). | id, type, level, start, end, size, address, agent_id |
+| rocpd_info_blob_schema | Self-describing binary blob layout (name, source table, byte order, size). | id, name, source_table, byte_order, struct_size |
+| rocpd_info_blob_field | One field descriptor per blob schema (name, offset, size, type). | id, schema_id, name, offset, size, data_type |
+| rocpd_blob_event | Packed binary blob instance tagged by schema and linked to an event. | id, event_id, schema_id, blob |
+| rocpd_gpu_pc_sample | GPU PC sampling record (timestamp, dispatch, PC, exec mask, stochastic fields). | id, timestamp, event_id, dispatch_id, code_object_id, code_object_offset |
+| rocpd_disassembly_data | Disassembled instruction text for sampled program counters. | id, code_object_id, code_object_offset, instruction, comment |
 
 ### Common views
 
@@ -562,3 +567,92 @@ Purpose: One memory allocation event (ALLOC, FREE, REALLOC, or RECLAIM) at REAL,
 | stream_id | References rocpd_info_stream.id (may be null). |
 | event_id | References rocpd_event.id (may be null). |
 | extdata | JSON for any extra data. |
+
+**rocpd_info_blob_schema**
+
+Purpose: Self-describing layout for a packed binary blob (schema 3.0.4+). Describes the source table the blob augments, its byte order, alignment, and total size; rocpd_info_blob_field lists the individual fields. Consumers decode blobs from this metadata without hard-coding struct layouts.
+
+| Field | Meaning |
+| ----- | ------- |
+| id | Primary key; referenced by rocpd_info_blob_field.schema_id and rocpd_blob_event.schema_id. |
+| guid | Database/import identifier. |
+| nid | References rocpd_info_node.id. |
+| pid | References rocpd_info_process.id. |
+| name | Schema name (e.g. the PC-sampling blob variant). |
+| source_table | Name of the table whose rows the blob augments (e.g. rocpd_gpu_pc_sample). |
+| description | Human-readable description. |
+| byte_order | Blob byte order: 'little' or 'big'. |
+| alignment | Field alignment in bytes. |
+| struct_size | Total packed blob size in bytes. |
+| version | Schema layout version. |
+| extdata | JSON for any extra data. |
+
+**rocpd_info_blob_field**
+
+Purpose: One descriptor per field in a rocpd_info_blob_schema: name, byte offset, size, data type, and signedness. Together the fields fully describe how to unpack a rocpd_blob_event blob.
+
+| Field | Meaning |
+| ----- | ------- |
+| id | Primary key. |
+| guid | Database/import identifier. |
+| schema_id | References rocpd_info_blob_schema.id. |
+| name | Field name (becomes a decoded-view column). |
+| offset | Byte offset of the field within the blob. |
+| size | Field size in bytes. |
+| data_type | Field data type (e.g. uint8_t, uint32_t). |
+| is_signed | 1 if the field is signed, else 0. |
+| description | Human-readable description. |
+| extdata | JSON for any extra data. |
+
+**rocpd_blob_event**
+
+Purpose: A packed binary blob instance tagged by schema and linked to an event; the blob's layout is given by rocpd_info_blob_schema. Used to store architecture-specific hardware state (e.g. PC-sampling hw_id and arbiter snapshot) without per-feature columns.
+
+| Field | Meaning |
+| ----- | ------- |
+| id | Primary key. |
+| guid | Database/import identifier. |
+| nid | References rocpd_info_node.id. |
+| pid | References rocpd_info_process.id. |
+| event_id | References rocpd_event.id (the event this blob belongs to). |
+| schema_id | References rocpd_info_blob_schema.id (the blob's layout). |
+| blob | Packed binary payload (decoded via the schema/field metadata). |
+
+**rocpd_gpu_pc_sample**
+
+Purpose: One GPU PC (program counter) sample (schema 3.0.4+). Stores the sampled program counter, dispatch, execution mask, and stochastic-only fields; architecture-specific hardware state is stored in a companion rocpd_blob_event row and surfaced by the rocpd_gpu_pc_sample_decoded view.
+
+| Field | Meaning |
+| ----- | ------- |
+| id | Primary key. |
+| guid | Database/import identifier. |
+| timestamp | Sample timestamp (nanoseconds). |
+| nid | References rocpd_info_node.id. |
+| pid | References rocpd_info_process.id. |
+| tid | CPU thread that launched the parent dispatch (may be null). |
+| agent_id | References rocpd_info_agent.id (may be null). |
+| event_id | References rocpd_event.id; its parent_id links to the dispatch event. |
+| dispatch_id | Dispatch id of the sampled kernel (unique within a recording/guid). |
+| correlation_id | Internal correlation id of the PC-sample record. |
+| exec_mask | Active SIMD lanes at sample time (TEXT, preserves the full 64-bit mask). |
+| code_object_id | Code object containing the sampled instruction. |
+| code_object_offset | Byte offset within the code object (the PC value). |
+| wave_issued | Whether the wave issued an instruction (stochastic only; null for host-trap). |
+| inst_type | Instruction type when wave_issued (stochastic only; null for host-trap). |
+| stall_reason | Stall reason when not issued (stochastic only; null for host-trap). |
+| wave_count | Active waves on the CU at sample time (stochastic only; null for host-trap). |
+
+**rocpd_disassembly_data**
+
+Purpose: Disassembled instruction text for sampled program counters (schema 3.0.4+). Populated at collection time with --complete-isa-decode, and by default during post-processing where lazily decoded instructions are written back at exit (disable with rocpd --no-cache-disassembly). Rows are deduplicated per (guid, code_object_id, code_object_offset).
+
+| Field | Meaning |
+| ----- | ------- |
+| id | Primary key. |
+| guid | Database/import identifier. |
+| nid | References rocpd_info_node.id. |
+| pid | References rocpd_info_process.id. |
+| code_object_id | Code object containing the instruction. |
+| code_object_offset | Byte offset within the code object (the PC value). |
+| instruction | Disassembled instruction text (may be null). |
+| comment | Instruction comment/annotation (may be null). |

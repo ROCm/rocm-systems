@@ -170,12 +170,23 @@ def update_query_for_blob_views(conn, query: str = None, profile: bool = False):
     :func:`importer.setup_blob_views`.  This function only rewrites the
     query string so callers do not need to manually use the ``_decoded`` suffix.
 
-    When no blob schemas are registered, or *query* is ``None``, returns
-    *query* unchanged.
+    A source table is rewritten only when its ``<source>_decoded`` view actually
+    exists -- blob-view setup is skipped for malformed/unknown blob metadata, and
+    rewriting to a non-existent view would turn a still-queryable base table into
+    an error.  Only unqualified references, or references explicitly qualified
+    with ``temp``, are rewritten (the decoded views are TEMP views, so a
+    ``main.``/attached-database qualifier is left untouched), and every table
+    factor in a comma-separated ``FROM`` list is rewritten, not just the first.
+
+    When no rewritable blob source tables are registered, or *query* is ``None``,
+    returns *query* unchanged.
     """
     import sqlite3
 
     _t0 = time.perf_counter() if profile else None
+
+    if not query:
+        return query
 
     try:
         rows = conn.execute(
@@ -185,14 +196,29 @@ def update_query_for_blob_views(conn, query: str = None, profile: bool = False):
     except sqlite3.OperationalError:
         return query
 
-    if not rows or not query:
+    if not rows:
         return query
 
-    replacements = {
-        str(source_table).casefold(): f"{source_table}{_BLOB_DECODED_SUFFIX}"
-        for (source_table,) in rows
-        if source_table
-    }
+    try:
+        existing_temp_views = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_temp_master WHERE type = 'view'"
+            ).fetchall()
+        }
+    except sqlite3.OperationalError:
+        return query
+
+    replacements = {}
+    for (source_table,) in rows:
+        if not source_table:
+            continue
+        decoded = f"{source_table}{_BLOB_DECODED_SUFFIX}"
+        if decoded in existing_temp_views:
+            replacements[str(source_table).casefold()] = decoded
+    if not replacements:
+        return query
+
     tokens = list(_sql_tokens(query))
     cte_names = _cte_names(tokens)
     significant_indexes = [
@@ -200,42 +226,98 @@ def update_query_for_blob_views(conn, query: str = None, profile: bool = False):
         for index, token in enumerate(tokens)
         if token[0] not in ("space", "comment")
     ]
+
+    # Clause keywords that close an open FROM list at its own parenthesis depth.
+    _from_list_enders = frozenset(
+        (
+            "where",
+            "group",
+            "having",
+            "window",
+            "order",
+            "limit",
+            "union",
+            "except",
+            "intersect",
+            "returning",
+        )
+    )
+
     edits = []
     expect_table = False
+    paren_depth = 0
+    from_list_depths = []  # stack of parenthesis depths with an active FROM list
     for position, token_index in enumerate(significant_indexes):
         kind, text, start, end = tokens[token_index]
         keyword = text.casefold() if kind == "identifier" else text
+
+        if text == "(":
+            paren_depth += 1
+            expect_table = False
+            continue
+        if text == ")":
+            paren_depth -= 1
+            while from_list_depths and from_list_depths[-1] > paren_depth:
+                from_list_depths.pop()
+            expect_table = False
+            continue
+
         if keyword in ("from", "join"):
             expect_table = True
+            if keyword == "from":
+                from_list_depths.append(paren_depth)
             continue
+
+        # A top-level comma inside an active FROM list starts another table factor.
+        if text == "," and from_list_depths and from_list_depths[-1] == paren_depth:
+            expect_table = True
+            continue
+
+        # A clause keyword at the FROM list's depth closes that FROM list.
+        if (
+            kind == "identifier"
+            and keyword in _from_list_enders
+            and from_list_depths
+            and from_list_depths[-1] == paren_depth
+        ):
+            from_list_depths.pop()
+            expect_table = False
+            continue
+
         if not expect_table:
             continue
         expect_table = False
-        if text == "(":
-            continue
         if kind != "identifier":
             continue
 
-        # A qualified name such as main.table rewrites only the final component.
+        # A qualified name such as main.table / temp.table.  Only rewrite when
+        # unqualified or explicitly qualified with temp (where decoded views live).
         name_token = tokens[token_index]
-        is_qualified = False
+        qualifier = None
         if position + 2 < len(significant_indexes):
             dot = tokens[significant_indexes[position + 1]]
             qualified = tokens[significant_indexes[position + 2]]
             if dot[1] == "." and qualified[0] == "identifier":
+                qualifier = _identifier_value(name_token[1]).casefold()
                 name_token = qualified
-                is_qualified = True
+
+        if qualifier is not None and qualifier != "temp":
+            continue
 
         name = _identifier_value(name_token[1])
         replacement = replacements.get(name.casefold())
-        if replacement and (is_qualified or name.casefold() not in cte_names):
-            edits.append(
-                (
-                    name_token[2],
-                    name_token[3],
-                    _quote_like_identifier(name_token[1], replacement),
-                )
+        if not replacement:
+            continue
+        # An unqualified name matching a top-level CTE is the CTE, not a table.
+        if qualifier is None and name.casefold() in cte_names:
+            continue
+        edits.append(
+            (
+                name_token[2],
+                name_token[3],
+                _quote_like_identifier(name_token[1], replacement),
             )
+        )
 
     for start, end, replacement in reversed(edits):
         query = query[:start] + replacement + query[end:]
