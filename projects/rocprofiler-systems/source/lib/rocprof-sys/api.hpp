@@ -4,7 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
+#include "rocprofiler-systems/categories.h"  // in rocprof-sys-common-api
 
 #include <timemory/compat/macros.h>
 

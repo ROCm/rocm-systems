@@ -52,7 +52,6 @@ try:
         "profile",
         "noprofile",
         "coverage",
-        "user",
     ]
 
     def _load_profiler_bindings():
