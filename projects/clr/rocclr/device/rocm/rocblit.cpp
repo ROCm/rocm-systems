@@ -2970,6 +2970,10 @@ bool KernelBlitManager::WriteBufferBatch(
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
+      // Release pinned memory on failure path to avoid leaks
+      for (const auto& op : pinned_copy_ops) {
+        gpu().addPinnedMem(op.srcMemory);
+      }
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
       return false;
@@ -3071,6 +3075,10 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
+      // Release pinned memory on failure path to avoid leaks
+      for (const auto& op : pinned_copy_ops) {
+        gpu().addPinnedMem(op.srcMemory);
+      }
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
       return false;
