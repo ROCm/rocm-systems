@@ -263,7 +263,7 @@ def plot_latency(
     fig, ax = plt.subplots(figsize=(10, 6))
 
     for label, df in [(baseline_label, baseline_df), *variant_dfs.items()]:
-        style = _VARIANT_STYLES.get(label, {})
+        style = _VARIANT_STYLES["baseline"] if label == baseline_label else _VARIANT_STYLES.get(label, {})
         ax.plot(
             df["msg_size"],
             df["latency_us"],
