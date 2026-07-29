@@ -394,17 +394,21 @@ class AMDSMIHelpers:
             outputformat = "csv"
         return outputformat
 
+    @staticmethod
+    def _query_or_na(query, device_handle):
+        """Run a device query, returning "N/A" if the library reports an error."""
+        try:
+            return query(device_handle)
+        except amdsmi_exception.AmdSmiLibraryException:
+            return "N/A"
+
     def get_gpu_cuid_or_uuid(self, device_handle):
         """Return the device CUID when available, falling back to the UUID."""
-        try:
-            identifier = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
-        except amdsmi_exception.AmdSmiLibraryException:
-            identifier = "N/A"
+        identifier = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_cuid, device_handle)
         if identifier == "N/A":
-            try:
-                identifier = amdsmi_interface.amdsmi_get_gpu_device_uuid(device_handle)
-            except amdsmi_exception.AmdSmiLibraryException:
-                identifier = "N/A"
+            identifier = self._query_or_na(
+                amdsmi_interface.amdsmi_get_gpu_device_uuid, device_handle
+            )
         return identifier
 
     def get_gpu_choices(self):
@@ -444,18 +448,9 @@ class AMDSMIHelpers:
             max_padding = int(math.log10(len(device_handles))) + 1
 
             for gpu_id, device_handle in enumerate(device_handles):
-                try:
-                    bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
-                except amdsmi_exception.AmdSmiLibraryException:
-                    bdf = "N/A"
-                try:
-                    uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(device_handle)
-                except amdsmi_exception.AmdSmiLibraryException:
-                    uuid = "N/A"
-                try:
-                    cuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
-                except amdsmi_exception.AmdSmiLibraryException:
-                    cuid = "N/A"
+                bdf = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_bdf, device_handle)
+                uuid = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_uuid, device_handle)
+                cuid = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_cuid, device_handle)
                 gpu_choices[str(gpu_id)] = {
                     "bdf": bdf,
                     "UUID": uuid,
