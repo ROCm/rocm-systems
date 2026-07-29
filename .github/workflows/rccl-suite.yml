@@ -1,16 +1,13 @@
 name: RCCL suite
 
-# Generic single-node launcher for an RCCL cluster test suite. Reusable (called
-# by rccl-ci.yml; also runnable via workflow_dispatch). The `suite` input drives
-# everything suite-specific: it selects lib/<suite>.sbatch, the .ci-out/<suite>-logs
-# dir, and the rccl-<suite>-* scheduler stream, so gin and device-API share this
-# one workflow.
+# Reusable single-node launcher for an RCCL cluster test suite (gin, device-api).
+# The `suite` input selects lib/<suite>.sbatch and its logs/scheduler stream.
 #
-# Per leg: checkout sources, provision ROCm on the head node (lib/fetch-rocm.sh),
-# then `sbatch --wait` the compute-node script and dump its logs. ROCm/OpenMPI are
-# version-keyed on the cluster-local cache (cache_root); RCCL/rccl-tests rebuild
-# each run. `runs_on`, `cache_root`, and `partition` select the cluster, so a
-# self-contained suite can run on any runner.
+# ROCm is provisioned on the head node from TheRock CI artifacts (base toolchain
+# + libraries only via --base-only); RCCL/rocSHMEM/rccl-tests still build from the
+# PR sources on the compute node. Everything is workspace-local and torn down at
+# the end: no shared cache, so each leg fetches ROCm and builds OpenMPI itself.
+# Set rocm_path to skip the fetch and build against a preinstalled ROCm instead.
 on:
   workflow_call:
     inputs:
@@ -23,11 +20,6 @@ on:
         type: string
         required: false
         default: '["ruby-linux-slurm-scale-runner"]'
-      cache_root:
-        description: 'Cluster-local ROCm/OpenMPI cache root (RCCL_DEVICE_API_CACHE).'
-        type: string
-        required: false
-        default: '/apps/rccl-ci'
       partition:
         description: 'SLURM partition for the compute-node job.'
         type: string
@@ -38,16 +30,26 @@ on:
         type: string
         required: false
         default: ''
-      rocm_release:
-        description: 'ROCm version prefix (e.g. "7.14" = newest 7.14.*; "7.14.0rc1" pins exactly). Empty = newest available.'
-        type: string
-        required: false
-        default: '7.14'
-      rocm_amdgpu_family:
-        description: 'Specific GPU family fallback if no multi-arch tarball is found.'
+      artifact_group:
+        description: 'TheRock artifact group / GPU family for the ROCm floor (e.g. "gfx950-dcgpu").'
         type: string
         required: false
         default: 'gfx950-dcgpu'
+      artifact_run_id:
+        description: 'TheRock (ROCm/TheRock) workflow run ID to fetch ROCm from. Empty = resolve the latest main run with artifacts.'
+        type: string
+        required: false
+        default: ''
+      rocm_path:
+        description: 'Absolute path to a preinstalled "hardened" ROCm on the cluster (e.g. /apps/rccl-ci/rocm/rocm-7.0.0). When set, skips the TheRock artifact fetch and builds against this tree as-is.'
+        type: string
+        required: false
+        default: ''
+      therock_ref:
+        description: 'ROCm/TheRock git ref to check out for build_tools + setup_test_environment.'
+        type: string
+        required: false
+        default: '2e7c190b99caa226a8644eda6eca720b3db102d5'
       amdgpu_targets:
         description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
         type: string
@@ -83,11 +85,6 @@ on:
         type: string
         required: false
         default: '["ruby-linux-slurm-scale-runner"]'
-      cache_root:
-        description: 'Cluster-local ROCm/OpenMPI cache root (RCCL_DEVICE_API_CACHE).'
-        type: string
-        required: false
-        default: '/apps/rccl-ci'
       partition:
         description: 'SLURM partition for the compute-node job.'
         type: string
@@ -98,16 +95,26 @@ on:
         type: string
         required: false
         default: ''
-      rocm_release:
-        description: 'ROCm version prefix (e.g. "7.14"; "7.14.0rc1" pins exactly). Empty = newest available. Cascades release -> prerelease -> nightly, multiarch-first.'
-        type: string
-        required: false
-        default: '7.14'
-      rocm_amdgpu_family:
-        description: 'Specific GPU family fallback if no multi-arch tarball is found.'
+      artifact_group:
+        description: 'TheRock artifact group / GPU family for the ROCm floor (e.g. "gfx950-dcgpu").'
         type: string
         required: false
         default: 'gfx950-dcgpu'
+      artifact_run_id:
+        description: 'TheRock workflow run ID to fetch ROCm from. Empty = resolve the latest main run with artifacts.'
+        type: string
+        required: false
+        default: ''
+      rocm_path:
+        description: 'Absolute path to a preinstalled "hardened" ROCm (e.g. /apps/rccl-ci/rocm/rocm-7.0.0). When set, skips the TheRock artifact fetch.'
+        type: string
+        required: false
+        default: ''
+      therock_ref:
+        description: 'ROCm/TheRock git ref to check out for build_tools + setup_test_environment.'
+        type: string
+        required: false
+        default: '2e7c190b99caa226a8644eda6eca720b3db102d5'
       amdgpu_targets:
         description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
         type: string
@@ -127,6 +134,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   suite:
@@ -134,6 +142,9 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runs_on) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     continue-on-error: ${{ inputs.non_gating }}
+    permissions:
+      contents: read
+      id-token: write
     outputs:
       build_failed: ${{ steps.classify.outputs.build_failed }}
     defaults:
@@ -141,56 +152,132 @@ jobs:
         shell: bash
     env:
       SUITE: ${{ inputs.suite }}
-      # Cluster-local ROCm/OpenMPI cache root.
-      RCCL_DEVICE_API_CACHE: ${{ inputs.cache_root }}
-      # SLURM partition for this cluster's compute-node job.
       RCCL_SLURM_PARTITION: ${{ inputs.partition }}
-      # Optional SLURM reservation (e.g. dedicated CI nodes); empty = none.
       RCCL_SLURM_RESERVATION: ${{ inputs.reservation }}
       RCCL_AMDGPU_TARGETS: ${{ inputs.amdgpu_targets }}
-      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family }}
-      # ROCM_RELEASE is a version prefix (e.g. "7.14"); empty => newest available.
-      ROCM_RELEASE: ${{ inputs.rocm_release }}
-      # Stability-first cascade used by fetch-rocm.sh (no token needed).
-      RCCL_ROCM_CHANNELS: 'release prerelease nightly'
+      ROCM_AMDGPU_FAMILY: ${{ inputs.artifact_group }}
       # Add the test matrix's debug_env (NCCL_DEBUG=INFO, ...) to every run.
       RCCL_CI_DEBUG: '1'
-      # Per-(run, attempt) checkout+build dir so parallel legs on the shared NFS
-      # _work never collide.
+      # rocm-systems goes in CI_SUBDIR; TheRock is checked out at the workspace root.
       CI_SUBDIR: _ci/${{ inputs.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
+      VENV_DIR: ${{ github.workspace }}/.venv-${{ inputs.suite }}
     steps:
-      - name: Checkout repository
+      # At the workspace root: setup_test_environment resolves build_tools/ relative
+      # to github.workspace. Skipped when rocm_path is set (no fetch needed).
+      - name: Checkout ROCm/TheRock
+        if: ${{ inputs.rocm_path == '' }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ inputs.therock_ref }}
+
+      # rocm-systems sources for the compute-node build (rocSHMEM only used by gin).
+      - name: Checkout rocm-systems
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           path: ${{ env.CI_SUBDIR }}
-          # Sources built by the compute-node script (rocSHMEM only used by gin).
           sparse-checkout: |
             projects/rccl
             projects/rccl-tests
             projects/rocshmem
 
-      - name: Provision ROCm (${{ inputs.rocm_release || 'latest' }}) on the head node
-        id: provision
+      # Pick the TheRock run: explicit artifact_run_id, else the newest main run
+      # with artifacts for this family (find_latest_artifacts.py).
+      - name: Resolve TheRock artifact run
+        id: rocm_run
+        if: ${{ inputs.rocm_path == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
         run: |
           set -euo pipefail
-          export RCCL_DEVICE_API_WORKDIR="${GITHUB_WORKSPACE}/${CI_SUBDIR}"
-          # Shared, version-keyed ROCm/OpenMPI cache on /apps NFS (safe to share).
-          export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
-          echo "Workdir: ${RCCL_DEVICE_API_WORKDIR}"
-          echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
-          if ! mkdir -p "${RCCL_DEVICE_API_CACHE}"/{rocm,ompi,downloads}; then
-            echo "ERROR: cannot create ${RCCL_DEVICE_API_CACHE} (is /apps writable by $(id -un)?)" >&2
+          cd "${GITHUB_WORKSPACE}"
+          if [[ -n "${ARTIFACT_RUN_ID}" ]]; then
+            echo "Using pinned TheRock run_id=${ARTIFACT_RUN_ID}"
+            echo "run_id=${ARTIFACT_RUN_ID}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          run_id="$(python3 - <<'PY'
+          import os, sys
+          sys.path.insert(0, "build_tools")
+          import find_latest_artifacts as fla
+          group = os.environ["ARTIFACT_GROUP"]
+          results = fla.find_latest_artifacts(artifact_groups=[group], verbose=True)
+          if not results:
+              sys.stderr.write(f"No TheRock artifacts found for group '{group}'\n")
+              sys.exit(1)
+          print(results[0].workflow_run_id)
+          PY
+          )"
+          echo "Resolved latest TheRock run_id=${run_id} for ${ARTIFACT_GROUP}"
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+
+      # Fetch the ROCm floor (--base-only: no rccl/tests) into the workspace via
+      # TheRock's own action. Skipped when rocm_path is set.
+      - name: Provision ROCm from TheRock artifacts
+        id: provision
+        if: ${{ inputs.rocm_path == '' }}
+        uses: ./.github/actions/setup_test_environment
+        with:
+          ARTIFACT_RUN_ID: ${{ steps.rocm_run.outputs.run_id }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
+          OUTPUT_ARTIFACTS_DIR: ${{ github.workspace }}/${{ env.CI_SUBDIR }}/.ci-out/rocm
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: "--base-only"
+
+      # Write rocm.env (ROCM_PATH, ROCM_RELEASE) for the compute-node scripts, from
+      # rocm_path (used as-is) or the fetched tree. Fetched-only: rewrite the RHEL
+      # /usr/lib64/lib<name>.so absolute paths in the cmake targets to portable -l
+      # (they otherwise break `make` on non-RHEL nodes).
+      - name: Finalize ROCm env
+        id: finalize
+        env:
+          ROCM_PATH_INPUT: ${{ inputs.rocm_path }}
+          FETCHED_ROCM: ${{ github.workspace }}/${{ env.CI_SUBDIR }}/.ci-out/rocm
+          RUN_ID: ${{ steps.rocm_run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${ROCM_PATH_INPUT}" ]]; then
+            rocm_root="${ROCM_PATH_INPUT}"
+            rocm_release="hardened:$(basename "${rocm_root}")"
+            patch_libpaths=0
+            echo "==> Using preinstalled ROCm at ${rocm_root} (TheRock fetch skipped)"
+          else
+            rocm_root="${FETCHED_ROCM}"
+            rocm_release="therock-run-${RUN_ID}"
+            patch_libpaths=1
+          fi
+          if [[ ! -x "${rocm_root}/bin/hipcc" ]]; then
+            echo "ERROR: ROCm at ${rocm_root} has no bin/hipcc" >&2
+            ls -la "${rocm_root}" >&2 || true
             exit 1
           fi
-          "${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+          cmake_dir="${rocm_root}/lib/cmake"
+          if [[ "${patch_libpaths}" == "1" && -d "${cmake_dir}" ]]; then
+            while IFS= read -r -d '' f; do
+              sed -i -E 's#/usr/lib64/lib([A-Za-z0-9_.+-]+)\.so#\1#g' "${f}"
+              echo "    patched RHEL absolute lib path(s) in ${f}"
+            done < <(grep -rlZ '/usr/lib64/lib[^";[:space:]]*\.so' "${cmake_dir}" 2>/dev/null || true)
+          fi
+          env_out="${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/rocm.env"
+          mkdir -p "$(dirname "${env_out}")"
+          {
+            printf 'export ROCM_RELEASE=%q\n' "${rocm_release}"
+            printf 'export ROCM_PATH=%q\n' "${rocm_root}"
+          } > "${env_out}"
+          echo "==> Wrote ${env_out} (ROCM_PATH=${rocm_root})"
 
       - name: Submit ${{ inputs.suite }} build+test to SLURM
         id: submit
         run: |
           set -euo pipefail
           export RCCL_DEVICE_API_WORKDIR="${GITHUB_WORKSPACE}/${CI_SUBDIR}"
-          export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
-          echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
+          # Workspace-local cache: OpenMPI + downloads live under the per-run
+          # workspace, so each leg builds its own and cleanup wipes it.
+          export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_WORKDIR}/.ci-out/cache"
+          mkdir -p "${RCCL_DEVICE_API_CACHE}"/{ompi,downloads}
           ci_lib="${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib"
           # submit_slurm_job.py does sbatch --wait + sacct cross-check (a bare
           # --wait exits 0 even for scheduler-killed jobs).
@@ -199,7 +286,7 @@ jobs:
             --chdir "${RCCL_DEVICE_API_WORKDIR}/.ci-out/${SUITE}-logs" \
             --partition "${RCCL_SLURM_PARTITION}" \
             --reservation "${RCCL_SLURM_RESERVATION}" \
-            --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS,RCCL_CI_DEBUG"
+            --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS,RCCL_CI_DEBUG"
 
       - name: Dump compute-node logs
         if: always()
@@ -251,12 +338,17 @@ jobs:
         id: classify
         if: always()
         run: |
-          if [[ "${{ steps.provision.outcome }}" == "failure" || "${{ steps.submit.outcome }}" == "failure" ]]; then
+          if [[ "${{ steps.rocm_run.outcome }}" == "failure" \
+             || "${{ steps.provision.outcome }}" == "failure" \
+             || "${{ steps.finalize.outcome }}" == "failure" \
+             || "${{ steps.submit.outcome }}" == "failure" ]]; then
             echo "build_failed=true" >> "${GITHUB_OUTPUT}"
           else
             echo "build_failed=false" >> "${GITHUB_OUTPUT}"
           fi
 
-      - name: Clean up per-job workdir
+      - name: Clean up per-job workspace
         if: always()
-        run: rm -rf "${GITHUB_WORKSPACE:?}/${CI_SUBDIR:?}"
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/${CI_SUBDIR:?}"
+          rm -rf "${VENV_DIR:?}"

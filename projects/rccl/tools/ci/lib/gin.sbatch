@@ -56,12 +56,13 @@ build_jobs="${RCCL_BUILD_JOBS}"
 # hard `exit` or a set -e abort) is caught below and skips the test phase. ---
 build_rc=0
 (
-# 1) ROCm: provisioned on the head node; consume its shared tree via rocm.env.
-echo "==> [1/6] use ROCm (provisioned on head node)"
+# 1) ROCm: provisioned on the head node from TheRock CI artifacts; consume the
+# workspace tree via rocm.env.
+echo "==> [1/6] use ROCm (provisioned from TheRock artifacts on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
 if [[ ! -f "${rocm_env}" ]]; then
-  echo "ERROR: ${rocm_env} not found. The workflow must run 'Provision ROCm'" >&2
-  echo "       (lib/fetch-rocm.sh on the head node) before sbatch." >&2
+  echo "ERROR: ${rocm_env} not found. The workflow must run 'Provision ROCm" >&2
+  echo "       from TheRock artifacts' on the head node before sbatch." >&2
   exit 1
 fi
 set -a
@@ -73,16 +74,6 @@ if [[ ! -x "${ROCM_PATH:-}/bin/hipcc" ]]; then
   exit 1
 fi
 echo "    ROCM_PATH=${ROCM_PATH} ROCM_RELEASE=${ROCM_RELEASE:-<unset>}"
-
-rocm_cache="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}/rocm"
-case "${ROCM_PATH}" in
-  "${rocm_cache}"/*) : ;;
-  *)
-    if [[ -z "${ROCM_PATH_OVERRIDE:-}" ]]; then
-      echo "ERROR: ROCM_PATH=${ROCM_PATH} is not under ${rocm_cache}" >&2
-      exit 1
-    fi ;;
-esac
 echo "    hipcc: $("${ROCM_PATH}/bin/hipcc" --version 2>/dev/null | head -n1)"
 
 export HIP_PATH="${ROCM_PATH}"
@@ -90,9 +81,9 @@ export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
 export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
 export CMAKE_PREFIX_PATH="${ROCM_PATH}/lib/cmake:${ROCM_PATH}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
 
-# 2) OpenMPI: prebuilt by the OpenMPI provision job; this is a cache hit that
-# just writes ompi.env (MPI_HOME). Falls back to building if run standalone.
-echo "==> [2/6] use OpenMPI"
+# 2) OpenMPI: built here against ROCM_PATH into the per-job workspace cache
+# (no shared cache), then ompi.env (MPI_HOME) is sourced below.
+echo "==> [2/6] build OpenMPI"
 "${ci_dir}/lib/build-ompi.sh"
 set -a
 # shellcheck source=/dev/null
