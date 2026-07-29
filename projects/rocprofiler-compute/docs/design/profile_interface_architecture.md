@@ -414,7 +414,7 @@ sequenceDiagram
             compression-->>computeAnalyze: Data
         end
         computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat + pivot)
-        computeAnalyze->>pmcPerf: Read back       
+        computeAnalyze->>pmcPerf: Read back
         pmcPerf-->>computeAnalyze: Data
         computeAnalyze->>computeAnalyze: build pandas dataframe
     end
