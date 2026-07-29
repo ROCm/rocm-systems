@@ -128,6 +128,8 @@ int amdsmiFabricDeviceCount = 0;
 struct amdsmiFabricDeviceInfo amdsmiFabricDevices[amdsmiFabricMaxDevices];
 
 namespace {
+// Sentinel amd_smi leaves in numeric fabric fields it could not read from sysfs
+constexpr uint32_t kAmdSmiFabricVersionUnreported = 0xFFFFFFFFu;
 std::mutex fabricLock; // Thread safety for fabric operations
 bool fabricInitialized = false;
 thread_local bool threadFabricInitialized = false;
@@ -239,7 +241,8 @@ ncclResult_t amd_smi_init() {
     // get amd-smi version
     amdsmi_version_t version;
     AMDSMITRY(amdsmi_get_lib_version, &version);
-    INFO(NCCL_INIT, "amdsmi_lib: version %d.%d.%d.%s", version.major, version.minor, version.release, version.build);
+    INFO(NCCL_INIT, "amdsmi_lib: version %u.%u.%u (build %s)", version.major, version.minor, version.release,
+         version.build);
   } else {
     // initialize alternate rsmi
     ARSMICHECK(ARSMI_init());
@@ -640,9 +643,12 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
         devInfo->fabricSupported = false;
         continue;
       }
-      if (fabricInfo.fabric_version != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
-        WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u",
-             fabricInfo.fabric_version, d, AMDSMI_FABRIC_INFO_CURRENT_VERSION);
+      // amd_smi does not populate version: fields it cannot read keep a sentinel of all-ones,
+      // so treat that as "unreported" and assume v1 rather than discarding valid fabric data.
+      const uint32_t fabricVersion = fabricInfo.fabric_version;
+      if (fabricVersion != kAmdSmiFabricVersionUnreported && fabricVersion != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
+        WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u", fabricVersion, d,
+             AMDSMI_FABRIC_INFO_CURRENT_VERSION);
         devInfo->fabricSupported = false;
         continue;
       }
