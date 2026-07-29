@@ -126,6 +126,20 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
   }
 }
 
+// CDNA (gfx90a family) is the only family with an AccVGPR file and a gfx90a
+// ACCUM_OFFSET split of the unified VGPR allocation. RDNA/gfx1250 have none.
+bool arch_has_accvgpr(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return true;
+  default:
+    return false;
+  }
+}
+
 // VGPR-count encoding granule for @p arch. Descriptor VGPR count =
 // (GRANULATED_WORKITEM_VGPR_COUNT + 1) * granule. Matches LLVM's
 // AMDGPUBaseInfo::getVGPREncodingGranule(). Throws for an unmodeled arch.
@@ -447,6 +461,11 @@ bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillMana
   }
   if (spill_set.none())
     return true;
+
+  if (!arch_has_accvgpr(arch)) {
+    report(error_out, "AccVGPR spilling is only supported on CDNA targets");
+    return false;
+  }
 
   const uint32_t max_offset = max_scratch_offset_bytes(arch);
   if (max_offset == 0) {
@@ -896,22 +915,27 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
         const uint32_t kernel_vgpr_count =
             (granulated_vgpr_count + 1) * vgpr_encoding_granule(arch_);
+        // On CDNA the unified VGPR allocation splits at the ACCUM_OFFSET base
+        // ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window;
+        // non-CDNA arches have no AccVGPRs, so the whole allocation is ordinary.
+        const uint32_t accum_base =
+            arch_has_accvgpr(arch_)
+                ? (AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
+                                   rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+                   1) *
+                      4
+                : kernel_vgpr_count;
+        // The SGPR bridge must be an ordinary VGPR: an index in the accumulator
+        // window would alias an AGPR that is not part of acc_spills.
+        const uint32_t ordinary_vgpr_bound = std::min(kernel_vgpr_count, accum_base);
         if (!sgpr_spill.none() &&
-            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, kernel_vgpr_count, *spills, arch_,
-                              plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
+            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, ordinary_vgpr_bound, *spills,
+                              arch_, plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
           result.errors.push_back(std::move(err));
           continue;
         }
-        // AccVGPRs (CDNA only). The AGPR window is the unified VGPR budget above the
-        // ACCUM_OFFSET base ((encoded+1)*4); reject an index the kernel never
-        // allocated. Only CDNA decodes ACC_VGPR clobbers, and CDNA2/3/4 all use the
-        // gfx90a ACCUM_OFFSET encoding, so this is reached only where it is valid.
+        // AccVGPRs (CDNA only): reject an index past the allocated AGPR window.
         if (!acc_spill.none()) {
-          const uint32_t accum_base =
-              (AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
-                               rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
-               1) *
-              4;
           const uint32_t acc_count =
               kernel_vgpr_count > accum_base ? kernel_vgpr_count - accum_base : 0;
           if (!plan_acc_spills(acc_spill, acc_count, *spills, arch_, plan.acc_spills, &err)) {

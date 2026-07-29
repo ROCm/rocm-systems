@@ -6414,7 +6414,13 @@ class CodeGenerator:
             expr = f'({expr} + OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)'
         elif ctx.operand_type == 'OPR_SRC_ACCVGPR':
             # 9-bit source field encodes acc N as 256 + N; shift into [768, 1023].
-            expr = f'({expr} + (OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256))'
+            # Only shift a well-formed field (>= 256); a raw < 256 would escape into
+            # [512, 767], which vgpr_index() reads as an out-of-range physical VGPR.
+            expr = (
+                f'({expr} >= 256 ? '
+                f'{expr} + (OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256) : '
+                f'{expr})'
+            )
         return expr
 
     @classmethod

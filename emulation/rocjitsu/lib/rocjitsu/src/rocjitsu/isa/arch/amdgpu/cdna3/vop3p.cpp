@@ -695,8 +695,10 @@ VAccvgprReadVop3p::VAccvgprReadVop3p(const MachineInst *inst)
             make_exec_fn<VAccvgprReadVop3p>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_ACCVGPR,
-           (reinterpret_cast<const OpEncoding *>(inst)->src0 +
-            (OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256))) {
+           (reinterpret_cast<const OpEncoding *>(inst)->src0 >= 256
+                ? reinterpret_cast<const OpEncoding *>(inst)->src0 +
+                      (OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256)
+                : reinterpret_cast<const OpEncoding *>(inst)->src0)) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;

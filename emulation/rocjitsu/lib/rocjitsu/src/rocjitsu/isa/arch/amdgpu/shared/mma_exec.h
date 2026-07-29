@@ -75,7 +75,11 @@ struct PackedOutputLoc {
 /// AccVGPR bank (acc_cd=1, gfx942 separate bank model).
 /// Encoding 0-255 = v[0-255] or acc[0-255] depending on acc_cd.
 /// Encoding 512-767 = acc[0-255] via OpSel (always AccVGPR bank).
+/// Encoding 768-1023 = acc[0-255] on CDNA1, which types MFMA/accvgpr destinations
+/// as OPR_ACCVGPR (OPR_ACCVGPR_ACC_MIN = 768) rather than the 512-based range.
 inline uint32_t dst_base(uint32_t vb, int ev, uint32_t acc_cd = 1) {
+  if (ev >= 768)
+    return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev - 768);
   if (ev >= 512)
     return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev - 512);
   if (acc_cd)

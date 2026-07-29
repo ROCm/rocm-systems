@@ -672,6 +672,26 @@ TEST(MfmaExecTest, OutputLoc32_4x4) {
   EXPECT_EQ(loc.lane, 1u);
 }
 
+TEST(MfmaExecTest, DstBaseMapsCdna1OprAccvgprRange) {
+  // CDNA1 types MFMA/accvgpr destinations as OPR_ACCVGPR, canonicalized into
+  // [768, 1023] (OPR_ACCVGPR_ACC_MIN = 768). acc0 -> vb + ACC_VGPR_OFFSET, not
+  // vb + ACC_VGPR_OFFSET + 256 (the pre-fix bug from the shared -512 fold).
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/768, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 0u);
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/770, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 2u);
+}
+
+TEST(MfmaExecTest, DstBaseMapsCdna2To4AccAndVgprRanges) {
+  // CDNA2-4: acc destination via OpSel sits at [512, 767] (acc0 = 512); an
+  // ordinary VGPR destination (acc_cd=0, ev 0-255) stays in the arch bank.
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/512, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 0u);
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/5, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 5u);
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/5, /*acc_cd=*/0), 100u + 5u);
+}
+
 TEST(MfmaExecTest, ResolveAccConstant) {
   // Encoding value 0-255 = inline constant. The callback should be invoked.
   uint32_t const_acc = 0;

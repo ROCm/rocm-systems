@@ -200,8 +200,9 @@ def test_accvgpr_dst_is_canonicalized_into_acc_range():
 
 
 def test_accvgpr_src_is_canonicalized_into_acc_range():
-    # v_accvgpr_read / v_accvgpr_mov src: raw src (256 + N) is shifted into the
-    # OPR_SRC_ACCVGPR range [768, 1023], matching vgpr_index()'s ev >= 256 branch.
+    # v_accvgpr_read / v_accvgpr_mov src: a well-formed raw src (256 + N) is shifted
+    # into the OPR_SRC_ACCVGPR range [768, 1023]; a raw < 256 is left unshifted so it
+    # cannot escape into the out-of-range [512, 767] band.
     expr = CodeGenerator._operand_encoding_value_expr(
         _OperandCtx(
             'src0',
@@ -211,6 +212,8 @@ def test_accvgpr_src_is_canonicalized_into_acc_range():
         )
     )
     assert expr == (
-        '(reinterpret_cast<const OpEncoding*>(inst)->src0 + '
-        '(OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256))'
+        '(reinterpret_cast<const OpEncoding*>(inst)->src0 >= 256 ? '
+        'reinterpret_cast<const OpEncoding*>(inst)->src0 + '
+        '(OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256) : '
+        'reinterpret_cast<const OpEncoding*>(inst)->src0)'
     )

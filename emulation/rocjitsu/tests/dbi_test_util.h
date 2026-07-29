@@ -117,6 +117,10 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // `text_words`, entry at .text offset 0. The `.kd` symbol is a global STT_OBJECT
 // of descriptor size so scan_kernel_descriptors() (and replace_text) can find and
 // keep it coherent. `e_flags` selects the target ISA (e.g. GFX950 / GFX1200).
+// granulated_vgpr_count / accum_offset encode the descriptor's
+// GRANULATED_WORKITEM_VGPR_COUNT (VGPR count = (field + 1) * granule) and gfx90a
+// ACCUM_OFFSET (AccVGPR base = (field + 1) * 4) fields. The defaults reproduce the
+// historical shape: 8 unified VGPRs with the AGPR window starting at v4.
 // The trailing bools inject malformed headers to exercise the scanner's rejection
 // paths (each keeps the rest of the image well-formed): `unterminated_kd_name` trims
 // the .strtab size so the `.kd` name runs off the table end with no NUL;
@@ -125,6 +129,8 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words,
                                                    uint32_t private_bytes,
                                                    uint32_t granulated_sgpr_count, uint32_t e_flags,
+                                                   uint32_t granulated_vgpr_count = 0,
+                                                   uint32_t accum_offset = 0,
                                                    bool unterminated_kd_name = false,
                                                    bool wrap_section_header_table = false,
                                                    bool wrap_symtab_range = false) {
@@ -208,6 +214,9 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &
       static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   granulated_sgpr_count);
+  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  granulated_vgpr_count);
+  AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, accum_offset);
   std::memcpy(image.data() + rodata_offset, &desc, sizeof(desc));
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
@@ -271,25 +280,31 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(const std::vector<uint32_t> &
 // CDNA3 (gfx942) single-kernel target ELF.
 inline std::vector<uint8_t> make_gfx942_kernel_elf(const std::vector<uint32_t> &text_words,
                                                    uint32_t private_bytes,
-                                                   uint32_t granulated_sgpr_count = 3) {
+                                                   uint32_t granulated_sgpr_count = 3,
+                                                   uint32_t granulated_vgpr_count = 0,
+                                                   uint32_t accum_offset = 0) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
-                                EF_AMDGPU_MACH_AMDGCN_GFX942);
+                                EF_AMDGPU_MACH_AMDGCN_GFX942, granulated_vgpr_count, accum_offset);
 }
 
 // CDNA4 (gfx950) single-kernel target ELF.
 inline std::vector<uint8_t> make_gfx950_kernel_elf(const std::vector<uint32_t> &text_words,
                                                    uint32_t private_bytes,
-                                                   uint32_t granulated_sgpr_count = 3) {
+                                                   uint32_t granulated_sgpr_count = 3,
+                                                   uint32_t granulated_vgpr_count = 0,
+                                                   uint32_t accum_offset = 0) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
-                                EF_AMDGPU_MACH_AMDGCN_GFX950);
+                                EF_AMDGPU_MACH_AMDGCN_GFX950, granulated_vgpr_count, accum_offset);
 }
 
 // RDNA4 (gfx1200) single-kernel target ELF.
 inline std::vector<uint8_t> make_gfx1200_kernel_elf(const std::vector<uint32_t> &text_words,
                                                     uint32_t private_bytes,
-                                                    uint32_t granulated_sgpr_count = 3) {
+                                                    uint32_t granulated_sgpr_count = 3,
+                                                    uint32_t granulated_vgpr_count = 0,
+                                                    uint32_t accum_offset = 0) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
-                                EF_AMDGPU_MACH_AMDGCN_GFX1200);
+                                EF_AMDGPU_MACH_AMDGCN_GFX1200, granulated_vgpr_count, accum_offset);
 }
 
 // gfx950 target ELF whose `.kd` symbol name runs to the end of its string table
@@ -299,7 +314,8 @@ inline std::vector<uint8_t>
 make_gfx950_unterminated_kd_name_elf(const std::vector<uint32_t> &text_words,
                                      uint32_t private_bytes) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, /*granulated_sgpr_count=*/3,
-                                EF_AMDGPU_MACH_AMDGCN_GFX950, /*unterminated_kd_name=*/true);
+                                EF_AMDGPU_MACH_AMDGCN_GFX950, /*granulated_vgpr_count=*/0,
+                                /*accum_offset=*/0, /*unterminated_kd_name=*/true);
 }
 
 // gfx950 target ELF whose e_shoff + e_shnum*sizeof(Elf64_Shdr) overflows, for
@@ -307,7 +323,8 @@ make_gfx950_unterminated_kd_name_elf(const std::vector<uint32_t> &text_words,
 inline std::vector<uint8_t> make_gfx950_wrapping_shoff_elf(const std::vector<uint32_t> &text_words,
                                                            uint32_t private_bytes) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, /*granulated_sgpr_count=*/3,
-                                EF_AMDGPU_MACH_AMDGCN_GFX950, /*unterminated_kd_name=*/false,
+                                EF_AMDGPU_MACH_AMDGCN_GFX950, /*granulated_vgpr_count=*/0,
+                                /*accum_offset=*/0, /*unterminated_kd_name=*/false,
                                 /*wrap_section_header_table=*/true);
 }
 
@@ -317,7 +334,8 @@ inline std::vector<uint8_t> make_gfx950_wrapping_shoff_elf(const std::vector<uin
 inline std::vector<uint8_t> make_gfx950_wrapping_symtab_elf(const std::vector<uint32_t> &text_words,
                                                             uint32_t private_bytes) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, /*granulated_sgpr_count=*/3,
-                                EF_AMDGPU_MACH_AMDGCN_GFX950, /*unterminated_kd_name=*/false,
+                                EF_AMDGPU_MACH_AMDGCN_GFX950, /*granulated_vgpr_count=*/0,
+                                /*accum_offset=*/0, /*unterminated_kd_name=*/false,
                                 /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/true);
 }
 

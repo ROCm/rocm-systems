@@ -1656,6 +1656,22 @@ TEST(InstrumentorSpill, PlanSgprSpillsFailsWhenNoBridgeWithinVgprCount) {
   EXPECT_NE(err.find("bridge VGPR"), std::string::npos) << "error was: " << err;
 }
 
+// The orchestrator passes min(kernel_vgpr_count, accum_base) as the bridge bound so
+// the bridge never lands in the AccVGPR window. Here every ordinary VGPR below the
+// accumulator base (v0-v3) is live, so no bridge exists and the spill fails closed
+// rather than picking v4 (= acc0 on a gfx90a kernel whose accum_base is 4).
+TEST(InstrumentorSpill, PlanSgprSpillsBridgeStaysBelowAccumBase) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  uint16_t bridge = 0xFFFF;
+  std::string err;
+  const RegisterSet live = make_vgpr_set({0, 1, 2, 3});
+  ASSERT_FALSE(plan_sgpr_spills(make_sgpr_set({7}), live, {}, /*kernel_vgpr_count=*/4, spills,
+                                ROCJITSU_CODE_ARCH_CDNA4, out, bridge, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("bridge VGPR"), std::string::npos) << "error was: " << err;
+}
+
 // A non-SGPR register in the spill set fails closed and is named.
 TEST(InstrumentorSpill, PlanSgprSpillsRejectsNonSgpr) {
   SpillManager spills(0, 4096);
@@ -1724,6 +1740,19 @@ TEST(InstrumentorSpill, PlanAccSpillsRejectsUnsupportedArch) {
   ASSERT_FALSE(plan_acc_spills(make_acc_set({1}), /*acc_count=*/8, spills,
                                ROCJITSU_CODE_ARCH_CDNA2, out, &err));
   EXPECT_TRUE(out.empty());
+}
+
+// AccVGPR spilling is CDNA-only. RDNA4 has a scratch emitter (nonzero offset cap)
+// but no AccVGPR file, so plan_acc_spills rejects it up front with a CDNA-only
+// diagnostic instead of letting emission throw UnimplementedInst later.
+TEST(InstrumentorSpill, PlanAccSpillsRejectsNonCdnaArch) {
+  SpillManager spills(0, 4096);
+  std::vector<SpillSlot> out;
+  std::string err;
+  ASSERT_FALSE(plan_acc_spills(make_acc_set({0}), /*acc_count=*/8, spills, ROCJITSU_CODE_ARCH_RDNA4,
+                               out, &err));
+  EXPECT_TRUE(out.empty());
+  EXPECT_NE(err.find("CDNA"), std::string::npos) << "error was: " << err;
 }
 
 //==============================================================================
@@ -2072,7 +2101,8 @@ TEST(InstrumentorProbePatch, DescriptorlessProbeCallFailsClosed) {
 // The arch-varying inputs: the ISA enum plus its {kernel, probe} ELF factories.
 struct SpillArch {
   rj_code_arch_t arch;
-  std::vector<uint8_t> (*make_kernel)(const std::vector<uint32_t> &, uint32_t, uint32_t);
+  std::vector<uint8_t> (*make_kernel)(const std::vector<uint32_t> &, uint32_t, uint32_t, uint32_t,
+                                      uint32_t);
   std::vector<uint8_t> (*make_probe)(std::string_view, const std::vector<uint32_t> &);
 };
 inline SpillArch cdna3_probe_spill_arch() {
@@ -2102,9 +2132,13 @@ protected:
   // Full probe-call patch: dispatch one point at offset 0 over `kernel_body` (the
   // original .text) with a probe of `probe_body`. Returns the cave (text past the
   // original words) and the patched scratch size; empty cave on failure.
+  // granulated_vgpr_count / accum_offset shape the descriptor's VGPR/AccVGPR window
+  // for AGPR tests; the defaults reproduce the historical CDNA shape.
   Caved patch_spill(const std::vector<uint32_t> &kernel_body,
-                    const std::vector<uint32_t> &probe_body, uint32_t private_bytes) {
-    auto target = a_.make_kernel(kernel_body, private_bytes, /*granulated_sgpr_count=*/3);
+                    const std::vector<uint32_t> &probe_body, uint32_t private_bytes,
+                    uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0) {
+    auto target = a_.make_kernel(kernel_body, private_bytes, /*granulated_sgpr_count=*/3,
+                                 granulated_vgpr_count, accum_offset);
     auto probe = a_.make_probe("rj_test_probe", probe_body);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -2136,8 +2170,10 @@ protected:
   }
 
   // Arch's single-kernel target ELF / probe ELF for this fixture's arch.
-  std::vector<uint8_t> kernel_elf(const std::vector<uint32_t> &body, uint32_t private_bytes) {
-    return a_.make_kernel(body, private_bytes, /*granulated_sgpr_count=*/3);
+  std::vector<uint8_t> kernel_elf(const std::vector<uint32_t> &body, uint32_t private_bytes,
+                                  uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0) {
+    return a_.make_kernel(body, private_bytes, /*granulated_sgpr_count=*/3, granulated_vgpr_count,
+                          accum_offset);
   }
   std::vector<uint8_t> probe_elf(const std::vector<uint32_t> &body) {
     return a_.make_probe("rj_test_probe", body);
@@ -2421,6 +2457,22 @@ TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedAccVgpr) {
                                {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64));
 }
 
+// The AccVGPR window size is descriptor-derived: acc_count = kernel_vgpr_count -
+// accum_base. With ACCUM_OFFSET=1 the accumulator base rises to v8 == the 8-VGPR
+// allocation, so the window is empty and a probe clobbering live acc0 must fail
+// closed -- even though the same kernel with ACCUM_OFFSET=0
+// (Cdna4SpillsLiveClobberedAccVgpr) spills acc0 fine. Pins both sides of the
+// descriptor-derived boundary end to end.
+TEST_F(Cdna4ProbeSpill, RejectsAccVgprPastAccumOffsetWindow) {
+  const InstrumentedCodeObject result = patch_expecting_result(
+      kernel_elf({kAccReadV3A0Lo, kAccReadV3A0Hi, endpgm()}, /*private_bytes=*/64,
+                 /*granulated_vgpr_count=*/0, /*accum_offset=*/1),
+      probe_elf({kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}));
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("allocated count"), std::string::npos)
+      << result.errors.front();
+}
+
 // A kernel with zero fixed scratch cannot be spilled into and fails closed.
 TEST_F(Cdna3ProbeSpill, ZeroScratchFailsClosed) { expect_zero_scratch_fails_closed(); }
 TEST_F(Cdna4ProbeSpill, ZeroScratchFailsClosed) { expect_zero_scratch_fails_closed(); }
@@ -2516,9 +2568,13 @@ TEST_F(Cdna4ProbeSpill, SpillsLiveClobberedVgprSgprAndAccVgpr) {
   // Anchor reads v2; the next two instructions read s8 then a0, so v2, s8, and acc0 are
   // all live at the anchor and all clobbered by the probe. Distinct readback dests
   // (v5/v6/v7) so the sim e2e can share this exact kernel shape.
+  // 16 VGPRs with ACCUM_OFFSET=1 puts the accumulator window at v8-v15, so v2 and
+  // the v5/v6/v7 dests are genuine ordinary VGPRs and acc0 sits in a nonempty
+  // window (the SGPR bridge is then bounded to the ordinary prefix v0-v7).
   const Caved caved = patch_spill(
       {kMovV5V2, kMovV6S8, kAccReadV7A0Lo, kAccReadV7A0Hi, endpgm()},
-      {kMovV2Zero, kMovS8Zero, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64);
+      {kMovV2Zero, kMovS8Zero, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc()}, 64,
+      /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
   const std::vector<uint32_t> &cave = caved.cave;
 
   // VGPR v2 -> slot 64, straight to scratch.
