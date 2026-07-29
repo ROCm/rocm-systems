@@ -78,14 +78,14 @@ public:
         return !is_interrupted();
     }
 
-    void interrupt()
+    void interrupt() noexcept
     {
         const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         const std::scoped_lock notify_lk{ m_mutex };
         m_interrupted = true;
     }
 
-    void reset()
+    void reset() noexcept
     {
         const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         const std::scoped_lock notify_lk{ m_mutex };
