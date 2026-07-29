@@ -55,7 +55,8 @@ SKIP_BUILD="${SKIP_BUILD:-false}"
 FORCE_REBUILD="${FORCE_REBUILD:-false}"
 MATCH="${MATCH:-}"
 
-ROCSHMEM_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
+ROCSHMEM_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROCSHMEM_DIR"
 
 if [[ "$SKIP_BUILD" != "true" ]] && ! git diff --quiet HEAD --; then
@@ -97,7 +98,7 @@ measure_commit() {
   mkdir -p "$cache_dir"
   local build_dir="$cache_dir/build"
 
-  git checkout --quiet --force --detach "$sha"
+  git checkout --quiet --force --detach "$(git rev-parse "$commit")"
 
   mkdir -p "$build_dir"
   rm -rf "${build_dir:?}"/*

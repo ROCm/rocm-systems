@@ -13,10 +13,10 @@ Usage:
         --arch gfx950 --build-config ipc_single \\
         --out resource_usage.csv
 
-Rows are appended to --out (header written once). Re-running with the same
-(arch, build-config, source_file, line, mangled_name) tuple replaces the
-existing row instead of duplicating it, so re-generating a build's numbers
-is idempotent.
+Rows are written to --out. If --out already exists, its rows are loaded and
+updated: re-running with the same (arch, build-config, source_file, line,
+mangled_name) tuple replaces the existing row instead of duplicating it, so
+re-generating a build's numbers is idempotent.
 """
 
 import argparse
