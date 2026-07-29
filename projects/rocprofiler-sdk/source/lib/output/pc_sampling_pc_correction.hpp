@@ -103,15 +103,15 @@ classify(std::string_view inst);
  * @brief Test whether a gfx_target_version identifies a gfx1250 agent.
  *
  * Encoding (per the SDK agent API): major = (ver / 10000) % 100,
- * minor = (ver / 100) % 100. gfx1250 -> major=12, minor=50 -> [125000, 125100).
+ * minor = (ver / 100) % 100. gfx1250 -> major=12, minor=5 -> ver == 120500.
  *
  * @param [in] gfx_target_version Packed gfx target version of the agent.
- * @return true if @p gfx_target_version is in the gfx1250 range.
+ * @return true if @p gfx_target_version identifies gfx1250.
  */
 constexpr bool
 is_gfx1250(uint32_t gfx_target_version)
 {
-    return gfx_target_version >= 125000u && gfx_target_version < 125100u;
+    return gfx_target_version == 120500u;
 }
 
 /**
