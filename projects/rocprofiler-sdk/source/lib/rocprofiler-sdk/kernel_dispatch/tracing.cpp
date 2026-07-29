@@ -37,8 +37,6 @@
 
 #include <hsa/hsa.h>
 
-#include <atomic>
-#include <fmt/format.h>
 #include <string_view>
 
 namespace rocprofiler
@@ -71,16 +69,6 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
         // dispatch completed via HSA fallback before its record arrived), so the
         // results map stays bounded without an erase on this path.
         auto kfd_result = kfd::results_map().take(corr_key);
-
-        {
-            static std::atomic<uint64_t> s_hit{0}, s_miss{0};
-            (kfd_result ? s_hit : s_miss).fetch_add(1, std::memory_order_relaxed);
-            uint64_t h = s_hit.load(), m = s_miss.load();
-            if((h + m) % 256 == 0)
-                ROCP_WARNING << fmt::format("DBGPROV hit={} miss={} rate={:.1f}%", h, m,
-                                            100.0 * static_cast<double>(h) /
-                                                static_cast<double>(h + m));
-        }
 
         // Converting firmware ticks needs the agent; without it we cannot emit KFD
         // timestamps, so fall through to the HSA path (which also handles null agent).

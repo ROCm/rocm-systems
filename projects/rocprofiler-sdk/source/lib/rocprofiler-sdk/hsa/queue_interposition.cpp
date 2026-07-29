@@ -687,9 +687,8 @@ write_interceptor(Queue*                                queue,
             // KFD dispatch-log: capture this kernel packet's HSA queue write index.
             // Inline path is strict 1:1 forwarding (no injected packets), so the
             // write index of packet i is simply base + i. Low 32 bits match the
-            // firmware record's dispatch_id. (Full correlation key + table insert
-            // are wired in the next step; kfd_correlation_key_valid stays false
-            // until then, so behavior is unchanged.)
+            // firmware record's dispatch_id. The doorbell + generation that
+            // complete the correlation key are resolved below.
             _packet_data.hsa_queue_pkt_index = _base_pkt_index + i;
             _packet_data.kfd_dispatch_idx_low32 =
                 static_cast<uint32_t>(_packet_data.hsa_queue_pkt_index & 0xFFFFFFFFULL);

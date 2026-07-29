@@ -133,7 +133,7 @@ drain_pipes(const uint8_t*           records_base,
     if(region_slots == 0 || (region_slots & (region_slots - 1)) != 0) return 0;
 
     // First drain: sync each pipe's read cursor to the current wptr so we do not
-    // replay pre-existing records (mirrors the reference dmabuf_drain_init).
+    // replay pre-existing records.
     if(!state.rptr_init)
     {
         for(uint32_t p = 0; p < npipes; ++p)

@@ -66,7 +66,7 @@ struct fake_ring
              uint32_t doorbell_off,
              uint64_t ts)
     {
-        uint64_t slot = static_cast<uint64_t>(region) * rrc + (idx & (rrc - 1));
+        uint64_t  slot = static_cast<uint64_t>(region) * rrc + (idx & (rrc - 1));
         fw_record rec{};
         rec.ts_lo        = static_cast<uint32_t>(ts & 0xFFFFFFFFu);
         rec.ts_hi        = static_cast<uint32_t>(ts >> 32);
@@ -299,8 +299,15 @@ TEST(dlog_drain, invalid_geometry_rejected)
         0u);
 
     // num_regions beyond kMaxRegions (cursor storage) -> reject.
-    EXPECT_EQ(drain_pipes(nullptr, kMaxRegions + 1, 2048, nullptr, nullptr, st, 1000,
-                          rec.on_record(), rec.on_pair()),
+    EXPECT_EQ(drain_pipes(nullptr,
+                          kMaxRegions + 1,
+                          2048,
+                          nullptr,
+                          nullptr,
+                          st,
+                          1000,
+                          rec.on_record(),
+                          rec.on_pair()),
               0u);
 
     // region_record_count not a power of two (3000) -> reject.

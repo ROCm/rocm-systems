@@ -62,7 +62,7 @@ namespace kfd
 namespace
 {
 constexpr int      kEventfdFlags = EFD_CLOEXEC | EFD_NONBLOCK;
-constexpr uint32_t kBufferKb     = 80;  // dlog ring size; matches reference harness default
+constexpr uint32_t kBufferKb     = 80;  // dlog ring size
 
 // fw_record, the 20-byte record layout, the kRec* type constants, kFwRecBytes, the
 // drain_state cursor bookkeeping, and the drain_pipes() logic all live in the
@@ -83,9 +83,9 @@ round_up_page(size_t x)
     return (x + p - 1) & ~(p - 1);
 }
 
-// One dispatch-log data-ring session for a single GPU. The reader (as the
-// in-process target+profiler in Mode 1) allocates a GTT buffer, registers it,
-// opens a RAW_MMAP stream against its own pid, and mmaps the layout.
+// One dispatch-log data-ring session for a single GPU. The reader allocates a
+// GTT buffer, registers it, opens a RAW_MMAP stream against its own pid, and
+// mmaps the layout.
 struct dlog_session
 {
     uint32_t gpu_id       = 0;
@@ -173,9 +173,7 @@ get_gpuvm_aperture(int kfd, uint32_t gpu_id, uint64_t* base, uint64_t* limit)
 // EOPNOTSUPP -- the driver only maps stream buffers it owns. Using HSA would
 // therefore force the READ_RECORDS consumption mode (a kernel-mediated copy per
 // drain), abandoning the zero-copy read that is the feature's whole overhead
-// advantage. This raw-KFD + RAW_MMAP combination matches the validated reference
-// (test-framework dlog_stream_test.cpp). See design notes and
-// ~/kfd_probe/verify_hsa_alloc.cpp for the EOPNOTSUPP evidence.
+// advantage. Hence the raw-KFD + RAW_MMAP path.
 //
 // Forward declaration: setup_session arms a scope_destructor that unwinds
 // partially-acquired resources via teardown_session on any failure return after
@@ -366,25 +364,6 @@ drain_records(dlog_session* s)
     auto* wptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.wptr_offset);
     auto* rptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.rptr_offset);
 
-    {
-        // DBGWPTR: does the ring advance at all? Print wptr[]/rptr[] when any wptr moves.
-        static uint64_t s_last[8] = {0};
-        const uint32_t  np        = s->info.num_regions <= 8 ? s->info.num_regions : 8;
-        bool            moved     = false;
-        for(uint32_t p = 0; p < np; ++p)
-            if(wptr_arr[p] != s_last[p]) moved = true;
-        if(moved)
-        {
-            std::string line;
-            for(uint32_t p = 0; p < np; ++p)
-            {
-                line += fmt::format("p{}:w={},r={} ", p, wptr_arr[p], rptr_arr[p]);
-                s_last[p] = wptr_arr[p];
-            }
-            ROCP_WARNING << "DBGWPTR " << line;
-        }
-    }
-
     return drain_pipes(
         recs,
         s->info.num_regions,
@@ -562,8 +541,8 @@ ensure_reader_session(uint32_t gpu_id)
         return;                // lost the race; someone set it up
     if(st.kfd_fd < 0) return;  // reader not started
 
-    // Step 2 scope: one session for the first supported GPU. (This gpu_id is
-    // supported per the guard above.)
+    // One session for the first supported GPU. (This gpu_id is supported per the
+    // guard above.)
     if(setup_session(st.kfd_fd, gpu_id, &st.session))
         st.session_ready.store(true, std::memory_order_release);
 }

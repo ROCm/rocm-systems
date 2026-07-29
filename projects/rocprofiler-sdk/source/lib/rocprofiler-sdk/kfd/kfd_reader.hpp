@@ -56,11 +56,10 @@ stop_kfd_reader();
 // session's HSA allocation needs. No-op if KFD dispatch-log is unavailable or the
 // GPU is unsupported.
 //
-// Scope (current): a SINGLE process-wide session, established for the first
-// supported GPU that calls this. Once that session is up, subsequent calls
-// (including for a different gpu_id) are a no-op -- a second GPU does not get its
-// own session and its dispatches fall back to HSA. Multi-GPU sessions are a
-// documented follow-up, not implemented here.
+// Scope: a SINGLE process-wide session, established for the first supported GPU
+// that calls this. Once that session is up, subsequent calls (including for a
+// different gpu_id) are a no-op -- a second GPU does not get its own session and
+// its dispatches fall back to HSA. Multi-GPU sessions are not supported.
 void
 ensure_reader_session(uint32_t gpu_id);
 }  // namespace kfd

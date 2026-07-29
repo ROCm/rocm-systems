@@ -76,7 +76,7 @@ doorbell_ptr_to_page_slot(uint64_t hardware_doorbell_ptr, uint64_t page_size)
     return static_cast<uint32_t>((hardware_doorbell_ptr & (page_size - 1)) >> 2);
 }
 // Snapshot of a queue's doorbell identity, valid at the moment get_by_queue()
-// was called. Captured into packet_data_t at enqueue time (later phase) so the
+// was called. Captured into packet_data_t at enqueue time so the
 // completion path uses a stable key.
 struct queue_doorbell_entry
 {
