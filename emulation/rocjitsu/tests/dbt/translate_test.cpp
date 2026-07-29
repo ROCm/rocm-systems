@@ -10741,28 +10741,6 @@ TEST(BinaryTranslatorE2E, Gfx1250CopiesA0CompatibleLowPrecisionSwmmac) {
   EXPECT_EQ(std::memcmp(text[0]->data(), swmmac.data(), 2 * sizeof(uint32_t)), 0);
 }
 
-TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnFlatScratchBaseHi64BitSource) {
-  // A 64-bit scalar source using the special FLAT_SCRATCH_BASE_HI value (encoding
-  // 231) is not supported on this target and must fail closed rather than copy the
-  // instruction through unchanged. s_mov_b64 reads a 64-bit source.
-  constexpr uint16_t kFlatScratchBaseHi = 231;
-  constexpr auto mov64 =
-      gfx1250::build_sop1(gfx1250::kSMovB64Sop1, {.ssrc0 = kFlatScratchBaseHi, .sdst = 0});
-  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  auto image =
-      rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({mov64[0], kGfx1250SEndpgm});
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
-  ASSERT_TRUE(source.is_valid());
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
-  auto result = translator.translate(source);
-
-  EXPECT_FALSE(result.ok());
-  EXPECT_EQ(result.elf_bytes, image) << "a fail-closed translation must leave the object unchanged";
-}
-
 TEST(BinaryTranslatorE2E, Gfx1250Allows32BitFlatScratchBaseHiSource) {
   // The same special value in a 32-bit source position is unaffected; s_mov_b32
   // must translate cleanly (identity, same-arch stepping copy).
@@ -13181,4 +13159,372 @@ TEST(KernelDescriptorTranslator, IgnoresNonAllocExecutableSectionsForEntryRange)
       image, shdrs[1].sh_offset, shdrs[1].sh_size, rocjitsu::KernelDescriptorTranslationOptions{});
   EXPECT_TRUE(translations.empty())
       << "non-loadable executable sections must not extend valid kernel entry range";
+}
+
+namespace {
+
+/// @brief Scalar selector naming the low half of the flat-scratch base.
+constexpr uint16_t kFlatScratchBaseLoSelector = 230;
+/// @brief Scalar selector naming the high half of the flat-scratch base.
+constexpr uint16_t kFlatScratchBaseHiSelector = 231;
+
+/// @brief Translate a single-instruction gfx1250 kernel with the B0-to-A0 profile.
+[[nodiscard]] std::vector<uint32_t> translate_gfx1250_b0_to_a0_words(std::vector<uint32_t> words) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  words.push_back(kGfx1250SEndpgm);
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  auto result = translator.translate(source);
+  EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  if (!result.ok())
+    return {};
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  EXPECT_FALSE(translated.text_sections().empty());
+  if (translated.text_sections().empty())
+    return {};
+  const auto *section = translated.text_sections()[0];
+  const auto *target_words = reinterpret_cast<const uint32_t *>(section->data());
+  return std::vector<uint32_t>(target_words, target_words + section->size() / sizeof(uint32_t));
+}
+
+} // namespace
+
+// A scalar 64-bit read reaches the whole flat-scratch base through either
+// selector. The A0 profile spells it with the low selector, so the high
+// selector is rewritten in place and the instruction keeps its size.
+TEST(BinaryTranslatorE2E, Gfx1250RewritesScalarFlatScratchBase64BitSourceForA0) {
+  const auto source =
+      gfx1250::build_sop1(gfx1250::kSMovB64Sop1,
+                          {.ssrc0 = static_cast<uint8_t>(kFlatScratchBaseHiSelector), .sdst = 10});
+  const auto out = translate_gfx1250_b0_to_a0_words({source[0]});
+  ASSERT_GE(out.size(), 2u);
+
+  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector)
+      << "the scalar read must use the low selector on A0";
+  // Only the source selector changes: destination, opcode, and encoding stay.
+  EXPECT_EQ(out[0] & ~0xffu, source[0] & ~0xffu);
+  EXPECT_EQ(out.size(), 2u) << "a scalar rewrite must not add instructions";
+}
+
+// A 64-bit read in the first scalar source position of a two-source encoding.
+TEST(BinaryTranslatorE2E, Gfx1250RewritesScalarFlatScratchBaseInFirstSourceOfSop2ForA0) {
+  const auto source = gfx1250::build_sop2(
+      gfx1250::kSLshlB64Sop2,
+      {.ssrc0 = static_cast<uint8_t>(kFlatScratchBaseHiSelector), .ssrc1 = 130, .sdst = 12});
+  const auto out = translate_gfx1250_b0_to_a0_words({source[0]});
+  ASSERT_GE(out.size(), 2u);
+
+  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+  EXPECT_EQ((out[0] >> 8) & 0xffu, 130u) << "the 32-bit shift source is unaffected";
+  EXPECT_EQ(out.size(), 2u);
+}
+
+// The second scalar source position is a separate encoding field, so it needs
+// its own coverage: a rewrite that only ever touched the first would pass every
+// test above.
+TEST(BinaryTranslatorE2E, Gfx1250RewritesScalarFlatScratchBaseInSecondSourceOfSop2ForA0) {
+  constexpr uint8_t kOrdinaryPair = 20;
+  const auto source = gfx1250::build_sop2(
+      gfx1250::kSAndB64Sop2, {.ssrc0 = kOrdinaryPair,
+                              .ssrc1 = static_cast<uint8_t>(kFlatScratchBaseHiSelector),
+                              .sdst = 12});
+  const auto out = translate_gfx1250_b0_to_a0_words({source[0]});
+  ASSERT_GE(out.size(), 2u);
+
+  EXPECT_EQ(out[0] & 0xffu, kOrdinaryPair) << "the first source is untouched";
+  EXPECT_EQ((out[0] >> 8) & 0xffu, kFlatScratchBaseLoSelector)
+      << "the second source must use the low selector on A0";
+  EXPECT_EQ(out.size(), 2u) << "a scalar rewrite must not add instructions";
+}
+
+// The two-source scalar compare is the remaining modelled scalar encoding, and
+// each of its fields is separate from the ones covered above.
+TEST(BinaryTranslatorE2E, Gfx1250RewritesScalarFlatScratchBaseInBothSourcesOfSopcForA0) {
+  constexpr uint8_t kOrdinaryPair = 20;
+  struct SopcCase {
+    const char *name;
+    uint8_t ssrc0;
+    uint8_t ssrc1;
+    uint32_t expected_ssrc0;
+    uint32_t expected_ssrc1;
+  };
+  const SopcCase cases[] = {
+      {"first source", static_cast<uint8_t>(kFlatScratchBaseHiSelector), kOrdinaryPair,
+       kFlatScratchBaseLoSelector, kOrdinaryPair},
+      {"second source", kOrdinaryPair, static_cast<uint8_t>(kFlatScratchBaseHiSelector),
+       kOrdinaryPair, kFlatScratchBaseLoSelector},
+      {"both sources", static_cast<uint8_t>(kFlatScratchBaseHiSelector),
+       static_cast<uint8_t>(kFlatScratchBaseHiSelector), kFlatScratchBaseLoSelector,
+       kFlatScratchBaseLoSelector},
+  };
+  for (const SopcCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto source = gfx1250::build_sopc(gfx1250::kSCmpEqU64Sopc,
+                                            {.ssrc0 = test_case.ssrc0, .ssrc1 = test_case.ssrc1});
+    const auto out = translate_gfx1250_b0_to_a0_words({source[0]});
+    ASSERT_GE(out.size(), 2u);
+
+    EXPECT_EQ(out[0] & 0xffu, test_case.expected_ssrc0);
+    EXPECT_EQ((out[0] >> 8) & 0xffu, test_case.expected_ssrc1);
+    EXPECT_EQ(out.size(), 2u) << "a scalar rewrite must not add instructions";
+  }
+}
+
+// The single-source vector encoding is the last modelled layout without
+// coverage. Its source is nine bits wide, so it reaches the selector and takes
+// the staged pair like the other vector forms.
+TEST(BinaryTranslatorE2E, Gfx1250MovesFlatScratchBaseInSingleSourceVectorFormToSgprPairForA0) {
+  const auto source =
+      gfx1250::build_vop1(gfx1250::kVMovB64Vop1, {.src0 = kFlatScratchBaseHiSelector, .vdst = 4});
+  const auto out = translate_gfx1250_b0_to_a0_words({source[0]});
+  ASSERT_GE(out.size(), 3u) << "the rewrite prepends one scalar move";
+
+  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
+  EXPECT_EQ(out[1] & 0x1ffu, pair_base) << "the vector source must name the borrowed pair";
+}
+
+// Two affected positions in one instruction share a single borrowed pair. This
+// is the only direct check that the prologue is emitted once rather than once
+// per rewritten source.
+TEST(BinaryTranslatorE2E, Gfx1250SharesOneBorrowedPairAcrossTwoVectorSourcesForA0) {
+  const auto source = gfx1250::build_vop3(
+      gfx1250::kVAddNcU64Vop3,
+      {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = kFlatScratchBaseHiSelector});
+  const auto out = translate_gfx1250_b0_to_a0_words({source[0], source[1]});
+  ASSERT_GE(out.size(), 4u);
+
+  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+
+  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
+  EXPECT_EQ((out[2] >> 9) & 0x1ffu, pair_base) << "src1 must name the same pair";
+  EXPECT_EQ(out.size(), 4u) << "one move serves both positions, so only one is emitted";
+}
+
+// The third source is the last modelled field and the only one no other case
+// reaches, so a rewrite that walked just the first two would pass every test
+// above.
+TEST(BinaryTranslatorE2E, Gfx1250MovesFlatScratchBaseInThirdVectorSourceToSgprPairForA0) {
+  const auto source = gfx1250::build_vop3(
+      gfx1250::kVFmaF64Vop3,
+      {.vdst = 0, .src0 = 256 + 2, .src1 = 256 + 4, .src2 = kFlatScratchBaseHiSelector});
+  const auto out = translate_gfx1250_b0_to_a0_words({source[0], source[1]});
+  ASSERT_GE(out.size(), 4u) << "the rewrite prepends one scalar move";
+
+  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
+
+  EXPECT_EQ(out[2] & 0x1ffu, 256u + 2u) << "src0 is unchanged";
+  EXPECT_EQ((out[2] >> 9) & 0x1ffu, 256u + 4u) << "src1 is unchanged";
+  EXPECT_EQ((out[2] >> 18) & 0x1ffu, pair_base) << "src2 must name the borrowed pair";
+}
+
+// VOP3P carries packed 64-bit sources through nine-bit fields, so it reaches
+// the selector exactly as VOP3 does. Leaving it unmodelled would send it to the
+// conservative scan, which skips vector-typed operands and would copy the
+// instruction through unchanged.
+TEST(BinaryTranslatorE2E, Gfx1250MovesVop3pFlatScratchBaseSourceToSgprPairForA0) {
+  const auto source = gfx1250::build_vop3p(
+      gfx1250::kVPkMulF32Vop3p, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 258});
+  const auto out = translate_gfx1250_b0_to_a0_words({source[0], source[1]});
+  ASSERT_GE(out.size(), 4u) << "the rewrite prepends one scalar move";
+
+  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
+
+  EXPECT_EQ(out[1], source[0]) << "the first word is unchanged";
+  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
+  EXPECT_EQ((out[2] >> 9) & 0x1ffu, 258u) << "src1 is unchanged";
+}
+
+// A decoder may report more sources than the encoding has source fields: an
+// accumulate form repeats its destination and a literal takes a position of its
+// own. Neither can carry the selector, so their presence must not by itself
+// refuse the rewrite.
+TEST(BinaryTranslatorE2E, Gfx1250RewritesCompactFormsWithExtraDecodedOperandsForA0) {
+  struct ExtraOperandCase {
+    const char *name;
+    std::vector<uint32_t> words;
+  };
+  const std::vector<ExtraOperandCase> cases = {
+      {"destination alias",
+       {gfx1250::build_vop2(gfx1250::kVFmacF64Vop2,
+                            {.src0 = kFlatScratchBaseHiSelector, .vsrc1 = 2})[0]}},
+  };
+  for (const ExtraOperandCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto out = translate_gfx1250_b0_to_a0_words(test_case.words);
+    ASSERT_GE(out.size(), 3u) << "the rewrite prepends one scalar move";
+
+    ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+    EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+    const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+    EXPECT_EQ(out[1] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
+    EXPECT_EQ((out[1] >> 9) & 0xffu, 2u) << "the VGPR source is unchanged";
+  }
+}
+
+// With every ordinary scalar register live there is no pair to borrow. The
+// rewrite must fail rather than clobber one, and the object must come back
+// unchanged.
+TEST(BinaryTranslatorE2E, Gfx1250FailsClosedWhenNoDeadSgprPairIsAvailableForA0) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const auto vector_read = gfx1250::build_vop3(
+      gfx1250::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
+  std::vector<uint32_t> words = {vector_read[0], vector_read[1]};
+  // Reading every ordinary scalar register after the rewrite keeps them all
+  // live across it, so the allocator has nothing to take.
+  for (uint16_t base = 0; base + 1 <= 101; base += 2) {
+    words.push_back(
+        gfx1250::build_sop2(gfx1250::kSAndB32Sop2, {.ssrc0 = static_cast<uint8_t>(base),
+                                                    .ssrc1 = static_cast<uint8_t>(base + 1),
+                                                    .sdst = 102})[0]);
+  }
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_FALSE(result.dispatchable());
+  EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::ExpandFailed,
+      "flat-scratch-base rewrite could not allocate a dead SGPR pair"));
+}
+
+// An unmodelled encoding carrying a wide vector register whose number equals
+// the selector must still be copied; only genuine scalar reads are refused.
+TEST(BinaryTranslatorE2E, Gfx1250LeavesWideVgprMatchingSelectorNumberUnchangedForA0) {
+  constexpr uint8_t kVgprMatchingSelector = 231;
+  // A NULL scalar base makes the address a 64-bit vector pair, which is a
+  // source operand of exactly the affected width.
+  constexpr uint8_t kNullScalarBase = 124;
+  const auto load =
+      gfx1250::build_vglobal(gfx1250::kGlobalLoadB64Vglobal,
+                             {.saddr = kNullScalarBase, .vdst = 0, .vaddr = kVgprMatchingSelector});
+  const auto out = translate_gfx1250_b0_to_a0_words({load[0], load[1], load[2]});
+  ASSERT_GE(out.size(), 4u);
+  EXPECT_EQ(out[0], load[0]);
+  EXPECT_EQ(out[1], load[1]);
+  EXPECT_EQ(out[2], load[2]);
+}
+
+// With the low registers live the rewrite must borrow from above them. The
+// scalar file is fixed on this target rather than descriptor-allocated, so the
+// requirement is that the borrowed pair stays inside the architectural file.
+TEST(BinaryTranslatorE2E, Gfx1250BorrowsFlatScratchBasePairAboveLiveRegistersForA0) {
+  constexpr uint16_t kHighestOrdinarySgpr = 101;
+  const auto vector_read = gfx1250::build_vop3(
+      gfx1250::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
+  std::vector<uint32_t> words = {vector_read[0], vector_read[1]};
+  // Reading s0..s7 after the rewrite keeps them live across it, so the
+  // allocator cannot choose any of them.
+  for (uint8_t base = 0; base < 8; base += 2) {
+    words.push_back(gfx1250::build_sop2(
+        gfx1250::kSAndB32Sop2,
+        {.ssrc0 = base, .ssrc1 = static_cast<uint8_t>(base + 1), .sdst = 20})[0]);
+  }
+  const auto out = translate_gfx1250_b0_to_a0_words(words);
+  ASSERT_GE(out.size(), 3u);
+
+  ASSERT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_GE(pair_base, 8u) << "s0..s7 are live, so the pair must sit above them";
+  EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
+  EXPECT_LE(pair_base + 1u, kHighestOrdinarySgpr)
+      << "the borrowed pair must stay inside the ordinary scalar file";
+  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "the vector read must name the borrowed pair";
+}
+
+// The compact vector formats reach the same rewrite as their VOP3 forms.
+TEST(BinaryTranslatorE2E, Gfx1250MovesCompactVectorFlatScratchBaseSourceToSgprPairForA0) {
+  struct CompactCase {
+    const char *name;
+    std::vector<uint32_t> words;
+  };
+  const std::vector<CompactCase> cases = {
+      {"vop2",
+       {gfx1250::build_vop2(gfx1250::kVAddNcU64Vop2,
+                            {.src0 = kFlatScratchBaseHiSelector, .vsrc1 = 2})[0]}},
+      {"vopc",
+       {gfx1250::build_vopc(gfx1250::kVCmpEqU64Vopc,
+                            {.src0 = kFlatScratchBaseHiSelector, .vsrc1 = 2})[0]}},
+  };
+  for (const CompactCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto out = translate_gfx1250_b0_to_a0_words(test_case.words);
+    ASSERT_GE(out.size(), 3u) << "the rewrite prepends one scalar move";
+
+    EXPECT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+    EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+    const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+    EXPECT_EQ(pair_base % 2u, 0u);
+
+    EXPECT_EQ(out[1] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
+    EXPECT_EQ((out[1] >> 9) & 0xffu, 2u) << "the VGPR source is unchanged";
+  }
+}
+
+// The compact formats decode their second source as a plain VGPR index, so a
+// VGPR whose number matches the selector must not be mistaken for it.
+TEST(BinaryTranslatorE2E, Gfx1250LeavesCompactVgprMatchingSelectorNumberUnchangedForA0) {
+  constexpr uint8_t kVgprMatchingSelector = 231;
+  const std::vector<uint32_t> sources = {
+      gfx1250::build_vop2(gfx1250::kVAddNcU64Vop2,
+                          {.src0 = 256 + 4, .vsrc1 = kVgprMatchingSelector})[0],
+      gfx1250::build_vopc(gfx1250::kVCmpEqU64Vopc,
+                          {.src0 = 256 + 4, .vsrc1 = kVgprMatchingSelector})[0],
+  };
+  for (const uint32_t source_word : sources) {
+    SCOPED_TRACE(source_word);
+    const auto out = translate_gfx1250_b0_to_a0_words({source_word});
+    ASSERT_GE(out.size(), 2u);
+    EXPECT_EQ(out[0], source_word) << "an ordinary VGPR must be copied verbatim";
+  }
+}
+
+// A vector 64-bit read cannot name the selector on A0, so the base is moved
+// into a dead SGPR pair and the source position is repointed at that pair.
+TEST(BinaryTranslatorE2E, Gfx1250MovesVectorFlatScratchBase64BitSourceToSgprPairForA0) {
+  const auto source = gfx1250::build_vop3(
+      gfx1250::kVAddNcU64Vop3, {.vdst = 0, .src0 = kFlatScratchBaseHiSelector, .src1 = 256 + 2});
+  const auto out = translate_gfx1250_b0_to_a0_words({source[0], source[1]});
+  ASSERT_GE(out.size(), 4u) << "the rewrite prepends one scalar move";
+
+  // The prologue is a 64-bit scalar read of the base through the low selector.
+  const auto expected_prologue_op = static_cast<uint32_t>(gfx1250::kSMovB64Sop1);
+  EXPECT_EQ((out[0] >> 23) & 0x1ffu, 381u) << "prologue must be a SOP1 instruction";
+  EXPECT_EQ((out[0] >> 8) & 0xffu, expected_prologue_op);
+  EXPECT_EQ(out[0] & 0xffu, kFlatScratchBaseLoSelector);
+
+  const uint32_t pair_base = (out[0] >> 16) & 0x7fu;
+  EXPECT_EQ(pair_base % 2u, 0u) << "a 64-bit scalar operand must be even-aligned";
+  EXPECT_LE(pair_base + 1u, 105u) << "the borrowed pair must be an ordinary SGPR pair";
+
+  // The vector instruction now reads that pair; its other operands are intact.
+  EXPECT_EQ(out[1] & 0xffffu, source[0] & 0xffffu) << "vdst and modifiers are unchanged";
+  EXPECT_EQ(out[2] & 0x1ffu, pair_base) << "src0 must name the borrowed pair";
+  EXPECT_EQ((out[2] >> 9) & 0x1ffu, 256u + 2u) << "src1 is unchanged";
 }
