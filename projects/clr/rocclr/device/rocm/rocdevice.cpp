@@ -1786,6 +1786,12 @@ bool Device::populateOCLDeviceConstants() {
   std::ignore = Hsa::system_get_info(
                     static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED),
                     &info_.dmabufSupported_);
+
+  // Check Support for host-allocated dma_buf buffer sharing. This is a CPU-agent query
+  // (HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED), distinct from the system query above.
+  // hostVmemSupported() issues that agent query and degrades to false on older ROCr.
+  info_.hostAllocDmabufSupported_ = hostVmemSupported(-1);
+
   // devices with no cluster support; max size is 0
   info_.clusterMaxSize_ = 0;
 
