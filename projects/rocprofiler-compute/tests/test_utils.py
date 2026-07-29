@@ -1066,7 +1066,7 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
     assert any("No native counter CSV for pid 12345" in m for m in debug_msgs)
 
 
-def _stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
+def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
     """Run run_prof against a canned counter CSV instead of a real profiler."""
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr(
