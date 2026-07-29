@@ -68,7 +68,21 @@ def retry(max_attempts, delay_seconds, exceptions):
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError))
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
-    """Returns the paths of modified files relative to the base reference."""
+    """Returns the paths of modified files relative to the base reference.
+
+    TEST OVERRIDE: when TEST_OVERRIDE_CHANGED_PROJECTS is set (space- or
+    comma-separated project paths, e.g. "projects/amdsmi"), detection is
+    bypassed and those paths are returned as the modified set. This scopes CI
+    deterministically regardless of which files a PR touches, which is useful
+    when repointing the workflow chain to a TheRock fork (the workflow-file
+    edits would otherwise fan CI out to all subtrees).
+    TODO(aendurth): Remove after testing the TheRock fork branch.
+    """
+    override = os.environ.get("TEST_OVERRIDE_CHANGED_PROJECTS", "").strip()
+    if override:
+        paths = [p for p in override.replace(",", " ").split() if p]
+        logging.info(f"TEST_OVERRIDE_CHANGED_PROJECTS set, using paths: {paths}")
+        return paths
     return subprocess.run(
         ["git", "diff", "--name-only", base_ref],
         stdout=subprocess.PIPE,
@@ -529,6 +543,11 @@ if __name__ == "__main__":
     )
 
     input_subtrees = os.getenv("SUBTREES", "")
+    # TEST OVERRIDE: when forcing changed projects, ignore SUBTREES from the
+    # detect step so the override is the sole source of scope on the PR path.
+    # TODO(aendurth): Remove after testing the TheRock fork branch.
+    if os.environ.get("TEST_OVERRIDE_CHANGED_PROJECTS", "").strip():
+        input_subtrees = ""
     args["input_subtrees"] = input_subtrees
 
     input_projects = os.getenv("PROJECTS", "")

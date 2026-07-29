@@ -471,6 +471,26 @@ class ConfigureCITest(unittest.TestCase):
         self.assertIn("DTHEROCK_ENABLE_STORAGE_LIBS=ON", cmake_options)
         self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
 
+    def test_override_changed_projects_scopes_to_amdsmi(self):
+        """TEST_OVERRIDE_CHANGED_PROJECTS bypasses git-diff detection and scopes
+        CI to the given project(s), independent of the actual PR diff."""
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "linux",
+        }
+
+        with patch.dict(
+            os.environ, {"TEST_OVERRIDE_CHANGED_PROJECTS": "projects/amdsmi"}
+        ):
+            project_to_run, _ = therock_configure_ci.retrieve_projects(args)
+
+        # projects/amdsmi maps to the "core" project.
+        self.assertEqual(len(project_to_run), 1)
+        cmake_options = project_to_run[0]["cmake_options"]
+        self.assertIn("DTHEROCK_ENABLE_CORE=ON", cmake_options)
+        self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
+
     @patch("therock_configure_ci.get_modified_paths")
     def test_hipfile_pr_skips_windows_ci(self, mock_get_modified):
         """PR with only hipfile changes should not trigger Windows CI (Linux-only component)."""

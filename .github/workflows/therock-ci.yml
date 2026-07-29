@@ -79,9 +79,11 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
+          # TEST: fork branch with amdsmi CMakeLists changes
+          # TODO(aendurth): revert to ROCm/TheRock @ pinned SHA after testing
+          repository: "endurthiabhilash/TheRock"
           path: TheRock
-          ref: 2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
+          ref: users/aendurth/amdsmi-test-subprojects-all
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -116,6 +118,10 @@ jobs:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "linux"
+          # TEST OVERRIDE: force amdsmi scope regardless of PR diff so the
+          # workflow-file edits (repointing to the fork) don't fan CI out to
+          # all subtrees. TODO(aendurth): Remove after testing the fork branch.
+          TEST_OVERRIDE_CHANGED_PROJECTS: "projects/amdsmi"
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -125,6 +131,10 @@ jobs:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "windows"
+          # TEST OVERRIDE: force amdsmi scope regardless of PR diff so the
+          # workflow-file edits (repointing to the fork) don't fan CI out to
+          # all subtrees. TODO(aendurth): Remove after testing the fork branch.
+          TEST_OVERRIDE_CHANGED_PROJECTS: "projects/amdsmi"
         run: |
           python .github/scripts/therock_configure_ci.py
 
