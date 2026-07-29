@@ -179,6 +179,8 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughVerifiedNopRelays) {
   EXPECT_EQ(routing.greedy_pair_fallback_attempt_count, 0u);
   EXPECT_GT(routing.search_work_count, 0u);
   EXPECT_GT(routing.scan_work_count, 0u);
+  EXPECT_TRUE(branch_only_reservoir_telemetry_is_empty(
+      result.flat_selection_telemetry->branch_only_reservoir_telemetry));
 }
 
 TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
@@ -231,6 +233,15 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   EXPECT_EQ(result.flat_selection_telemetry->discarded_branch_only_routing.plan_call_count, 0u);
   EXPECT_GT(routing.search_work_count, 0u);
   EXPECT_GT(routing.scan_work_count, 0u);
+  const ConSanBranchOnlyReservoirTelemetry &inventory =
+      result.flat_selection_telemetry->branch_only_reservoir_telemetry;
+  EXPECT_GE(inventory.planned_reservoir_count, 1u);
+  EXPECT_EQ(inventory.used_reservoir_count, 1u);
+  EXPECT_EQ(inventory.planned_reservoir_count,
+            inventory.used_reservoir_count + inventory.unused_reservoir_count);
+  EXPECT_EQ(inventory.planned_appended_bytes,
+            inventory.used_appended_bytes + inventory.unused_appended_bytes);
+  EXPECT_EQ(inventory.used_appended_bytes, reservoir->trampoline_size);
 
   ConSanResult malformed = result;
   const auto malformed_reservoir =
@@ -286,6 +297,15 @@ TEST(ConSan, FlatDirectReservoirLosingRetryReportsDiscardedRouting) {
   EXPECT_EQ(selection.discarded_branch_only_routing.entry_route_failure_count, 1u);
   EXPECT_GT(selection.discarded_branch_only_routing.search_work_count, 0u);
   EXPECT_GT(selection.discarded_branch_only_routing.scan_work_count, 0u);
+  EXPECT_TRUE(branch_only_reservoir_telemetry_is_empty(selection.branch_only_reservoir_telemetry));
+  const ConSanBranchOnlyReservoirTelemetry &discarded_reservoirs =
+      selection.discarded_branch_only_reservoir_telemetry;
+  EXPECT_GT(discarded_reservoirs.planned_reservoir_count, 0u);
+  EXPECT_EQ(discarded_reservoirs.used_reservoir_count, 0u);
+  EXPECT_EQ(discarded_reservoirs.planned_reservoir_count,
+            discarded_reservoirs.unused_reservoir_count);
+  EXPECT_EQ(discarded_reservoirs.planned_appended_bytes,
+            discarded_reservoirs.unused_appended_bytes);
 }
 
 TEST(ConSan, FlatDirectReservoirRetryRetainsEarlierRoutingTelemetry) {
@@ -5447,6 +5467,56 @@ TEST(ConSan, CdnaIndirectLdsScalarScratchReservesWholeVccPair) {
   }
 }
 
+TEST(ConSan, Cdna3LdsVccSaveSkipsPartiallyLiveScalarPair) {
+  std::vector<uint32_t> text_words = {
+      0xD81A0000u,
+      0x00000201u, // ds_write_b32 v1, v2
+  };
+  for (uint16_t sgpr = 0u; sgpr < 16u; ++sgpr)
+    text_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_CDNA3));
+  text_words.push_back(
+      build_s_mov_b32(17u, scalar_positive_inline_u32(0u), ROCJITSU_CODE_ARCH_CDNA3));
+  text_words.push_back(0xD3B04004u);
+  text_words.push_back(0x1C0A0810u); // v_pk_fma_f32 v[4:5], s[16:17], v[4:5], v[2:3]
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+
+  std::vector<uint8_t> bytes = make_cdna3_lds_code_object(text_words, "cdna3_partial_scalar_pair");
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 2u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 15u;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveLdsStoreCheckTrap,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.patches);
+  ASSERT_GE(patch->required_sgpr_count, 2u);
+  const uint16_t vcc_save = static_cast<uint16_t>(patch->required_sgpr_count - 2u);
+  EXPECT_EQ(vcc_save, 18u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> body =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const auto save_vcc =
+      instrumentation::build_s_mov_b64(vcc_save, kRdna4VccLo, ROCJITSU_CODE_ARCH_CDNA3);
+  const auto restore_vcc =
+      instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(save_vcc);
+  ASSERT_TRUE(restore_vcc);
+  EXPECT_NE(std::ranges::find(body, *save_vcc), body.end());
+  EXPECT_NE(std::ranges::find(body, *restore_vcc), body.end());
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModePartitionsLongLocalCaveIntoEntryIslands) {
   constexpr size_t kLargeTextWords = 33000u;
   std::vector<uint32_t> text_words = {
@@ -5532,42 +5602,61 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   ASSERT_TRUE(first_host->indirect_pc_sgpr);
   ASSERT_TRUE(first_host->indirect_saved_scc_sgpr);
   const uint64_t first_host_word = first_host->anchor_offset / sizeof(uint32_t);
-  ASSERT_LE(first_host_word + 11u, text_words.size());
-  std::vector<uint32_t> live_out_words = text_words;
+  ASSERT_LE(first_host_word + 17u, text_words.size());
   const uint16_t jump_pc = *first_host->indirect_pc_sgpr;
-  const uint16_t saved_scc = *first_host->indirect_saved_scc_sgpr;
-  // Define the return scratch inside the eight displaced words and consume it
-  // immediately afterward. It is dead at host entry but live at the appended
-  // return endpoint, so this otherwise-preferred host must be rejected.
-  live_out_words[first_host_word] =
-      build_s_mov_b32(jump_pc, scalar_positive_inline_u32(1u), ROCJITSU_CODE_ARCH_RDNA4);
-  live_out_words[first_host_word + 1u] =
+  // Define only the high half of the return pair inside the eight displaced
+  // words and consume it at the boundary instruction. The tuple is dead at
+  // host entry but partially live at the appended return endpoint, so this
+  // otherwise-preferred host must be rejected.
+  std::vector<uint32_t> boundary_partial_words = text_words;
+  boundary_partial_words[first_host_word] =
       build_s_mov_b32(static_cast<uint16_t>(jump_pc + 1u), scalar_positive_inline_u32(1u),
                       ROCJITSU_CODE_ARCH_RDNA4);
-  live_out_words[first_host_word + 2u] =
-      build_s_mov_b32(saved_scc, scalar_positive_inline_u32(1u), ROCJITSU_CODE_ARCH_RDNA4);
-  live_out_words[first_host_word + 8u] = build_s_mov_b32(105u, jump_pc, ROCJITSU_CODE_ARCH_RDNA4);
-  live_out_words[first_host_word + 9u] =
+  boundary_partial_words[first_host_word + 8u] =
       build_s_mov_b32(105u, static_cast<uint16_t>(jump_pc + 1u), ROCJITSU_CODE_ARCH_RDNA4);
-  live_out_words[first_host_word + 10u] =
-      build_s_mov_b32(105u, saved_scc, ROCJITSU_CODE_ARCH_RDNA4);
 
-  const ConSanResult live_out_result = try_patch_consan(
-      make_rdna4_lds_code_object(live_out_words, "rdna4_dense_live_out_host"), options);
+  const ConSanResult boundary_partial_result = try_patch_consan(
+      make_rdna4_lds_code_object(boundary_partial_words, "rdna4_dense_boundary_partial_host"),
+      options);
 
-  ASSERT_TRUE(consan_patch_succeeded(live_out_result))
-      << testing::PrintToString(live_out_result.errors);
-  ASSERT_TRUE(live_out_result.modified) << testing::PrintToString(live_out_result.warnings);
-  const auto replacement_host = std::ranges::find(
-      live_out_result.patches, ConSanPatchKind::TrampolineScDenseEntryHost, &ConSanPatchInfo::kind);
-  ASSERT_NE(replacement_host, live_out_result.patches.end());
-  ASSERT_TRUE(replacement_host->indirect_pc_sgpr);
-  ASSERT_TRUE(replacement_host->indirect_saved_scc_sgpr);
-  EXPECT_NE(replacement_host->anchor_offset, first_host->anchor_offset)
+  ASSERT_TRUE(consan_patch_succeeded(boundary_partial_result))
+      << testing::PrintToString(boundary_partial_result.errors);
+  ASSERT_TRUE(boundary_partial_result.modified)
+      << testing::PrintToString(boundary_partial_result.warnings);
+  const auto boundary_replacement_host =
+      std::ranges::find(boundary_partial_result.patches,
+                        ConSanPatchKind::TrampolineScDenseEntryHost, &ConSanPatchInfo::kind);
+  ASSERT_NE(boundary_replacement_host, boundary_partial_result.patches.end());
+  ASSERT_TRUE(boundary_replacement_host->indirect_pc_sgpr);
+  ASSERT_TRUE(boundary_replacement_host->indirect_saved_scc_sgpr);
+  EXPECT_NE(boundary_replacement_host->anchor_offset, first_host->anchor_offset)
       << "first jump=" << *first_host->indirect_pc_sgpr
       << " first scc=" << *first_host->indirect_saved_scc_sgpr
-      << " replacement jump=" << *replacement_host->indirect_pc_sgpr
-      << " replacement scc=" << *replacement_host->indirect_saved_scc_sgpr;
+      << " replacement jump=" << *boundary_replacement_host->indirect_pc_sgpr
+      << " replacement scc=" << *boundary_replacement_host->indirect_saved_scc_sgpr;
+
+  // Split the block immediately after the displaced prefix with a backward
+  // branch whose target is the high-half consumer. This leaves no boundary
+  // instruction in the host block, so the same partial tuple must be rejected
+  // through block live-out.
+  std::vector<uint32_t> block_exit_partial_words = boundary_partial_words;
+  constexpr int16_t kBranchDistanceDwords = -9;
+  block_exit_partial_words[first_host_word + 16u] =
+      build_s_branch(kBranchDistanceDwords, ROCJITSU_CODE_ARCH_RDNA4);
+
+  const ConSanResult block_exit_partial_result = try_patch_consan(
+      make_rdna4_lds_code_object(block_exit_partial_words, "rdna4_dense_block_exit_partial_host"),
+      options);
+
+  ASSERT_TRUE(consan_patch_succeeded(block_exit_partial_result))
+      << testing::PrintToString(block_exit_partial_result.errors);
+  ASSERT_TRUE(block_exit_partial_result.modified)
+      << testing::PrintToString(block_exit_partial_result.warnings);
+  const auto block_exit_replacement_host =
+      std::ranges::find(block_exit_partial_result.patches,
+                        ConSanPatchKind::TrampolineScDenseEntryHost, &ConSanPatchInfo::kind);
+  ASSERT_NE(block_exit_replacement_host, block_exit_partial_result.patches.end());
+  EXPECT_NE(block_exit_replacement_host->anchor_offset, first_host->anchor_offset);
 }
 
 TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {
@@ -6686,6 +6775,58 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
   const auto reservoir = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(reservoir, result.patches.end());
+  // Discovery, one optimistic owner selection, and the final
+  // materialized-only replay must each run exactly once.
+  EXPECT_EQ(result.lds_branch_only_routing_telemetry.plan_call_count, 3u);
+  // Owner-affinity preprocessing proves the one-owner lower bound here, so
+  // branch-and-bound search is unnecessary. Its independent scan counter
+  // still verifies that the LDS owner keys reached the shared router.
+  EXPECT_GT(result.lds_branch_only_routing_telemetry.route_optimization_scan_work_count, 0u);
+}
+
+TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
+  constexpr size_t kTextWords = 44020u;
+  constexpr size_t kSecondSiteWord = 12000u;
+  constexpr auto load = gfx1250::build_vds(gfx1250::kDsLoadB32Vds, {.addr = 2, .vdst = 1});
+  std::vector<uint32_t> text_words(kTextWords,
+                                   build_s_mov_b32(100, 100, ROCJITSU_CODE_ARCH_GFX1250));
+  const auto place_full_scalar_pressure_site = [&](size_t word) {
+    text_words[word] = load[0];
+    text_words[word + 1u] = load[1];
+    for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
+      text_words[word + 2u + sgpr] = build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_GFX1250);
+    }
+  };
+  place_full_scalar_pressure_site(0u);
+  place_full_scalar_pressure_site(kSecondSiteWord);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250);
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_minimized_relay_reservoir_owners");
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3;
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
+            1u);
+  // This layout admits competing optimistic reservoir owners. The nonzero
+  // search count proves that convergence exercised the owner branch-and-bound
+  // pass rather than accepting the binary one-owner lower bound immediately.
+  EXPECT_GT(result.lds_branch_only_routing_telemetry.route_optimization_search_work_count, 0u);
+  // Discovery, the minimized optimistic-owner selection, and the final
+  // materialized-only replay converge in three bounded planner calls.
+  EXPECT_EQ(result.lds_branch_only_routing_telemetry.plan_call_count, 3u);
+  EXPECT_EQ(result.lds_relay_reservoir_telemetry.used_reservoir_count, 1u);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
+                               &ConSanPatchInfo::kind),
+            1u);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughRelocatedAnchorSecondWord) {
@@ -6795,6 +6936,24 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
             (kReservoirWords + kReservoirAppendedOverheadWords) * sizeof(uint32_t));
   ASSERT_TRUE(reservoir->indirect_saved_vcc_sgpr.has_value());
   ASSERT_TRUE(reservoir->indirect_return_saved_vcc_sgpr.has_value());
+  const ConSanBranchOnlyReservoirTelemetry &inventory = result.lds_relay_reservoir_telemetry;
+  EXPECT_GE(inventory.planned_reservoir_count, 1u);
+  EXPECT_EQ(inventory.used_reservoir_count, 1u);
+  EXPECT_EQ(inventory.planned_reservoir_count,
+            inventory.used_reservoir_count + inventory.unused_reservoir_count);
+  EXPECT_EQ(inventory.planned_appended_bytes,
+            inventory.used_appended_bytes + inventory.unused_appended_bytes);
+  EXPECT_EQ(inventory.used_appended_bytes, reservoir->trampoline_size);
+
+  const ConSanResult repeated = try_patch_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(repeated));
+  EXPECT_TRUE(repeated.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(repeated.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_EQ(repeated.lds_branch_only_routing_telemetry, result.lds_branch_only_routing_telemetry);
+  EXPECT_EQ(repeated.lds_relay_reservoir_telemetry, result.lds_relay_reservoir_telemetry);
+  EXPECT_EQ(repeated.elf_bytes, result.elf_bytes);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());

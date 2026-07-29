@@ -337,6 +337,13 @@ TEST(DbiPatchPlacementPlanner, ReservesSequentialAppendedCavesWithExplicitMappin
   EXPECT_EQ(second_placement->return_branch_offset, 324u);
   EXPECT_EQ(second_placement->return_target, 40u);
   EXPECT_EQ(planner.appended_end(), 328u);
+  const std::vector<std::pair<uint64_t, uint64_t>> expected_reservations = {
+      {16u, 24u},
+      {32u, 40u},
+      {256u, 300u},
+      {300u, 328u},
+  };
+  EXPECT_TRUE(std::ranges::equal(planner.occupied_ranges(), expected_reservations));
 }
 
 TEST(DbiPatchPlacementPlanner, PrefersInlineThenLocalAndRejectsOverlapTransactionally) {
@@ -387,6 +394,54 @@ TEST(DbiPatchPlacementPlanner, SeedsComposedRangesBeforeLaterFamilySelection) {
   ASSERT_TRUE(placement);
   EXPECT_EQ(placement->kind, DbiPatchPlacementKind::AppendedCave);
   EXPECT_EQ(placement->body_offset, 512u);
+}
+
+TEST(DbiPatchPlacementPlanner, KeepsReservationsSortedForLogarithmicOverlapQueries) {
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, /*original_text_size=*/512);
+  ASSERT_TRUE(planner.reserve_existing_range(/*begin=*/256, /*size=*/64));
+  ASSERT_TRUE(planner.reserve_existing_range(/*begin=*/32, /*size=*/48));
+  ASSERT_TRUE(planner.reserve_existing_range(/*begin=*/160, /*size=*/16));
+
+  const std::vector<std::pair<uint64_t, uint64_t>> expected = {
+      {32u, 80u},
+      {160u, 176u},
+      {256u, 320u},
+  };
+  EXPECT_TRUE(std::ranges::equal(planner.occupied_ranges(), expected));
+  EXPECT_FALSE(planner.can_reserve_existing_range(/*begin=*/24, /*size=*/16));
+  EXPECT_FALSE(planner.can_reserve_existing_range(/*begin=*/72, /*size=*/16));
+  EXPECT_FALSE(planner.can_reserve_existing_range(/*begin=*/152, /*size=*/16));
+  EXPECT_FALSE(planner.can_reserve_existing_range(/*begin=*/312, /*size=*/16));
+  EXPECT_TRUE(planner.can_reserve_existing_range(/*begin=*/80, /*size=*/80));
+  EXPECT_TRUE(planner.can_reserve_existing_range(/*begin=*/176, /*size=*/80));
+  EXPECT_TRUE(planner.overlaps_reserved_range(/*begin=*/72, /*end=*/88));
+  EXPECT_TRUE(planner.overlaps_reserved_range(/*begin=*/168, /*end=*/184));
+  EXPECT_FALSE(planner.overlaps_reserved_range(/*begin=*/80, /*end=*/160));
+  EXPECT_FALSE(planner.overlaps_reserved_range(/*begin=*/176, /*end=*/256));
+  EXPECT_TRUE(planner.overlaps_reserved_range(/*begin=*/256, /*end=*/256));
+  EXPECT_TRUE(planner.overlaps_reserved_range(/*begin=*/257, /*end=*/256));
+}
+
+TEST(DbiPatchPlacementPlanner, RejectsLocalCaveThatOverlapsItsOwnAnchor) {
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, /*original_text_size=*/512);
+  DbiPatchPlacementRequest request;
+  request.anchor_offset = 32u;
+  request.original_size = 64u;
+  request.body_size = sizeof(uint32_t);
+  request.inline_capacity = 0u;
+  request.local_cave = DbiPatchLocalCave{/*offset=*/60u, /*capacity=*/8u};
+  request.allow_appended_cave = false;
+  std::string error;
+
+  EXPECT_FALSE(planner.plan(request, &error));
+  EXPECT_NE(error.find("no nonoverlapping"), std::string::npos);
+  EXPECT_TRUE(planner.occupied_ranges().empty());
+
+  request.allow_appended_cave = true;
+  const auto fallback = planner.plan(request);
+  ASSERT_TRUE(fallback);
+  EXPECT_EQ(fallback->kind, DbiPatchPlacementKind::AppendedCave);
+  EXPECT_EQ(fallback->body_offset, 512u);
 }
 
 TEST(DbiPatchPlacementPlanner, FailsBeforeReservingUnreachableAppendedMapping) {

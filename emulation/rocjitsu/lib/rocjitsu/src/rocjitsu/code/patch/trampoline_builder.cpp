@@ -7,7 +7,10 @@
 #include "rocjitsu/code/patch/instruction_builder.h"
 
 #include <algorithm>
+#include <array>
+#include <cassert>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <numeric>
 #include <queue>
@@ -747,30 +750,72 @@ DbiPatchPlacementPlanner::DbiPatchPlacementPlanner(rj_code_arch_t arch, uint64_t
 bool DbiPatchPlacementPlanner::range_is_free(uint64_t begin, uint64_t end) const {
   if (begin >= end)
     return false;
-  for (const auto &[occupied_begin, occupied_end] : occupied_ranges_) {
-    if (begin < occupied_end && occupied_begin < end)
+  return !overlaps_reserved_range(begin, end);
+}
+
+bool DbiPatchPlacementPlanner::overlaps_reserved_range(uint64_t begin, uint64_t end) const {
+  if (begin >= end)
+    return true;
+  const auto next =
+      std::ranges::lower_bound(occupied_ranges_, begin, {}, &std::pair<uint64_t, uint64_t>::first);
+  if (next != occupied_ranges_.end() && next->first < end)
+    return true;
+  return next != occupied_ranges_.begin() && std::prev(next)->second > begin;
+}
+
+bool DbiPatchPlacementPlanner::highest_appended_reservation_within_cursor() const {
+  return occupied_ranges_.empty() || occupied_ranges_.back().first < original_text_size_ ||
+         occupied_ranges_.back().second <= appended_cursor_;
+}
+
+void DbiPatchPlacementPlanner::insert_validated_range(uint64_t begin, uint64_t end) {
+  assert(!overlaps_reserved_range(begin, end) &&
+         "validated reservations must remain nonempty, sorted, and disjoint");
+  const auto insertion =
+      std::ranges::lower_bound(occupied_ranges_, begin, {}, &std::pair<uint64_t, uint64_t>::first);
+  occupied_ranges_.emplace(insertion, begin, end);
+}
+
+bool DbiPatchPlacementPlanner::reserve_ranges(
+    std::span<const std::pair<uint64_t, uint64_t>> ranges) {
+  for (size_t range = 0u; range < ranges.size(); ++range) {
+    const auto [begin, end] = ranges[range];
+    if (!range_is_free(begin, end))
       return false;
+    for (size_t prior = 0u; prior < range; ++prior) {
+      const auto [prior_begin, prior_end] = ranges[prior];
+      if (begin < prior_end && prior_begin < end)
+        return false;
+    }
   }
+  for (const auto &[begin, end] : ranges)
+    insert_validated_range(begin, end);
   return true;
 }
 
-void DbiPatchPlacementPlanner::reserve_range(uint64_t begin, uint64_t end) {
-  occupied_ranges_.emplace_back(begin, end);
+bool DbiPatchPlacementPlanner::reserve_range(uint64_t begin, uint64_t end) {
+  const std::array ranges = {std::pair{begin, end}};
+  return reserve_ranges(ranges);
 }
 
 bool DbiPatchPlacementPlanner::reserve_existing_range(uint64_t begin, uint64_t size,
                                                       std::string *error_out) {
-  if (size == 0 || begin > original_text_size_ || size > original_text_size_ - begin ||
-      !range_is_free(begin, begin + size)) {
+  if (!can_reserve_existing_range(begin, size)) {
     report(error_out,
            "DBI patch placement: existing range is empty, out of bounds, or overlapping");
     return false;
   }
-  reserve_range(begin, begin + size);
+  insert_validated_range(begin, begin + size);
   return true;
 }
 
+bool DbiPatchPlacementPlanner::can_reserve_existing_range(uint64_t begin, uint64_t size) const {
+  return size != 0u && begin <= original_text_size_ && size <= original_text_size_ - begin &&
+         range_is_free(begin, begin + size);
+}
+
 bool DbiPatchPlacementPlanner::reserve_appended_prefix(uint64_t size, std::string *error_out) {
+  assert(highest_appended_reservation_within_cursor());
   if (size == 0)
     return true;
   if (size > std::numeric_limits<uint64_t>::max() - appended_cursor_) {
@@ -778,17 +823,18 @@ bool DbiPatchPlacementPlanner::reserve_appended_prefix(uint64_t size, std::strin
     return false;
   }
   const uint64_t end = appended_cursor_ + size;
-  if (!range_is_free(appended_cursor_, end)) {
+  if (!reserve_range(appended_cursor_, end)) {
     report(error_out, "DBI patch placement: appended prefix overlaps an existing reservation");
     return false;
   }
-  reserve_range(appended_cursor_, end);
   appended_cursor_ = end;
+  assert(highest_appended_reservation_within_cursor());
   return true;
 }
 
 std::optional<DbiPatchPlacement>
 DbiPatchPlacementPlanner::plan(const DbiPatchPlacementRequest &request, std::string *error_out) {
+  assert(highest_appended_reservation_within_cursor());
   const auto checked_end = [](uint64_t begin, uint64_t size) -> std::optional<uint64_t> {
     if (size > std::numeric_limits<uint64_t>::max() - begin)
       return std::nullopt;
@@ -813,7 +859,10 @@ DbiPatchPlacementPlanner::plan(const DbiPatchPlacementRequest &request, std::str
     const auto body_end = checked_end(request.anchor_offset, request.body_size);
     if (body_end && *body_end <= original_text_size_ &&
         range_is_free(request.anchor_offset, *body_end)) {
-      reserve_range(request.anchor_offset, *body_end);
+      if (!reserve_range(request.anchor_offset, *body_end)) {
+        report(error_out, "DBI patch placement: inline reservation conflicted");
+        return std::nullopt;
+      }
       return DbiPatchPlacement{
           .kind = DbiPatchPlacementKind::Inline,
           .anchor_offset = request.anchor_offset,
@@ -830,11 +879,14 @@ DbiPatchPlacementPlanner::plan(const DbiPatchPlacementRequest &request, std::str
                                   uint64_t capacity) -> std::optional<DbiPatchPlacement> {
     const auto body_end = checked_end(body_offset, request.body_size);
     const auto reservation_end = body_end ? checked_end(*body_end, sizeof(uint32_t)) : std::nullopt;
+    const bool local_body_overlaps_anchor =
+        kind == DbiPatchPlacementKind::LocalCave && reservation_end &&
+        request.anchor_offset < *reservation_end && body_offset < *anchor_end;
     if (!body_end || !reservation_end || request.body_size + sizeof(uint32_t) > capacity ||
         !range_is_free(request.anchor_offset, *anchor_end) ||
+        !range_is_free(body_offset, *reservation_end) ||
         (kind == DbiPatchPlacementKind::LocalCave &&
-         (!range_is_free(body_offset, *reservation_end) ||
-          *reservation_end > original_text_size_)) ||
+         (local_body_overlaps_anchor || *reservation_end > original_text_size_)) ||
         !compute_sopp_branch_simm16(request.anchor_offset, body_offset) ||
         !compute_sopp_branch_simm16(*body_end, *anchor_end)) {
       return std::nullopt;
@@ -853,8 +905,17 @@ DbiPatchPlacementPlanner::plan(const DbiPatchPlacementRequest &request, std::str
   if (request.local_cave) {
     if (auto placement = try_trampoline(DbiPatchPlacementKind::LocalCave,
                                         request.local_cave->offset, request.local_cave->capacity)) {
-      reserve_range(request.anchor_offset, *anchor_end);
-      reserve_range(placement->body_offset, placement->return_branch_offset + sizeof(uint32_t));
+      const std::array reservations = {
+          std::pair{request.anchor_offset, *anchor_end},
+          std::pair{placement->body_offset, placement->return_branch_offset + sizeof(uint32_t)},
+      };
+      if (!reserve_ranges(reservations)) {
+        // try_trampoline preflighted both ranges. A conflict here is an
+        // internal planner-state inconsistency, not an unavailable local tier;
+        // do not hide it by falling through to appended placement.
+        report(error_out, "DBI patch placement: local-cave reservations conflicted");
+        return std::nullopt;
+      }
       return placement;
     }
   }
@@ -862,8 +923,16 @@ DbiPatchPlacementPlanner::plan(const DbiPatchPlacementRequest &request, std::str
   if (request.allow_appended_cave) {
     if (auto placement = try_trampoline(DbiPatchPlacementKind::AppendedCave, appended_cursor_,
                                         std::numeric_limits<uint64_t>::max())) {
-      reserve_range(request.anchor_offset, *anchor_end);
+      const std::array reservations = {
+          std::pair{request.anchor_offset, *anchor_end},
+          std::pair{placement->body_offset, placement->return_branch_offset + sizeof(uint32_t)},
+      };
+      if (!reserve_ranges(reservations)) {
+        report(error_out, "DBI patch placement: appended-cave reservations conflicted");
+        return std::nullopt;
+      }
       appended_cursor_ = placement->return_branch_offset + sizeof(uint32_t);
+      assert(highest_appended_reservation_within_cursor());
       return placement;
     }
   }
@@ -876,21 +945,30 @@ DbiPatchPlacementPlanner::plan(const DbiPatchPlacementRequest &request, std::str
 std::optional<DbiPatchPlacement>
 DbiPatchPlacementPlanner::plan_indirect_appended(uint64_t anchor_offset, uint32_t original_size,
                                                  uint64_t body_size, std::string *error_out) {
+  assert(highest_appended_reservation_within_cursor());
   if (arch_ == ROCJITSU_CODE_ARCH_INVALID || original_size < sizeof(uint32_t) ||
       original_size % sizeof(uint32_t) != 0 || body_size == 0 ||
       body_size % sizeof(uint32_t) != 0 || anchor_offset > original_text_size_ ||
       original_size > original_text_size_ - anchor_offset ||
       body_size > std::numeric_limits<uint64_t>::max() - appended_cursor_ ||
-      !range_is_free(anchor_offset, anchor_offset + original_size)) {
+      !range_is_free(anchor_offset, anchor_offset + original_size) ||
+      !range_is_free(appended_cursor_, appended_cursor_ + body_size)) {
     report(error_out, "DBI patch placement: invalid or overlapping indirect appended reservation");
     return std::nullopt;
   }
 
   const uint64_t body_offset = appended_cursor_;
   const uint64_t body_end = body_offset + body_size;
-  reserve_range(anchor_offset, anchor_offset + original_size);
-  reserve_range(body_offset, body_end);
+  const std::array reservations = {
+      std::pair{anchor_offset, anchor_offset + original_size},
+      std::pair{body_offset, body_end},
+  };
+  if (!reserve_ranges(reservations)) {
+    report(error_out, "DBI patch placement: indirect appended reservations conflicted");
+    return std::nullopt;
+  }
   appended_cursor_ = body_end;
+  assert(highest_appended_reservation_within_cursor());
   return DbiPatchPlacement{
       .kind = DbiPatchPlacementKind::AppendedCave,
       .anchor_offset = anchor_offset,

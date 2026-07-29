@@ -1822,6 +1822,17 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRelocatesInstructionReservoirs) {
   };
   EXPECT_TRUE(std::ranges::any_of(branch_only->branch_only_entry_relay_offsets, in_reservoir));
   EXPECT_TRUE(std::ranges::any_of(branch_only->branch_only_return_relay_offsets, in_reservoir));
+  const ConSanBranchOnlyReservoirTelemetry &inventory =
+      relocated.moi_branch_only_reservoir_telemetry;
+  const size_t emitted_reservoir_count = std::ranges::count(
+      relocated.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
+  EXPECT_GE(inventory.planned_reservoir_count, 1u);
+  EXPECT_EQ(inventory.used_reservoir_count, emitted_reservoir_count);
+  EXPECT_EQ(inventory.planned_reservoir_count,
+            inventory.used_reservoir_count + inventory.unused_reservoir_count);
+  EXPECT_EQ(inventory.planned_appended_bytes,
+            inventory.used_appended_bytes + inventory.unused_appended_bytes);
+  EXPECT_GT(inventory.used_appended_bytes, 0u);
 }
 
 TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackFailsClosedWithoutAdmissibleReservoir) {

@@ -570,6 +570,39 @@ TEST(ConSan, CommunicationAddressRecipeProvesOrdinaryReleasePostSequenceResource
   EXPECT_EQ(recipe->owner_descriptor_file_offsets.size(), 1u);
 }
 
+TEST(ConSan, CommunicationAddressRecipeRejectsPartiallyLiveScalarAddressPair) {
+  const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto wait_load_ds = build_s_wait_loadcnt_dscnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(wait_store);
+  ASSERT_TRUE(wait_load_ds);
+  const std::array<uint32_t, 8> text_words = {
+      *wait_store,
+      *wait_load_ds,
+      0xEE068004u,
+      2u << 18u | 7u << 23u,
+      10u, // global_store_b32 v10, v7, s[4:5] scope:SCOPE_DEV
+      build_v_mov_b32_e32(/*vdst=*/20, vector_source_vgpr(10), ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(/*sdst=*/8, /*ssrc0=*/4, ROCJITSU_CODE_ARCH_RDNA4),
+      0xBFB00000u, // s_endpgm
+  };
+  ConSanOptions options = moi_options();
+  options.fault_dry_run = true;
+  const ConSanResult result = try_patch_consan(
+      make_rdna4_lds_code_object(text_words, "partial_scalar_address_recipe"), options);
+
+  const auto recipe = std::ranges::find_if(
+      result.communication_address_recipes, [](const ConSanCommunicationAddressRecipe &candidate) {
+        return candidate.kind == ConSanCommunicationAddressKind::Ordinary;
+      });
+  ASSERT_NE(recipe, result.communication_address_recipes.end());
+  EXPECT_EQ(recipe->post_sequence_text_offset, 5u * sizeof(uint32_t));
+  EXPECT_EQ(recipe->address_vgpr, 10u);
+  ASSERT_TRUE(recipe->address_sgpr);
+  EXPECT_EQ(*recipe->address_sgpr, 4u);
+  EXPECT_EQ(recipe->address_sgpr_count, 2u);
+  EXPECT_EQ(recipe->support, ConSanCommunicationAddressSupport::AddressNotLiveAfterSequence);
+}
+
 TEST(ConSan, ScopedOrdinaryReleaseWaitTailFailsClosedOnInexactShapes) {
   const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   const auto wait_load_ds = build_s_wait_loadcnt_dscnt0(ROCJITSU_CODE_ARCH_RDNA4);

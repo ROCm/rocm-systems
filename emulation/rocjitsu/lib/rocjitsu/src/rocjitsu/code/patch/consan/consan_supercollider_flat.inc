@@ -54,7 +54,7 @@ flat_check_trap_delay_source_sgpr(const ConSanOptions &options) {
       const RegisterRef ref{RegClass::SGPR, *pair, 2u};
       const bool dead_for_every_owner =
           std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-            return !liveness->is_live_before(*inst, ref);
+            return !liveness->any_live_before(*inst, ref);
           });
       if (!flat_check_trap_overlaps_delay_source(*pair, 2u, options) && !overlaps_dynamic_stack &&
           dead_for_every_owner)
@@ -100,7 +100,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
   const auto dead_for_every_owner = [&](uint16_t base, uint8_t width) {
     const RegisterRef ref{RegClass::SGPR, base, width};
     return std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-      return !liveness->is_live_before(*inst, ref);
+      return !liveness->any_live_before(*inst, ref);
     });
   };
   const auto search = [&](uint16_t start) -> std::optional<LdsCheckTrapIndirectScalarScratch> {
@@ -185,7 +185,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
     const RegisterRef ref{RegClass::VGPR, *candidate, static_cast<uint8_t>(required_vgprs)};
     const bool dead_for_every_owner =
         std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-          return !liveness->is_live_before(*inst, ref);
+          return !liveness->any_live_before(*inst, ref);
         });
     if (candidate_end <= REGISTER_SET_MAX_VGPRS && dead_for_every_owner &&
         !is_forbidden_flat_scratch_vgpr_run(site, *candidate, required_vgprs))
@@ -968,6 +968,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   ConSanBranchOnlyRoutingTelemetry branch_only_routing;
   size_t discarded_branch_only_placement_failures = 0u;
   ConSanBranchOnlyRoutingTelemetry discarded_branch_only_routing;
+  ConSanBranchOnlyReservoirTelemetry discarded_branch_only_reservoir_telemetry;
   size_t branch_only_placement_failures = 0u;
   size_t branch_only_selected = 0;
   const auto publish_flat_anchor_relays = [&](const FlatCheckTrapCandidate &candidate,
@@ -1019,9 +1020,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         const ByteRange island_text_range{candidate.entry_island->text_offset,
                                           candidate.entry_island->text_offset +
                                               kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t)};
-        if (std::ranges::any_of(placement_planner.occupied_ranges(), [&](const auto &range) {
-              return island_text_range.begin < range.second && range.first < island_text_range.end;
-            }))
+        if (placement_planner.overlaps_reserved_range(island_text_range.begin,
+                                                      island_text_range.end))
           return;
       }
     }
@@ -1160,6 +1160,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
               : 0u;
       discarded_branch_only_routing =
           branch_only_relay_telemetry_delta(branch_only_routing, branch_routing_after_first_pass);
+      // This is the full speculative inventory, not a delta: the reservoir
+      // set is cleared immediately below when the entire retry is rolled back.
+      discarded_branch_only_reservoir_telemetry = direct_branch_reservoirs.telemetry();
       branch_router = std::move(router_without_direct_reservoirs);
       placement_planner = std::move(planner_without_direct_reservoirs);
       direct_branch_reservoirs = {};
@@ -1188,8 +1191,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       .branch_only_selected_count = branch_only_selected,
       .branch_only_placement_failure_count = branch_only_placement_failures,
       .branch_only_routing = branch_only_routing,
+      .branch_only_reservoir_telemetry = {},
       .discarded_branch_only_placement_failure_count = discarded_branch_only_placement_failures,
       .discarded_branch_only_routing = discarded_branch_only_routing,
+      .discarded_branch_only_reservoir_telemetry = discarded_branch_only_reservoir_telemetry,
       .original_nop_relay_slot_count = branch_relay_word_count,
       .selected_anchor_relay_slot_count = selected_flat_anchor_relay_offsets.size(),
   };
@@ -2000,6 +2005,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       }
     }
     result.elf_bytes = std::move(patched_bytes);
+  }
+  if (result.flat_selection_telemetry) {
+    assert(branch_only_reservoir_telemetry_is_empty(
+        result.flat_selection_telemetry->branch_only_reservoir_telemetry));
+    result.flat_selection_telemetry->branch_only_reservoir_telemetry =
+        direct_branch_reservoirs.telemetry();
   }
   result.patches.insert(result.patches.end(), new_patch_infos.begin(), new_patch_infos.end());
   result.modified = true;

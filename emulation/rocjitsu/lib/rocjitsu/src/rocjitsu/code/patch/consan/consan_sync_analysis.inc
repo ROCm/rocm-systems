@@ -2309,13 +2309,13 @@ void build_communication_address_recipes(
       result.communication_address_recipes.push_back(std::move(recipe));
       continue;
     }
-    if (!liveness.is_live_before(*post_sequence,
-                                 RegisterRef{RegClass::VGPR, recipe.address_vgpr,
-                                             static_cast<uint8_t>(recipe.address_vgpr_count)}) ||
+    if (!liveness.all_live_before(*post_sequence,
+                                  RegisterRef{RegClass::VGPR, recipe.address_vgpr,
+                                              static_cast<uint8_t>(recipe.address_vgpr_count)}) ||
         (recipe.address_sgpr &&
-         !liveness.is_live_before(*post_sequence,
-                                  RegisterRef{RegClass::SGPR, *recipe.address_sgpr,
-                                              static_cast<uint8_t>(recipe.address_sgpr_count)}))) {
+         !liveness.all_live_before(*post_sequence,
+                                   RegisterRef{RegClass::SGPR, *recipe.address_sgpr,
+                                               static_cast<uint8_t>(recipe.address_sgpr_count)}))) {
       recipe.support = ConSanCommunicationAddressSupport::AddressNotLiveAfterSequence;
       result.communication_address_recipes.push_back(std::move(recipe));
       continue;

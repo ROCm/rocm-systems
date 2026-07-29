@@ -1634,11 +1634,24 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
       .relay_contention_failure_count = 5u,
       .work_budget_failure_count = 7u,
       .work_budget_exhaustion_count = 11u,
+      .routing_invariant_failure_count = 10u,
+      .route_optimization_exhaustion_count = 12u,
+      .route_optimization_invariant_failure_count = 14u,
       .reservation_failure_count = 13u,
       .exact_pair_fallback_attempt_count = 41u,
       .greedy_pair_fallback_attempt_count = 37u,
       .search_work_count = 17u,
       .scan_work_count = 19u,
+      .route_optimization_search_work_count = 23u,
+      .route_optimization_scan_work_count = 29u,
+  };
+  selection.branch_only_reservoir_telemetry = {
+      .planned_reservoir_count = 5u,
+      .used_reservoir_count = 3u,
+      .unused_reservoir_count = 2u,
+      .planned_appended_bytes = 1536u,
+      .used_appended_bytes = 1024u,
+      .unused_appended_bytes = 512u,
   };
   selection.discarded_branch_only_routing = {
       .pair_attempt_count = 109u,
@@ -1648,14 +1661,81 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
       .relay_contention_failure_count = 61u,
       .work_budget_failure_count = 67u,
       .work_budget_exhaustion_count = 71u,
+      .routing_invariant_failure_count = 70u,
+      .route_optimization_exhaustion_count = 72u,
+      .route_optimization_invariant_failure_count = 74u,
       .reservation_failure_count = 73u,
       .exact_pair_fallback_attempt_count = 101u,
       .greedy_pair_fallback_attempt_count = 97u,
       .search_work_count = 79u,
       .scan_work_count = 83u,
+      .route_optimization_search_work_count = 103u,
+      .route_optimization_scan_work_count = 113u,
+  };
+  selection.discarded_branch_only_reservoir_telemetry = {
+      .planned_reservoir_count = 13u,
+      .used_reservoir_count = 5u,
+      .unused_reservoir_count = 8u,
+      .planned_appended_bytes = 8192u,
+      .used_appended_bytes = 3072u,
+      .unused_appended_bytes = 5120u,
   };
   selection.discarded_branch_only_placement_failure_count = 89u;
   g_transform_override_result.moi_branch_only_placement_failure_count = 127u;
+  g_transform_override_result.lds_branch_only_routing_telemetry = {
+      .pair_attempt_count = 131u,
+      .plan_call_count = 137u,
+      .entry_route_failure_count = 139u,
+      .return_route_failure_count = 149u,
+      .relay_contention_failure_count = 151u,
+      .work_budget_failure_count = 157u,
+      .work_budget_exhaustion_count = 163u,
+      .routing_invariant_failure_count = 165u,
+      .route_optimization_exhaustion_count = 167u,
+      .route_optimization_invariant_failure_count = 171u,
+      .reservation_failure_count = 173u,
+      .exact_pair_fallback_attempt_count = 179u,
+      .greedy_pair_fallback_attempt_count = 181u,
+      .search_work_count = 191u,
+      .scan_work_count = 193u,
+      .route_optimization_search_work_count = 197u,
+      .route_optimization_scan_work_count = 199u,
+  };
+  g_transform_override_result.moi_branch_only_routing_telemetry = {
+      .pair_attempt_count = 197u,
+      .plan_call_count = 199u,
+      .entry_route_failure_count = 211u,
+      .return_route_failure_count = 223u,
+      .relay_contention_failure_count = 227u,
+      .work_budget_failure_count = 229u,
+      .work_budget_exhaustion_count = 233u,
+      .routing_invariant_failure_count = 237u,
+      .route_optimization_exhaustion_count = 239u,
+      .route_optimization_invariant_failure_count = 243u,
+      .reservation_failure_count = 241u,
+      .exact_pair_fallback_attempt_count = 251u,
+      .greedy_pair_fallback_attempt_count = 257u,
+      .search_work_count = 263u,
+      .scan_work_count = 269u,
+      .route_optimization_search_work_count = 271u,
+      .route_optimization_scan_work_count = 277u,
+  };
+  g_transform_override_result.lds_relay_reservoir_telemetry = {
+      .planned_reservoir_count = 2u,
+      .used_reservoir_count = 1u,
+      .unused_reservoir_count = 1u,
+      .planned_appended_bytes = 768u,
+      .used_appended_bytes = 512u,
+      .unused_appended_bytes = 256u,
+  };
+  g_transform_override_result.moi_branch_only_reservoir_telemetry = {
+      .planned_reservoir_count = 17u,
+      .used_reservoir_count = 11u,
+      .unused_reservoir_count = 6u,
+      .planned_appended_bytes = 4096u,
+      .used_appended_bytes = 3072u,
+      .unused_appended_bytes = 1024u,
+  };
 
   FakeApiTable api;
   InstalledDbiHook hook(api);
@@ -1673,22 +1753,70 @@ TEST(HsaHooksUnitTest, ConSanLogsCompleteBranchRoutingTelemetrySchema) {
 
   EXPECT_EQ(load_status, HSA_STATUS_SUCCESS);
   EXPECT_NE(log.find("entry_route_failed=2 return_route_failed=3 relay_contention_failed=5 "
-                     "work_budget_failed=7 work_budget_exhaustions=11 reservation_failed=13 "
+                     "work_budget_failed=7 work_budget_exhaustions=11 "
+                     "routing_invariant_failures=10 "
+                     "route_optimization_exhaustions=12 "
+                     "route_optimization_invariant_failures=14 reservation_failed=13 "
                      "exact_pair_fallback_attempts=41 greedy_pair_fallback_attempts=37 "
                      "pair_attempts=47 plan_calls=43 search_work=17 scan_work=19 "
+                     "route_optimization_search_work=23 route_optimization_scan_work=29 "
+                     "reservoirs_planned=5 reservoirs_used=3 reservoirs_unused=2 "
+                     "reservoir_planned_appended_bytes=1536 "
+                     "reservoir_used_appended_bytes=1024 "
+                     "reservoir_unused_appended_bytes=512 "
                      "discarded_branch_work=true"),
             std::string::npos)
       << log;
   EXPECT_NE(log.find("placement_failed=89 pair_attempts=109 plan_calls=107 "
                      "entry_route_failed=53 "
                      "return_route_failed=59 relay_contention_failed=61 work_budget_failed=67 "
-                     "work_budget_exhaustions=71 reservation_failed=73 "
+                     "work_budget_exhaustions=71 routing_invariant_failures=70 "
+                     "route_optimization_exhaustions=72 "
+                     "route_optimization_invariant_failures=74 reservation_failed=73 "
                      "exact_pair_fallback_attempts=101 greedy_pair_fallback_attempts=97 "
-                     "search_work=79 scan_work=83"),
+                     "search_work=79 scan_work=83 route_optimization_search_work=103 "
+                     "route_optimization_scan_work=113 "
+                     "reservoirs_planned=13 reservoirs_used=5 reservoirs_unused=8 "
+                     "reservoir_planned_appended_bytes=8192 "
+                     "reservoir_used_appended_bytes=3072 "
+                     "reservoir_unused_appended_bytes=5120"),
             std::string::npos)
       << log;
-  EXPECT_NE(log.find("ConSan MOI branch routing reader="), std::string::npos) << log;
-  EXPECT_NE(log.find("placement_failed=127 pair_attempts=0 plan_calls=0"), std::string::npos)
+  EXPECT_NE(log.find("ConSan SC LDS branch routing reader="), std::string::npos) << log;
+  EXPECT_NE(log.find("pair_attempts=131 plan_calls=137 entry_route_failed=139 "
+                     "return_route_failed=149 relay_contention_failed=151 "
+                     "work_budget_failed=157 work_budget_exhaustions=163 "
+                     "routing_invariant_failures=165 "
+                     "route_optimization_exhaustions=167 "
+                     "route_optimization_invariant_failures=171 reservation_failed=173 "
+                     "exact_pair_fallback_attempts=179 greedy_pair_fallback_attempts=181 "
+                     "search_work=191 scan_work=193 route_optimization_search_work=197 "
+                     "route_optimization_scan_work=199"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("lds_relay_reservoirs_planned=2 lds_relay_reservoirs_used=1 "
+                     "lds_relay_reservoirs_unused=1 "
+                     "lds_relay_reservoir_planned_appended_bytes=768 "
+                     "lds_relay_reservoir_used_appended_bytes=512 "
+                     "lds_relay_reservoir_unused_appended_bytes=256"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("placement_failed=127 pair_attempts=197 plan_calls=199 "
+                     "entry_route_failed=211 return_route_failed=223 "
+                     "relay_contention_failed=227 work_budget_failed=229 "
+                     "work_budget_exhaustions=233 routing_invariant_failures=237 "
+                     "route_optimization_exhaustions=239 "
+                     "route_optimization_invariant_failures=243 reservation_failed=241 "
+                     "exact_pair_fallback_attempts=251 "
+                     "greedy_pair_fallback_attempts=257 search_work=263 scan_work=269 "
+                     "route_optimization_search_work=271 route_optimization_scan_work=277"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("reservoirs_planned=17 reservoirs_used=11 reservoirs_unused=6 "
+                     "reservoir_planned_appended_bytes=4096 "
+                     "reservoir_used_appended_bytes=3072 "
+                     "reservoir_unused_appended_bytes=1024"),
+            std::string::npos)
       << log;
 }
 

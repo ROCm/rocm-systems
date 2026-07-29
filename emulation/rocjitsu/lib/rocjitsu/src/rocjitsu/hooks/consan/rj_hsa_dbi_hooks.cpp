@@ -3499,15 +3499,27 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           *patch_result.flat_selection_telemetry;
       const bool has_discarded_branch_work =
           selection.discarded_branch_only_placement_failure_count != 0u ||
-          !rocjitsu::branch_only_relay_telemetry_is_empty(selection.discarded_branch_only_routing);
+          !rocjitsu::branch_only_relay_telemetry_is_empty(
+              selection.discarded_branch_only_routing) ||
+          !rocjitsu::branch_only_reservoir_telemetry_is_empty(
+              selection.discarded_branch_only_reservoir_telemetry);
+      const rocjitsu::ConSanBranchOnlyReservoirTelemetry &flat_reservoirs =
+          selection.branch_only_reservoir_telemetry;
       log_message(
           kLogInfo,
           "ConSan SC flat selection reader=%llu supported=%zu target=%zu selected=%zu "
           "branch_only_candidates=%zu branch_only_selected=%zu placement_failed=%zu "
           "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
-          "work_budget_failed=%zu work_budget_exhaustions=%zu reservation_failed=%zu "
+          "work_budget_failed=%zu work_budget_exhaustions=%zu "
+          "routing_invariant_failures=%zu "
+          "route_optimization_exhaustions=%zu route_optimization_invariant_failures=%zu "
+          "reservation_failed=%zu "
           "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
           "pair_attempts=%zu plan_calls=%zu search_work=%zu scan_work=%zu "
+          "route_optimization_search_work=%zu route_optimization_scan_work=%zu "
+          "reservoirs_planned=%zu reservoirs_used=%zu reservoirs_unused=%zu "
+          "reservoir_planned_appended_bytes=%zu reservoir_used_appended_bytes=%zu "
+          "reservoir_unused_appended_bytes=%zu "
           "discarded_branch_work=%s "
           "fixed_stack=%zu dynamic_stack=%zu mixed_stack=%zu missing_vcc_save=%zu "
           "missing_scratch=%zu spill_backed=%zu mixed_stack_spill_rejected=%zu "
@@ -3522,6 +3534,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           selection.branch_only_routing.relay_contention_failure_count,
           selection.branch_only_routing.work_budget_failure_count,
           selection.branch_only_routing.work_budget_exhaustion_count,
+          selection.branch_only_routing.routing_invariant_failure_count,
+          selection.branch_only_routing.route_optimization_exhaustion_count,
+          selection.branch_only_routing.route_optimization_invariant_failure_count,
           selection.branch_only_routing.reservation_failure_count,
           selection.branch_only_routing.exact_pair_fallback_attempt_count,
           selection.branch_only_routing.greedy_pair_fallback_attempt_count,
@@ -3529,6 +3544,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           selection.branch_only_routing.plan_call_count,
           selection.branch_only_routing.search_work_count,
           selection.branch_only_routing.scan_work_count,
+          selection.branch_only_routing.route_optimization_search_work_count,
+          selection.branch_only_routing.route_optimization_scan_work_count,
+          flat_reservoirs.planned_reservoir_count, flat_reservoirs.used_reservoir_count,
+          flat_reservoirs.unused_reservoir_count, flat_reservoirs.planned_appended_bytes,
+          flat_reservoirs.used_appended_bytes, flat_reservoirs.unused_appended_bytes,
           has_discarded_branch_work ? "true" : "false", selection.fixed_stack_candidate_count,
           selection.dynamic_stack_candidate_count, selection.mixed_stack_candidate_count,
           selection.missing_vcc_save_candidate_count, selection.missing_scratch_candidate_count,
@@ -3538,67 +3558,121 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           selection.selected_anchor_relay_slot_count);
       const rocjitsu::ConSanBranchOnlyRoutingTelemetry &discarded_routing =
           selection.discarded_branch_only_routing;
+      const rocjitsu::ConSanBranchOnlyReservoirTelemetry &discarded_reservoirs =
+          selection.discarded_branch_only_reservoir_telemetry;
       if (has_discarded_branch_work) {
-        log_message(kLogInfo,
-                    "ConSan SC flat discarded branch routing reader=%llu placement_failed=%zu "
-                    "pair_attempts=%zu plan_calls=%zu "
-                    "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
-                    "work_budget_failed=%zu work_budget_exhaustions=%zu reservation_failed=%zu "
-                    "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
-                    "search_work=%zu scan_work=%zu",
-                    static_cast<unsigned long long>(code_object_reader.handle),
-                    selection.discarded_branch_only_placement_failure_count,
-                    discarded_routing.pair_attempt_count, discarded_routing.plan_call_count,
-                    discarded_routing.entry_route_failure_count,
-                    discarded_routing.return_route_failure_count,
-                    discarded_routing.relay_contention_failure_count,
-                    discarded_routing.work_budget_failure_count,
-                    discarded_routing.work_budget_exhaustion_count,
-                    discarded_routing.reservation_failure_count,
-                    discarded_routing.exact_pair_fallback_attempt_count,
-                    discarded_routing.greedy_pair_fallback_attempt_count,
-                    discarded_routing.search_work_count, discarded_routing.scan_work_count);
+        log_message(
+            kLogInfo,
+            "ConSan SC flat discarded branch routing reader=%llu placement_failed=%zu "
+            "pair_attempts=%zu plan_calls=%zu "
+            "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
+            "work_budget_failed=%zu work_budget_exhaustions=%zu "
+            "routing_invariant_failures=%zu "
+            "route_optimization_exhaustions=%zu route_optimization_invariant_failures=%zu "
+            "reservation_failed=%zu "
+            "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
+            "search_work=%zu scan_work=%zu "
+            "route_optimization_search_work=%zu route_optimization_scan_work=%zu "
+            "reservoirs_planned=%zu reservoirs_used=%zu reservoirs_unused=%zu "
+            "reservoir_planned_appended_bytes=%zu reservoir_used_appended_bytes=%zu "
+            "reservoir_unused_appended_bytes=%zu",
+            static_cast<unsigned long long>(code_object_reader.handle),
+            selection.discarded_branch_only_placement_failure_count,
+            discarded_routing.pair_attempt_count, discarded_routing.plan_call_count,
+            discarded_routing.entry_route_failure_count,
+            discarded_routing.return_route_failure_count,
+            discarded_routing.relay_contention_failure_count,
+            discarded_routing.work_budget_failure_count,
+            discarded_routing.work_budget_exhaustion_count,
+            discarded_routing.routing_invariant_failure_count,
+            discarded_routing.route_optimization_exhaustion_count,
+            discarded_routing.route_optimization_invariant_failure_count,
+            discarded_routing.reservation_failure_count,
+            discarded_routing.exact_pair_fallback_attempt_count,
+            discarded_routing.greedy_pair_fallback_attempt_count,
+            discarded_routing.search_work_count, discarded_routing.scan_work_count,
+            discarded_routing.route_optimization_search_work_count,
+            discarded_routing.route_optimization_scan_work_count,
+            discarded_reservoirs.planned_reservoir_count, discarded_reservoirs.used_reservoir_count,
+            discarded_reservoirs.unused_reservoir_count,
+            discarded_reservoirs.planned_appended_bytes, discarded_reservoirs.used_appended_bytes,
+            discarded_reservoirs.unused_appended_bytes);
       }
     }
     const rocjitsu::ConSanBranchOnlyRoutingTelemetry &lds_routing =
         patch_result.lds_branch_only_routing_telemetry;
-    if (!rocjitsu::branch_only_relay_telemetry_is_empty(lds_routing)) {
-      log_message(kLogInfo,
-                  "ConSan SC LDS branch routing reader=%llu pair_attempts=%zu plan_calls=%zu "
-                  "entry_route_failed=%zu "
-                  "return_route_failed=%zu relay_contention_failed=%zu work_budget_failed=%zu "
-                  "work_budget_exhaustions=%zu reservation_failed=%zu "
-                  "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
-                  "search_work=%zu scan_work=%zu",
-                  static_cast<unsigned long long>(code_object_reader.handle),
-                  lds_routing.pair_attempt_count, lds_routing.plan_call_count,
-                  lds_routing.entry_route_failure_count, lds_routing.return_route_failure_count,
-                  lds_routing.relay_contention_failure_count, lds_routing.work_budget_failure_count,
-                  lds_routing.work_budget_exhaustion_count, lds_routing.reservation_failure_count,
-                  lds_routing.exact_pair_fallback_attempt_count,
-                  lds_routing.greedy_pair_fallback_attempt_count, lds_routing.search_work_count,
-                  lds_routing.scan_work_count);
+    const rocjitsu::ConSanBranchOnlyReservoirTelemetry &lds_reservoirs =
+        patch_result.lds_relay_reservoir_telemetry;
+    if (!rocjitsu::branch_only_relay_telemetry_is_empty(lds_routing) ||
+        !rocjitsu::branch_only_reservoir_telemetry_is_empty(lds_reservoirs)) {
+      log_message(
+          kLogInfo,
+          "ConSan SC LDS branch routing reader=%llu pair_attempts=%zu plan_calls=%zu "
+          "entry_route_failed=%zu "
+          "return_route_failed=%zu relay_contention_failed=%zu work_budget_failed=%zu "
+          "work_budget_exhaustions=%zu routing_invariant_failures=%zu "
+          "route_optimization_exhaustions=%zu "
+          "route_optimization_invariant_failures=%zu reservation_failed=%zu "
+          "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
+          "search_work=%zu scan_work=%zu route_optimization_search_work=%zu "
+          "route_optimization_scan_work=%zu "
+          "lds_relay_reservoirs_planned=%zu lds_relay_reservoirs_used=%zu "
+          "lds_relay_reservoirs_unused=%zu "
+          "lds_relay_reservoir_planned_appended_bytes=%zu "
+          "lds_relay_reservoir_used_appended_bytes=%zu "
+          "lds_relay_reservoir_unused_appended_bytes=%zu",
+          static_cast<unsigned long long>(code_object_reader.handle),
+          lds_routing.pair_attempt_count, lds_routing.plan_call_count,
+          lds_routing.entry_route_failure_count, lds_routing.return_route_failure_count,
+          lds_routing.relay_contention_failure_count, lds_routing.work_budget_failure_count,
+          lds_routing.work_budget_exhaustion_count, lds_routing.routing_invariant_failure_count,
+          lds_routing.route_optimization_exhaustion_count,
+          lds_routing.route_optimization_invariant_failure_count,
+          lds_routing.reservation_failure_count, lds_routing.exact_pair_fallback_attempt_count,
+          lds_routing.greedy_pair_fallback_attempt_count, lds_routing.search_work_count,
+          lds_routing.scan_work_count, lds_routing.route_optimization_search_work_count,
+          lds_routing.route_optimization_scan_work_count, lds_reservoirs.planned_reservoir_count,
+          lds_reservoirs.used_reservoir_count, lds_reservoirs.unused_reservoir_count,
+          lds_reservoirs.planned_appended_bytes, lds_reservoirs.used_appended_bytes,
+          lds_reservoirs.unused_appended_bytes);
     }
     const rocjitsu::ConSanBranchOnlyRoutingTelemetry &moi_routing =
         patch_result.moi_branch_only_routing_telemetry;
+    const rocjitsu::ConSanBranchOnlyReservoirTelemetry &moi_reservoirs =
+        patch_result.moi_branch_only_reservoir_telemetry;
     if (patch_result.moi_branch_only_placement_failure_count != 0u ||
-        !rocjitsu::branch_only_relay_telemetry_is_empty(moi_routing)) {
-      log_message(kLogInfo,
-                  "ConSan MOI branch routing reader=%llu placement_failed=%zu "
-                  "pair_attempts=%zu plan_calls=%zu "
-                  "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
-                  "work_budget_failed=%zu work_budget_exhaustions=%zu reservation_failed=%zu "
-                  "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
-                  "search_work=%zu scan_work=%zu",
-                  static_cast<unsigned long long>(code_object_reader.handle),
-                  patch_result.moi_branch_only_placement_failure_count,
-                  moi_routing.pair_attempt_count, moi_routing.plan_call_count,
-                  moi_routing.entry_route_failure_count, moi_routing.return_route_failure_count,
-                  moi_routing.relay_contention_failure_count, moi_routing.work_budget_failure_count,
-                  moi_routing.work_budget_exhaustion_count, moi_routing.reservation_failure_count,
-                  moi_routing.exact_pair_fallback_attempt_count,
-                  moi_routing.greedy_pair_fallback_attempt_count, moi_routing.search_work_count,
-                  moi_routing.scan_work_count);
+        !rocjitsu::branch_only_relay_telemetry_is_empty(moi_routing) ||
+        !rocjitsu::branch_only_reservoir_telemetry_is_empty(moi_reservoirs)) {
+      log_message(
+          kLogInfo,
+          "ConSan MOI branch routing reader=%llu placement_failed=%zu "
+          "pair_attempts=%zu plan_calls=%zu "
+          "entry_route_failed=%zu return_route_failed=%zu relay_contention_failed=%zu "
+          "work_budget_failed=%zu work_budget_exhaustions=%zu "
+          "routing_invariant_failures=%zu "
+          "route_optimization_exhaustions=%zu route_optimization_invariant_failures=%zu "
+          "reservation_failed=%zu "
+          "exact_pair_fallback_attempts=%zu greedy_pair_fallback_attempts=%zu "
+          "search_work=%zu scan_work=%zu route_optimization_search_work=%zu "
+          "route_optimization_scan_work=%zu "
+          "reservoirs_planned=%zu reservoirs_used=%zu reservoirs_unused=%zu "
+          "reservoir_planned_appended_bytes=%zu reservoir_used_appended_bytes=%zu "
+          "reservoir_unused_appended_bytes=%zu",
+          static_cast<unsigned long long>(code_object_reader.handle),
+          patch_result.moi_branch_only_placement_failure_count, moi_routing.pair_attempt_count,
+          moi_routing.plan_call_count, moi_routing.entry_route_failure_count,
+          moi_routing.return_route_failure_count, moi_routing.relay_contention_failure_count,
+          moi_routing.work_budget_failure_count, moi_routing.work_budget_exhaustion_count,
+          moi_routing.routing_invariant_failure_count,
+          moi_routing.route_optimization_exhaustion_count,
+          moi_routing.route_optimization_invariant_failure_count,
+          moi_routing.reservation_failure_count, moi_routing.exact_pair_fallback_attempt_count,
+          moi_routing.greedy_pair_fallback_attempt_count, moi_routing.search_work_count,
+          moi_routing.scan_work_count, moi_routing.route_optimization_search_work_count,
+          moi_routing.route_optimization_scan_work_count, moi_reservoirs.planned_reservoir_count,
+          moi_reservoirs.used_reservoir_count, moi_reservoirs.unused_reservoir_count,
+          moi_reservoirs.planned_appended_bytes, moi_reservoirs.used_appended_bytes,
+          moi_reservoirs.unused_appended_bytes);
     }
 
     for (const std::string &warning : patch_result.warnings)

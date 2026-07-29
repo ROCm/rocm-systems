@@ -154,9 +154,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     bool entry_island_at_anchor = false;
     bool dense_call_anchor = false;
     std::optional<uint64_t> dense_dispatcher_offset;
-    bool branch_only_continuation = false;
-    std::vector<uint64_t> entry_relay_offsets;
-    std::vector<uint64_t> return_relay_offsets;
     std::optional<BranchOnlyRelayRoute> branch_only_route;
     std::vector<uint32_t> displaced_tail_words;
     ResolvedMoiScratchPlan resources;
@@ -896,9 +893,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::optional<uint64_t> entry_island_offset;
     bool entry_island_at_anchor = false;
     std::vector<uint32_t> displaced_tail_words;
-    bool branch_only_continuation = false;
-    std::vector<uint64_t> entry_relay_offsets;
-    std::vector<uint64_t> return_relay_offsets;
     std::optional<BranchOnlyRelayRoute> branch_only_route;
     uint32_t displaced_original_size = candidate.size;
     bool placed_through_indirect_island = false;
@@ -923,9 +917,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           record_branch_only_relay_failure(routing, relay_outcome.failure);
         } else if (!branch_router.commit(*branch_only_route, &relay_error)) {
           record_branch_only_relay_failure(routing, BranchOnlyRelayPlanFailure::Reservation);
+          branch_only_route.reset();
         } else {
-          entry_relay_offsets = branch_only_route->entry_relay_offsets;
-          return_relay_offsets = branch_only_route->return_relay_offsets;
           for (const BranchOnlyRelayClaim &claim : branch_only_route->claims) {
             if (local_entry_islands && claim.provenance == BranchOnlyRelayProvenance::PristineNop)
               local_entry_islands->reserve(claim.offset, 1u);
@@ -938,7 +931,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           placement = *reservation;
           placement->body_size = patch_bytes;
           placement->return_target = candidate.text_offset + candidate.size;
-          branch_only_continuation = true;
           placed_through_indirect_island = true;
         }
       } else {
@@ -1057,9 +1049,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     planned.entry_island_offset = entry_island_offset;
     planned.entry_island_at_anchor = entry_island_at_anchor;
     planned.dense_call_anchor = use_dense_call;
-    planned.branch_only_continuation = branch_only_continuation;
-    planned.entry_relay_offsets = std::move(entry_relay_offsets);
-    planned.return_relay_offsets = std::move(return_relay_offsets);
     planned.branch_only_route = std::move(branch_only_route);
     if (use_dense_call)
       planned.dense_dispatcher_offset = dense_dispatchers.at(candidate_ptr);
@@ -1078,8 +1067,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     planned.workgroup_shadow = workgroup_shadow;
     planned.workgroup_shadow_compact_token = workgroup_shadow_compact_token;
     planned.required_private_bytes = required_private_bytes;
+    const bool routed_through_branch_only = planned.branch_only_route.has_value();
     planned_patches.push_back(std::move(planned));
-    if (branch_only_continuation)
+    if (routed_through_branch_only)
       publish_inline_anchor_relays(candidate, placement->original_size);
     if (use_indirect_appended && !use_dense_call)
       planned_anchor_ranges.emplace_back(candidate.text_offset,
@@ -1126,8 +1116,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       const auto donor = inline_anchor_relay_donors.find(relay);
       return donor != inline_anchor_relay_donors.end() && donor->second < index;
     };
-    if (!std::ranges::all_of(planned.entry_relay_offsets, donor_precedes_borrower) ||
-        !std::ranges::all_of(planned.return_relay_offsets, donor_precedes_borrower)) {
+    if (planned.branch_only_route &&
+        (!std::ranges::all_of(planned.branch_only_route->entry_relay_offsets,
+                              donor_precedes_borrower) ||
+         !std::ranges::all_of(planned.branch_only_route->return_relay_offsets,
+                              donor_precedes_borrower))) {
       result.errors.emplace_back(
           "ConSan MOI inline-shadow probe planned an anchor-tail relay before its donor");
       return;
@@ -1534,9 +1527,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
       if (planned_patch.spill)
         info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
-      info.branch_only_continuation = planned_patch.branch_only_continuation;
-      info.branch_only_entry_relay_offsets = planned_patch.entry_relay_offsets;
-      info.branch_only_return_relay_offsets = planned_patch.return_relay_offsets;
+      info.branch_only_continuation = planned_patch.branch_only_route.has_value();
+      if (planned_patch.branch_only_route) {
+        info.branch_only_entry_relay_offsets = planned_patch.branch_only_route->entry_relay_offsets;
+        info.branch_only_return_relay_offsets =
+            planned_patch.branch_only_route->return_relay_offsets;
+      }
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
         const uint64_t cave_text_offset = planned_patch.placement.body_offset;
@@ -1547,8 +1543,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           return;
         }
         const uint64_t entry_target =
-            planned_patch.branch_only_continuation && !planned_patch.entry_relay_offsets.empty()
-                ? planned_patch.entry_relay_offsets.front()
+            planned_patch.branch_only_route &&
+                    !planned_patch.branch_only_route->entry_relay_offsets.empty()
+                ? planned_patch.branch_only_route->entry_relay_offsets.front()
                 : planned_patch.entry_island_offset.value_or(planned_patch.placement.body_offset);
         if (!planned_patch.dense_call_anchor &&
             !write_moi_appended_anchor(new_text, planned_patch, entry_target, arch,
@@ -1593,7 +1590,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         const std::array<uint32_t, 1> dynamic_stack_guard_placeholder = {
             build_s_nop(0, arch),
         };
-        if (planned_patch.branch_only_continuation)
+        if (planned_patch.branch_only_route)
           body_options.entry_prefix_words = dynamic_stack_guard_placeholder;
         body_options.deferred_guest_word_count = deferred_guest_words.size();
         body_options.scalar_save_words = planned_patch.scalar_spill
@@ -1623,7 +1620,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           displaced_tail_words.assign(displaced_begin, cave_words->end());
           cave_words->erase(displaced_begin, cave_words->end());
         }
-        if (planned_patch.branch_only_continuation) {
+        if (planned_patch.branch_only_route) {
           if (!candidate_options.moi_inline_dynamic_stack_borrowed_sgpr ||
               planned_patch.entry_island_offset || planned_patch.dense_call_anchor ||
               !planned_patch.displaced_tail_words.empty()) {
@@ -1661,9 +1658,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return;
           }
           const uint64_t return_source = cave_text_offset + cave_words->size() * sizeof(uint32_t);
-          const uint64_t return_target = planned_patch.return_relay_offsets.empty()
-                                             ? planned_patch.placement.return_target
-                                             : planned_patch.return_relay_offsets.front();
+          const uint64_t return_target =
+              planned_patch.branch_only_route->return_relay_offsets.empty()
+                  ? planned_patch.placement.return_target
+                  : planned_patch.branch_only_route->return_relay_offsets.front();
           const auto ret = compute_sopp_branch_simm16(return_source, return_target);
           if (!ret) {
             result.errors.emplace_back(
@@ -1837,6 +1835,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     result.elf_bytes = std::move(patcher).emit();
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
+    result.moi_branch_only_reservoir_telemetry = direct_branch_reservoirs.telemetry();
     result.modified = true;
     return;
   }

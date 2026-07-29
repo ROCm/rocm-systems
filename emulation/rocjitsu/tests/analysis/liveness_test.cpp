@@ -1938,7 +1938,7 @@ TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &def = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  EXPECT_TRUE(liveness.any_live_before(def, {RegClass::VGPR, 0, 1}));
 
   auto free_vgpr = liveness.find_free_run(&def, 1);
   ASSERT_TRUE(free_vgpr.has_value());
@@ -1950,8 +1950,23 @@ TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(use, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.any_live_before(use, {RegClass::SGPR, 4, 1}));
   EXPECT_EQ(liveness.find_free_sgpr(&use, 4), 5);
+}
+
+TEST(LivenessAnalysis, AnyLiveBeforeRejectsInstructionOutsideAnalysis) {
+  auto analyzed_blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto other_blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(analyzed_blocks);
+
+  const Instruction &outside = *other_blocks[0]->instructions().begin();
+  EXPECT_FALSE(liveness.has_live_before(outside));
+  EXPECT_FALSE(liveness.contains_block(*other_blocks[0]));
+  EXPECT_TRUE(liveness.has_live_before(*analyzed_blocks[0]->instructions().begin()));
+  EXPECT_TRUE(liveness.contains_block(*analyzed_blocks[0]));
+  EXPECT_TRUE(liveness.any_live_before(outside, {RegClass::SGPR, 4, 2}));
+  EXPECT_FALSE(liveness.all_live_before(outside, {RegClass::SGPR, 4, 2}));
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&outside, 4), std::nullopt);
 }
 
 TEST(LivenessAnalysis, FindValidSgprPair) {
@@ -1959,7 +1974,7 @@ TEST(LivenessAnalysis, FindValidSgprPair) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(use, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.any_live_before(use, {RegClass::SGPR, 4, 1}));
   EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 4), 6);
 }
 
@@ -1968,6 +1983,12 @@ TEST(LivenessAnalysis, FindSgprPairSkipsStraddle) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_TRUE(liveness.any_live_before(use, {RegClass::SGPR, 3, 2}));
+  EXPECT_TRUE(liveness.any_live_before(use, {RegClass::SGPR, 4, 2}));
+  EXPECT_FALSE(liveness.all_live_before(use, {RegClass::SGPR, 3, 2}));
+  EXPECT_FALSE(liveness.all_live_before(use, {RegClass::SGPR, 4, 2}));
+  EXPECT_TRUE(liveness.any_live_before(use, {RegClass::SGPR, 4, 0}));
+  EXPECT_TRUE(liveness.all_live_before(use, {RegClass::SGPR, 4, 0}));
   EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 4), 8);
 }
 
@@ -1989,7 +2010,7 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
   LivenessAnalysis liveness(KernelBlockScope(scope), options);
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_FALSE(liveness.is_live_before(use, {RegClass::VGPR, 0, 4}));
+  EXPECT_FALSE(liveness.any_live_before(use, {RegClass::VGPR, 0, 4}));
   EXPECT_EQ(liveness.find_free_sgpr(&use, 0), 0);
   EXPECT_EQ(liveness.find_free_run(&use, 1, 0), 4);
   EXPECT_EQ(liveness.find_free_run(&use, 1, 7), 7);
@@ -2031,7 +2052,7 @@ TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &read_write = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(read_write, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.any_live_before(read_write, {RegClass::SGPR, 4, 1}));
 }
 
 TEST(LivenessAnalysis, ReadWriteRegisterStaysLiveOutWhenUsedBySuccessor) {
@@ -2042,7 +2063,7 @@ TEST(LivenessAnalysis, ReadWriteRegisterStaysLiveOutWhenUsedBySuccessor) {
 
   ASSERT_EQ(blocks.size(), 2u);
   const Instruction &read_write = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(read_write, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.any_live_before(read_write, {RegClass::SGPR, 4, 1}));
   EXPECT_TRUE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 1}));
 }
 
@@ -2051,7 +2072,7 @@ TEST(LivenessAnalysis, PartialDefKeepsRegisterLiveBeforeInstruction) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &partial_def = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(partial_def, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.any_live_before(partial_def, {RegClass::SGPR, 4, 1}));
 }
 
 TEST(LivenessAnalysis, PartialDefRegisterStaysLiveOutWhenUsedBySuccessor) {
@@ -2062,8 +2083,22 @@ TEST(LivenessAnalysis, PartialDefRegisterStaysLiveOutWhenUsedBySuccessor) {
 
   ASSERT_EQ(blocks.size(), 2u);
   const Instruction &partial_def = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(partial_def, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.any_live_before(partial_def, {RegClass::SGPR, 4, 1}));
   EXPECT_TRUE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 1}));
+}
+
+TEST(LivenessAnalysis, AnyLiveOutRejectsPartiallyLiveRegisterPair) {
+  std::array<uint64_t, 1> extra_leaders{4};
+  auto blocks =
+      build_test_blocks({TestOpcode::Nop, TestOpcode::UseSgpr4, TestOpcode::End}, extra_leaders);
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  ASSERT_EQ(blocks.size(), 2u);
+  EXPECT_TRUE(liveness.any_live_out(*blocks[0], {RegClass::SGPR, 3, 2}));
+  EXPECT_TRUE(liveness.any_live_out(*blocks[0], {RegClass::SGPR, 4, 2}));
+  EXPECT_FALSE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 3, 2}));
+  EXPECT_FALSE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 2}));
+  EXPECT_TRUE(liveness.any_live_out(*blocks[0], {RegClass::SGPR, 4, 0}));
 }
 
 TEST(LivenessAnalysis, FullWidthDefKillsRegisterBeforeInstruction) {
@@ -2071,7 +2106,7 @@ TEST(LivenessAnalysis, FullWidthDefKillsRegisterBeforeInstruction) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &def = *blocks[0]->instructions().begin();
-  EXPECT_FALSE(liveness.is_live_before(def, {RegClass::SGPR, 4, 1}));
+  EXPECT_FALSE(liveness.any_live_before(def, {RegClass::SGPR, 4, 1}));
 }
 
 TEST(LivenessAnalysis, ImplicitUseIsLiveBeforeInstruction) {
@@ -2079,7 +2114,7 @@ TEST(LivenessAnalysis, ImplicitUseIsLiveBeforeInstruction) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &implicit_use = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(implicit_use, {RegClass::SGPR, 6, 2}));
+  EXPECT_TRUE(liveness.any_live_before(implicit_use, {RegClass::SGPR, 6, 2}));
 }
 
 TEST(LivenessAnalysis, PredicatedScalarDefDoesNotKillLiveOutValue) {
@@ -2088,7 +2123,7 @@ TEST(LivenessAnalysis, PredicatedScalarDefDoesNotKillLiveOutValue) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &pred_def = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(pred_def, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.any_live_before(pred_def, {RegClass::SGPR, 4, 1}));
 }
 
 TEST(LivenessAnalysis, LoopCarriedUseRevisitsBackEdgePredecessor) {
@@ -2112,7 +2147,7 @@ TEST(LivenessAnalysis, BranchMeetKeepsValueLiveWhenOneSuccessorPreservesIt) {
   LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &branch = *blocks[0]->instructions().begin();
-  EXPECT_TRUE(liveness.is_live_before(branch, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.any_live_before(branch, {RegClass::SGPR, 4, 1}));
   EXPECT_TRUE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 1}));
 }
 
@@ -2129,11 +2164,11 @@ TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
 
   const Instruction &def = *kernel0->instructions().begin();
   LivenessAnalysis all_decoded_liveness = analyze_scope(blocks);
-  EXPECT_TRUE(all_decoded_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  EXPECT_TRUE(all_decoded_liveness.any_live_before(def, {RegClass::VGPR, 0, 1}));
 
   std::vector<BasicBlock *> kernel_blocks{kernel0};
   LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks)};
-  EXPECT_FALSE(kernel_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+  EXPECT_FALSE(kernel_liveness.any_live_before(def, {RegClass::VGPR, 0, 1}));
 }
 
 TEST(InstDefUse, DstOnlyVgpr) {
@@ -2194,6 +2229,17 @@ constexpr uint32_t kVop1MovWord0Sdwa = (0x3Fu << 25) | (5u << 17) | (1u << 9) | 
 std::unique_ptr<Instruction> decode_cdna4(const std::array<uint32_t, 2> &words) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+}
+
+TEST(GeneratedInstDefUse, Cdna3PackedF32TracksWideScalarSource) {
+  constexpr std::array<uint32_t, 2> words{0xD3B04004u, 0x1C0A0810u};
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto inst = std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_pk_fma_f32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 16, 2}));
 }
 
 // DPP word1 fields (CDNA4): vsrc0[7:0], dpp_ctrl[16:8], bound_ctrl[19],

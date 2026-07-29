@@ -119,8 +119,30 @@ public:
   /// @brief Registers live immediately before @p inst executes.
   [[nodiscard]] const RegisterSet &live_before(const Instruction &inst) const;
 
-  /// @brief Convenience predicate for one register reference.
-  [[nodiscard]] bool is_live_before(const Instruction &inst, RegisterRef ref) const;
+  /// @brief Whether this analysis materialized a live-before snapshot for @p inst.
+  [[nodiscard]] bool has_live_before(const Instruction &inst) const;
+
+  /// @brief Whether @p block belongs to this analysis scope.
+  [[nodiscard]] bool contains_block(const BasicBlock &block) const;
+
+  /// @brief Whether any constituent register is live before an instruction.
+  ///
+  /// @details Multi-register references are unavailable for scratch use when
+  /// even one constituent register is live. Instructions outside this
+  /// analysis are conservatively treated as live.
+  [[nodiscard]] bool any_live_before(const Instruction &inst, RegisterRef ref) const;
+
+  /// @brief Whether every constituent register is live before an instruction.
+  ///
+  /// @details Consumers that must preserve a complete multi-register value use
+  /// this query to reject partially live register tuples.
+  [[nodiscard]] bool all_live_before(const Instruction &inst, RegisterRef ref) const;
+
+  /// @brief Whether any constituent register is live out of a block.
+  ///
+  /// @details Multi-register references are unavailable for scratch use when
+  /// even one constituent register remains live on a successor edge.
+  [[nodiscard]] bool any_live_out(const BasicBlock &block, RegisterRef ref) const;
 
   /// @brief Find N consecutive dead VGPRs immediately before an instruction.
   ///

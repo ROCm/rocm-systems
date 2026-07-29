@@ -90,11 +90,37 @@ struct ConSanPatchedImageGrowthRejection {
 /// Fallback counters count pairs that reached the corresponding tier, whether
 /// or not that tier produced a route. Greedy fallback attempts are a subset of
 /// exact-pair fallback attempts; the two counters must not be summed.
-/// Work-limit exhaustion counts plan calls that reached any configured limit,
-/// including calls recovered by fallback. Reservation failures count failed
-/// reservations and commits. LDS convergence iterations remain in this
-/// aggregate; a losing FLAT direct-reservoir retry is moved to
+/// Work-limit exhaustion counts plan calls whose routing, setup, or greedy tier
+/// reached its configured limit, including calls recovered by fallback. The
+/// work counters may remain zero when an initial setup precharge exceeds the
+/// whole allowance. Greedy fallback is owner-oblivious and therefore
+/// identifies pairs whose retained route has no exact minimization guarantee,
+/// even when an earlier exact-pair minimization ran before an independent
+/// removal limit forced fallback. Reservation failures count failed
+/// reservations and commits. Unavailable pristine relay storage is excluded
+/// during qualification, so it contributes to the appropriate unreachable
+/// route counter instead of a reservation failure. LDS convergence iterations
+/// remain in this aggregate; a losing FLAT direct-reservoir retry is moved to
 /// `discarded_branch_only_routing`.
+///
+/// Route-optimization exhaustion separately counts plan calls in which at
+/// least one bounded lexicographic minimization pass reached its own limit and
+/// retained its best known feasible route, which may be the feasibility
+/// baseline or a partially proven improvement. The objective minimizes newly
+/// activated owner groups first and relay count for capped exact-pair
+/// fallback, including inventories with no owner tags. Its search/scan work
+/// has separate counters so routing work remains comparable with routing
+/// limits. Search counters measure charged work units, not physical relay
+/// inspections: a mixed owner inventory may perform one uncharged second cost
+/// tier, so physical inspections are at most twice the charged traversal
+/// units for both feasibility and optimization.
+/// Routing invariant failures count exact tiers abandoned after defensive
+/// validation rejected inconsistent solver inputs or output. A later
+/// exact-pair or greedy tier may recover the plan.
+/// Route-optimization invariant failures count defensive fallbacks that retain
+/// the feasibility route after detecting inconsistent minimizer inputs. They
+/// are distinct from work-budget exhaustion because raising a limit cannot
+/// repair them.
 struct ConSanBranchOnlyRoutingTelemetry {
   size_t pair_attempt_count = 0;
   size_t plan_call_count = 0;
@@ -103,18 +129,82 @@ struct ConSanBranchOnlyRoutingTelemetry {
   size_t relay_contention_failure_count = 0;
   size_t work_budget_failure_count = 0;
   size_t work_budget_exhaustion_count = 0;
+  size_t routing_invariant_failure_count = 0;
+  size_t route_optimization_exhaustion_count = 0;
+  size_t route_optimization_invariant_failure_count = 0;
   size_t reservation_failure_count = 0;
   size_t exact_pair_fallback_attempt_count = 0;
   size_t greedy_pair_fallback_attempt_count = 0;
   size_t search_work_count = 0;
   size_t scan_work_count = 0;
+  size_t route_optimization_search_work_count = 0;
+  size_t route_optimization_scan_work_count = 0;
 
   bool operator==(const ConSanBranchOnlyRoutingTelemetry &) const = default;
 };
 
+/// Instruction reservoirs retained for shared relay routing, including both
+/// branch-only and legacy indirect relay consumers. Appended byte counts
+/// include each complete reserved appended body. Unused reservations remain
+/// explicit NOP padding so later planned offsets stay stable, and this
+/// inventory makes that retained footprint observable. It is an observational
+/// inventory, not a score for the unweighted owner-group minimizer.
+struct ConSanBranchOnlyReservoirTelemetry {
+  size_t planned_reservoir_count = 0;
+  size_t used_reservoir_count = 0;
+  size_t unused_reservoir_count = 0;
+  size_t planned_appended_bytes = 0;
+  size_t used_appended_bytes = 0;
+  size_t unused_appended_bytes = 0;
+
+  bool operator==(const ConSanBranchOnlyReservoirTelemetry &) const = default;
+};
+
+static_assert(sizeof(ConSanBranchOnlyReservoirTelemetry) == 6u * sizeof(size_t),
+              "add new reservoir counters to every producer and hook log site");
+
+/// Records one complete reserved appended footprint. Keeping the payload and
+/// final return-control bytes separate makes the shared normalization
+/// structural instead of relying on placement-specific body-size conventions.
+inline void
+accumulate_branch_only_reservoir_telemetry(ConSanBranchOnlyReservoirTelemetry &telemetry,
+                                           uint64_t retained_payload_bytes,
+                                           uint64_t retained_return_bytes, bool used) {
+  const auto add = [](size_t &total, size_t value) {
+    total = value > std::numeric_limits<size_t>::max() - total ? std::numeric_limits<size_t>::max()
+                                                               : total + value;
+  };
+  const uint64_t retained_appended_bytes =
+      retained_return_bytes > std::numeric_limits<uint64_t>::max() - retained_payload_bytes
+          ? std::numeric_limits<uint64_t>::max()
+          : retained_payload_bytes + retained_return_bytes;
+  const size_t bytes = [&] {
+    if constexpr (sizeof(uint64_t) > sizeof(size_t)) {
+      if (retained_appended_bytes > std::numeric_limits<size_t>::max())
+        return std::numeric_limits<size_t>::max();
+    }
+    return static_cast<size_t>(retained_appended_bytes);
+  }();
+
+  add(telemetry.planned_reservoir_count, 1u);
+  add(telemetry.planned_appended_bytes, bytes);
+  if (used) {
+    add(telemetry.used_reservoir_count, 1u);
+    add(telemetry.used_appended_bytes, bytes);
+  } else {
+    add(telemetry.unused_reservoir_count, 1u);
+    add(telemetry.unused_appended_bytes, bytes);
+  }
+}
+
 [[nodiscard]] inline bool
 branch_only_relay_telemetry_is_empty(const ConSanBranchOnlyRoutingTelemetry &telemetry) {
   return telemetry == ConSanBranchOnlyRoutingTelemetry{};
+}
+
+[[nodiscard]] inline bool
+branch_only_reservoir_telemetry_is_empty(const ConSanBranchOnlyReservoirTelemetry &telemetry) {
+  return telemetry == ConSanBranchOnlyReservoirTelemetry{};
 }
 
 /// Machine-readable outcome of SuperCollider group-FLAT candidate selection.
@@ -137,12 +227,19 @@ struct ConSanFlatSelectionTelemetry {
   size_t branch_only_selected_count = 0;
   size_t branch_only_placement_failure_count = 0;
   ConSanBranchOnlyRoutingTelemetry branch_only_routing;
+  /// Direct-reservoir footprint retained in the emitted FLAT patch. This is
+  /// published only after successful final emission, so an earlier rejection
+  /// leaves it zero. A losing speculative retry is rolled back and therefore
+  /// contributes no retained footprint.
+  ConSanBranchOnlyReservoirTelemetry branch_only_reservoir_telemetry;
   /// Placement failures and routing activity from a losing direct-reservoir
   /// retry that was transactionally discarded. Kept separate so primary
   /// attempt/failure rates describe the selection path retained in the
-  /// emitted patch.
+  /// emitted patch. The reservoir inventory records the speculative appended
+  /// footprint before rollback.
   size_t discarded_branch_only_placement_failure_count = 0;
   ConSanBranchOnlyRoutingTelemetry discarded_branch_only_routing;
+  ConSanBranchOnlyReservoirTelemetry discarded_branch_only_reservoir_telemetry;
   size_t original_nop_relay_slot_count = 0;
   size_t selected_anchor_relay_slot_count = 0;
 };
@@ -164,7 +261,16 @@ struct ConSanResult {
   /// be reserved without overlapping an accepted placement.
   size_t moi_branch_only_placement_failure_count = 0;
   ConSanBranchOnlyRoutingTelemetry moi_branch_only_routing_telemetry;
+  /// Reservoir footprint retained in a successfully emitted MOI patch. A
+  /// rejected transform retains no output image, so this remains zero; any
+  /// attempted-plan inventory must use separate telemetry.
+  ConSanBranchOnlyReservoirTelemetry moi_branch_only_reservoir_telemetry;
   ConSanBranchOnlyRoutingTelemetry lds_branch_only_routing_telemetry;
+  /// Reservoir footprint retained by all successfully emitted LDS relay
+  /// consumers, including branch-only and legacy indirect routing. A rejected
+  /// transform retains no output image, so this remains zero; any attempted-
+  /// plan inventory must use separate telemetry.
+  ConSanBranchOnlyReservoirTelemetry lds_relay_reservoir_telemetry;
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
   ConSanFlavor flavor = ConSanFlavor::None;
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;

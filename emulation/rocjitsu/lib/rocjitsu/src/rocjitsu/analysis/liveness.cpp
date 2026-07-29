@@ -47,7 +47,8 @@ void dfs_reverse_post_order(const BasicBlock &start,
 
 [[nodiscard]] bool any_live_in_range(const RegisterSet &live, RegClass cls, uint16_t base,
                                      uint16_t count) {
-  for (uint16_t i = 0; i < count; ++i) {
+  const uint16_t normalized_count = std::max<uint16_t>(1u, count);
+  for (uint16_t i = 0; i < normalized_count; ++i) {
     if (live.contains({cls, static_cast<uint16_t>(base + i), 1}))
       return true;
   }
@@ -251,8 +252,27 @@ const RegisterSet &LivenessAnalysis::live_before(const Instruction &inst) const 
   return it != live_before_.end() ? it->second : empty_;
 }
 
-bool LivenessAnalysis::is_live_before(const Instruction &inst, RegisterRef ref) const {
+bool LivenessAnalysis::has_live_before(const Instruction &inst) const {
+  return live_before_.contains(&inst);
+}
+
+bool LivenessAnalysis::contains_block(const BasicBlock &block) const {
+  return block_index_.contains(&block);
+}
+
+bool LivenessAnalysis::any_live_before(const Instruction &inst, RegisterRef ref) const {
+  const auto live = live_before_.find(&inst);
+  if (live == live_before_.end())
+    return true;
+  return any_live_in_range(live->second, ref.cls, ref.index, ref.width);
+}
+
+bool LivenessAnalysis::all_live_before(const Instruction &inst, RegisterRef ref) const {
   return live_before(inst).contains(ref);
+}
+
+bool LivenessAnalysis::any_live_out(const BasicBlock &block, RegisterRef ref) const {
+  return any_live_in_range(block_liveness(block).live_out, ref.cls, ref.index, ref.width);
 }
 
 std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst, uint16_t count,

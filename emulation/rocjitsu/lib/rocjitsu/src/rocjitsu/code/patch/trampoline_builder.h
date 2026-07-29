@@ -231,10 +231,12 @@ struct DbiPatchPlacement {
 
 /// @brief Transactional placement allocator shared by DBI probe families.
 ///
-/// The planner owns overlap accounting and appended-cave cursor movement. A
-/// successful trampoline reservation includes its four-byte return branch, so
-/// later placements and final emitters use the same coordinates. Failed
-/// requests do not mutate the planner.
+/// The planner owns overlap accounting and appended-cave cursor movement.
+/// Every successful reservation remains in `occupied_ranges()`, including
+/// appended bodies beyond the original image, so composition and audit users
+/// see the complete owned address space. A successful trampoline reservation
+/// includes its four-byte return branch, so later placements and final emitters
+/// use the same coordinates. Failed requests do not mutate the planner.
 class DbiPatchPlacementPlanner {
 public:
   DbiPatchPlacementPlanner(rj_code_arch_t arch, uint64_t original_text_size);
@@ -255,19 +257,36 @@ public:
   [[nodiscard]] bool reserve_existing_range(uint64_t begin, uint64_t size,
                                             std::string *error_out = nullptr);
 
+  /// Check an existing-image range without changing planner state.
+  [[nodiscard]] bool can_reserve_existing_range(uint64_t begin, uint64_t size) const;
+
+  /// Check a half-open text-coordinate range for overlap with any retained
+  /// reservation. Invalid empty or reversed ranges are conservatively treated
+  /// as overlapping so placement callers fail closed.
+  [[nodiscard]] bool overlaps_reserved_range(uint64_t begin, uint64_t end) const;
+
   /// Reserve a generated prefix at the current appended cursor. This is used
   /// for fixed-size veneer banks whose stable addresses must be known before
   /// any variable-size bodies are placed.
   [[nodiscard]] bool reserve_appended_prefix(uint64_t size, std::string *error_out = nullptr);
 
   [[nodiscard]] uint64_t appended_end() const { return appended_cursor_; }
+  /// Reservations are retained as pairwise-disjoint ranges in increasing
+  /// begin-coordinate order so read-only overlap queries are logarithmic.
+  /// Insertion remains linear in the number of retained ranges.
   [[nodiscard]] std::span<const std::pair<uint64_t, uint64_t>> occupied_ranges() const {
     return occupied_ranges_;
   }
 
 private:
   [[nodiscard]] bool range_is_free(uint64_t begin, uint64_t end) const;
-  void reserve_range(uint64_t begin, uint64_t end);
+  /// The sorted, disjoint inventory places every appended reservation after
+  /// every original-text reservation, so checking the last range covers the
+  /// entire appended suffix in constant time.
+  [[nodiscard]] bool highest_appended_reservation_within_cursor() const;
+  void insert_validated_range(uint64_t begin, uint64_t end);
+  [[nodiscard]] bool reserve_ranges(std::span<const std::pair<uint64_t, uint64_t>> ranges);
+  [[nodiscard]] bool reserve_range(uint64_t begin, uint64_t end);
 
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   uint64_t original_text_size_ = 0;

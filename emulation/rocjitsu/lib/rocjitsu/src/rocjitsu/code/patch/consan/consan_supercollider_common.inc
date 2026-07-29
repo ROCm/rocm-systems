@@ -204,7 +204,7 @@ void publish_sc_access_coverage_support(ConSanResult &result, ConSanScAccessCove
         continue;
       const RegisterRef ref{RegClass::SGPR, base, static_cast<uint8_t>(width)};
       if (std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-            return !liveness->is_live_before(*inst, ref);
+            return !liveness->any_live_before(*inst, ref);
           }))
         return base;
     }
@@ -490,7 +490,7 @@ choose_lds_check_trap_indirect_pc_sgpr(
     const RegisterRef ref{RegClass::SGPR, *pair, 2u};
     if (!sc_sgpr_ranges_overlap(*pair, 2u, excluded_vcc_sgpr, excluded_vcc_width) &&
         std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-          return !liveness->is_live_before(*inst, ref);
+          return !liveness->any_live_before(*inst, ref);
         }))
       return pair;
     if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
@@ -514,7 +514,7 @@ choose_lds_check_trap_indirect_pc_sgpr(
     if (!sc_sgpr_ranges_overlap(*single, 1u, excluded_vcc_sgpr, excluded_vcc_width) &&
         !sc_sgpr_ranges_overlap(*single, 1u, excluded_pair, 2u) &&
         std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-          return !liveness->is_live_before(*inst, ref);
+          return !liveness->any_live_before(*inst, ref);
         })) {
       return single;
     }
@@ -544,7 +544,7 @@ choose_lds_check_trap_indirect_scalar_scratch(const Instruction *inst,
   while (auto pair = owner_liveness.front()->find_free_sgpr_pair(inst, pair_search_start)) {
     const RegisterRef pair_ref{RegClass::SGPR, *pair, 2u};
     if (!std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-          return !liveness->is_live_before(*inst, pair_ref);
+          return !liveness->any_live_before(*inst, pair_ref);
         })) {
       if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
         return std::nullopt;
@@ -558,7 +558,7 @@ choose_lds_check_trap_indirect_scalar_scratch(const Instruction *inst,
           const RegisterRef vcc_ref{RegClass::SGPR, *vcc, 2u};
           if (!sc_sgpr_ranges_overlap(*vcc, 2u, *pair, 2u) &&
               std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-                return !liveness->is_live_before(*inst, vcc_ref);
+                return !liveness->any_live_before(*inst, vcc_ref);
               }))
             return vcc;
           if (*vcc + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
@@ -571,7 +571,7 @@ choose_lds_check_trap_indirect_scalar_scratch(const Instruction *inst,
         const RegisterRef vcc_ref{RegClass::SGPR, *vcc, 1u};
         if (!sc_sgpr_ranges_overlap(*vcc, 1u, *pair, 2u) &&
             std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-              return !liveness->is_live_before(*inst, vcc_ref);
+              return !liveness->any_live_before(*inst, vcc_ref);
             }))
           return vcc;
         if (*vcc + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS)

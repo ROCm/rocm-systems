@@ -6,7 +6,10 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 
+#include <compare>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <optional>
 #include <span>
@@ -32,9 +35,31 @@ enum class BranchOnlyRelayProvenance : uint8_t {
   OwnedReservoir,
 };
 
+enum class BranchOnlyRelayOwnerKind : uint8_t {
+  LdsReservoir,
+};
+
+/// Identifies one lazily materialized relay owner. The producer kind is part of
+/// the identity so independently named producer keys cannot collide when more
+/// deferred-storage producers are added.
+struct BranchOnlyRelayOwnerIdentity {
+  constexpr BranchOnlyRelayOwnerIdentity(BranchOnlyRelayOwnerKind kind, uint64_t producer_key)
+      : kind(kind), producer_key(producer_key) {}
+  BranchOnlyRelayOwnerIdentity() = delete;
+
+  BranchOnlyRelayOwnerKind kind;
+  uint64_t producer_key;
+
+  auto operator<=>(const BranchOnlyRelayOwnerIdentity &) const = default;
+};
+
 struct BranchOnlyRelayClaim {
   uint64_t offset = 0;
   BranchOnlyRelayProvenance provenance = BranchOnlyRelayProvenance::PristineNop;
+  /// Optional owner whose materialization cost is shared by every relay with
+  /// the same key. It participates in planning and commit identity, but does
+  /// not change relay emission.
+  std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity;
 };
 
 struct BranchOnlyRelayRoute {
@@ -91,27 +116,85 @@ struct BranchOnlyRelaySearchLimits {
   /// useful exact-search window solely because its summaries cost more.
   size_t batch_base_scan_work = 2'000'000u;
   size_t batch_scan_work_per_demand_relay = 256u;
-  /// One-time construction of the ordered fallback inventory.
+  /// A separate bounded pass may improve the first exact route
+  /// lexicographically: newly activated owner groups first, then relay count
+  /// for capped exact-pair fallback. Exhausting this allowance retains the
+  /// exact route instead of degrading the routing tier. Per-input headroom
+  /// keeps the minimization window useful as the number of demands and relay
+  /// slots grows.
+  size_t batch_route_optimization_search_work = 25'000u;
+  size_t batch_route_optimization_search_work_per_demand = 1'024u;
+  size_t batch_route_optimization_scan_work = 500'000u;
+  size_t batch_route_optimization_scan_work_per_demand_relay = 64u;
+  /// Base allowance for endpoint lookup and placement-occupancy inspections
+  /// while qualifying the offered relay inventory. This phase is separate
+  /// from routing because every later tier consumes the same filtered set.
+  /// Per-input headroom covers one relay traversal and the logarithmic
+  /// occupied-range query for each relay; only pristine relays consume the
+  /// latter. The per-relay default covers the traversal plus the maximum
+  /// endpoint-lookup depth for a size_t-sized coordinate set.
+  size_t batch_relay_qualification_work = 2'000'000u;
+  size_t batch_relay_qualification_work_per_relay = 1u + std::numeric_limits<size_t>::digits;
+  size_t batch_relay_qualification_work_per_relay_range_level = 1u;
+  /// One-time construction of the ordered fallback inventory. Selected-route
+  /// removal and rollback work is charged by the per-pair meters. The default
+  /// preserves the original useful inventory window.
   size_t batch_fallback_setup_work = 100'000u;
   /// Per-pair fallback allowances. Setup, exact routing, greedy routing, and
   /// classification are all metered, so total fallback work remains linear in
-  /// the number of pairs. Zero base/tier limits are normalized to one unit;
-  /// zero per-input headroom is allowed.
+  /// the number of pairs. Each recursive frame charges its first complete
+  /// inventory traversal; a bounded second owner-cost traversal deliberately
+  /// reuses that charge to preserve the established one-traversal limits and
+  /// telemetry scale. Physical inspections are therefore at most twice the
+  /// charged traversal units. Zero base/tier limits are normalized to one
+  /// unit; zero per-input headroom is allowed.
   size_t pair_search_work = 8'192u;
   size_t pair_base_scan_work = 100'000u;
   size_t pair_scan_work_per_relay = 64u;
+  size_t pair_route_optimization_search_work = 2'048u;
+  size_t pair_route_optimization_search_work_per_demand = 512u;
+  size_t pair_route_optimization_scan_work = 25'000u;
+  size_t pair_route_optimization_scan_work_per_demand_relay = 16u;
   /// Allowance for one greedy routing or independent-classification phase.
   size_t pair_greedy_work = 8'192u;
 };
 
-struct BranchOnlyRelayPlanOutcome {
+static_assert(sizeof(BranchOnlyRelaySearchLimits) == 20u * sizeof(size_t),
+              "update all-field relay search-limit tests");
+
+struct BranchOnlyRelayPlanFlags {
+  /// True when a routing search, scan, setup, or greedy tier reached its
+  /// limit, including successful plans recovered by a later fallback tier.
+  /// The independent route-minimization allowance is reported separately.
+  bool work_budget_exhausted = false;
+  /// True when defensive validation rejected inconsistent exact-routing
+  /// inputs or output. A later exact-pair or greedy tier may still recover the
+  /// plan. This is not a budget event.
+  bool routing_invariant_failed = false;
+  /// True when at least one independent lexicographic route-minimization pass
+  /// retained its best known feasible route after reaching its own bound. A
+  /// later pair may still degrade for an independent routing-limit reason.
+  bool route_optimization_exhausted = false;
+  /// True when defensive validation found inconsistent route-minimization
+  /// inputs and retained the feasibility route. This is not a budget event.
+  bool route_optimization_invariant_failed = false;
+};
+
+static_assert(sizeof(BranchOnlyRelayPlanFlags) == 4u * sizeof(bool),
+              "map new plan flags in record_branch_only_relay_plan");
+
+struct BranchOnlyRelayPlanOutcome : BranchOnlyRelayPlanFlags {
   BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
   BranchOnlyRelayPlanStrategy strategy = BranchOnlyRelayPlanStrategy::ExactBatch;
-  /// True when any search, scan, setup, or greedy tier reached its limit,
-  /// including successful plans recovered by a later fallback tier.
-  bool work_budget_exhausted = false;
+  /// Routing work aggregates feasibility search/scan work with the independently
+  /// bounded relay-qualification and fallback-inventory setup phases. It
+  /// excludes the independent route-minimization pass.
   size_t search_work_consumed = 0u;
   size_t scan_work_consumed = 0u;
+  /// Route-minimization work is reported independently even when a later
+  /// routing reservation discards the improved route.
+  size_t route_optimization_search_work_consumed = 0u;
+  size_t route_optimization_scan_work_consumed = 0u;
 };
 
 struct BranchOnlyRelayBatchPlan : BranchOnlyRelayPlanOutcome {
@@ -165,6 +248,7 @@ struct BranchOnlyDirectRelayReservoirSet {
 
   [[nodiscard]] bool mark_claims_used(std::span<const BranchOnlyRelayClaim> claims,
                                       std::string *error_out = nullptr);
+  [[nodiscard]] ConSanBranchOnlyReservoirTelemetry telemetry() const;
 };
 
 /// Owns capacity-one branch relay hosts from discovery through emission.
@@ -177,7 +261,22 @@ struct BranchOnlyDirectRelayReservoirSet {
 /// planners are for interchangeable island destinations instead.
 class BranchOnlyRelayRouter {
 public:
-  [[nodiscard]] bool offer(uint64_t offset, BranchOnlyRelayProvenance provenance);
+  /// Offers one capacity-one relay. Relays with the same non-null owner
+  /// identity form one owner group within this router instance; identities
+  /// from independent routers have no shared namespace. The domain is
+  /// structural, so different producer kinds cannot collide on a numeric
+  /// value. Producers omit an identity for storage paid before a plan call.
+  ///
+  /// For lazily selected LDS reservoirs, a newly used group represents one
+  /// reservoir materialization and convergence replay, so group count is the
+  /// primary objective even though reservoir byte sizes vary. Preplanned
+  /// direct reservoirs are untagged because their appended storage is already
+  /// committed before routing. The objective is intentionally unweighted;
+  /// retained appended bytes are reported separately rather than used as a
+  /// secondary score.
+  [[nodiscard]] bool
+  offer(uint64_t offset, BranchOnlyRelayProvenance provenance,
+        std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity = std::nullopt);
   void retire_range(uint64_t offset, uint64_t size);
 
   [[nodiscard]] std::optional<BranchOnlyRelayRoute>
@@ -190,8 +289,37 @@ public:
   /// words in @p tentative_planner. Exact backtracking has a deterministic work
   /// budget; exhaustion falls back to bounded exact pair routing, then to
   /// greedy pair-atomic routing. `strategy` and `work_budget_exhausted`
-  /// report degradation even when fallback completes the batch. A failed plan
-  /// leaves the planner unchanged.
+  /// report degradation even when fallback completes the batch. Relay
+  /// qualification retains its sound prefix when bounded, so later tiers may
+  /// still complete from the proven subset. A failed plan leaves the planner
+  /// unchanged.
+  ///
+  /// Exact routing first preserves a complete route, then minimizes the number
+  /// of newly used owner groups in an independent bounded pass; group count
+  /// outranks relay count. A complete batch deliberately does not use route
+  /// length as a secondary objective because proving that wider optimum would
+  /// enlarge the bounded search. The result remains capacity-safe but may
+  /// retain more relay claims than the feasibility baseline. Exact-pair
+  /// fallback searches only routes no longer than its feasibility baseline.
+  /// For every nonfinal pair, optimization is restricted to that baseline's
+  /// relay set and the complete set remains unavailable to later pairs until
+  /// batch planning ends. This preserves the deterministic feasibility path
+  /// while shorter subset routes reduce the claims retained after the batch.
+  /// The final pair may optimize over the remaining inventory. The tier
+  /// minimizes relay count at the zero-owner lower bound and among equal-owner
+  /// improvements. It minimizes each pair against owners selected by earlier
+  /// pairs, so it is greedy across the batch rather than globally minimal.
+  /// Owner carry is intentionally scoped to one batch; independent plan calls
+  /// have no implicit shared ownership state. Producers omit affinity for
+  /// storage paid before the call, while the exact-pair tier tracks affinities
+  /// paid by earlier fallback pairs in that same call. The final greedy
+  /// fallback is owner-oblivious and preserves pair feasibility rather than
+  /// any minimization guarantee. `route_optimization_exhausted` reports a
+  /// retained feasible route whose independent minimization pass reached its
+  /// bound. `routing_invariant_failed` reports an exact tier rejected for
+  /// inconsistent routing inputs or output, while
+  /// `route_optimization_invariant_failed` reports inconsistent minimizer
+  /// inputs whose validated feasibility route was retained.
   /// If no complete disjoint assignment exists, returned partial routes are
   /// pair-atomic. `rejection_reasons` is indexed like the requests, and
   /// `rejected_pair_indices` identifies every omitted pair; callers may inspect
@@ -229,7 +357,17 @@ public:
   [[nodiscard]] size_t available_count() const { return relays_.size(); }
 
 private:
-  std::map<uint64_t, BranchOnlyRelayProvenance> relays_;
+  struct RelayOffer {
+    BranchOnlyRelayProvenance provenance = BranchOnlyRelayProvenance::PristineNop;
+    std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity;
+
+    bool operator==(const RelayOffer &) const = default;
+  };
+
+  std::map<uint64_t, RelayOffer> relays_;
+  // Monotonic: false enables the common untagged fast path. Keeping true after
+  // the final tagged relay retires only permits a redundant bounded scan.
+  bool has_owner_affinity_ = false;
 };
 
 } // namespace rocjitsu
