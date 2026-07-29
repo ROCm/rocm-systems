@@ -965,19 +965,20 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     return true;
   };
   std::unordered_set<uint64_t> selected_flat_anchor_relay_offsets;
-  struct BranchOnlyRoutingCounts {
-    size_t placement_failures = 0u;
+  struct BranchOnlyRoutingFailureCounts {
     size_t entry_route_failures = 0u;
     size_t return_route_failures = 0u;
     size_t relay_contention_failures = 0u;
-    size_t search_budget_failures = 0u;
+    size_t work_budget_failures = 0u;
     size_t reservation_failures = 0u;
-    size_t pair_fallbacks = 0u;
-    size_t greedy_fallbacks = 0u;
-    size_t search_work = 0u;
-    size_t scan_work = 0u;
   };
-  BranchOnlyRoutingCounts branch_only_counts;
+  BranchOnlyRoutingFailureCounts branch_only_failures;
+  ConSanBranchOnlyRoutingTelemetry branch_only_routing;
+  size_t branch_only_placement_failures = 0u;
+  const auto add_routing_work = [](size_t &total, size_t value) {
+    total = value > std::numeric_limits<size_t>::max() - total ? std::numeric_limits<size_t>::max()
+                                                               : total + value;
+  };
   size_t branch_only_selected = 0;
   const auto publish_flat_anchor_relays = [&](const FlatCheckTrapCandidate &candidate,
                                               uint32_t original_size) {
@@ -1044,38 +1045,38 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       const auto placement = tentative_planner.plan_indirect_appended(
           site.text_offset, original_size, body_bytes + sizeof(uint32_t));
       if (!placement) {
-        ++branch_only_counts.placement_failures;
+        ++branch_only_placement_failures;
         return;
       }
 
       std::string relay_error;
-      BranchOnlyRelayPlanFailure relay_failure = BranchOnlyRelayPlanFailure::None;
       BranchOnlyRelayPlanOutcome relay_outcome;
-      auto route = branch_router.plan_pair(
-          tentative_planner, site.text_offset, placement->body_offset,
-          placement->body_offset + body_bytes, site.text_offset + original_size, &relay_error,
-          &relay_failure, &relay_outcome);
-      branch_only_counts.search_work += relay_outcome.search_work_consumed;
-      branch_only_counts.scan_work += relay_outcome.scan_work_consumed;
+      auto route =
+          branch_router.plan_pair(tentative_planner, site.text_offset, placement->body_offset,
+                                  placement->body_offset + body_bytes,
+                                  site.text_offset + original_size, &relay_error, &relay_outcome);
+      ++branch_only_routing.plan_attempt_count;
+      add_routing_work(branch_only_routing.search_work_count, relay_outcome.search_work_consumed);
+      add_routing_work(branch_only_routing.scan_work_count, relay_outcome.scan_work_consumed);
       if (relay_outcome.strategy == BranchOnlyRelayPlanStrategy::ExactPairFallback)
-        ++branch_only_counts.pair_fallbacks;
+        ++branch_only_routing.exact_pair_fallback_attempt_count;
       else if (relay_outcome.strategy == BranchOnlyRelayPlanStrategy::GreedyPairFallback)
-        ++branch_only_counts.greedy_fallbacks;
+        ++branch_only_routing.greedy_pair_fallback_attempt_count;
       if (!route) {
-        if (relay_failure == BranchOnlyRelayPlanFailure::ReturnRoute)
-          ++branch_only_counts.return_route_failures;
-        else if (relay_failure == BranchOnlyRelayPlanFailure::RelayContention)
-          ++branch_only_counts.relay_contention_failures;
-        else if (relay_failure == BranchOnlyRelayPlanFailure::SearchBudget)
-          ++branch_only_counts.search_budget_failures;
-        else if (relay_failure == BranchOnlyRelayPlanFailure::Reservation)
-          ++branch_only_counts.reservation_failures;
+        if (relay_outcome.failure == BranchOnlyRelayPlanFailure::ReturnRoute)
+          ++branch_only_failures.return_route_failures;
+        else if (relay_outcome.failure == BranchOnlyRelayPlanFailure::RelayContention)
+          ++branch_only_failures.relay_contention_failures;
+        else if (relay_outcome.failure == BranchOnlyRelayPlanFailure::WorkBudget)
+          ++branch_only_failures.work_budget_failures;
+        else if (relay_outcome.failure == BranchOnlyRelayPlanFailure::Reservation)
+          ++branch_only_failures.reservation_failures;
         else
-          ++branch_only_counts.entry_route_failures;
+          ++branch_only_failures.entry_route_failures;
         return;
       }
       if (!branch_router.commit(*route, &relay_error)) {
-        ++branch_only_counts.reservation_failures;
+        ++branch_only_failures.reservation_failures;
         return;
       }
       if (!direct_branch_reservoirs.mark_claims_used(route->claims, &relay_error)) {
@@ -1160,9 +1161,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   for (const FlatCheckTrapCandidate &candidate : local_cave_candidates)
     try_select_candidate(candidate);
 
-  const BranchOnlyRoutingCounts branch_failure_baseline = branch_only_counts;
+  const BranchOnlyRoutingFailureCounts branch_failure_baseline = branch_only_failures;
+  const size_t branch_placement_failure_baseline = branch_only_placement_failures;
   for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
     try_select_candidate(candidate);
+  const BranchOnlyRoutingFailureCounts branch_failures_after_first_pass = branch_only_failures;
+  const size_t branch_placement_failures_after_first_pass = branch_only_placement_failures;
   if (selected_candidates.size() < max_patches && !branch_only_appended_candidates.empty()) {
     BranchOnlyRelayRouter router_without_direct_reservoirs = branch_router;
     DbiPatchPlacementPlanner planner_without_direct_reservoirs = placement_planner;
@@ -1170,7 +1174,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!prepare_direct_branch_reservoirs())
       return;
 
-    branch_only_counts = branch_failure_baseline;
+    branch_only_failures = branch_failure_baseline;
+    branch_only_placement_failures = branch_placement_failure_baseline;
     for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
       try_select_candidate(candidate);
 
@@ -1178,6 +1183,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       branch_router = std::move(router_without_direct_reservoirs);
       placement_planner = std::move(planner_without_direct_reservoirs);
       direct_branch_reservoirs = {};
+      branch_only_failures = branch_failures_after_first_pass;
+      branch_only_placement_failures = branch_placement_failures_after_first_pass;
     }
   }
   for (const FlatCheckTrapCandidate &candidate : indirect_appended_candidates)
@@ -1199,16 +1206,22 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       .dynamic_stack_spill_encoding_failure_count = dynamic_stack_spill_encoding_failure_count,
       .private_spill_encoding_failure_count = private_spill_encoding_failure_count,
       .branch_only_selected_count = branch_only_selected,
-      .branch_only_placement_failure_count = branch_only_counts.placement_failures,
-      .branch_only_entry_route_failure_count = branch_only_counts.entry_route_failures,
-      .branch_only_return_route_failure_count = branch_only_counts.return_route_failures,
-      .branch_only_relay_contention_failure_count = branch_only_counts.relay_contention_failures,
-      .branch_only_search_budget_failure_count = branch_only_counts.search_budget_failures,
-      .branch_only_reservation_failure_count = branch_only_counts.reservation_failures,
-      .branch_only_pair_fallback_count = branch_only_counts.pair_fallbacks,
-      .branch_only_greedy_fallback_count = branch_only_counts.greedy_fallbacks,
-      .branch_only_search_work_count = branch_only_counts.search_work,
-      .branch_only_scan_work_count = branch_only_counts.scan_work,
+      .branch_only_placement_failure_count = branch_only_placement_failures,
+      .branch_only_routing =
+          {
+              .plan_attempt_count = branch_only_routing.plan_attempt_count,
+              .entry_route_failure_count = branch_only_failures.entry_route_failures,
+              .return_route_failure_count = branch_only_failures.return_route_failures,
+              .relay_contention_failure_count = branch_only_failures.relay_contention_failures,
+              .work_budget_failure_count = branch_only_failures.work_budget_failures,
+              .reservation_failure_count = branch_only_failures.reservation_failures,
+              .exact_pair_fallback_attempt_count =
+                  branch_only_routing.exact_pair_fallback_attempt_count,
+              .greedy_pair_fallback_attempt_count =
+                  branch_only_routing.greedy_pair_fallback_attempt_count,
+              .search_work_count = branch_only_routing.search_work_count,
+              .scan_work_count = branch_only_routing.scan_work_count,
+          },
       .original_nop_relay_slot_count = branch_relay_word_count,
       .selected_anchor_relay_slot_count = selected_flat_anchor_relay_offsets.size(),
   };

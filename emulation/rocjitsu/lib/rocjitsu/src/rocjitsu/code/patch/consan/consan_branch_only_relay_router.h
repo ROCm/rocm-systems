@@ -58,7 +58,7 @@ enum class BranchOnlyRelayPlanFailure : uint8_t {
   EntryRoute,
   ReturnRoute,
   RelayContention,
-  SearchBudget,
+  WorkBudget,
   Reservation,
 };
 
@@ -69,9 +69,11 @@ enum class BranchOnlyRelayPairRejection : uint8_t {
   EntryUnreachable,
   ReturnUnreachable,
   RelayContention,
-  SearchBudget,
-  Count,
+  WorkBudget,
 };
+
+inline constexpr size_t kBranchOnlyRelayPairRejectionCount =
+    static_cast<size_t>(BranchOnlyRelayPairRejection::WorkBudget) + 1u;
 
 enum class BranchOnlyRelayPlanStrategy : uint8_t {
   ExactBatch,
@@ -83,31 +85,41 @@ struct BranchOnlyRelaySearchLimits {
   /// Search states and feasible alternatives allowed for a complete batch.
   size_t batch_base_search_work = 100'000u;
   size_t batch_search_work_per_demand = 4'096u;
-  /// Relay inspections allowed for a complete batch.
-  size_t batch_scan_work = 2'000'000u;
-  /// Per-pair fallback allowances. Total fallback work scales linearly with
-  /// the number of pairs rather than with the number of route combinations.
+  /// Polynomial relay inspections allowed for a complete batch. Per-input
+  /// headroom keeps a larger request/relay inventory from shrinking the
+  /// useful exact-search window solely because its summaries cost more.
+  size_t batch_base_scan_work = 2'000'000u;
+  size_t batch_scan_work_per_demand_relay = 256u;
+  /// One-time construction of the ordered fallback inventory.
+  size_t batch_fallback_setup_work = 100'000u;
+  /// Per-pair fallback allowances. Setup, exact routing, greedy routing, and
+  /// classification are all metered, so total fallback work remains linear in
+  /// the number of pairs. Zero base/tier limits are normalized to one unit;
+  /// zero per-input headroom is allowed.
   size_t pair_search_work = 8'192u;
-  size_t pair_scan_work = 100'000u;
+  size_t pair_base_scan_work = 100'000u;
+  size_t pair_scan_work_per_relay = 64u;
+  /// Allowance for one greedy routing or independent-classification phase.
+  size_t pair_greedy_work = 8'192u;
 };
 
 struct BranchOnlyRelayPlanOutcome {
   BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
   BranchOnlyRelayPlanStrategy strategy = BranchOnlyRelayPlanStrategy::ExactBatch;
-  bool search_budget_exhausted = false;
+  /// True when any search, scan, setup, or greedy tier reached its limit,
+  /// including successful plans recovered by a later fallback tier.
+  bool work_budget_exhausted = false;
   size_t search_work_consumed = 0u;
   size_t scan_work_consumed = 0u;
 };
 
-struct BranchOnlyRelayBatchPlan {
+struct BranchOnlyRelayBatchPlan : BranchOnlyRelayPlanOutcome {
   std::vector<BranchOnlyRelayRoute> routes;
   std::vector<BranchOnlyRelayPairRejection> rejection_reasons;
+  /// Per-request strategy. The inherited strategy is the most degraded tier
+  /// reached anywhere in the batch.
+  std::vector<BranchOnlyRelayPlanStrategy> pair_strategies;
   std::vector<size_t> rejected_pair_indices;
-  BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
-  BranchOnlyRelayPlanStrategy strategy = BranchOnlyRelayPlanStrategy::ExactBatch;
-  bool search_budget_exhausted = false;
-  size_t search_work_consumed = 0u;
-  size_t scan_work_consumed = 0u;
 
   [[nodiscard]] bool complete() const {
     return failure == BranchOnlyRelayPlanFailure::None && rejected_pair_indices.empty();
@@ -145,14 +157,13 @@ public:
   [[nodiscard]] std::optional<BranchOnlyRelayRoute>
   plan_pair(DbiPatchPlacementPlanner &tentative_planner, uint64_t entry_source,
             uint64_t entry_target, uint64_t return_source, uint64_t return_target,
-            std::string *error_out = nullptr, BranchOnlyRelayPlanFailure *failure_out = nullptr,
-            BranchOnlyRelayPlanOutcome *outcome_out = nullptr,
+            std::string *error_out = nullptr, BranchOnlyRelayPlanOutcome *outcome_out = nullptr,
             const BranchOnlyRelaySearchLimits &limits = {}) const;
 
   /// Plans fixed request pairs and transactionally reserves pristine relay
   /// words in @p tentative_planner. Exact backtracking has a deterministic work
   /// budget; exhaustion falls back to bounded exact pair routing, then to
-  /// greedy pair-atomic routing. `strategy` and `search_budget_exhausted`
+  /// greedy pair-atomic routing. `strategy` and `work_budget_exhausted`
   /// report degradation even when fallback completes the batch. A failed plan
   /// leaves the planner unchanged.
   /// If no complete disjoint assignment exists, returned partial routes are

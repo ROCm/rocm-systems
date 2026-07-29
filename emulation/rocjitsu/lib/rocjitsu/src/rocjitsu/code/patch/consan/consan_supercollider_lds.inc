@@ -2664,6 +2664,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   if (is_rdna4_family_arch(arch) && !branch_only_candidates.empty() &&
       selected_candidates.size() < max_patches) {
     std::string branch_only_route_error;
+    ConSanBranchOnlyRoutingTelemetry &routing_telemetry = result.lds_branch_only_routing_telemetry;
+    const auto add_routing_work = [](size_t &total, size_t value) {
+      total = value > std::numeric_limits<size_t>::max() - total
+                  ? std::numeric_limits<size_t>::max()
+                  : total + value;
+    };
     std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
       return lhs.site->text_offset < rhs.site->text_offset;
     });
@@ -2827,8 +2833,33 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       branch_only_route_error.clear();
       BranchOnlyRelayBatchPlan route_plan =
           branch_router.plan_pairs(tentative_planner, route_requests, &route_error);
-      if (!route_plan.complete())
+      ++routing_telemetry.plan_attempt_count;
+      add_routing_work(routing_telemetry.search_work_count, route_plan.search_work_consumed);
+      add_routing_work(routing_telemetry.scan_work_count, route_plan.scan_work_consumed);
+      for (BranchOnlyRelayPlanStrategy strategy : route_plan.pair_strategies) {
+        if (strategy == BranchOnlyRelayPlanStrategy::ExactPairFallback)
+          ++routing_telemetry.exact_pair_fallback_attempt_count;
+        else if (strategy == BranchOnlyRelayPlanStrategy::GreedyPairFallback)
+          ++routing_telemetry.greedy_pair_fallback_attempt_count;
+      }
+      if (!route_plan.complete()) {
         branch_only_route_error = route_error;
+        for (BranchOnlyRelayPairRejection rejection : route_plan.rejection_reasons) {
+          if (rejection == BranchOnlyRelayPairRejection::InvalidEntryCoordinates ||
+              rejection == BranchOnlyRelayPairRejection::EntryUnreachable) {
+            ++routing_telemetry.entry_route_failure_count;
+          } else if (rejection == BranchOnlyRelayPairRejection::InvalidReturnCoordinates ||
+                     rejection == BranchOnlyRelayPairRejection::ReturnUnreachable) {
+            ++routing_telemetry.return_route_failure_count;
+          } else if (rejection == BranchOnlyRelayPairRejection::RelayContention) {
+            ++routing_telemetry.relay_contention_failure_count;
+          } else if (rejection == BranchOnlyRelayPairRejection::WorkBudget) {
+            ++routing_telemetry.work_budget_failure_count;
+          }
+        }
+        if (route_plan.failure == BranchOnlyRelayPlanFailure::Reservation)
+          ++routing_telemetry.reservation_failure_count;
+      }
       for (const BranchOnlyRelayRoute &route : route_plan.routes) {
         for (const BranchOnlyRelayClaim &claim : route.claims) {
           if (const auto owner = optimistic_relay_owner.find(claim.offset);
@@ -2838,8 +2869,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       const bool complete =
           route_plan.complete() && route_plan.routes.size() == tentative_candidates.size();
-      if (complete && used_optimistic_reservoirs.empty() &&
-          branch_router.commit(route_plan.routes, &route_error)) {
+      bool committed = false;
+      if (complete && used_optimistic_reservoirs.empty()) {
+        committed = branch_router.commit(route_plan.routes, &route_error);
+        if (!committed)
+          ++routing_telemetry.reservation_failure_count;
+      }
+      if (committed) {
         for (size_t index = 0; index < tentative_candidates.size(); ++index) {
           tentative_candidates[index].entry_relay_offsets =
               route_plan.routes[index].entry_relay_offsets;

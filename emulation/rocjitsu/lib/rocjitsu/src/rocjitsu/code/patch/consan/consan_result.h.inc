@@ -84,6 +84,24 @@ struct ConSanPatchedImageGrowthRejection {
   size_t limit_bytes = 0;
 };
 
+/// Aggregate branch-only routing activity. Fallback counters count attempts
+/// that reached the corresponding tier, whether or not that attempt produced
+/// a route. Route-failure counters count rejected pairs; reservation failures
+/// count failed commits. Work counters are monotonic across retries and
+/// convergence iterations.
+struct ConSanBranchOnlyRoutingTelemetry {
+  size_t plan_attempt_count = 0;
+  size_t entry_route_failure_count = 0;
+  size_t return_route_failure_count = 0;
+  size_t relay_contention_failure_count = 0;
+  size_t work_budget_failure_count = 0;
+  size_t reservation_failure_count = 0;
+  size_t exact_pair_fallback_attempt_count = 0;
+  size_t greedy_pair_fallback_attempt_count = 0;
+  size_t search_work_count = 0;
+  size_t scan_work_count = 0;
+};
+
 /// Machine-readable outcome of SuperCollider group-FLAT candidate selection.
 /// This remains available for successful partial transforms without forcing
 /// callers to parse a long warning string.
@@ -103,15 +121,7 @@ struct ConSanFlatSelectionTelemetry {
   size_t private_spill_encoding_failure_count = 0;
   size_t branch_only_selected_count = 0;
   size_t branch_only_placement_failure_count = 0;
-  size_t branch_only_entry_route_failure_count = 0;
-  size_t branch_only_return_route_failure_count = 0;
-  size_t branch_only_relay_contention_failure_count = 0;
-  size_t branch_only_search_budget_failure_count = 0;
-  size_t branch_only_reservation_failure_count = 0;
-  size_t branch_only_pair_fallback_count = 0;
-  size_t branch_only_greedy_fallback_count = 0;
-  size_t branch_only_search_work_count = 0;
-  size_t branch_only_scan_work_count = 0;
+  ConSanBranchOnlyRoutingTelemetry branch_only_routing;
   size_t original_nop_relay_slot_count = 0;
   size_t selected_anchor_relay_slot_count = 0;
 };
@@ -129,6 +139,7 @@ struct ConSanResult {
   bool staged_composition_validated = false;
   /// Internal second-stage proof over a mutation image using a pristine plan.
   bool carried_composite_instrumentation_stage = false;
+  ConSanBranchOnlyRoutingTelemetry lds_branch_only_routing_telemetry;
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
   ConSanFlavor flavor = ConSanFlavor::None;
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;

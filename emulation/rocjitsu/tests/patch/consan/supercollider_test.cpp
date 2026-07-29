@@ -170,6 +170,14 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughVerifiedNopRelays) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
                                &ConSanPatchInfo::kind),
             relay_count);
+  ASSERT_TRUE(result.flat_selection_telemetry);
+  const ConSanBranchOnlyRoutingTelemetry &routing =
+      result.flat_selection_telemetry->branch_only_routing;
+  EXPECT_EQ(routing.plan_attempt_count, 1u);
+  EXPECT_EQ(routing.exact_pair_fallback_attempt_count, 0u);
+  EXPECT_EQ(routing.greedy_pair_fallback_attempt_count, 0u);
+  EXPECT_GT(routing.search_work_count, 0u);
+  EXPECT_GT(routing.scan_work_count, 0u);
 }
 
 TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
@@ -213,6 +221,12 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   };
   EXPECT_TRUE(std::ranges::any_of(body->branch_only_entry_relay_offsets, inside_reservoir));
   EXPECT_TRUE(std::ranges::any_of(body->branch_only_return_relay_offsets, inside_reservoir));
+  ASSERT_TRUE(result.flat_selection_telemetry);
+  const ConSanBranchOnlyRoutingTelemetry &routing =
+      result.flat_selection_telemetry->branch_only_routing;
+  EXPECT_EQ(routing.plan_attempt_count, 2u);
+  EXPECT_GT(routing.search_work_count, 0u);
+  EXPECT_GT(routing.scan_work_count, 0u);
 
   ConSanResult malformed = result;
   const auto malformed_reservoir =
@@ -6529,6 +6543,10 @@ TEST(ConSan, Rdna4CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   EXPECT_FALSE(branch_only->indirect_pc_sgpr.has_value());
   ASSERT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
   ASSERT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
+  const ConSanBranchOnlyRoutingTelemetry &routing = result.lds_branch_only_routing_telemetry;
+  EXPECT_GT(routing.plan_attempt_count, 0u);
+  EXPECT_GT(routing.search_work_count, 0u);
+  EXPECT_GT(routing.scan_work_count, 0u);
 }
 
 TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
