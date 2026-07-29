@@ -11,7 +11,8 @@ endif()
 
 set(TEST_MICRO_SOURCE_FILES
   p2p-test.cc
-  fakes/p2p_fakes.cc                   # stubs for everything p2p.cc references
+  fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
+  fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
   fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
   ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
   ../common/ProcessIsolatedTestRunner.cpp
