@@ -7,6 +7,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 ### Added
 
 * Invalid video size handling for AVC/HEVC.
+* /validate skill and scripts.
 
 ### Resolved issues
 
