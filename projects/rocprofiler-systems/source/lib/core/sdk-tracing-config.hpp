@@ -670,7 +670,7 @@ sdk_tracing_config<SdkApi, Externals>::get_callback_domains()
     {
         if(sdk_runtime_version >= version_info{ .major = 1, .minor = 3, .patch = 4 })
         {
-            supported.emplace(Wrapper::CALLBACK_TRACING_ROCSHMEM_API);
+            supported.emplace(SdkApi::CALLBACK_TRACING_ROCSHMEM_API);
         }
     }
     if constexpr(compile_time_sdk_version >=
@@ -678,7 +678,7 @@ sdk_tracing_config<SdkApi, Externals>::get_callback_domains()
     {
         if(sdk_runtime_version >= version_info{ .major = 1, .minor = 3, .patch = 5 })
         {
-            supported.emplace(Wrapper::CALLBACK_TRACING_HIPFILE_API);
+            supported.emplace(SdkApi::CALLBACK_TRACING_HIPFILE_API);
         }
     }
 
