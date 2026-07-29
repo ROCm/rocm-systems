@@ -126,7 +126,7 @@ option(ENABLE_ASAN_PACKAGING "" OFF)
 
 # WSL/WDDM GPU backend. Default OFF so native builds and CI are unchanged. When
 # ON, the WSL intercept hooks and mock backend are compiled
-option(ENABLE_WSL_BACKEND "Build the experimental WSL (WDDM/dxg) GPU backend" OFF)
+option(ENABLE_WSL_BACKEND "Build the experimental WSL (WDDM/dxg) GPU backend" ON)
 set(AMDSMI_ENABLE_WSL_BACKEND ${ENABLE_WSL_BACKEND})
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
