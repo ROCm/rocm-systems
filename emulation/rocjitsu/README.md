@@ -26,7 +26,7 @@ real hardware. Supports three execution strategies:
 | RDNA3.5&trade; | gfx1150 | GFX11 | Experimental | Experimental | Planned |
 | RDNA4&trade; | gfx1200 | GFX12 | Experimental | Experimental | Planned |
 | gfx1250      | gfx1250 | GFX12 | Experimental | Experimental | Planned |
-| RISC-V | RV32IMAFDC | RV | Experimental | &mdash; | &mdash; |
+| RISC-V | RV64I | RV | Experimental | &mdash; | &mdash; |
 
 <!-- \NPI new GPU: add a row to the supported-architectures table above. -->
 
@@ -146,6 +146,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [DBT Design](docs/dbt-design.md) | Binary translator architecture |
 | [DBI Design](docs/dbi-design.md) | Binary instrumentation (in progress) |
 | [Codegen](docs/codegen.md) | ISA codegen pipeline and regen commands |
+| [ISA Target Providers](docs/isa-target-providers.md) | Static target registration and per-component subsets |
 
 ### Reference
 

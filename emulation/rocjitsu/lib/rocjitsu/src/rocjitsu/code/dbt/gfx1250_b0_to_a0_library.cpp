@@ -5,27 +5,10 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
-#include "rocjitsu/isa/decoder.h"
-#include "rocjitsu/isa/instruction.h"
 
 #include <cstdlib>
 #include <cstring>
-#include <memory>
 #include <new>
-
-namespace rocjitsu {
-
-// This fixed-profile frontend deliberately supplies its own decoder factory.
-// Keeping the all-ISA registry out of this shared object lets the static linker
-// select only the gfx1250 model objects required by the B0-to-A0 translator.
-std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250)
-    return nullptr;
-  return std::make_unique<IsaDecoder<gfx1250::Isa>>();
-}
-
-} // namespace rocjitsu
 
 rj_status_t rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size,
                                           uint8_t **translated_elf, size_t *translated_size) {
