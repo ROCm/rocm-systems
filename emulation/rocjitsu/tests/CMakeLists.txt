@@ -759,7 +759,7 @@ target_include_directories(
 )
 target_link_libraries(
     rj_dbt_translate_smoke_test
-    PRIVATE rocjitsu_tooling GTest::gtest
+    PRIVATE rocjitsu_translate_cli GTest::gtest
 )
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
 add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)

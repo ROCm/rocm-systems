@@ -7,6 +7,10 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
+#include <cstdint>
+#include <optional>
+#include <vector>
+
 namespace rocjitsu {
 
 namespace {
@@ -91,7 +95,39 @@ InstDefUse::InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vg
     if (auto ref = op->to_register_ref())
       expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use);
   }
-  inst.implicit_uses(uses);
+
+  if (vgpr_msb == nullptr) {
+    // No dynamic VGPR banking (non-gfx1250): the flat hook already reports every
+    // implicit read at its physical index.
+    inst.implicit_uses(uses);
+    return;
+  }
+
+  // On gfx1250 an implicit read with a backing operand (a partial-write/RMW op
+  // preserve-reading its destination, or a swap preserve-reading both operands)
+  // carries its own VGPR-MSB role and width, so resolve it through the same
+  // per-operand path as explicit sources. This applies each read's own bank —
+  // critical when a preserve-read aliases an explicit bank-0 source but sits in a
+  // different destination bank, or when a swap mixes SRC0 and DST banks — and it
+  // preserves the operand's true tuple width.
+  std::vector<const Operand *> implicit_use_operand_list;
+  inst.implicit_use_operands(implicit_use_operand_list);
+  for (const Operand *op : implicit_use_operand_list) {
+    if (op == nullptr)
+      continue;
+    if (auto ref = op->to_register_ref())
+      expand_operand_register(uses, inst, *op, *ref, vgpr_msb, OperandExpansionKind::Use);
+  }
+
+  // The flat hook also reports encoded-field implicit reads with no backing
+  // operand (e.g. FLAT/GLOBAL saddr, an SGPR). Merge only those: the VGPR reads
+  // it would add carry no bank, and the operand path above already resolved them
+  // to the correct physical tuple, so re-adding the raw low-8 index would mark a
+  // wrong, unbanked register live.
+  RegisterSet flat_implicit;
+  inst.implicit_uses(flat_implicit);
+  flat_implicit.clear_class(RegClass::VGPR);
+  uses |= flat_implicit;
 }
 
 } // namespace rocjitsu
