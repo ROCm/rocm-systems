@@ -277,6 +277,24 @@ TEST_F(roctx_client_control_test, pause_resume_no_filter)
     EXPECT_TRUE(client->get_trigger().should_write_markers());
 }
 
+TEST_F(roctx_client_control_test, no_filter_range_started_while_paused_suppresses_markers)
+{
+    auto client = make_client("");
+
+    client->get_trigger().on_pause();
+    EXPECT_FALSE(client->get_trigger().should_write_markers());
+
+    // Opening a range must not lift the pause when no region filter is set.
+    client->get_trigger().on_range_start(1, "Region1");
+    EXPECT_FALSE(client->get_trigger().should_write_markers());
+
+    client->get_trigger().on_resume();
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+
+    client->get_trigger().on_range_stop(1);
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+}
+
 // ---------------------------------------------------------------------------
 // Selective Region Tracing - Example 1: Normal Case
 // ---------------------------------------------------------------------------
