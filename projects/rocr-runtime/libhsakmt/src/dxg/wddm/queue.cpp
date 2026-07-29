@@ -897,10 +897,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
   if (required_size > cmdbuf_aql_frame_size) {
     pr_err("PM4 command buffer overflow in VendorSpecific: required %zu bytes, limit %u bytes\n",
            required_size, cmdbuf_aql_frame_size);
-    // Oversized vendor IB: drop the PM4 payload but still retire the AQL
-    // packet and signal completion, matching the existing
-    // vendor_packet_process=off skip contract below (no queue hang).
-    process_packet = false;
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
   pr_debug("queue %p %s VENDOR_SPECIFIC pkt pm4_addr %p pm4_size %#x cs=%" PRIx64 "\n", ring,
