@@ -116,8 +116,10 @@ drain_pipes(const uint8_t*           records_base,
             OnRecord&&               on_record,
             OnPair&&                 on_pair)
 {
+    if(num_regions == 0 || (region_record_count % num_regions) != 0) return 0;
+
     const uint32_t npipes         = std::min<uint32_t>(num_regions, 8);
-    const uint32_t slots_per_pipe = num_regions ? region_record_count / num_regions : 0;
+    const uint32_t slots_per_pipe = region_record_count / num_regions;
 
     if(slots_per_pipe == 0 || (slots_per_pipe & (slots_per_pipe - 1)) != 0) return 0;
 
