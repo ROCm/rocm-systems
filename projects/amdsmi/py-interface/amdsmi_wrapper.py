@@ -3168,6 +3168,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_device_cuid = _libraries['libamd_smi.so'].amdsmi_get_gpu_device_cuid
+    amdsmi_get_gpu_device_cuid.restype = amdsmi_status_t
+    amdsmi_get_gpu_device_cuid.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_enumeration_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_enumeration_info
     amdsmi_get_gpu_enumeration_info.restype = amdsmi_status_t
     amdsmi_get_gpu_enumeration_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_enumeration_info_t)]
@@ -5311,9 +5317,10 @@ __all__ = \
     'amdsmi_get_gpu_compute_process_info',
     'amdsmi_get_gpu_compute_process_info_by_pid',
     'amdsmi_get_gpu_cper_entries', 'amdsmi_get_gpu_device_bdf',
-    'amdsmi_get_gpu_device_uuid', 'amdsmi_get_gpu_driver_info',
-    'amdsmi_get_gpu_ecc_count', 'amdsmi_get_gpu_ecc_enabled',
-    'amdsmi_get_gpu_ecc_status', 'amdsmi_get_gpu_enumeration_info',
+    'amdsmi_get_gpu_device_cuid', 'amdsmi_get_gpu_device_uuid',
+    'amdsmi_get_gpu_driver_info', 'amdsmi_get_gpu_ecc_count',
+    'amdsmi_get_gpu_ecc_enabled', 'amdsmi_get_gpu_ecc_status',
+    'amdsmi_get_gpu_enumeration_info',
     'amdsmi_get_gpu_event_notification', 'amdsmi_get_gpu_fabric_info',
     'amdsmi_get_gpu_fan_rpms', 'amdsmi_get_gpu_fan_speed',
     'amdsmi_get_gpu_fan_speed_max', 'amdsmi_get_gpu_id',
