@@ -101,8 +101,11 @@ public:
             std::string *error_out = nullptr,
             BranchOnlyRelayPlanFailure *failure_out = nullptr) const;
 
-  /// Plans exact request pairs and transactionally reserves pristine relay
-  /// words in @p tentative_planner. A failed plan leaves the planner unchanged.
+  /// Plans fixed request pairs and transactionally reserves pristine relay
+  /// words in @p tentative_planner. Exact backtracking has a deterministic work
+  /// budget; exhaustion falls back to linear pair-atomic routing and is
+  /// reported if that fallback is partial. A failed plan leaves the planner
+  /// unchanged.
   /// If no complete disjoint assignment exists, returned partial routes are
   /// pair-atomic and `rejected_pair_indices` identifies every omitted pair;
   /// callers may inspect their claims for convergence but must not commit them.
