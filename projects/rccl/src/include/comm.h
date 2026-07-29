@@ -26,7 +26,6 @@
 #include "ce_coll.h"
 #include "rma/rma.h"
 #include "argcheck.h"
-#include "mem_manager.h"
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
