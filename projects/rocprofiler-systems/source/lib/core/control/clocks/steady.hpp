@@ -23,7 +23,8 @@ public:
 
     [[nodiscard]] clock_time_point now() const noexcept;
     [[nodiscard]] bool             sleep_until(clock_time_point deadline);
-    void                           interrupt();
+    void                           interrupt() noexcept;
+    void                           reset() noexcept;
 
 private:
     std::mutex              m_mutex;
