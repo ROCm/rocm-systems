@@ -199,6 +199,7 @@ PartitionID partition_by_name_suffix(Component *comp) {
 } // namespace
 
 TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
+  ProducerComponent external("external", 0, 1, false);
   Topology topology;
   auto root = std::make_unique<CompositeComponent>("root");
   auto consumer = std::make_unique<ConsumerComponent>("consumer");
@@ -206,7 +207,6 @@ TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
   root->add_child(std::move(consumer));
   topology.set_root(std::move(root));
 
-  ProducerComponent external("external", 0, 1, false);
   topology.add_link(external.out_port(), consumer_ptr->in_port(), 1);
 
   for (int pass = 0; pass < 2; ++pass) {
@@ -220,6 +220,7 @@ TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
 }
 
 TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
+  ProducerComponent external("external", 0, 1, false);
   Topology topology;
   auto root = std::make_unique<CompositeComponent>("root");
   auto consumer = std::make_unique<ConsumerComponent>("consumer");
@@ -227,7 +228,6 @@ TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
   root->add_child(std::move(consumer));
   topology.set_root(std::move(root));
 
-  ProducerComponent external("external", 0, 1, false);
   topology.add_link(external.out_port(), consumer_ptr->in_port(), 1);
 
   topology.partition_balanced(1);
@@ -240,6 +240,7 @@ TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
 }
 
 TEST(TopologyPartitionTest, BalancedRepartitionRetainsExternalLinkOwnerOnce) {
+  ProducerComponent external("external", 0, 1, false);
   Topology topology;
   auto root = std::make_unique<CompositeComponent>("root");
   auto consumer = std::make_unique<ConsumerComponent>("consumer");
@@ -247,7 +248,6 @@ TEST(TopologyPartitionTest, BalancedRepartitionRetainsExternalLinkOwnerOnce) {
   root->add_child(std::move(consumer));
   topology.set_root(std::move(root));
 
-  ProducerComponent external("external", 0, 1, false);
   topology.add_link(external.out_port(), consumer_ptr->in_port(), 1);
 
   for (int pass = 0; pass < 2; ++pass) {
@@ -336,7 +336,15 @@ TEST(TopologyPartitionTest, EngineRejectsZeroLatencyCrossPartitionLink) {
   engine.topology().add_link(producer_ptr->out_port(), consumer_ptr->in_port(), 0);
   engine.topology().partition_manual(2, partition_by_name_suffix);
 
-  EXPECT_THROW(engine.create(), std::invalid_argument);
+  try {
+    engine.create();
+    FAIL() << "expected invalid cross-partition latency";
+  } catch (const std::invalid_argument &e) {
+    const std::string message = e.what();
+    EXPECT_NE(message.find("root.producer0.out"), std::string::npos);
+    EXPECT_NE(message.find("root.consumer1.in"), std::string::npos);
+    EXPECT_NE(message.find("positive latency"), std::string::npos);
+  }
   EXPECT_FALSE(engine.is_created());
 }
 
@@ -353,7 +361,15 @@ TEST(TopologyPartitionTest, EngineRejectsCrossPartitionQueuedLink) {
   engine.topology().add_queued_link(producer_ptr->out_port(), consumer_ptr->in_port(), 1, 4);
   engine.topology().partition_manual(2, partition_by_name_suffix);
 
-  EXPECT_THROW(engine.create(), std::invalid_argument);
+  try {
+    engine.create();
+    FAIL() << "expected cross-partition QueuedLink rejection";
+  } catch (const std::invalid_argument &e) {
+    const std::string message = e.what();
+    EXPECT_NE(message.find("root.producer0.out"), std::string::npos);
+    EXPECT_NE(message.find("root.consumer1.in"), std::string::npos);
+    EXPECT_NE(message.find("QueuedLink"), std::string::npos);
+  }
   EXPECT_FALSE(engine.is_created());
 }
 

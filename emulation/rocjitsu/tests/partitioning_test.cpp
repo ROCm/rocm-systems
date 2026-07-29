@@ -117,6 +117,14 @@ TEST(XcdPartitioningTest, ZeroPartitionsIsNoopWithoutManualPartitions) {
     EXPECT_EQ(soc->xcd(i)->partition_id(), simdojo::INVALID_PARTITION_ID);
 }
 
+TEST(XcdPartitioningTest, NoXcdsIsNoopWithoutManualPartitions) {
+  simdojo::Topology topology;
+
+  EXPECT_FALSE(amdgpu::partition_topology_by_xcds(topology, std::span<SoC *>{}, 1));
+  EXPECT_FALSE(amdgpu::partition_topology_by_xcds(topology, static_cast<SoC *>(nullptr), 1));
+  EXPECT_TRUE(topology.partitions().empty());
+}
+
 TEST(XcdPartitioningTest, SinglePartitionAssignsAllComponentsToZero) {
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();

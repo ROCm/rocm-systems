@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
@@ -21,7 +22,6 @@ RJ_DIAGNOSTIC_POP
 #include <cerrno>
 #include <cstring>
 #include <memory>
-#include <span>
 #include <stdexcept>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -121,10 +121,10 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     s->soc->wire_backing(s->engine->topology());
     partition_socs.push_back(s->soc);
   }
-  if (num_threads_used > 1)
-    amdgpu::partition_topology_by_xcds(
-        s->engine->topology(), std::span<SoC *>(partition_socs.data(), partition_socs.size()),
-        num_threads_used);
+  if (num_threads_used > 1 && !amdgpu::partition_topology_by_xcds(
+                                  s->engine->topology(), partition_socs, num_threads_used)) {
+    throw std::invalid_argument("multi-threaded VM requires at least one XCD");
+  }
   s->engine->create();
 
   if (serve) {
@@ -189,7 +189,8 @@ rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm)
   try {
     auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema);
     return create_from_loaded(loaded, mode, vm);
-  } catch (const std::exception &) {
+  } catch (const std::exception &e) {
+    util::Logger::warn("rj_vm_create failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
 }
@@ -200,7 +201,8 @@ rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_
   try {
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     return create_from_loaded(loaded, mode, vm);
-  } catch (const std::exception &) {
+  } catch (const std::exception &e) {
+    util::Logger::warn("rj_vm_create_from_string failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
 }

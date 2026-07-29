@@ -6,8 +6,17 @@
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
+#include <string>
 
 namespace simdojo {
+
+namespace {
+
+std::string link_endpoints(const Link &link) {
+  return link.src()->full_path() + " -> " + link.dst()->full_path();
+}
+
+} // namespace
 
 void PartitionContext::drain_incoming() {
   for (auto &queue : incoming)
@@ -84,12 +93,12 @@ void SimulationEngine::setup_partitions() {
   for (auto &link : topology_.links()) {
     if (link->is_cross_partition()) {
       if (link->latency() == 0) {
-        throw std::invalid_argument(
-            "SimulationEngine cross-partition links require positive latency");
+        throw std::invalid_argument("SimulationEngine cross-partition link " +
+                                    link_endpoints(*link) + " requires positive latency");
       }
       if (dynamic_cast<QueuedLink *>(link.get()) != nullptr) {
-        throw std::invalid_argument(
-            "SimulationEngine QueuedLinks must not cross partition boundaries");
+        throw std::invalid_argument("SimulationEngine QueuedLink " + link_endpoints(*link) +
+                                    " must not cross partition boundaries");
       }
     }
   }

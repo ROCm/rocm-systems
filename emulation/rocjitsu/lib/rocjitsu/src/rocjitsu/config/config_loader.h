@@ -48,12 +48,18 @@ struct TopologyBuildResult {
 ///
 /// Contains the engine configuration and the built component tree. Provides
 /// convenience accessors for the SoC and GPU memory. After loading, wire
-/// the topology into a SimulationEngine:
+/// the topology into a SimulationEngine. Multi-threaded rocjitsu topologies
+/// use the XCD-aware policy from rocjitsu/vm/amdgpu/partitioning.h:
 /// @code
 ///   auto loaded = load_config("config.json", kEmbeddedSchema);
-///   SimulationEngine engine(loaded.engine_config);
+///   auto *soc = loaded.soc();
+///   simdojo::SimulationEngine engine(loaded.engine_config);
 ///   engine.topology().set_root(loaded.take_root());
 ///   loaded.wire_links(engine.topology());
+///   if (loaded.engine_config.num_threads > 1 &&
+///       !amdgpu::partition_topology_by_xcds(
+///           engine.topology(), soc, loaded.engine_config.num_threads))
+///     throw std::invalid_argument("multi-threaded topology requires an XCD");
 ///   engine.create();
 /// @endcode
 struct LoadedConfig {

@@ -84,6 +84,18 @@ Port *resolve_port_impl(CompositeComponent *root, const std::string &path) {
   return find_or_create_port(comp, pn);
 }
 
+void validate_link_ports([[maybe_unused]] Port *src, [[maybe_unused]] Port *dst) {
+  // Validate port protocol compatibility (UNTYPED matches anything).
+  assert((src->protocol() == PortProtocol::UNTYPED || dst->protocol() == PortProtocol::UNTYPED ||
+          src->protocol() == dst->protocol()) &&
+         "link endpoints must have compatible protocols");
+  // Validate port direction: link goes from OUT to IN (or UNTYPED).
+  assert((src->direction() == PortDirection::OUT || src->protocol() == PortProtocol::UNTYPED) &&
+         "link source must be an OUT port");
+  assert((dst->direction() == PortDirection::IN || dst->protocol() == PortProtocol::UNTYPED) &&
+         "link destination must be an IN port");
+}
+
 } // namespace
 
 ClockDomain *Topology::add_clock_domain(std::string name, uint64_t frequency_hz,
@@ -95,15 +107,7 @@ ClockDomain *Topology::add_clock_domain(std::string name, uint64_t frequency_hz,
 }
 
 Link *Topology::add_link(Port *src, Port *dst, Tick latency, uint32_t weight) {
-  // Validate port protocol compatibility (UNTYPED matches anything).
-  assert((src->protocol() == PortProtocol::UNTYPED || dst->protocol() == PortProtocol::UNTYPED ||
-          src->protocol() == dst->protocol()) &&
-         "link endpoints must have compatible protocols");
-  // Validate port direction: link goes from OUT to IN (or UNTYPED).
-  assert((src->direction() == PortDirection::OUT || src->protocol() == PortProtocol::UNTYPED) &&
-         "link source must be an OUT port");
-  assert((dst->direction() == PortDirection::IN || dst->protocol() == PortProtocol::UNTYPED) &&
-         "link destination must be an IN port");
+  validate_link_ports(src, dst);
 
   auto link = std::make_unique<Link>(next_link_id_++, src, dst, latency);
   link->set_weight(weight);
@@ -116,15 +120,7 @@ Link *Topology::add_link(Port *src, Port *dst, Tick latency, uint32_t weight) {
 
 QueuedLink *Topology::add_queued_link(Port *src, Port *dst, Tick latency, size_t capacity,
                                       uint32_t weight) {
-  // Validate port protocol compatibility (UNTYPED matches anything).
-  assert((src->protocol() == PortProtocol::UNTYPED || dst->protocol() == PortProtocol::UNTYPED ||
-          src->protocol() == dst->protocol()) &&
-         "link endpoints must have compatible protocols");
-  // Validate port direction: link goes from OUT to IN (or UNTYPED).
-  assert((src->direction() == PortDirection::OUT || src->protocol() == PortProtocol::UNTYPED) &&
-         "link source must be an OUT port");
-  assert((dst->direction() == PortDirection::IN || dst->protocol() == PortProtocol::UNTYPED) &&
-         "link destination must be an IN port");
+  validate_link_ports(src, dst);
 
   auto link = std::make_unique<QueuedLink>(next_link_id_++, src, dst, latency, capacity);
   link->set_weight(weight);

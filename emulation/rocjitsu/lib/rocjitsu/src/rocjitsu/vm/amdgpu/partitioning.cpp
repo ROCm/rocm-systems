@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 
 #include <array>
+#include <cassert>
 #include <unordered_map>
 
 namespace rocjitsu {
@@ -29,11 +30,15 @@ bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> so
     return false;
 
   topology.partition_manual(num_partitions, [&](simdojo::Component *component) {
-    for (auto *candidate = component; candidate != nullptr;
-         candidate = static_cast<simdojo::Component *>(candidate->parent())) {
+    for (auto *candidate = component; candidate != nullptr;) {
       auto it = xcd_partitions.find(candidate);
       if (it != xcd_partitions.end())
         return it->second;
+
+      auto *parent = candidate->parent();
+      candidate = dynamic_cast<simdojo::Component *>(parent);
+      assert((parent == nullptr || candidate != nullptr) &&
+             "component parents must also be components");
     }
     return simdojo::PartitionID{0};
   });

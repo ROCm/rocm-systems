@@ -25,11 +25,12 @@ namespace amdgpu {
 /// subtrees stay in partition 0.
 /// @returns true when a manual partition was installed; false when
 /// @p num_partitions is zero or no XCDs are present.
-bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> socs,
-                                uint32_t num_partitions);
+[[nodiscard]] bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> socs,
+                                              uint32_t num_partitions);
 
 /// @brief Convenience overload for a single SoC.
-bool partition_topology_by_xcds(simdojo::Topology &topology, SoC *soc, uint32_t num_partitions);
+[[nodiscard]] bool partition_topology_by_xcds(simdojo::Topology &topology, SoC *soc,
+                                              uint32_t num_partitions);
 
 } // namespace amdgpu
 } // namespace rocjitsu

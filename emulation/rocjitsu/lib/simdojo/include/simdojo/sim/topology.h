@@ -96,6 +96,11 @@ public:
   Link *add_link(Port *src, Port *dst, Tick latency, uint32_t weight = 1);
 
   /// @brief Create a queued link between two ports.
+  ///
+  /// @details Topology owns links, so topology builders use this factory when
+  /// bounded-capacity transport is required. Queued links may only connect
+  /// components in the same topology partition. SimulationEngine::create()
+  /// rejects cross-partition queued links.
   /// @param src Source port.
   /// @param dst Destination port.
   /// @param latency Propagation delay in simulation ticks.
