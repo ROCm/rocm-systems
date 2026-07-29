@@ -240,11 +240,15 @@ static int vhsakmt_init_userptr_blob(vhsakmt_device_handle dev, void* addr, size
   int r;
   struct drm_virtgpu_resource_create_blob args = {
       .blob_mem = VIRTGPU_BLOB_MEM_HOST3D_GUEST,
-      .blob_flags = VIRTGPU_BLOB_FLAG_USE_USERPTR,
+      .blob_flags = dev->use_svm ? VIRTGPU_BLOB_FLAG_USE_SVM
+                                 : VIRTGPU_BLOB_FLAG_USE_USERPTR,
       .size = size,
       .blob_id = vhsakmt_atomic_inc_return(&dev->next_blob_id),
-      .blob_userptr = (uint64_t)addr,
   };
+  if (dev->use_svm)
+    args.blob_svm = (uint64_t)addr;
+  else
+    args.blob_userptr = (uint64_t)addr;
 
   r = virtio_gpu_create_blob(dev->vgdev, &args);
   if (r < 0) return r;

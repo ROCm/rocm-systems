@@ -92,7 +92,7 @@ static vhsakmt_device_handle vhsakmt_device_init(void) {
   pthread_mutex_init(&dev->vhsakmt_mutex, NULL);
   dev_list = dev;
 
-  dev->use_svm = false;
+  dev->use_svm = true;
 
   pthread_mutex_unlock(&dev_mutex);
   return dev;
@@ -109,7 +109,7 @@ static void vhsakmt_init_vars_from_env(void) {
   char* env_val = NULL;
 
   env_val = getenv("VHSAKMT_USE_SVM");
-  if (env_val && atoi(env_val)) vhsakmt_dev()->use_svm = true;
+  if (env_val) vhsakmt_dev()->use_svm = (atoi(env_val) != 0);
 
   env_val = getenv("VHSAKMT_DEBUG_LEVEL");
   if (env_val) vhsakmt_debug_level = atoi(env_val);
