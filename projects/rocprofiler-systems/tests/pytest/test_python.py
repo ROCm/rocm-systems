@@ -87,7 +87,7 @@ class TestPython(RocprofsysTest):
     PYTHON_SOURCE_GENERAL = {
         "metric": "trip_count",  # Timemory
         "file": "trip_count.json",  # Timemory
-        "categories": ["python", "user"],  # Perfetto
+        "categories": ["python", "rocm_marker_api"],  # Perfetto
         "labels": [
             "main_loop",
             "run",
@@ -281,7 +281,13 @@ class TestPython(RocprofsysTest):
             )
 
     @pytest.mark.rocpd("python_rocpd_env")
-    def test_source(self, python_version, python_rocpd_env, python_source_rocpd_rules):
+    def test_source(
+        self, python_version, python_rocpd_env, python_source_rocpd_rules, rocprof_config
+    ):
+        if not rocprof_config.capabilities.roctx_available_for(python_version):
+            pytest.skip(
+                f"roctx Python bindings not installed for Python {python_version}"
+            )
         result = self.run_test(
             "python",
             target="source.py",

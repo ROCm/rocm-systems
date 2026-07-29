@@ -72,6 +72,35 @@ def get_amdgpu_version(
     return None
 
 
+def find_roctx_site_packages(
+    rocm_path: Optional[Path], python_version: str
+) -> Optional[Path]:
+    """Return the ROCm-provided roctx site-packages directory for a Python version.
+
+    rocprofiler-sdk builds and installs its ``roctx`` Python bindings
+    (``libpyroctx.<abi>.so``) per interpreter into a versioned directory under
+    the ROCm install tree, e.g. ``<rocm_path>/lib/python3.11/site-packages``.
+    Unlike rocprofsys's own bindings, these are not consolidated into a single
+    ABI-agnostic directory, so the correct versioned directory must be
+    resolved per Python version.
+
+    Args:
+        rocm_path: Path to the ROCm installation, or None.
+        python_version: Python version string, e.g. "3.11".
+
+    Returns:
+        Path to the site-packages directory containing the ``roctx`` package
+        for the given version, or None if not found.
+    """
+    if not rocm_path:
+        return None
+    for lib_name in ("lib", "lib64"):
+        candidate = rocm_path / lib_name / f"python{python_version}" / "site-packages"
+        if (candidate / "roctx").is_dir():
+            return candidate
+    return None
+
+
 @dataclass
 class SystemCapabilities:
     """
@@ -430,6 +459,10 @@ class SystemCapabilities:
             raise FileNotFoundError(
                 f"Python version '{version}' not found. Available: {', '.join(self.supported_python_versions)}"
             )
+
+    def roctx_available_for(self, python_version: str) -> bool:
+        """Return whether ROCm's roctx Python bindings are installed for this version."""
+        return find_roctx_site_packages(self.rocm_path, python_version) is not None
 
     # ---------------------------------------------------------------------------
 

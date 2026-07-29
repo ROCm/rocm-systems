@@ -258,7 +258,9 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     def test_simulate_lib(self, rocprof_config):
-        causal_api_lib = rocprof_config.rocprofsys_lib_dir / "librocprof-sys-causal-api.so"
+        causal_api_lib = (
+            rocprof_config.rocprofsys_lib_dir / "librocprof-sys-causal-api.so"
+        )
         if not causal_api_lib.exists():
             pytest.fail("librocprof-sys-causal-api.so not found")
 

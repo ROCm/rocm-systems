@@ -12,7 +12,7 @@ from typing import Optional
 import re
 
 from .cache import persistent_cache, persistent_cached_property, resolve_username
-from .capabilities import SystemCapabilities
+from .capabilities import SystemCapabilities, find_roctx_site_packages
 
 
 @dataclass
@@ -164,6 +164,13 @@ class RocprofsysConfig:
             return None
         existing = os.environ.get("LD_PRELOAD", "")
         return f"{asan_library}:{existing}" if existing else asan_library
+
+    def get_roctx_site_packages(self, python_version: str) -> Optional[Path]:
+        """Get the ROCm-provided roctx site-packages directory for a Python version.
+
+        See :func:`rocprofsys.capabilities.find_roctx_site_packages`.
+        """
+        return find_roctx_site_packages(self.rocm_path, python_version)
 
     def get_target_executable(self, name: str) -> Path:
         """Get path to a test target executable.
