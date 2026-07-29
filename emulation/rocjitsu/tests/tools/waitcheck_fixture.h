@@ -56,6 +56,27 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   return inst;
 }
 
+[[nodiscard]] inline uint32_t v_add_f32_e32_word(uint32_t vdst, uint32_t src0, uint32_t vsrc1) {
+  auto inst = std::bit_cast<rdna4::Vop2MachineInst>(0x06000000U);
+  inst.vdst = vdst;
+  inst.src0 = src0;
+  inst.vsrc1 = vsrc1;
+  return std::bit_cast<uint32_t>(inst);
+}
+
+[[nodiscard]] inline uint32_t s_mov_b32_word(uint32_t sdst, uint32_t ssrc0) {
+  auto inst = std::bit_cast<rdna4::Sop1MachineInst>(0xBE800000U);
+  inst.sdst = sdst;
+  inst.ssrc0 = ssrc0;
+  return std::bit_cast<uint32_t>(inst);
+}
+
+[[nodiscard]] inline uint32_t s_setpc_b64_word(uint32_t ssrc0) {
+  auto inst = std::bit_cast<rdna4::Sop1MachineInst>(0xBE804800U);
+  inst.ssrc0 = ssrc0;
+  return std::bit_cast<uint32_t>(inst);
+}
+
 [[nodiscard]] inline rdna4::VglobalMachineInst global_load_b32(uint32_t vdst) {
   rdna4::VglobalMachineInst inst{};
   inst.encoding = 0xEE;
@@ -232,9 +253,36 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   return image;
 }
 
+[[nodiscard]] inline std::vector<uint8_t> make_gfx_function_only_code_object(
+    const std::vector<std::pair<std::string, std::vector<uint32_t>>> &functions, uint32_t mach,
+    bool wave32 = false) {
+  std::vector<uint8_t> image = make_gfx_multi_kernel_code_object(functions, mach, wave32);
+  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
+  auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+  auto *symbols = reinterpret_cast<Elf64_Sym *>(image.data() + shdrs[3].sh_offset);
+  for (size_t i = 0; i < functions.size(); ++i)
+    symbols[2 * i + 1] = {};
+  return image;
+}
+
 [[nodiscard]] inline std::vector<uint8_t>
 make_gfx_code_object(const std::vector<uint32_t> &text_words, uint32_t mach, bool wave32 = false) {
   return make_gfx_multi_kernel_code_object({{"waitcheck", text_words}}, mach, wave32);
+}
+
+[[nodiscard]] inline std::vector<uint8_t>
+make_gfx_symbol_less_code_object(const std::vector<uint32_t> &text_words, uint32_t mach,
+                                 bool wave32 = false) {
+  std::vector<uint8_t> image = make_gfx_code_object(text_words, mach, wave32);
+  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
+  auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+  for (size_t section_index = 0; section_index < ehdr->e_shnum; ++section_index) {
+    const Elf64_Shdr &section = shdrs[section_index];
+    if (section.sh_type != SHT_SYMTAB)
+      continue;
+    std::memset(image.data() + section.sh_offset, 0, section.sh_size);
+  }
+  return image;
 }
 
 [[nodiscard]] inline std::vector<uint8_t>
@@ -250,6 +298,11 @@ make_gfx1201_code_object(const std::vector<uint32_t> &text_words) {
 [[nodiscard]] inline std::vector<uint8_t> make_gfx1201_multi_kernel_code_object(
     const std::vector<std::pair<std::string, std::vector<uint32_t>>> &kernels) {
   return make_gfx_multi_kernel_code_object(kernels, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+}
+
+[[nodiscard]] inline std::vector<uint8_t> make_gfx1201_function_only_code_object(
+    const std::vector<std::pair<std::string, std::vector<uint32_t>>> &functions) {
+  return make_gfx_function_only_code_object(functions, EF_AMDGPU_MACH_AMDGCN_GFX1201);
 }
 
 [[nodiscard]] inline std::vector<uint8_t> make_relocatable_code_object(std::vector<uint8_t> image) {
@@ -353,13 +406,11 @@ make_gfx1250_code_object(const std::vector<uint32_t> &text_words) {
   append_inst(second, v_mov_b32(1, 0));
   second.push_back(0xBE80481EU); // s_setpc_b64 s[30:31]
 
-  auto image = make_gfx_multi_kernel_code_object({{"first", first}, {"second", second}},
-                                                 EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  auto image = make_gfx_function_only_code_object({{"first", first}, {"second", second}},
+                                                  EF_AMDGPU_MACH_AMDGCN_GFX1200);
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
   auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
   auto *syms = reinterpret_cast<Elf64_Sym *>(image.data() + shdrs[3].sh_offset);
-  syms[1] = {};
-  syms[3] = {};
   syms[2].st_size = 2 * sizeof(uint32_t);
   syms[4].st_size = second.size() * sizeof(uint32_t);
   return image;

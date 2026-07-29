@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -105,6 +106,8 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
     return "memory-order";
   case WaitcheckAccessKind::ProgramEnd:
     return "program-end";
+  case WaitcheckAccessKind::ControlTransfer:
+    return "control-transfer";
   }
   return "unknown";
 }
@@ -639,6 +642,54 @@ void append_image_bvhs(std::vector<uint32_t> &program, uint32_t count, uint32_t 
 [[nodiscard]] rdna4::SoppMachineInst s_wait_xcnt(uint32_t count) { return sopp(69, count); }
 
 [[nodiscard]] rdna4::SoppMachineInst s_wait_xcnt_0() { return s_wait_xcnt(0); }
+
+[[nodiscard]] std::vector<uint32_t> gfx1201_swappc_valu_sgpr_boundary_program(bool include_wait) {
+  constexpr uint16_t kTargetSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint16_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> program;
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  program.push_back(
+      build_s_add_u32(kTargetSreg, kTargetSreg, kLiteralOperand, ROCJITSU_CODE_ARCH_RDNA4));
+  const size_t delta_word = program.size();
+  program.push_back(0);
+  program.push_back(
+      build_s_addc_u32(kTargetSreg + 1, kTargetSreg + 1, kInlineInt0, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  const auto readlane =
+      build_rdna4_v_readlane_b32(/*sdst=*/2, /*vsrc=*/40, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  if (!readlane)
+    return {};
+  program.insert(program.end(), readlane->begin(), readlane->end());
+  if (include_wait)
+    append_inst(program, s_wait_alu_va_sdst_0());
+  program.push_back(build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, s_endpgm());
+  const uint64_t helper_offset = program.size() * sizeof(uint32_t);
+  constexpr uint64_t kGetpcResultOffset = sizeof(uint32_t);
+  program[delta_word] = static_cast<uint32_t>(helper_offset - kGetpcResultOffset);
+  program.push_back(build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  return program;
+}
+
+[[nodiscard]] std::vector<uint32_t> gfx1201_call_valu_sgpr_boundary_program(bool include_wait) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  const auto readlane =
+      build_rdna4_v_readlane_b32(/*sdst=*/2, /*vsrc=*/40, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  if (!readlane)
+    return {};
+  program.insert(program.end(), readlane->begin(), readlane->end());
+  if (include_wait)
+    append_inst(program, s_wait_alu_va_sdst_0());
+  program.push_back(build_s_call_b64(kReturnSreg, /*offset_dwords=*/1, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, s_endpgm());
+  program.push_back(build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  return program;
+}
 
 void append_gfx950_s_waitcnt_vmcnt_0(std::vector<uint32_t> &program) {
   program.push_back(0xBF8C0F70u);
@@ -6733,6 +6784,462 @@ TEST(WaitcheckTest, Gfx1201ResolvedSwappcPreservesCanonicalizedPcHighHalf) {
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201ReportsValuSgprHazardBeforeResolvedSwappcCall) {
+  const std::vector<uint32_t> program =
+      gfx1201_swappc_valu_sgpr_boundary_program(/*include_wait=*/false);
+  ASSERT_FALSE(program.empty());
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.kind, WaitcheckDiagnosticKind::SgprDepctr);
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::ControlTransfer);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+  EXPECT_NE(diagnostic.instruction.find("s_swappc_b64"), std::string::npos);
+  EXPECT_NE(diagnostic.message.find("depctr_va_sdst(0)"), std::string::npos);
+  EXPECT_NE(diagnostic.message.find("control transfer"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201AcceptsValuSgprWaitBeforeResolvedSwappcCall) {
+  const std::vector<uint32_t> program =
+      gfx1201_swappc_valu_sgpr_boundary_program(/*include_wait=*/true);
+  ASSERT_FALSE(program.empty());
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201ReportsValuSgprHazardBeforeResolvedDirectCall) {
+  const std::vector<uint32_t> program =
+      gfx1201_call_valu_sgpr_boundary_program(/*include_wait=*/false);
+  ASSERT_FALSE(program.empty());
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::ControlTransfer);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+  EXPECT_NE(diagnostic.instruction.find("s_call_b64"), std::string::npos);
+  EXPECT_NE(diagnostic.message.find("depctr_va_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201AcceptsValuSgprWaitBeforeResolvedDirectCall) {
+  const std::vector<uint32_t> program =
+      gfx1201_call_valu_sgpr_boundary_program(/*include_wait=*/true);
+  ASSERT_FALSE(program.empty());
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201ReportsSaluSgprHazardBeforeResolvedFunctionReturn) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, s_endpgm());
+  append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  program.push_back(build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::ControlTransfer);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+  EXPECT_NE(diagnostic.instruction.find("s_setpc_b64"), std::string::npos);
+  EXPECT_NE(diagnostic.message.find("depctr_sa_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201AcceptsSaluSgprWaitBeforeResolvedFunctionReturn) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, s_endpgm());
+  append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  append_inst(program, s_wait_alu_sa_sdst_0());
+  program.push_back(build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201ReportsValuVccHazardBeforeResolvedSwappcCall) {
+  constexpr uint16_t kTargetSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint16_t kInlineInt0 = 128;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  program.push_back(
+      build_s_add_u32(kTargetSreg, kTargetSreg, kLiteralOperand, ROCJITSU_CODE_ARCH_RDNA4));
+  const size_t delta_word = program.size();
+  program.push_back(0);
+  program.push_back(
+      build_s_addc_u32(kTargetSreg + 1, kTargetSreg + 1, kInlineInt0, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, v_cndmask_b32_e32(/*vdst=*/0, /*src0=*/0, /*vsrc1=*/0));
+  append_inst(program, v_cmp_gt_u32_e32(/*src0=*/0, /*vsrc1=*/0));
+  program.push_back(build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, s_endpgm());
+  const uint64_t helper_offset = program.size() * sizeof(uint32_t);
+  constexpr uint64_t kGetpcResultOffset = sizeof(uint32_t);
+  program[delta_word] = static_cast<uint32_t>(helper_offset - kGetpcResultOffset);
+  program.push_back(build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::ControlTransfer);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::VCC, 0, 1}));
+  EXPECT_NE(diagnostic.message.find("depctr_va_vcc(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201UnresolvedSetpcStillChecksSgprBoundaryHazards) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  program.push_back(build_s_setpc_b64(/*ssrc0=*/8, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics.front().access, WaitcheckAccessKind::ControlTransfer);
+  EXPECT_NE(report.diagnostics.front().message.find("depctr_sa_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201UnresolvedSwappcConservativelySeedsItsContinuation) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_swappc_b64(kReturnSreg, /*ssrc0=*/8, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  append_inst(program, s_endpgm());
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+  EXPECT_NE(diagnostic.message.find("depctr_sa_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201UnresolvedSwappcLinkRegisterIsPendingAtContinuation) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_swappc_b64(kReturnSreg, /*ssrc0=*/8, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/kReturnSreg, /*vsrc1=*/0));
+  append_inst(program, s_endpgm());
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::SGPR, kReturnSreg, 1}));
+  EXPECT_NE(diagnostic.producer_instruction.find("s_swappc_b64"), std::string::npos);
+  EXPECT_NE(diagnostic.message.find("depctr_sa_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201ResolvedCallLinkRegisterIsPendingAtContinuation) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_call_b64(kReturnSreg, /*offset_dwords=*/2, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/kReturnSreg, /*vsrc1=*/0));
+  append_inst(program, s_endpgm());
+  program.push_back(build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::SGPR, kReturnSreg, 1}));
+  EXPECT_NE(diagnostic.producer_instruction.find("s_call_b64"), std::string::npos);
+  EXPECT_NE(diagnostic.message.find("depctr_sa_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201WaitClearsResolvedCallLinkRegisterAtContinuation) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_call_b64(kReturnSreg, /*offset_dwords=*/3, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, s_wait_alu_sa_sdst_0());
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/kReturnSreg, /*vsrc1=*/0));
+  append_inst(program, s_endpgm());
+  program.push_back(build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201ResolvedIndirectBranchPreservesOrdinarySgprState) {
+  constexpr uint16_t kTargetSreg = 8;
+  constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint16_t kInlineInt0 = 128;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  program.push_back(
+      build_s_add_u32(kTargetSreg, kTargetSreg, kLiteralOperand, ROCJITSU_CODE_ARCH_RDNA4));
+  const size_t delta_word = program.size();
+  program.push_back(0);
+  program.push_back(
+      build_s_addc_u32(kTargetSreg + 1, kTargetSreg + 1, kInlineInt0, ROCJITSU_CODE_ARCH_RDNA4));
+  program.push_back(build_s_setpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, s_endpgm());
+  const uint64_t target_offset = program.size() * sizeof(uint32_t);
+  constexpr uint64_t kGetpcResultOffset = sizeof(uint32_t);
+  program[delta_word] = static_cast<uint32_t>(target_offset - kGetpcResultOffset);
+  append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  append_inst(program, s_endpgm());
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_GE(report.instructions_analyzed, 7u);
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201DirectBranchPreservesPendingSgprHazard) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  program.push_back(build_s_branch(/*offset_dwords=*/1, ROCJITSU_CODE_ARCH_RDNA4));
+  append_inst(program, s_endpgm());
+  append_inst(program, v_add_f32_e32(/*vdst=*/1, /*src0=*/2, /*vsrc1=*/1));
+  append_inst(program, s_endpgm());
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+  EXPECT_NE(diagnostic.instruction.find("v_add_f32"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201SymbolLessSectionConservativelySeedsEveryCfgRoot) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_endpgm());
+  append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  append_inst(program, s_endpgm());
+  const auto image = rocjitsu::waitcheck_test::make_gfx_symbol_less_code_object(
+      program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics.front().access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics.front().reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1201ReportsSaluVccHazardAtControlTransfer) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_cndmask_b32_e32(/*vdst=*/0, /*src0=*/0, /*vsrc1=*/0));
+  append_inst(program, s_mov_b32(/*sdst=*/106, /*ssrc0=*/128)); // vcc_lo.
+  program.push_back(build_s_setpc_b64(/*ssrc0=*/8, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::ControlTransfer);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::VCC, 0, 1}));
+  EXPECT_NE(diagnostic.message.find("depctr_sa_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201ControlTransferReportsOneRepresentativePerDepctrField) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  append_inst(program, v_cndmask_b32_e32(/*vdst=*/1, /*src0=*/0, /*vsrc1=*/1));
+  append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  append_inst(program, s_mov_b32(/*sdst=*/106, /*ssrc0=*/128)); // vcc_lo.
+  program.push_back(build_s_setpc_b64(/*ssrc0=*/8, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::ControlTransfer);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+  EXPECT_NE(diagnostic.message.find("depctr_sa_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201ScalarIssueStallClearsValuSgprHazardBeforeTransfer) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  const auto readlane =
+      build_rdna4_v_readlane_b32(/*sdst=*/2, /*vsrc=*/40, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(readlane);
+  program.insert(program.end(), readlane->begin(), readlane->end());
+  // Any register-bearing SALU instruction supplies the hardware issue stall
+  // modeled by AMDGPUInsertDelayAlu, even when its operands are unrelated.
+  append_inst(program, s_mov_b32(/*sdst=*/4, /*ssrc0=*/128));
+  program.push_back(build_s_setpc_b64(/*ssrc0=*/8, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1250DoesNotApplyRdna4SgprControlTransferRules) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  program.push_back(build_s_setpc_b64(/*ssrc0=*/8, ROCJITSU_CODE_ARCH_GFX1250));
+  const auto image = rocjitsu::waitcheck_test::make_gfx1250_code_object(program);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_GFX1250);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201ControlTransferReportsEveryOutstandingSgprWaitField) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  append_inst(program, v_add_f32_e32(/*vdst=*/1, /*src0=*/4, /*vsrc1=*/1));
+  append_inst(program, v_cndmask_b32_e32(/*vdst=*/2, /*src0=*/0, /*vsrc1=*/2));
+  append_inst(program, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  const auto readlane =
+      build_rdna4_v_readlane_b32(/*sdst=*/4, /*vsrc=*/40, /*lane=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(readlane);
+  program.insert(program.end(), readlane->begin(), readlane->end());
+  append_inst(program, v_cmp_gt_u32_e32(/*src0=*/0, /*vsrc1=*/0));
+  program.push_back(build_s_setpc_b64(/*ssrc0=*/8, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 3u) << diagnostic_summary(report);
+  // A single all-zero depctr wait repairs every register covered by a field.
+  // Report one representative register per required field instead of emitting
+  // a duplicate diagnostic for every outstanding lane.
+  std::set<std::string> fields;
+  for (const WaitcheckDiagnostic &diagnostic : report.diagnostics) {
+    EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::ControlTransfer);
+    if (diagnostic.message.find("depctr_sa_sdst(0)") != std::string::npos)
+      fields.insert("sa_sdst");
+    if (diagnostic.message.find("depctr_va_sdst(0)") != std::string::npos)
+      fields.insert("va_sdst");
+    if (diagnostic.message.find("depctr_va_vcc(0)") != std::string::npos)
+      fields.insert("va_vcc");
+  }
+  EXPECT_EQ(fields, (std::set<std::string>{"sa_sdst", "va_sdst", "va_vcc"}));
+}
+
+TEST(WaitcheckTest, Gfx1201NonEntryFunctionConservativelyTracksEverySgprPair) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> function;
+  append_inst(function, s_mov_b32(/*sdst=*/2, /*ssrc0=*/128));
+  append_inst(function, v_add_f32_e32(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0));
+  append_inst(function, s_wait_alu_sa_sdst_0());
+  function.push_back(build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx1201_function_only_code_object({{"helper", function}});
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::SGPR, 2, 1}));
+  EXPECT_NE(diagnostic.message.find("depctr_sa_sdst(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1201NonEntryFunctionConservativelyTracksVcc) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> function;
+  append_inst(function, v_cmp_gt_u32_e32(/*src0=*/0, /*vsrc1=*/0));
+  append_inst(function, v_cndmask_b32_e32(/*vdst=*/0, /*src0=*/0, /*vsrc1=*/0));
+  append_inst(function, s_wait_alu_va_vcc_0());
+  function.push_back(build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx1201_function_only_code_object({{"helper", function}});
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  const WaitcheckDiagnostic &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::VCC, 0, 1}));
+  EXPECT_NE(diagnostic.message.find("depctr_va_vcc(0)"), std::string::npos);
 }
 
 TEST(WaitcheckTest, Gfx1250ResolvedSwappcLiteral64HelperWaitAppliesBeforeContinuation) {

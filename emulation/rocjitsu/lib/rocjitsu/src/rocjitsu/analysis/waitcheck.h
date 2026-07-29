@@ -51,6 +51,7 @@ enum class WaitcheckAccessKind : uint8_t {
   Def,
   MemoryOrder,
   ProgramEnd,
+  ControlTransfer,
 };
 
 /// @brief Stable semantic family for one waitcheck diagnostic.

@@ -317,6 +317,8 @@ void print_help() {
     return "memory-order";
   case WaitcheckAccessKind::ProgramEnd:
     return "program-end";
+  case WaitcheckAccessKind::ControlTransfer:
+    return "control-transfer";
   }
   return "unknown";
 }

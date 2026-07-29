@@ -90,7 +90,9 @@ typedef enum rj_waitcheck_access_e {
   ROCJITSU_WAITCHECK_ACCESS_DEF,
   ROCJITSU_WAITCHECK_ACCESS_MEMORY_ORDER,
   ROCJITSU_WAITCHECK_ACCESS_PROGRAM_END,
-  ROCJITSU_WAITCHECK_ACCESS_INVALID
+  ROCJITSU_WAITCHECK_ACCESS_INVALID,
+  /// @brief An outstanding SGPR dependency reaches a call, return, or indirect branch.
+  ROCJITSU_WAITCHECK_ACCESS_CONTROL_TRANSFER
 } rj_waitcheck_access_t;
 
 /// @brief ISA register file associated with a diagnostic.

@@ -411,6 +411,41 @@ TEST(RjWaitcheck, ExhaustiveWritesLosslessPerKernelDiagnosticJsonl) {
   EXPECT_TRUE(contains(diagnostic_text, "\"repro_command\":")) << diagnostic_text;
 }
 
+TEST(RjWaitcheck, DiagnosticJsonlNamesControlTransferAccess) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto input = temp_dir.path / "control_transfer_gfx1201.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  const auto diagnostics = temp_dir.path / "diagnostics.jsonl";
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(
+      {rocjitsu::waitcheck_test::v_add_f32_e32_word(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0),
+       rocjitsu::waitcheck_test::s_mov_b32_word(/*sdst=*/2, /*ssrc0=*/128),
+       rocjitsu::waitcheck_test::s_setpc_b64_word(/*ssrc0=*/8)});
+  ASSERT_TRUE(write_binary_file(input, image));
+
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --exhaustive --target gfx1201 --summary-only --no-fail "
+                              "--diagnostics-jsonl " +
+                              shell_quote(diagnostics.string()) + " > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+  const std::string diagnostic_text = read_text_file(diagnostics);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "diagnostics=1")) << stdout_text;
+  EXPECT_EQ(std::count(diagnostic_text.begin(), diagnostic_text.end(), '\n'), 1);
+  EXPECT_TRUE(contains(diagnostic_text, "\"access\":\"control-transfer\"")) << diagnostic_text;
+}
+
 TEST(RjWaitcheck, ExhaustiveWritesLosslessGfx950CounterParityJsonl) {
   const TempDir temp_dir(
       std::filesystem::temp_directory_path() /

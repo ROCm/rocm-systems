@@ -110,6 +110,8 @@ void report_error(const rj_waitcheck_options_t &options, const char *message) no
     return ROCJITSU_WAITCHECK_ACCESS_MEMORY_ORDER;
   case WaitcheckAccessKind::ProgramEnd:
     return ROCJITSU_WAITCHECK_ACCESS_PROGRAM_END;
+  case WaitcheckAccessKind::ControlTransfer:
+    return ROCJITSU_WAITCHECK_ACCESS_CONTROL_TRANSFER;
   }
   return ROCJITSU_WAITCHECK_ACCESS_INVALID;
 }

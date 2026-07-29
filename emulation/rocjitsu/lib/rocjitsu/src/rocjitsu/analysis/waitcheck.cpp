@@ -705,7 +705,8 @@ struct Analyzer {
 
   void analyze_cfg(std::vector<std::unique_ptr<BasicBlock>> &blocks,
                    const std::string &section_name, uint64_t file_offset_base, rj_code_arch_t arch,
-                   uint32_t wavefront_size, std::span<const uint64_t> entry_offsets = {}) {
+                   uint32_t wavefront_size, std::span<const uint64_t> entry_offsets = {},
+                   bool non_entry_function = false) {
     if (blocks.empty())
       return;
     wavefront_size_ = wavefront_size;
@@ -724,8 +725,14 @@ struct Analyzer {
     // device helpers can recurse; re-entering an already active callee is
     // summarized at that call's continuation instead of enumerating an
     // exponential family of finite stacks up to the hard depth limit.
-    using CallFrame = std::tuple<size_t, uint16_t, size_t>;
-    using AnalysisNodeKey = std::pair<size_t, std::vector<CallFrame>>;
+    // The optional third component identifies the first block executed after
+    // one specific call returns. Keeping it in the node identity consumes the
+    // link-register seed after that block, so a later loop backedge does not
+    // manufacture another return from the call.
+    using CallFrame = std::tuple<size_t, uint16_t, size_t, uint64_t>;
+    using CallContinuationSeed = std::pair<uint16_t, uint64_t>;
+    using AnalysisNodeKey =
+        std::tuple<size_t, std::vector<CallFrame>, std::optional<CallContinuationSeed>>;
     constexpr size_t kMaxCallDepth = 32;
     // Real code objects can have tens of thousands of distinct depth-two
     // contexts when many wrappers share a small set of helpers. Keep a hard
@@ -739,6 +746,7 @@ struct Analyzer {
     std::vector<AnalysisNodeKey> analysis_node_keys;
     std::vector<BasicBlock *> analysis_blocks;
     std::vector<std::vector<size_t>> cfg_successors;
+    std::vector<uint8_t> conservative_sgpr_entries;
     std::vector<size_t> expansion_worklist;
 
     auto get_or_add_node = [&](AnalysisNodeKey key) -> std::optional<size_t> {
@@ -748,9 +756,10 @@ struct Analyzer {
         return std::nullopt;
       const size_t index = analysis_node_keys.size();
       analysis_node_index.emplace(key, index);
-      analysis_blocks.push_back(blocks[key.first].get());
+      analysis_blocks.push_back(blocks[std::get<0>(key)].get());
       analysis_node_keys.push_back(std::move(key));
       cfg_successors.emplace_back();
+      conservative_sgpr_entries.push_back(0);
       expansion_worklist.push_back(index);
       return index;
     };
@@ -759,17 +768,17 @@ struct Analyzer {
       size_t deepest_stack = 0;
       size_t setpc_nodes = 0;
       size_t matching_return_nodes = 0;
-      for (const auto &[_, call_stack] : analysis_node_keys)
-        deepest_stack = std::max(deepest_stack, call_stack.size());
+      for (const auto &key : analysis_node_keys)
+        deepest_stack = std::max(deepest_stack, std::get<1>(key).size());
       for (size_t i = 0; i < analysis_node_keys.size(); ++i) {
         const Instruction *term = analysis_blocks[i]->terminator();
         if (term == nullptr ||
             (term->mnemonic() != "s_setpc_b64" && term->mnemonic() != "s_set_pc_i64"))
           continue;
         ++setpc_nodes;
-        if (!analysis_node_keys[i].second.empty() && term->raw_encoding() != nullptr &&
+        if (!std::get<1>(analysis_node_keys[i]).empty() && term->raw_encoding() != nullptr &&
             static_cast<uint16_t>(term->raw_encoding()[0] & 0xffu) ==
-                std::get<1>(analysis_node_keys[i].second.back()))
+                std::get<1>(std::get<1>(analysis_node_keys[i]).back()))
           ++matching_return_nodes;
       }
       report_.analysis_error = "waitcheck call-context graph exceeded node limit: nodes=" +
@@ -801,23 +810,31 @@ struct Analyzer {
       }
     }
     for (size_t i : root_blocks) {
-      if (!get_or_add_node({i, {}})) {
+      const auto root = get_or_add_node({i, {}, std::nullopt});
+      if (!root) {
         report_.supported = false;
         set_call_context_limit_error();
         return;
       }
+      if (tracks_gfx12_sgpr_hazards(arch) && (entry_offsets.empty() || non_entry_function))
+        conservative_sgpr_entries[*root] = 1;
     }
 
     for (size_t work_index = 0; work_index < expansion_worklist.size(); ++work_index) {
       const size_t node_index = expansion_worklist[work_index];
       const AnalysisNodeKey node_key = analysis_node_keys[node_index];
-      const BasicBlock &block = *blocks[node_key.first];
+      const BasicBlock &block = *blocks[std::get<0>(node_key)];
 
-      auto add_context_edge = [&](size_t target_block_index,
-                                  std::vector<CallFrame> call_stack) -> bool {
-        const auto target = get_or_add_node({target_block_index, std::move(call_stack)});
+      auto add_context_edge = [&](size_t target_block_index, std::vector<CallFrame> call_stack,
+                                  bool conservative_sgpr_entry = false,
+                                  std::optional<CallContinuationSeed> call_continuation =
+                                      std::nullopt) -> bool {
+        const auto target = get_or_add_node(
+            {target_block_index, std::move(call_stack), std::move(call_continuation)});
         if (!target)
           return false;
+        if (conservative_sgpr_entry && tracks_gfx12_sgpr_hazards(arch))
+          conservative_sgpr_entries[*target] = 1;
         auto &successors = cfg_successors[node_index];
         if (std::ranges::find(successors, *target) == successors.end())
           successors.push_back(*target);
@@ -825,16 +842,20 @@ struct Analyzer {
       };
 
       const Instruction *term = block.terminator();
-      if (!node_key.second.empty() && term != nullptr &&
+      if (!std::get<1>(node_key).empty() && term != nullptr &&
           term->size() == static_cast<int>(sizeof(uint32_t)) &&
           (term->mnemonic() == "s_setpc_b64" || term->mnemonic() == "s_set_pc_i64") &&
           term->raw_encoding() != nullptr &&
           static_cast<uint16_t>(term->raw_encoding()[0] & 0xffu) ==
-              std::get<1>(node_key.second.back())) {
-        std::vector<CallFrame> caller_stack = node_key.second;
+              std::get<1>(std::get<1>(node_key).back())) {
+        std::vector<CallFrame> caller_stack = std::get<1>(node_key);
         const size_t continuation_index = std::get<0>(caller_stack.back());
+        const uint16_t return_sreg = std::get<1>(caller_stack.back());
+        const uint64_t source_call_offset = std::get<3>(caller_stack.back());
         caller_stack.pop_back();
-        if (!add_context_edge(continuation_index, std::move(caller_stack))) {
+        if (!add_context_edge(continuation_index, std::move(caller_stack),
+                              /*conservative_sgpr_entry=*/true,
+                              CallContinuationSeed{return_sreg, source_call_offset})) {
           report_.supported = false;
           set_call_context_limit_error();
           return;
@@ -850,7 +871,21 @@ struct Analyzer {
             std::ranges::any_of(block.call_edges(), [&](const BasicBlock::CallEdge &call) {
               return call.continuation == successor;
             });
-        if (!is_call_fallthrough && !add_context_edge(successor_it->second, node_key.second)) {
+        std::optional<CallContinuationSeed> unresolved_call_continuation;
+        if (!is_call_fallthrough && term != nullptr && (term->flags() & INDIRECT_CALL) != 0) {
+          const Operand *return_operand = term->dst_operand(0);
+          const auto return_ref =
+              return_operand == nullptr ? std::nullopt : return_operand->to_register_ref();
+          if (return_ref && return_ref->cls == RegClass::SGPR) {
+            const uint64_t source_call_offset =
+                block.end_offset() - static_cast<uint64_t>(term->size());
+            unresolved_call_continuation =
+                CallContinuationSeed{return_ref->index, source_call_offset};
+          }
+        }
+        if (!is_call_fallthrough && !add_context_edge(successor_it->second, std::get<1>(node_key),
+                                                      unresolved_call_continuation.has_value(),
+                                                      unresolved_call_continuation)) {
           report_.supported = false;
           set_call_context_limit_error();
           return;
@@ -862,26 +897,30 @@ struct Analyzer {
         const auto continuation_it = block_index.find(call.continuation);
         if (callee_it == block_index.end() || continuation_it == block_index.end())
           continue;
-        if (node_key.second.size() >= kMaxCallDepth) {
+        if (std::get<1>(node_key).size() >= kMaxCallDepth) {
           report_.supported = false;
           report_.analysis_error = "waitcheck call depth exceeds supported limit";
           return;
         }
         const bool recursive_reentry =
-            std::ranges::any_of(node_key.second, [&](const CallFrame &frame) {
+            std::ranges::any_of(std::get<1>(node_key), [&](const CallFrame &frame) {
               return std::get<2>(frame) == callee_it->second;
             });
         if (recursive_reentry) {
-          if (!add_context_edge(continuation_it->second, node_key.second)) {
+          if (!add_context_edge(continuation_it->second, std::get<1>(node_key),
+                                /*conservative_sgpr_entry=*/true,
+                                CallContinuationSeed{call.return_sreg, call.source_call_offset})) {
             report_.supported = false;
             set_call_context_limit_error();
             return;
           }
           continue;
         }
-        std::vector<CallFrame> callee_stack = node_key.second;
-        callee_stack.emplace_back(continuation_it->second, call.return_sreg, callee_it->second);
-        if (!add_context_edge(callee_it->second, std::move(callee_stack))) {
+        std::vector<CallFrame> callee_stack = std::get<1>(node_key);
+        callee_stack.emplace_back(continuation_it->second, call.return_sreg, callee_it->second,
+                                  call.source_call_offset);
+        if (!add_context_edge(callee_it->second, std::move(callee_stack),
+                              /*conservative_sgpr_entry=*/true)) {
           report_.supported = false;
           set_call_context_limit_error();
           return;
@@ -898,6 +937,11 @@ struct Analyzer {
     std::vector<PendingState> in(analysis_blocks.size());
     std::vector<PendingState> out(analysis_blocks.size());
     std::vector<uint8_t> out_initialized(analysis_blocks.size());
+    std::unordered_map<uint64_t, const Instruction *> instruction_by_offset;
+    for (const auto &block : blocks) {
+      for (const Instruction &inst : block->instructions())
+        instruction_by_offset.emplace(inst.src_loc(), &inst);
+    }
 
     // Revisit only successors whose merged input may have changed. Large
     // generated kernels otherwise spend most of their time rescanning stable
@@ -953,6 +997,32 @@ struct Analyzer {
       queued[i] = 0;
 
       PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized);
+      if (conservative_sgpr_entries[i] != 0) {
+        // Linked code objects do not retain whether LLVM's boundary-cull
+        // option was enabled. Model its default disabled behavior: every
+        // tracked pair and VCC can be live across an externally visible
+        // function boundary or a call whose target cannot be recovered.
+        merged.sgpr_hazards.tracked_pairs.set();
+        merged.sgpr_hazards.tracked_vcc = true;
+      }
+      if (const auto &continuation = std::get<2>(analysis_node_keys[i])) {
+        const auto [return_sreg, source_call_offset] = *continuation;
+        const auto source = instruction_by_offset.find(source_call_offset);
+        const SgprHazardProducer producer{
+            .section_name = section_name,
+            .section_offset = source_call_offset,
+            .file_offset = file_offset_base + source_call_offset,
+            .instruction = source == instruction_by_offset.end() ? std::string{}
+                                                                 : source->second->disassemble(),
+        };
+        set_sgpr_hazard(merged.sgpr_hazards, RegisterRef{RegClass::SGPR, return_sreg, 1},
+                        /*is_valu=*/false, producer);
+        if (return_sreg < 127) {
+          set_sgpr_hazard(merged.sgpr_hazards,
+                          RegisterRef{RegClass::SGPR, static_cast<uint16_t>(return_sreg + 1), 1},
+                          /*is_valu=*/false, producer);
+        }
+      }
       PendingState next_out =
           analyze_block(*analysis_blocks[i], merged, section_name, file_offset_base, arch, false);
       const bool input_changed = !(merged == in[i]);
@@ -997,10 +1067,10 @@ struct Analyzer {
     prepare_cfg_path_filter(analysis_blocks, cfg_predecessors, cfg_successors);
     for (size_t i = 0; i < analysis_blocks.size(); ++i) {
       current_cfg_view_index_ = i;
-      current_in_callee_context_ = !analysis_node_keys[i].second.empty();
+      current_in_callee_context_ = !std::get<1>(analysis_node_keys[i]).empty();
       current_call_return_sreg_ =
           current_in_callee_context_
-              ? std::optional{std::get<1>(analysis_node_keys[i].second.back())}
+              ? std::optional{std::get<1>(std::get<1>(analysis_node_keys[i]).back())}
               : std::nullopt;
       (void)analyze_block(*analysis_blocks[i], in[i], section_name, file_offset_base, arch, true);
       if (should_stop_after_diagnostic())
@@ -3514,6 +3584,11 @@ private:
     return false;
   }
 
+  [[nodiscard]] static bool is_sgpr_hazard_control_transfer(const Instruction &inst) {
+    constexpr uint64_t kControlTransferFlags = INDIRECT_CALL | INDIRECT_BRANCH;
+    return (inst.flags() & kControlTransferFlags) != 0;
+  }
+
   [[nodiscard]] static bool instruction_waits_for_valu_sgpr_writes(const Instruction &inst) {
     // Scalar memory is handled by apply_sgpr_hazard_memory_cull(). For SALU,
     // model the issue stall used by LLVM's
@@ -4108,11 +4183,12 @@ private:
 
   void emit_sgpr_hazard_diagnostic(const Instruction &inst, const SgprHazardProducer *producer,
                                    RegisterRef reg, std::string_view depctr_field,
-                                   uint64_t section_offset, uint64_t file_offset) {
+                                   uint64_t section_offset, uint64_t file_offset,
+                                   WaitcheckAccessKind access = WaitcheckAccessKind::Use) {
     WaitcheckDiagnostic diag;
     diag.kind = WaitcheckDiagnosticKind::SgprDepctr;
     diag.counter = WaitCounterKind::Depctr;
-    diag.access = WaitcheckAccessKind::Use;
+    diag.access = access;
     diag.reg = reg;
     diag.section_offset = section_offset;
     diag.file_offset = file_offset;
@@ -4126,7 +4202,11 @@ private:
     }
 
     std::ostringstream msg;
-    msg << "missing s_wait_alu " << depctr_field << "(0) before use of " << reg_name(reg);
+    msg << "missing s_wait_alu " << depctr_field << "(0) before ";
+    if (access == WaitcheckAccessKind::ControlTransfer)
+      msg << "control transfer with outstanding " << reg_name(reg);
+    else
+      msg << "use of " << reg_name(reg);
     diag.message = msg.str();
     record_diagnostic(std::move(diag));
   }
@@ -5072,6 +5152,48 @@ private:
     }
   }
 
+  [[nodiscard]] static std::optional<uint16_t>
+  first_sgpr_hazard_lane(const std::bitset<128> &hazards) {
+    for (uint16_t lane = 0; lane < hazards.size(); ++lane) {
+      if (hazards.test(lane))
+        return lane;
+    }
+    return std::nullopt;
+  }
+
+  void check_sgpr_control_transfer_hazards(const SgprHazardState &state, const Instruction &inst,
+                                           uint64_t section_offset, uint64_t file_offset) {
+    // One all-zero depctr field repairs every register in that hazard class.
+    // Emit its lowest-numbered representative instead of one diagnostic per
+    // outstanding lane; VCC represents the field only when no SGPR lane does.
+    if (const auto lane = first_sgpr_hazard_lane(state.salu_hazards)) {
+      const auto producer = state.salu_producers.find(*lane);
+      emit_sgpr_hazard_diagnostic(
+          inst, producer == state.salu_producers.end() ? nullptr : &producer->second,
+          RegisterRef{RegClass::SGPR, *lane, 1}, "depctr_sa_sdst", section_offset, file_offset,
+          WaitcheckAccessKind::ControlTransfer);
+    } else if ((state.vcc_hazard & kSgprHazardSalu) != 0) {
+      emit_sgpr_hazard_diagnostic(
+          inst, state.salu_vcc_producer ? &*state.salu_vcc_producer : nullptr,
+          RegisterRef{RegClass::VCC, 0, 1}, "depctr_sa_sdst", section_offset, file_offset,
+          WaitcheckAccessKind::ControlTransfer);
+    }
+
+    if (const auto lane = first_sgpr_hazard_lane(state.valu_hazards)) {
+      const auto producer = state.valu_producers.find(*lane);
+      emit_sgpr_hazard_diagnostic(
+          inst, producer == state.valu_producers.end() ? nullptr : &producer->second,
+          RegisterRef{RegClass::SGPR, *lane, 1}, "depctr_va_sdst", section_offset, file_offset,
+          WaitcheckAccessKind::ControlTransfer);
+    }
+    if ((state.vcc_hazard & kSgprHazardValu) != 0) {
+      emit_sgpr_hazard_diagnostic(inst,
+                                  state.valu_vcc_producer ? &*state.valu_vcc_producer : nullptr,
+                                  RegisterRef{RegClass::VCC, 0, 1}, "depctr_va_vcc", section_offset,
+                                  file_offset, WaitcheckAccessKind::ControlTransfer);
+    }
+  }
+
   void check_sgpr_hazard_uses(const SgprHazardState &state, const Instruction &inst,
                               const RegisterSet &uses, bool is_valu, uint64_t section_offset,
                               uint64_t file_offset) {
@@ -5115,6 +5237,19 @@ private:
   void update_sgpr_hazards(SgprHazardState &state, const Instruction &inst, const InstDefUse &du,
                            const std::string &section_name, uint64_t section_offset,
                            uint64_t file_offset, bool emit_diagnostics) {
+    if (is_sgpr_hazard_control_transfer(inst)) {
+      if (emit_diagnostics)
+        check_sgpr_control_transfer_hazards(state, inst, section_offset, file_offset);
+      // Calls, returns, and indirect branches do not carry the hardware hazard
+      // chain across the transfer. Report every required field at the source,
+      // then begin the target context without stale producer state. CFG edge
+      // construction separately marks callees and return continuations as
+      // conservatively tracked and injects a call's link-register write only
+      // into that call's matching continuation.
+      clear_all_sgpr_hazards(state);
+      return;
+    }
+
     if (instruction_waits_for_valu_sgpr_writes(inst))
       clear_valu_sgpr_hazards(state);
 
@@ -5502,7 +5637,8 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       std::vector<std::unique_ptr<BasicBlock>> blocks = BasicBlock::build_reachable(
           code_object, *decoder, arch, entry, entry_size, wavefront_size);
       analyzer.set_kernel_context(is_kernel ? &*kernel_it : nullptr);
-      analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry);
+      analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry,
+                           /*non_entry_function=*/!is_kernel);
       if (is_kernel && report.supported && !report.stopped_early) {
         ++report.kernels_analyzed;
         if (options.kernel_analyzed_callback)
@@ -5529,7 +5665,8 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         std::vector<std::unique_ptr<BasicBlock>> blocks = BasicBlock::build_reachable(
             code_object, *decoder, arch, entry, entry_size, wavefront_size);
         analyzer.set_kernel_context(kernel);
-        analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry);
+        analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch, wavefront_size, entry,
+                             /*non_entry_function=*/kernel == nullptr);
         if (kernel && report.supported && !report.stopped_early) {
           ++report.kernels_analyzed;
           if (options.kernel_analyzed_callback)

@@ -3,6 +3,7 @@
 
 #include "../tools/waitcheck_fixture.h"
 #include "rocjitsu/analysis/rj_waitcheck.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
 
 #include <gtest/gtest.h>
 
@@ -255,6 +256,33 @@ TEST(WaitcheckCApiTest, ReportsStructuredDiagnosticFromHazardousBuffer) {
   EXPECT_NE(diagnostic.message.find("missing s_wait_loadcnt"), std::string::npos);
 }
 
+TEST(WaitcheckCApiTest, ReportsControlTransferHazardsThroughDedicatedAccess) {
+  const auto image = rocjitsu::waitcheck_test::make_gfx1201_code_object(
+      {rocjitsu::waitcheck_test::v_add_f32_e32_word(/*vdst=*/0, /*src0=*/2, /*vsrc1=*/0),
+       rocjitsu::build_s_mov_b32(/*sdst=*/2, /*ssrc0=*/128, ROCJITSU_CODE_ARCH_RDNA4),
+       rocjitsu::build_s_setpc_b64(/*ssrc0=*/8, ROCJITSU_CODE_ARCH_RDNA4)});
+  CallbackState state;
+  const rj_waitcheck_options_t options = callback_options(state);
+  rj_waitcheck_result_t result = initialized_result();
+
+  ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), &options, &result),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(result.target, ROCJITSU_WAITCHECK_TARGET_GFX1201);
+  EXPECT_EQ(result.instructions_analyzed, 3u);
+  EXPECT_EQ(result.passed, 0u);
+  ASSERT_EQ(state.diagnostics.size(), 1u);
+
+  const OwnedDiagnostic &diagnostic = state.diagnostics.front();
+  EXPECT_EQ(diagnostic.code, ROCJITSU_WAITCHECK_DIAGNOSTIC_SGPR_DEPCTR);
+  EXPECT_EQ(diagnostic.counter, ROCJITSU_WAITCHECK_COUNTER_DEPCTR);
+  EXPECT_EQ(diagnostic.access, ROCJITSU_WAITCHECK_ACCESS_CONTROL_TRANSFER);
+  EXPECT_EQ(diagnostic.reg.register_class, ROCJITSU_WAITCHECK_REGISTER_SGPR);
+  EXPECT_EQ(diagnostic.reg.index, 2u);
+  EXPECT_NE(diagnostic.instruction.find("s_setpc_b64"), std::string::npos);
+  EXPECT_NE(diagnostic.message.find("control transfer"), std::string::npos);
+  EXPECT_TRUE(state.errors.empty());
+}
+
 TEST(WaitcheckCApiTest, DiagnosticCodesAndNamesAreStable) {
   static_assert(ROCJITSU_WAITCHECK_DIAGNOSTIC_UNKNOWN == 0);
   static_assert(ROCJITSU_WAITCHECK_DIAGNOSTIC_WAIT_COUNTER == 1);
@@ -262,6 +290,12 @@ TEST(WaitcheckCApiTest, DiagnosticCodesAndNamesAreStable) {
   static_assert(ROCJITSU_WAITCHECK_DIAGNOSTIC_ASYNC_BARRIER_PRE_WAIT == 3);
   static_assert(ROCJITSU_WAITCHECK_DIAGNOSTIC_ASYNC_BARRIER_POST_WAIT == 4);
   static_assert(ROCJITSU_WAITCHECK_DIAGNOSTIC_VA_VDST == 5);
+  static_assert(ROCJITSU_WAITCHECK_ACCESS_USE == 0);
+  static_assert(ROCJITSU_WAITCHECK_ACCESS_DEF == 1);
+  static_assert(ROCJITSU_WAITCHECK_ACCESS_MEMORY_ORDER == 2);
+  static_assert(ROCJITSU_WAITCHECK_ACCESS_PROGRAM_END == 3);
+  static_assert(ROCJITSU_WAITCHECK_ACCESS_INVALID == 4);
+  static_assert(ROCJITSU_WAITCHECK_ACCESS_CONTROL_TRANSFER == 5);
 
   EXPECT_STREQ(rj_waitcheck_diagnostic_code_name(ROCJITSU_WAITCHECK_DIAGNOSTIC_UNKNOWN), "unknown");
   EXPECT_STREQ(rj_waitcheck_diagnostic_code_name(ROCJITSU_WAITCHECK_DIAGNOSTIC_WAIT_COUNTER),
