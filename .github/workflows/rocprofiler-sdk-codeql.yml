@@ -36,9 +36,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
-  packages: read
-  actions: read
 
 env:
   ROCM_PATH: "/opt/rocm"

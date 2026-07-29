@@ -5,11 +5,13 @@ on:
       - testbranch
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
+
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
 #      - name: Generate a token
 #        id: generate-token

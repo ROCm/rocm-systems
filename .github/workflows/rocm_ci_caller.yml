@@ -5,7 +5,8 @@ on:
     types: [opened, synchronize, reopened]
     branches: [develop]
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   trigger-rocm-ci:

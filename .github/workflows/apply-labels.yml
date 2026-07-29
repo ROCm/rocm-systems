@@ -10,10 +10,13 @@ on:
 
 permissions:
   contents: read
-  issues: write
+
 jobs:
   apply-labels:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
 
     steps:
       - name: Checkout super-repo

@@ -37,7 +37,8 @@ on:
         description: 'Issue number to import'
         required: true
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   import:

@@ -33,7 +33,6 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -48,6 +47,9 @@ jobs:
     # The type of runner that the job will run on
     # Using rocprofiler-systems images and later installing rocm, the official rocm images for al8 red hat variant are too large- this is a workaround.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-rhel:${{ matrix.os-release }}-compute-ci-base
     strategy:

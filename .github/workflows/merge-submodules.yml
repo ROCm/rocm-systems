@@ -4,11 +4,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   combine-gitmodules:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout super-repo
         uses: actions/checkout@v4

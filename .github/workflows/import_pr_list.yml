@@ -20,7 +20,8 @@ on:
         required: false
         default: "develop"
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   import-prs:
