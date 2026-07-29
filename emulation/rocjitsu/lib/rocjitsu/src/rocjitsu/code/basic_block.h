@@ -128,6 +128,16 @@ public:
     return static_indirect_call_fixups_;
   }
 
+  /// @brief Every PC-relative address producer whose `s_getpc_b64` lives in this block.
+  ///
+  /// @details Unlike static_indirect_call_fixups(), this covers producers that
+  /// no recovered consumer references, including ones the pass could not follow.
+  /// DBT needs the complete set to decide whether a kernel scope can be made
+  /// free of stale PC-derived values.
+  [[nodiscard]] const std::vector<PcAddressBuilder> &static_pc_address_builders() const {
+    return static_pc_address_builders_;
+  }
+
   /// @brief Mutable access to the intrusive list of instructions.
   /// @returns Reference to the instruction list.
   InstructionList &instructions() { return instructions_; }
@@ -162,6 +172,7 @@ private:
   /// Remove one proven-dead edge while preserving the inverse predecessor list.
   [[nodiscard]] bool remove_successor(BasicBlock &successor);
   void add_static_indirect_call_fixup(IndirectCallFixup fixup);
+  void add_static_pc_address_builder(PcAddressBuilder builder);
 
   uint64_t start_offset_;
   uint32_t size_ = 0;
@@ -175,6 +186,7 @@ private:
   std::vector<BasicBlock *> predecessors_;
   std::vector<CallEdge> call_edges_;
   std::vector<IndirectCallFixup> static_indirect_call_fixups_;
+  std::vector<PcAddressBuilder> static_pc_address_builders_;
 };
 
 } // namespace rocjitsu
