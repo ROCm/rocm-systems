@@ -26,6 +26,7 @@
 #include "rocshmem/rocshmem.hpp"
 #include "rocshmem_config_embedded.hpp"
 #include "util.hpp"
+#include "memory/default_allocator.hpp"
 
 #include <rocm-core/rocm_version.h>
 
@@ -79,6 +80,17 @@ static void print_rocm_info(std::ostream& os) {
                            + std::to_string(ROCM_VERSION_MINOR) + "."
                            + std::to_string(ROCM_VERSION_PATCH);
   print_entry(os, "ROCm", rocm_version.c_str());
+}
+
+static void print_heap_allocator_info(std::ostream& os) {
+  static const char* names[AllocatorTypeLast + 1] = {
+    "coarsegrained", "finegrained", "uncached",
+    "vmm_posix", "vmm_fabric", "host", "posix", "(unknown)"
+  };
+  AllocatorType t = get_default_allocator()->get_type();
+  int idx = (t >= 0 && t < AllocatorTypeLast) ? static_cast<int>(t)
+                                               : static_cast<int>(AllocatorTypeLast);
+  print_entry(os, "Heap Allocator", names[idx]);
 }
 
 static void print_mpi_info(std::ostream& os) {
@@ -165,6 +177,7 @@ void print_build_info(std::ostream& os) {
   print_arch_info(os);
   print_rocm_info(os);
   print_mpi_info(os);
+  print_heap_allocator_info(os);
   parse_config(os);
 
   os << "################################################################################\n";
