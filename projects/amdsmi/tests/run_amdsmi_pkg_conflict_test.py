@@ -39,6 +39,7 @@ Run it from inside a freshly-built tree where both artifacts exist:
     <build>/.../libamd_smi_python.so.<MAJOR>      (wheel)
 """
 
+import argparse
 import os
 import re
 import shutil
@@ -78,33 +79,55 @@ def _rocm_lib_dir() -> Path:
     return Path(rocm_path) / "lib"
 
 
-def find_system_lib() -> Path:
+def find_system_lib(build_root: Path) -> Path:
+    # Prefer the installed system library (rpm/deb layout). When it is absent
+    # -- e.g. the manylinux wheel job builds both libraries but installs no
+    # system package -- fall back to the build tree, which holds the same
+    # libamd_smi.so.<MAJOR> the package would ship.
     lib_dir = _rocm_lib_dir()
     candidates = sorted(
         (c for c in lib_dir.glob("libamd_smi.so.*") if not c.is_symlink()), key=_version_key
     )
     if not candidates:
-        sys.exit(f"System libamd_smi.so not found under {lib_dir}; install the rpm/deb first.")
+        candidates = sorted(
+            (c for c in build_root.glob("**/libamd_smi.so.*") if not c.is_symlink()),
+            key=_version_key,
+        )
+    if not candidates:
+        sys.exit(
+            f"System libamd_smi.so not found under {lib_dir} or the build tree "
+            f"({build_root}); install the rpm/deb or build first."
+        )
     return candidates[-1]
 
 
-def find_wheel_lib(repo_root: Path) -> Path:
+def find_wheel_lib(build_root: Path) -> Path:
     candidates = sorted(
-        (c for c in repo_root.glob("**/libamd_smi_python.so.*") if not c.is_symlink()),
+        (c for c in build_root.glob("**/libamd_smi_python.so.*") if not c.is_symlink()),
         key=_version_key,
     )
     if not candidates:
         sys.exit(
-            "libamd_smi_python.so not found under the build tree; "
+            f"libamd_smi_python.so not found under {build_root}; "
             "build with -DBUILD_PYTHON_WHEEL=ON first."
         )
     return candidates[-1]
 
 
 def main() -> int:
-    repo_root = Path(__file__).resolve().parent.parent
-    sys_lib = find_system_lib()
-    wheel_lib = find_wheel_lib(repo_root)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--build-root",
+        type=Path,
+        default=Path(__file__).resolve().parent.parent,
+        help="Directory to search for the built libraries "
+        "(default: the amdsmi project root; use e.g. /tmp/amdsmi-build when the "
+        "wheel was built out-of-tree).",
+    )
+    args = parser.parse_args()
+    build_root = args.build_root.resolve()
+    sys_lib = find_system_lib(build_root)
+    wheel_lib = find_wheel_lib(build_root)
 
     sys_son = soname(sys_lib)
     wheel_son = soname(wheel_lib)
