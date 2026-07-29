@@ -238,39 +238,11 @@ ncclResult_t ncclGinValidateSignalRequest(struct ncclDevCommRequirements const* 
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinPickBackendBasedOnReqs(struct ncclGinState* ginState, struct ncclDevCommRequirements const* reqs,
-                                           struct ncclGinBackendState** backend) {
-  *backend = NULL;
-
-  if (reqs->ginType >= NCCL_GIN_MAX_TYPES) {
-    WARN("Invalid GIN type requested (%d)", reqs->ginType);
-    return ncclInvalidUsage;
-  }
-
-  for (int backendIdx = 0; backendIdx < ginState->numActiveBackends; backendIdx++) {
-    struct ncclGinBackendState* candidate = &ginState->backends[backendIdx];
-
-    if (ncclSuccess != ncclGinValidateSignalRequest(reqs, candidate)) {
-      continue;
-    }
-
-    if (reqs->ginType == NCCL_GIN_TYPE_NONE || reqs->ginType == candidate->ginType) {
-      *backend = candidate;
-      return ncclSuccess;
-    }
-  }
-
-  WARN("No active GIN backend matches requested ginType (%d) with required signals.", reqs->ginType);
-  return ncclInvalidUsage;
-}
-
-ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
-                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+static ncclResult_t ginDevCommSetupWithBackend(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                               struct ncclDevComm* devComm, uint32_t deviceCodeVersion,
+                                               struct ncclGinBackendState* backend) {
   ncclGinConfig_t ginConfig;
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
-  struct ncclGinBackendState* backend = NULL;
-
-  NCCLCHECK(ncclGinPickBackendBasedOnReqs(ginState, reqs, &backend));
 
   devComm->backendIndex = (uint8_t)(backend - ginState->backends);
   devComm->ginSignalCount = reqs->ginSignalCount;
@@ -420,10 +392,53 @@ end:
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       if (ginStateDevComm->ginCtx[commIdx]) backend->ncclGin->destroyContext(ginStateDevComm->ginCtx[commIdx]);
     }
-    devComm->ginContextCount = 0;
     free(ginStateDevComm);
+    devComm->backendIndex = 0;
+    devComm->ginConnectionCount = 0;
+    devComm->ginContextCount = 0;
+    devComm->ginConnectionStride = 0;
+    devComm->ginConnectionStride_rcp32 = 0;
+    devComm->ginContextStride = 0;
+    memset(devComm->ginNetDeviceTypes, 0, sizeof(devComm->ginNetDeviceTypes));
+    memset(devComm->ginHandles, 0, sizeof(devComm->ginHandles));
   }
   return ret;
+}
+
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+  struct ncclGinState* ginState = &comm->sharedRes->ginState;
+  ncclGinType_t reqGinType = reqs->ginType;
+  int64_t envGinType = ncclParamGinType();
+
+  if (reqGinType == NCCL_GIN_TYPE_NONE && envGinType > NCCL_GIN_TYPE_NONE) {
+    reqGinType = (ncclGinType_t)envGinType;
+  }
+
+  if (reqGinType >= NCCL_GIN_MAX_TYPES) {
+    WARN("Invalid GIN type requested (%d)", reqGinType);
+    return ncclInvalidUsage;
+  }
+
+  for (int i = 0; i < ginState->numActiveBackends; i++) {
+    struct ncclGinBackendState* candidate = &ginState->backends[i];
+
+    if (reqGinType != NCCL_GIN_TYPE_NONE && candidate->ginType != reqGinType) {
+      continue;
+    }
+    if (ncclSuccess != ncclGinValidateSignalRequest(reqs, candidate)) {
+      continue;
+    }
+
+    if (ncclSuccess == ginDevCommSetupWithBackend(comm, reqs, devComm, deviceCodeVersion, candidate)) {
+      return ncclSuccess;
+    }
+
+    INFO(NCCL_INIT, "GIN: DevComm setup failed with backend type %d", candidate->ginType);
+  }
+
+  WARN("GIN: DevComm setup failed on all available backends");
+  return ncclInternalError;
 }
 
 // Called from main thread.
