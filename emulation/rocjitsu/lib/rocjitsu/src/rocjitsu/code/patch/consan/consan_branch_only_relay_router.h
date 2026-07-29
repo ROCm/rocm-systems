@@ -129,6 +129,19 @@ struct BranchOnlyRelayBatchPlan : BranchOnlyRelayPlanOutcome {
   [[nodiscard]] const BranchOnlyRelayPlanOutcome &plan_outcome() const { return *this; }
 };
 
+/// Records one router invocation using pair-counted units shared by FLAT, LDS,
+/// and MOI producers. A greedy pair also counts as an exact-pair fallback
+/// attempt because it reaches that tier first.
+void record_branch_only_relay_plan(ConSanBranchOnlyRoutingTelemetry &telemetry,
+                                   const BranchOnlyRelayPlanOutcome &outcome,
+                                   std::span<const BranchOnlyRelayPlanStrategy> pair_strategies);
+
+void record_branch_only_relay_failure(ConSanBranchOnlyRoutingTelemetry &telemetry,
+                                      BranchOnlyRelayPlanFailure failure);
+
+void record_branch_only_relay_rejection(ConSanBranchOnlyRoutingTelemetry &telemetry,
+                                        BranchOnlyRelayPairRejection rejection);
+
 struct BranchOnlyDirectRelayReservoir {
   uint64_t anchor_offset = 0;
   std::vector<uint32_t> original_words;

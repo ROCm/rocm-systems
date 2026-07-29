@@ -917,32 +917,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             reservation->body_offset + patch_bytes, candidate.text_offset + candidate.size,
             &relay_error, &relay_outcome);
         ConSanBranchOnlyRoutingTelemetry &routing = result.moi_branch_only_routing_telemetry;
-        ++routing.pair_attempt_count;
-        ++routing.plan_call_count;
-        if (relay_outcome.work_budget_exhausted)
-          ++routing.work_budget_exhaustion_count;
-        const auto add_routing_work = [](size_t &total, size_t value) {
-          total = value > std::numeric_limits<size_t>::max() - total
-                      ? std::numeric_limits<size_t>::max()
-                      : total + value;
-        };
-        add_routing_work(routing.search_work_count, relay_outcome.search_work_consumed);
-        add_routing_work(routing.scan_work_count, relay_outcome.scan_work_consumed);
-        if (relay_outcome.strategy == BranchOnlyRelayPlanStrategy::ExactPairFallback)
-          ++routing.exact_pair_fallback_attempt_count;
-        else if (relay_outcome.strategy == BranchOnlyRelayPlanStrategy::GreedyPairFallback)
-          ++routing.greedy_pair_fallback_attempt_count;
+        const std::array pair_strategies = {relay_outcome.strategy};
+        record_branch_only_relay_plan(routing, relay_outcome, pair_strategies);
         if (!branch_only_route) {
-          if (relay_outcome.failure == BranchOnlyRelayPlanFailure::ReturnRoute)
-            ++routing.return_route_failure_count;
-          else if (relay_outcome.failure == BranchOnlyRelayPlanFailure::RelayContention)
-            ++routing.relay_contention_failure_count;
-          else if (relay_outcome.failure == BranchOnlyRelayPlanFailure::WorkBudget)
-            ++routing.work_budget_failure_count;
-          else
-            ++routing.entry_route_failure_count;
+          record_branch_only_relay_failure(routing, relay_outcome.failure);
         } else if (!branch_router.commit(*branch_only_route, &relay_error)) {
-          ++routing.reservation_failure_count;
+          record_branch_only_relay_failure(routing, BranchOnlyRelayPlanFailure::Reservation);
         } else {
           entry_relay_offsets = branch_only_route->entry_relay_offsets;
           return_relay_offsets = branch_only_route->return_relay_offsets;
@@ -961,6 +941,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           branch_only_continuation = true;
           placed_through_indirect_island = true;
         }
+      } else {
+        ++result.moi_branch_only_placement_failure_count;
       }
     }
     if (use_indirect_appended && !placed_through_indirect_island) {

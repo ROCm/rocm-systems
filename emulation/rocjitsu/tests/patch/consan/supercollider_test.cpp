@@ -225,10 +225,10 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   ASSERT_TRUE(result.flat_selection_telemetry);
   const ConSanBranchOnlyRoutingTelemetry &routing =
       result.flat_selection_telemetry->branch_only_routing;
-  EXPECT_EQ(routing.pair_attempt_count, 1u);
-  EXPECT_EQ(routing.plan_call_count, 1u);
-  EXPECT_EQ(result.flat_selection_telemetry->discarded_branch_only_routing.pair_attempt_count, 1u);
-  EXPECT_EQ(result.flat_selection_telemetry->discarded_branch_only_routing.plan_call_count, 1u);
+  EXPECT_EQ(routing.pair_attempt_count, 2u);
+  EXPECT_EQ(routing.plan_call_count, 2u);
+  EXPECT_EQ(result.flat_selection_telemetry->discarded_branch_only_routing.pair_attempt_count, 0u);
+  EXPECT_EQ(result.flat_selection_telemetry->discarded_branch_only_routing.plan_call_count, 0u);
   EXPECT_GT(routing.search_work_count, 0u);
   EXPECT_GT(routing.scan_work_count, 0u);
 
@@ -244,6 +244,63 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   EXPECT_TRUE(std::ranges::any_of(malformed_errors, [](const std::string &error) {
     return error.find("invalid geometry or phase") != std::string::npos;
   })) << testing::PrintToString(malformed_errors);
+}
+
+TEST(ConSan, FlatDirectReservoirRetryRetainsEarlierRoutingTelemetry) {
+  const std::array<uint32_t, 8> flat_access = {
+      0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
+      0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
+      0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
+      0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
+  };
+  std::vector<uint32_t> first_kernel_words(flat_access.begin(), flat_access.end());
+  for (uint16_t sgpr = 2u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    first_kernel_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
+  first_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  std::vector<uint32_t> second_kernel_words(flat_access.begin(), flat_access.end());
+  for (uint16_t sgpr = 2u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    second_kernel_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
+  second_kernel_words.resize(
+      16'000u, build_s_mov_b32(/*sdst=*/100u, /*ssrc=*/100u, ROCJITSU_CODE_ARCH_RDNA4));
+  second_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  // Existing uncovered NOPs can route one candidate. Covered scalar moves can
+  // supply additional direct reservoirs when the other candidate is retried.
+  std::vector<uint32_t> tail_words(
+      17'010u, build_s_mov_b32(/*sdst=*/100u, /*ssrc=*/100u, ROCJITSU_CODE_ARCH_RDNA4));
+  tail_words[0u] = build_s_nop(0u, ROCJITSU_CODE_ARCH_RDNA4);
+  tail_words[1'000u] = build_s_nop(0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const std::vector<uint8_t> bytes =
+      make_rdna4_two_kernel_code_object(first_kernel_words, second_kernel_words, tail_words);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.scratch_vgpr = 5u;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
+            2u)
+      << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.flat_selection_telemetry);
+  const ConSanFlatSelectionTelemetry &selection = *result.flat_selection_telemetry;
+  EXPECT_EQ(selection.branch_only_selected_count, 2u);
+  // Two first-pass calls plus one retry prove that the selected first-pass
+  // route is retained instead of being planned again.
+  EXPECT_EQ(selection.branch_only_routing.pair_attempt_count, 3u)
+      << " entry=" << selection.branch_only_routing.entry_route_failure_count
+      << " return=" << selection.branch_only_routing.return_route_failure_count
+      << " contention=" << selection.branch_only_routing.relay_contention_failure_count
+      << " work=" << selection.branch_only_routing.work_budget_failure_count
+      << " reservation=" << selection.branch_only_routing.reservation_failure_count
+      << " placement=" << selection.branch_only_placement_failure_count;
+  EXPECT_EQ(selection.branch_only_routing.plan_call_count, 3u);
+  EXPECT_EQ(selection.discarded_branch_only_routing.pair_attempt_count, 0u);
+  EXPECT_EQ(selection.discarded_branch_only_routing.plan_call_count, 0u);
 }
 
 TEST(ConSan, FlatCheckTrapReusesDirectAnchorTailForFarBranchRoutes) {

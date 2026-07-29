@@ -407,6 +407,71 @@ struct GreedyFixedRelayRoute {
 
 } // namespace
 
+void record_branch_only_relay_plan(ConSanBranchOnlyRoutingTelemetry &telemetry,
+                                   const BranchOnlyRelayPlanOutcome &outcome,
+                                   std::span<const BranchOnlyRelayPlanStrategy> pair_strategies) {
+  add_saturated(telemetry.pair_attempt_count, pair_strategies.size());
+  add_saturated(telemetry.plan_call_count, 1u);
+  if (outcome.work_budget_exhausted)
+    add_saturated(telemetry.work_budget_exhaustion_count, 1u);
+  add_saturated(telemetry.search_work_count, outcome.search_work_consumed);
+  add_saturated(telemetry.scan_work_count, outcome.scan_work_consumed);
+  for (BranchOnlyRelayPlanStrategy strategy : pair_strategies) {
+    if (strategy == BranchOnlyRelayPlanStrategy::ExactPairFallback ||
+        strategy == BranchOnlyRelayPlanStrategy::GreedyPairFallback) {
+      add_saturated(telemetry.exact_pair_fallback_attempt_count, 1u);
+    }
+    if (strategy == BranchOnlyRelayPlanStrategy::GreedyPairFallback)
+      add_saturated(telemetry.greedy_pair_fallback_attempt_count, 1u);
+  }
+}
+
+void record_branch_only_relay_failure(ConSanBranchOnlyRoutingTelemetry &telemetry,
+                                      BranchOnlyRelayPlanFailure failure) {
+  switch (failure) {
+  case BranchOnlyRelayPlanFailure::None:
+    break;
+  case BranchOnlyRelayPlanFailure::EntryRoute:
+    add_saturated(telemetry.entry_route_failure_count, 1u);
+    break;
+  case BranchOnlyRelayPlanFailure::ReturnRoute:
+    add_saturated(telemetry.return_route_failure_count, 1u);
+    break;
+  case BranchOnlyRelayPlanFailure::RelayContention:
+    add_saturated(telemetry.relay_contention_failure_count, 1u);
+    break;
+  case BranchOnlyRelayPlanFailure::WorkBudget:
+    add_saturated(telemetry.work_budget_failure_count, 1u);
+    break;
+  case BranchOnlyRelayPlanFailure::Reservation:
+    add_saturated(telemetry.reservation_failure_count, 1u);
+    break;
+  }
+}
+
+void record_branch_only_relay_rejection(ConSanBranchOnlyRoutingTelemetry &telemetry,
+                                        BranchOnlyRelayPairRejection rejection) {
+  switch (rejection) {
+  case BranchOnlyRelayPairRejection::None:
+  case BranchOnlyRelayPairRejection::Count:
+    break;
+  case BranchOnlyRelayPairRejection::InvalidEntryCoordinates:
+  case BranchOnlyRelayPairRejection::EntryUnreachable:
+    add_saturated(telemetry.entry_route_failure_count, 1u);
+    break;
+  case BranchOnlyRelayPairRejection::InvalidReturnCoordinates:
+  case BranchOnlyRelayPairRejection::ReturnUnreachable:
+    add_saturated(telemetry.return_route_failure_count, 1u);
+    break;
+  case BranchOnlyRelayPairRejection::RelayContention:
+    add_saturated(telemetry.relay_contention_failure_count, 1u);
+    break;
+  case BranchOnlyRelayPairRejection::WorkBudget:
+    add_saturated(telemetry.work_budget_failure_count, 1u);
+    break;
+  }
+}
+
 bool is_consan_branch_relay_reservoir_instruction(const Instruction &instruction, uint64_t offset,
                                                   std::span<const uint8_t> text,
                                                   rj_code_arch_t arch) {
