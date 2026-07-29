@@ -9603,15 +9603,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
         )
-        # In wave32, EXEC_HI remains addressable as scalar scratch even though
-        # it is not part of the active-lane mask. Wave64-only ISAs can keep the
-        # conventional EXEC accessors in their generated operand code.
-        exec_register = (
-            'exec_raw()' if self.isa_spec.profile.wave_size == 32 else 'exec()'
-        )
-        set_exec_register = (
-            'set_exec_raw' if self.isa_spec.profile.wave_size == 32 else 'set_exec'
-        )
 
         switch_cases = []
         ref_switch_cases = []

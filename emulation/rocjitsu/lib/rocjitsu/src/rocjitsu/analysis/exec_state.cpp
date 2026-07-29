@@ -60,13 +60,16 @@ enum class ExecWrite : uint8_t {
 /// bits [0,32), `exec_hi` (index 1) bits [32,64). Only an exec_lo-based write can
 /// cover the active mask; an exec_hi write never touches lanes [0,wave_size).
 struct ExecWriteExtent {
-  uint64_t mask = 0; ///< Bits written into EXEC.
-  bool full = false; ///< True when those bits cover the entire active EXEC mask.
+  uint64_t mask = 0;     ///< Bits written into EXEC (sub-register width, unpositioned).
+  bool full = false;     ///< True when those bits cover the entire active EXEC mask.
+  bool disjoint = false; ///< True when the written bits lie entirely outside the active
+                         ///< mask [0,wave_size) (e.g. exec_hi on Wave32), so the write
+                         ///< touches no active lane whatever value it stores.
 };
 
 [[nodiscard]] ExecWriteExtent exec_write_extent(const Instruction &inst, uint32_t wave_size) {
   if (inst.flags() & WRITES_EXEC)
-    return {full_exec_mask(wave_size), true};
+    return {full_exec_mask(wave_size), /*full=*/true, /*disjoint=*/false};
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const Operand *op = inst.dst_operand(i);
     if (op == nullptr)
@@ -76,7 +79,14 @@ struct ExecWriteExtent {
       const uint64_t mask = (w >= 64) ? ~0ULL : ((1ULL << w) - 1ULL);
       // Full only when the write starts at exec_lo (index 0) and spans the mask.
       const bool full = ref->index == 0 && w >= static_cast<int>(wave_size);
-      return {mask, full};
+      // Position the written bits within EXEC (exec_lo -> [0,w), exec_hi ->
+      // [32,32+w)) and test them against the active mask. A write landing wholly
+      // above the active lanes -- most notably exec_hi on Wave32 -- leaves every
+      // active lane untouched.
+      const int shift = ref->index * 32;
+      const uint64_t positioned = shift >= 64 ? 0ULL : (mask << shift);
+      const bool disjoint = (positioned & full_exec_mask(wave_size)) == 0;
+      return {mask, full, disjoint};
     }
   }
   return {};
@@ -125,16 +135,20 @@ enum class Combinator { Other, Copy, Or };
   return false;
 }
 
-/// @details A full all-ones write establishes `Full`. A *partial* all-ones write
-/// (e.g. `s_mov_b32 exec_lo, -1` on Wave64) only sets a subset of the mask to
-/// ones, so it keeps an already-`Full` mask `Full` but cannot establish `Full`
-/// from `Unknown` — that is `Preserve`. AND-style writes (incl.
-/// `s_and_saveexec exec, -1`, where `exec & -1 == exec`) and writes of any other
-/// value fall through to `Narrowing`.
+/// @details A write disjoint from the active mask (e.g. `s_mov_b32 exec_hi, N` on
+/// Wave32, where the active lanes are exec_lo) touches no active lane, so it is
+/// `Preserve` regardless of the value written. Otherwise: a full all-ones write
+/// establishes `Full`; a *partial* all-ones write (e.g. `s_mov_b32 exec_lo, -1`
+/// on Wave64) only sets a subset of the mask to ones, so it keeps an already-`Full`
+/// mask `Full` but cannot establish `Full` from `Unknown` — that is `Preserve`.
+/// AND-style writes (incl. `s_and_saveexec exec, -1`, where `exec & -1 == exec`)
+/// and writes of any other value fall through to `Narrowing`.
 [[nodiscard]] ExecWrite classify(const Instruction &inst, uint32_t wave_size) {
   if (!writes_exec(inst))
     return ExecWrite::None;
   const ExecWriteExtent ext = exec_write_extent(inst, wave_size);
+  if (ext.disjoint)
+    return ExecWrite::Preserve;
   if (writes_all_ones_value(inst, ext.mask))
     return ext.full ? ExecWrite::AllOnes : ExecWrite::Preserve;
   return ExecWrite::Narrowing;

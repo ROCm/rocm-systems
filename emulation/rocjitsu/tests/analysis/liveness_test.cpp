@@ -193,6 +193,7 @@ enum class TestOpcode : uint32_t {
   WriteExecAndSaveexec = 21,
   WriteExecLoHalf = 22,
   WriteExecHiHalf = 23,
+  WriteExecHiHalfZero = 25,
   PartialDefSgpr4 = 24,
 };
 
@@ -270,6 +271,10 @@ public:
       // of EXEC. Never covers the active lanes, so it can never establish Full.
       return new TestInstruction("test_write_exec_hi_half", {{RegClass::EXEC, 1, 1}}, {},
                                  RESULT_COPY, std::nullopt, {}, std::nullopt, ~0ULL);
+    case TestOpcode::WriteExecHiHalfZero:
+      // s_mov_b32 exec_hi, 0: a 32-bit COPY of zero into only the high half of EXEC.
+      return new TestInstruction("test_write_exec_hi_half_zero", {{RegClass::EXEC, 1, 1}}, {},
+                                 RESULT_COPY, std::nullopt, {}, std::nullopt, 0ULL);
     case TestOpcode::PartialDefSgpr4:
       // 16-bit write to s4: defines only part of the lane, so it also reads s4.
       return new TestInstruction("test_partial_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0,
@@ -3547,6 +3552,24 @@ TEST(ExecMaskAnalysis, ExecHiWritePreservesButDoesNotNarrowFull) {
   ASSERT_GE(insts.size(), 3u);
   EXPECT_EQ(exec.before(*insts[1]), ExecState::Full); // entering the hi write
   EXPECT_EQ(exec.before(*insts[2]), ExecState::Full); // hi all-ones preserved Full
+}
+
+TEST(ExecMaskAnalysis, Wave32ExecHiZeroWritePreservesFull) {
+  // On Wave32 exec_hi lies outside the active mask, so an exec_hi write preserves
+  // the current state even for a non-all-ones value like `s_mov_b32 exec_hi, 0`
+  // (which previously narrowed an established Full to Unknown).
+  auto blocks = build_test_blocks({TestOpcode::WriteExecFull, TestOpcode::WriteExecHiHalfZero,
+                                   TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  ExecMaskAnalysis exec{KernelBlockScope(scope), 32};
+  auto insts = insts_of(*blocks[0]);
+  ASSERT_GE(insts.size(), 4u);
+  EXPECT_EQ(exec.before(*insts[1]), ExecState::Full); // entering the exec_hi=0 write
+  EXPECT_EQ(exec.before(*insts[2]), ExecState::Full); // exec_hi=0 preserved Full
+
+  const ExecMaskAnalysis exec_for_liveness{KernelBlockScope(scope), /*wave_size=*/32};
+  const LivenessAnalysis liveness{KernelBlockScope(scope), exec_for_liveness};
+  EXPECT_FALSE(liveness.is_live_before(*insts[2], {RegClass::VGPR, 0, 1}));
 }
 
 TEST(LivenessAnalysis, ExecFullPromotesVgprDefToKill) {
