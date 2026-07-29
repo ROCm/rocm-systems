@@ -531,15 +531,6 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int s
   }
 }
 
-// Prefix/tail bytes (< ChunkSize) are copied via copy_bulk<1, ...> rather
-// than a single tid==0 lane running copy_remainder: with group-cooperative
-// callers (stride > 1), gating a multi-step byte copy behind one lane forces
-// every other active lane to sit masked-off through the branch until
-// reconvergence -- paid on *every* call. Routing it through copy_bulk<1>
-// spreads the (at most ChunkSize-1) leftover bytes one-per-lane across
-// tid/stride instead, so it costs a single parallel step. For memcpy_lane
-// (tid=0, stride=1) this degenerates back to the same serial byte-by-byte
-// copy it already did.
 template <int ChunkSize, CachePolicy LP, CachePolicy SP, int Unroll,
           bool UniformBase = false>
 __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
@@ -578,8 +569,6 @@ __device__ __forceinline__ void copy_aligned_body(uint8_t* dst, uint8_t* src,
 // LANE, WAVE, AND WG IMPLEMENTATIONS
 // ==============================================================================
 
-// Blocking variants additionally drain all in-flight VMEM ops before returning.
-//
 // memcpy_lane is per-lane: many lanes may call it concurrently, each with its
 // own independent dst/src (see e.g. tile_put's element-by-element fallback).
 // It must NOT set UniformBase=true on copy_aligned_best_effort/copy_bulk --
@@ -627,7 +616,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
 // memcpy_wave is group-cooperative: every lane in the wave passes the same
 // dst/src and only differs by wave_tid/wave_size (folded into the per-access
-// offset inside copy_bulk), so UniformBase=true is safe here.
+// offset inside copy_bulk), so UniformBase=true
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   if (size == 0) return;
@@ -645,7 +634,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
                                                 static_cast<uint8_t*>(src),
                                                 size, wave_tid, wave_size);
   } else {
-    // The "Whatever Else" Path: Small sizes skip bulk setup entirely
+    // Small sizes skip bulk setup entirely
     if (wave_tid == 0) {
       copy_remainder<LP, SP>(static_cast<uint8_t*>(dst),
                              static_cast<uint8_t*>(src),
@@ -656,7 +645,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
 // memcpy_wg is group-cooperative: every lane in the workgroup passes the same
 // dst/src and only differs by tid/stride (folded into the per-access offset
-// inside copy_bulk), so UniformBase=true is safe here.
+// inside copy_bulk), so UniformBase=true 
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
   if (size == 0) return;
