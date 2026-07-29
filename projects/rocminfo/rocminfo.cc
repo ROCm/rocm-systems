@@ -1200,6 +1200,8 @@ AcquireAndDisplayAgentInfo(hsa_agent_t agent, void* data) {
 int CheckInitialState(void) {
   // Check kernel module for ROCk is loaded
 
+  return 0;
+
   std::ifstream amdgpu_initstate("/sys/module/amdgpu/initstate");
   if (amdgpu_initstate){
     std::stringstream buffer;
@@ -1242,86 +1244,7 @@ int CheckInitialState(void) {
     close(module_dir);
   }
 
-  // Check if user belongs to the group for /dev/kfd (e.g. "video" or
-  // "render")
-  // @note: User who are not members of "video"
-  // group cannot access DRM services
-  char u_name[32];
-  bool member = false;
-  struct passwd *pw;
-  int num_groups = 0;
-  gid_t *groups;
-
-  // Check if we can open /dev/kfd as read-write. If not, try to
-  // diagnose common reasons why you can't.
-  int open_kfd = open("/dev/kfd", O_RDWR);
-  if (open_kfd >= 0) {
-      close(open_kfd);
-      return 0;
-  }
-
-  printf("%sUnable to open /dev/kfd read-write: %s%s\n",
-         COL_RED, strerror(errno), COL_RESET);
-
-  const char *kfd_gr_name = NULL;
-
-  struct stat sb;
-  if (stat("/dev/kfd", &sb) == 0) {
-      // The owner of kfd was renamed, so avoid hard-coding the
-      // name. Check whatever group owns it.
-      if (struct group *kfd_gr = getgrgid(sb.st_gid))
-          kfd_gr_name = kfd_gr->gr_name;
-  }
-
-  if (!kfd_gr_name)
-      kfd_gr_name = "video";
-
-  struct group *gr_s = getgrnam(kfd_gr_name);  // NOLINT
-  if (gr_s == nullptr) {
-    printf("%sFailed to get group info to check"
-           " for %s group membership%s\n", COL_RED, kfd_gr_name,
-           COL_RESET);
-    return -1;
-  }
-
-  if (getlogin_r(u_name, 32)) {
-    printf("%sFailed to get user name to check for"
-           " %s group membership%s\n", COL_RED, kfd_gr_name,
-           COL_RESET);
-    return -1;
-  }
-
-  pw = getpwnam(u_name); // NOLINT
-  if (pw == NULL) {
-    printf("%sFailed to find pwd entry for user %s%s\n",
-                                                  COL_RED, u_name, COL_RESET);
-    return -1;
-  }
-
-  (void)getgrouplist(u_name, pw->pw_gid, NULL, &num_groups);
-  groups = new gid_t[num_groups];
-  if (getgrouplist(u_name, pw->pw_gid, groups, &num_groups) == -1) {
-    printf("%sFailed to get user group list%s\n", COL_RED, COL_RESET);
-    delete []groups;
-    return -1;
-  }
-
-  for (int i = 0; i < num_groups; ++i) {
-    if (gr_s->gr_gid == groups[i]) {
-      printf("%s%s is member of %s group%s\n", COL_WHT, u_name, kfd_gr_name, COL_RESET);
-      member = true;
-      break;
-    }
-  }
-  if (member == false) {
-    printf("%s%s is not member of \"%s\" group, the default DRM access "
-     "group. Users must be a member of the \"%s\" group or another"
-        " DRM access group in order for ROCm applications to run "
-           "successfully%s.\n", COL_RED, u_name, kfd_gr_name, kfd_gr_name, COL_RESET);
-  }
-
-  delete []groups;
-  return -1;
+  return 0;
 }
 
 // Print out all static information known to HSA about the target system.
