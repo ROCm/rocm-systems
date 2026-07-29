@@ -33,6 +33,8 @@ set_target_properties(rocclr PROPERTIES
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON)
 
+rocm_harden_target(rocclr)
+
 if(WIN32)
   set_target_properties(rocclr PROPERTIES CXX_STANDARD 20)
 else()

@@ -68,6 +68,8 @@ set_target_properties(amdhip64 PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib
   ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 
+rocm_harden_target(amdhip64)
+
 if(WIN32)
   set_target_properties(amdhip64 PROPERTIES CXX_STANDARD 20)
 else()

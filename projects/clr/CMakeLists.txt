@@ -48,6 +48,12 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
+# Security hardening. Probed after the build type is settled, because
+# _FORTIFY_SOURCE is only applied to configurations that optimize.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+include(ROCmHardening)
+rocm_hardening_probe()
+
 #############
 # Build steps
 #############

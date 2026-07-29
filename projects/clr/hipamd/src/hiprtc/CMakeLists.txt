@@ -64,6 +64,10 @@ set_target_properties(hiprtc PROPERTIES
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON)
 
+# hiprtc-builtins is deliberately left alone: it wraps a device code object
+# produced by llvm-mc, with no host translation unit to harden.
+rocm_harden_target(hiprtc)
+
 target_include_directories(hiprtc
   PRIVATE
   $<BUILD_INTERFACE:${HIP_COMMON_INCLUDE_DIR}>

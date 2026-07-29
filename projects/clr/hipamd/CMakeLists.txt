@@ -23,6 +23,12 @@ include(GNUInstallDirs)
 #  By default, CMake will search for a folder named opencl or ROCm-OpenCL-Runtime relative to the current path. Specify -DAMD_OPENCL_PATH=$OPENCL_DIR if opencl source is in obscure location.
 list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 
+# Security hardening. Repeated here because hipamd is also usable directly as
+# the CMake entry point, per the sample commands above; both calls are no-ops
+# when projects/clr already ran them.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../cmake")
+include(ROCmHardening)
+rocm_hardening_probe()
 
 #############################
 # Options

@@ -43,6 +43,8 @@ set_target_properties(amdocl PROPERTIES
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON)
 
+rocm_harden_target(amdocl)
+
 # set amdocl library version
 set(AMDOCL_LIB_VERSION_MAJOR "2")
 set(AMDOCL_LIB_VERSION_MINOR "1")
