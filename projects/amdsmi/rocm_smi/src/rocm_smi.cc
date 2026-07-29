@@ -2557,7 +2557,7 @@ static bool is_multi_partition_mode(const std::string& compute_partition) {
   if (it == mapStringToRSMIComputePartitionTypes.end()) {
     return false;
   }
-  return it->second != RSMI_COMPUTE_PARTITION_SPX && it->second != RSMI_COMPUTE_PARTITION_INVALID;
+  return it->second != RSMI_COMPUTE_PARTITION_SPX;
 }
 
 static const std::map<std::string, rsmi_compute_partition_mem_alloc_mode_t>
@@ -4189,8 +4189,9 @@ namespace amd::smi {
 // See rocm_smi_vram.h for the three cases this covers. Implementation note:
 // APUs are detected by size (kfd_total > sysfs_total), not a flag, because the
 // driver exposes no APU marker (processor_type is AMD_GPU for APU and discrete
-// alike). On discrete and SPX GPUs sysfs is not smaller than the KFD FB_PUBLIC
-// bank, so the comparison stays false and the sysfs value is kept.
+// alike).
+// TODO(#8476): the size comparison is a proxy until APUs are directly
+// identifiable; a semantic check would compare only the KFD FB_PUBLIC banks.
 bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
                            const std::string& compute_partition, uint64_t kfd_total) {
   if (!sysfs_read_ok || sysfs_total == 0) {

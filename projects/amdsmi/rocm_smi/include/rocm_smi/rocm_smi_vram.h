@@ -35,9 +35,6 @@ namespace amd::smi {
 // (CPX/DPX/TPX/QPX), where sysfs splits the whole device and ignores reserved
 // memory; and APUs (e.g. gfx1151) that report only the small BIOS carveout
 // instead of the unified pool.
-//
-// Declared here so the implementation (rocm_smi.cc) and the unit test share one
-// signature; a drift between them then fails to compile instead of silently.
 bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
                            const std::string& compute_partition, uint64_t kfd_total);
 
