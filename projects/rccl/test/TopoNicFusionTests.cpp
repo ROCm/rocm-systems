@@ -16,22 +16,15 @@
 // not bounded by the number of patterns. Without a bound inside the match loop,
 // vProps.devs[vProps.ndevs++] runs off the end of the stack array.
 //
-// IMPORTANT -- this test has no behavioural red/green signature on a normal
-// build, and must not be deleted as vacuous on that basis. Before the fix, the
-// overflowing writes are immediately followed by the pre-existing
-// "vProps.ndevs != nUserIfs" check, which fails, so the return code is
-// ncclInvalidUsage with or without the fix. The value of the test is that it
-// makes the overflow reproducible under a sanitizer build
-// (BUILD_ADDRESS_SANITIZER=ON, see the top-level CMakeLists.txt): there the
-// pre-fix code aborts with a stack-buffer-overflow at the store into devs[],
-// while the fixed code returns cleanly. Treat an ASan run of this test as the
-// real assertion; the EXPECT below only pins the contract on ordinary builds.
+// IMPORTANT -- on an ordinary build this test cannot tell the fix from its absence,
+// and must not be deleted as vacuous on that basis: the pre-existing
+// "vProps.ndevs != nUserIfs" check fails right after the overflowing writes, so the
+// result is ncclInvalidUsage either way. It earns its keep under
+// BUILD_ADDRESS_SANITIZER=ON, where the pre-fix code aborts on the store into devs[]
+// and the fixed code returns cleanly.
 //
-// The test target is rccl-UnitTestsFixturesDebug (Debug only): ncclTopoForceMerge
-// lives inside librccl.so with default-hidden visibility in Release builds, so it
-// is only linkable from the Debug fixtures binary -- exactly like
-// TopoEnvPolicyTests, ParamTests::ncclLoadParam, ArgCheckTests' argcheck helpers,
-// etc.
+// Debug-only target (rccl-UnitTestsFixturesDebug): ncclTopoForceMerge has hidden
+// visibility in Release, so it is only linkable from the Debug fixtures binary.
 
 #include <gtest/gtest.h>
 
@@ -54,7 +47,8 @@ namespace
 // overruns the array by exactly one entry.
 constexpr int kPhysDevs = NCCL_NET_MAX_DEVS_PER_NIC + 1;
 
-const char* kNicName = "mlx5_0";
+// Any name works: it is both the fake device name and the pattern matched against it.
+const char* kFakeNicName = "testnic0";
 
 }  // namespace
 
@@ -81,7 +75,7 @@ TEST(TopoNicFusionTests, ForceMerge_PatternMatchingMoreDevsThanArray_Rejected)
     memset(placedDevs, 0, sizeof(placedDevs));
     for(int dev = 0; dev < kPhysDevs; dev++)
     {
-        snprintf(names[dev], sizeof(names[dev]), "%s", kNicName);
+        snprintf(names[dev], sizeof(names[dev]), "%s", kFakeNicName);
         propsList[dev].name = names[dev];
         propsList[dev].port = dev + 1;  // IB port numbers are 1-based
         ASSERT_EQ(xmlAddNode(xml, root, "net", &physNetNodes[dev]), ncclSuccess);
@@ -90,7 +84,7 @@ TEST(TopoNicFusionTests, ForceMerge_PatternMatchingMoreDevsThanArray_Rejected)
     struct ncclTopoNetInfo netInfo;
     memset(&netInfo, 0, sizeof(netInfo));
     netInfo.maxDevsPerNic = NCCL_NET_MAX_DEVS_PER_NIC;
-    netInfo.forceMerge    = kNicName;
+    netInfo.forceMerge    = kFakeNicName;
 
     EXPECT_EQ(ncclTopoForceMerge(xml, &netInfo, placedDevs, propsList, physNetNodes, kPhysDevs),
               ncclInvalidUsage);

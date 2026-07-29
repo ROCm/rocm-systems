@@ -60,14 +60,25 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
     int vdev = -1;
     ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
     EXPECT_EQ(result, ncclInvalidUsage) << "Should fail with zero devices";
+}
 
-    // Negative test: negative count. It clears every per-device check because the
-    // build loop never runs, so without an explicit bound it registers an empty vNIC.
+TEST_F(NetIbMPITest, MakeVirtualDeviceNegativeNdevs) {
+    // A negative count clears every per-device check, because the build loop never runs.
+    // Without an explicit bound it registers a vNIC with no constituent device.
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
+        << "Test requirements not met";
+
+    int ndev = 0;
+    AssertInitAndGetDevices(&ndev);
+
     int ndevBefore = 0;
     ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
 
+    ncclNetVDeviceProps_t vProps;
     vProps.ndevs = -1;
-    vdev = -1;
+
+    int vdev = -1;
     EXPECT_EQ(MakeVirtualDevice(&vdev, &vProps), ncclInvalidUsage)
         << "Should fail with a negative device count";
 
@@ -1794,12 +1805,10 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
 // =============================================================================
 // Test: MergeMultipleDevices
 //
-// Exercises makeVDevice() around the NCCL_NET_MAX_DEVS_PER_NIC boundary:
-//   - below the limit:  succeeds
-//   - at the limit:     succeeds
-//   - above the limit:  rejected, no device added
-//
-// The limit is a compile-time property of the negotiated plugin API, not an env var.
+// Tests makeVDevice() with increasing numbers of physical devices:
+//   - below NCCL_NET_MAX_DEVS_PER_NIC: should succeed
+//   - at the limit:                    should succeed
+//   - above the limit:                 should fail, adding no device
 //
 // makeVDevice() is additive — each successful call appends a new merged device
 // to the device list. Physical devices remain visible (hiding is done by the
@@ -1811,8 +1820,8 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
                                          kRequirePowerOfTwo, 1, kNoNodeLimit))
         << "Test requirements not met";
 
-    // Every sub-test below requests ndevs > 1, which the plugin refuses outright when
-    // merging is off, making the over-limit sub-test pass for the wrong reason.
+    // With merging off, every ndevs > 1 request is refused and the over-limit case would
+    // pass for the wrong reason.
     const char* mergeEnv = getenv("NCCL_IB_MERGE_NICS");
     if (mergeEnv && atoi(mergeEnv) == 0) {
         GTEST_SKIP() << "NIC merging disabled (NCCL_IB_MERGE_NICS=0)";
@@ -1826,7 +1835,7 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
 
     constexpr int kMaxDevsPerNic = NCCL_NET_MAX_DEVS_PER_NIC;
 
-    // --- Collect all device properties and identify the physical devices ---
+    // --- Collect all device properties and identify physical (non-merged) devices ---
     std::vector<ncclNetProperties_t> allProps(ndev);
     std::vector<int> physicalDevices;
 
@@ -1834,9 +1843,8 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
         memset(&allProps[i], 0, sizeof(ncclNetProperties_t));
         ASSERT_EQ(GetDeviceProperties(i, &allProps[i]), ncclSuccess);
 
-        // The plugin registers a 1:1 vNIC per physical NIC at init, so a physical device
-        // is the one whose own index equals the index it wraps. A deduped 1-device vNIC
-        // left by an earlier test also has ndevs == 1 but wraps a different index.
+        // Only the init-time 1:1 vNICs wrap their own index; MakeVirtualDeviceDuplicateDevs
+        // leaves behind a deduped vNIC that also has ndevs == 1 but wraps a lower index.
         if (allProps[i].vProps.ndevs == 1 && allProps[i].vProps.devs[0] == i) {
             physicalDevices.push_back(i);
         }
@@ -1847,7 +1855,7 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
     }
 
     // --- Take up to kMaxDevsPerNic physical devices sharing one speed ---
-    const int targetSpeed = allProps[physicalDevices[0]].speed;
+    int targetSpeed = allProps[physicalDevices[0]].speed;
     std::vector<int> selected;
 
     for (size_t i = 0; i < physicalDevices.size() && (int)selected.size() < kMaxDevsPerNic; i++) {
@@ -1956,9 +1964,11 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
             << "Merging " << kOverLimit << " devices must be rejected (limit is "
             << kMaxDevsPerNic << ")";
 
+        // Device count should NOT have changed
         int ndevAfter = 0;
         ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
-        EXPECT_EQ(ndevAfter, ndevBefore) << "Failed merge should not add any devices";
+        EXPECT_EQ(ndevAfter, ndevBefore)
+            << "Failed merge should not add any devices";
     }
 }
 
