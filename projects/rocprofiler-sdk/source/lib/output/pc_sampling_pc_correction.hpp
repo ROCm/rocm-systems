@@ -176,7 +176,8 @@ struct CodeObjectClassification
     /// real decoder; tests return synthetic instructions (see @ref add_symbol).
     using decode_fn = std::function<std::unique_ptr<Instruction>(uint64_t voffset)>;
 
-    std::vector<InternalEntry> entries;  ///< Sorted by offset (after @ref sort); immutable thereafter.
+    std::vector<InternalEntry>
+        entries;  ///< Sorted by offset (after @ref sort); immutable thereafter.
 
     /**
      * @brief Walk one symbol's instruction stream in a single pass, appending
@@ -224,9 +225,8 @@ struct CodeObjectClassification
  * safe-by-construction — entries are published read-only and never mutated
  * afterwards.
  */
-using ClassificationMap =
-    std::unordered_map<rocprofiler_code_object_id_t,
-                       std::shared_ptr<const CodeObjectClassification>>;
+using ClassificationMap = std::unordered_map<rocprofiler_code_object_id_t,
+                                             std::shared_ptr<const CodeObjectClassification>>;
 
 /**
  * @brief Owns the per-code-object classification map and exposes the correction API.
@@ -250,7 +250,7 @@ public:
     explicit PCCorrectionManager(common::Synchronized<code_obj_decoder_t, true>& decoder);
     ~PCCorrectionManager();
 
-    PCCorrectionManager(const PCCorrectionManager&)            = delete;
+    PCCorrectionManager(const PCCorrectionManager&) = delete;
     PCCorrectionManager& operator=(const PCCorrectionManager&) = delete;
 
     /**
@@ -314,7 +314,7 @@ public:
      * @return true if the sample should be passed to @ref correct.
      */
     bool should_correct(const rocprofiler_pc_sampling_record_stochastic_v0_t& s,
-                        std::string_view decoded_inst) const;
+                        std::string_view                                      decoded_inst) const;
 
     /**
      * @brief Hot-path correction: apply the cascade, mutating @p s in place on Keep.
