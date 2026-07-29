@@ -59,8 +59,8 @@ make_default_nic_tracks()
 
 struct nic_perfetto_sample
 {
-    size_t  timestamp;
-    metrics metric_values;
+    std::uint64_t timestamp;
+    metrics       metric_values;
 };
 
 // Emit a single NIC counter sample to a pre-resolved track. CategoryTp is a
@@ -72,7 +72,7 @@ struct nic_perfetto_sample
 // up per sample.
 template <typename CategoryTp>
 inline void
-emit_nic_counter(size_t device_index, std::int64_t track_index, size_t ts,
+emit_nic_counter(size_t device_index, std::int64_t track_index, std::uint64_t ts,
                  std::uint64_t value)
 {
     if(track_index < 0) return;
