@@ -1531,35 +1531,343 @@ TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
   for (uint16_t sgpr : live_sgprs)
     text_words[cursor++] = build_s_mov_b32(0, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  for (const bool uses_dynamic_stack : {false, true}) {
+    SCOPED_TRACE(uses_dynamic_stack ? "dynamic-stack" : "fixed-stack");
+    const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+        text_words, "inline_scalar_spill", kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+        uses_dynamic_stack);
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_dispatch_id = 0x1122334455667788ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+    options.max_patches = 16u;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.final_validation_passed);
+    // Complete owner coverage proves that this pair is absent from guest
+    // code, so preserve runtime dispatch identity instead of falling back to
+    // the configured literal merely because the live scalar set is sparse.
+    EXPECT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+    EXPECT_EQ(result.moi_report_dispatch_id, options.moi_report_dispatch_id);
+    EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+      return patch.anchor_offset == access_word * sizeof(uint32_t) &&
+             (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+              patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore);
+    }));
+    ASSERT_EQ(result.resource_plans.size(), 1u);
+    EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+    EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+      return warning.find("automatically assigned spill-backed Inline SGPRs") != std::string::npos;
+    })) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+      return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
+             patch.required_private_segment_size != 0u;
+    }));
+    if (uses_dynamic_stack) {
+      EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
+               patch.dynamic_private_segment_addend > 0u;
+      }));
+    }
+  }
+}
+
+TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
+  std::vector<uint32_t> text_words(800u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  size_t cursor = 0u;
+  text_words[cursor++] = 0xD8340000u;
+  text_words[cursor++] = 0x00000000u; // ds_store_b32 v0, v0
+  // Make every ordinary SGPR live at the access without assuming any
+  // preserved scalar range. Consume s105 before reusing it as the destination
+  // for the remaining reads.
+  text_words[cursor++] = build_s_mov_b32(105u, 105u, ROCJITSU_CODE_ARCH_RDNA4);
+  for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "inline_branch_only_dynamic_stack",
+                                 kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/true);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_dispatch_id = 0x1122334455667788ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  options.max_patches = 16u;
+  options.max_patches = 1u;
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
-  EXPECT_EQ(result.moi_report_dispatch_id, options.moi_report_dispatch_id);
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-    return patch.anchor_offset == access_word * sizeof(uint32_t) &&
-           (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
-            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore);
-  }));
-  ASSERT_EQ(result.resource_plans.size(), 1u);
-  EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+      << testing::PrintToString(result.warnings);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.dynamic_stack_borrowed_sgpr);
+  EXPECT_FALSE(assignment.indirect_pc_sgpr);
+  EXPECT_FALSE(assignment.indirect_scc_sgpr);
+  EXPECT_FALSE(assignment.dispatch_key_sgpr);
+  EXPECT_FALSE(assignment.call_return_sgpr);
+
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
+  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kConSanMoiInlineExecSaveSgprCount);
+  ASSERT_EQ(prologue->owner_descriptor_file_offsets.size(), 1u);
+  EXPECT_EQ(prologue->owner_descriptor_file_offsets.front(), assignment.descriptor_file_offset);
+  const auto branch_only =
+      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  ASSERT_NE(branch_only, result.patches.end());
+  EXPECT_EQ(branch_only->anchor_offset, 0u);
+  EXPECT_EQ(branch_only->branch_only_entry_prologue_offset, prologue->trampoline_offset);
+  EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, branch_only->trampoline_offset);
+  EXPECT_TRUE(branch_only->branch_only_entry_relay_offsets.empty());
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
+                               &ConSanPatchInfo::kind),
+            0u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> prologue_words =
+      text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
+  const auto first_save = instrumentation::build_v_writelane_b32(
+      *prologue->entry_scalar_backup_vgpr, assignment.exec_save_sgpr, /*lane=*/0u,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto last_save = instrumentation::build_v_writelane_b32(
+      *prologue->entry_scalar_backup_vgpr,
+      static_cast<uint16_t>(assignment.exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount - 1u),
+      kConSanMoiInlineExecSaveSgprCount - 1u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto first_restore = instrumentation::build_v_readlane_b32(
+      assignment.exec_save_sgpr, *prologue->entry_scalar_backup_vgpr, /*lane=*/0u,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto last_restore = instrumentation::build_v_readlane_b32(
+      static_cast<uint16_t>(assignment.exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount - 1u),
+      *prologue->entry_scalar_backup_vgpr, kConSanMoiInlineExecSaveSgprCount - 1u,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_wait = instrumentation::build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(first_save);
+  ASSERT_TRUE(last_save);
+  ASSERT_TRUE(first_restore);
+  ASSERT_TRUE(last_restore);
+  ASSERT_TRUE(restore_wait);
+  ASSERT_GE(prologue_words.size(), first_save->size());
+  EXPECT_TRUE(std::ranges::equal(std::span(prologue_words).first<2>(), *first_save));
+  EXPECT_TRUE(contains_subsequence(prologue_words, *last_save));
+  EXPECT_TRUE(contains_subsequence(prologue_words, *first_restore));
+  const std::array<uint32_t, 3> final_restore = {
+      (*last_restore)[0],
+      (*last_restore)[1],
+      *restore_wait,
+  };
+  EXPECT_TRUE(contains_subsequence(prologue_words, final_restore));
+
+  ConSanResult corrupted = result;
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const uint64_t backup_body_offset =
+      prologue->dispatch_id_primary_prologue_offset.value_or(prologue->trampoline_offset);
+  corrupted.elf_bytes[patched.text_sections().front()->sectionOffset() + backup_body_offset] ^= 1u;
+  const std::vector<std::string> validation_errors = validate_consan_modified_elf(bytes, corrupted);
+  EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
+    return error.find("invalid entry scalar backup save") != std::string::npos;
+  })) << testing::PrintToString(validation_errors);
+
+  ConSanResult invalid_resources = result;
+  const auto invalid_prologue =
+      std::ranges::find(invalid_resources.patches,
+                        ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(invalid_prologue, invalid_resources.patches.end());
+  invalid_prologue->entry_scalar_backup_vgpr = kConSanOrdinaryVgprLimit;
+  const std::vector<std::string> resource_errors =
+      validate_consan_modified_elf(bytes, invalid_resources);
+  EXPECT_TRUE(std::ranges::any_of(resource_errors, [](const std::string &error) {
+    return error.find("invalid entry scalar backup resources") != std::string::npos;
+  })) << testing::PrintToString(resource_errors);
+}
+
+TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughIsolatedNopWords) {
+  constexpr size_t kSegmentWords = 20'000u;
+  constexpr size_t kEntryRelayWord = 15'000u;
+  constexpr size_t kUnusedEntryRelayWord = kEntryRelayWord + 1u;
+  constexpr size_t kReturnRelayWord = 5'000u;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/105u, /*ssrc0=*/105u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> kernel_words(7u, filler);
+  kernel_words.reserve(kSegmentWords);
+  const uint64_t access_offset = kernel_words.size() * sizeof(uint32_t);
+  kernel_words.push_back(0xD8340000u);
+  kernel_words.push_back(0x00000000u); // ds_store_b32 v0, v0
+  kernel_words.push_back(filler);
+  for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
+    kernel_words.push_back(build_s_mov_b32(/*sdst=*/105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
+  kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const uint64_t kernel_code_size = kernel_words.size() * sizeof(uint32_t);
+  kernel_words.resize(kSegmentWords, filler);
+  kernel_words[kEntryRelayWord] = build_s_nop(0u, ROCJITSU_CODE_ARCH_RDNA4);
+  kernel_words[kUnusedEntryRelayWord] = build_s_nop(0u, ROCJITSU_CODE_ARCH_RDNA4);
+
+  std::vector<uint32_t> function_words(kSegmentWords, filler);
+  function_words.front() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  function_words[kReturnRelayWord] = build_s_nop(0u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint8_t> bytes =
+      make_rdna4_code_object_with_local_function(kernel_words, function_words);
+  mutate_elf_symbol_by_name(bytes, "lds_probe",
+                            [&](Elf64_Sym &symbol) { symbol.st_size = kernel_code_size; });
+  mutate_elf_symbol_by_name(bytes, "lds_helper",
+                            [&](Elf64_Sym &symbol) { symbol.st_size = sizeof(uint32_t); });
+  append_kernel_metadata_note(bytes, "lds_probe", /*uses_dynamic_stack=*/true,
+                              /*sgpr_count=*/106u);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &candidate) {
+    return candidate.branch_only_continuation && candidate.anchor_offset == access_offset;
+  });
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.patches);
+  ASSERT_EQ(patch->branch_only_entry_relay_offsets.size(), 1u);
+  ASSERT_EQ(patch->branch_only_return_relay_offsets.size(), 1u);
+  const std::array<uint64_t, 3> relay_candidates = {
+      kEntryRelayWord * sizeof(uint32_t),
+      kUnusedEntryRelayWord * sizeof(uint32_t),
+      (kSegmentWords + kReturnRelayWord) * sizeof(uint32_t),
+  };
+  EXPECT_NE(std::ranges::find(relay_candidates, patch->branch_only_entry_relay_offsets.front()),
+            relay_candidates.end());
+  EXPECT_NE(std::ranges::find(relay_candidates, patch->branch_only_return_relay_offsets.front()),
+            relay_candidates.end());
+  EXPECT_NE(patch->branch_only_entry_relay_offsets.front(),
+            patch->branch_only_return_relay_offsets.front());
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
+                               &ConSanPatchInfo::kind),
+            2u);
+
+  const auto unused_relay = std::ranges::find_if(relay_candidates, [&](uint64_t candidate) {
+    return candidate != patch->branch_only_entry_relay_offsets.front() &&
+           candidate != patch->branch_only_return_relay_offsets.front();
+  });
+  ASSERT_NE(unused_relay, relay_candidates.end());
+  ConSanResult unused = result;
+  ConSanPatchInfo unused_info;
+  unused_info.kind = ConSanPatchKind::TrampolineNopBranchRelay;
+  unused_info.anchor_offset = *unused_relay;
+  unused_info.trampoline_offset = *unused_relay;
+  unused_info.original_size = sizeof(uint32_t);
+  unused_info.trampoline_size = sizeof(uint32_t);
+  unused.patches.push_back(std::move(unused_info));
+  const std::vector<std::string> unused_errors = validate_consan_modified_elf(bytes, unused);
+  EXPECT_TRUE(std::ranges::any_of(unused_errors, [](const std::string &error) {
+    return error.find("unused original-NOP relay") != std::string::npos;
+  })) << testing::PrintToString(unused_errors);
+}
+
+TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackFailsClosedWithoutRelayHosts) {
+  constexpr size_t kTextWords = 45'000u;
+  constexpr size_t kAccessWord = 7u;
+  constexpr size_t kScalarUseWord = 40'000u;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/105u, /*ssrc0=*/105u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> text_words(kTextWords, filler);
+  text_words[kAccessWord] = 0xD8340000u;
+  text_words[kAccessWord + 1u] = 0x00000000u; // ds_store_b32 v0, v0
+  size_t cursor = kScalarUseWord;
+  for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words[cursor] = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "branch_only_without_relays", kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+      /*uses_dynamic_stack=*/true);
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  EXPECT_EQ(std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
+            result.patches.end());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("automatically assigned spill-backed Inline SGPRs") != std::string::npos;
+    return warning.find("could not route its branch-only dynamic-stack body") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
-           patch.required_private_segment_size != 0u;
-  }));
+}
+
+TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughSelectedAnchorTails) {
+  constexpr size_t kTextWords = 45'000u;
+  constexpr size_t kEarlyAccessWord = 7u;
+  constexpr size_t kMiddleAccessWord = 25'000u;
+  constexpr size_t kLateAccessWord = 30'000u;
+  constexpr size_t kScalarUseWord = 40'000u;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/105u, /*ssrc0=*/105u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> text_words(kTextWords, filler);
+  const auto write_access = [&](size_t word) {
+    text_words[word] = 0xD8340000u;
+    text_words[word + 1u] = 0x00000000u; // ds_store_b32 v0, v0
+  };
+  write_access(kEarlyAccessWord);
+  write_access(kMiddleAccessWord);
+  write_access(kLateAccessWord);
+  size_t cursor = kScalarUseWord;
+  for (uint16_t sgpr = 0u; sgpr < 105u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/105u, sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words[cursor] = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "inline_branch_only_anchor_relays",
+                                 kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/true);
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 3u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto branch_patch_at = [&](size_t word) {
+    return std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+      return patch.branch_only_continuation && patch.anchor_offset == word * sizeof(uint32_t);
+    });
+  };
+  const auto early = branch_patch_at(kEarlyAccessWord);
+  const auto middle = branch_patch_at(kMiddleAccessWord);
+  const auto late = branch_patch_at(kLateAccessWord);
+  ASSERT_NE(early, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_NE(middle, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_NE(late, result.patches.end()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(early->branch_only_entry_relay_offsets.size(), 1u);
+  ASSERT_EQ(early->branch_only_return_relay_offsets.size(), 1u);
+  EXPECT_TRUE(middle->branch_only_entry_relay_offsets.empty());
+  EXPECT_TRUE(middle->branch_only_return_relay_offsets.empty());
+  EXPECT_TRUE(late->branch_only_entry_relay_offsets.empty());
+  EXPECT_TRUE(late->branch_only_return_relay_offsets.empty());
+  std::array<uint64_t, 2> relays = {
+      early->branch_only_entry_relay_offsets.front(),
+      early->branch_only_return_relay_offsets.front(),
+  };
+  std::ranges::sort(relays);
+  const std::array<uint64_t, 2> expected = {
+      (kMiddleAccessWord + 1u) * sizeof(uint32_t),
+      (kLateAccessWord + 1u) * sizeof(uint32_t),
+  };
+  EXPECT_EQ(relays, expected);
 }
 
 TEST(ConSanMoi, Gfx1250InlineOddShadowSlotCountFallsBackToExactB64Clear) {

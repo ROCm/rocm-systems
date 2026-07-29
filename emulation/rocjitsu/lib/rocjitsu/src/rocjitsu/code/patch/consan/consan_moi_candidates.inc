@@ -12,7 +12,7 @@ inline constexpr uint16_t kScalarOperandSharedBase = 235;
 inline constexpr uint16_t kTtmpRdna4GridYz = 7;
 inline constexpr uint16_t kTtmpRdna4GridX = 9;
 inline constexpr uint16_t kTtmpGfx1250ClusterWorkgroupId = 6;
-inline constexpr uint32_t kMaxVgprs = 256;
+inline constexpr uint32_t kMaxVgprs = kConSanOrdinaryVgprLimit;
 inline constexpr uint32_t kMaxSgprs = 106;
 inline constexpr uint16_t kGfx12HwRegHwId1 = 23;
 inline constexpr uint16_t kGfx12HwIdOwnerBits = 10;
@@ -928,8 +928,13 @@ private:
 
 struct ConSanMoiReportDispatchIdWordSource {
   std::optional<uint16_t> sgpr;
+  std::optional<uint16_t> vgpr;
   uint32_t literal = 0;
 };
+
+[[nodiscard]] bool moi_has_runtime_hardware_dispatch_id(const ConSanOptions &options) {
+  return options.moi_dispatch_id_sgpr || options.moi_dispatch_id_vgpr;
+}
 
 // Code-object-wide CDNA instrumentation keeps the preloaded-SGPR contract
 // until its dispatch-identity resolver and final validation accept literal
@@ -943,10 +948,17 @@ enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { Rdna4FamilyOnly, AnyArch
 moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word) {
   if (options.moi_dispatch_id_sgpr) {
     return ConSanMoiReportDispatchIdWordSource{
-        .sgpr = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + (high_word ? 1u : 0u))};
+        .sgpr = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + (high_word ? 1u : 0u)),
+        .vgpr = std::nullopt};
+  }
+  if (options.moi_dispatch_id_vgpr) {
+    return ConSanMoiReportDispatchIdWordSource{
+        .sgpr = std::nullopt,
+        .vgpr = static_cast<uint16_t>(*options.moi_dispatch_id_vgpr + (high_word ? 1u : 0u))};
   }
   return ConSanMoiReportDispatchIdWordSource{
       .sgpr = std::nullopt,
+      .vgpr = std::nullopt,
       .literal = high_word ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
                            : static_cast<uint32_t>(options.moi_report_dispatch_id)};
 }
@@ -955,8 +967,8 @@ moi_report_dispatch_id_word_source(const ConSanOptions &options, bool high_word)
 moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSource &source,
                                         ConSanMoiLiteralDispatchIdPolicy policy,
                                         rj_code_arch_t arch) {
-  return source.sgpr || policy == ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture ||
-         is_rdna4_family_arch(arch);
+  return source.sgpr || source.vgpr ||
+         policy == ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture || is_rdna4_family_arch(arch);
 }
 
 [[nodiscard]] bool append_moi_report_dispatch_id_word(std::vector<uint32_t> &words,
@@ -970,6 +982,10 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
     return false;
   if (source.sgpr) {
     words.push_back(build_v_mov_b32_e32(destination_vgpr, *source.sgpr, arch));
+    return true;
+  }
+  if (source.vgpr) {
+    words.push_back(build_v_mov_b32_e32(destination_vgpr, vector_source_vgpr(*source.vgpr), arch));
     return true;
   }
   const auto materialize =
@@ -1002,6 +1018,8 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
   uint16_t expected = 0u;
   if (source.sgpr) {
     expected = *source.sgpr;
+  } else if (source.vgpr) {
+    expected = vector_source_vgpr(*source.vgpr);
   } else {
     // The literal path clobbers this temporary. Every caller must pass a dead
     // VGPR whose next use either overwrites or explicitly reloads it.
@@ -1029,8 +1047,9 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
     if (!moi_report_dispatch_id_source_permitted(source, policy, arch))
       return false;
     const uint32_t offset = low_offset + (high_word ? sizeof(uint32_t) : 0u);
-    if (source.sgpr ? !record.store_sgpr(offset, *source.sgpr)
-                    : !record.store_literal(offset, source.literal)) {
+    if (source.sgpr   ? !record.store_sgpr(offset, *source.sgpr)
+        : source.vgpr ? !record.store_vgpr(offset, *source.vgpr)
+                      : !record.store_literal(offset, source.literal)) {
       return false;
     }
   }
@@ -1217,9 +1236,11 @@ inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {
       return false;
     const uint64_t field_address = low_field_address + (high_word ? sizeof(uint32_t) : 0u);
     const bool stored =
-        source.sgpr
-            ? append_dynamic_record_store_u32_scalar_src(words, layout, field_address, *source.sgpr,
-                                                         slot_vgpr, scratch_vgpr, arch)
+        source.sgpr ? append_dynamic_record_store_u32_scalar_src(
+                          words, layout, field_address, *source.sgpr, slot_vgpr, scratch_vgpr, arch)
+        : source.vgpr
+            ? append_dynamic_record_store_u32_vgpr(words, layout, field_address, *source.vgpr,
+                                                   slot_vgpr, scratch_vgpr, arch)
             : append_dynamic_record_store_u32_literal(words, layout, field_address, source.literal,
                                                       slot_vgpr, scratch_vgpr, arch);
     if (!stored)

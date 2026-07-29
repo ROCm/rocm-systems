@@ -368,6 +368,13 @@ build_s_wait_indirect_pc0(rj_code_arch_t arch) {
   return rocjitsu::build_s_wait_alu_sa_sdst0(arch);
 }
 
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_wait_alu_va_sdst0(rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch))
+    return std::nullopt;
+  return rocjitsu::build_s_wait_alu_va_sdst0(arch);
+}
+
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_trap(uint16_t simm16,
                                                                     rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA4)

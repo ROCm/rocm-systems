@@ -91,9 +91,17 @@ public:
       return it != merged_occupied_ranges.begin() && std::prev(it)->second > begin;
     };
     for (size_t owner_index = 0; owner_index < unique.size(); ++owner_index) {
-      uint64_t cursor = util::align_up(unique[owner_index].code_end, uint64_t{4});
+      const uint64_t gap_begin = util::align_up(unique[owner_index].code_end, uint64_t{4});
       const uint64_t gap_end =
           owner_index + 1u < unique.size() ? unique[owner_index + 1u].entry : text.size();
+      for (uint64_t word_offset = gap_begin; word_offset + sizeof(uint32_t) <= gap_end;
+           word_offset += sizeof(uint32_t)) {
+        uint32_t word = 0;
+        std::memcpy(&word, text.data() + word_offset, sizeof(word));
+        if (word == nop_ && !overlaps_patch(word_offset, word_offset + sizeof(uint32_t)))
+          available_word_offsets_.insert(word_offset);
+      }
+      uint64_t cursor = gap_begin;
       while (cursor + island_bytes <= gap_end) {
         bool all_nops = !overlaps_patch(cursor, cursor + island_bytes);
         for (uint64_t offset = 0; all_nops && offset < island_bytes; offset += sizeof(uint32_t)) {
@@ -191,6 +199,10 @@ public:
     return offset;
   }
 
+  [[nodiscard]] std::vector<uint64_t> available_word_offsets() const {
+    return {available_word_offsets_.begin(), available_word_offsets_.end()};
+  }
+
   void reserve(uint64_t offset, uint32_t words) { retire_overlaps(offset, words); }
 
 private:
@@ -216,6 +228,12 @@ private:
     const uint64_t claim_bytes = static_cast<uint64_t>(claim_words) * sizeof(uint32_t);
     if (offset > text_.size() || claim_bytes > text_.size() - offset)
       return false;
+    const uint64_t claim_end = offset + claim_bytes;
+    if (std::ranges::any_of(claimed_ranges_, [&](const auto &range) {
+          return range.first < claim_end && offset < range.second;
+        })) {
+      return false;
+    }
     for (uint64_t byte = 0; byte < claim_bytes; byte += sizeof(uint32_t)) {
       uint32_t word = 0;
       std::memcpy(&word, text_.data() + offset + byte, sizeof(word));
@@ -227,6 +245,9 @@ private:
 
   void retire_overlaps(uint64_t offset, uint32_t claim_words) {
     const uint64_t claim_end = offset + static_cast<uint64_t>(claim_words) * sizeof(uint32_t);
+    claimed_ranges_.emplace_back(offset, claim_end);
+    available_word_offsets_.erase(available_word_offsets_.lower_bound(offset),
+                                  available_word_offsets_.lower_bound(claim_end));
     const uint64_t island_bytes = static_cast<uint64_t>(island_words_) * sizeof(uint32_t);
     const uint64_t first_possible_overlap =
         offset >= island_bytes ? offset - island_bytes + 1u : 0u;
@@ -244,6 +265,8 @@ private:
   uint32_t nop_ = 0;
   uint32_t island_words_ = 0;
   std::set<uint64_t> available_offsets_;
+  std::set<uint64_t> available_word_offsets_;
+  std::vector<std::pair<uint64_t, uint64_t>> claimed_ranges_;
 };
 
 void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t alignment,
@@ -698,9 +721,11 @@ struct MoiSgprRange {
   if (!options.moi_exec_save_sgpr)
     return true;
   if (options.automatic_moi_inline_sgpr_spill && options.moi_inline_access_present &&
-      (!options.moi_inline_call_return_sgpr || !options.moi_inline_dispatch_key_sgpr)) {
+      ((!options.moi_inline_call_return_sgpr || !options.moi_inline_dispatch_key_sgpr) &&
+       !options.moi_inline_dynamic_stack_borrowed_sgpr)) {
     errors.emplace_back(
-        "ConSan MOI spill-backed inline-shadow probes require external dense-router state");
+        "ConSan MOI spill-backed inline-shadow probes require a dense router or dynamic-stack "
+        "bootstrap");
     return false;
   }
   // Diagnostics use s[base:base+10]. Atomic publication and causal-token
@@ -839,10 +864,15 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
   const uint16_t spill_address_snapshot_count = cdna_spill_capable ? 2u : 0u;
   const uint16_t flat_offset_address_count =
       candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u : 0u;
+  const uint16_t dynamic_stack_reservoir_count =
+      is_rdna4_family_arch(arch) && options.moi_dynamic_stack_spill
+          ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
+          : 0u;
   return static_cast<uint16_t>(
       inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
       (moi_load_clobbers_address(candidate) && flat_offset_address_count == 0u ? 1u : 0u) +
-      std::max(spill_address_snapshot_count, flat_offset_address_count));
+      std::max(spill_address_snapshot_count, flat_offset_address_count) +
+      dynamic_stack_reservoir_count);
 }
 
 [[nodiscard]] uint16_t direct_sampled_scratch_count(const ConSanOptions &options,
@@ -970,6 +1000,34 @@ find_moi_transient_sgpr_assignment(const ConSanOptions &options, uint64_t descri
   return assignment == options.moi_transient_sgpr_assignments.end() ? nullptr : &*assignment;
 }
 
+/// Returns true when automatic scalar spilling selected after the initial
+/// resource pass must share a site-local frame with a dynamic-stack owner.
+/// The first pass is still useful: it avoids reserving the dynamic frame ABI
+/// for ordinary owners that can keep their transient state in registers.
+[[nodiscard]] bool
+automatic_moi_scalar_spill_needs_dynamic_stack_planning(const ConSanOptions &options,
+                                                        const ConSanResult &result) {
+  const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) {
+    const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
+                                          &ConSanKernelInfo::descriptor_file_offset);
+    return kernel != result.kernels.end() && kernel->uses_dynamic_stack.value_or(false);
+  };
+  if (std::ranges::any_of(options.moi_transient_sgpr_assignments,
+                          [&](const ConSanMoiTransientSgprAssignment &assignment) {
+                            return assignment.spill_backed &&
+                                   owner_uses_dynamic_stack(assignment.descriptor_file_offset);
+                          })) {
+    return true;
+  }
+  if (!options.automatic_moi_inline_sgpr_spill && !options.automatic_moi_record_replay_sgpr_spill) {
+    return false;
+  }
+  return std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+    return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+           std::ranges::any_of(plan.owner_descriptor_file_offsets, owner_uses_dynamic_stack);
+  });
+}
+
 /// Applies the one transient scalar assignment shared by every owner of a
 /// site. Owners connected through a shared helper must either all carry the
 /// same assignment or keep the code-object-wide fallback.
@@ -984,23 +1042,26 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
       saw_unassigned_owner = true;
       continue;
     }
-    if (selected && (selected->exec_save_sgpr != assignment->exec_save_sgpr ||
-                     selected->dispatch_id_sgpr != assignment->dispatch_id_sgpr ||
-                     selected->spill_backed != assignment->spill_backed ||
-                     selected->indirect_pc_sgpr != assignment->indirect_pc_sgpr ||
-                     selected->indirect_scc_sgpr != assignment->indirect_scc_sgpr ||
-                     selected->dispatch_key_sgpr != assignment->dispatch_key_sgpr ||
-                     selected->call_return_sgpr != assignment->call_return_sgpr ||
-                     selected->visible_evidence_sgpr != assignment->visible_evidence_sgpr))
+    if (selected &&
+        (selected->exec_save_sgpr != assignment->exec_save_sgpr ||
+         selected->dispatch_id_sgpr != assignment->dispatch_id_sgpr ||
+         selected->spill_backed != assignment->spill_backed ||
+         selected->indirect_pc_sgpr != assignment->indirect_pc_sgpr ||
+         selected->indirect_scc_sgpr != assignment->indirect_scc_sgpr ||
+         selected->dispatch_key_sgpr != assignment->dispatch_key_sgpr ||
+         selected->call_return_sgpr != assignment->call_return_sgpr ||
+         selected->visible_evidence_sgpr != assignment->visible_evidence_sgpr ||
+         selected->dynamic_stack_borrowed_sgpr != assignment->dynamic_stack_borrowed_sgpr))
       return false;
     selected = assignment;
   }
   if (!selected) {
     return options.moi_exec_save_sgpr.has_value() ||
            (options.moi_engine == ConSanMoiEngine::InlineShadow &&
-            options.automatic_moi_inline_sgpr_spill && options.moi_inline_indirect_pc_sgpr &&
-            options.moi_inline_indirect_scc_sgpr && options.moi_inline_dispatch_key_sgpr &&
-            options.moi_inline_call_return_sgpr);
+            options.automatic_moi_inline_sgpr_spill &&
+            ((options.moi_inline_indirect_pc_sgpr && options.moi_inline_indirect_scc_sgpr &&
+              options.moi_inline_dispatch_key_sgpr && options.moi_inline_call_return_sgpr) ||
+             options.moi_inline_dynamic_stack_borrowed_sgpr));
   }
   if (saw_unassigned_owner)
     return false;
@@ -1014,8 +1075,10 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
     options.moi_inline_dispatch_key_sgpr = selected->dispatch_key_sgpr;
     options.moi_inline_call_return_sgpr = selected->call_return_sgpr;
     options.moi_inline_visible_evidence_sgpr = selected->visible_evidence_sgpr;
+    options.moi_inline_dynamic_stack_borrowed_sgpr = selected->dynamic_stack_borrowed_sgpr;
   } else {
     options.automatic_moi_inline_sgpr_spill = false;
+    options.moi_inline_dynamic_stack_borrowed_sgpr.reset();
     options.automatic_moi_record_replay_sgpr_spill = selected->spill_backed;
     options.moi_record_replay_dispatch_key_sgpr = selected->dispatch_key_sgpr;
     options.moi_record_replay_call_return_sgpr = selected->call_return_sgpr;
@@ -1037,7 +1100,8 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
         (selected->owner_vgpr != assignment->owner_vgpr ||
          selected->epoch_vgpr != assignment->epoch_vgpr ||
          selected->workgroup_key_vgpr != assignment->workgroup_key_vgpr ||
-         selected->record_replay_workgroup_vgprs != assignment->record_replay_workgroup_vgprs)) {
+         selected->record_replay_workgroup_vgprs != assignment->record_replay_workgroup_vgprs ||
+         selected->dispatch_id_vgpr != assignment->dispatch_id_vgpr)) {
       return false;
     }
     selected = assignment;
@@ -1048,6 +1112,7 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
   options.moi_epoch_vgpr = selected->epoch_vgpr;
   options.moi_workgroup_key_vgpr = selected->workgroup_key_vgpr;
   options.moi_record_replay_workgroup_vgprs = selected->record_replay_workgroup_vgprs;
+  options.moi_dispatch_id_vgpr = selected->dispatch_id_vgpr;
   return true;
 }
 
@@ -1775,6 +1840,8 @@ moi_inline_dense_router_scalar_abi(const ConSanOptions &options, rj_code_arch_t 
       (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
     return std::nullopt;
   }
+  if (options.moi_inline_dynamic_stack_borrowed_sgpr)
+    return std::nullopt;
   const auto indirect_jump = moi_indirect_jump_sgprs(options);
   if (!indirect_jump)
     return std::nullopt;
@@ -2101,6 +2168,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     request.forbidden.expand({RegClass::VGPR, *options.moi_epoch_vgpr, 1});
   if (options.moi_workgroup_key_vgpr)
     request.forbidden.expand({RegClass::VGPR, *options.moi_workgroup_key_vgpr, 1});
+  if (options.moi_dispatch_id_vgpr)
+    request.forbidden.expand({RegClass::VGPR, *options.moi_dispatch_id_vgpr, 2});
   for (const std::optional<uint16_t> reg :
        {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
         options.moi_record_replay_workgroup_vgprs.z}) {
@@ -2115,6 +2184,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     request.forbidden.expand({RegClass::VGPR, assignment->epoch_vgpr, 1});
     if (assignment->workgroup_key_vgpr)
       request.forbidden.expand({RegClass::VGPR, *assignment->workgroup_key_vgpr, 1});
+    if (assignment->dispatch_id_vgpr)
+      request.forbidden.expand({RegClass::VGPR, *assignment->dispatch_id_vgpr, 2});
     for (const std::optional<uint16_t> reg :
          {assignment->record_replay_workgroup_vgprs.x, assignment->record_replay_workgroup_vgprs.y,
           assignment->record_replay_workgroup_vgprs.z}) {
@@ -2157,6 +2228,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
       spill_request.forbidden.expand({RegClass::VGPR, *options.moi_epoch_vgpr, 1});
     if (options.moi_workgroup_key_vgpr)
       spill_request.forbidden.expand({RegClass::VGPR, *options.moi_workgroup_key_vgpr, 1});
+    if (options.moi_dispatch_id_vgpr)
+      spill_request.forbidden.expand({RegClass::VGPR, *options.moi_dispatch_id_vgpr, 2});
     for (const std::optional<uint16_t> reg :
          {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
           options.moi_record_replay_workgroup_vgprs.z}) {
@@ -2171,6 +2244,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
       spill_request.forbidden.expand({RegClass::VGPR, assignment->epoch_vgpr, 1});
       if (assignment->workgroup_key_vgpr)
         spill_request.forbidden.expand({RegClass::VGPR, *assignment->workgroup_key_vgpr, 1});
+      if (assignment->dispatch_id_vgpr)
+        spill_request.forbidden.expand({RegClass::VGPR, *assignment->dispatch_id_vgpr, 2});
       for (const std::optional<uint16_t> reg : {assignment->record_replay_workgroup_vgprs.x,
                                                 assignment->record_replay_workgroup_vgprs.y,
                                                 assignment->record_replay_workgroup_vgprs.z}) {
@@ -2286,6 +2361,10 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOp
           std::max<uint16_t>(resolved.required_vgpr_count,
                              static_cast<uint16_t>(*options.moi_workgroup_key_vgpr + 1u));
     }
+    if (options.moi_dispatch_id_vgpr) {
+      resolved.required_vgpr_count = std::max<uint16_t>(
+          resolved.required_vgpr_count, static_cast<uint16_t>(*options.moi_dispatch_id_vgpr + 2u));
+    }
     for (const std::optional<uint16_t> reg :
          {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
           options.moi_record_replay_workgroup_vgprs.z}) {
@@ -2301,6 +2380,8 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOp
       uint16_t end = static_cast<uint16_t>(assignment->epoch_vgpr + 1u);
       if (assignment->workgroup_key_vgpr)
         end = std::max<uint16_t>(end, static_cast<uint16_t>(*assignment->workgroup_key_vgpr + 1u));
+      if (assignment->dispatch_id_vgpr)
+        end = std::max<uint16_t>(end, static_cast<uint16_t>(*assignment->dispatch_id_vgpr + 2u));
       for (const std::optional<uint16_t> reg : {assignment->record_replay_workgroup_vgprs.x,
                                                 assignment->record_replay_workgroup_vgprs.y,
                                                 assignment->record_replay_workgroup_vgprs.z}) {
@@ -2601,7 +2682,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   const rj_code_arch_t arch = planning_state.arch;
   const bool component_local_sampled =
       options.moi_engine == ConSanMoiEngine::Sampled &&
-      (arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+      (is_rdna4_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
        arch == ROCJITSU_CODE_ARCH_CDNA4);
   if ((options.moi_engine != ConSanMoiEngine::RecordReplay &&
        options.moi_engine != ConSanMoiEngine::InlineShadow && !component_local_sampled) ||
@@ -2697,7 +2778,12 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     if (site.disposition == ConSanSiteDisposition::Supported)
       include_site(site.text_offset);
   }
-  if (options.moi_init_owner_epoch) {
+  // Inline's component-local transient window is established only inside an
+  // access or synchronization body. Its RDNA entry relay and return use
+  // special state, while persistent owner/epoch values live in VGPRs. Do not
+  // turn entry ABI inputs into false live-through constraints for that
+  // site-local window.
+  if (options.moi_init_owner_epoch && options.moi_engine != ConSanMoiEngine::InlineShadow) {
     for (const ConSanKernelInfo &kernel : result.kernels)
       include_site(kernel.entry_text_offset);
   }
@@ -2748,6 +2834,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     std::optional<uint16_t> spill_scc;
     std::optional<uint16_t> spill_key;
     std::optional<uint16_t> spill_visible;
+    std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
     if (options.moi_engine == ConSanMoiEngine::RecordReplay || component_local_sampled) {
       for (uint32_t base = util::align_up(liveness_search_floor, 2u); base + count <= limit;
            base += 2u) {
@@ -2804,7 +2891,15 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
           arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
               ? std::max(initialized_end, component_contexts->tail_floor)
               : component_contexts->tail_floor;
-      for (uint32_t base = util::align_up(std::max(initialized_end, liveness_search_floor), 2u);
+      // The Inline scalar window is saved after the VGPR frame is established
+      // and restored before that frame is released. RDNA4 may therefore
+      // borrow initialized guest SGPRs; only the live-through router state
+      // must remain liveness-dead. CDNA retains its stricter preload boundary.
+      const uint32_t scalar_spill_begin =
+          is_rdna4_family_arch(arch) ? 0u : std::max(initialized_end, liveness_search_floor);
+      const uint32_t router_begin =
+          is_rdna4_family_arch(arch) ? liveness_search_floor : fresh_begin;
+      for (uint32_t base = util::align_up(scalar_spill_begin, 2u);
            !selected && base + count <= limit; base += 2u) {
         const uint16_t spill_base = static_cast<uint16_t>(base);
         std::vector<MoiSgprRange> selected_ranges{{spill_base, count}};
@@ -2860,7 +2955,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
           selected = spill_base;
           break;
         }
-        for (uint32_t reg = fresh_begin; spill_scc && reg < limit; ++reg) {
+        for (uint32_t reg = router_begin; spill_scc && reg < limit; ++reg) {
           const uint16_t candidate = static_cast<uint16_t>(reg);
           if (!unavailable_or_reserved(candidate, 1u) &&
               (!spill_visible || candidate != *spill_visible) &&
@@ -2871,7 +2966,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
             break;
           }
         }
-        for (uint32_t call = util::align_up(fresh_begin, 2u); spill_key && call + 2u <= limit;
+        for (uint32_t call = util::align_up(router_begin, 2u); spill_key && call + 2u <= limit;
              call += 2u) {
           const uint16_t candidate = static_cast<uint16_t>(call);
           if (!unavailable_or_reserved(candidate, 2u) &&
@@ -2888,6 +2983,73 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
           selected = spill_base;
         else
           spill_visible = spill_pc = spill_scc = spill_key = std::nullopt;
+      }
+      // A full-pressure dynamic-stack owner may have no scalar register that
+      // remains dead from an access anchor through an appended router. Route
+      // with branch-only hops instead, then preserve both the complete Inline
+      // window and one ordinary bootstrap pair before either is clobbered.
+      // Every choice stays inside every owner's existing allocation and is
+      // derived from descriptor/runtime ABI state rather than a fixed range.
+      const bool all_owners_use_dynamic_stack =
+          is_rdna4_family_arch(arch) && !owners.empty() &&
+          std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
+            const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
+                                                  &ConSanKernelInfo::descriptor_file_offset);
+            return kernel != result.kernels.end() && kernel->uses_dynamic_stack.value_or(false);
+          });
+      if (!selected && all_owners_use_dynamic_stack) {
+        uint16_t allocated_limit = limit;
+        for (const auto &summary : component_contexts->summaries)
+          allocated_limit = std::min(allocated_limit, summary.current_sgpr_count);
+
+        const auto overlaps_optional = [](uint16_t base, uint16_t width,
+                                          std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
+          return reg && range_overlaps(base, width, *reg, reg_width);
+        };
+        const auto overlaps_instrumentation_state = [&](uint16_t base, uint16_t width) {
+          bool overlaps =
+              architecturally_reserved(base, width) ||
+              moi_sgpr_range_overlaps_dynamic_stack_state(base, width) ||
+              persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
+              overlaps_optional(base, width, options.moi_persistent_owner_sgpr) ||
+              overlaps_optional(base, width, options.moi_persistent_epoch_sgpr) ||
+              overlaps_optional(base, width, options.moi_persistent_workgroup_key_sgpr) ||
+              overlaps_optional(base, width, options.moi_dispatch_id_sgpr,
+                                moi_dispatch_state_sgpr_count(options)) ||
+              overlaps_optional(base, width, options.moi_inline_visible_evidence_sgpr);
+          for (const std::optional<uint16_t> reg : {options.moi_record_replay_workgroup_sgprs.x,
+                                                    options.moi_record_replay_workgroup_sgprs.y,
+                                                    options.moi_record_replay_workgroup_sgprs.z}) {
+            overlaps |= overlaps_optional(base, width, reg);
+          }
+          if (options.delay_mode == ConSanDelayMode::SleepVar)
+            overlaps |= range_overlaps(base, width, options.delay_var_ssrc, 1u);
+          return overlaps;
+        };
+
+        for (uint32_t base = 0; !selected && base + count <= allocated_limit; base += 2u) {
+          const uint16_t candidate = static_cast<uint16_t>(base);
+          const std::array scalar_window{MoiSgprRange{candidate, count}};
+          if (overlaps_instrumentation_state(candidate, count) ||
+              conflicts_with_cdna_vcc(scalar_window)) {
+            continue;
+          }
+          for (uint32_t pair = 0; pair + 2u <= allocated_limit; pair += 2u) {
+            const uint16_t borrowed = static_cast<uint16_t>(pair);
+            const std::array combined_ranges{
+                MoiSgprRange{candidate, count},
+                MoiSgprRange{borrowed, 2u},
+            };
+            if (range_overlaps(borrowed, 2u, candidate, count) ||
+                overlaps_instrumentation_state(borrowed, 2u) ||
+                conflicts_with_cdna_vcc(combined_ranges)) {
+              continue;
+            }
+            selected = candidate;
+            dynamic_stack_borrowed_sgpr = borrowed;
+            break;
+          }
+        }
       }
       // If no complete spill router exists, an owner-local window that is
       // dead at every instrumentation site remains useful for external-shadow
@@ -2975,7 +3137,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       missed_required_assignment = true;
       continue;
     }
-    const bool spill_backed = spill_pc && spill_scc && spill_key && spill_call_return;
+    const bool spill_backed = (spill_pc && spill_scc && spill_key && spill_call_return) ||
+                              dynamic_stack_borrowed_sgpr.has_value();
     const std::optional<uint16_t> dispatch_id_sgpr =
         options.moi_dispatch_id_sgpr &&
                 moi_scalar_contexts_admit_reserved_window(
@@ -2984,15 +3147,17 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
             ? options.moi_dispatch_id_sgpr
             : std::nullopt;
     for (uint64_t owner : owners) {
-      options.moi_transient_sgpr_assignments.push_back({.descriptor_file_offset = owner,
-                                                        .exec_save_sgpr = *selected,
-                                                        .dispatch_id_sgpr = dispatch_id_sgpr,
-                                                        .spill_backed = spill_backed,
-                                                        .indirect_pc_sgpr = spill_pc,
-                                                        .indirect_scc_sgpr = spill_scc,
-                                                        .dispatch_key_sgpr = spill_key,
-                                                        .call_return_sgpr = spill_call_return,
-                                                        .visible_evidence_sgpr = spill_visible});
+      options.moi_transient_sgpr_assignments.push_back(
+          {.descriptor_file_offset = owner,
+           .exec_save_sgpr = *selected,
+           .dispatch_id_sgpr = dispatch_id_sgpr,
+           .spill_backed = spill_backed,
+           .indirect_pc_sgpr = spill_pc,
+           .indirect_scc_sgpr = spill_scc,
+           .dispatch_key_sgpr = spill_key,
+           .call_return_sgpr = spill_call_return,
+           .visible_evidence_sgpr = spill_visible,
+           .dynamic_stack_borrowed_sgpr = dynamic_stack_borrowed_sgpr});
     }
     assigned_any = true;
   }
@@ -3242,8 +3407,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   // cross-site visible-evidence state still require genuinely dead/fresh
   // registers outside that window.
   if (is_rdna4_family_arch(arch) && options.moi_engine == ConSanMoiEngine::InlineShadow &&
-      options.moi_inline_access_present && !options.moi_dynamic_stack_spill && state.valid &&
-      saw_site) {
+      options.moi_inline_access_present && state.valid && saw_site) {
     const size_t ordinary_access_count =
         std::ranges::count_if(result.moi_candidates, [](const ConSanMoiCandidate &candidate) {
           return candidate.kind == ConSanLdsAccessKind::Read ||
@@ -3271,7 +3435,9 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       return (options.moi_owner_sgpr && range_overlaps(base, width, *options.moi_owner_sgpr, 1u)) ||
              (options.moi_dispatch_id_sgpr &&
               range_overlaps(base, width, *options.moi_dispatch_id_sgpr,
-                             moi_dispatch_state_sgpr_count(options)));
+                             moi_dispatch_state_sgpr_count(options))) ||
+             (options.moi_dynamic_stack_spill &&
+              moi_sgpr_range_overlaps_dynamic_stack_state(base, width));
     };
     std::optional<uint16_t> spill_base;
     for (uint32_t base = util::align_up(initialized_end, 2u); base + count <= ordinary_sgpr_limit;
@@ -3505,7 +3671,8 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
       has_inline_dispatch_consumer || options.moi_engine == ConSanMoiEngine::RecordReplay ||
       (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_runtime_sample_stride > 1u &&
        arch != ROCJITSU_CODE_ARCH_GFX1250);
-  if (!needs_dispatch_id || !options.moi_report_buffer_address || options.moi_dispatch_id_sgpr) {
+  if (!needs_dispatch_id || !options.moi_report_buffer_address || options.moi_dispatch_id_sgpr ||
+      options.moi_dispatch_id_vgpr) {
     return false;
   }
 
@@ -3624,6 +3791,70 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
   }
 
   if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    // A dynamic-stack kernel can allocate the full ordinary scalar file while
+    // leaving a lower pair completely untouched. Dispatch identity crosses
+    // arbitrary guest code, so site-local liveness is not sufficient: require
+    // a closed owner CFG, or conservatively scan every declared function when
+    // those ranges cover the complete text section. The pair also remains
+    // above the largest possible entry-input window so dispatch-ID insertion
+    // and guest-input restoration cannot overwrite it.
+    MoiOwnerRegisterReferenceSummary references =
+        summarize_moi_owner_register_references(scalar_contexts.contexts);
+    bool used_complete_text_summary = false;
+    if (!references.control_flow_closed) {
+      if (auto complete = summarize_moi_complete_text_register_references(state)) {
+        references = std::move(*complete);
+        used_complete_text_summary = true;
+      }
+    }
+    const bool has_dynamic_stack_owner =
+        std::ranges::any_of(result.kernels, [](const ConSanKernelInfo &kernel) {
+          return kernel.uses_dynamic_stack.value_or(false);
+        });
+    const auto referenced = [&](uint16_t base) {
+      for (uint16_t index = 0; index < dispatch_state_count; ++index) {
+        if (references.references.contains(
+                {RegClass::SGPR, static_cast<uint16_t>(base + index), 1u})) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (references.control_flow_closed && !references.uses_indirect_sgprs) {
+      for (uint32_t base = 20u; base + dispatch_state_count <= ordinary_sgpr_limit; base += 2u) {
+        const uint16_t candidate = static_cast<uint16_t>(base);
+        if (referenced(candidate) ||
+            persistent_sgpr_range_overlaps_reserved_ordinary_range(candidate, dispatch_state_count,
+                                                                   arch) ||
+            moi_scalar_contexts_conflict_with_physical_vcc(scalar_contexts.summaries, candidate,
+                                                           dispatch_state_count, arch) ||
+            (options.moi_owner_sgpr &&
+             range_overlaps(candidate, dispatch_state_count, *options.moi_owner_sgpr, 1u)) ||
+            (options.moi_exec_save_sgpr &&
+             range_overlaps(candidate, dispatch_state_count, *options.moi_exec_save_sgpr,
+                            moi_exec_save_sgpr_count(options, arch))) ||
+            (has_dynamic_stack_owner &&
+             moi_sgpr_range_overlaps_dynamic_stack_state(candidate, dispatch_state_count))) {
+          continue;
+        }
+        options.moi_dispatch_id_sgpr = candidate;
+        options.automatic_moi_dispatch_id_sgprs = true;
+        result.resolved_moi_dispatch_id_sgpr = candidate;
+        result.moi_dispatch_id_sgprs_automatic = true;
+        qualify_owner_local_assignments(candidate);
+        result.warnings.emplace_back(
+            "ConSan MOI assigned persistent dispatch-ID state to a proven-unused RDNA4 SGPR pair" +
+            std::string(used_complete_text_summary ? " using complete-text coverage" : ""));
+        return true;
+      }
+    }
+  }
+
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    // Automatic banked Record/Replay can capture the preload into persistent
+    // descriptor-grown VGPRs during the later owner-state placement pass.
+    if (record_replay_uses_automatic_banked_capture(options))
+      return false;
     result.warnings.emplace_back(
         "ConSan MOI is using a literal report dispatch ID because no persistent hardware "
         "dispatch-ID SGPR pair fits");
@@ -3695,14 +3926,69 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   const bool overlaps_exec = options.moi_exec_save_sgpr &&
                              range_overlaps(base, dispatch_state_count, *options.moi_exec_save_sgpr,
                                             moi_exec_save_sgpr_count(options, arch));
-  if (base < 20u || base % 2u != 0u ||
-      static_cast<uint32_t>(base) + dispatch_state_count > moi_ordinary_sgpr_limit(arch) ||
-      persistent_sgpr_range_overlaps_reserved_ordinary_range(base, dispatch_state_count, arch) ||
+  const bool below_entry_window = base < 20u;
+  const bool unaligned = base % 2u != 0u;
+  const bool beyond_ordinary_file =
+      static_cast<uint32_t>(base) + dispatch_state_count > moi_ordinary_sgpr_limit(arch);
+  const bool overlaps_reserved =
+      persistent_sgpr_range_overlaps_reserved_ordinary_range(base, dispatch_state_count, arch);
+  if (below_entry_window || unaligned || beyond_ordinary_file || overlaps_reserved ||
       overlaps_owner || overlaps_exec) {
     result.outcome = ConSanTransformOutcome::Unsupported;
+    std::string reason;
+    const auto append_reason = [&](std::string_view item) {
+      if (!reason.empty())
+        reason += ", ";
+      reason += item;
+    };
+    if (below_entry_window)
+      append_reason("entry window");
+    if (unaligned)
+      append_reason("alignment");
+    if (beyond_ordinary_file)
+      append_reason("ordinary-file bound");
+    if (overlaps_reserved)
+      append_reason("architectural reservation");
+    if (overlaps_owner)
+      append_reason("owner temporary");
+    if (overlaps_exec)
+      append_reason("EXEC-save window");
     result.warnings.emplace_back(
-        "ConSan MOI persistent dispatch-ID SGPR pair is unaligned, overlaps entry/scratch "
-        "state, aliases an architectural special SGPR, or exceeds the architectural SGPR file");
+        "ConSan MOI persistent dispatch-ID SGPR pair s" + std::to_string(base) + ":s" +
+        std::to_string(base + dispatch_state_count - 1u) + " violates " + reason);
+    return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool validate_moi_dispatch_id_vgprs(const ConSanOptions &options,
+                                                  ConSanResult &result) {
+  if (options.moi_dispatch_id_sgpr && options.moi_dispatch_id_vgpr) {
+    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.warnings.emplace_back(
+        "ConSan MOI has multiple persistent hardware dispatch-ID representations");
+    return false;
+  }
+  if (!options.moi_dispatch_id_vgpr)
+    return true;
+
+  const uint16_t base = *options.moi_dispatch_id_vgpr;
+  const auto overlaps = [&](std::optional<uint16_t> reg) {
+    return reg && range_overlaps(base, 2u, *reg, 1u);
+  };
+  bool overlaps_persistent_state = overlaps(options.moi_owner_vgpr) ||
+                                   overlaps(options.moi_epoch_vgpr) ||
+                                   overlaps(options.moi_workgroup_key_vgpr);
+  for (const std::optional<uint16_t> reg :
+       {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
+        options.moi_record_replay_workgroup_vgprs.z}) {
+    overlaps_persistent_state |= overlaps(reg);
+  }
+  if (static_cast<uint32_t>(base) + 2u > kMaxVgprs || overlaps_persistent_state) {
+    result.outcome = ConSanTransformOutcome::Unsupported;
+    result.warnings.emplace_back(
+        "ConSan MOI persistent dispatch-ID VGPR pair overlaps persistent state or exceeds the "
+        "architectural VGPR file");
     return false;
   }
   return true;
@@ -3753,7 +4039,38 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
        *options.moi_record_replay_dispatch_key_sgpr >= limit) ||
       (options.moi_record_replay_call_return_sgpr &&
        static_cast<uint32_t>(*options.moi_record_replay_call_return_sgpr) + 2u > limit);
-  if (!exec_invalid && !owner_invalid && !persistent_invalid && !inline_external_invalid)
+  const bool dynamic_bootstrap_invalid = [&] {
+    if (!options.moi_inline_dynamic_stack_borrowed_sgpr)
+      return false;
+    const uint16_t base = *options.moi_inline_dynamic_stack_borrowed_sgpr;
+    const uint16_t exec_count = moi_exec_save_sgpr_count(options, arch);
+    const bool overlaps_persistent =
+        (options.moi_persistent_owner_sgpr &&
+         range_overlaps(base, 2u, *options.moi_persistent_owner_sgpr, 1u)) ||
+        (options.moi_persistent_epoch_sgpr &&
+         range_overlaps(base, 2u, *options.moi_persistent_epoch_sgpr, 1u)) ||
+        (options.moi_persistent_workgroup_key_sgpr &&
+         range_overlaps(base, 2u, *options.moi_persistent_workgroup_key_sgpr, 1u));
+    bool overlaps_workgroup_tuple = false;
+    for (const std::optional<uint16_t> reg :
+         {options.moi_record_replay_workgroup_sgprs.x, options.moi_record_replay_workgroup_sgprs.y,
+          options.moi_record_replay_workgroup_sgprs.z}) {
+      overlaps_workgroup_tuple |= reg && range_overlaps(base, 2u, *reg, 1u);
+    }
+    return options.moi_engine != ConSanMoiEngine::InlineShadow ||
+           !options.automatic_moi_inline_sgpr_spill || !options.moi_dynamic_stack_spill ||
+           !is_rdna4_family_arch(arch) || base % 2u != 0u ||
+           static_cast<uint32_t>(base) + 2u > limit ||
+           moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
+           persistent_sgpr_range_overlaps_reserved_ordinary_range(base, 2u, arch) ||
+           (options.moi_exec_save_sgpr &&
+            range_overlaps(base, 2u, *options.moi_exec_save_sgpr, exec_count)) ||
+           options.moi_inline_indirect_pc_sgpr || options.moi_inline_indirect_scc_sgpr ||
+           options.moi_inline_dispatch_key_sgpr || options.moi_inline_call_return_sgpr ||
+           overlaps_persistent || overlaps_workgroup_tuple;
+  }();
+  if (!exec_invalid && !owner_invalid && !persistent_invalid && !inline_external_invalid &&
+      !dynamic_bootstrap_invalid)
     return true;
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.warnings.emplace_back(
@@ -3822,6 +4139,17 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   const bool needs_record_replay_workgroup_tuple =
       record_replay_requires_entry_workgroup_capture(options) && has_supported_record_replay_site &&
       !record_replay_has_entry_workgroup_capture(options);
+  const bool has_supported_record_replay_access =
+      options.moi_engine == ConSanMoiEngine::RecordReplay &&
+      std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+        return plan.source != ConSanRegisterAllocationSource::Unsupported &&
+               !plan.owner_descriptor_file_offsets.empty() &&
+               plan.site_kind == ConSanResourceSiteKind::Access;
+      });
+  const bool needs_persistent_dispatch_vgprs =
+      is_rdna4_family_arch(arch) && has_supported_record_replay_access &&
+      record_replay_uses_automatic_banked_capture(options) &&
+      !moi_has_runtime_hardware_dispatch_id(options);
   const bool needs_workgroup_key = needs_inline_workgroup_key;
   const bool has_explicit_owner_epoch = options.moi_owner_vgpr && options.moi_epoch_vgpr;
   if (!record_replay_entry_workgroup_capture_is_unambiguous(options)) {
@@ -3908,9 +4236,10 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
   // guest reference even though owner/epoch remain the only persistent values.
   const uint32_t automatic_owner_epoch_count = has_explicit_owner_epoch ? 0u : 2u;
   const uint32_t record_replay_workgroup_count = needs_record_replay_workgroup_tuple ? 3u : 0u;
+  const uint32_t dispatch_id_count = needs_persistent_dispatch_vgprs ? 2u : 0u;
   const uint32_t named_persistent_count = automatic_owner_epoch_count +
                                           static_cast<uint32_t>(needs_workgroup_key) +
-                                          record_replay_workgroup_count;
+                                          record_replay_workgroup_count + dispatch_id_count;
   const uint32_t persistent_count =
       options.moi_engine == ConSanMoiEngine::InlineShadow && arch == ROCJITSU_CODE_ARCH_GFX1250
           ? std::max<uint32_t>(named_persistent_count, 5u)
@@ -4595,6 +4924,13 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
        (options.moi_engine == ConSanMoiEngine::Sampled && has_dynamic_stack_owner)) &&
       (persistent_end > kMaxVgprs || prefer_private_epoch);
   if (rdna4_needs_scalar_epoch) {
+    if (needs_persistent_dispatch_vgprs) {
+      result.outcome = ConSanTransformOutcome::Unsupported;
+      result.warnings.emplace_back(
+          "ConSan MOI cannot retain automatic Record/Replay dispatch identity without a "
+          "persistent VGPR pair");
+      return false;
+    }
     const uint16_t scalar_count = static_cast<uint16_t>(named_persistent_count);
     MoiResourcePlanningState scalar_state(bytes, arch, options, result);
     const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(result);
@@ -4742,20 +5078,27 @@ configure_gfx1250_record_replay_dispatch_id_overrides(ConSanOptions &options, Co
         .z = next_persistent_vgpr++,
     };
   }
+  if (needs_persistent_dispatch_vgprs) {
+    options.moi_dispatch_id_vgpr = next_persistent_vgpr;
+    next_persistent_vgpr = static_cast<uint16_t>(next_persistent_vgpr + 2u);
+    options.automatic_moi_dispatch_id_vgprs = true;
+  }
   options.moi_init_owner_epoch = true;
   options.automatic_moi_persistent_vgprs = true;
   result.resolved_moi_owner_vgpr = options.moi_owner_vgpr;
   result.resolved_moi_epoch_vgpr = options.moi_epoch_vgpr;
   result.resolved_moi_workgroup_key_vgpr = options.moi_workgroup_key_vgpr;
   result.resolved_moi_record_replay_workgroup_vgprs = options.moi_record_replay_workgroup_vgprs;
+  result.resolved_moi_dispatch_id_vgpr = options.moi_dispatch_id_vgpr;
   result.moi_persistent_vgprs_automatic = true;
+  result.moi_dispatch_id_vgprs_automatic = options.automatic_moi_dispatch_id_vgprs;
   result.warnings.emplace_back(
       "ConSan MOI automatically assigned persistent " +
       std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +
       std::string(needs_workgroup_key ? "/workgroup-key" : "") +
       std::string(needs_record_replay_workgroup_tuple ? "/exact-workgroup-tuple" : "") +
-      " VGPRs v" + std::to_string(persistent_base) + ":v" +
-      std::to_string(next_persistent_vgpr - 1u) +
+      std::string(needs_persistent_dispatch_vgprs ? "/dispatch-ID" : "") + " VGPRs v" +
+      std::to_string(persistent_base) + ":v" + std::to_string(next_persistent_vgpr - 1u) +
       (would_grow_descriptor && has_dynamic_stack_owner
            ? " with descriptor growth because private epoch storage is incompatible with a "
              "dynamic-stack owner"
@@ -4824,6 +5167,10 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
   if (options.moi_inline_visible_evidence_sgpr)
     required_count = std::max<uint16_t>(
         required_count, static_cast<uint16_t>(*options.moi_inline_visible_evidence_sgpr + 1u));
+  if (options.moi_inline_dynamic_stack_borrowed_sgpr)
+    required_count = std::max<uint16_t>(
+        required_count,
+        static_cast<uint16_t>(*options.moi_inline_dynamic_stack_borrowed_sgpr + 2u));
   if (options.moi_record_replay_dispatch_key_sgpr)
     required_count = std::max<uint16_t>(
         required_count, static_cast<uint16_t>(*options.moi_record_replay_dispatch_key_sgpr + 1u));

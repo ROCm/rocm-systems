@@ -298,6 +298,17 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   uint32_t max_uncovered_nop_cave_words = 0;
   for (const LocalNopCave &cave : local_nop_caves)
     max_uncovered_nop_cave_words = std::max(max_uncovered_nop_cave_words, cave.word_count);
+  std::vector<uint64_t> available_branch_relay_offsets;
+  size_t branch_relay_word_count = 0;
+  for (const LocalNopCave &cave : local_nop_caves)
+    branch_relay_word_count += cave.word_count;
+  available_branch_relay_offsets.reserve(branch_relay_word_count);
+  for (const LocalNopCave &cave : local_nop_caves) {
+    for (uint64_t word = 0; word < cave.word_count; ++word)
+      available_branch_relay_offsets.push_back(cave.text_offset + word * sizeof(uint32_t));
+  }
+  const std::unordered_set<uint64_t> pristine_nop_branch_relay_offsets(
+      available_branch_relay_offsets.begin(), available_branch_relay_offsets.end());
 
   struct FlatOwnerPlanningContext {
     uint64_t descriptor_file_offset = 0;
@@ -354,6 +365,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     uint64_t requested_words = 0;
     bool use_local_cave = false;
     bool use_appended_cave = false;
+    bool branch_only_continuation = false;
+    std::vector<uint64_t> entry_relay_offsets;
+    std::vector<uint64_t> return_relay_offsets;
     std::optional<LdsCheckTrapIndirectScalarScratch> indirect_scratch;
     std::vector<uint64_t> owner_descriptor_file_offsets;
     std::optional<DbiPatchPlacement> placement;
@@ -395,6 +409,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   std::vector<FlatCheckTrapCandidate> inline_candidates;
   std::vector<FlatCheckTrapCandidate> local_cave_candidates;
   std::vector<FlatCheckTrapCandidate> appended_cave_candidates;
+  std::vector<FlatCheckTrapCandidate> branch_only_appended_candidates;
   std::vector<FlatCheckTrapCandidate> indirect_appended_candidates;
   std::vector<LocalNopCave> flat_entry_islands;
   size_t flat_entry_island_count = 0;
@@ -414,6 +429,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   size_t supported_candidate_count = 0;
   size_t scratchable_candidate_count = 0;
   size_t spill_backed_candidate_count = 0;
+  size_t fixed_stack_candidate_count = 0;
+  size_t dynamic_stack_candidate_count = 0;
+  size_t mixed_stack_candidate_count = 0;
+  size_t missing_vcc_save_candidate_count = 0;
+  size_t missing_scratch_candidate_count = 0;
   size_t mixed_stack_owner_spill_rejection_count = 0;
   size_t dynamic_stack_spill_encoding_failure_count = 0;
   size_t private_spill_encoding_failure_count = 0;
@@ -447,6 +467,17 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!is_supported_flat_check_trap_site(site, options.flat_provenance_mode))
       return;
     ++supported_candidate_count;
+    switch (owner_stack_kind) {
+    case FlatOwnerStackKind::Fixed:
+      ++fixed_stack_candidate_count;
+      break;
+    case FlatOwnerStackKind::Dynamic:
+      ++dynamic_stack_candidate_count;
+      break;
+    case FlatOwnerStackKind::Mixed:
+      ++mixed_stack_candidate_count;
+      break;
+    }
     auto required_vgprs = flat_dword_count(site);
     if (!required_vgprs)
       return;
@@ -481,13 +512,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     auto vcc_save = choose_flat_check_trap_vcc_save_sgpr(site_inst, owner_liveness, min_fresh_sgpr,
                                                          options, preserve_dynamic_stack_abi);
     bool spill_vcc_save_pair_to_vgprs = false;
-    if (!vcc_save && arch == ROCJITSU_CODE_ARCH_GFX1250 && allocated_sgpr_count) {
+    if (!vcc_save && is_rdna4_family_arch(arch) && allocated_sgpr_count) {
       vcc_save = choose_flat_check_trap_scalar_spill_pair(
           *allocated_sgpr_count, options, preserve_dynamic_stack_abi);
       spill_vcc_save_pair_to_vgprs = vcc_save.has_value();
     }
-    if (!vcc_save)
+    if (!vcc_save) {
+      ++missing_vcc_save_candidate_count;
       return;
+    }
     uint32_t scratch_vgprs =
         instrumentation_scratch_vgprs + (spill_vcc_save_pair_to_vgprs ? 1u : 0u);
     auto scratch = choose_flat_check_trap_scratch_vgpr(site, options, site_inst, owner_liveness,
@@ -496,19 +529,19 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     std::optional<VgprSpillSequence> vgpr_spill;
     std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
     uint16_t scalar_vcc_spill_vgpr_count = spill_vcc_save_pair_to_vgprs ? 1u : 0u;
-    if (!scratch && spill_vcc_save_pair_to_vgprs && !options.scratch_vgpr &&
-        max_auto_scratch_vgpr) {
+    if (!scratch && !options.scratch_vgpr && max_auto_scratch_vgpr) {
       if (owner_stack_kind == FlatOwnerStackKind::Mixed) {
         ++mixed_stack_owner_spill_rejection_count;
       } else {
-        // A fixed-lane scalar reservoir is EXEC-independent only while its
-        // VGPR is otherwise dead. Once the VGPR window itself is live, use
-        // one active-lane reservoir per scalar. The spill preserves exactly
-        // those active lanes, and an EXECZ guard leaves empty waves untouched.
+        // Once the VGPR window itself is live, preserve it before using it as
+        // instrumentation scratch. A borrowed scalar pair additionally needs
+        // one active-lane reservoir per scalar. Dynamic-stack bootstrapping
+        // always preserves the selected pair because that pair temporarily
+        // carries both frame state and VCC, even when it was dead at the site.
+        // An EXECZ guard leaves empty waves untouched.
         const uint16_t scalar_reservoir_count =
-            uses_dynamic_stack
-                ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
-                : 2u;
+            uses_dynamic_stack ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
+                               : static_cast<uint16_t>(spill_vcc_save_pair_to_vgprs ? 2u : 0u);
         scratch_vgprs = instrumentation_scratch_vgprs + scalar_reservoir_count;
         scratch =
             choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
@@ -526,12 +559,14 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
           }
         }
         if (vgpr_spill || dynamic_stack_spill) {
+          if (dynamic_stack_spill)
+            spill_vcc_save_pair_to_vgprs = true;
           scalar_vcc_spill_vgpr_count = scalar_reservoir_count;
           if (dynamic_stack_spill) {
             requested_words += 1u + dynamic_stack_spill->save_words.size() +
                                dynamic_stack_spill->restore_words.size();
           } else {
-            requested_words += 1u + vgpr_spill->save_words.size() + 2u + 2u +
+            requested_words += 1u + vgpr_spill->save_words.size() + 2u * scalar_reservoir_count +
                                vgpr_spill->restore_words.size();
           }
           ++spill_backed_candidate_count;
@@ -546,8 +581,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     } else if (spill_vcc_save_pair_to_vgprs) {
       requested_words += 8u;
     }
-    if (!scratch)
+    if (!scratch) {
+      ++missing_scratch_candidate_count;
       return;
+    }
     if (requested_words > 256u) {
       skipped_supported_site_for_excessive_delay = true;
       return;
@@ -588,6 +625,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                            owner_descriptor_file_offsets));
         finish_candidate(appended_cave_candidates.back());
       }
+      branch_only_appended_candidates.push_back(
+          make_candidate(&site, nullptr, nullptr, *scratch, requested_words,
+                         /*use_local_cave=*/false, /*use_appended_cave=*/true, std::nullopt,
+                         owner_descriptor_file_offsets));
+      branch_only_appended_candidates.back().branch_only_continuation = true;
+      finish_candidate(branch_only_appended_candidates.back());
     }
     const std::vector<const LocalNopCave *> caves = reachable_local_caves(site, requested_words);
     if (!caves.empty())
@@ -856,6 +899,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   std::ranges::sort(inline_candidates, candidate_order);
   std::ranges::sort(local_cave_candidates, candidate_order);
   std::ranges::sort(appended_cave_candidates, candidate_order);
+  std::ranges::sort(branch_only_appended_candidates, candidate_order);
   std::ranges::sort(indirect_appended_candidates, candidate_order);
 
   const size_t max_patches =
@@ -863,6 +907,24 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   std::vector<FlatCheckTrapCandidate> selected_candidates;
   selected_candidates.reserve(std::min(max_patches, supported_candidate_count));
   DbiPatchPlacementPlanner placement_planner(arch, appended_cave_offset);
+  std::vector<uint64_t> remaining_branch_relay_offsets = available_branch_relay_offsets;
+  std::unordered_set<uint64_t> selected_flat_anchor_relay_offsets;
+  size_t branch_only_placement_failures = 0;
+  size_t branch_only_entry_route_failures = 0;
+  size_t branch_only_return_route_failures = 0;
+  size_t branch_only_reservation_failures = 0;
+  size_t branch_only_selected = 0;
+  const auto publish_flat_anchor_relays = [&](const FlatCheckTrapCandidate &candidate,
+                                              uint32_t original_size) {
+    if (candidate.entry_island_at_anchor || original_size <= sizeof(uint32_t))
+      return;
+    for (uint64_t offset = candidate.site->text_offset + sizeof(uint32_t);
+         offset < candidate.site->text_offset + original_size; offset += sizeof(uint32_t)) {
+      if (selected_flat_anchor_relay_offsets.insert(offset).second)
+        remaining_branch_relay_offsets.push_back(offset);
+    }
+    std::ranges::sort(remaining_branch_relay_offsets);
+  };
   auto try_select_candidate = [&](FlatCheckTrapCandidate candidate) {
     if (selected_candidates.size() >= max_patches)
       return;
@@ -908,6 +970,70 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                 {site.file_offset, site.file_offset + body_bytes}))
       return;
 
+    if (candidate.branch_only_continuation) {
+      DbiPatchPlacementPlanner tentative_planner = placement_planner;
+      const auto placement = tentative_planner.plan_indirect_appended(
+          site.text_offset, original_size, body_bytes + sizeof(uint32_t));
+      if (!placement) {
+        ++branch_only_placement_failures;
+        return;
+      }
+
+      const std::array<uint64_t, 1> entry_sources = {site.text_offset};
+      const std::array<uint64_t, 1> entry_targets = {placement->body_offset};
+      std::string relay_error;
+      const auto entry_plan = plan_forward_sopp_branch_relays(
+          entry_sources, remaining_branch_relay_offsets, entry_targets, &relay_error);
+      if (!entry_plan || entry_plan->routes.size() != 1u ||
+          !entry_plan->rejected_source_indices.empty()) {
+        ++branch_only_entry_route_failures;
+        return;
+      }
+      candidate.entry_relay_offsets = entry_plan->routes.front().relay_offsets;
+
+      std::vector<uint64_t> return_relay_candidates;
+      return_relay_candidates.reserve(remaining_branch_relay_offsets.size());
+      for (uint64_t relay : remaining_branch_relay_offsets) {
+        if (std::ranges::find(candidate.entry_relay_offsets, relay) ==
+            candidate.entry_relay_offsets.end())
+          return_relay_candidates.push_back(relay);
+      }
+      const std::array<uint64_t, 1> return_sources = {
+          placement->body_offset + body_bytes,
+      };
+      const std::array<uint64_t, 1> return_targets = {
+          site.text_offset + original_size,
+      };
+      const auto return_plan = plan_backward_sopp_branch_relays(
+          return_sources, return_relay_candidates, return_targets, &relay_error);
+      if (!return_plan || return_plan->routes.size() != 1u ||
+          !return_plan->rejected_source_indices.empty()) {
+        ++branch_only_return_route_failures;
+        return;
+      }
+      candidate.return_relay_offsets = return_plan->routes.front().relay_offsets;
+
+      std::vector<uint64_t> claimed_relays = candidate.entry_relay_offsets;
+      claimed_relays.insert(claimed_relays.end(), candidate.return_relay_offsets.begin(),
+                            candidate.return_relay_offsets.end());
+      for (uint64_t relay : claimed_relays) {
+        if (!selected_flat_anchor_relay_offsets.contains(relay) &&
+            !tentative_planner.reserve_existing_range(relay, sizeof(uint32_t))) {
+          ++branch_only_reservation_failures;
+          return;
+        }
+      }
+      std::erase_if(remaining_branch_relay_offsets, [&](uint64_t relay) {
+        return std::ranges::find(claimed_relays, relay) != claimed_relays.end();
+      });
+      placement_planner = std::move(tentative_planner);
+      candidate.placement = placement;
+      selected_candidates.push_back(std::move(candidate));
+      publish_flat_anchor_relays(selected_candidates.back(), original_size);
+      ++branch_only_selected;
+      return;
+    }
+
     if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor) {
       const auto placement = placement_planner.plan_indirect_appended(
           site.text_offset, original_size,
@@ -919,6 +1045,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         return;
       candidate.placement = placement;
       selected_candidates.push_back(std::move(candidate));
+      publish_flat_anchor_relays(selected_candidates.back(), original_size);
       return;
     }
 
@@ -943,16 +1070,50 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       return;
     candidate.placement = placement;
     selected_candidates.push_back(candidate);
+    if (placement->kind != DbiPatchPlacementKind::Inline)
+      publish_flat_anchor_relays(selected_candidates.back(), original_size);
   };
 
   for (const FlatCheckTrapCandidate &candidate : inline_candidates)
     try_select_candidate(candidate);
   for (const FlatCheckTrapCandidate &candidate : appended_cave_candidates)
     try_select_candidate(candidate);
-  for (const FlatCheckTrapCandidate &candidate : indirect_appended_candidates)
-    try_select_candidate(candidate);
   for (const FlatCheckTrapCandidate &candidate : local_cave_candidates)
     try_select_candidate(candidate);
+  for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
+    try_select_candidate(candidate);
+  for (const FlatCheckTrapCandidate &candidate : indirect_appended_candidates)
+    try_select_candidate(candidate);
+
+  const size_t selection_target = std::min(max_patches, supported_candidate_count);
+  result.flat_selection_telemetry = ConSanFlatSelectionTelemetry{
+      .supported_candidate_count = supported_candidate_count,
+      .selection_target = selection_target,
+      .selected_candidate_count = selected_candidates.size(),
+      .branch_only_candidate_count = branch_only_appended_candidates.size(),
+      .fixed_stack_candidate_count = fixed_stack_candidate_count,
+      .dynamic_stack_candidate_count = dynamic_stack_candidate_count,
+      .mixed_stack_candidate_count = mixed_stack_candidate_count,
+      .missing_vcc_save_candidate_count = missing_vcc_save_candidate_count,
+      .missing_scratch_candidate_count = missing_scratch_candidate_count,
+      .spill_backed_candidate_count = spill_backed_candidate_count,
+      .mixed_stack_spill_rejection_count = mixed_stack_owner_spill_rejection_count,
+      .dynamic_stack_spill_encoding_failure_count = dynamic_stack_spill_encoding_failure_count,
+      .private_spill_encoding_failure_count = private_spill_encoding_failure_count,
+      .branch_only_selected_count = branch_only_selected,
+      .branch_only_placement_failure_count = branch_only_placement_failures,
+      .branch_only_entry_route_failure_count = branch_only_entry_route_failures,
+      .branch_only_return_route_failure_count = branch_only_return_route_failures,
+      .branch_only_reservation_failure_count = branch_only_reservation_failures,
+      .original_nop_relay_slot_count = available_branch_relay_offsets.size(),
+      .selected_anchor_relay_slot_count = selected_flat_anchor_relay_offsets.size(),
+  };
+  if (selected_candidates.size() < selection_target) {
+    result.warnings.emplace_back("ConSan flat check/trap proof selected only " +
+                                 std::to_string(selected_candidates.size()) + "/" +
+                                 std::to_string(selection_target) +
+                                 " supported sites; structured selection telemetry is available");
+  }
 
   if (selected_candidates.empty()) {
     if (skipped_supported_site_for_excessive_delay) {
@@ -972,12 +1133,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         std::to_string(mixed_stack_owner_spill_rejection_count) +
         " dynamic_stack_spill_encoding_failures=" +
         std::to_string(dynamic_stack_spill_encoding_failure_count) +
-        " private_spill_encoding_failures=" +
-        std::to_string(private_spill_encoding_failure_count) +
+        " private_spill_encoding_failures=" + std::to_string(private_spill_encoding_failure_count) +
         " inline_candidates=" + std::to_string(inline_candidates.size()) +
         " local_cave_candidates=" + std::to_string(local_cave_candidates.size()) +
-        " max_observed_padding_words=" + std::to_string(max_observed_padding_words) +
-        " append_cave_reachable_candidates=" +
+        " branch_only_appended_candidates=" +
+        std::to_string(branch_only_appended_candidates.size()) + " max_observed_padding_words=" +
+        std::to_string(max_observed_padding_words) + " append_cave_reachable_candidates=" +
         std::to_string(append_cave_reachable_candidate_count) +
         " uncovered_nop_caves=" + std::to_string(local_nop_caves.size()) +
         " max_uncovered_nop_cave_words=" + std::to_string(max_uncovered_nop_cave_words) +
@@ -996,6 +1157,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     ConSanPatchInfo info;
     bool use_local_cave = false;
     bool use_appended_cave = false;
+    bool branch_only_continuation = false;
+    std::vector<uint64_t> entry_relay_offsets;
+    std::vector<uint64_t> return_relay_offsets;
     std::optional<DbiPatchPlacement> placement;
     bool entry_island_at_anchor = false;
     std::vector<uint32_t> displaced_tail_words;
@@ -1059,6 +1223,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     planned.entry_island = candidate.entry_island;
     planned.use_local_cave = candidate.use_local_cave;
     planned.use_appended_cave = candidate.use_appended_cave;
+    planned.branch_only_continuation = candidate.branch_only_continuation;
+    planned.entry_relay_offsets = candidate.entry_relay_offsets;
+    planned.return_relay_offsets = candidate.return_relay_offsets;
     planned.placement = candidate.placement;
     planned.entry_island_at_anchor = candidate.entry_island_at_anchor;
     planned.displaced_tail_words = candidate.displaced_tail_words;
@@ -1072,6 +1239,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     planned.info.scalar_vcc_spill_vgpr = candidate.scalar_vcc_spill_vgpr;
     planned.info.scalar_vcc_spill_vgpr_count = candidate.scalar_vcc_spill_vgpr_count;
     planned.info.owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets;
+    planned.info.branch_only_continuation = candidate.branch_only_continuation;
+    planned.info.branch_only_entry_relay_offsets = candidate.entry_relay_offsets;
+    planned.info.branch_only_return_relay_offsets = candidate.return_relay_offsets;
     planned.info.required_sgpr_count = static_cast<uint16_t>(candidate.vcc_save_sgpr + 2u);
     if (candidate.vgpr_spill) {
       planned.info.spilled_vgpr_count = candidate.vgpr_spill->vgpr_count;
@@ -1255,17 +1425,14 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       planned.words[*runtime_group_gate_branch_index] = *skip_probe;
     }
     if (candidate.vgpr_spill || candidate.dynamic_stack_spill) {
-      if (!candidate.scalar_vcc_spill_vgpr ||
-          (!candidate.dynamic_stack_spill &&
-           candidate.scalar_vcc_spill_vgpr_count != 2u) ||
-          (candidate.dynamic_stack_spill &&
-           candidate.scalar_vcc_spill_vgpr_count !=
-               DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount)) {
-        result.errors.emplace_back(
-            "ConSan flat check/trap proof lost its active-lane scalar spill window");
-        return;
-      }
       if (candidate.dynamic_stack_spill) {
+        if (!candidate.scalar_vcc_spill_vgpr ||
+            candidate.scalar_vcc_spill_vgpr_count !=
+                DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof lost its dynamic scalar spill window");
+          return;
+        }
         const size_t guarded_words = candidate.dynamic_stack_spill->save_words.size() +
                                      planned.words.size() +
                                      candidate.dynamic_stack_spill->restore_words.size();
@@ -1291,25 +1458,35 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                        candidate.dynamic_stack_spill->restore_words.end());
         planned.words = std::move(wrapped);
       } else {
+        const bool spills_scalar_pair = candidate.scalar_vcc_spill_vgpr.has_value();
+        if ((spills_scalar_pair && candidate.scalar_vcc_spill_vgpr_count != 2u) ||
+            (!spills_scalar_pair && candidate.scalar_vcc_spill_vgpr_count != 0u)) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof has an invalid scalar spill window");
+          return;
+        }
         std::array<uint32_t, 2> save_scalar_pair{};
         std::array<uint32_t, 2> restore_scalar_pair{};
-        for (uint16_t i = 0; i < 2u; ++i) {
-          save_scalar_pair[i] =
-              build_v_mov_b32_e32(static_cast<uint16_t>(*candidate.scalar_vcc_spill_vgpr + i),
-                                  static_cast<uint16_t>(candidate.vcc_save_sgpr + i), arch);
-          const auto restore = instrumentation::build_v_readfirstlane_b32(
-              static_cast<uint16_t>(candidate.vcc_save_sgpr + i),
-              static_cast<uint16_t>(*candidate.scalar_vcc_spill_vgpr + i), arch);
-          if (!restore) {
-            result.errors.emplace_back(
-                "ConSan flat check/trap proof could not encode its active-lane scalar restore");
-            return;
+        if (spills_scalar_pair) {
+          for (uint16_t i = 0; i < 2u; ++i) {
+            save_scalar_pair[i] =
+                build_v_mov_b32_e32(static_cast<uint16_t>(*candidate.scalar_vcc_spill_vgpr + i),
+                                    static_cast<uint16_t>(candidate.vcc_save_sgpr + i), arch);
+            const auto restore = instrumentation::build_v_readfirstlane_b32(
+                static_cast<uint16_t>(candidate.vcc_save_sgpr + i),
+                static_cast<uint16_t>(*candidate.scalar_vcc_spill_vgpr + i), arch);
+            if (!restore) {
+              result.errors.emplace_back(
+                  "ConSan flat check/trap proof could not encode its active-lane scalar restore");
+              return;
+            }
+            restore_scalar_pair[i] = *restore;
           }
-          restore_scalar_pair[i] = *restore;
         }
         const size_t guarded_words = candidate.vgpr_spill->save_words.size() +
-                                     save_scalar_pair.size() + planned.words.size() +
-                                     restore_scalar_pair.size() +
+                                     (spills_scalar_pair ? save_scalar_pair.size() : 0u) +
+                                     planned.words.size() +
+                                     (spills_scalar_pair ? restore_scalar_pair.size() : 0u) +
                                      candidate.vgpr_spill->restore_words.size();
         if (guarded_words > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
           result.errors.emplace_back(
@@ -1328,9 +1505,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         wrapped.push_back(*skip_empty_wave);
         wrapped.insert(wrapped.end(), candidate.vgpr_spill->save_words.begin(),
                        candidate.vgpr_spill->save_words.end());
-        wrapped.insert(wrapped.end(), save_scalar_pair.begin(), save_scalar_pair.end());
+        if (spills_scalar_pair)
+          wrapped.insert(wrapped.end(), save_scalar_pair.begin(), save_scalar_pair.end());
         wrapped.insert(wrapped.end(), planned.words.begin(), planned.words.end());
-        wrapped.insert(wrapped.end(), restore_scalar_pair.begin(), restore_scalar_pair.end());
+        if (spills_scalar_pair)
+          wrapped.insert(wrapped.end(), restore_scalar_pair.begin(), restore_scalar_pair.end());
         wrapped.insert(wrapped.end(), candidate.vgpr_spill->restore_words.begin(),
                        candidate.vgpr_spill->restore_words.end());
         planned.words = std::move(wrapped);
@@ -1373,7 +1552,31 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       }
       planned.cave_words = planned.words;
       uint64_t entry_target = candidate.placement->body_offset;
-      if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor) {
+      if (candidate.branch_only_continuation) {
+        if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor ||
+            candidate.indirect_scratch ||
+            candidate.placement->body_size !=
+                planned.words.size() * sizeof(uint32_t) + sizeof(uint32_t)) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof found inconsistent branch-only placement");
+          return;
+        }
+        const uint64_t return_source =
+            candidate.placement->body_offset + planned.words.size() * sizeof(uint32_t);
+        const uint64_t return_target = candidate.return_relay_offsets.empty()
+                                           ? candidate.placement->return_target
+                                           : candidate.return_relay_offsets.front();
+        const auto ret = compute_sopp_branch_simm16(return_source, return_target);
+        if (!ret) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof branch-only return is unreachable");
+          return;
+        }
+        planned.cave_words.push_back(build_s_branch(*ret, arch));
+        entry_target = candidate.entry_relay_offsets.empty()
+                           ? candidate.placement->body_offset
+                           : candidate.entry_relay_offsets.front();
+      } else if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor) {
         if (!candidate.indirect_scratch) {
           result.errors.emplace_back("ConSan flat check/trap proof lost indirect scalar scratch");
           return;
@@ -1469,6 +1672,32 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     planned_patches.push_back(std::move(planned));
   }
 
+  std::unordered_map<uint64_t, size_t> flat_anchor_relay_donors;
+  for (size_t index = 0; index < planned_patches.size(); ++index) {
+    const PlannedFlatCheckTrapPatch &planned = planned_patches[index];
+    for (uint64_t offset = planned.info.anchor_offset + sizeof(uint32_t);
+         offset < planned.info.anchor_offset + planned.info.original_size;
+         offset += sizeof(uint32_t)) {
+      if (selected_flat_anchor_relay_offsets.contains(offset))
+        flat_anchor_relay_donors.emplace(offset, index);
+    }
+  }
+  for (size_t index = 0; index < planned_patches.size(); ++index) {
+    const PlannedFlatCheckTrapPatch &planned = planned_patches[index];
+    const auto donor_precedes_borrower = [&](uint64_t relay) {
+      if (!selected_flat_anchor_relay_offsets.contains(relay))
+        return true;
+      const auto donor = flat_anchor_relay_donors.find(relay);
+      return donor != flat_anchor_relay_donors.end() && donor->second < index;
+    };
+    if (!std::ranges::all_of(planned.entry_relay_offsets, donor_precedes_borrower) ||
+        !std::ranges::all_of(planned.return_relay_offsets, donor_precedes_borrower)) {
+      result.errors.emplace_back(
+          "ConSan flat check/trap proof planned an anchor-tail relay before its donor");
+      return;
+    }
+  }
+
   std::vector<uint8_t> patched_bytes;
   if (result.elf_bytes.empty())
     patched_bytes.assign(original_bytes.begin(), original_bytes.end());
@@ -1510,6 +1739,21 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
 
     new_patch_infos.push_back(planned.info);
+    const auto append_relay_info = [&](uint64_t relay) {
+      if (!pristine_nop_branch_relay_offsets.contains(relay))
+        return;
+      ConSanPatchInfo relay_info;
+      relay_info.kind = ConSanPatchKind::TrampolineNopBranchRelay;
+      relay_info.anchor_offset = relay;
+      relay_info.trampoline_offset = relay;
+      relay_info.original_size = sizeof(uint32_t);
+      relay_info.trampoline_size = sizeof(uint32_t);
+      new_patch_infos.push_back(std::move(relay_info));
+    };
+    for (uint64_t relay : planned.entry_relay_offsets)
+      append_relay_info(relay);
+    for (uint64_t relay : planned.return_relay_offsets)
+      append_relay_info(relay);
     if (planned.entry_island != nullptr && !planned.entry_island_at_anchor) {
       ConSanPatchInfo island_info;
       island_info.kind = ConSanPatchKind::TrampolineScIndirectBranchIsland;
@@ -1596,6 +1840,27 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       } else {
         std::memcpy(new_text.data() + site.text_offset, planned.words.data(),
                     planned.words.size() * sizeof(uint32_t));
+      }
+      if (planned.branch_only_continuation) {
+        const auto emit_route = [&](std::span<const uint64_t> relays, uint64_t target) {
+          for (size_t index = 0; index < relays.size(); ++index) {
+            const uint64_t source = relays[index];
+            const uint64_t hop_target = index + 1u < relays.size() ? relays[index + 1u] : target;
+            const auto delta = compute_sopp_branch_simm16(source, hop_target);
+            if (!delta || source > new_text.size() || sizeof(uint32_t) > new_text.size() - source)
+              return false;
+            const uint32_t branch = build_s_branch(*delta, arch);
+            std::memcpy(new_text.data() + source, &branch, sizeof(branch));
+          }
+          return true;
+        };
+        if (!emit_route(planned.entry_relay_offsets, planned.info.trampoline_offset) ||
+            !emit_route(planned.return_relay_offsets,
+                        planned.info.anchor_offset + planned.info.original_size)) {
+          result.errors.emplace_back(
+              "ConSan flat check/trap proof could not emit branch-only relay route");
+          return;
+        }
       }
     }
     if (!replace_consan_text(patcher, new_text, options, "flat check/trap proof", result)) {

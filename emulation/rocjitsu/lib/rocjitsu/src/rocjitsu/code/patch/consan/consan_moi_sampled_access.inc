@@ -238,9 +238,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
   }
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
-  if (use_indirect_appended && !original_text.empty())
-    local_entry_islands.emplace(original_text, result, arch, kIndirectIslandWords,
+  if (use_indirect_appended && !original_text.empty()) {
+    const uint32_t local_entry_island_words =
+        has_spill_backed_scalar_assignment ? kIndirectIslandWords + 1u : kIndirectIslandWords;
+    local_entry_islands.emplace(original_text, result, arch, local_entry_island_words,
                                 options.preapplied_reserved_ranges);
+  }
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_entry_islands;
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_dispatchers;
   std::unordered_map<const ConSanMoiCandidate *, size_t> candidate_indices;
@@ -319,7 +322,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       const bool singleton_has_direct_island =
           group.candidates.size() == 1u &&
           local_entry_islands->has_reachable(group.candidates.front()->text_offset,
-                                             kIndirectIslandWords);
+                                             group_entry_island_words);
       // gfx1250 also uses the call relay to compact nearby anchors. RDNA4 has
       // no scalar call instruction, so use an explicit key plus branch only
       // when the ordinary per-site relay is stranded.

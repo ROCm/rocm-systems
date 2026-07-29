@@ -194,10 +194,25 @@ struct DynamicStackBorrowedSgprSpillSequence {
   uint16_t vgpr_count = 0;
   uint16_t borrowed_sgpr_base = 0;
   uint16_t scalar_reservoir_vgpr_base = 0;
+  std::vector<uint32_t> slot_offsets;
   std::vector<uint32_t> save_words;
   std::vector<uint32_t> restore_words;
   uint32_t total_private_bytes = 0;
   uint32_t dynamic_frame_bytes = 0;
+
+  [[nodiscard]] VgprSpillSequence as_vgpr_spill_sequence() const {
+    return {
+        .vgpr_base = vgpr_base,
+        .vgpr_count = vgpr_count,
+        .slot_offsets = slot_offsets,
+        .save_words = save_words,
+        .restore_words = restore_words,
+        .total_private_bytes = total_private_bytes,
+        .uses_dynamic_stack_frame = true,
+        .dynamic_frame_base_sgpr = kDynamicFrameBaseSgpr,
+        .dynamic_frame_bytes = dynamic_frame_bytes,
+    };
+  }
 };
 
 /// @brief Standalone save/restore program for one ordinary SGPR window.
@@ -247,6 +262,8 @@ build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
 ///        the spilled window used to preserve the pair, frame base, and SCC.
 /// @param original_private_bytes Compiler-declared maximum private backing
 ///        before the instrumentation frame is added.
+/// @param additional_frame_bytes Extra frame storage reserved after the VGPR
+///        slots for a caller-owned scalar spill layout.
 ///
 /// @details Save leaves the borrowed pair available to the caller and restore
 /// expects any special state saved in that pair (for example VCC) to have
@@ -258,7 +275,8 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
                                                  uint16_t borrowed_sgpr_base,
                                                  uint16_t scalar_reservoir_vgpr_base,
                                                  uint32_t original_private_bytes,
-                                                 rj_code_arch_t arch);
+                                                 rj_code_arch_t arch,
+                                                 uint32_t additional_frame_bytes = 0);
 
 /// @brief Save an SGPR window in an already-established dynamic-stack frame.
 ///

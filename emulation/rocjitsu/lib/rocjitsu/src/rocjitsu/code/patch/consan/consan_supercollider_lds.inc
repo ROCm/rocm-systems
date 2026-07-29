@@ -3236,9 +3236,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           return;
         }
         planned.cave_words.back() = build_s_branch(*ret, arch);
-        planned.info.sc_branch_only_continuation = true;
-        planned.info.sc_branch_only_entry_relay_offsets = candidate.entry_relay_offsets;
-        planned.info.sc_branch_only_return_relay_offsets = candidate.return_relay_offsets;
+        planned.info.branch_only_continuation = true;
+        planned.info.branch_only_entry_relay_offsets = candidate.entry_relay_offsets;
+        planned.info.branch_only_return_relay_offsets = candidate.return_relay_offsets;
       } else if (candidate.entry_island != nullptr || candidate.dense_call_group_index) {
         if (!candidate.indirect_pc_sgpr || !candidate.indirect_scc_save_sgpr) {
           result.errors.emplace_back(

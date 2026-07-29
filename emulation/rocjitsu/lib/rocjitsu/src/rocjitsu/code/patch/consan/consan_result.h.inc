@@ -84,6 +84,32 @@ struct ConSanPatchedImageGrowthRejection {
   size_t limit_bytes = 0;
 };
 
+/// Machine-readable outcome of SuperCollider group-FLAT candidate selection.
+/// This remains available for successful partial transforms without forcing
+/// callers to parse a long warning string.
+struct ConSanFlatSelectionTelemetry {
+  size_t supported_candidate_count = 0;
+  size_t selection_target = 0;
+  size_t selected_candidate_count = 0;
+  size_t branch_only_candidate_count = 0;
+  size_t fixed_stack_candidate_count = 0;
+  size_t dynamic_stack_candidate_count = 0;
+  size_t mixed_stack_candidate_count = 0;
+  size_t missing_vcc_save_candidate_count = 0;
+  size_t missing_scratch_candidate_count = 0;
+  size_t spill_backed_candidate_count = 0;
+  size_t mixed_stack_spill_rejection_count = 0;
+  size_t dynamic_stack_spill_encoding_failure_count = 0;
+  size_t private_spill_encoding_failure_count = 0;
+  size_t branch_only_selected_count = 0;
+  size_t branch_only_placement_failure_count = 0;
+  size_t branch_only_entry_route_failure_count = 0;
+  size_t branch_only_return_route_failure_count = 0;
+  size_t branch_only_reservation_failure_count = 0;
+  size_t original_nop_relay_slot_count = 0;
+  size_t selected_anchor_relay_slot_count = 0;
+};
+
 struct ConSanResult {
   bool visited_code_object = false;
   /// True after the input has been parsed as a structurally valid AMDGPU code
@@ -119,6 +145,7 @@ struct ConSanResult {
   std::vector<ConSanMoiTransientSgprAssignment> resolved_moi_transient_sgpr_assignments;
   std::optional<uint16_t> resolved_moi_owner_sgpr;
   std::optional<uint16_t> resolved_moi_dispatch_id_sgpr;
+  std::optional<uint16_t> resolved_moi_dispatch_id_vgpr;
   /// Original owner-descriptor offsets whose active replacement descriptors
   /// were explicitly expanded to carry the complete RDNA workgroup-ID launch
   /// payload. Final validation resolves these identities after text growth.
@@ -130,6 +157,7 @@ struct ConSanResult {
   bool moi_exec_save_sgprs_automatic = false;
   bool moi_owner_sgpr_automatic = false;
   bool moi_dispatch_id_sgprs_automatic = false;
+  bool moi_dispatch_id_vgprs_automatic = false;
   size_t input_size = 0;
   std::string input_fingerprint;
   /// Machine-readable input-metadata trust state retained with the diagnostic.
@@ -192,6 +220,7 @@ struct ConSanResult {
   size_t moi_stage_warning_begin = 0;
   std::vector<ConSanCandidateResourcePlan> resource_plans;
   ConSanResourcePlanSummary resource_plan_summary;
+  std::optional<ConSanFlatSelectionTelemetry> flat_selection_telemetry;
   std::vector<ConSanAccessPlan> access_plans;
   std::optional<ConSanCompositeProof> composite_proof;
   std::vector<ConSanPatchInfo> patches;

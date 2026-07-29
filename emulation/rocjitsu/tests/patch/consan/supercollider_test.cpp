@@ -36,6 +36,8 @@ make_gfx1250_two_kernel_code_object(std::span<const uint32_t> first_kernel_words
                                                       /*function_is_kernel=*/true);
 }
 
+[[nodiscard]] std::vector<uint32_t> make_gfx1250_full_pressure_flat_store_words(bool append_endpgm);
+
 [[nodiscard]] GrowthPolicyFixture make_growth_policy_fixture() {
   const std::array<uint32_t, 1> kernel_words = {
       0xBFB00000u, // s_endpgm
@@ -122,6 +124,148 @@ TEST(ConSan, FlatCheckTrapProofUsesReachableAppendedCave) {
   EXPECT_GT(result.patches.front().trampoline_size, 0u);
   EXPECT_GT(result.elf_bytes.size(), bytes.size());
   EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughVerifiedNopRelays) {
+  std::vector<uint32_t> first_kernel_words = {
+      0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
+      0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
+      0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
+      0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
+  };
+  for (uint16_t sgpr = 2u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+    first_kernel_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
+  first_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  const std::array<uint32_t, 1> second_kernel_words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  std::vector<uint32_t> tail_words(33010u, build_s_mov_b32(100u, 100u, ROCJITSU_CODE_ARCH_RDNA4));
+  tail_words[16000u] = build_s_nop(0u, ROCJITSU_CODE_ARCH_RDNA4);
+  tail_words[17000u] = build_s_nop(0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const std::vector<uint8_t> bytes =
+      make_rdna4_two_kernel_code_object(first_kernel_words, second_kernel_words, tail_words);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.scratch_vgpr = 5u;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch =
+      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(patch->kind, ConSanPatchKind::LocalCaveFlatLoadCheckTrap);
+  EXPECT_EQ(patch->original_size, 3u * sizeof(uint32_t));
+  EXPECT_FALSE(patch->indirect_pc_sgpr.has_value());
+  ASSERT_FALSE(patch->branch_only_entry_relay_offsets.empty());
+  ASSERT_FALSE(patch->branch_only_return_relay_offsets.empty());
+  const size_t relay_count = patch->branch_only_entry_relay_offsets.size() +
+                             patch->branch_only_return_relay_offsets.size();
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
+                               &ConSanPatchInfo::kind),
+            relay_count);
+}
+
+TEST(ConSan, FlatCheckTrapReusesDirectAnchorTailForFarBranchRoutes) {
+  const std::array<uint32_t, 8> flat_prefix = {
+      0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
+      0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
+      0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
+      0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
+  };
+  std::vector<uint32_t> first_kernel_words(flat_prefix.begin(), flat_prefix.end());
+  first_kernel_words.resize(16000u, build_s_mov_b32(100u, 100u, ROCJITSU_CODE_ARCH_RDNA4));
+  first_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  std::vector<uint32_t> second_kernel_words(flat_prefix.begin(), flat_prefix.end());
+  second_kernel_words.resize(17000u, build_s_mov_b32(100u, 100u, ROCJITSU_CODE_ARCH_RDNA4));
+  second_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const std::vector<uint8_t> bytes =
+      make_rdna4_two_kernel_code_object(first_kernel_words, second_kernel_words);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.scratch_vgpr = 5u;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  std::vector<const ConSanPatchInfo *> bodies;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap)
+      bodies.push_back(&patch);
+  }
+  ASSERT_EQ(bodies.size(), 2u);
+  std::ranges::sort(bodies, {}, &ConSanPatchInfo::anchor_offset);
+  const ConSanPatchInfo &far = *bodies.front();
+  const ConSanPatchInfo &direct = *bodies.back();
+  ASSERT_TRUE(far.branch_only_continuation);
+  EXPECT_FALSE(direct.branch_only_continuation);
+  ASSERT_EQ(far.branch_only_entry_relay_offsets.size(), 1u);
+  ASSERT_EQ(far.branch_only_return_relay_offsets.size(), 1u);
+  const std::array<uint64_t, 2> direct_tail = {
+      direct.anchor_offset + sizeof(uint32_t),
+      direct.anchor_offset + 2u * sizeof(uint32_t),
+  };
+  EXPECT_NE(std::ranges::find(direct_tail, far.branch_only_entry_relay_offsets.front()),
+            direct_tail.end());
+  EXPECT_NE(std::ranges::find(direct_tail, far.branch_only_return_relay_offsets.front()),
+            direct_tail.end());
+  EXPECT_NE(far.branch_only_entry_relay_offsets.front(),
+            far.branch_only_return_relay_offsets.front());
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
+                               &ConSanPatchInfo::kind),
+            0u);
+}
+
+TEST(ConSan, FlatCheckTrapReportsStructuredPartialSelection) {
+  std::vector<uint32_t> first_kernel_words =
+      make_gfx1250_full_pressure_flat_store_words(/*append_endpgm=*/true);
+  ASSERT_GE(first_kernel_words.size(), 6u);
+  std::vector<uint32_t> second_kernel_words(first_kernel_words.begin(),
+                                            first_kernel_words.begin() + 6u);
+  second_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  std::vector<uint8_t> bytes =
+      make_gfx1250_two_kernel_code_object(first_kernel_words, second_kernel_words);
+  mutate_kernel_descriptor(bytes, "lds_probe", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+    descriptor.private_segment_fixed_size = kMaxAddressFreeScratchPrivateBytes;
+  });
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.delay_mode = ConSanDelayMode::SleepVar;
+  options.delay_nops = 1u;
+  options.delay_var_ssrc = 0u;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_TRUE(result.flat_selection_telemetry);
+  const ConSanFlatSelectionTelemetry &telemetry = *result.flat_selection_telemetry;
+  EXPECT_EQ(telemetry.supported_candidate_count, 2u);
+  EXPECT_EQ(telemetry.selection_target, 2u);
+  EXPECT_EQ(telemetry.selected_candidate_count, 1u);
+  EXPECT_EQ(telemetry.private_spill_encoding_failure_count, 1u);
+  EXPECT_EQ(telemetry.branch_only_selected_count, 0u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("structured selection telemetry is available") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSan, RelativeGrowthLimitRejectsAndAdmitsAtExactPercentageBoundary) {
@@ -1410,6 +1554,26 @@ make_gfx1250_full_pressure_flat_store_words(bool append_endpgm = true) {
   return words;
 }
 
+[[nodiscard]] std::vector<uint32_t>
+make_rdna4_full_pressure_flat_store_words(bool keep_all_sgprs_live = true) {
+  std::vector<uint32_t> words = {
+      0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
+      build_v_mov_b32_e32(0u, 0u, ROCJITSU_CODE_ARCH_RDNA4),
+      build_v_mov_b32_e32(1u, 1u, ROCJITSU_CODE_ARCH_RDNA4),
+      0xEC06807Cu,
+      0x01000000u,
+      0x00000000u, // flat_store_b32 v[0:1], v2
+  };
+  if (keep_all_sgprs_live) {
+    for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+      words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
+  }
+  for (uint16_t vgpr = 0; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr)
+    words.push_back(build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_RDNA4));
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  return words;
+}
+
 TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsSimultaneouslyLiveRegisterFilesInBothWaveModes) {
   const std::vector<uint32_t> text_words = make_gfx1250_full_pressure_flat_store_words();
 
@@ -1485,6 +1649,85 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsSimultaneouslyLiveRegisterFilesInBot
         AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
         1u);
   }
+}
+
+TEST(ConSan, Rdna4FullRegisterFlatDynamicStackSpillBorrowsAllocatedScalarState) {
+  constexpr std::string_view kKernelName = "rdna4_flat_full_register_dynamic_stack";
+  std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(make_rdna4_full_pressure_flat_store_words(), kKernelName,
+                                 kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/true);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.delay_mode = ConSanDelayMode::SleepVar;
+  options.delay_nops = 1u;
+  options.delay_var_ssrc = 0u;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scratch_vgpr);
+  ASSERT_TRUE(patch->scalar_vcc_spill_sgpr);
+  ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
+  EXPECT_EQ(*patch->scalar_vcc_spill_sgpr, 2u);
+  EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count,
+            DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount);
+  EXPECT_GT(patch->spilled_vgpr_count, 0u);
+  EXPECT_GT(patch->dynamic_private_segment_addend, 0u);
+  EXPECT_LT(static_cast<uint32_t>(*patch->scalar_vcc_spill_sgpr) + 1u,
+            REGISTER_SET_ALLOCATABLE_SGPRS);
+  EXPECT_TRUE(static_cast<uint32_t>(*patch->scalar_vcc_spill_sgpr) + 1u < kDynamicStackTopSgpr ||
+              *patch->scalar_vcc_spill_sgpr > kDynamicStackTopSgpr + 1u);
+
+  const auto expected_spill = build_dynamic_stack_borrowed_sgpr_spill_sequence(
+      *patch->scratch_vgpr, patch->spilled_vgpr_count, *patch->scalar_vcc_spill_sgpr,
+      *patch->scalar_vcc_spill_vgpr, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(expected_spill);
+  EXPECT_EQ(patch->required_private_segment_size, expected_spill->total_private_bytes);
+  EXPECT_EQ(patch->dynamic_private_segment_addend, expected_spill->dynamic_frame_bytes);
+}
+
+TEST(ConSan, Rdna4FullVgprFlatDynamicStackSpillPreservesDeadScalarState) {
+  constexpr std::string_view kKernelName = "rdna4_flat_full_vgpr_dynamic_stack";
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      make_rdna4_full_pressure_flat_store_words(/*keep_all_sgprs_live=*/false), kKernelName,
+      kRdna4Wave64AllVgprsGranulated, /*wave32=*/false, /*uses_dynamic_stack=*/true);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.delay_mode = ConSanDelayMode::SleepVar;
+  options.delay_nops = 1u;
+  options.delay_var_ssrc = 0u;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap,
+                                       &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scratch_vgpr);
+  ASSERT_TRUE(patch->scalar_vcc_spill_sgpr);
+  ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
+  EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count,
+            DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount);
+  EXPECT_GT(patch->spilled_vgpr_count, 0u);
+  EXPECT_GT(patch->dynamic_private_segment_addend, 0u);
 }
 
 TEST(ConSan, Gfx1250FullRegisterFlatDynamicStackSpillPreservesAbiStateInBothWaveModes) {
@@ -6166,12 +6409,12 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.final_validation_passed);
   const auto branch_only =
-      std::ranges::find(result.patches, true, &ConSanPatchInfo::sc_branch_only_continuation);
+      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
   ASSERT_NE(branch_only, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(branch_only->anchor_offset, 0u);
   EXPECT_FALSE(branch_only->indirect_pc_sgpr.has_value());
-  ASSERT_FALSE(branch_only->sc_branch_only_entry_relay_offsets.empty());
-  ASSERT_FALSE(branch_only->sc_branch_only_return_relay_offsets.empty());
+  ASSERT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
+  ASSERT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
 
   ConSanResult corrupted = result;
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
@@ -6180,7 +6423,7 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   const uint64_t text_file_offset = patched.text_sections().front()->sectionOffset();
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250);
   std::memcpy(corrupted.elf_bytes.data() + text_file_offset +
-                  branch_only->sc_branch_only_return_relay_offsets.front(),
+                  branch_only->branch_only_return_relay_offsets.front(),
               &nop, sizeof(nop));
   const auto corrupted_errors = validate_consan_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(corrupted_errors, [](const std::string &error) {
@@ -6221,12 +6464,12 @@ TEST(ConSan, Rdna4CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.final_validation_passed);
   const auto branch_only =
-      std::ranges::find(result.patches, true, &ConSanPatchInfo::sc_branch_only_continuation);
+      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
   ASSERT_NE(branch_only, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(branch_only->anchor_offset, 0u);
   EXPECT_FALSE(branch_only->indirect_pc_sgpr.has_value());
-  ASSERT_FALSE(branch_only->sc_branch_only_entry_relay_offsets.empty());
-  ASSERT_FALSE(branch_only->sc_branch_only_return_relay_offsets.empty());
+  ASSERT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
+  ASSERT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
 }
 
 TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
@@ -6254,11 +6497,11 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.final_validation_passed);
   const auto branch_only =
-      std::ranges::find(result.patches, true, &ConSanPatchInfo::sc_branch_only_continuation);
+      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
   ASSERT_NE(branch_only, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(branch_only->anchor_offset, 0u);
-  EXPECT_FALSE(branch_only->sc_branch_only_entry_relay_offsets.empty());
-  EXPECT_FALSE(branch_only->sc_branch_only_return_relay_offsets.empty());
+  EXPECT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
+  EXPECT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
   const auto reservoir = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineScRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(reservoir, result.patches.end());
@@ -6493,7 +6736,7 @@ TEST(ConSan, Gfx1250CheckTrapPreplansBranchFallbackBeforeReachableBodiesDrift) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
             kSiteCount);
-  EXPECT_NE(std::ranges::find(result.patches, true, &ConSanPatchInfo::sc_branch_only_continuation),
+  EXPECT_NE(std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
             result.patches.end());
 }
 

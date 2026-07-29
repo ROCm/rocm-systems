@@ -306,6 +306,9 @@ struct ConSanMoiPersistentVgprAssignment {
   uint16_t epoch_vgpr = 0;
   std::optional<uint16_t> workgroup_key_vgpr;
   ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs;
+  /// Entry-captured hardware dispatch identity. The pair is used when no
+  /// lifetime-safe persistent SGPR pair exists for an automatic banked report.
+  std::optional<uint16_t> dispatch_id_vgpr;
 
   auto operator<=>(const ConSanMoiPersistentVgprAssignment &) const = default;
 };
@@ -336,6 +339,10 @@ struct ConSanMoiTransientSgprAssignment {
   std::optional<uint16_t> dispatch_key_sgpr;
   std::optional<uint16_t> call_return_sgpr;
   std::optional<uint16_t> visible_evidence_sgpr;
+  /// Live ordinary pair preserved through the dynamic-stack VGPR bootstrap.
+  /// Present only when branch-only routing avoids every live-through router
+  /// register.
+  std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
 
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
 };
@@ -476,6 +483,9 @@ struct ConSanOptions {
   /// Internal marker set after ConSan assigns the persistent hardware
   /// dispatch-ID SGPR pair used by dispatch-qualified engine metadata.
   bool automatic_moi_dispatch_id_sgprs = false;
+  /// Internal marker set after ConSan assigns an entry-captured persistent
+  /// hardware dispatch-ID VGPR pair.
+  bool automatic_moi_dispatch_id_vgprs = false;
   /// Internal metadata used only by the mutation-then-instrument composition
   /// path. It prevents appended fault code from being attributed to an
   /// unrelated tail function merely because that FUNC covers the cave bytes.
@@ -515,10 +525,14 @@ struct ConSanOptions {
   std::optional<uint16_t> moi_inline_dispatch_key_sgpr;
   std::optional<uint16_t> moi_inline_indirect_scc_sgpr;
   std::optional<uint16_t> moi_inline_visible_evidence_sgpr;
+  /// Component-local live pair used only while a spill-backed Inline body
+  /// establishes and releases its runtime-sized private frame.
+  std::optional<uint16_t> moi_inline_dynamic_stack_borrowed_sgpr;
   std::optional<uint16_t> moi_record_replay_dispatch_key_sgpr;
   std::optional<uint16_t> moi_record_replay_call_return_sgpr;
   std::optional<uint16_t> moi_owner_sgpr;
   std::optional<uint16_t> moi_dispatch_id_sgpr;
+  std::optional<uint16_t> moi_dispatch_id_vgpr;
   std::optional<uint16_t> moi_owner_vgpr;
   std::optional<uint16_t> moi_epoch_vgpr;
   /// Uniform persistent state used when a dynamic-stack MOI owner has no

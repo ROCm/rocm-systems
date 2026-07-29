@@ -23,7 +23,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   if (options.max_patches == 0 || layout.access_record_capacity == 0)
     return;
   if (!options.moi_dynamic_access_records && layout.record_replay_access_dispatch_bank_count > 1u &&
-      !options.moi_dispatch_id_sgpr) {
+      !moi_has_runtime_hardware_dispatch_id(options)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
         "ConSan MOI automatic Record/Replay identity tables require runtime hardware dispatch "
@@ -167,7 +167,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     const auto text_bytes =
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
     original_text = text_bytes;
-    local_entry_islands.emplace(text_bytes, result, arch, kIndirectIslandWords);
+    const uint32_t local_entry_island_words =
+        has_spill_backed_scalar_assignment ? kIndirectIslandWords + 1u : kIndirectIslandWords;
+    local_entry_islands.emplace(text_bytes, result, arch, local_entry_island_words);
   }
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_entry_islands;
   std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_dispatchers;

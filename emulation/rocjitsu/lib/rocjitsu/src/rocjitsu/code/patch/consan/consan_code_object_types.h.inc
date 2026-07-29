@@ -126,6 +126,9 @@ enum class ConSanPatchKind : uint8_t {
   TrampolineScRelayReservoir,
   TrampolineMoiIndirectBranchIsland,
   TrampolineNop,
+  /// Appended after the original patch-kind sequence so existing numeric
+  /// diagnostics remain stable across this addition.
+  TrampolineNopBranchRelay,
 };
 
 enum class ConSanPatchPhase : uint8_t {
@@ -398,13 +401,21 @@ struct ConSanPatchInfo {
   /// trampoline body. Relay-reservoir validation uses this exact provenance
   /// when proving routes through appended text.
   std::vector<uint64_t> branch_relay_offsets;
-  /// Exact forward and return relay chains for a SuperCollider body whose
+  /// Exact forward and return relay chains for a trampoline body whose
   /// anchor and continuation use branch-only control flow.  These routes do
   /// not borrow an indirect PC pair: the forward chain terminates at the
   /// trampoline and the return chain terminates after the displaced anchor.
-  bool sc_branch_only_continuation = false;
-  std::vector<uint64_t> sc_branch_only_entry_relay_offsets;
-  std::vector<uint64_t> sc_branch_only_return_relay_offsets;
+  bool branch_only_continuation = false;
+  std::vector<uint64_t> branch_only_entry_relay_offsets;
+  std::vector<uint64_t> branch_only_return_relay_offsets;
+  /// Entry prologue that supersedes this patch's original anchor-to-body
+  /// route. The prologue owns the hardware entry and chains directly into
+  /// this trampoline after initializing persistent state.
+  std::optional<uint64_t> branch_only_entry_prologue_offset;
+  /// Trampoline reached after this entry prologue completes. This is recorded
+  /// on the prologue patch so final validation can prove composed entry
+  /// ownership without treating the overwritten anchor branch as live.
+  std::optional<uint64_t> entry_prologue_chained_trampoline_offset;
   /// Full dispatch-ID initialization bodies reached through paired
   /// kernarg-preload entry relays. Absent when initialization is inline in
   /// the two 256-byte hardware entry slots.
@@ -470,6 +481,14 @@ struct ConSanPatchInfo {
   std::optional<uint16_t> persistent_epoch_vgpr;
   std::optional<uint16_t> persistent_workgroup_key_vgpr;
   ConSanMoiPersistentWorkgroupRegisters persistent_record_replay_workgroup_vgprs;
+  /// Entry-local VGPR whose lanes preserve a runtime-selected transient SGPR
+  /// window while persistent vector state is initialized. The register is
+  /// dead again before any displaced guest instruction executes.
+  std::optional<uint16_t> entry_scalar_backup_vgpr;
+  /// First transient SGPR preserved in entry_scalar_backup_vgpr.
+  std::optional<uint16_t> entry_scalar_backup_sgpr_base;
+  /// Number of consecutive transient SGPRs preserved in fixed VGPR lanes.
+  uint16_t entry_scalar_backup_sgpr_count = 0;
   /// Minimum ordinary SGPR allocation required by this patch, independent of
   /// whether its placement uses an indirect control-flow relay.
   uint16_t required_sgpr_count = 0;
@@ -503,10 +522,11 @@ struct ConSanPatchInfo {
   ConSanMoiPersistentWorkgroupPrivateOffsets persistent_record_replay_workgroup_private_offsets;
   /// First private byte available after all persistent MOI state.
   std::optional<uint32_t> persistent_private_state_end;
-  /// Persistent instrumentation-owned SGPR pair receiving the full hardware
-  /// dispatch ID at kernel entry. Presence also proves that this prologue
-  /// checked the descriptor's preload map.
+  /// Persistent instrumentation-owned register pair receiving the full
+  /// hardware dispatch ID at kernel entry. Exactly one representation is
+  /// present, and either proves that the prologue checked the preload map.
   std::optional<uint16_t> dispatch_id_capture_sgpr;
+  std::optional<uint16_t> dispatch_id_capture_vgpr;
   uint16_t dispatch_id_source_sgpr = 0;
   uint16_t dispatch_id_original_user_sgpr_count = 0;
   uint16_t dispatch_id_expanded_user_sgpr_count = 0;

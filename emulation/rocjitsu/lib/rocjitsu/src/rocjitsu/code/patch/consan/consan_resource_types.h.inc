@@ -5,6 +5,11 @@ enum class ConSanResourceSiteKind : uint8_t {
   Fence,
 };
 
+/// Number of directly encoded ordinary VGPRs in the ConSan instrumentation
+/// ABIs. REGISTER_SET_MAX_VGPRS is intentionally larger so analysis can also
+/// represent architecture-specific banks; it is not an emission bound.
+inline constexpr uint16_t kConSanOrdinaryVgprLimit = 256u;
+
 /// Stable disposition of one decoded final-code site before engine-specific
 /// candidate filtering. Coverage is derived from this ledger rather than
 /// reconstructing discovery from the surviving candidate vector.
@@ -93,7 +98,7 @@ struct ConSanCandidateResourcePlan {
   uint16_t scratch_vgpr_count = 0;
   uint16_t current_vgpr_count = 0;
   uint16_t max_referenced_vgpr_count = 0;
-  uint16_t ordinary_vgpr_limit = 256u;
+  uint16_t ordinary_vgpr_limit = kConSanOrdinaryVgprLimit;
   bool has_indirect_vgpr_access = false;
   uint16_t required_vgpr_count = 0;
   uint16_t current_sgpr_count = 0;

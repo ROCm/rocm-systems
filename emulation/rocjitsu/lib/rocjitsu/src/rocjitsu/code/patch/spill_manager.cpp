@@ -338,7 +338,8 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
                                                  uint16_t borrowed_sgpr_base,
                                                  uint16_t scalar_reservoir_vgpr_base,
                                                  uint32_t original_private_bytes,
-                                                 rj_code_arch_t arch) {
+                                                 rj_code_arch_t arch,
+                                                 uint32_t additional_frame_bytes) {
   constexpr uint16_t kBorrowedSgprCount = 2u;
   constexpr uint16_t kReservoirCount = DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount;
   const uint32_t vgpr_end = static_cast<uint32_t>(vgpr_base) + vgpr_count;
@@ -348,12 +349,14 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
   if (!is_rdna4_family_arch(arch) || vgpr_count < kReservoirCount ||
       vgpr_end > REGISTER_SET_MAX_VGPRS || scalar_reservoir_vgpr_base < vgpr_base ||
       reservoir_end > vgpr_end || borrowed_end > REGISTER_SET_ALLOCATABLE_SGPRS ||
+      additional_frame_bytes % SpillManager::kSlotBytes != 0u ||
       (borrowed_sgpr_base <= kDynamicStackTopSgpr && kDynamicStackTopSgpr < borrowed_end) ||
       (borrowed_sgpr_base <= kDynamicFrameBaseSgpr && kDynamicFrameBaseSgpr < borrowed_end)) {
     return std::nullopt;
   }
 
-  const uint64_t frame_bytes = static_cast<uint64_t>(vgpr_count) * SpillManager::kSlotBytes;
+  const uint64_t vgpr_frame_bytes = static_cast<uint64_t>(vgpr_count) * SpillManager::kSlotBytes;
+  const uint64_t frame_bytes = vgpr_frame_bytes + additional_frame_bytes;
   const uint64_t requested_private_bytes =
       static_cast<uint64_t>(original_private_bytes) + frame_bytes;
   const auto private_limit = address_free_scratch_private_limit(arch);
@@ -384,6 +387,7 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
   sequence.scalar_reservoir_vgpr_base = scalar_reservoir_vgpr_base;
   sequence.total_private_bytes = *total_private_bytes;
   sequence.dynamic_frame_bytes = static_cast<uint32_t>(frame_bytes);
+  sequence.slot_offsets.reserve(vgpr_count);
   sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 12u);
   sequence.restore_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 9u);
   std::vector<uint32_t> fill_words;
@@ -392,6 +396,7 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
   for (uint16_t i = 0; i < vgpr_count; ++i) {
     const uint16_t vgpr = static_cast<uint16_t>(vgpr_base + i);
     const uint32_t offset = static_cast<uint32_t>(i) * SpillManager::kSlotBytes;
+    sequence.slot_offsets.push_back(offset);
     const auto store = build_scratch_store_b32_saddr(vgpr, kDynamicStackTopSgpr, offset, arch);
     const auto load = build_scratch_load_b32_saddr(vgpr, kDynamicStackTopSgpr, offset, arch);
     if (!store || !load)

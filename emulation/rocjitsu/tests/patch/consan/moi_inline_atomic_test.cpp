@@ -3505,7 +3505,7 @@ TEST(ConSanMoi, InlineAtomicUsesIndirectIslandsForFarAppendedHelpers) {
   EXPECT_TRUE(patched.is_valid());
 }
 
-TEST(ConSanMoi, InlineAtomicLiteralDispatchIdCoversEveryAcquireReleaseComparison) {
+TEST(ConSanMoi, InlineAtomicPersistentDispatchIdCoversEveryAcquireReleaseComparison) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.helper_has_ordered_atomic = true;
   fixture.helper_atomic_acquire_release = true;
@@ -3527,7 +3527,100 @@ TEST(ConSanMoi, InlineAtomicLiteralDispatchIdCoversEveryAcquireReleaseComparison
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("proven-unused RDNA4 SGPR pair") != std::string::npos;
+  })) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scratch_vgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const uint16_t scratch = *patch->scratch_vgpr;
+  struct DispatchComparison {
+    uint16_t address_offset;
+    uint16_t value_offset;
+    size_t field_offset;
+    size_t expected_count;
+    std::string_view label;
+  };
+  constexpr std::array kDispatchComparisons = {
+      // append_inline_atomic_acquire_import: the release-slot value is loaded
+      // into `value` at +2.
+      DispatchComparison{0u, 2u, offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id), 1u,
+                         "release-slot acquire"},
+      // append_inline_acquired_epoch_token_publications: the acquired-token
+      // value is loaded into `value` at +19 for each of five unrolled edges.
+      DispatchComparison{0u, 19u, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id), 5u,
+                         "acquired-token publication"},
+      // append_inline_release_causal_snapshot_capture: the token-table value
+      // is loaded through `temporary` at +20 from the address at +5.
+      DispatchComparison{5u, 20u, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id), 1u,
+                         "causal-snapshot scan"},
+      // append_inline_versioned_release_transaction: the release-record value
+      // is loaded through `temporary` at +4.
+      DispatchComparison{0u, 4u, offsetof(ConSanMoiInlineAtomicReleaseSlot, dispatch_id), 1u,
+                         "release-record verification"},
+  };
+  for (const DispatchComparison &comparison : kDispatchComparisons) {
+    SCOPED_TRACE(comparison.label);
+    for (const bool high_word : {false, true}) {
+      SCOPED_TRACE(high_word ? "high" : "low");
+      const uint16_t address = static_cast<uint16_t>(scratch + comparison.address_offset);
+      const uint16_t value = static_cast<uint16_t>(scratch + comparison.value_offset);
+      const uint16_t expected_sgpr =
+          static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + (high_word ? 1u : 0u));
+      const auto load = instrumentation::build_flat_load_b32(
+          address, value, ROCJITSU_CODE_ARCH_RDNA4,
+          static_cast<uint32_t>(comparison.field_offset + (high_word ? sizeof(uint32_t) : 0u)));
+      const auto wait = instrumentation::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4);
+      const auto compare =
+          instrumentation::build_v_cmp_eq_u32_vcc(expected_sgpr, value, ROCJITSU_CODE_ARCH_RDNA4);
+      ASSERT_TRUE(load && wait && compare);
+      std::vector<uint32_t> expected = *load;
+      expected.push_back(*wait);
+      expected.push_back(*compare);
+      EXPECT_EQ(count_subsequence(cave, expected), comparison.expected_count);
+    }
+  }
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, InlineAtomicLiteralDispatchIdCoversEveryAcquireReleaseComparison) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.helper_has_ordered_atomic = true;
+  fixture.helper_atomic_acquire_release = true;
+  // The explicit 22-register atomic EXEC window occupies s84:s105. Keep every
+  // lower ordinary SGPR live across both calls so no lifetime-safe persistent
+  // pair exists and the public planner must select its literal representation.
+  for (uint16_t sgpr = 0u; sgpr < 84u; ++sgpr) {
+    fixture.first_continuation_live_sgprs.push_back(sgpr);
+    fixture.second_continuation_live_sgprs.push_back(sgpr);
+  }
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  ASSERT_FALSE(bytes.empty());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_vgpr_spill = true;
+  options.moi_track_atomics = true;
+  options.moi_track_barriers = false;
+  options.moi_inline_workgroup_shadow = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_exec_save_sgpr = 84u;
+  options.max_patches = 2u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_FALSE(result.resolved_moi_dispatch_id_vgpr);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("literal report dispatch ID") != std::string::npos;
   })) << testing::PrintToString(result.warnings);

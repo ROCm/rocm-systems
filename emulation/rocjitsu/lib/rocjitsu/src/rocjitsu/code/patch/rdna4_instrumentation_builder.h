@@ -651,6 +651,18 @@ build_s_wait_alu_sa_sdst0(rj_code_arch_t arch) {
   return pack_sopp(rdna4::kSWaitAlu, 0xff9eu);
 }
 
+/// @brief Encode gfx12 `s_wait_alu depctr_va_sdst(0)`.
+///
+/// A VALU instruction such as `v_readlane_b32` can define an ordinary SGPR.
+/// Drain that cross-pipeline result before an arbitrary following guest VALU
+/// is allowed to consume the restored scalar value.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_wait_alu_va_sdst0(rj_code_arch_t arch) {
+  if (!is_rdna4_family_arch(arch))
+    return std::nullopt;
+  return pack_sopp(rdna4::kSWaitAlu, 0xf19fu);
+}
+
 /// @brief Encode RDNA4 `flat_atomic_add_u32 vdst, v[vaddr:vaddr+1], vsrc`.
 ///
 /// @details Uses the no-SADDR flat form. `return_old_value=true` encodes the

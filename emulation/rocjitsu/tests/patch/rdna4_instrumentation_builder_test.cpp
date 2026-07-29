@@ -91,6 +91,25 @@ TEST(InstructionBuilder, BuildSplitScratchWaits) {
   EXPECT_FALSE(build_s_wait_storecnt_dscnt0(ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_CDNA4));
 }
+
+TEST(InstructionBuilder, BuildScalarDestinationDependencyWaits) {
+  const auto salu = build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto valu = build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto gfx1250_salu = build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_GFX1250);
+  const auto gfx1250_valu = build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(salu);
+  ASSERT_TRUE(valu);
+  ASSERT_TRUE(gfx1250_salu);
+  ASSERT_TRUE(gfx1250_valu);
+  EXPECT_EQ(*salu, 0xbf88ff9eu);
+  // va_sdst=0 with every other depctr field at its no-wait maximum.
+  EXPECT_EQ(*valu, 0xbf88f19fu);
+  EXPECT_EQ(*gfx1250_salu, 0xbf88ff9eu);
+  EXPECT_EQ(*gfx1250_valu, 0xbf88f19fu);
+  EXPECT_FALSE(build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_CDNA4));
+}
+
 TEST(InstructionBuilder, BuildVLshrrevB32E32) {
   const auto word = build_v_lshrrev_b32_e32(/*vdst=*/10, scalar_positive_inline_u32(2),
                                             /*vsrc1=*/3, ROCJITSU_CODE_ARCH_RDNA4);

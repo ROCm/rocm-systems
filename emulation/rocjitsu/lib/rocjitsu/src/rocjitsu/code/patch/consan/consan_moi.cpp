@@ -423,6 +423,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.resolved_moi_transient_sgpr_assignments.clear();
   result.resolved_moi_owner_sgpr.reset();
   result.resolved_moi_dispatch_id_sgpr.reset();
+  result.resolved_moi_dispatch_id_vgpr.reset();
   result.moi_report_dispatch_id = effective_options.moi_report_dispatch_id;
   result.moi_persistent_vgprs_automatic = false;
   result.moi_persistent_sgprs_automatic = false;
@@ -430,6 +431,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.moi_exec_save_sgprs_automatic = false;
   result.moi_owner_sgpr_automatic = false;
   result.moi_dispatch_id_sgprs_automatic = false;
+  result.moi_dispatch_id_vgprs_automatic = false;
   result.modified = false;
   result.final_validation_passed = false;
   result.elf_bytes.clear();
@@ -633,7 +635,31 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   // fresh registers and make dispatch identity spuriously impossible.
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
-  if (configure_automatic_moi_exec_save_sgprs(effective_options, result, resource_planning_state))
+  const ConSanOptions exec_planning_base = effective_options;
+  const std::optional<uint16_t> resolved_exec_before = result.resolved_moi_exec_save_sgpr;
+  const std::vector<ConSanMoiTransientSgprAssignment> resolved_transient_before =
+      result.resolved_moi_transient_sgpr_assignments;
+  const bool automatic_exec_before = result.moi_exec_save_sgprs_automatic;
+  const size_t warnings_before_exec_planning = result.warnings.size();
+  bool exec_planning_changed =
+      configure_automatic_moi_exec_save_sgprs(effective_options, result, resource_planning_state);
+  if (!effective_options.moi_dynamic_stack_spill &&
+      automatic_moi_scalar_spill_needs_dynamic_stack_planning(effective_options, result)) {
+    // Scalar spilling is selected only after the first transient-window
+    // search. Re-run that search with the dynamic frame ABI visible so its
+    // stack registers, scalar width, and any architecture-specific scratch
+    // demand participate in the same resource proof.
+    effective_options = exec_planning_base;
+    effective_options.moi_dynamic_stack_spill = true;
+    result.resolved_moi_exec_save_sgpr = resolved_exec_before;
+    result.resolved_moi_transient_sgpr_assignments = resolved_transient_before;
+    result.moi_exec_save_sgprs_automatic = automatic_exec_before;
+    result.warnings.resize(warnings_before_exec_planning);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+    exec_planning_changed =
+        configure_automatic_moi_exec_save_sgprs(effective_options, result, resource_planning_state);
+  }
+  if (exec_planning_changed)
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (configure_gfx1250_record_replay_dispatch_id_overrides(effective_options, result,
                                                             resource_planning_state))
@@ -653,7 +679,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     append_moi_sync_site_dispositions(effective_options, result);
   if (configure_automatic_moi_persistent_vgprs(effective_options, result, code_object_bytes, arch))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
-  if (result.outcome == ConSanTransformOutcome::Unsupported) {
+  if (result.outcome == ConSanTransformOutcome::Unsupported ||
+      !validate_moi_dispatch_id_vgprs(effective_options, result)) {
     finalize_moi_site_lowering_outcomes(result);
     summarize_moi_resource_plans(result);
     return result;
@@ -711,6 +738,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     result.resolved_moi_owner_sgpr = effective_options.moi_owner_sgpr;
   if (!result.resolved_moi_dispatch_id_sgpr)
     result.resolved_moi_dispatch_id_sgpr = effective_options.moi_dispatch_id_sgpr;
+  if (!result.resolved_moi_dispatch_id_vgpr)
+    result.resolved_moi_dispatch_id_vgpr = effective_options.moi_dispatch_id_vgpr;
   if (effective_options.moi_engine != ConSanMoiEngine::Sampled)
     append_moi_sync_site_dispositions(effective_options, result);
   if (effective_options.moi_report_buffer_address &&
@@ -768,6 +797,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     effective_options.moi_epoch_vgpr.reset();
     effective_options.moi_record_replay_workgroup_vgprs = {};
     effective_options.moi_record_replay_workgroup_sgprs = {};
+    effective_options.moi_dispatch_id_vgpr.reset();
     effective_options.moi_persistent_vgpr_assignments.clear();
     result.warnings.emplace_back(
         "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "

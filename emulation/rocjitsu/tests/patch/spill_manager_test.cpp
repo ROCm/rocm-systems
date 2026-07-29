@@ -734,6 +734,14 @@ TEST(SpillManager, BootstrapsDynamicStackSpillFromBorrowedScalarPair) {
     ASSERT_TRUE(sequence);
     EXPECT_EQ(sequence->dynamic_frame_bytes, 20u);
     EXPECT_EQ(sequence->total_private_bytes, 36u);
+    EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0u, 4u, 8u, 12u, 16u}));
+    const VgprSpillSequence projected = sequence->as_vgpr_spill_sequence();
+    EXPECT_TRUE(projected.uses_dynamic_stack_frame);
+    EXPECT_EQ(projected.dynamic_frame_base_sgpr, kDynamicFrameBaseSgpr);
+    EXPECT_EQ(projected.dynamic_frame_bytes, sequence->dynamic_frame_bytes);
+    EXPECT_EQ(projected.slot_offsets, sequence->slot_offsets);
+    EXPECT_EQ(projected.save_words, sequence->save_words);
+    EXPECT_EQ(projected.restore_words, sequence->restore_words);
     ASSERT_EQ(sequence->save_words.size(), 25u);
     ASSERT_EQ(sequence->restore_words.size(), 22u);
     EXPECT_EQ(sequence->save_words.front(), *build_s_wait_loadcnt0(arch));
@@ -762,6 +770,22 @@ TEST(SpillManager, BootstrapsDynamicStackSpillFromBorrowedScalarPair) {
     EXPECT_EQ(sequence->restore_words[4], *build_v_readfirstlane_b32(/*s2=*/2u, /*v4=*/4u, arch));
     EXPECT_EQ(sequence->restore_words[5], *build_v_readfirstlane_b32(/*s3=*/3u, /*v5=*/5u, arch));
     EXPECT_EQ(sequence->restore_words.back(), *build_s_wait_loadcnt0(arch));
+
+    constexpr uint32_t kVgprFrameBytes = 5u * SpillManager::kSlotBytes;
+    constexpr uint32_t kSgprFrameBytes = 2u * SpillManager::kSlotBytes;
+    const auto composed = build_dynamic_stack_borrowed_sgpr_spill_sequence(
+        /*vgpr_base=*/3u, /*vgpr_count=*/5u, /*borrowed_sgpr_base=*/2u,
+        /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/16u, arch, kSgprFrameBytes);
+    ASSERT_TRUE(composed);
+    EXPECT_EQ(composed->dynamic_frame_bytes, kVgprFrameBytes + kSgprFrameBytes);
+    EXPECT_EQ(composed->total_private_bytes, 16u + kVgprFrameBytes + kSgprFrameBytes);
+    EXPECT_EQ(composed->save_words.back(), kVgprFrameBytes + kSgprFrameBytes);
+    const VgprSpillSequence composed_frame = composed->as_vgpr_spill_sequence();
+    const auto scalar = build_dynamic_stack_sgpr_spill_sequence(
+        /*sgpr_base=*/40u, /*sgpr_count=*/2u, /*transfer_vgpr=*/3u, composed_frame, kVgprFrameBytes,
+        arch);
+    ASSERT_TRUE(scalar);
+    EXPECT_EQ(scalar->total_private_bytes, composed->total_private_bytes);
   }
 
   EXPECT_FALSE(build_dynamic_stack_borrowed_sgpr_spill_sequence(
@@ -775,6 +799,10 @@ TEST(SpillManager, BootstrapsDynamicStackSpillFromBorrowedScalarPair) {
   EXPECT_FALSE(build_dynamic_stack_borrowed_sgpr_spill_sequence(
       /*vgpr_base=*/3u, /*vgpr_count=*/5u, /*borrowed_sgpr_base=*/2u,
       /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_dynamic_stack_borrowed_sgpr_spill_sequence(
+      /*vgpr_base=*/3u, /*vgpr_count=*/5u, /*borrowed_sgpr_base=*/2u,
+      /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_GFX1250,
+      /*additional_frame_bytes=*/2u));
 }
 
 TEST(SpillManager, BuildsCdna4SccPreservingDynamicStackVgprFrame) {
