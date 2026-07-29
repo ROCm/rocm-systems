@@ -2295,6 +2295,30 @@ class CodeGenerator:
                         f'{{ {implicit_uses_impl} }}'
                     )
                 )
+            # Only profiles with MODE-controlled VGPR high-bank bits (gfx1250)
+            # have a consumer: InstDefUse calls this hook exclusively on the
+            # vgpr_msb != nullptr path. Emitting it elsewhere would add dead
+            # overrides -- generated lines, compile time and vtable slots -- to
+            # every other architecture, so leave the base-class no-op in place.
+            implicit_use_operands_impl = (
+                self._encoding_implicit_use_operands_impl(inst_enc, enc_field_names)
+                if self.isa_spec.profile.uses_vgpr_msb_indexing
+                else ''
+            )
+            if implicit_use_operands_impl:
+                public_members.append(
+                    cgen.Line(
+                        'void implicit_use_operands('
+                        'std::vector<const ::rocjitsu::Operand *> &operands) const override;'
+                    )
+                )
+                class_func_impls.append(
+                    cgen.Line(
+                        f'void {fmt_enc_name}::implicit_use_operands'
+                        f'(std::vector<const ::rocjitsu::Operand *> &operands) const '
+                        f'{{ {implicit_use_operands_impl} }}'
+                    )
+                )
 
             if fmt_enc_name not in cond_emitted:
                 cond_emitted.add(fmt_enc_name)
@@ -2565,38 +2589,72 @@ class CodeGenerator:
         # VOP3_SDST_ENC on gfx11+ (gated -- GCN/CDNA lack the dpp_* fields).
         # VOPC/VOPCX stay omitted: their result lands in VCC/EXEC, which liveness
         # does not track (see liveness.h).
+        return self._encoding_preserved_dst_body(
+            inst_enc, enc_field_names, 'uses.expand(*ref);'
+        )
+
+    def _encoding_implicit_use_operands_impl(
+        self, inst_enc: InstEncoding, enc_field_names: set[str]
+    ) -> str:
+        """Return C++ body for operand-backed hidden uses on an encoding base.
+
+        Mirrors the operand-backed reads of _encoding_implicit_uses_impl (the
+        SDWA/DPP preserved destination), but appends the source Operand pointers
+        so a caller can resolve each with its own VGPR-MSB role and width. The
+        FLAT/GLOBAL saddr case is intentionally omitted: it reads an encoded
+        field with no backing Operand, so it stays exclusive to implicit_uses().
+        """
+        return self._encoding_preserved_dst_body(
+            inst_enc, enc_field_names, 'operands.push_back(dst);'
+        )
+
+    def _encoding_preserved_dst_body(
+        self, inst_enc: InstEncoding, enc_field_names: set[str], emit: str
+    ) -> str:
+        """Return the SDWA/DPP preserved-destination body, or '' if not applicable.
+
+        SINGLE SOURCE OF TRUTH for both implicit_uses() and
+        implicit_use_operands(): the two hooks must agree on exactly which
+        encodings preserve their destination, and differ only in how they report
+        it (`emit`). This is load-bearing rather than cosmetic -- on gfx1250,
+        InstDefUse clears the VGPR class from the flat implicit_uses() result and
+        takes banked VGPR reads solely from implicit_use_operands(), so an
+        encoding covered by one predicate but not the other would silently vanish
+        from liveness instead of failing a build. Keeping one predicate makes that
+        drift impossible to express.
+        """
         enc = inst_enc.enc_name.upper()
         has_sdwa = enc in ('ENC_VOP1', 'ENC_VOP2')
         has_dpp = enc in ('ENC_VOP1', 'ENC_VOP2') or (
             enc in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
             and self._supports_vop_dpp_encoding(enc)
         )
-        if (has_sdwa or has_dpp) and 'vdst' in enc_field_names:
-            decls = ''
-            guards = []
-            if has_sdwa:
-                decls += (
-                    'bool sdwa_preserve = sdwa_dst_sel_ != amdgpu::sdwa::DWORD && '
-                    'sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE; '
-                )
-                guards.append('sdwa_preserve')
-            if has_dpp:
-                decls += (
-                    'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
-                    '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
-                    '(dpp_bound_ctrl_ == 0 && '
-                    'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
-                )
-                guards.append('dpp_partial')
-            return (
-                decls + f'if ({" || ".join(guards)}) '
-                'for (int i = 0; i < num_dst_operands(); ++i) '
-                'if (const auto *dst = dst_operand(i)) '
-                'if (auto ref = dst->to_register_ref()) '
-                'if (ref->cls == RegClass::VGPR) '
-                'uses.expand(*ref);'
+        if not (has_sdwa or has_dpp) or 'vdst' not in enc_field_names:
+            return ''
+        decls = ''
+        guards = []
+        if has_sdwa:
+            decls += (
+                'bool sdwa_preserve = sdwa_dst_sel_ != amdgpu::sdwa::DWORD && '
+                'sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE; '
             )
-        return ''
+            guards.append('sdwa_preserve')
+        if has_dpp:
+            decls += (
+                'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
+                '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
+                '(dpp_bound_ctrl_ == 0 && '
+                'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
+            )
+            guards.append('dpp_partial')
+        return (
+            decls + f'if ({" || ".join(guards)}) '
+            'for (int i = 0; i < num_dst_operands(); ++i) '
+            'if (const auto *dst = dst_operand(i)) '
+            'if (auto ref = dst->to_register_ref()) '
+            'if (ref->cls == RegClass::VGPR) '
+            f'{emit}'
+        )
 
     def _saddr_null_expr(self, enc_name: str) -> str:
         """Return the profile-defined NULL-SADDR selector for an encoding."""
@@ -6851,6 +6909,16 @@ class CodeGenerator:
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
+                        # Gated with the definition below: only gfx1250 has a
+                        # consumer for the operand-backed hook.
+                        if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                            public_members.append(
+                                cgen.Statement(
+                                    'void implicit_use_operands('
+                                    'std::vector<const ::rocjitsu::Operand *> &operands) const '
+                                    'override'
+                                )
+                            )
                     if gfx1250_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
@@ -7965,6 +8033,29 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
+                        # Operand-backed twin of implicit_uses: report each partial
+                        # def as a preserved-read Operand so a caller can resolve it
+                        # with its own VGPR-MSB role and width (see
+                        # Instruction::implicit_use_operands). Gated to profiles
+                        # with VGPR-MSB banking -- InstDefUse only consults this
+                        # hook when vgpr_msb != nullptr, so on every other
+                        # architecture the override would be dead weight.
+                        if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                            _pd_operands_body = ''.join(
+                                f'  if ({name}.to_register_ref())\n'
+                                f'    operands.push_back(&{name});\n'
+                                for name in _partial_def_outputs
+                            )
+                            inst_impls.append(
+                                cgen.Line(
+                                    f'void {inst.fmt_name}::implicit_use_operands'
+                                    f'(std::vector<const ::rocjitsu::Operand *> &operands) '
+                                    f'const {{\n'
+                                    f'  {inst.fmt_true_enc_name}::implicit_use_operands(operands);\n'
+                                    f'{_pd_operands_body}'
+                                    f'}}'
+                                )
+                            )
                     execution_impls = [exec_impl]
                     if not profile.split_execution_sources:
                         inst_impls.extend(execution_impls)
