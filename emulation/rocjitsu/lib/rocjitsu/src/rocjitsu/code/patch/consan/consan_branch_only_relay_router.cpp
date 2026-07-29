@@ -116,12 +116,42 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
     return batch;
   }
 
+  const auto route_reaches_exact_target = [](uint64_t source, std::span<const uint64_t> relays,
+                                             uint64_t target, bool forward) {
+    uint64_t cursor = source;
+    for (uint64_t hop : relays) {
+      if ((forward ? hop <= cursor : hop >= cursor) || !compute_sopp_branch_simm16(cursor, hop)) {
+        return false;
+      }
+      cursor = hop;
+    }
+    return (forward ? target > cursor : target < cursor) &&
+           compute_sopp_branch_simm16(cursor, target).has_value();
+  };
+
   std::unordered_set<uint64_t> entry_relays;
+  std::vector<bool> entry_assigned(requests.size(), false);
+  std::unordered_map<uint64_t, size_t> entry_owner_by_target;
+  entry_owner_by_target.reserve(requests.size());
+  for (size_t index = 0; index < requests.size(); ++index)
+    entry_owner_by_target.emplace(requests[index].entry_target, index);
   for (const SoppBranchRelayRoute &route : entry_plan->routes) {
-    if (route.source_index >= batch.routes.size())
+    const auto owner = entry_owner_by_target.find(route.island_offset);
+    if (owner == entry_owner_by_target.end())
       continue;
-    batch.routes[route.source_index].entry_relay_offsets = route.relay_offsets;
+    const size_t request_index = owner->second;
+    if (!route_reaches_exact_target(requests[request_index].entry_source, route.relay_offsets,
+                                    route.island_offset, /*forward=*/true)) {
+      continue;
+    }
+    batch.routes[request_index].entry_relay_offsets = route.relay_offsets;
+    entry_assigned[request_index] = true;
     entry_relays.insert(route.relay_offsets.begin(), route.relay_offsets.end());
+  }
+  std::unordered_set<size_t> rejected_entry_indices;
+  for (size_t index = 0; index < entry_assigned.size(); ++index) {
+    if (!entry_assigned[index])
+      rejected_entry_indices.insert(index);
   }
   std::erase_if(relay_offsets, [&](uint64_t offset) { return entry_relays.contains(offset); });
 
@@ -142,23 +172,40 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
     return batch;
   }
 
+  std::vector<bool> return_assigned(requests.size(), false);
+  std::unordered_map<uint64_t, size_t> return_owner_by_target;
+  return_owner_by_target.reserve(requests.size());
+  for (size_t index = 0; index < requests.size(); ++index)
+    return_owner_by_target.emplace(requests[index].return_target, index);
   for (const SoppBranchRelayRoute &route : return_plan->routes) {
-    if (route.source_index < batch.routes.size())
-      batch.routes[route.source_index].return_relay_offsets = route.relay_offsets;
+    const auto owner = return_owner_by_target.find(route.island_offset);
+    if (owner == return_owner_by_target.end())
+      continue;
+    const size_t request_index = owner->second;
+    if (!route_reaches_exact_target(requests[request_index].return_source, route.relay_offsets,
+                                    route.island_offset, /*forward=*/false)) {
+      continue;
+    }
+    batch.routes[request_index].return_relay_offsets = route.relay_offsets;
+    return_assigned[request_index] = true;
   }
-  std::unordered_set<size_t> rejected(entry_plan->rejected_source_indices.begin(),
-                                      entry_plan->rejected_source_indices.end());
-  rejected.insert(return_plan->rejected_source_indices.begin(),
-                  return_plan->rejected_source_indices.end());
+  std::unordered_set<size_t> rejected_return_indices;
+  for (size_t index = 0; index < return_assigned.size(); ++index) {
+    if (!return_assigned[index])
+      rejected_return_indices.insert(index);
+  }
+  std::unordered_set<size_t> rejected(rejected_entry_indices.begin(), rejected_entry_indices.end());
+  rejected.insert(rejected_return_indices.begin(), rejected_return_indices.end());
   batch.rejected_pair_indices.assign(rejected.begin(), rejected.end());
   std::ranges::sort(batch.rejected_pair_indices);
   if (!batch.rejected_pair_indices.empty()) {
-    batch.failure = !entry_plan->rejected_source_indices.empty()
-                        ? BranchOnlyRelayPlanFailure::EntryRoute
-                        : BranchOnlyRelayPlanFailure::ReturnRoute;
-    report(error_out, batch.failure == BranchOnlyRelayPlanFailure::EntryRoute
-                          ? "branch-only router could not reach every appended entry"
-                          : "branch-only router could not reach every original continuation");
+    batch.failure = !rejected_entry_indices.empty() ? BranchOnlyRelayPlanFailure::EntryRoute
+                                                    : BranchOnlyRelayPlanFailure::ReturnRoute;
+    if (error_out == nullptr || error_out->empty()) {
+      report(error_out, batch.failure == BranchOnlyRelayPlanFailure::EntryRoute
+                            ? "branch-only router could not reach every appended entry"
+                            : "branch-only router could not reach every original continuation");
+    }
   }
 
   for (BranchOnlyRelayRoute &route : batch.routes) {
@@ -343,6 +390,12 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
 
   size_t offered_relay_count = 0u;
   for (const Candidate &candidate : candidates) {
+    const uint64_t first_relay = candidate.offset + sizeof(uint32_t);
+    const uint64_t candidate_end = candidate.offset + candidate.words.size() * sizeof(uint32_t);
+    const auto first_existing = relays_.lower_bound(first_relay);
+    if (first_existing != relays_.end() && first_existing->first < candidate_end)
+      continue;
+
     DbiPatchPlacementPlanner tentative_planner = placement_planner;
     DbiPatchPlacementRequest request;
     request.anchor_offset = candidate.offset;
@@ -362,10 +415,12 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
     const size_t reservoir_index = reservoirs.reservoirs.size();
     for (uint64_t word = 1u; word < candidate.words.size(); ++word) {
       const uint64_t relay = candidate.offset + word * sizeof(uint32_t);
-      if (offer(relay, BranchOnlyRelayProvenance::OwnedReservoir)) {
-        reservoirs.reservoir_by_relay.emplace(relay, reservoir_index);
-        ++offered_relay_count;
+      if (!offer(relay, BranchOnlyRelayProvenance::OwnedReservoir)) {
+        report(error_out, "branch-only router could not atomically adopt a direct reservoir");
+        return false;
       }
+      reservoirs.reservoir_by_relay.emplace(relay, reservoir_index);
+      ++offered_relay_count;
     }
     reservoirs.reservoirs.push_back(std::move(reservoir));
     placement_planner = std::move(tentative_planner);
@@ -428,17 +483,27 @@ bool BranchOnlyRelayRouter::emit_direct_reservoir(std::vector<uint8_t> &text,
       reservoir.placement.original_size != original_size ||
       reservoir.placement.body_size != original_size ||
       reservoir.placement.return_branch_offset != reservoir.placement.body_offset + original_size ||
-      reservoir.placement.return_target != reservoir.anchor_offset + original_size ||
-      text.size() != reservoir.placement.body_offset) {
+      reservoir.placement.return_target != reservoir.anchor_offset + original_size) {
     report(error_out, "branch-only router found invalid direct-reservoir geometry");
     return false;
   }
+  if (reservoir.placement.return_branch_offset >
+      std::numeric_limits<uint64_t>::max() - sizeof(uint32_t)) {
+    report(error_out, "branch-only router direct reservoir exceeds host address space");
+    return false;
+  }
+  const uint64_t emitted_end = reservoir.placement.return_branch_offset + sizeof(uint32_t);
+  if (emitted_end > std::numeric_limits<size_t>::max()) {
+    report(error_out, "branch-only router direct reservoir exceeds host address space");
+    return false;
+  }
+  if (text.size() < emitted_end)
+    text.resize(static_cast<size_t>(emitted_end));
   if (!reservoir.used) {
     const uint32_t nop = build_s_nop(0, arch);
-    for (size_t word = 0; word < reservoir.original_words.size() + 1u; ++word) {
-      const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&nop);
-      text.insert(text.end(), bytes, bytes + sizeof(nop));
-    }
+    for (uint64_t offset = reservoir.placement.body_offset; offset < emitted_end;
+         offset += sizeof(uint32_t))
+      std::memcpy(text.data() + offset, &nop, sizeof(nop));
     return true;
   }
 
@@ -460,10 +525,10 @@ bool BranchOnlyRelayRouter::emit_direct_reservoir(std::vector<uint8_t> &text,
 
   const uint8_t *original_begin =
       reinterpret_cast<const uint8_t *>(reservoir.original_words.data());
-  text.insert(text.end(), original_begin, original_begin + original_size);
+  std::memcpy(text.data() + reservoir.placement.body_offset, original_begin, original_size);
   const uint32_t return_branch = build_s_branch(*return_delta, arch);
-  const uint8_t *return_begin = reinterpret_cast<const uint8_t *>(&return_branch);
-  text.insert(text.end(), return_begin, return_begin + sizeof(return_branch));
+  std::memcpy(text.data() + reservoir.placement.return_branch_offset, &return_branch,
+              sizeof(return_branch));
 
   ConSanPatchInfo info;
   info.kind = ConSanPatchKind::TrampolineBranchRelayReservoir;

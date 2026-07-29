@@ -1,5 +1,30 @@
 namespace {
 
+enum class BranchRelayReservoirShape : uint8_t {
+  GeneratedBank,
+  DirectInstruction,
+  IndirectInstruction,
+  Invalid,
+};
+
+[[nodiscard]] BranchRelayReservoirShape branch_relay_reservoir_shape(const ConSanPatchInfo &patch) {
+  if (patch.kind != ConSanPatchKind::TrampolineBranchRelayReservoir)
+    return BranchRelayReservoirShape::Invalid;
+  const uint32_t indirect_field_count =
+      static_cast<uint32_t>(patch.indirect_pc_sgpr.has_value()) +
+      static_cast<uint32_t>(patch.indirect_saved_vcc_sgpr.has_value()) +
+      static_cast<uint32_t>(patch.indirect_return_pc_sgpr.has_value()) +
+      static_cast<uint32_t>(patch.indirect_return_saved_vcc_sgpr.has_value());
+  if (patch.original_size == 0u)
+    return indirect_field_count == 0u ? BranchRelayReservoirShape::GeneratedBank
+                                      : BranchRelayReservoirShape::Invalid;
+  if (indirect_field_count == 0u)
+    return BranchRelayReservoirShape::DirectInstruction;
+  if (indirect_field_count == 4u)
+    return BranchRelayReservoirShape::IndirectInstruction;
+  return BranchRelayReservoirShape::Invalid;
+}
+
 struct UnmatchedBarrierWait {
   const ConSanBarrierSite *site = nullptr;
   std::optional<uint64_t> owner_descriptor_file_offset;
@@ -594,18 +619,25 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
       }
     }
     if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir) {
-      if (patch.original_size == 0) {
+      switch (branch_relay_reservoir_shape(patch)) {
+      case BranchRelayReservoirShape::GeneratedBank:
         for (uint64_t offset = patch.trampoline_offset;
              offset < patch.trampoline_offset + patch.trampoline_size; offset += sizeof(uint32_t))
           owned_relay_slots.insert(offset);
-      } else if (!patch.indirect_pc_sgpr) {
+        break;
+      case BranchRelayReservoirShape::DirectInstruction:
         for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
              offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
           owned_relay_slots.insert(offset);
-      } else {
+        break;
+      case BranchRelayReservoirShape::IndirectInstruction: {
         const auto slots =
             sc_relay_reservoir_all_slot_offsets(patch.anchor_offset, patch.original_size);
         owned_relay_slots.insert(slots.begin(), slots.end());
+        break;
+      }
+      case BranchRelayReservoirShape::Invalid:
+        break;
       }
     }
     if (patch.kind == ConSanPatchKind::TrampolineNopBranchRelay) {
@@ -970,20 +1002,24 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineBranchRelayReservoir)
       continue;
-    if (patch.original_size == 0) {
+    switch (branch_relay_reservoir_shape(patch)) {
+    case BranchRelayReservoirShape::GeneratedBank:
       for (uint64_t offset = patch.trampoline_offset;
            offset < patch.trampoline_offset + patch.trampoline_size; offset += sizeof(uint32_t))
         relay_vertices.insert(offset);
-      continue;
-    }
-    if (!patch.indirect_pc_sgpr) {
+      break;
+    case BranchRelayReservoirShape::DirectInstruction:
       for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
            offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
         relay_vertices.insert(offset);
-    } else {
+      break;
+    case BranchRelayReservoirShape::IndirectInstruction:
       for (uint64_t offset :
            sc_relay_reservoir_slot_offsets(patch.anchor_offset, patch.original_size))
         relay_vertices.insert(offset);
+      break;
+    case BranchRelayReservoirShape::Invalid:
+      break;
     }
   }
   const auto valid_relay_payload = [&](uint64_t offset) {
@@ -1226,18 +1262,24 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
           relay_vertices.insert(offset);
     }
     if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir) {
-      if (patch.original_size == 0) {
+      switch (branch_relay_reservoir_shape(patch)) {
+      case BranchRelayReservoirShape::GeneratedBank:
         for (uint64_t offset = patch.trampoline_offset;
              offset < patch.trampoline_offset + patch.trampoline_size; offset += sizeof(uint32_t))
           relay_vertices.insert(offset);
-      } else if (!patch.indirect_pc_sgpr) {
+        break;
+      case BranchRelayReservoirShape::DirectInstruction:
         for (uint64_t offset = patch.anchor_offset + sizeof(uint32_t);
              offset < patch.anchor_offset + patch.original_size; offset += sizeof(uint32_t))
           relay_vertices.insert(offset);
-      } else {
+        break;
+      case BranchRelayReservoirShape::IndirectInstruction:
         for (uint64_t offset :
              sc_relay_reservoir_all_slot_offsets(patch.anchor_offset, patch.original_size))
           relay_vertices.insert(offset);
+        break;
+      case BranchRelayReservoirShape::Invalid:
+        break;
       }
     }
     if (patch.branch_only_continuation) {
@@ -1270,7 +1312,8 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
   };
 
   for (const ConSanPatchInfo *patch : reservoirs) {
-    if (patch->original_size == 0) {
+    const BranchRelayReservoirShape shape = branch_relay_reservoir_shape(*patch);
+    if (shape == BranchRelayReservoirShape::GeneratedBank) {
       if (patch->phase != ConSanPatchPhase::Instrumentation || patch->trampoline_size == 0 ||
           patch->trampoline_size % sizeof(uint32_t) != 0 ||
           patch->trampoline_offset > replacement_text.size() ||
@@ -1311,14 +1354,12 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
       }
       continue;
     }
-    const bool direct_reservoir =
-        !patch->indirect_pc_sgpr && !patch->indirect_saved_vcc_sgpr &&
-        !patch->indirect_return_pc_sgpr && !patch->indirect_return_saved_vcc_sgpr;
     const bool valid_direct_geometry =
-        direct_reservoir && patch->original_size >= 2u * sizeof(uint32_t) &&
+        shape == BranchRelayReservoirShape::DirectInstruction &&
+        patch->original_size >= 2u * sizeof(uint32_t) &&
         patch->trampoline_size == patch->original_size + sizeof(uint32_t);
     const bool valid_indirect_geometry =
-        !direct_reservoir &&
+        shape == BranchRelayReservoirShape::IndirectInstruction &&
         patch->original_size >=
             (kScRelayEntryWords + kScRelayTailRestoreWords + 1u) * sizeof(uint32_t) &&
         patch->trampoline_size ==
@@ -1365,8 +1406,8 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
           break;
         inside = true;
         if (instruction.src_loc() != cursor || clause_remaining != 0 ||
-            !is_consan_branch_relay_reservoir_instruction(
-                instruction, instruction.src_loc(), original_text, arch)) {
+            !is_consan_branch_relay_reservoir_instruction(instruction, instruction.src_loc(),
+                                                          original_text, arch)) {
           valid = false;
           break;
         }
@@ -1385,21 +1426,19 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
           "ConSan relay reservoir proof rejected its pristine straight-line sequence");
       return errors;
     }
-    if (direct_reservoir) {
+    if (shape == BranchRelayReservoirShape::DirectInstruction) {
       const auto entry_delta =
           compute_sopp_branch_simm16(patch->anchor_offset, patch->trampoline_offset);
       const uint64_t return_source = patch->trampoline_offset + patch->original_size;
       const uint64_t return_target = patch->anchor_offset + patch->original_size;
       const auto return_delta = compute_sopp_branch_simm16(return_source, return_target);
       if (!entry_delta || !return_delta ||
-          read_word(replacement_text, patch->anchor_offset) !=
-              build_s_branch(*entry_delta, arch) ||
+          read_word(replacement_text, patch->anchor_offset) != build_s_branch(*entry_delta, arch) ||
           !std::ranges::equal(
               original_text.subspan(patch->anchor_offset, patch->original_size),
               replacement_text.subspan(patch->trampoline_offset, patch->original_size)) ||
           read_word(replacement_text, return_source) != build_s_branch(*return_delta, arch)) {
-        errors.emplace_back(
-            "ConSan relay reservoir proof found a corrupted direct execution path");
+        errors.emplace_back("ConSan relay reservoir proof found a corrupted direct execution path");
         return errors;
       }
       bool has_used_payload = false;
@@ -1427,10 +1466,9 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
         has_used_payload = true;
       }
       if (!has_used_payload) {
-        errors.emplace_back(
-            "ConSan relay reservoir proof found an unused reservoir (direct) at " +
-            std::to_string(patch->anchor_offset) + " with " +
-            std::to_string(patch->original_size) + " bytes");
+        errors.emplace_back("ConSan relay reservoir proof found an unused reservoir (direct) at " +
+                            std::to_string(patch->anchor_offset) + " with " +
+                            std::to_string(patch->original_size) + " bytes");
         return errors;
       }
       continue;

@@ -446,8 +446,10 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   }
   words.push_back(*claimed);
   words.push_back(*narrow_claimed);
-  if (!sequence.emit_branch(existing_label, InstructionSequence::BranchKind::SccZero))
+  if (!sequence.emit_branch(existing_label, InstructionSequence::BranchKind::SccZero)) {
+    errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata branch");
     return std::nullopt;
+  }
 
   const auto increment = instrumentation::build_v_add_u32(next_epoch, scalar_positive_inline_u32(1),
                                                           *options.moi_epoch_vgpr, arch);
@@ -520,14 +522,16 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   // path must implement the same contract instead of treating every failed
   // empty-slot claim as lost coverage. A different or partially published
   // record remains a collision.
-  if (!sequence.bind(existing_label))
+  if (!sequence.bind(existing_label)) {
+    errors.emplace_back("ConSan MOI sampled barrier failed to bind existing metadata");
     return std::nullopt;
+  }
   const auto restore_existing_exec =
       instrumentation::build_s_mov_b64(kRdna4ExecLo, temporary_exec, arch);
-  const auto existing_descriptor = instrumentation::build_v_mov_b32_literal(
-      expected, encoded.packed.descriptor, arch);
-  const auto descriptor_equal = instrumentation::build_v_cmp_eq_u32_vcc(
-      vector_source_vgpr(expected), value, arch);
+  const auto existing_descriptor =
+      instrumentation::build_v_mov_b32_literal(expected, encoded.packed.descriptor, arch);
+  const auto descriptor_equal =
+      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
   if (!restore_existing_exec || !existing_descriptor || !descriptor_equal) {
     errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata descriptor");
     return std::nullopt;
@@ -547,8 +551,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   const auto require_existing_vgpr = [&](uint32_t offset, uint16_t expected_vgpr) -> bool {
     if (!record.load(offset, value))
       return false;
-    const auto equal = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(expected_vgpr), value, arch);
+    const auto equal =
+        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected_vgpr), value, arch);
     return equal && sequence.emit(equal) &&
            sequence.emit_branch(collision_label, InstructionSequence::BranchKind::VccZero);
   };

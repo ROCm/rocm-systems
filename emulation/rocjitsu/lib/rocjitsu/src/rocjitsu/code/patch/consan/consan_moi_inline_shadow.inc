@@ -520,9 +520,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     for (const ConSanMoiCandidate *candidate : candidates) {
       if (dense_entry_islands.contains(candidate))
         continue;
-      const uint64_t slice_begin =
-          access_island_begin + candidate_indices.at(candidate) * access_relay_words *
-                                    sizeof(uint32_t);
+      const uint64_t slice_begin = access_island_begin + candidate_indices.at(candidate) *
+                                                             access_relay_words * sizeof(uint32_t);
       for (uint64_t word = kIndirectIslandWords; word < access_relay_words; ++word) {
         (void)branch_router.offer(slice_begin + word * sizeof(uint32_t),
                                   BranchOnlyRelayProvenance::GeneratedBank);
@@ -533,8 +532,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   if (has_branch_only_dynamic_assignment && use_indirect_appended && !original_text.empty()) {
     std::vector<std::pair<uint64_t, uint64_t>> protected_ranges = synchronization_ranges;
     protected_ranges.reserve(protected_ranges.size() + candidates.size() + result.kernels.size() +
-                             options.preapplied_reserved_ranges.size() +
-                             dense_entry_hosts.size());
+                             options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
     for (const ConSanMoiCandidate *candidate : candidates)
       protected_ranges.emplace_back(candidate->text_offset,
                                     candidate->text_offset + candidate->size);
@@ -548,8 +546,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     for (const auto &[dispatcher, host] : dense_entry_hosts) {
       (void)dispatcher;
       protected_ranges.emplace_back(
-          host.host_offset,
-          host.host_offset + host.displaced_words.size() * sizeof(uint32_t));
+          host.host_offset, host.host_offset + host.displaced_words.size() * sizeof(uint32_t));
     }
     const uint64_t latest_source =
         std::ranges::max(candidates, {}, &ConSanMoiCandidate::text_offset)->text_offset;
@@ -563,8 +560,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::string relay_error;
     if (!branch_router.plan_direct_reservoirs(
             reservoir_blocks, original_text, protected_ranges, arch, route_midpoint,
-            2u * candidates.size(), placement_planner, direct_branch_reservoirs,
-            &relay_error)) {
+            2u * candidates.size(), placement_planner, direct_branch_reservoirs, &relay_error)) {
       result.errors.emplace_back("ConSan MOI inline-shadow probe " + relay_error);
       return;
     }
@@ -579,6 +575,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                 uint32_t original_size) {
     if (original_size <= sizeof(uint32_t))
       return;
+    branch_router.retire_range(candidate.text_offset, original_size);
     for (uint64_t offset = candidate.text_offset + sizeof(uint32_t);
          offset < candidate.text_offset + original_size; offset += sizeof(uint32_t)) {
       if (selected_inline_anchor_relay_offsets.insert(offset).second)
@@ -922,12 +919,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           entry_relay_offsets = branch_only_route->entry_relay_offsets;
           return_relay_offsets = branch_only_route->return_relay_offsets;
           for (const BranchOnlyRelayClaim &claim : branch_only_route->claims) {
-            if (local_entry_islands &&
-                claim.provenance == BranchOnlyRelayProvenance::PristineNop)
+            if (local_entry_islands && claim.provenance == BranchOnlyRelayProvenance::PristineNop)
               local_entry_islands->reserve(claim.offset, 1u);
           }
-          if (!direct_branch_reservoirs.mark_claims_used(branch_only_route->claims,
-                                                         &relay_error)) {
+          if (!direct_branch_reservoirs.mark_claims_used(branch_only_route->claims, &relay_error)) {
             result.errors.emplace_back("ConSan MOI inline-shadow probe " + relay_error);
             return;
           }
@@ -1185,8 +1180,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
     std::vector<ConSanPatchInfo> patches;
     patches.reserve(planned_patches.size());
-    for (const BranchOnlyDirectRelayReservoir &reservoir :
-         direct_branch_reservoirs.reservoirs) {
+    for (const BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs) {
       std::string relay_error;
       if (!BranchOnlyRelayRouter::emit_direct_reservoir(new_text, reservoir, arch, patches,
                                                         &relay_error)) {

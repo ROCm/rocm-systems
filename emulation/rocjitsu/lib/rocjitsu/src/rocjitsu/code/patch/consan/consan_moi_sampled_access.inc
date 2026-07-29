@@ -1,7 +1,6 @@
 [[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
-atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index,
-                           std::string_view container_name, bool in_kernel,
-                           const ConSanAtomicSite &site);
+atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_view container_name,
+                           bool in_kernel, const ConSanAtomicSite &site);
 
 void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                const ConSanOptions &options, rj_code_arch_t arch,
@@ -517,8 +516,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     if (spill)
       required_private_bytes = std::max(required_private_bytes, spill->total_private_bytes);
     bool spill_overlaps_guest_operands = false;
-    if (spill &&
-        sampled_access_can_emit_spill_over_guest_operands(candidate_options, candidate)) {
+    if (spill && sampled_access_can_emit_spill_over_guest_operands(candidate_options, candidate)) {
       std::vector<std::string> ignored_overlap_errors;
       spill_overlaps_guest_operands = reject_candidate_scratch_range_overlap(
           candidate, resources->base, resources->count, ignored_overlap_errors);
@@ -831,6 +829,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                             : static_cast<uint16_t>(base + 6u);
       const bool collapsed_spill_router =
           group_options.automatic_moi_record_replay_sgpr_spill && call_return_sgpr == pc_sgpr;
+      // Spill-backed dense hosts reserve the complete shared entry layout,
+      // including the extra save arm used when the PC and call-return pair
+      // collapse. Keeping that width stable lets either route shape share the
+      // same host without overwriting adjacent guest instructions.
       const uint32_t dense_entry_island_words = moi_record_replay_entry_island_words(
           group_options.automatic_moi_record_replay_sgpr_spill);
       const bool explicit_dense_key = arch != ROCJITSU_CODE_ARCH_GFX1250;
@@ -1411,8 +1413,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 planned_patch.resources.owner_descriptor_file_offsets;
             info.relocated_guest_instruction_offset =
                 candidate.text_offset + planned_patch.probe_guest_instruction_offset;
-            note_dynamic_stack_private_requirement(
-                info, planned_patch.spill ? &*planned_patch.spill : nullptr);
+            note_dynamic_stack_private_requirement(info, planned_patch.spill ? &*planned_patch.spill
+                                                                             : nullptr);
             return info;
           },
           [](std::vector<uint8_t> &, ConSanResult &) { return true; }, result))

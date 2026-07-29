@@ -98,6 +98,11 @@ public:
             std::string *error_out = nullptr,
             BranchOnlyRelayPlanFailure *failure_out = nullptr) const;
 
+  /// Plans exact request pairs and transactionally reserves pristine relay
+  /// words in @p tentative_planner. A failed plan leaves the planner unchanged.
+  /// A successful plan updates the planner but does not consume router capacity;
+  /// the caller must either commit every returned route or discard its planner
+  /// copy together with the plan.
   [[nodiscard]] BranchOnlyRelayBatchPlan
   plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
              std::span<const BranchOnlyRelayPairRequest> requests,

@@ -75,22 +75,19 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     for (const ConSanKernelInfo &kernel : result.kernels) {
       if (kernel.preflight_action == ConSanPreflightAction::Reject)
         continue;
-      if (std::ranges::any_of(kernel.lds_sites,
-                              [&](const auto &site) {
-                                return is_supported_check_trap_site(site, arch);
-                              }))
+      if (std::ranges::any_of(kernel.lds_sites, [&](const auto &site) {
+            return is_supported_check_trap_site(site, arch);
+          }))
         return true;
     }
     for (const ConSanFunctionInfo &function : result.functions) {
       for (const ConSanLdsSite &site : function.lds_sites) {
-        if (!is_supported_check_trap_site(site, arch) ||
-            site.owner_descriptor_file_offsets.empty())
+        if (!is_supported_check_trap_site(site, arch) || site.owner_descriptor_file_offsets.empty())
           continue;
         const bool every_owner_is_plannable =
             std::ranges::all_of(site.owner_descriptor_file_offsets, [&](uint64_t owner) {
-              const auto kernel =
-                  std::ranges::find(result.kernels, owner,
-                                    &ConSanKernelInfo::descriptor_file_offset);
+              const auto kernel = std::ranges::find(result.kernels, owner,
+                                                    &ConSanKernelInfo::descriptor_file_offset);
               return kernel != result.kernels.end() &&
                      kernel->preflight_action != ConSanPreflightAction::Reject;
             });
@@ -101,8 +98,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     return false;
   }();
   if (!has_plannable_supported_site) {
-    publish_sc_access_coverage_support(
-        result, ConSanScAccessCoverageKind::NativeLds, [](uint64_t) { return false; });
+    publish_sc_access_coverage_support(result, ConSanScAccessCoverageKind::NativeLds,
+                                       [](uint64_t) { return false; });
     result.warnings.emplace_back("ConSan LDS check/trap proof found no supported "
                                  "native-LDS load or store site with complete owners");
     return;
@@ -403,9 +400,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         container.name.find(options.test_kernel_name_filter) != std::string::npos)
       return true;
     const auto owner_matches = [&](uint64_t descriptor_offset) {
-      const auto kernel =
-          std::ranges::find(result.kernels, descriptor_offset,
-                            &ConSanKernelInfo::descriptor_file_offset);
+      const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
+                                            &ConSanKernelInfo::descriptor_file_offset);
       return kernel != result.kernels.end() &&
              kernel->name.find(options.test_kernel_name_filter) != std::string::npos;
     };
@@ -760,8 +756,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const Instruction *owner_site_inst =
           owner_context == reservoir_owner_contexts.end()
               ? nullptr
-              : find_instruction_at_text_offset(
-                    KernelBlockScope(owner_context->scope.blocks), site.text_offset);
+              : find_instruction_at_text_offset(KernelBlockScope(owner_context->scope.blocks),
+                                                site.text_offset);
       if (owner_kernel == kernels_by_descriptor.end() ||
           owner_context == reservoir_owner_contexts.end() || owner_context->liveness == nullptr ||
           context.instruction == nullptr || owner_site_inst != context.instruction ||
@@ -941,9 +937,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       constexpr uint16_t dead_vcc_selection_limit = REGISTER_SET_ALLOCATABLE_SGPRS;
       auto vcc_save =
           allocated_sgpr_count
-              ? choose_sc_dead_vcc_save_sgpr(
-                    site_inst, owner_liveness, *allocated_sgpr_count,
-                    min_preferred_vcc_save_sgpr, dead_vcc_selection_limit, arch, options)
+              ? choose_sc_dead_vcc_save_sgpr(site_inst, owner_liveness, *allocated_sgpr_count,
+                                             min_preferred_vcc_save_sgpr, dead_vcc_selection_limit,
+                                             arch, options)
               : std::nullopt;
       std::optional<uint16_t> scalar_vcc_spill_sgpr;
       if (!vcc_save && is_rdna4_family_arch(arch) && allocated_sgpr_count) {
@@ -1390,8 +1386,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       manager = existing->second;
     else
       manager.emplace(plan->second.original_private_bytes, plan->second.private_limit);
-    auto sequence = build_vgpr_spill_sequence(
-        *manager, plan->second.vgpr_base, plan->second.vgpr_count, arch);
+    auto sequence =
+        build_vgpr_spill_sequence(*manager, plan->second.vgpr_base, plan->second.vgpr_count, arch);
     if (!sequence)
       return false;
     state.managers.insert_or_assign(key, std::move(*manager));
@@ -1593,20 +1589,20 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           });
         });
       };
-      const auto dense_host_return_scratch_is_dead =
-          [&](const Instruction *boundary, const BasicBlock &block) {
-            const std::array<RegisterRef, 2> return_scratch = {
-                RegisterRef{RegClass::SGPR, seed_group.jump_pc_sgpr, 2u},
-                RegisterRef{RegClass::SGPR, seed_group.saved_scc_sgpr, 1u},
-            };
-            return std::ranges::all_of(dense_owner_contexts, [&](const auto *owner) {
-              return std::ranges::all_of(return_scratch, [&](RegisterRef reg) {
-                return boundary != nullptr
-                           ? !owner->liveness->is_live_before(*boundary, reg)
-                           : !owner->liveness->block_liveness(block).live_out.contains(reg);
-              });
-            });
-          };
+      const auto dense_host_return_scratch_is_dead = [&](const Instruction *boundary,
+                                                         const BasicBlock &block) {
+        const std::array<RegisterRef, 2> return_scratch = {
+            RegisterRef{RegClass::SGPR, seed_group.jump_pc_sgpr, 2u},
+            RegisterRef{RegClass::SGPR, seed_group.saved_scc_sgpr, 1u},
+        };
+        return std::ranges::all_of(dense_owner_contexts, [&](const auto *owner) {
+          return std::ranges::all_of(return_scratch, [&](RegisterRef reg) {
+            return boundary != nullptr
+                       ? !owner->liveness->is_live_before(*boundary, reg)
+                       : !owner->liveness->block_liveness(block).live_out.contains(reg);
+          });
+        });
+      };
 
       const uint64_t kernel_end = kernel->entry_text_offset + kernel->code_size;
       std::optional<uint64_t> best_host_offset;
@@ -2667,6 +2663,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   // and never make a live guest scalar carry a continuation.
   if (is_rdna4_family_arch(arch) && !branch_only_candidates.empty() &&
       selected_candidates.size() < max_patches) {
+    std::string branch_only_route_error;
     std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
       return lhs.site->text_offset < rhs.site->text_offset;
     });
@@ -2809,9 +2806,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       BranchOnlyRelayRouter branch_router;
       for (uint64_t relay : available_relays) {
         const BranchOnlyRelayProvenance provenance =
-            owned_anchor_relays.contains(relay)
-                ? BranchOnlyRelayProvenance::OwnedAnchor
-                : BranchOnlyRelayProvenance::OwnedReservoir;
+            owned_anchor_relays.contains(relay) ? BranchOnlyRelayProvenance::OwnedAnchor
+                                                : BranchOnlyRelayProvenance::OwnedReservoir;
         (void)branch_router.offer(relay, provenance);
       }
       std::vector<BranchOnlyRelayPairRequest> route_requests;
@@ -2820,14 +2816,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         route_requests.push_back({
             .entry_source = candidate.site->text_offset,
             .entry_target = candidate.placement->body_offset,
-            .return_source = candidate.placement->body_offset +
-                             candidate.requested_words * sizeof(uint32_t),
+            .return_source =
+                candidate.placement->body_offset + candidate.requested_words * sizeof(uint32_t),
             .return_target = candidate.site->text_offset + candidate.site->size,
         });
       }
       std::string route_error;
       BranchOnlyRelayBatchPlan route_plan =
           branch_router.plan_pairs(tentative_planner, route_requests, &route_error);
+      if (!route_plan.complete())
+        branch_only_route_error = route_error;
       for (const BranchOnlyRelayRoute &route : route_plan.routes) {
         for (const BranchOnlyRelayClaim &claim : route.claims) {
           if (const auto owner = optimistic_relay_owner.find(claim.offset);
@@ -2908,7 +2906,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
     } else {
       result.warnings.emplace_back(
-          "ConSan LDS check/trap branch-only continuation could not route all spill-backed sites");
+          "ConSan LDS check/trap branch-only continuation could not route all spill-backed sites" +
+          (branch_only_route_error.empty() ? std::string{} : ": " + branch_only_route_error));
     }
   }
 
@@ -2934,8 +2933,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         std::to_string(indirect_candidate_placement_failure_count) +
         " dynamic_stack_private_spill_rejections=" +
         std::to_string(dynamic_stack_private_spill_rejection_count) +
-        " private_spill_encoding_failures=" +
-        std::to_string(private_spill_encoding_failure_count) +
+        " private_spill_encoding_failures=" + std::to_string(private_spill_encoding_failure_count) +
         " uncovered_nop_caves=" + std::to_string(local_nop_caves.size()) +
         " local_entry_islands=" + std::to_string(local_entry_islands.size()) +
         " local_cave_reachable_candidates=" + std::to_string(local_cave_reachable_candidate_count));
@@ -2972,8 +2970,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         std::to_string(indirect_candidate_placement_failure_count) +
         " dynamic_stack_private_spill_rejections=" +
         std::to_string(dynamic_stack_private_spill_rejection_count) +
-        " private_spill_encoding_failures=" +
-        std::to_string(private_spill_encoding_failure_count) +
+        " private_spill_encoding_failures=" + std::to_string(private_spill_encoding_failure_count) +
         " uncovered_nop_caves=" + std::to_string(local_nop_caves.size()) +
         " max_uncovered_nop_cave_words=" + std::to_string(max_uncovered_nop_cave_words) +
         " local_cave_reachable_candidates=" + std::to_string(local_cave_reachable_candidate_count) +
@@ -3187,9 +3184,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           return;
         }
         const uint16_t required_sgpr_count = std::max<uint16_t>(
-            std::max<uint16_t>(static_cast<uint16_t>(*candidate.indirect_pc_sgpr + 2u),
-                               static_cast<uint16_t>(candidate.vcc_save_sgpr +
-                                                     sc_vcc_save_sgpr_width(arch))),
+            std::max<uint16_t>(
+                static_cast<uint16_t>(*candidate.indirect_pc_sgpr + 2u),
+                static_cast<uint16_t>(candidate.vcc_save_sgpr + sc_vcc_save_sgpr_width(arch))),
             static_cast<uint16_t>(*candidate.indirect_scc_save_sgpr + 1u));
         planned.info.indirect_pc_sgpr = *candidate.indirect_pc_sgpr;
         planned.info.indirect_saved_scc_sgpr = *candidate.indirect_scc_save_sgpr;
@@ -3427,10 +3424,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   }
   const bool generated_relay_bank_used =
       std::ranges::any_of(selected_relay_slots, [&](uint64_t offset) {
-        const bool used = entry_relay_words.contains(offset) ||
-                          branch_only_claimed_relay_slots.contains(offset);
-        return offset >= generated_relay_bank_offset &&
-               used &&
+        const bool used =
+            entry_relay_words.contains(offset) || branch_only_claimed_relay_slots.contains(offset);
+        return offset >= generated_relay_bank_offset && used &&
                (offset - generated_relay_bank_offset) / sizeof(uint32_t) <
                    generated_relay_bank_word_count;
       });
@@ -3492,8 +3488,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       std::array<uint8_t, sizeof(KD)> descriptor{};
       std::memcpy(descriptor.data(), image.data() + descriptor_offset, descriptor.size());
-      const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-          descriptor, 0, required_private_bytes);
+      const SpillDescriptorUpdate update =
+          update_kernel_descriptor_for_spills(descriptor, 0, required_private_bytes);
       if ((update != SpillDescriptorUpdate::Updated &&
            update != SpillDescriptorUpdate::Unchanged) ||
           !patcher.patch_kernel_descriptor(descriptor_offset, descriptor)) {
@@ -3941,8 +3937,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       std::string relay_error;
       if (!BranchOnlyRelayRouter::emit_and_record(
               new_text, *planned.branch_only_route, planned.placement->body_offset,
-              planned.site->text_offset + planned.site->size, arch, result.patches,
-              &relay_error)) {
+              planned.site->text_offset + planned.site->size, arch, result.patches, &relay_error)) {
         result.errors.emplace_back("ConSan LDS check/trap " + relay_error);
         result.patches.clear();
         return;
@@ -3970,9 +3965,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
     for (const auto &[descriptor_offset, required_private_bytes] :
          descriptor_private_requirements) {
-      const auto original_kernel =
-          std::ranges::find(result.kernels, descriptor_offset,
-                            &ConSanKernelInfo::descriptor_file_offset);
+      const auto original_kernel = std::ranges::find(result.kernels, descriptor_offset,
+                                                     &ConSanKernelInfo::descriptor_file_offset);
       const auto moved_kernel =
           original_kernel == result.kernels.end()
               ? patched_probe.kernels().end()
@@ -4008,7 +4002,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     return;
   }
   if (!apply_descriptor_sgpr_growths_to_bytes(result.elf_bytes, descriptor_sgpr_growths, arch,
-                                               result.errors)) {
+                                              result.errors)) {
     result.patches.clear();
     return;
   }

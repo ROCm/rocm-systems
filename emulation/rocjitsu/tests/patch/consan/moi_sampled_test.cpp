@@ -40,7 +40,49 @@ void expect_sampled_barrier_exact_existing_metadata_path(
   const auto existing_descriptor =
       instrumentation::build_v_mov_b32_literal(expected, encoded.packed.descriptor, arch);
   ASSERT_TRUE(existing_descriptor);
-  EXPECT_TRUE(contains_subsequence(cave, *existing_descriptor));
+  std::vector<size_t> descriptor_starts;
+  for (size_t index = 0u; index + existing_descriptor->size() <= cave.size(); ++index) {
+    if (std::equal(existing_descriptor->begin(), existing_descriptor->end(),
+                   cave.begin() + static_cast<ptrdiff_t>(index))) {
+      descriptor_starts.push_back(index);
+    }
+  }
+  ASSERT_EQ(descriptor_starts.size(), 1u);
+  const size_t descriptor_start = descriptor_starts.front();
+  ASSERT_GT(descriptor_start, 0u);
+  const size_t existing_label = descriptor_start - 1u;
+  const auto branch_target = [&](size_t index) -> std::optional<size_t> {
+    if (index >= cave.size())
+      return std::nullopt;
+    const int64_t target = static_cast<int64_t>(index) + 1 +
+                           static_cast<int64_t>(static_cast<int16_t>(cave[index] & 0xffffu));
+    if (target < 0 || target >= static_cast<int64_t>(cave.size()))
+      return std::nullopt;
+    return static_cast<size_t>(target);
+  };
+  const uint32_t scc_zero_opcode =
+      *instrumentation::build_s_cbranch_scc0(/*displacement=*/0, arch) & 0xffff0000u;
+  const uint32_t vcc_zero_opcode =
+      *instrumentation::build_s_cbranch_vccz(/*displacement=*/0, arch) & 0xffff0000u;
+  const uint32_t branch_opcode = build_s_branch(/*displacement=*/0, arch) & 0xffff0000u;
+  bool has_existing_label_branch = false;
+  for (size_t index = 0u; index < existing_label; ++index) {
+    has_existing_label_branch |=
+        (cave[index] & 0xffff0000u) == scc_zero_opcode && branch_target(index) == existing_label;
+  }
+  EXPECT_TRUE(has_existing_label_branch);
+
+  const auto descriptor_equal =
+      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
+  ASSERT_TRUE(descriptor_equal);
+  const size_t descriptor_compare = descriptor_start + existing_descriptor->size();
+  ASSERT_LT(descriptor_compare + 1u, cave.size());
+  EXPECT_EQ(cave[descriptor_compare], *descriptor_equal);
+  EXPECT_EQ(cave[descriptor_compare + 1u] & 0xffff0000u, vcc_zero_opcode);
+  const std::optional<size_t> collision_label = branch_target(descriptor_compare + 1u);
+  ASSERT_TRUE(collision_label);
+  ASSERT_GT(*collision_label, descriptor_compare + 1u);
+
   for (uint32_t offset : {offsetof(ConSanMoiSampledSyncMetadataPacked, address),
                           offsetof(ConSanMoiSampledSyncMetadataPacked, address) + sizeof(uint32_t),
                           offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count),
@@ -50,6 +92,19 @@ void expect_sampled_barrier_exact_existing_metadata_path(
     ASSERT_TRUE(load);
     EXPECT_TRUE(contains_subsequence(cave, *load)) << "missing metadata field offset " << offset;
   }
+  size_t collision_branch_count = 0u;
+  for (size_t index = existing_label; index < *collision_label; ++index) {
+    if ((cave[index] & 0xffff0000u) != vcc_zero_opcode)
+      continue;
+    ++collision_branch_count;
+    EXPECT_EQ(branch_target(index), collision_label);
+  }
+  EXPECT_EQ(collision_branch_count, 6u);
+  ASSERT_GT(*collision_label, 0u);
+  EXPECT_EQ(cave[*collision_label - 1u] & 0xffff0000u, branch_opcode);
+  const std::optional<size_t> restore_label = branch_target(*collision_label - 1u);
+  ASSERT_TRUE(restore_label);
+  EXPECT_GT(*restore_label, *collision_label);
 }
 
 TEST(ConSanMoi, SampledEngineInventoriesCodeObjectWithoutModification) {
@@ -2038,6 +2093,59 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
     }
     EXPECT_TRUE(result.final_validation_passed);
   }
+}
+
+TEST(ConSanMoi, Rdna4SampledSpillBackedDenseHostKeepsCompleteEntryLayout) {
+  constexpr uint32_t kAccessCount = 2u;
+  const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::vector<uint32_t> words(8u, filler);
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(dead, sgpr) == dead.end())
+      words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
+  }
+  words.resize(33'000u, filler);
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(kAccessCount);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(words, "rdna4_sampled_spill_dense_two");
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size != 0u;
+  });
+  ASSERT_NE(dense_host, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> entry_island = text_words_at_offset(
+      patched, dense_host->anchor_offset + sizeof(uint32_t), 8u * sizeof(uint32_t));
+  ASSERT_EQ(entry_island.size(), 8u);
+  EXPECT_GE(dense_host->original_size, 9u * sizeof(uint32_t));
+  EXPECT_NE(entry_island.back(), filler)
+      << "the eighth reserved word must belong to the emitted spill-backed entry sequence";
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {

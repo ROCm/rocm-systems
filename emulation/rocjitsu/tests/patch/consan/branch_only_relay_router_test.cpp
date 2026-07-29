@@ -3,18 +3,99 @@
 
 #include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 
+#include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstring>
+#include <limits>
+#include <memory>
+#include <optional>
 #include <ranges>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
 namespace {
+
+class RelayTestInstruction : public Instruction {
+public:
+  RelayTestInstruction(std::string_view mnemonic, int size, uint64_t flags,
+                       std::optional<int64_t> branch_delta, const uint32_t *raw)
+      : Instruction(mnemonic, nullptr), branch_delta_(branch_delta) {
+    size_ = size;
+    flags_ = flags;
+    raw_encoding_ = raw;
+  }
+
+  std::optional<int64_t> branch_offset_bytes() const override { return branch_delta_; }
+
+private:
+  std::optional<int64_t> branch_delta_;
+};
+
+class RelayTestTextSection : public Section {
+public:
+  RelayTestTextSection(std::unique_ptr<char[]> data, size_t size)
+      : Section(".text"), data_(std::move(data)), size_(size) {}
+
+  size_t size() const override { return size_; }
+  const char *data() const override { return data_.get(); }
+  uint32_t sectionHeaderNameIdx() const override { return 0u; }
+  uint64_t sectionOffset() const override { return 0u; }
+
+private:
+  std::unique_ptr<char[]> data_;
+  size_t size_ = 0u;
+};
+
+class RelayTestCodeObject : public CodeObject {
+public:
+  explicit RelayTestCodeObject(std::vector<uint32_t> words) {
+    const size_t byte_size = words.size() * sizeof(uint32_t);
+    image_.resize(byte_size);
+    std::memcpy(image_.data(), words.data(), byte_size);
+    auto text = std::make_unique<char[]>(byte_size);
+    std::memcpy(text.get(), words.data(), byte_size);
+    sections_.push_back(std::make_unique<RelayTestTextSection>(std::move(text), byte_size));
+    text_sections_.push_back(sections_.back().get());
+  }
+};
+
+constexpr uint32_t kRelayTestDonor = 0x1000u;
+constexpr uint32_t kRelayTestClauseTwo = 0x1041u;
+constexpr uint32_t kRelayTestEnd = 0x2000u;
+
+class RelayTestDecoder : public Decoder {
+public:
+  Instruction *decode(const rj_code_binary_inst_t *word) override {
+    if (*word == kRelayTestEnd)
+      return new RelayTestInstruction("s_endpgm", 4, PROGRAM_TERMINATOR, std::nullopt, word);
+    if (*word == kRelayTestClauseTwo)
+      return new RelayTestInstruction("s_clause", 4, 0u, std::nullopt, word);
+    return new RelayTestInstruction("s_mov_b32", 4, 0u, std::nullopt, word);
+  }
+};
+
+std::vector<BasicBlock *> relay_block_ptrs(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+  std::vector<BasicBlock *> pointers;
+  pointers.reserve(blocks.size());
+  for (const std::unique_ptr<BasicBlock> &block : blocks)
+    pointers.push_back(block.get());
+  return pointers;
+}
+
+std::span<const uint8_t> relay_test_text(const RelayTestCodeObject &object) {
+  const Section *text = object.text_sections().front();
+  return {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
+}
 
 TEST(ConSanBranchOnlyRelayRouter, PlansCommitsEmitsAndRecordsTypedRelayOwnership) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
@@ -35,6 +116,7 @@ TEST(ConSanBranchOnlyRelayRouter, PlansCommitsEmitsAndRecordsTypedRelayOwnership
   EXPECT_TRUE(router.offer(kPristineRelay, BranchOnlyRelayProvenance::PristineNop));
   EXPECT_TRUE(router.offer(kOwnedAnchorRelay, BranchOnlyRelayProvenance::OwnedAnchor));
   EXPECT_FALSE(router.offer(kPristineRelay, BranchOnlyRelayProvenance::GeneratedBank));
+  EXPECT_FALSE(router.offer(2u, BranchOnlyRelayProvenance::PristineNop));
 
   DbiPatchPlacementPlanner planner(kArch, kTextSize);
   BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::Reservation;
@@ -103,6 +185,19 @@ TEST(ConSanBranchOnlyRelayRouter, PlansCommitsEmitsAndRecordsTypedRelayOwnership
   EXPECT_EQ(generated->original_size, 0u);
 }
 
+TEST(ConSanBranchOnlyRelayRouter, RetiresHalfOpenRangesAndIgnoresEmptyOnes) {
+  BranchOnlyRelayRouter router;
+  for (uint64_t relay : {100u, 104u, 108u})
+    ASSERT_TRUE(router.offer(relay, BranchOnlyRelayProvenance::PristineNop));
+
+  router.retire_range(100u, 0u);
+  EXPECT_EQ(router.available_count(), 3u);
+  router.retire_range(100u, 2u * sizeof(uint32_t));
+  EXPECT_EQ(router.available_count(), 1u);
+  router.retire_range(108u, std::numeric_limits<uint64_t>::max());
+  EXPECT_EQ(router.available_count(), 0u);
+}
+
 TEST(ConSanBranchOnlyRelayRouter, ReportsWhichHalfOfPairedRoutingIsUnreachable) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   BranchOnlyRelayRouter router;
@@ -117,6 +212,68 @@ TEST(ConSanBranchOnlyRelayRouter, ReportsWhichHalfOfPairedRoutingIsUnreachable) 
                                 &failure));
   EXPECT_EQ(failure, BranchOnlyRelayPlanFailure::ReturnRoute);
   EXPECT_NE(error.find("original continuation"), std::string::npos);
+  EXPECT_TRUE(planner.occupied_ranges().empty());
+}
+
+TEST(ConSanBranchOnlyRelayRouter, ReportsUnreachableEntryAndReservationWithoutPartialPlanning) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  {
+    BranchOnlyRelayRouter router;
+    DbiPatchPlacementPlanner planner(kArch, 200'008u);
+    BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
+    std::string error;
+
+    EXPECT_FALSE(router.plan_pair(planner, /*entry_source=*/0u, /*entry_target=*/200'000u,
+                                  /*return_source=*/200'004u, /*return_target=*/100'000u, &error,
+                                  &failure));
+    EXPECT_EQ(failure, BranchOnlyRelayPlanFailure::EntryRoute);
+    EXPECT_NE(error.find("appended entry"), std::string::npos);
+    EXPECT_TRUE(planner.occupied_ranges().empty());
+  }
+
+  {
+    BranchOnlyRelayRouter router;
+    ASSERT_TRUE(router.offer(100'000u, BranchOnlyRelayProvenance::PristineNop));
+    DbiPatchPlacementPlanner planner(kArch, 200'008u);
+    ASSERT_TRUE(planner.reserve_existing_range(100'000u, sizeof(uint32_t)));
+    const std::vector occupied_before(planner.occupied_ranges().begin(),
+                                      planner.occupied_ranges().end());
+    BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
+    std::string error;
+
+    EXPECT_FALSE(router.plan_pair(planner, /*entry_source=*/0u, /*entry_target=*/200'000u,
+                                  /*return_source=*/200'004u, /*return_target=*/100'000u, &error,
+                                  &failure));
+    EXPECT_EQ(failure, BranchOnlyRelayPlanFailure::Reservation);
+    EXPECT_TRUE(std::ranges::equal(planner.occupied_ranges(), occupied_before));
+  }
+}
+
+TEST(ConSanBranchOnlyRelayRouter, RejectsCrossedDestinationAssignment) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  BranchOnlyRelayRouter router;
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{
+          .entry_source = 0u,
+          .entry_target = 200'000u,
+          .return_source = 200'004u,
+          .return_target = 100'000u,
+      },
+      BranchOnlyRelayPairRequest{
+          .entry_source = 130'000u,
+          .entry_target = 120'000u,
+          .return_source = 120'004u,
+          .return_target = 100'004u,
+      },
+  };
+  DbiPatchPlacementPlanner planner(kArch, 200'008u);
+  std::string error;
+
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
+
+  EXPECT_FALSE(plan.complete());
+  EXPECT_EQ(plan.failure, BranchOnlyRelayPlanFailure::EntryRoute);
+  EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u, 1u}));
   EXPECT_TRUE(planner.occupied_ranges().empty());
 }
 
@@ -159,6 +316,222 @@ TEST(ConSanBranchOnlyRelayRouter, PlansMultipleDisjointEntryAndReturnPairsAtomic
   EXPECT_TRUE(planner.occupied_ranges().empty());
   EXPECT_TRUE(router.commit(plan.routes, &error)) << error;
   EXPECT_EQ(router.available_count(), 0u);
+}
+
+TEST(ConSanBranchOnlyRelayRouter, EmptyBatchIsACompleteNoOp) {
+  BranchOnlyRelayRouter router;
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, 16u);
+  const BranchOnlyRelayBatchPlan plan =
+      router.plan_pairs(planner, std::span<const BranchOnlyRelayPairRequest>{});
+
+  EXPECT_TRUE(plan.complete());
+  EXPECT_TRUE(plan.routes.empty());
+  EXPECT_TRUE(planner.occupied_ranges().empty());
+}
+
+TEST(ConSanBranchOnlyRelayRouter, ClassifiesReservoirInstructionBoundaries) {
+  static constexpr std::array<uint32_t, 4> kRaw = {
+      0x11111111u,
+      0x22222222u,
+      0x33333333u,
+      0x44444444u,
+  };
+  const std::vector<uint8_t> text(4u * sizeof(uint32_t));
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const auto accepted = [&](std::string_view mnemonic, int size, uint64_t flags = 0u,
+                            std::optional<int64_t> branch_delta = std::nullopt,
+                            uint64_t offset = 0u) {
+    RelayTestInstruction instruction(mnemonic, size, flags, branch_delta, kRaw.data());
+    return is_consan_branch_relay_reservoir_instruction(instruction, offset, text, kArch);
+  };
+
+  EXPECT_TRUE(accepted("s_mov_b32", 4));
+  EXPECT_FALSE(accepted("s_mov_b32", 4, 0u, std::nullopt, 2u));
+  EXPECT_FALSE(accepted("s_mov_b32", 4, 0u, std::nullopt, text.size() + sizeof(uint32_t)));
+  EXPECT_FALSE(accepted("s_mov_b32", 8, 0u, std::nullopt, text.size() - sizeof(uint32_t)));
+  EXPECT_FALSE(accepted("ds_read_b32", 4));
+  EXPECT_FALSE(accepted("s_clause", 4));
+  EXPECT_FALSE(accepted("s_delay_alu", 4));
+  EXPECT_TRUE(accepted("flat_load_dword", 3 * sizeof(uint32_t)));
+  EXPECT_TRUE(accepted("flat_store_dword", 3 * sizeof(uint32_t)));
+  EXPECT_FALSE(accepted("global_load_dword", 3 * sizeof(uint32_t)));
+  EXPECT_FALSE(accepted("flat_load_dword", 3 * sizeof(uint32_t), BRANCH));
+  EXPECT_FALSE(accepted("flat_load_dword", 3 * sizeof(uint32_t), 0u, 4));
+  EXPECT_FALSE(accepted("flat_load_dword", 4 * sizeof(uint32_t)));
+}
+
+TEST(ConSanBranchOnlyRelayRouter, PlansOnlyMinimumWidthRunsAndChunksLongRuns) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  const auto plan = [&](size_t donor_word_count, size_t target_relay_count) {
+    std::vector<uint32_t> words(donor_word_count, kRelayTestDonor);
+    words.push_back(kRelayTestEnd);
+    RelayTestCodeObject object(std::move(words));
+    RelayTestDecoder decoder;
+    auto blocks = BasicBlock::build(object, decoder, kArch);
+    const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+    DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+    BranchOnlyRelayRouter router;
+    BranchOnlyDirectRelayReservoirSet reservoirs;
+    std::string error;
+    EXPECT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch,
+                                              relay_test_text(object).size() / 2u,
+                                              target_relay_count, planner, reservoirs, &error))
+        << error;
+    return reservoirs;
+  };
+
+  EXPECT_TRUE(plan(15u, 1u).reservoirs.empty());
+  const BranchOnlyDirectRelayReservoirSet exact = plan(16u, 1u);
+  ASSERT_EQ(exact.reservoirs.size(), 1u);
+  EXPECT_EQ(exact.reservoirs.front().original_words.size(), 16u);
+  EXPECT_EQ(exact.reservoir_by_relay.size(), 15u);
+
+  BranchOnlyDirectRelayReservoirSet long_run = plan(100u, 200u);
+  ASSERT_EQ(long_run.reservoirs.size(), 2u);
+  std::vector<size_t> widths;
+  for (const BranchOnlyDirectRelayReservoir &reservoir : long_run.reservoirs)
+    widths.push_back(reservoir.original_words.size());
+  std::ranges::sort(widths);
+  EXPECT_EQ(widths, (std::vector<size_t>{36u, 64u}));
+  const auto first = std::ranges::min(
+      long_run.reservoirs, {}, [](const auto &reservoir) { return reservoir.anchor_offset; });
+  const auto last = std::ranges::max(long_run.reservoirs, {},
+                                     [](const auto &reservoir) { return reservoir.anchor_offset; });
+  EXPECT_LE(first.anchor_offset + first.original_words.size() * sizeof(uint32_t),
+            last.anchor_offset);
+}
+
+TEST(ConSanBranchOnlyRelayRouter, SplitsReservoirRunsAtProtectedAndClauseRanges) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  {
+    std::vector<uint32_t> words(40u, kRelayTestDonor);
+    words.push_back(kRelayTestEnd);
+    RelayTestCodeObject object(std::move(words));
+    RelayTestDecoder decoder;
+    auto blocks = BasicBlock::build(object, decoder, kArch);
+    const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+    const std::array protected_ranges = {
+        std::pair<uint64_t, uint64_t>{16u * sizeof(uint32_t), 20u * sizeof(uint32_t)},
+        std::pair<uint64_t, uint64_t>{20u * sizeof(uint32_t), 24u * sizeof(uint32_t)},
+    };
+    DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+    BranchOnlyRelayRouter router;
+    BranchOnlyDirectRelayReservoirSet reservoirs;
+    std::string error;
+
+    ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), protected_ranges,
+                                              kArch, relay_test_text(object).size() / 2u, 100u,
+                                              planner, reservoirs, &error))
+        << error;
+    ASSERT_EQ(reservoirs.reservoirs.size(), 2u);
+    EXPECT_TRUE(std::ranges::all_of(reservoirs.reservoirs, [](const auto &reservoir) {
+      return reservoir.original_words.size() == 16u;
+    }));
+  }
+
+  {
+    std::vector<uint32_t> words(16u, kRelayTestDonor);
+    words.push_back(kRelayTestClauseTwo);
+    words.insert(words.end(), 18u, kRelayTestDonor);
+    words.push_back(kRelayTestEnd);
+    RelayTestCodeObject object(std::move(words));
+    RelayTestDecoder decoder;
+    auto blocks = BasicBlock::build(object, decoder, kArch);
+    const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+    DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+    BranchOnlyRelayRouter router;
+    BranchOnlyDirectRelayReservoirSet reservoirs;
+    std::string error;
+
+    ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch,
+                                              relay_test_text(object).size() / 2u, 100u, planner,
+                                              reservoirs, &error))
+        << error;
+    ASSERT_EQ(reservoirs.reservoirs.size(), 2u);
+    EXPECT_TRUE(std::ranges::all_of(reservoirs.reservoirs, [](const auto &reservoir) {
+      return reservoir.original_words.size() == 16u;
+    }));
+  }
+}
+
+TEST(ConSanBranchOnlyRelayRouter, DirectReservoirPlanningShortCircuitsAndAdoptsAtomically) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  {
+    DbiPatchPlacementPlanner planner(kArch, 0u);
+    BranchOnlyRelayRouter router;
+    BranchOnlyDirectRelayReservoirSet reservoirs;
+    std::string error;
+    EXPECT_TRUE(
+        router.plan_direct_reservoirs({}, {}, {}, kArch, 0u, 0u, planner, reservoirs, &error));
+    EXPECT_TRUE(reservoirs.reservoirs.empty());
+    EXPECT_FALSE(
+        router.plan_direct_reservoirs({}, {}, {}, kArch, 0u, 1u, planner, reservoirs, &error));
+    EXPECT_NE(error.find("pristine text"), std::string::npos);
+  }
+
+  std::vector<uint32_t> words(16u, kRelayTestDonor);
+  words.push_back(kRelayTestEnd);
+  RelayTestCodeObject object(std::move(words));
+  RelayTestDecoder decoder;
+  auto blocks = BasicBlock::build(object, decoder, kArch);
+  const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+  DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+  BranchOnlyRelayRouter router;
+  ASSERT_TRUE(router.offer(sizeof(uint32_t), BranchOnlyRelayProvenance::PristineNop));
+  BranchOnlyDirectRelayReservoirSet reservoirs;
+  std::string error;
+
+  ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch, 0u, 1u,
+                                            planner, reservoirs, &error))
+      << error;
+  EXPECT_TRUE(reservoirs.reservoirs.empty());
+  EXPECT_EQ(router.available_count(), 1u);
+}
+
+TEST(ConSanBranchOnlyRelayRouter, EmitsDirectReservoirAtItsOwnedAppendedOffset) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint64_t kAnchor = 64u;
+  constexpr uint64_t kBody = 512u;
+  constexpr uint64_t kOriginalSize = 16u * sizeof(uint32_t);
+  BranchOnlyDirectRelayReservoir reservoir{
+      .anchor_offset = kAnchor,
+      .original_words = std::vector<uint32_t>(16u, build_s_mov_b32(8u, 8u, kArch)),
+      .placement =
+          {
+              .kind = DbiPatchPlacementKind::AppendedCave,
+              .anchor_offset = kAnchor,
+              .original_size = kOriginalSize,
+              .body_offset = kBody,
+              .body_size = kOriginalSize,
+              .return_branch_offset = kBody + kOriginalSize,
+              .return_target = kAnchor + kOriginalSize,
+          },
+      .used = true,
+  };
+  // Model an unrelated appended allocation before this reservoir. Emission is
+  // offset-driven and must not require the reservoir to start at text.end().
+  std::vector<uint8_t> text(256u, 0u);
+  std::memcpy(text.data() + kAnchor, reservoir.original_words.data(), kOriginalSize);
+  std::vector<ConSanPatchInfo> patches;
+  std::string error;
+
+  ASSERT_TRUE(BranchOnlyRelayRouter::emit_direct_reservoir(text, reservoir, kArch, patches, &error))
+      << error;
+
+  ASSERT_EQ(text.size(), kBody + kOriginalSize + sizeof(uint32_t));
+  EXPECT_EQ(0, std::memcmp(text.data() + kBody, reservoir.original_words.data(), kOriginalSize));
+  uint32_t entry = 0u;
+  uint32_t ret = 0u;
+  std::memcpy(&entry, text.data() + kAnchor, sizeof(entry));
+  std::memcpy(&ret, text.data() + kBody + kOriginalSize, sizeof(ret));
+  ASSERT_TRUE(compute_sopp_branch_simm16(kAnchor, kBody));
+  EXPECT_EQ(entry, build_s_branch(*compute_sopp_branch_simm16(kAnchor, kBody), kArch));
+  EXPECT_EQ(
+      ret, build_s_branch(
+               *compute_sopp_branch_simm16(kBody + kOriginalSize, kAnchor + kOriginalSize), kArch));
+  ASSERT_EQ(patches.size(), 1u);
+  EXPECT_EQ(patches.front().kind, ConSanPatchKind::TrampolineBranchRelayReservoir);
+  EXPECT_EQ(patches.front().original_size, kOriginalSize);
 }
 
 } // namespace

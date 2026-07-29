@@ -567,8 +567,7 @@ record_replay_persistent_workgroup_sources(const ConSanOptions &options, rj_code
   return std::min<uint32_t>(allocated, kMaxVgprs);
 }
 
-[[nodiscard]] uint32_t moi_descriptor_sgpr_allocation_count(const KD &desc,
-                                                            rj_code_arch_t arch) {
+[[nodiscard]] uint32_t moi_descriptor_sgpr_allocation_count(const KD &desc, rj_code_arch_t arch) {
   const uint32_t granulated = AMDHSA_BITS_GET(
       desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
   const uint32_t allocated = amdgpu_kernel_descriptor_sgpr_count(granulated, arch);
@@ -1076,7 +1075,8 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
   // persistent outputs are represented by the fields copied below, so the
   // broad object-wide persistence marker must not reject a spill-backed
   // window whose incoming contents are deliberately backed up at entry.
-  options.moi_exec_save_sgprs_persistent = false;
+  if (selected->spill_backed)
+    options.moi_exec_save_sgprs_persistent = false;
   options.moi_dispatch_id_sgpr = selected->dispatch_id_sgpr;
   options.moi_inline_indirect_pc_sgpr = selected->indirect_pc_sgpr;
   options.moi_inline_indirect_scc_sgpr = selected->indirect_scc_sgpr;
@@ -2087,8 +2087,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
         .sgpr_reference_coverage_complete = owner->sgpr_reference_coverage_complete,
         .descriptor_valid = owner->descriptor_valid,
     };
-    plan.scalar_tail_floor = std::max(
-        plan.scalar_tail_floor, consan_detail::scalar_owner_tail_floor(scalar_owner));
+    plan.scalar_tail_floor =
+        std::max(plan.scalar_tail_floor, consan_detail::scalar_owner_tail_floor(scalar_owner));
     // These two fields summarize diagnostics only. The actionable bound above
     // is computed per owner before aggregation.
     plan.has_indirect_sgpr_access |= owner->has_indirect_sgpr_access;

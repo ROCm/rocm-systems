@@ -172,6 +172,62 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughVerifiedNopRelays) {
             relay_count);
 }
 
+TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
+  std::vector<uint32_t> first_kernel_words = {
+      0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
+      0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
+      0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
+      0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
+  };
+  first_kernel_words.resize(
+      33'000u, build_s_mov_b32(/*sdst=*/100u, /*ssrc=*/100u, ROCJITSU_CODE_ARCH_RDNA4));
+  first_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  const std::array<uint32_t, 1> second_kernel_words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_two_kernel_code_object(first_kernel_words, second_kernel_words);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_flat_check_trap = true;
+  options.scratch_vgpr = 5u;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto body =
+      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  ASSERT_NE(body, result.patches.end()) << testing::PrintToString(result.warnings);
+  const auto reservoir = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
+           patch.original_size != 0u;
+  });
+  ASSERT_NE(reservoir, result.patches.end()) << testing::PrintToString(result.warnings);
+  const auto inside_reservoir = [&](uint64_t relay) {
+    return reservoir->anchor_offset < relay &&
+           relay < reservoir->anchor_offset + reservoir->original_size;
+  };
+  EXPECT_TRUE(std::ranges::any_of(body->branch_only_entry_relay_offsets, inside_reservoir));
+  EXPECT_TRUE(std::ranges::any_of(body->branch_only_return_relay_offsets, inside_reservoir));
+
+  ConSanResult malformed = result;
+  const auto malformed_reservoir =
+      std::ranges::find_if(malformed.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
+               patch.original_size != 0u;
+      });
+  ASSERT_NE(malformed_reservoir, malformed.patches.end());
+  malformed_reservoir->indirect_pc_sgpr = 0u;
+  const std::vector<std::string> malformed_errors = validate_consan_modified_elf(bytes, malformed);
+  EXPECT_TRUE(std::ranges::any_of(malformed_errors, [](const std::string &error) {
+    return error.find("invalid geometry or phase") != std::string::npos;
+  })) << testing::PrintToString(malformed_errors);
+}
+
 TEST(ConSan, FlatCheckTrapReusesDirectAnchorTailForFarBranchRoutes) {
   const std::array<uint32_t, 8> flat_prefix = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base

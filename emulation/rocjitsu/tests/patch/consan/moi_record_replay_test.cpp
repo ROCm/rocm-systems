@@ -4417,7 +4417,10 @@ TEST(ConSanMoi, RecordReplayAutomaticExecSaveOverridesOnlyIncompatibleOwner) {
   EXPECT_TRUE(result.final_validation_passed);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  EXPECT_FALSE(result.resolved_moi_transient_sgpr_assignments.front().dispatch_id_sgpr);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_FALSE(assignment.spill_backed);
+  EXPECT_FALSE(assignment.dispatch_id_sgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             2u);
