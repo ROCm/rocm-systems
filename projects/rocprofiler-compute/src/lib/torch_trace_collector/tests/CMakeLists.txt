@@ -57,7 +57,7 @@ add_test(NAME ${target} COMMAND ${_ttc_test_cmd})
 set_tests_properties(
     ${target}
     PROPERTIES
-        LABELS "profile"
+        LABELS "quick;standard;comprehensive;full;pre-commit;smoke;pr;nightly;weekly"
         ENVIRONMENT "LD_LIBRARY_PATH=${_ttc_test_ld_path}:$ENV{LD_LIBRARY_PATH}"
 )
 
