@@ -137,7 +137,7 @@ The subcommand decides which role runs.
 ```mermaid
 flowchart TB
     CLI["mirage [verb]<br/>control plane (ctl)"]
-    HOST["mirage host --session ID<br/>per-session worker"]
+    HOST["mirage daemon<br/>supervisor (owns every session)"]
     WEB["mirage webui<br/>optional dashboard"]
     FS[("Filesystem<br/>XDG dirs: profiles, sessions, execs")]
 
@@ -181,7 +181,7 @@ flowchart LR
 flowchart TB
     root["mirage (root binary)"]
     root --> ctl["mirage_ctl<br/>CLI verbs"]
-    root --> host["mirage_host<br/>per-session host"]
+    root --> host["mirage_supervisor<br/>session/exec/process engine"]
     root --> core["mirage_core<br/>types · XDG paths · state I/O · traits"]
     root --> cont["mirage_container<br/>podman/docker provider"]
     root --> builtin["mirage_builtin<br/>embedded agents/topologies/profiles"]
@@ -249,7 +249,7 @@ flowchart TB
       A1["App + interposer"] --> D1["SimulatedDriver<br/>VM in-process"]
     end
     subgraph daemon["DAEMON mode (--daemon)"]
-      A2["App + interposer"] -->|"Unix socket + SCM_RIGHTS"| DD["rocjitsu daemon<br/>(hosted in mirage host)"]
+      A2["App + interposer"] -->|"Unix socket + SCM_RIGHTS"| DD["rocjitsu daemon<br/>(hosted in mirage daemon)"]
       DD --> D2["VM (shared across processes)"]
     end
 ```
@@ -293,7 +293,7 @@ A **profile** binds this topology to an emulator + options.
 # Startup: how rocjitsu boots on each box
 
 The logical topology (nodes × GPUs) maps **1 node → 1 physical box**. On every
-box a `mirage host` boots the rocjitsu daemon, which brings the box's emulated
+box the mirage supervisor boots the rocjitsu daemon, which brings the box's emulated
 GPUs online.
 
 ```mermaid
@@ -310,17 +310,17 @@ flowchart TB
     ORCH -->|"launch_node(3)<br/>MIRAGE_RANK=3"| B3
 
     subgraph B0["Box 0 — physical node (rank 0 · HEAD)"]
-      H0["mirage host --rank 0"] --> D0["rocjitsu daemon<br/>(in-proc FFI · rocjitsu_sys)"]
+      H0["mirage node 0"] --> D0["rocjitsu daemon<br/>(in-proc FFI · rocjitsu_sys)"]
       D0 --> G00["emul GPU 0<br/>rj_vm MI350X"]
       D0 --> G01["emul GPU 1<br/>rj_vm MI350X"]
     end
     subgraph B1["Box 1 — physical node (rank 1)"]
-      H1["mirage host --rank 1"] --> D1["rocjitsu daemon<br/>(in-proc FFI)"]
+      H1["mirage node 1"] --> D1["rocjitsu daemon<br/>(in-proc FFI)"]
       D1 --> G10["emul GPU 0"]
       D1 --> G11["emul GPU 1"]
     end
     subgraph B3["Box 3 — physical node (rank 3)"]
-      H3["mirage host --rank 3"] --> D3["rocjitsu daemon<br/>(in-proc FFI)"]
+      H3["mirage node 3"] --> D3["rocjitsu daemon<br/>(in-proc FFI)"]
       D3 --> G30["emul GPU 0"]
       D3 --> G31["emul GPU 1"]
     end
@@ -329,7 +329,7 @@ flowchart TB
     H3 -. rendezvous .-> H0
 ```
 
-- **Box** = one physical node (or its container). Topology rank → box → one `mirage host`.
+- **Box** = one physical node (or its container). Topology rank → box → one emulated node.
 - Each host hosts a **rocjitsu daemon in-process** (`rocjitsu_sys` FFI) — one daemon per box.
 - The daemon stands up `gpus-per-node` emulated `rj_vm` GPUs; workloads on that box
   attach via `$ROCJITSU_RUNTIME_DIR/daemon.sock`.
@@ -340,7 +340,7 @@ flowchart TB
 # Startup at scale: 32 boxes × 8 GPUs
 
 Same shape, more boxes. A `32 × 8` topology fans out to **32 physical boxes**,
-each running one `mirage host` + one rocjitsu daemon hosting **8 emulated GPUs** —
+each an emulated node backed by a rocjitsu daemon hosting **8 emulated GPUs** —
 **256 emulated GPUs** total, all on disk, all inspectable.
 
 ```mermaid
@@ -357,15 +357,15 @@ flowchart TB
     ORCH -->|"launch_node(31)"| B31
 
     subgraph B0["Box 0 (rank 0 · HEAD)"]
-      H0["mirage host --rank 0"] --> D0["rocjitsu daemon"]
+      H0["mirage node 0"] --> D0["rocjitsu daemon"]
       D0 --> GG0["8 × emul MI350X GPUs<br/>(rj_vm 0 … 7)"]
     end
     subgraph B1["Box 1 (rank 1)"]
-      H1["mirage host --rank 1"] --> D1["rocjitsu daemon"]
+      H1["mirage node 1"] --> D1["rocjitsu daemon"]
       D1 --> GG1["8 × emul MI350X GPUs<br/>(rj_vm 0 … 7)"]
     end
     subgraph B31["Box 31 (rank 31)"]
-      H31["mirage host --rank 31"] --> D31["rocjitsu daemon"]
+      H31["mirage node 31"] --> D31["rocjitsu daemon"]
       D31 --> GG31["8 × emul MI350X GPUs<br/>(rj_vm 0 … 7)"]
     end
 
@@ -387,15 +387,16 @@ $ mirage run --profile super -- mpirun -np 32 ./all_reduce_perf -b 8 -e 1G
 # Containerization: one container per node
 
 When a profile requests an image, the **orchestrator** brings up one container
-per node, bind-mounts the session dir in, and runs a `mirage host` *inside* each.
+per node and bind-mounts the session scratch directory in; workloads are launched
+into them from the supervisor via the provider's `exec`.
 
 ```mermaid
 flowchart TB
     O["Orchestrator host<br/>(real machine, rank=None)"]
     O -->|"pull image"| IMG[("registry")]
     O -->|"create per-session network"| NET["mirage-[session] net"]
-    O -->|"launch_node(0)"| C0["container node 0<br/>mirage host --rank 0"]
-    O -->|"launch_node(1)"| C1["container node 1<br/>mirage host --rank 1"]
+    O -->|"launch_node(0)"| C0["container node 0"]
+    O -->|"launch_node(1)"| C1["container node 1"]
     O -.->|bind-mount session dir| C0
     O -.->|bind-mount session dir| C1
 ```
@@ -417,10 +418,10 @@ flowchart TB
       ORCH["Orchestrator host<br/>rank = None<br/>writes node/0/pid, health.json"]
     end
     subgraph c0["Container — rank 0 (HEAD)"]
-      H0["mirage host --rank 0"]
+      H0["mirage node 0"]
     end
     subgraph c1["Container — rank 1"]
-      H1["mirage host --rank 1"]
+      H1["mirage node 1"]
     end
     ORCH -->|"MIRAGE_RANK=0<br/>MIRAGE_HEAD_ADDR<br/>MIRAGE_HEAD_PORT"| H0
     ORCH -->|"MIRAGE_RANK=1<br/>MIRAGE_HEAD_ADDR<br/>MIRAGE_HEAD_PORT"| H1
@@ -583,8 +584,9 @@ $ mirage session show $sid --json | jq '.container.nodes'
 ]
 ```
 
-Each node is a container. Inside each, a `mirage host --rank <n>` runs
-the emulated GPU. The orchestrator wires the network + head node.
+Each node is a container. The containers themselves just idle; the mirage
+daemon on the host runs the emulated GPU and launches workloads into them
+via the provider's `exec`. The daemon also wires the network + head node.
 
 ---
 
@@ -654,7 +656,7 @@ LD_PRELOAD=/.../_rocm_sdk_devel/lib/librocjitsu.so
 ROCJITSU_RUNTIME_DIR=/run/user/1000/mirage/session/s-.../rocjitsu
 ```
 
-- `--daemon` stands up the rocjitsu VM **in the mirage host** (in-process FFI).
+- `--daemon` stands up the rocjitsu VM **in the mirage daemon** (in-process FFI).
 - The workload's interposer connects to the daemon socket first.
 - Multiple processes → **one** shared emulated GPU, GPU memory via memfds.
 

@@ -46,7 +46,7 @@ ddp_mlp_ok
 
 ```mermaid
 flowchart LR
-  subgraph host["mirage host (1 emulated node)"]
+  subgraph host["mirage session (1 emulated node)"]
     tr["torchrun --nproc_per_node=2"]
     subgraph r0["rank 0"]
       p0["python ddp_mlp.py"] --> g0["emulated GPU 0"]

@@ -37,8 +37,7 @@ Global flags may appear before or after the subcommand, e.g.
 | `mirage state`     | Manage mirage's on-disk state (builtins, purge).              |
 | `mirage paths`     | Print where mirage stores its state.                          |
 | `mirage about`     | Show version, copyright, and third-party licenses.            |
-| `mirage webui`     | Run or install the optional web dashboard (feature-gated).    |
-| `mirage host`      | Run a per-session host (used internally; rarely invoked).     |
+| `mirage daemon`    | Run or manage the supervisor daemon (usually auto-started).   |
 
 ## `mirage emulators`
 
@@ -117,30 +116,34 @@ mirage agent delete <name> [-f|--force]
 
 ## `mirage session`
 
-Sessions are the long-lived contexts in which execs run. Each session is
-served by one host process.
+Sessions are the long-lived contexts in which execs run. They are owned by
+the [supervisor daemon](daemon.md), which the CLI starts on demand — so a
+session created in one shell is usable from another.
 
 ```text
 mirage session list
 mirage session show <id>
 mirage session wait <id> [--timeout SECONDS]   # default 30
 mirage session start [--profile NAME] [--id ID] [--workdir DIR]
-                     [--no-host] [--ready-timeout SECONDS]
+                     [--no-wait] [--ready-timeout SECONDS]
                      [--image IMAGE] [--mount SPEC]... [--container-provider PROV]
                      [--exec-mode functional|clocked] [--option KEY=VALUE]...
                      [--config PATH] [--daemon] [--no-input]
 mirage session stop <id> [-f|--force]
-mirage session dir  <id>                        # print the on-disk directory
+mirage session dir  <id>                        # emulator scratch directory
 ```
 
-* `session start` creates the session, spawns the per-session host
-  (`mirage host --session <id>`) in its own process group, then waits up to
-  `--ready-timeout` seconds for the host to publish `healthy=true`. It prints
-  the session id (or the full state with `--json`).
+* `session start` creates the session and waits up to `--ready-timeout`
+  seconds for it to become healthy, then prints its id (or the full state
+  with `--json`). A session that fails to come up is destroyed and the
+  reason reported, rather than left behind for you to clean up.
 * On a terminal it prompts for the profile (and id, workdir, ready-timeout)
   when not passed; `--no-input` requires `--profile` and uses defaults.
-* `--no-host` creates the session without spawning a host (for tests, or when
-  you start the host yourself, e.g. inside a container).
+* `--no-wait` returns as soon as the session is registered, without waiting
+  for bring-up to finish.
+* `session stop` returns only once every workload process has been
+  terminated and reaped, every container removed, and the scratch directory
+  deleted.
 * `-o`/`--option KEY=VALUE` overrides emulator options; `--exec-mode` selects
   functional (default) or clocked emulation; `--config PATH` uses an explicit
   emulator config file; `--daemon` runs the emulator out-of-process.
@@ -197,7 +200,7 @@ mirage run [--profile NAME] [--emulator NAME]
            [--env KEY=VALUE]...
            [--image IMAGE] [--mount SPEC]... [--container-provider PROV]
            [--exec-mode functional|clocked] [--option KEY=VALUE]...
-           [--config PATH] [--daemon]
+           [--config PATH] [--daemon] [--tty auto|always|never]
            -- <cmd> [args...]
 ```
 
@@ -207,6 +210,33 @@ mirage run [--profile NAME] [--emulator NAME]
   one; `--keep-session` keeps a transient session running after the exec
   finishes.
 * The container, emulator, and option overrides mirror `session start`.
+
+### Interactive workloads and `--tty`
+
+`--tty auto` (the default) allocates a pseudo-terminal for the workload
+when `mirage`'s own stdin and stdout are both terminals. That is what
+makes an interactive program work:
+
+```sh
+mirage run --profile cdna4 -- bash        # a real shell: prompt, echo,
+                                          # line editing, Ctrl-C, job control
+mirage run --profile cdna4 -- python3     # a working REPL
+```
+
+Resizing your window resizes the workload's terminal, so full-screen
+programs redraw correctly.
+
+When output is redirected or piped, `auto` stays on pipes instead, which
+keeps it byte-exact and keeps stdout separate from stderr:
+
+```sh
+mirage run --profile cdna4 -- ./app > out.txt 2> err.txt   # streams stay split
+```
+
+Force either with `--tty always` or `--tty never`. Note that a terminal
+has only one stream by construction, so under `--tty always` stderr is
+merged into stdout and newlines become CRLF — that is what a terminal is,
+not a mirage limitation.
 
 ## `mirage state`
 
@@ -240,18 +270,30 @@ sessions: /run/user/1000/mirage/session
 Print the mirage version, copyright, and the third-party crates (with
 licenses) the binary is built from.
 
-## `mirage webui` (optional, feature-gated)
+## `mirage daemon`
 
-Run or install the cross-session HTTP/WebSocket dashboard. Available when
-mirage is built with `--features daemon` (API only) or `--features webui`
-(API + bundled SPA). `daemon` is accepted as an alias of `webui`.
+The supervisor daemon owns every session. The CLI starts one automatically
+the first time a command needs it, so you normally never run this — see
+[`daemon.md`](daemon.md) for the model.
+
+Only session-related commands need it. `paths`, `emulators`, and the
+profile/topology/agent commands are answered in-process and start no
+daemon.
 
 ```text
-mirage webui [serve] [--addr ADDR]    # default 127.0.0.1:5174
-mirage webui install [--addr ADDR]    # register a systemd user service
+mirage daemon [serve] [--socket PATH] [--idle-timeout SECONDS] [--addr ADDR]
+mirage daemon status                  # pid, uptime, session count
+mirage daemon stop                    # destroy every session and exit
+mirage daemon install [--addr ADDR]   # register a systemd user service
 ```
 
-The bind address can also be set with `MIRAGE_WEBUI_ADDR`.
+* `--idle-timeout` (default 600) is how long the daemon stays up with no
+  sessions and no clients before exiting; `0` disables it. The systemd unit
+  installs with it disabled.
+* `--addr` additionally serves the HTTP/WebSocket API, and with
+  `--features webui` the bundled dashboard SPA. It is backed by the same
+  sessions the CLI sees. Also settable with `MIRAGE_WEBUI_ADDR`.
+* `webui` is accepted as an alias of `daemon`.
 
 ## Drop-in `rocjitsu` mode
 
@@ -271,13 +313,15 @@ Invocations that name a subcommand, or that have no `--` separator (so
 
 | Variable                     | Purpose                                                          |
 | ---------------------------- | ---------------------------------------------------------------- |
-| `MIRAGE_LOG`                 | Tracing-subscriber filter, e.g. `debug` or `mirage_host=debug`.  |
-| `MIRAGE_BIN`                 | Path to the `mirage` binary used to spawn per-session hosts. Defaults to the current executable, falling back to `mirage` on `$PATH`. |
+| `MIRAGE_LOG`                 | Tracing-subscriber filter, e.g. `debug` or `mirage_supervisor=debug`. Inherited by an auto-started daemon. |
+| `MIRAGE_BIN`                 | Path to the `mirage` binary used to start the daemon. Defaults to the current executable, falling back to `mirage` on `$PATH`. |
+| `MIRAGE_SOCKET`              | Control socket path (else `<runtime>/mirage/mirage.sock`). Give each isolated mirage instance its own. |
+| `MIRAGE_AUTOSTART`           | Set to `0` to make the CLI report that no daemon is running instead of starting one. |
 | `MIRAGE_CONTAINER_PROVIDER`  | Default container provider when none is given (`podman`/`docker`/path). |
 | `MIRAGE_CONFIG`              | Override the config dir (else `$XDG_CONFIG_HOME/mirage`).         |
-| `MIRAGE_RUNTIME`             | Override the runtime/session dir (else `$XDG_RUNTIME_DIR/mirage`). |
+| `MIRAGE_RUNTIME`             | Override the runtime dir — daemon socket, log, and emulator scratch (else `$XDG_RUNTIME_DIR/mirage`). |
 | `MIRAGE_STATE`               | Override the state dir (else `$XDG_STATE_HOME/mirage`).           |
-| `MIRAGE_WEBUI_ADDR`          | Default bind address for `mirage webui`.                         |
+| `MIRAGE_WEBUI_ADDR`          | Default bind address for the daemon's HTTP API.                  |
 | `XDG_CONFIG_HOME` / `XDG_RUNTIME_DIR` / `XDG_STATE_HOME` | Standard XDG base directories used when the `MIRAGE_*` overrides are unset. |
 
 rocjitsu discovery additionally honours `ROCM_HOME` and the ROCm SDK

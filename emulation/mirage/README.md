@@ -13,14 +13,23 @@ $ mirage run --profile cdna4 -- ./my-rocm-app --flag
 
 ## Why mirage
 
-* **All state lives on disk** in standard [XDG locations][xdg]. There is no
-  required background daemon to keep state alive: the CLI and the per-session
-  host processes coordinate exclusively through well-defined files. You can
-  inspect everything with `ls`, `cat`, and `tail -f`.
+* **Nothing is left behind.** Every workload process is owned by a
+  supervisor that always waits on it, runs it in its own process group, and
+  escalates `SIGTERM` to `SIGKILL` on teardown. `mirage session stop`
+  returns only once the process table agrees, so destroying a session
+  really destroys it — no orphans, no zombies.
+* **Configuration lives on disk** in standard [XDG locations][xdg]:
+  profiles, agents and topologies are files you can read, edit and check
+  into version control. Session state does not — it is owned in memory by
+  the daemon, so what you are told about a running session is true rather
+  than inferred from a file someone left behind.
+* **Interactive when you need it.** `mirage run -- bash` is a real shell:
+  prompt, echo, line editing, Ctrl-C and job control all work, and
+  resizing your window resizes the workload's terminal. Redirected runs
+  stay on pipes, so their output is byte-exact with stdout and stderr
+  separate.
 * **Easy to script.** Every list/show command accepts `--json` for
   machine-readable output, and exit codes are predictable.
-* **Crash-resilient.** Because state is on disk, a crashed CLI or host can be
-  restarted and pick up where it left off.
 * **A drop-in for `rocjitsu`.** `mirage --config cfg.json -- ./app` works just
   like the upstream `rocjitsu` CLI, so existing scripts keep running.
 
@@ -32,7 +41,7 @@ $ mirage run --profile cdna4 -- ./my-rocm-app --flag
 | **Agent**    | A hardware GPU definition (e.g. `MI300X`, `MI350X`, `MI450X`).             |
 | **Topology** | A rack/node/GPU layout that references an agent.                           |
 | **Profile**  | A reusable preset binding an emulator + topology + options.               |
-| **Session**  | A long-lived context (one host process) that hosts an emulator and runs execs. |
+| **Session**  | A long-lived context that hosts an emulator and runs execs. Owned by the daemon, so it outlives the command that created it. |
 | **Exec**     | A single command invocation inside a session, with fully redirected stdio. |
 
 A typical flow is: pick or create a **profile**, start a **session** from it,
@@ -92,14 +101,27 @@ start exec → attach → signal → stop) through the public CLI and HTTP surfa
 The rocjitsu-backed e2e tests require a working rocjitsu runtime; without it
 they are expected to fail with a "KMD preload library not found" message.
 
+## The daemon
+
+Sessions outlive the command that created them, so something has to own
+them in between. That is the supervisor daemon — one per user, started
+automatically the first time a command needs it, and gone again after ten
+idle minutes. You normally never think about it:
+
+```sh
+mirage daemon status             # pid, uptime, sessions
+mirage daemon stop               # destroy every session and exit
+```
+
 ## Web dashboard (optional)
 
-mirage ships an optional cross-session HTTP/WebSocket dashboard:
+The daemon can also serve an HTTP/WebSocket dashboard, backed by the same
+sessions the CLI sees:
 
 ```sh
 cargo build --workspace --features webui
-mirage webui                     # serve on 127.0.0.1:5174 by default
-mirage webui install             # register it as a systemd user service
+mirage daemon --addr 127.0.0.1:5174   # serve the dashboard
+mirage daemon install --addr 127.0.0.1:5174   # as a systemd user service
 ```
 
 ## Documentation
@@ -107,7 +129,7 @@ mirage webui install             # register it as a systemd user service
 * [`docs/cli.md`](docs/cli.md) — complete CLI reference.
 * [`docs/architecture.md`](docs/architecture.md) — design and crate overview.
 * [`docs/building.md`](docs/building.md) — building mirage, the dashboard, and rocjitsu.
-* [`docs/host.md`](docs/host.md) — what the per-session host does and how to extend it.
+* [`docs/daemon.md`](docs/daemon.md) — the supervisor daemon and its process model.
 * [`docs/state-layout.md`](docs/state-layout.md) — authoritative on-disk layout reference.
 
 [rocjitsu]: ../rocjitsu/
