@@ -86,15 +86,10 @@ endif()
 target_compile_options(profiler-hub_unit_tests PRIVATE -pthread)
 target_link_options(profiler-hub_unit_tests PRIVATE -pthread)
 
-# TheRock's ASAN build forces -shared-libsan fleet-wide, but amd-llvm provides no
-# loadable shared asan runtime (only static libclang_rt.asan.a). Force this target
-# to link the static runtime so it builds. It still cannot RUN under ASAN:
-# gtest_discover_tests executes the binary at build time to enumerate cases, and a
-# static-asan exe aborts with "incompatible ASan runtimes" because its sanitized
-# deps (libprofiler-hub.so, librocprofiler-sdk-rocpd.so) use the shared runtime.
-# The binary is still built and sanitized; only build-time discovery is
-# unsupported under ASAN, so skip it there. The release build discovers and runs
-# the full unit suite normally.
+# ASAN: TheRock forces -shared-libsan fleet-wide, but amd-llvm ships only the
+# static asan runtime, so link it statically here. The sanitized exe can't run at
+# build-time gtest discovery, so skip discovery under ASAN (release builds discover
+# and run the full suite). Full rationale in the PR description.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_FLAGS MATCHES "-fsanitize=address")
     target_link_options(profiler-hub_unit_tests PRIVATE -static-libsan)
     message(STATUS "profiler-hub: skipping gtest_discover_tests under ASAN "
