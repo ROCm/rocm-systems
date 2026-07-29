@@ -165,6 +165,12 @@ class RocProfCompute_Base:
         """Perform sanitization of inputs"""
         args = self.get_args()
         selected_frameworks = _compute_selected_frameworks(args)
+        if selected_frameworks and is_only_pc_sampling(args.filter_blocks):
+            console_error(
+                "ML API tracing cannot be used with PC-sampling-only profiling, "
+                "which does not collect counters. Remove the ML API tracing option "
+                "or add a counter block."
+            )
         self._selected_frameworks: set[str] = selected_frameworks
 
         if (
