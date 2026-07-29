@@ -46,11 +46,13 @@ def validate_delay_alu_instructions(all_samples, delay_alu_samples):
     allowed_stall_reasons = {
         "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_INTERNAL_INSTRUCTION",
         "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT",
-        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE"
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
     }
-    assert delay_alu_samples["Stall_Reason"].apply(
-        lambda x: x in allowed_stall_reasons
-    ).all(), (
+    assert (
+        delay_alu_samples["Stall_Reason"]
+        .apply(lambda x: x in allowed_stall_reasons)
+        .all()
+    ), (
         "All s_delay_alu instructions should have an allowed stall reason. "
         f"Unexpected reasons: "
         f"{set(delay_alu_samples['Stall_Reason'].unique()) - allowed_stall_reasons}"

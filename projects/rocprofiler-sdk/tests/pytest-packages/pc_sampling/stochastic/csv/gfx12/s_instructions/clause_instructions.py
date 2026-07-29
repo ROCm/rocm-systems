@@ -33,9 +33,7 @@ def validate_clause_instructions(all_samples, clause_samples):
         return
 
     # s_clause is never issued
-    assert (
-        clause_samples["Wave_Issued_Instruction"] == False
-    ).all(), (
+    assert (clause_samples["Wave_Issued_Instruction"] == False).all(), (
         f"s_clause should never be issued, but "
         f"{(clause_samples['Wave_Issued_Instruction'] == True).sum()}/{total} "
         f"samples have Wave_Issued_Instruction == True"

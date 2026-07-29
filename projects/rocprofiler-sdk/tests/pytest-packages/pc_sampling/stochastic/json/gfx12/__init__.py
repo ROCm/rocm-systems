@@ -100,7 +100,10 @@ class PrefixTree:
 
 instructions_with_types = [
     ("s_", "SCALAR"),  # Scalar instructions (general category)
-    ("s_wait", "WAITCNT"),  # WAITCNT (specific) - GFX12 uses s_wait_loadcnt, s_wait_storecnt, etc.
+    (
+        "s_wait",
+        "WAITCNT",
+    ),  # WAITCNT (specific) - GFX12 uses s_wait_loadcnt, s_wait_storecnt, etc.
     ("s_sendmsg", "MESSAGE"),  # MESSAGE (specific)
     ("s_barrier", "BARRIER"),  # BARRIER (specific)
     ("s_swappc", "JUMP"),  # JUMP (specific)
@@ -182,9 +185,9 @@ def validate_stochastic_samples_json(data_json):
         validate_arbiter_state(snapshot)
 
         # memory counters must always be present on GFX1250
-        assert record["flags"]["has_mem_cnt"] == 1, (
-            "memory_counters must always be present on GFX1250"
-        )
+        assert (
+            record["flags"]["has_mem_cnt"] == 1
+        ), "memory_counters must always be present on GFX1250"
 
         # sampling_lock_error: GFX12 hardware may set this when sampling frequency is too high
         # (hardware generates samples faster than trap handler reads them).

@@ -28,9 +28,9 @@ def validate_internal_instructions(all_samples, internal_samples):
     # The PC sampling correction WA ensures that no skid samples for internal
     # instructions reach the validator. All internal instructions must not be
     # issued to EX and must carry a valid internal stall reason.
-    assert (internal_samples["Wave_Issued_Instruction"] == False).all(), (
-        "Internal instructions (s_nop, s_sleep) must not be issued to EX"
-    )
+    assert (
+        internal_samples["Wave_Issued_Instruction"] == False
+    ).all(), "Internal instructions (s_nop, s_sleep) must not be issued to EX"
 
     valid_stall = internal_samples["Stall_Reason"].isin(
         {

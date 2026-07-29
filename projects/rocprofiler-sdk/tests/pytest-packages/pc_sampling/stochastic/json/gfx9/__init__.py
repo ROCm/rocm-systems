@@ -164,9 +164,9 @@ def validate_stochastic_samples_json(data_json):
         validate_arbiter_state(snapshot)
 
         # memory counters are not present on GFX9
-        assert record["flags"]["has_mem_cnt"] == 0, (
-            "memory_counters must not be present on GFX9"
-        )
+        assert (
+            record["flags"]["has_mem_cnt"] == 0
+        ), "memory_counters must not be present on GFX9"
 
         # sampling_lock_error is not supported on GFX9
         assert snapshot["lck_err"] == 0, "sampling_lock_error must be 0 on GFX9"

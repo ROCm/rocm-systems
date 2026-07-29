@@ -43,9 +43,7 @@ def validate_barrier_signal(all_samples, s_barrier_signal_samples):
     - Stalled: Stall reason must be NO_INSTRUCTION_AVAILABLE, ARBITER_NOT_WIN, or OTHER_WAIT.
     """
     # -- issued --
-    issued = s_barrier_signal_samples[
-        s_barrier_signal_samples["Wave_Issued_Instruction"]
-    ]
+    issued = s_barrier_signal_samples[s_barrier_signal_samples["Wave_Issued_Instruction"]]
 
     if not issued.empty:
         # Cross-check: issued barrier samples from all_samples must match
@@ -78,7 +76,7 @@ def validate_barrier_signal(all_samples, s_barrier_signal_samples):
         allowed_stall_reasons = {
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN",
-            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT"
+            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT",
         }
         invalid = ~stalled["Stall_Reason"].isin(allowed_stall_reasons)
         assert not invalid.any(), (
@@ -93,16 +91,16 @@ def validate_barrier_wait(s_barrier_wait_samples):
     s_barrier_wait is always stalled (issued=False).
     Stall reason must be NO_INSTRUCTION_AVAILABLE, BARRIER_WAIT, OTHER_WAIT, or INTERNAL_INSTRUCTION.
     """
-    assert (s_barrier_wait_samples["Wave_Issued_Instruction"] == False).all(), (
-        "issued is not False for all s_barrier_wait samples."
-    )
+    assert (
+        s_barrier_wait_samples["Wave_Issued_Instruction"] == False
+    ).all(), "issued is not False for all s_barrier_wait samples."
 
     if not s_barrier_wait_samples.empty:
         allowed_stall_reasons = {
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_BARRIER_WAIT",
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT",
-            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_INTERNAL_INSTRUCTION"
+            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_INTERNAL_INSTRUCTION",
         }
         invalid = ~s_barrier_wait_samples["Stall_Reason"].isin(allowed_stall_reasons)
         assert not invalid.any(), (

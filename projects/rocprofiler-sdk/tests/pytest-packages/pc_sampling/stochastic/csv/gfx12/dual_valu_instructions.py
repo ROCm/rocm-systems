@@ -35,9 +35,11 @@ def validate_dual_valu_instructions_issued(samples_issued):
         samples_issued["Instruction_Type"]
         == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_DUAL_VALU"
     ]
-    assert issued_type_dual_valu["Instruction"].apply(
-        lambda x: x.startswith("v_dual_")
-    ).all(), "All issued DUAL_VALU type instructions should start with v_dual_"
+    assert (
+        issued_type_dual_valu["Instruction"]
+        .apply(lambda x: x.startswith("v_dual_"))
+        .all()
+    ), "All issued DUAL_VALU type instructions should start with v_dual_"
 
     # All v_dual_ issued instructions should have DUAL_VALU instruction type
     v_dual_issued = samples_issued[
@@ -61,9 +63,7 @@ def validate_dual_valu_instructions_stalled(samples):
     v_dual_samples = samples[
         samples["Instruction"].apply(lambda x: x.startswith("v_dual_"))
     ]
-    v_dual_stalled = v_dual_samples[
-        v_dual_samples["Wave_Issued_Instruction"] == False
-    ]
+    v_dual_stalled = v_dual_samples[v_dual_samples["Wave_Issued_Instruction"] == False]
 
     if v_dual_stalled.empty:
         return
@@ -73,12 +73,12 @@ def validate_dual_valu_instructions_stalled(samples):
     allowed_stall_reasons = {
         "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN",
         "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
-        'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT',
-        'ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY'
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT",
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY",
     }
-    assert v_dual_stalled["Stall_Reason"].apply(
-        lambda x: x in allowed_stall_reasons
-    ).all(), (
+    assert (
+        v_dual_stalled["Stall_Reason"].apply(lambda x: x in allowed_stall_reasons).all()
+    ), (
         "All stalled v_dual_ instructions should have an allowed stall reason. "
         f"Unexpected reasons: "
         f"{set(v_dual_stalled['Stall_Reason'].unique()) - allowed_stall_reasons}"

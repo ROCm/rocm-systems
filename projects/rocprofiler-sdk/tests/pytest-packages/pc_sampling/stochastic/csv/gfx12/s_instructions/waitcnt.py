@@ -34,9 +34,9 @@ def validate_waitcnt(all_samples, waitcnt_samples):
     # The PC sampling correction WA ensures that no skid samples for s_wait_*
     # instructions reach the validator. s_wait_* instructions are never issued
     # on GFX12, and ARBITER_NOT_WIN skid samples are also corrected away.
-    assert (waitcnt_samples["Wave_Issued_Instruction"] == False).all(), (
-        "s_wait_* instructions must never be issued on GFX12"
-    )
+    assert (
+        waitcnt_samples["Wave_Issued_Instruction"] == False
+    ).all(), "s_wait_* instructions must never be issued on GFX12"
 
     # accepted stall reasons are
     assert (

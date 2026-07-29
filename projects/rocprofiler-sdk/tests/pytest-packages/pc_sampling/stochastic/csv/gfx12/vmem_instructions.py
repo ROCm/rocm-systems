@@ -49,8 +49,7 @@ def validate_vmem_instructions_issued(samples_issued):
         )
     ]
     assert (
-        issued_vmem["Instruction_Type"]
-        == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_TEX"
+        issued_vmem["Instruction_Type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_TEX"
     ).all()
 
 
