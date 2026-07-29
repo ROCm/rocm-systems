@@ -405,9 +405,24 @@ def load_pc_sampling_data(
     if not tool_data_records:
         return pd.DataFrame()
 
-    # A profiling invocation configures one sampling method for every process,
-    # so the first record determines the shared method.
-    pc_sampling_method = detect_pc_sampling_method(tool_data_records[0])
+    # Zero-sample processes still produce valid result records when another
+    # enabled domain, such as kernel tracing, contains data. Infer the shared
+    # method from every process that captured at least one PC sample.
+    detected_pc_sampling_methods = {
+        method
+        for tool_data in tool_data_records
+        if (method := detect_pc_sampling_method(tool_data)) is not None
+    }
+    if len(detected_pc_sampling_methods) > 1:
+        conflicting_methods = ", ".join(sorted(detected_pc_sampling_methods))
+        console_error(
+            "PC sampling: conflicting sampling methods "
+            f"({conflicting_methods}) found for {file_prefix}",
+            exit=False,
+        )
+        return pd.DataFrame()
+
+    pc_sampling_method = next(iter(detected_pc_sampling_methods), None)
     if pc_sampling_method is None:
         console_warning("PC sampling: can not detect pc sampling method.")
         return pd.DataFrame()

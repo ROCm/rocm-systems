@@ -70,6 +70,15 @@ from utils.utils_counter_defs import (
     get_build_in_vars,
 )
 
+KernelKey = tuple[Optional[int], str]
+CodeObjectKey = tuple[Optional[int], int]
+
+
+def _normalize_pid(pid: Any) -> Optional[int]:  # noqa: ANN401
+    if pid is None or pd.isna(pid):
+        return None
+    return int(pid)
+
 
 class MetricInfoRow(NamedTuple):
     name: str
@@ -149,28 +158,33 @@ class db_analysis(OmniAnalyze_Base):
             Database.get_session().add(workload_obj)
 
             # Add kernel
-            kernel_objs: dict[str, orm.Kernel] = {}
+            kernel_objs: dict[KernelKey, orm.Kernel] = {}
 
             for dispatch in self._dispatch_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
+                dispatch_pid = _normalize_pid(dispatch.pid)
+                kernel_key: KernelKey = (
+                    dispatch_pid if self.pc_sampling_only() else None,
+                    dispatch.kernel_name,
+                )
                 # Add kernel object and map it, if not already added
-                if dispatch.kernel_name not in kernel_objs:
-                    kernel_objs[dispatch.kernel_name] = orm.Kernel(
+                if kernel_key not in kernel_objs:
+                    kernel_objs[kernel_key] = orm.Kernel(
                         kernel_name=dispatch.kernel_name,
                         workload=workload_obj,
                     )
-                    Database.get_session().add(kernel_objs[dispatch.kernel_name])
+                    Database.get_session().add(kernel_objs[kernel_key])
 
                 # Add dispatch object and link with kernel object
                 Database.get_session().add(
                     orm.Dispatch(
                         dispatch_id=dispatch.dispatch_id,
-                        pid=dispatch.pid,
+                        pid=dispatch_pid,
                         gpu_id=dispatch.gpu_id,
                         start_timestamp=dispatch.start_timestamp,
                         end_timestamp=dispatch.end_timestamp,
-                        kernel=kernel_objs[dispatch.kernel_name],
+                        kernel=kernel_objs[kernel_key],
                     )
                 )
 
@@ -179,7 +193,8 @@ class db_analysis(OmniAnalyze_Base):
                 workload_path, pd.DataFrame()
             ).itertuples():
                 kernel_name = getattr(roofline_data, "kernel_name", None)
-                if kernel_name not in kernel_objs:
+                kernel_key: KernelKey = (None, kernel_name)
+                if kernel_key not in kernel_objs:
                     console_warning(
                         f"Kernel {kernel_name} from roofline data "
                         "not found in dispatch data. Skipping roofline entry."
@@ -193,7 +208,7 @@ class db_analysis(OmniAnalyze_Base):
                         l2_cache_data=getattr(roofline_data, "l2_cache_data", None),
                         hbm_cache_data=getattr(roofline_data, "hbm_cache_data", None),
                         lds_cache_data=getattr(roofline_data, "lds_cache_data", None),
-                        kernel=kernel_objs[kernel_name],
+                        kernel=kernel_objs[kernel_key],
                     )
                 )
 
@@ -213,8 +228,15 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
             # Add pc sampling data, then the full code-object ISA
-            self.add_pc_sampling_data(workload_path, workload_obj, kernel_objs)
-            self.add_code_object_isa(workload_path, workload_obj, kernel_objs)
+            code_object_stores = self.add_pc_sampling_data(
+                workload_path, workload_obj, kernel_objs
+            )
+            self.add_code_object_isa(
+                workload_path,
+                workload_obj,
+                kernel_objs,
+                code_object_stores,
+            )
 
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
@@ -240,7 +262,7 @@ class db_analysis(OmniAnalyze_Base):
         self,
         workload_path: str,
         workload_obj: orm.Workload,
-        kernel_objs: dict[str, orm.Kernel],
+        kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> None:
         """Add metric definitions and metric values to the database."""
         # Add metrics and values - iterate on values, create metrics as needed
@@ -255,8 +277,9 @@ class db_analysis(OmniAnalyze_Base):
         for value in self._kernel_values_data_per_workload.get(
             workload_path, pd.DataFrame()
         ).itertuples():
+            kernel_key: KernelKey = (None, value.kernel_name)
             # Check if kernel exists
-            if value.kernel_name not in kernel_objs:
+            if kernel_key not in kernel_objs:
                 console_warning(
                     f"Kernel {value.kernel_name} from values data "
                     "not found in dispatch data. Skipping metric value."
@@ -288,7 +311,7 @@ class db_analysis(OmniAnalyze_Base):
             Database.get_session().add(
                 orm.KernelMetricValue(
                     metric=metric_objs[value.metric_id],
-                    kernel=kernel_objs[value.kernel_name],
+                    kernel=kernel_objs[kernel_key],
                     value_name=value.value_name,
                     value=value.value,
                 )
@@ -389,37 +412,48 @@ class db_analysis(OmniAnalyze_Base):
         self,
         workload_path: str,
         workload_obj: orm.Workload,
-        kernel_objs: dict[str, orm.Kernel],
-    ) -> None:
+        kernel_objs: dict[KernelKey, orm.Kernel],
+    ) -> dict[CodeObjectKey, orm.CodeObjectStore]:
         """Insert the normalized PC-sampling rows for one workload."""
+        code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore] = {}
         tool_data_records = self._pc_sampling_tool_data_per_workload.get(
             workload_path, []
         )
-        if not tool_data_records:
-            return
 
         for tool_data in tool_data_records:
-            pid = tool_data.get("metadata", {}).get("pid")
+            pid = _normalize_pid(tool_data.get("metadata", {}).get("pid"))
 
             for code_object in load_aggregated_pc_sampling(tool_data):
-                code_object_store = orm.CodeObjectStore(
-                    pid=pid,
-                    code_object_id=code_object.code_object_id,
-                    load_base=code_object.load_base,
-                    workload=workload_obj,
-                )
-                Database.get_session().add(code_object_store)
+                code_object_key: CodeObjectKey = (pid, code_object.code_object_id)
+                code_object_store = code_object_stores.get(code_object_key)
+                if code_object_store is None:
+                    code_object_store = orm.CodeObjectStore(
+                        code_object_id=code_object.code_object_id,
+                        load_base=code_object.load_base,
+                        workload=workload_obj,
+                    )
+                    Database.get_session().add(code_object_store)
+                    code_object_stores[code_object_key] = code_object_store
+
                 for line in code_object.instruction_lines:
-                    self._add_instruction_line(line, code_object_store, kernel_objs)
+                    self._add_instruction_line(
+                        line,
+                        pid,
+                        code_object_store,
+                        kernel_objs,
+                    )
+
+        return code_object_stores
 
     @staticmethod
     def _add_instruction_line(
         line: InstructionLineRecord,
+        pid: Optional[int],
         code_object_store: orm.CodeObjectStore,
-        kernel_objs: dict[str, orm.Kernel],
+        kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> None:
         """Insert one instruction line, its sample state, and child counts."""
-        kernel = kernel_objs.get(line.kernel_name)
+        kernel = kernel_objs.get((pid, line.kernel_name))
         if kernel is None:
             # Drop lines whose kernel was filtered out or never mapped.
             return
@@ -466,7 +500,8 @@ class db_analysis(OmniAnalyze_Base):
         self,
         workload_path: str,
         workload_obj: orm.Workload,
-        kernel_objs: dict[str, orm.Kernel],
+        kernel_objs: dict[KernelKey, orm.Kernel],
+        code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore],
     ) -> None:
         """Add dispatched kernels' disassembly as instruction lines,
         skipping any offset already present."""
@@ -474,13 +509,11 @@ class db_analysis(OmniAnalyze_Base):
             workload_path, []
         )
         tool_data_by_pid = self._pc_sampling_tool_data_by_pid(tool_data_records)
-        # Reuse an existing code object instead of creating a duplicate.
-        existing_code_objects = {
-            (store.pid, store.code_object_id): store
-            for store in workload_obj.code_object_stores
-        }
 
-        for pid, disassemblies in load_code_object_disassemblies(workload_path).items():
+        for raw_pid, disassemblies in load_code_object_disassemblies(
+            workload_path
+        ).items():
+            pid = _normalize_pid(raw_pid)
             tool_data = tool_data_by_pid.get(pid)
             if tool_data is None:
                 continue
@@ -495,21 +528,19 @@ class db_analysis(OmniAnalyze_Base):
                 if disassembly.code_object_id not in invoked_code_object_ids:
                     continue
 
-                code_object_store = existing_code_objects.get((
+                code_object_key: CodeObjectKey = (
                     pid,
                     disassembly.code_object_id,
-                ))
+                )
+                code_object_store = code_object_stores.get(code_object_key)
                 if code_object_store is None:
                     code_object_store = orm.CodeObjectStore(
-                        pid=pid,
                         code_object_id=disassembly.code_object_id,
                         load_base=load_base_by_id.get(disassembly.code_object_id),
                         workload=workload_obj,
                     )
                     Database.get_session().add(code_object_store)
-                    existing_code_objects[(pid, disassembly.code_object_id)] = (
-                        code_object_store
-                    )
+                    code_object_stores[code_object_key] = code_object_store
 
                 # The disassembly's own offset is into the ELF file, not the
                 # offset the PC-sampling rows use (measured from the code
@@ -996,9 +1027,9 @@ class db_analysis(OmniAnalyze_Base):
     @staticmethod
     def _pc_sampling_tool_data_by_pid(
         tool_data_records: list[dict[str, Any]],
-    ) -> dict[Any, dict[str, Any]]:
+    ) -> dict[Optional[int], dict[str, Any]]:
         return {
-            tool_data["metadata"]["pid"]: tool_data
+            _normalize_pid(tool_data["metadata"]["pid"]): tool_data
             for tool_data in tool_data_records
             if "pid" in tool_data.get("metadata", {})
         }
@@ -1015,15 +1046,24 @@ class db_analysis(OmniAnalyze_Base):
     @staticmethod
     def _kernel_by_symbol(
         tool_data: dict[str, Any],
-        kernel_objs: dict[str, orm.Kernel],
+        kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> dict[tuple[Any, str], orm.Kernel]:
+        pid = _normalize_pid(tool_data.get("metadata", {}).get("pid"))
+        dispatched_kernel_ids = {
+            dispatch_record["dispatch_info"]["kernel_id"]
+            for dispatch_record in tool_data["buffer_records"]["kernel_dispatch"]
+        }
         return {
             (
                 symbol["code_object_id"],
                 symbol["kernel_name"].removesuffix(".kd"),
             ): kernel
             for symbol in tool_data.get("kernel_symbols", [])
-            if (kernel := kernel_objs.get(symbol["formatted_kernel_name"])) is not None
+            if symbol["kernel_id"] in dispatched_kernel_ids
+            if (
+                (kernel := kernel_objs.get((pid, symbol["formatted_kernel_name"])))
+                is not None
+            )
         }
 
     @staticmethod

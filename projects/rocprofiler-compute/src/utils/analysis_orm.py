@@ -124,8 +124,8 @@ class KernelRooflineData(Base):
 
 class Dispatch(Base):
     __tablename__ = f"{PREFIX}dispatch"
-    # dispatch_id is unique within a kernel and process.
-    __table_args__ = (UniqueConstraint("kernel_uuid", "pid", "dispatch_id"),)
+    # dispatch_id is unique within a kernel.
+    __table_args__ = (UniqueConstraint("kernel_uuid", "dispatch_id"),)
 
     dispatch_uuid = Column(Integer, primary_key=True)
     kernel_uuid = Column(
@@ -143,8 +143,6 @@ class Dispatch(Base):
 
 class Kernel(Base):
     __tablename__ = f"{PREFIX}kernel"
-    # One kernel row per name per workload.
-    __table_args__ = (UniqueConstraint("workload_id", "kernel_name"),)
 
     kernel_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
@@ -166,14 +164,11 @@ class Kernel(Base):
 
 class CodeObjectStore(Base):
     __tablename__ = f"{PREFIX}code_object_store"
-    # code_object_id is only unique per process, so pid disambiguates it.
-    __table_args__ = (UniqueConstraint("workload_id", "pid", "code_object_id"),)
 
     code_object_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
         Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
-    pid = Column(Integer)
     code_object_id = Column(Integer)
     load_base = Column(Integer, nullable=True)
 
