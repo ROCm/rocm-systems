@@ -19,6 +19,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -43,6 +44,9 @@ TEST(GpuUnit, VramTotalUnusableSysfsPrefersKfd) {
     EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(false, kSampleVramTotal, mode, kSampleVramTotal))
         << "Failed sysfs read must fall back to KFD (mode=" << mode << ")";
   }
+  // The helper does not guard on kfd_total; the caller substitutes only when
+  // kfd_total > 0. A failed read still prefers KFD even when kfd_total is 0.
+  EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(false, kSampleVramTotal, "SPX", 0));
 }
 
 // A zero sysfs total is unusable and must fall back to the KFD total.
@@ -51,6 +55,8 @@ TEST(GpuUnit, VramTotalZeroSysfsPrefersKfd) {
     EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, 0, mode, kSampleVramTotal))
         << "Zero sysfs total must fall back to KFD (mode=" << mode << ")";
   }
+  // A zero sysfs total is unusable regardless of the KFD total.
+  EXPECT_TRUE(amd::smi::vram_total_prefer_kfd(true, 0, "SPX", 0));
 }
 
 // Usable sysfs on a non-partitioned GPU (SPX or empty) is trusted; KFD is not
@@ -60,6 +66,7 @@ TEST(GpuUnit, VramTotalUsableNonPartitionedKeepsSysfs) {
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "", kSampleVramTotal));
   // A zero KFD total must never override a usable sysfs value.
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "SPX", 0));
+  EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "", 0));
 }
 
 // In a multi-partition mode, sysfs reports the whole device split evenly and is
@@ -86,7 +93,7 @@ TEST(GpuUnit, VramTotalMi300xSpxKeepsSysfs) {
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kMi300xSpxTotal, "SPX", kMi300xSpxTotal));
 }
 
-// Discrete GPU: the KFD FB_PUBLIC bank is not larger than sysfs, so the final
+// Discrete GPU: the KFD mem_banks total is not larger than sysfs, so the final
 // clause stays false and the sysfs value is kept.
 TEST(GpuUnit, VramTotalDiscreteKeepsSysfs) {
   const uint64_t kfd_smaller = kSampleVramTotal - 1;

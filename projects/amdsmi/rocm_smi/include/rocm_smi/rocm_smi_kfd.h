@@ -76,6 +76,7 @@ class KFDNode {
   std::map<uint32_t, std::shared_ptr<IOLink>> io_link_map_;
   std::map<std::string, uint64_t> properties_;
   std::shared_ptr<Device> amdgpu_device_;
+  uint64_t total_memory_ = 0;  // cached mem_banks sum; 0 = not yet computed
 };
 
 int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes);
