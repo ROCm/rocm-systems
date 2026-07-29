@@ -158,7 +158,7 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
 
   if (ag_type == HSA_DEVICE_TYPE_CPU && pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
 
-  // Query whether this agent supports host memory DMA-BUF allocation via vmem APIs
+  // Query whether the system supports host memory DMA-BUF allocation via vmem APIs
   const bool is_cpu_pool = (ag_type == HSA_DEVICE_TYPE_CPU);
   bool vmem_host_supported = false;
   ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED,
