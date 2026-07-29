@@ -52,6 +52,11 @@
 #include <dlfcn.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
+#include <unistd.h>
+#include <sys/auxv.h>
+#ifndef AT_SECURE
+#define AT_SECURE 23
+#endif
 #endif
 
 #include "core/inc/runtime.h"
@@ -2851,9 +2856,13 @@ void Runtime::CheckVirtualMemApiSupport() {
 void Runtime::InitIPCDmaBufSupport() {
   bool dmabuf_supported = false;
 
+  // dma-buf IPC passes the FD via SCM_RIGHTS, which Valgrind can't reproduce.
+  // Force legacy IPC (no FD passing) under Valgrind, no effect otherwise.
+  const bool force_legacy_ipc = flag().running_valgrind();
+
   // Early exit so we don't double load lib DRM
   if (virtual_mem_api_supported_) {
-    ipc_dmabuf_supported_ = !flag().enable_ipc_mode_legacy();
+    ipc_dmabuf_supported_ = !flag().enable_ipc_mode_legacy() && !force_legacy_ipc;
     return;
   }
 
@@ -2867,7 +2876,7 @@ void Runtime::InitIPCDmaBufSupport() {
     debug_warning("amdgpu_device_get_fd not available. Please update version of libdrm");
     fn_amdgpu_device_get_fd = &fn_amdgpu_device_get_fd_nosupport;
   } else {
-    ipc_dmabuf_supported_ = !flag().enable_ipc_mode_legacy();
+    ipc_dmabuf_supported_ = !flag().enable_ipc_mode_legacy() && !force_legacy_ipc;
   }
 #else
   ipc_dmabuf_supported_ = false;
@@ -2930,10 +2939,28 @@ void Runtime::LoadTools() {
   uint32_t env_count = 0;
 
   // Load env var tool lib names and determine ordering offset.
+  //
+  // Security: HSA_TOOLS_LIB is user-controlled and fed to dlopen(), so honoring
+  // it in a secure context (setuid/setgid/file-capability) is a privilege-
+  // escalation primitive. glibc scrubs its own env vars (LD_PRELOAD, ...) in
+  // secure-execution mode but not HSA_TOOLS_LIB, so ignore it ourselves here.
   std::string tool_names = flag_.tools_lib_names();
   std::vector<std::string> names;
   if (tool_names != "") {
     names = parse_tool_names(std::move(tool_names));
+
+#if defined(__linux__)
+    const bool secure =
+        (geteuid() != getuid()) || (getegid() != getgid()) || (getauxval(AT_SECURE) != 0);
+    if (secure) {
+      if (!names.empty() && flag().report_tool_load_failures())
+        fprintf(stderr,
+                "HSA_TOOLS_LIB ignored: running in a secure context "
+                "(setuid/setgid or AT_SECURE).\n");
+      names.clear();
+    }
+#endif
+
     env_count = names.size();
   }
 
