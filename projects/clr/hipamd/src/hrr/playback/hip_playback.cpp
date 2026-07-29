@@ -2439,8 +2439,9 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
 // Manual playback: hipDrvMemcpy3D / hipDrvMemcpy3DAsync / hipDrvMemcpy2DUnaligned
 // Driver-style struct copies. Mirror hipMemcpy3D: reconstruct the struct from
 // the inline bytes, translate the embedded device pointers (srcDevice/dstDevice)
-// and array handles via the alloc/array maps, load the H2D blob into srcHost, or
-// validate D2H against the expected blob. Keyed off srcMemoryType/dstMemoryType.
+// via the alloc map, load the H2D blob into srcHost, or validate D2H against the
+// expected blob. Keyed off srcMemoryType/dstMemoryType. Host and device memory
+// types are in scope; array-typed rects are declined (see below).
 // ---------------------------------------------------------------------------
 
 // Host-side byte footprint of a driver-copy rect, measured from the host base
@@ -2486,24 +2487,22 @@ static const void* drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
     return blob;
 }
 
-// Recorded array handles are stale at replay. Translate them; a miss means the
-// array was never captured, so there is nothing safe to dereference.
-static bool drvmemcpy_translate_arrays(PlaybackContext& ctx, const char* api,
-                                       hipMemoryType src_type, hipArray_t& src_array,
-                                       hipMemoryType dst_type, hipArray_t& dst_array) {
-    if (src_type == hipMemoryTypeArray) {
-        src_array = ctx.translate_array(reinterpret_cast<uint64_t>(src_array));
-        if (!src_array) {
-            fprintf(stderr, "[HRR] %s: source array not mapped, skipped\n", api);
-            return false;
-        }
-    }
-    if (dst_type == hipMemoryTypeArray) {
-        dst_array = ctx.translate_array(reinterpret_cast<uint64_t>(dst_array));
-        if (!dst_array) {
-            fprintf(stderr, "[HRR] %s: destination array not mapped, skipped\n", api);
-            return false;
-        }
+// Array-typed rects are out of scope for these APIs, so decline them up front
+// rather than let them reach a branch that cannot describe them. An array is
+// addressed through srcArray / dstArray, and the matching srcDevice / dstDevice
+// is unset: the device-to-host branch below would translate that unset pointer
+// and report the resulting null as a translation bug, and the device-to-device
+// branch would translate two unset pointers. hipMemoryType has no separate
+// texture enumerator (a texture is read through the array it is bound to), so
+// this covers the texture case too. Warned once per API, like the no-op
+// handlers, so a replay with many such copies does not spam stderr.
+static bool drvmemcpy_declines_array_rect(const char* api, bool& warned,
+                                          hipMemoryType src_type, hipMemoryType dst_type) {
+    if (src_type != hipMemoryTypeArray && dst_type != hipMemoryTypeArray) return false;
+    if (!warned) {
+        warned = true;
+        fprintf(stderr, "[HRR] %s: array memory type is not replayed by HRR; the copy is "
+                        "skipped and results may differ from capture.\n", api);
     }
     return true;
 }
@@ -2514,10 +2513,6 @@ static hipError_t replay_drvmemcpy3d(PlaybackContext& ctx, HIP_MEMCPY3D& parms,
                                      uint64_t blob_hash_hi, uint64_t d2h_hash_lo,
                                      uint64_t d2h_hash_hi, hipStream_t stream,
                                      bool is_async) {
-    if (!drvmemcpy_translate_arrays(ctx, api, parms.srcMemoryType, parms.srcArray,
-                                    parms.dstMemoryType, parms.dstArray))
-        return hipSuccess;
-
     if (parms.srcMemoryType == hipMemoryTypeHost) {
         if (parms.dstMemoryType == hipMemoryTypeHost) {
             // Host-to-host touches no device state, and the recorded dstHost VA
@@ -2567,6 +2562,10 @@ hipError_t playback_hipDrvMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipDrvMemcpy3D*>(pl);
     HIP_MEMCPY3D parms{};
     std::memcpy(&parms, a->drv3d_bytes, sizeof(parms));
+    static bool array_warned = false;
+    if (drvmemcpy_declines_array_rect("hipDrvMemcpy3D", array_warned,
+                                      parms.srcMemoryType, parms.dstMemoryType))
+        return hipSuccess;
     return replay_drvmemcpy3d(ctx, parms, "hipDrvMemcpy3D",
                               a->blob_hash_lo, a->blob_hash_hi,
                               a->d2h_hash_lo, a->d2h_hash_hi,
@@ -2577,6 +2576,10 @@ hipError_t playback_hipDrvMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl)
     const auto* a = reinterpret_cast<const hrr_args_hipDrvMemcpy3DAsync*>(pl);
     HIP_MEMCPY3D parms{};
     std::memcpy(&parms, a->drv3d_bytes, sizeof(parms));
+    static bool array_warned = false;
+    if (drvmemcpy_declines_array_rect("hipDrvMemcpy3DAsync", array_warned,
+                                      parms.srcMemoryType, parms.dstMemoryType))
+        return hipSuccess;
     return replay_drvmemcpy3d(ctx, parms, "hipDrvMemcpy3DAsync",
                               a->blob_hash_lo, a->blob_hash_hi,
                               a->d2h_hash_lo, a->d2h_hash_hi,
@@ -2589,8 +2592,9 @@ hipError_t playback_hipDrvMemcpy2DUnaligned(PlaybackContext& ctx, const uint8_t*
     hip_Memcpy2D parms{};
     std::memcpy(&parms, a->drv2d_bytes, sizeof(parms));
 
-    if (!drvmemcpy_translate_arrays(ctx, kApi, parms.srcMemoryType, parms.srcArray,
-                                    parms.dstMemoryType, parms.dstArray))
+    static bool array_warned = false;
+    if (drvmemcpy_declines_array_rect(kApi, array_warned,
+                                      parms.srcMemoryType, parms.dstMemoryType))
         return hipSuccess;
 
     if (parms.srcMemoryType == hipMemoryTypeHost) {

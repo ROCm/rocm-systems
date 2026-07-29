@@ -1242,11 +1242,14 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
       auto h = hrr_cap::writer::write_blob(p->srcHost, n);
       a.blob_hash_lo = h.lo; a.blob_hash_hi = h.hi;
     }
-  } else if (p->dstMemoryType == hipMemoryTypeHost && p->dstHost) {
+  } else if (p->dstMemoryType == hipMemoryTypeHost && p->dstHost &&
+             p->srcMemoryType != hipMemoryTypeArray) {
     // D2H expected output. Replay does a flat readback of the copied volume
     // (it never substitutes dstHost), so the blob stays the flat volume to keep
     // the two sides the same shape. A pitched destination rect is therefore not
     // validated faithfully; that is a fidelity gap, not a replay over-read.
+    // An array source is skipped because playback declines array-typed rects,
+    // so the blob would be an expected output nothing ever validates.
     size_t n = p->WidthInBytes * p->Height * p->Depth;
     if (n > 0) {
       if (is_async && stream) {
@@ -1281,7 +1284,8 @@ static void capture_drvmemcpy2d_impl(T& a, hrr_api_id_t api_id, const hip_Memcpy
       auto h = hrr_cap::writer::write_blob(p->srcHost, n);
       a.blob_hash_lo = h.lo; a.blob_hash_hi = h.hi;
     }
-  } else if (p->dstMemoryType == hipMemoryTypeHost && p->dstHost) {
+  } else if (p->dstMemoryType == hipMemoryTypeHost && p->dstHost &&
+             p->srcMemoryType != hipMemoryTypeArray) {
     size_t n = p->WidthInBytes * p->Height;  // flat volume; see the 3D note above
     if (n > 0) {
       auto h = hrr_cap::writer::write_blob(p->dstHost, n);
