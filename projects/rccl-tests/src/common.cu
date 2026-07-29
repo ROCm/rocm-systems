@@ -24,7 +24,7 @@
 #include <utility>
 #include <errno.h>     /* program_invocation_short_name */
 #include <dlfcn.h>
-//#define DEBUG_PRINT
+#define DEBUG_PRINT
 
 #include "verifiable.h"
 #include "util.h"
@@ -576,6 +576,12 @@ void Allreduce(struct threadArgs* args, T* value, int average) {
   epoch ^= 1;
 }
 
+#if defined(DEBUG_PRINT)
+#define MAX_SNAPSHOT_GPUS 32
+static __thread char* preCollSnapshot[MAX_SNAPSHOT_GPUS];
+static __thread size_t preCollSnapshotBytes[MAX_SNAPSHOT_GPUS];
+#endif
+
 testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, int64_t *wrongElts) {
   int nranks = args->nProcs*args->nGpus*args->nThreads;
   size_t count = args->expectedBytes/wordSize(type);
@@ -599,16 +605,49 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       cudaMemcpy(expectedHost, args->expected[i], args->expectedBytes, cudaMemcpyDeviceToHost);
       cudaMemcpy(dataHost, data, args->expectedBytes, cudaMemcpyDeviceToHost);
 
-      for(int j=0; j<args->expectedBytes/eltsz; j++) {
-        unsigned long long want, got;
-        want = 0;
-        memcpy(&want, expectedHost + j*eltsz, eltsz);
-        got = 0;
-        memcpy(&got, dataHost + j*eltsz, eltsz);
-        if(want != got) {
-          printf(" rank=%d elt[%d]: want=0x%llx got=0x%llx\n", rank, j, want, got);
+      const size_t nelts = args->expectedBytes/eltsz;
+      const size_t maxRuns = 8, maxPerRun = 4;
+      size_t idx = 0, runs = 0;
+      while (idx < nelts && runs < maxRuns) {
+        unsigned long long want = 0, got = 0;
+        memcpy(&want, expectedHost + idx*eltsz, eltsz);
+        memcpy(&got, dataHost + idx*eltsz, eltsz);
+        if (want == got) { idx++; continue; }
+
+        size_t start = idx;
+        while (idx < nelts) {
+          unsigned long long w = 0, g = 0;
+          memcpy(&w, expectedHost + idx*eltsz, eltsz);
+          memcpy(&g, dataHost + idx*eltsz, eltsz);
+          if (w == g) break;
+          idx++;
         }
+        size_t end = idx - 1;
+        // Was this run already wrong before the collective ran?
+        size_t preZero = 0, preMatchesGot = 0;
+        const char* pre = (preCollSnapshotBytes[i] == args->expectedBytes) ? preCollSnapshot[i] : nullptr;
+        if (pre != nullptr) {
+          for (size_t k = start; k <= end; k++) {
+            unsigned long long p = 0, g = 0;
+            memcpy(&p, pre + k*eltsz, eltsz);
+            memcpy(&g, dataHost + k*eltsz, eltsz);
+            if (p == 0) preZero++;
+            if (p == g) preMatchesGot++;
+          }
+        }
+        printf("rank=%d run=%zu elts[%zu..%zu] count=%zu byteOff=%zu preZero=%zu preMatchesGot=%zu\n",
+               rank, runs, start, end, end-start+1, start*(size_t)eltsz, preZero, preMatchesGot);
+        for (size_t k = start; k <= end && k < start + maxPerRun; k++) {
+          unsigned long long w = 0, g = 0, p = 0;
+          memcpy(&w, expectedHost + k*eltsz, eltsz);
+          memcpy(&g, dataHost + k*eltsz, eltsz);
+          if (pre != nullptr) memcpy(&p, pre + k*eltsz, eltsz);
+          printf("  rank=%d elt=%zu preColl=0x%llx want=0x%llx got=0x%llx\n", rank, k, p, w, g);
+        }
+        runs++;
       }
+      printf("rank=%d runsShown=%zu totalWrong=%d nelts=%zu\n", rank, runs, (int)wrongPerGpu[i], nelts);
+
       free(expectedHost);
       free(dataHost);
     }
@@ -916,6 +955,22 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   for (int c = 0; c < datacheck; c++) {
       // Initialize sendbuffs, recvbuffs and expected
       TESTCHECK(args->collTest->initData(args, type, op, root, rep, in_place));
+
+#if defined(DEBUG_PRINT)
+      // Snapshot the buffer that CheckData will validate, so a mismatch report can
+      // distinguish data lost during init from data clobbered by the collective.
+      for (int i=0; i<args->nGpus; i++) {
+        int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
+        void *data = in_place ? ((void *)((uintptr_t)args->recvbuffs[i] + args->recvInplaceOffset*rank)) : args->recvbuffs[i];
+        if (preCollSnapshotBytes[i] != args->expectedBytes) {
+          free(preCollSnapshot[i]);
+          preCollSnapshot[i] = (char*)malloc(args->expectedBytes);
+          preCollSnapshotBytes[i] = args->expectedBytes;
+        }
+        CUDACHECK(cudaSetDevice(args->gpus[i]));
+        CUDACHECK(cudaMemcpy(preCollSnapshot[i], data, args->expectedBytes, cudaMemcpyDeviceToHost));
+      }
+#endif
 
 #if HIP_VERSION >= 50221310
       if (cudaGraphLaunches >= 1) {
