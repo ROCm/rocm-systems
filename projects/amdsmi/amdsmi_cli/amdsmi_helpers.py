@@ -444,9 +444,18 @@ class AMDSMIHelpers:
             max_padding = int(math.log10(len(device_handles))) + 1
 
             for gpu_id, device_handle in enumerate(device_handles):
-                bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
-                uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(device_handle)
-                cuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
+                try:
+                    bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
+                except amdsmi_exception.AmdSmiLibraryException:
+                    bdf = "N/A"
+                try:
+                    uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(device_handle)
+                except amdsmi_exception.AmdSmiLibraryException:
+                    uuid = "N/A"
+                try:
+                    cuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
+                except amdsmi_exception.AmdSmiLibraryException:
+                    cuid = "N/A"
                 gpu_choices[str(gpu_id)] = {
                     "bdf": bdf,
                     "UUID": uuid,
