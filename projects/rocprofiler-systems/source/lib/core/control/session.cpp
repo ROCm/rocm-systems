@@ -41,7 +41,7 @@ session::session() noexcept
 {
     for(auto& tracing_flag : m_scope_tracing)
     {
-        tracing_flag.store(true, std::memory_order_relaxed);
+        tracing_flag.store(true, std::memory_order_release);
     }
 }
 
@@ -62,7 +62,7 @@ session::shutdown()
         }
         for(auto& tracing_flag : m_scope_tracing)
         {
-            tracing_flag.store(true, std::memory_order_relaxed);
+            tracing_flag.store(true, std::memory_order_release);
         }
     }
 }
@@ -124,10 +124,10 @@ session::apply_locked_transition(const std::function<void()>& mutate,
     {
         const std::scoped_lock action_lk{ m_actions_mutex };
 
-        was_active = m_scope_tracing[scope_idx].load(std::memory_order_relaxed);
+        was_active = m_scope_tracing[scope_idx].load(std::memory_order_acquire);
         mutate();
         now_active = resolve_locked(event_scope);
-        m_scope_tracing[scope_idx].store(now_active, std::memory_order_relaxed);
+        m_scope_tracing[scope_idx].store(now_active, std::memory_order_release);
     }
 
     if(was_active == now_active)
