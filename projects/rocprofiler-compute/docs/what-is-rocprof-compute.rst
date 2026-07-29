@@ -1,6 +1,7 @@
 .. meta::
    :description: What is ROCm Compute Profiler?
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD
+   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD,
+              ROCm Optiq, analysis database
 
 ******************************
 What is ROCm Compute Profiler?
@@ -54,12 +55,21 @@ Additionally, ROCm Compute Profiler provides in-depth memory chart analysis, roo
 analysis, baseline comparisons, and more, ensuring a thorough understanding of
 system performance.
 
-ROCm Compute Profiler supports analysis through both the :doc:`command line </how-to/analyze/cli>`.
+ROCm Compute Profiler supports analysis through its
+:doc:`command-line interface </how-to/analyze/cli>`, built-in
+:doc:`standalone GUI </how-to/analyze/standalone-gui>` (experimental), and
+:doc:`text-based user interface (TUI) </how-to/analyze/tui>` (experimental).
+:doc:`ROCm Optiq (Beta) </how-to/analyze/optiq>` is a separate graphical
+application that visualizes ROCm Compute Profiler analysis database output.
+
 The following list describes ROCm Compute Profiler's features at a high level.
 
 * :doc:`Support for AMD Instinct MI300, MI200, and MI100 accelerators <reference/compatible-accelerators>`
 
 * :doc:`Standalone GUI analyzer </how-to/analyze/standalone-gui>` (experimental)
+
+* :doc:`ROCm Optiq (Beta) </how-to/analyze/optiq>`, a separate graphical application for
+  visualizing ROCm Compute Profiler analysis database output
 
 * :ref:`Filtering <filtering>` to reduce profiling time
 
