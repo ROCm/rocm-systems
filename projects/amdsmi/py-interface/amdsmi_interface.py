@@ -7046,15 +7046,18 @@ def amdsmi_get_fabric_telemetry_data(
                     item = inst.items[item_idx]
                     telem_id = item.id
                     name_ptr = ctypes.POINTER(ctypes.c_char)()
-                    _check_res(
-                        amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(
-                            telem_id, ctypes.byref(name_ptr)
-                        )
+                    status = amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(
+                        telem_id, ctypes.byref(name_ptr)
                     )
-                    if name_ptr:
+                    # Unmapped telemetry ids (newer firmware) return NOT_FOUND;
+                    # tolerate them so one unknown id does not abort the whole
+                    # telemetry read.
+                    if status == amdsmi_wrapper.AMDSMI_STATUS_SUCCESS and name_ptr:
                         name_str = ctypes.string_at(name_ptr).decode("utf-8")
-                    else:
+                    elif status == amdsmi_wrapper.AMDSMI_STATUS_NOT_FOUND:
                         name_str = "UNKNOWN"
+                    else:
+                        _check_res(status)
                     items.append({"id": telem_id, "name": name_str, "value": item.value})
                 instances.append(
                     {
