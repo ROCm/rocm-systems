@@ -543,25 +543,13 @@ install(
 )
 
 # RPM package specific variables
-# The Python module installs under an absolute system site-packages path
-# (e.g. /usr/lib64/python3.9/site-packages) that the OS python package already
-# owns. Left alone, CPack's RPM generator declares %dir ownership of that
-# directory and its parents -- co-owning system directories, with the default
-# group-writable (0775) mode. Exclude the sitelib and its ancestors from the
-# auto filelist so the RPM owns only its own <sitelib>/amdsmi subtree, not the
-# shared /usr python directories.
-set(_amdsmi_sitelib_excludes "")
-if(AMDSMI_SYSTEM_PYTHON_SITELIB)
-    set(_amdsmi_walk "${AMDSMI_SYSTEM_PYTHON_SITELIB}")
-    while(_amdsmi_walk AND NOT _amdsmi_walk STREQUAL "/" AND NOT _amdsmi_walk STREQUAL "/usr")
-        list(APPEND _amdsmi_sitelib_excludes "${_amdsmi_walk}")
-        get_filename_component(_amdsmi_walk "${_amdsmi_walk}" DIRECTORY)
-    endwhile()
-endif()
+# The package owns only files under its own prefix (the Python module now lands
+# in site-packages at install time via the post-install scriptlet, not as a
+# package-owned file), so exclude just the prefix and bindir from the auto
+# filelist to avoid co-owning shared system directories.
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     "${CPACK_PACKAGING_INSTALL_PREFIX}"
     "${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
-    ${_amdsmi_sitelib_excludes}
 )
 #Set rpm distro
 if(CPACK_RPM_PACKAGE_RELEASE)
@@ -574,50 +562,12 @@ set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 # note that RPM based systems have "devel" suffix instead of "dev" in debian based systems
 #
-# The amdsmi Python module installs into a version-specific site-packages path
-# on RPM distros (e.g. /usr/lib64/python3.9/site-packages). py-interface/
-# CMakeLists.txt detects that path from the system's DEFAULT python3
-# (platform-python on RHEL), so the module lands where a plain `import amdsmi`
-# and the `amd-smi` CLI (#!/usr/bin/python3) actually look. This dependency
-# pins the RPM to that same default interpreter's ABI as defense-in-depth: it
-# makes the interpreter dependency explicit and keeps the RPM from installing
-# onto a host missing that interpreter.
-#
-# On RPM distros there is NO version-independent site-packages location --
-# /usr/lib/python3/site-packages (Debian's version-agnostic dir) is not on any
-# RHEL interpreter's sys.path -- so the install path is intrinsically tied to a
-# python minor and the dependency must be too. The canonical RPM expression is
-# `python(abi) = X.Y` (per the Fedora Python Packaging Guidelines): normally
-# rpmbuild's dependency generator emits this automatically for files under
-# %{python3_sitelib}. That auto-generator does NOT fire here -- CPack installs
-# the module as raw .py files (no .dist-info metadata) and the RHEL8 build image
-# lacks the path-based python.attr generator -- so we set the same requirement
-# by hand. The token that expresses "this python minor" differs by distro
-# family, so pick it from /etc/os-release:
-#   * RHEL/CentOS/Fedora/AlmaLinux/AzureLinux: `python(abi) = X.Y`, provided by
-#     the pythonX.Y packages (dnf pulls the matching interpreter in on install).
-#   * SLES/openSUSE: no python(abi) provide; the versioned package is `pythonXY`
-#     (no dot), e.g. python311 (zypper pulls it in on install).
-# Fall back to the loose `python3 >= 3.6.8` when the ABI could not be derived
-# (version-agnostic Debian path) or the distro family is unrecognized.
+# The amdsmi Python module is delivered as a relocatable wheel shipped under
+# share/amd_smi/wheels and installed into the target interpreter's
+# site-packages by the post-install scriptlet, which detects the interpreter on
+# the target host at install time. Because no version-specific path is baked at
+# build time, the RPM only needs the loose interpreter dependency.
 set(_amdsmi_py_req "python3 >= 3.6.8")
-if(AMDSMI_SYSTEM_PYTHON_ABI)
-    set(_amdsmi_os_id "")
-    if(EXISTS "/etc/os-release")
-        file(READ "/etc/os-release" _amdsmi_os_release)
-        # ID_LIKE covers derivatives (e.g. almalinux -> "rhel centos fedora").
-        string(REGEX MATCH "ID_LIKE=[\"']?([^\"'\n]+)" _ "${_amdsmi_os_release}")
-        set(_amdsmi_os_id "${CMAKE_MATCH_1}")
-        string(REGEX MATCH "\nID=[\"']?([^\"'\n]+)" _ "\n${_amdsmi_os_release}")
-        string(APPEND _amdsmi_os_id " ${CMAKE_MATCH_1}")
-    endif()
-    if(_amdsmi_os_id MATCHES "rhel|centos|fedora|almalinux|rocky|mariner|azurelinux")
-        set(_amdsmi_py_req "python(abi) = ${AMDSMI_SYSTEM_PYTHON_ABI}")
-    elseif(_amdsmi_os_id MATCHES "suse|sles")
-        string(REPLACE "." "" _amdsmi_abi_nodot "${AMDSMI_SYSTEM_PYTHON_ABI}")
-        set(_amdsmi_py_req "python${_amdsmi_abi_nodot}")
-    endif()
-endif()
 message(STATUS "amdsmi RPM python interpreter dependency: ${_amdsmi_py_req}")
 set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, ${_amdsmi_py_req}")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})

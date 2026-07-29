@@ -86,11 +86,31 @@ do_activate_argcomplete() {
   fi
 }
 
+do_install_python_module() {
+  # Install the shipped amdsmi wheel into the target interpreter's
+  # site-packages so a plain `import amdsmi` resolves. The helper prefers pip
+  # and falls back to a stdlib extraction, so python3-pip is not required. The
+  # amd-smi CLI itself does not depend on this; it resolves the module from
+  # share/amd_smi regardless.
+  local helper="$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/amdsmi_install_wheel.py"
+  local py=/usr/bin/python3
+  [ -x /usr/libexec/platform-python ] && py=/usr/libexec/platform-python
+  if [ ! -x "$py" ]; then
+    echo "[WARNING] python3 not found; amdsmi Python module not installed. The amd-smi CLI still works."
+    return 0
+  fi
+  if [ -f "$helper" ]; then
+    "$py" "$helper" install || \
+      echo "[WARNING] amdsmi Python module install failed; 'import amdsmi' may not work. The amd-smi CLI still works."
+  fi
+}
+
 
 
 # post install or upgrade, $i is 1 or 2 -> do these actions
 if [ "$1" -ge 1 ]; then
   do_ldconfig
   do_activate_argcomplete
+  do_install_python_module
   do_configureLogrotate || exit 0
 fi

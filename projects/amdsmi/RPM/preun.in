@@ -5,11 +5,15 @@ rm_leftovers() {
   rm -rf "$RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_LIBEXECDIR@/amdsmi_cli/subcommands/__pycache__"
   rm -rf "$RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_LIBEXECDIR@/amdsmi_cli/__pycache__"
   rm -rf "$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/amdsmi/__pycache__"
-  # The module now also installs into the system interpreter's site-packages
-  # (absolute path, outside RPM_INSTALL_PREFIX0). Python writes __pycache__/*.pyc
-  # there on first import; the package owns the .py files but not those generated
-  # .pyc, so remove them here to avoid leaving unowned bytecode after uninstall.
-  rm -rf "@AMDSMI_SYSTEM_PYTHON_SITELIB@/amdsmi/__pycache__"
+  # The module is installed into the target interpreter's site-packages by the
+  # post-install scriptlet (pip or stdlib extract), outside RPM_INSTALL_PREFIX0.
+  # Ask the same helper to remove it so no orphaned module/bytecode is left.
+  local helper="$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/amdsmi_install_wheel.py"
+  local py=/usr/bin/python3
+  [ -x /usr/libexec/platform-python ] && py=/usr/libexec/platform-python
+  if [ -x "$py" ] && [ -f "$helper" ]; then
+    "$py" "$helper" uninstall || true
+  fi
 
   # remove build and egg files
   rm -rf "$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/amdsmi.egg-info"
