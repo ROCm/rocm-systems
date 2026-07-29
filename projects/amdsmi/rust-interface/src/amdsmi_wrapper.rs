@@ -331,6 +331,13 @@ pub enum AmdsmiComputePartitionMemAllocModeT {
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiAcceleratorPartitionMemAllocModeT {
+    AmdsmiAcceleratorPartitionMemAllocInvalid = 0,
+    AmdsmiAcceleratorPartitionMemAllocCapping = 1,
+    AmdsmiAcceleratorPartitionMemAllocAll = 2,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiMemoryPartitionTypeT {
     AmdsmiMemoryPartitionUnknown = 0,
     AmdsmiMemoryPartitionNps1 = 1,
@@ -2257,11 +2264,17 @@ pub enum AmdsmiGpuBlockT {
     AmdsmiGpuBlockMpio = 262144,
     AmdsmiGpuBlockReserved = 9223372036854775808,
 }
+impl AmdsmiClkLimitTypeT {
+    pub const ClkLimitMin: AmdsmiClkLimitTypeT = AmdsmiClkLimitTypeT::AmdsmiClkLimitMin;
+}
+impl AmdsmiClkLimitTypeT {
+    pub const ClkLimitMax: AmdsmiClkLimitTypeT = AmdsmiClkLimitTypeT::AmdsmiClkLimitMax;
+}
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiClkLimitTypeT {
-    ClkLimitMin = 0,
-    ClkLimitMax = 1,
+    AmdsmiClkLimitMin = 0,
+    AmdsmiClkLimitMax = 1,
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -4931,9 +4944,21 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(
+        processor_handle: AmdsmiProcessorHandle,
+        mode: *mut AmdsmiAcceleratorPartitionMemAllocModeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_set_gpu_compute_partition_mem_alloc_mode(
         processor_handle: AmdsmiProcessorHandle,
         mode: AmdsmiComputePartitionMemAllocModeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
+        processor_handle: AmdsmiProcessorHandle,
+        mode: AmdsmiAcceleratorPartitionMemAllocModeT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

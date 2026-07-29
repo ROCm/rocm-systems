@@ -570,6 +570,17 @@ AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING = 1
 AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL = 2
 amdsmi_compute_partition_mem_alloc_mode_t = ctypes.c_uint32 # enum
 
+# values for enumeration 'amdsmi_accelerator_partition_mem_alloc_mode_t'
+amdsmi_accelerator_partition_mem_alloc_mode_t__enumvalues = {
+    0: 'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID',
+    1: 'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING',
+    2: 'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL',
+}
+AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID = 0
+AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING = 1
+AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL = 2
+amdsmi_accelerator_partition_mem_alloc_mode_t = ctypes.c_uint32 # enum
+
 # values for enumeration 'amdsmi_memory_partition_type_t'
 amdsmi_memory_partition_type_t__enumvalues = {
     0: 'AMDSMI_MEMORY_PARTITION_UNKNOWN',
@@ -1993,9 +2004,13 @@ amdsmi_gpu_block_t = ctypes.c_uint64 # enum
 
 # values for enumeration 'amdsmi_clk_limit_type_t'
 amdsmi_clk_limit_type_t__enumvalues = {
+    0: 'AMDSMI_CLK_LIMIT_MIN',
+    1: 'AMDSMI_CLK_LIMIT_MAX',
     0: 'CLK_LIMIT_MIN',
     1: 'CLK_LIMIT_MAX',
 }
+AMDSMI_CLK_LIMIT_MIN = 0
+AMDSMI_CLK_LIMIT_MAX = 1
 CLK_LIMIT_MIN = 0
 CLK_LIMIT_MAX = 1
 amdsmi_clk_limit_type_t = ctypes.c_uint32 # enum
@@ -2776,10 +2791,16 @@ amdsmi_dimm_thermal_t = struct_amdsmi_dimm_thermal_t
 
 # values for enumeration 'amdsmi_io_bw_encoding_t'
 amdsmi_io_bw_encoding_t__enumvalues = {
+    1: 'AMDSMI_AGG_BW0',
+    2: 'AMDSMI_RD_BW0',
+    4: 'AMDSMI_WR_BW0',
     1: 'AGG_BW0',
     2: 'RD_BW0',
     4: 'WR_BW0',
 }
+AMDSMI_AGG_BW0 = 1
+AMDSMI_RD_BW0 = 2
+AMDSMI_WR_BW0 = 4
 AGG_BW0 = 1
 RD_BW0 = 2
 WR_BW0 = 4
@@ -4109,9 +4130,21 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_accelerator_partition_mem_alloc_mode = _libraries['libamd_smi.so'].amdsmi_get_gpu_accelerator_partition_mem_alloc_mode
+    amdsmi_get_gpu_accelerator_partition_mem_alloc_mode.restype = amdsmi_status_t
+    amdsmi_get_gpu_accelerator_partition_mem_alloc_mode.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_accelerator_partition_mem_alloc_mode_t)]
+except AttributeError:
+    pass
+try:
     amdsmi_set_gpu_compute_partition_mem_alloc_mode = _libraries['libamd_smi.so'].amdsmi_set_gpu_compute_partition_mem_alloc_mode
     amdsmi_set_gpu_compute_partition_mem_alloc_mode.restype = amdsmi_status_t
     amdsmi_set_gpu_compute_partition_mem_alloc_mode.argtypes = [amdsmi_processor_handle, amdsmi_compute_partition_mem_alloc_mode_t]
+except AttributeError:
+    pass
+try:
+    amdsmi_set_gpu_accelerator_partition_mem_alloc_mode = _libraries['libamd_smi.so'].amdsmi_set_gpu_accelerator_partition_mem_alloc_mode
+    amdsmi_set_gpu_accelerator_partition_mem_alloc_mode.restype = amdsmi_status_t
+    amdsmi_set_gpu_accelerator_partition_mem_alloc_mode.argtypes = [amdsmi_processor_handle, amdsmi_accelerator_partition_mem_alloc_mode_t]
 except AttributeError:
     pass
 try:
@@ -4863,17 +4896,21 @@ __all__ = \
     'AMDSMI_ACCELERATOR_PARTITION_DPX',
     'AMDSMI_ACCELERATOR_PARTITION_INVALID',
     'AMDSMI_ACCELERATOR_PARTITION_MAX',
+    'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL',
+    'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING',
+    'AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID',
     'AMDSMI_ACCELERATOR_PARTITION_QPX',
     'AMDSMI_ACCELERATOR_PARTITION_SPX',
     'AMDSMI_ACCELERATOR_PARTITION_TPX', 'AMDSMI_ACCELERATOR_XCC',
     'AMDSMI_AFFINITY_SCOPE_NODE', 'AMDSMI_AFFINITY_SCOPE_SOCKET',
-    'AMDSMI_CACHE_PROPERTY_CPU_CACHE',
+    'AMDSMI_AGG_BW0', 'AMDSMI_CACHE_PROPERTY_CPU_CACHE',
     'AMDSMI_CACHE_PROPERTY_DATA_CACHE',
     'AMDSMI_CACHE_PROPERTY_ENABLED',
     'AMDSMI_CACHE_PROPERTY_INST_CACHE',
     'AMDSMI_CACHE_PROPERTY_SIMD_CACHE', 'AMDSMI_CARD_FORM_FACTOR_CEM',
     'AMDSMI_CARD_FORM_FACTOR_OAM', 'AMDSMI_CARD_FORM_FACTOR_PCIE',
-    'AMDSMI_CARD_FORM_FACTOR_UNKNOWN', 'AMDSMI_CLK_TYPE_DCEF',
+    'AMDSMI_CARD_FORM_FACTOR_UNKNOWN', 'AMDSMI_CLK_LIMIT_MAX',
+    'AMDSMI_CLK_LIMIT_MIN', 'AMDSMI_CLK_TYPE_DCEF',
     'AMDSMI_CLK_TYPE_DCLK0', 'AMDSMI_CLK_TYPE_DCLK1',
     'AMDSMI_CLK_TYPE_DF', 'AMDSMI_CLK_TYPE_FIRST',
     'AMDSMI_CLK_TYPE_GFX', 'AMDSMI_CLK_TYPE_MEM',
@@ -5059,7 +5096,7 @@ __all__ = \
     'AMDSMI_RAS_ERR_STATE_INVALID', 'AMDSMI_RAS_ERR_STATE_LAST',
     'AMDSMI_RAS_ERR_STATE_MULT_UC', 'AMDSMI_RAS_ERR_STATE_NONE',
     'AMDSMI_RAS_ERR_STATE_PARITY', 'AMDSMI_RAS_ERR_STATE_POISON',
-    'AMDSMI_RAS_ERR_STATE_SING_C', 'AMDSMI_REG_PCIE',
+    'AMDSMI_RAS_ERR_STATE_SING_C', 'AMDSMI_RD_BW0', 'AMDSMI_REG_PCIE',
     'AMDSMI_REG_USR', 'AMDSMI_REG_USR1', 'AMDSMI_REG_WAFL',
     'AMDSMI_REG_XGMI', 'AMDSMI_STATUS_ADDRESS_FAULT',
     'AMDSMI_STATUS_AMDGPU_RESTART_ERR', 'AMDSMI_STATUS_API_FAILED',
@@ -5185,11 +5222,13 @@ __all__ = \
     'AMDSMI_VRAM_TYPE_HBM2E', 'AMDSMI_VRAM_TYPE_HBM3',
     'AMDSMI_VRAM_TYPE_HBM3E', 'AMDSMI_VRAM_TYPE_LPDDR4',
     'AMDSMI_VRAM_TYPE_LPDDR5', 'AMDSMI_VRAM_TYPE_UNKNOWN',
-    'AMDSMI_VRAM_TYPE__MAX', 'AMDSMI_XGMI_LINK_DISABLE',
-    'AMDSMI_XGMI_LINK_DOWN', 'AMDSMI_XGMI_LINK_UP',
-    'AMDSMI_XGMI_STATUS_ERROR', 'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
+    'AMDSMI_VRAM_TYPE__MAX', 'AMDSMI_WR_BW0',
+    'AMDSMI_XGMI_LINK_DISABLE', 'AMDSMI_XGMI_LINK_DOWN',
+    'AMDSMI_XGMI_LINK_UP', 'AMDSMI_XGMI_STATUS_ERROR',
+    'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
     'AMDSMI_XGMI_STATUS_NO_ERRORS', 'CLK_LIMIT_MAX', 'CLK_LIMIT_MIN',
     'RD_BW0', 'WR_BW0', 'amd_metrics_table_header_t',
+    'amdsmi_accelerator_partition_mem_alloc_mode_t',
     'amdsmi_accelerator_partition_profile_config_t',
     'amdsmi_accelerator_partition_profile_t',
     'amdsmi_accelerator_partition_resource_profile_t',
@@ -5273,6 +5312,7 @@ __all__ = \
     'amdsmi_get_cpu_xgmi_pstate_range', 'amdsmi_get_cpucore_handles',
     'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
     'amdsmi_get_fabric_telemetry_data', 'amdsmi_get_fw_info',
+    'amdsmi_get_gpu_accelerator_partition_mem_alloc_mode',
     'amdsmi_get_gpu_accelerator_partition_profile',
     'amdsmi_get_gpu_accelerator_partition_profile_config',
     'amdsmi_get_gpu_activity', 'amdsmi_get_gpu_asic_info',
@@ -5399,6 +5439,7 @@ __all__ = \
     'amdsmi_set_cpu_socket_lclk_dpm_level',
     'amdsmi_set_cpu_socket_power_cap',
     'amdsmi_set_cpu_xgmi_pstate_range', 'amdsmi_set_cpu_xgmi_width',
+    'amdsmi_set_gpu_accelerator_partition_mem_alloc_mode',
     'amdsmi_set_gpu_accelerator_partition_profile',
     'amdsmi_set_gpu_clk_limit', 'amdsmi_set_gpu_compute_partition',
     'amdsmi_set_gpu_compute_partition_mem_alloc_mode',

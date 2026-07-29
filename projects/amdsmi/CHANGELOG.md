@@ -6,6 +6,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 7.15.0
 
+### Added
+
+- **Added accelerator partition memory allocation mode API**.  
+  - New APIs: `amdsmi_get_gpu_accelerator_partition_mem_alloc_mode()`, `amdsmi_set_gpu_accelerator_partition_mem_alloc_mode()`.
+  - New enum: `amdsmi_accelerator_partition_mem_alloc_mode_t` (`AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING`, `AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL`).
+  - Supersedes the equivalent `compute_partition` memory allocation mode APIs, which are now deprecated.
+
 ### Changed
 
 - **Bumped the library major version to 27.0.0** (breaking).  
@@ -26,6 +33,17 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Prefixed public preprocessor macros with `AMDSMI_` in `amdsmi.h`** (breaking).  
   - `MAX_SVI3_RAIL_INDEX`, `MAX_SVI3_RAIL_SELECTION`, `POWER_EFFICIENCY_MODE_4`, `POWER_EFFICIENCY_MODE_5`, and `MAX_NUMBER_OF_AFIDS_PER_RECORD` are now `AMDSMI_MAX_SVI3_RAIL_INDEX`, `AMDSMI_MAX_SVI3_RAIL_SELECTION`, `AMDSMI_POWER_EFFICIENCY_MODE_4`, `AMDSMI_POWER_EFFICIENCY_MODE_5`, and `AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD`. The unused `CENTRIGRADE_TO_MILLI_CENTIGRADE` macro was removed. Update references to the new names.
+
+- **Deprecated the `compute_partition` APIs in favor of `accelerator_partition` equivalents**.  
+  - `amdsmi_get_gpu_compute_partition()`, `amdsmi_set_gpu_compute_partition()`, `amdsmi_get_gpu_compute_partition_mem_alloc_mode()`, and `amdsmi_set_gpu_compute_partition_mem_alloc_mode()` are slated for removal in a future ROCm release. They now emit a `DeprecationWarning` from the Python interface and delegate to their `accelerator_partition` counterparts.
+  - The `amdsmi_compute_partition_type_t` and `amdsmi_compute_partition_mem_alloc_mode_t` enums are deprecated in favor of `amdsmi_accelerator_partition_type_t` and `amdsmi_accelerator_partition_mem_alloc_mode_t`.
+
+- **Deprecated `amdsmi_set_gpu_memory_partition()` in favor of `amdsmi_set_gpu_memory_partition_mode()`**.  
+  - `amdsmi_set_gpu_memory_partition` is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and functions as a wrapper of `amdsmi_set_gpu_memory_partition_mode()`.
+
+- **Namespaced `amdsmi_clk_limit_type_t` and `amdsmi_io_bw_encoding_t` enumerators with an `AMDSMI_` prefix**.  
+  - Added `AMDSMI_CLK_LIMIT_MIN`/`AMDSMI_CLK_LIMIT_MAX` and `AMDSMI_AGG_BW0`/`AMDSMI_RD_BW0`/`AMDSMI_WR_BW0`.
+  - The unprefixed names (`CLK_LIMIT_MIN`, `CLK_LIMIT_MAX`, `AGG_BW0`, `RD_BW0`, `WR_BW0`) are retained as deprecated aliases with unchanged values and are slated for removal in a future ROCm release.
 
 - **Removed the `amdsmi_gpu_driver_reload()` API and its Python binding** (breaking).  
   - Reload the amdgpu driver out of band with `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to apply memory partition changes instead.
