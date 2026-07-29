@@ -1296,14 +1296,13 @@ template <typename T>
 __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[qp_index].atomic_add(base_heap[pe] + L_offset, value, wf_info);
+      qps[qp_index].atomic_add(dst, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -1314,7 +1313,6 @@ template <typename T>
 __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   T ret_val = 0;
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -1322,7 +1320,7 @@ __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      ret_val =  qps[qp_index].atomic_fetch_add(base_heap[pe] + L_offset, value, wf_info);
+      ret_val =  qps[qp_index].atomic_fetch_add(dst, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -1334,7 +1332,6 @@ template <typename T>
 __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -1349,7 +1346,7 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
        * It may run additional times if contention on memory location.
        */
       while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_compare_swap(
-             base_heap[pe] + L_offset, cond, value, wf_info)) != cond) {
+             dst, cond, value, wf_info)) != cond) {
         cond = ret_val;
       }
       need_turn = false;
