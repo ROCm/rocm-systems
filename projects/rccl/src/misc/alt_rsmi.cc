@@ -440,14 +440,43 @@ int ARSMI_get_fabric_info(uint32_t dv_ind, struct ARSMI_fabricInfo* info) {
   if ((int)dv_ind >= ARSMI_num_devices) return EINVAL;
 
   const ARSMI_systemNode& node = ARSMI_orderedNodes[dv_ind];
-  int card = findCardForBdf((uint32_t)node.s_domain, node.s_bus, node.s_device, node.s_function);
+  auto getCardForFn = [&](uint8_t fn) -> int {
+    return findCardForBdf((uint32_t)node.s_domain, node.s_bus, node.s_device, fn);
+  };
+
+  // In CPX/DPX-like partitioned topologies, only function 0 may expose the
+  // UALink sysfs directory even when sibling functions share the same fabric.
+  // Fall back to function 0 for fabric metadata to avoid per-function
+  // asymmetry in fabric_supported.
+  int card = getCardForFn(node.s_function);
+  uint8_t fabricFn = node.s_function;
+  if (card < 0 && node.s_function != 0) {
+    card = getCardForFn(0);
+    fabricFn = 0;
+  }
   if (card < 0) return ENODEV;
 
   char dir[256];
   snprintf(dir, sizeof(dir), "%s/card%d/device/ualink", kDrmClassRoot, card);
 
   struct stat st;
-  if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) return ENODEV;
+  if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    if (node.s_function != 0 && fabricFn != 0) {
+      int card0 = getCardForFn(0);
+      if (card0 >= 0) {
+        snprintf(dir, sizeof(dir), "%s/card%d/device/ualink", kDrmClassRoot, card0);
+        if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) {
+          fabricFn = 0;
+        } else {
+          return ENODEV;
+        }
+      } else {
+        return ENODEV;
+      }
+    } else {
+      return ENODEV;
+    }
+  }
 
   char buf[256];
 
