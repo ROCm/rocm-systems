@@ -99,7 +99,11 @@ class TestPython(RocprofsysTest):
             "inefficient",
             "_sum",
         ],
-        "counts": [5, 3, 3, 6, 12, 18, 6, 3, 3],
+        # main_loop=4, not 5: roctx.profilerPause() (called mid 4th iteration,
+        # unlike the old rocprofsys.user.stop_trace()) suppresses all marker
+        # writes from that point on, including the wrapping RoctxRange for
+        # the 5th (never-resumed) iteration.
+        "counts": [4, 3, 3, 6, 12, 18, 6, 3, 3],
         "depths": [0, 1, 2, 3, 4, 5, 6, 2, 3],
     }
 

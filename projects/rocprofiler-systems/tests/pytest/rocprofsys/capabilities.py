@@ -95,9 +95,16 @@ def find_roctx_site_packages(
     if not rocm_path:
         return None
     for lib_name in ("lib", "lib64"):
-        candidate = rocm_path / lib_name / f"python{python_version}" / "site-packages"
-        if (candidate / "roctx").is_dir():
-            return candidate
+        roctx_dir = (
+            rocm_path / lib_name / f"python{python_version}" / "site-packages" / "roctx"
+        )
+        if not (roctx_dir / "__init__.py").is_file():
+            continue
+        # The package directory alone isn't sufficient: some ROCm packaging
+        # variants ship the __init__.py without the compiled extension it
+        # imports (libpyroctx.<abi>.so), which would still raise on import.
+        if any(roctx_dir.glob("libpyroctx.*")):
+            return roctx_dir.parent
     return None
 
 

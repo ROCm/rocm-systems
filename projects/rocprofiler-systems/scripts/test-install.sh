@@ -181,6 +181,24 @@ test-rocprof-sys-sample()
     verbose-run rocprof-sys-sample --sample-cputime 100 --sample-realtime 50 --hsa-interrupt 0 -TPH -- python3 ${SOURCE_DIR}/examples/python/external.py -n 5 -v 20
 }
 
+find-roctx-site-packages()
+{
+    # rocprofiler-sdk installs its "roctx" Python bindings per interpreter
+    # under <rocm_path>/lib{,64}/pythonX.Y/site-packages, unlike rocprofsys's
+    # own ABI-agnostic bindings. Resolve that directory for the interpreter
+    # that will run source.py so `import roctx` can succeed.
+    local python_version=$("${1}" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+    local rocm_path="${ROCM_PATH:-/opt/rocm}"
+    for lib_name in lib lib64; do
+        local candidate="${rocm_path}/${lib_name}/python${python_version}/site-packages"
+        if [ -d "${candidate}/roctx" ]; then
+            echo "${candidate}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 test-rocprof-sys-python()
 {
     verbose-run which rocprof-sys-python
@@ -188,7 +206,14 @@ test-rocprof-sys-python()
     verbose-run rocprof-sys-python -b -- ${SOURCE_DIR}/examples/python/builtin.py -n 5 -v 5
     verbose-run rocprof-sys-python -b -- ${SOURCE_DIR}/examples/python/noprofile.py -n 5 -v 5
     verbose-run rocprof-sys-python -- ${SOURCE_DIR}/examples/python/external.py -n 5 -v 5
-    verbose-run python3 ${SOURCE_DIR}/examples/python/source.py -n 5 -v 5
+
+    local roctx_site_packages=$(find-roctx-site-packages python3 || true)
+    if [ -n "${roctx_site_packages}" ]; then
+        PYTHONPATH="${roctx_site_packages}${PYTHONPATH:+:${PYTHONPATH}}" \
+            verbose-run python3 ${SOURCE_DIR}/examples/python/source.py -n 5 -v 5
+    else
+        echo -e "\nSkipping ${SOURCE_DIR}/examples/python/source.py: roctx Python bindings not installed for $(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')\n"
+    fi
 }
 
 test-rocprof-sys-rewrite()
