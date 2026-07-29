@@ -76,6 +76,11 @@ class TestGpuIdentity(unittest.TestCase):
         self.common.Test_API_Per_GPU(amdsmi_get_gpu_device_uuid=amdsmi.amdsmi_get_gpu_device_uuid)
         return
 
+    def test_get_gpu_device_cuid(self):
+        self.common.print_func_name("")
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_device_cuid=amdsmi.amdsmi_get_gpu_device_cuid)
+        return
+
     def test_get_gpu_driver_info(self):
         self.common.print_func_name("")
         self.common.Test_API_Per_GPU(amdsmi_get_gpu_driver_info=amdsmi.amdsmi_get_gpu_driver_info)
