@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use harness::{
     Env, assert_no_leaks, count_processes, find_processes, marker, pid_alive, pid_is_zombie,
-    tagged_sleep, wait_for,
+    skip_without_emulator, tagged_sleep, wait_for,
 };
 
 /// Children of `pid` that are zombies.
@@ -91,6 +91,9 @@ fn rapid_session_create_and_destroy_leaves_nothing() {
     const ROUNDS: usize = 40;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
 
     for round in 0..ROUNDS {
@@ -132,6 +135,9 @@ fn destroying_sessions_with_live_workloads_leaves_no_processes() {
     const ROUNDS: usize = 25;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let tag = marker("live-destroy");
 
@@ -166,6 +172,9 @@ fn rapid_exec_churn_within_one_session_leaves_nothing() {
     const ROUNDS: usize = 60;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "hammer");
     let tag = marker("exec-churn");
@@ -208,6 +217,9 @@ fn concurrent_session_churn_leaves_nothing() {
     const ROUNDS: usize = 6;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let tag = marker("concurrent");
 
@@ -265,6 +277,9 @@ fn killing_an_attached_client_does_not_orphan_the_workload() {
     use std::process::Stdio;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "detach");
     let tag = marker("client-kill");
@@ -318,6 +333,9 @@ fn killing_an_attached_client_does_not_orphan_the_workload() {
 #[test]
 fn sigterm_proof_workloads_are_still_killed() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "stubborn");
     let tag = marker("sigterm-proof");
@@ -348,6 +366,9 @@ fn sigterm_proof_workloads_are_still_killed() {
 #[test]
 fn descendant_processes_are_cleaned_up_with_the_session() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "tree");
     let parent_tag = marker("tree-parent");
@@ -383,6 +404,9 @@ fn descendant_processes_are_cleaned_up_with_the_session() {
 #[test]
 fn stopping_the_daemon_tears_down_every_session() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let tag = marker("daemon-stop");
 
@@ -419,6 +443,9 @@ fn stopping_the_daemon_tears_down_every_session() {
 #[test]
 fn a_killed_daemon_does_not_prevent_a_new_one_from_starting() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "before");
 
@@ -458,6 +485,9 @@ fn a_killed_daemon_does_not_prevent_a_new_one_from_starting() {
 #[test]
 fn a_daemon_whose_socket_disappears_shuts_itself_down() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "orphaned");
     let tag = marker("orphan");
@@ -493,6 +523,9 @@ fn many_concurrent_execs_all_complete_and_are_reaped() {
     const EXECS: usize = 50;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "wide");
 
@@ -543,6 +576,9 @@ fn output_is_not_lost_under_churn() {
     const EXECS: usize = 30;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "noisy");
 
@@ -594,6 +630,9 @@ fn the_daemon_does_not_leak_file_descriptors() {
     const ROUNDS: usize = 25;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     // Warm up so one-off allocations are not counted as growth.
     env.start_session("p", "warmup");
@@ -636,6 +675,9 @@ fn destroying_a_session_during_bring_up_is_clean() {
     const ROUNDS: usize = 20;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
 
     for round in 0..ROUNDS {
@@ -663,6 +705,9 @@ fn mixed_churn_under_load_leaves_a_clean_process_table() {
     const ROUNDS: usize = 5;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let tag = marker("mixed");
 
@@ -723,4 +768,11 @@ fn mixed_churn_under_load_leaves_a_clean_process_table() {
         "{} workload process(es) survived mixed churn plus a daemon shutdown: {survivors:?}",
         survivors.len()
     );
+}
+
+#[test]
+fn the_suite_can_actually_run() {
+    // Guards against the strain suite going green while every test in it skipped
+    // for a missing emulator runtime. See `assert_suite_can_run`.
+    harness::assert_suite_can_run();
 }

@@ -7,11 +7,11 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-// Link-only: `mirage_noop` registers itself into the emulator registry
-// via `inventory` at link time. Without a reference the linker drops the
+// Link-only: a backend registers itself into the emulator registry via
+// `inventory` at link time. Without a reference the linker drops the
 // crate object, the registration with it, and every session here fails
-// with "unknown emulator `noop`".
-extern crate mirage_noop as _;
+// with "unknown emulator".
+extern crate mirage_rocjitsu as _;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -55,7 +55,7 @@ impl Env {
         &self.manager
     }
 
-    /// Create a ready session running the pass-through `noop` emulator.
+    /// Create a ready session on the test emulator backend.
     async fn session(&self) -> SessionId {
         self.session_named(None).await
     }
@@ -65,7 +65,7 @@ impl Env {
             .ctl()
             .session_create(CreateSessionRequest {
                 id: id.map(|i| SessionId::new(i).unwrap()),
-                profile: MaybeRef::Owned(noop_profile()),
+                profile: MaybeRef::Owned(test_profile()),
                 workdir: "/tmp".to_string(),
                 daemon: false,
             })
@@ -96,12 +96,42 @@ impl Drop for Env {
     }
 }
 
-fn noop_profile() -> ProfileDef {
+/// The emulator these tests run sessions on.
+///
+/// They exercise the session and process lifecycle, not emulation, but a
+/// session still needs a backend that can produce a usable injection —
+/// and mirage ships exactly one. rocjitsu interposes GPU calls the shell
+/// commands here never make, so it adds nothing to what is under test
+/// beyond requiring its runtime library.
+const TEST_EMULATOR: &str = "rocjitsu";
+
+/// Whether that runtime is present. rocjitsu is a sibling project in this
+/// monorepo, so a full build has it; a mirage-only build does not.
+fn emulator_available() -> bool {
+    mirage_core::emulator::get_emulator_backend(TEST_EMULATOR)
+        .is_some_and(mirage_core::emulator::EmulatorBackend::installed)
+}
+
+/// Skip the calling test, loudly, when the emulator runtime is missing.
+#[must_use]
+fn skip_without_emulator() -> bool {
+    if emulator_available() {
+        return false;
+    }
+    eprintln!(
+        "SKIP: the `{TEST_EMULATOR}` runtime was not found, so no session \
+         can be brought up. Build the sibling `emulation/rocjitsu` project \
+         (or set ROCM_HOME) and re-run."
+    );
+    true
+}
+
+fn test_profile() -> ProfileDef {
     ProfileDef {
         name: "test".to_string(),
         description: None,
         emulator: EmulatorDef {
-            emulator: "noop".to_string(),
+            emulator: TEST_EMULATOR.to_string(),
             plugins: BTreeMap::new(),
             exec_mode: ExecMode::Functional,
             options: Default::default(),
@@ -167,6 +197,9 @@ async fn run(ctl: &SessionManager, session: &SessionId, script: &str) -> (i32, S
 #[tokio::test]
 async fn a_created_session_becomes_ready_and_is_listed() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     assert_eq!(env.ctl().session_list().await.unwrap(), vec![id.clone()]);
     let state = env.ctl().session_state(&id).await.unwrap();
@@ -178,6 +211,9 @@ async fn a_created_session_becomes_ready_and_is_listed() {
 #[tokio::test]
 async fn a_destroyed_session_is_gone_immediately() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     env.ctl().session_destroy(&id).await.unwrap();
     assert!(env.ctl().session_list().await.unwrap().is_empty());
@@ -190,6 +226,9 @@ async fn a_destroyed_session_is_gone_immediately() {
 #[tokio::test]
 async fn destroying_a_session_twice_reports_not_found() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     env.ctl().session_destroy(&id).await.unwrap();
     let err = env.ctl().session_destroy(&id).await.unwrap_err();
@@ -199,12 +238,15 @@ async fn destroying_a_session_twice_reports_not_found() {
 #[tokio::test]
 async fn duplicate_session_ids_are_rejected() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.session_named(Some("dup")).await;
     let err = env
         .ctl()
         .session_create(CreateSessionRequest {
             id: Some(SessionId::new("dup").unwrap()),
-            profile: MaybeRef::Owned(noop_profile()),
+            profile: MaybeRef::Owned(test_profile()),
             workdir: "/tmp".to_string(),
             daemon: false,
         })
@@ -216,6 +258,9 @@ async fn duplicate_session_ids_are_rejected() {
 #[tokio::test]
 async fn a_session_referring_to_a_missing_profile_fails_at_creation() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     // Failing here rather than coming up and failing every exec is the
     // point: the error names the profile, at the moment it was requested.
     let err = env
@@ -235,7 +280,10 @@ async fn a_session_referring_to_a_missing_profile_fails_at_creation() {
 #[tokio::test]
 async fn a_session_with_an_unknown_emulator_fails_terminally_with_a_reason() {
     let env = Env::new();
-    let mut profile = noop_profile();
+    if skip_without_emulator() {
+        return;
+    }
+    let mut profile = test_profile();
     profile.emulator.emulator = "not-a-real-emulator".to_string();
     let def = env
         .ctl()
@@ -277,11 +325,14 @@ async fn waiting_on_a_session_that_is_already_ready_returns_immediately() {
     // It only reproduces once the daemon is warm enough for bring-up to
     // beat the client's first query.
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let def = env
         .ctl()
         .session_create(CreateSessionRequest {
             id: None,
-            profile: MaybeRef::Owned(noop_profile()),
+            profile: MaybeRef::Owned(test_profile()),
             workdir: "/tmp".to_string(),
             daemon: false,
         })
@@ -309,6 +360,9 @@ async fn waiting_on_a_session_that_is_already_ready_returns_immediately() {
 #[tokio::test]
 async fn health_is_observable_without_a_subscriber_present_at_publish_time() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     // Read health through a fresh call, i.e. with no receiver alive when
     // the ready snapshot was published.
@@ -320,6 +374,9 @@ async fn health_is_observable_without_a_subscriber_present_at_publish_time() {
 #[tokio::test]
 async fn waiting_on_a_missing_session_is_an_error_not_a_timeout() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let err = env
         .ctl()
         .session_wait_ready(&SessionId::new("ghost").unwrap(), Duration::from_secs(1))
@@ -331,6 +388,9 @@ async fn waiting_on_a_missing_session_is_an_error_not_a_timeout() {
 #[tokio::test]
 async fn the_session_scratch_directory_is_created_and_removed_with_the_session() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let scratch = mirage_core::paths::session_runtime_dir(&id);
     assert!(scratch.is_dir(), "scratch must exist while the session does");
@@ -347,6 +407,9 @@ async fn the_session_scratch_directory_is_created_and_removed_with_the_session()
 #[tokio::test]
 async fn an_exec_runs_and_reports_its_output_and_exit_code() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let (code, out) = run(env.ctl(), &id, "echo hello; exit 3").await;
     assert_eq!(code, 3);
@@ -356,6 +419,9 @@ async fn an_exec_runs_and_reports_its_output_and_exit_code() {
 #[tokio::test]
 async fn exec_ids_increase_and_are_listed() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let a = env
         .ctl()
@@ -375,6 +441,9 @@ async fn exec_ids_increase_and_are_listed() {
 #[tokio::test]
 async fn stderr_is_reported_separately_from_stdout() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let r = env
         .ctl()
@@ -402,6 +471,9 @@ async fn stderr_is_reported_separately_from_stdout() {
 #[tokio::test]
 async fn attaching_after_an_exec_finished_still_replays_it() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let r = env
         .ctl()
@@ -438,6 +510,9 @@ async fn attaching_after_an_exec_finished_still_replays_it() {
 #[tokio::test]
 async fn several_clients_can_attach_to_one_exec() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let r = env
         .ctl()
@@ -478,6 +553,9 @@ async fn several_clients_can_attach_to_one_exec() {
 #[tokio::test]
 async fn signalling_an_exec_terminates_it() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let r = env
         .ctl()
@@ -502,6 +580,9 @@ async fn signalling_an_exec_terminates_it() {
 #[tokio::test]
 async fn an_invalid_signal_is_rejected_rather_than_dropped() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let r = env
         .ctl()
@@ -516,6 +597,9 @@ async fn an_invalid_signal_is_rejected_rather_than_dropped() {
 #[tokio::test]
 async fn removing_a_running_exec_kills_its_processes() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let r = env
         .ctl()
@@ -539,6 +623,9 @@ async fn removing_a_running_exec_kills_its_processes() {
 #[tokio::test]
 async fn stdin_reaches_the_workload() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let mut def = exec_def(&id, "");
     def.exec.command = "/bin/cat".to_string();
@@ -569,6 +656,9 @@ async fn stdin_reaches_the_workload() {
 #[tokio::test]
 async fn an_exec_whose_command_does_not_exist_still_terminates() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let mut def = exec_def(&id, "");
     def.exec.command = "definitely-not-a-real-binary".to_string();
@@ -608,6 +698,9 @@ async fn an_exec_whose_command_does_not_exist_still_terminates() {
 #[tokio::test]
 async fn execs_in_a_session_run_concurrently() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let started = std::time::Instant::now();
     let defs: Vec<ExecDef> = (0..5).map(|_| exec_def(&id, "sleep 0.5")).collect();
@@ -630,7 +723,10 @@ async fn execs_in_a_session_run_concurrently() {
 #[tokio::test]
 async fn a_multi_node_topology_runs_one_process_per_node() {
     let env = Env::new();
-    let mut profile = noop_profile();
+    if skip_without_emulator() {
+        return;
+    }
+    let mut profile = test_profile();
     profile.emulator.topology = MaybeRef::Owned(TopologyDef {
         num_nodes: 3,
         gpus_per_node: 1,
@@ -665,7 +761,10 @@ async fn a_multi_node_topology_runs_one_process_per_node() {
 #[tokio::test]
 async fn nproc_per_node_multiplies_the_process_grid() {
     let env = Env::new();
-    let mut profile = noop_profile();
+    if skip_without_emulator() {
+        return;
+    }
+    let mut profile = test_profile();
     profile.emulator.topology = MaybeRef::Owned(TopologyDef {
         num_nodes: 2,
         gpus_per_node: 2,
@@ -705,6 +804,9 @@ async fn a_session_forgets_its_oldest_finished_execs() {
     // for replay. Without a bound, a session running execs in a loop grows
     // forever — a leak that only shows up after hours of use.
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let manager = Arc::new(SessionManager::new(mirage_supervisor::ManagerConfig {
         replay_bytes: 4096,
         max_finished_execs: 5,
@@ -712,7 +814,7 @@ async fn a_session_forgets_its_oldest_finished_execs() {
     let def = manager
         .session_create(CreateSessionRequest {
             id: None,
-            profile: MaybeRef::Owned(noop_profile()),
+            profile: MaybeRef::Owned(test_profile()),
             workdir: "/tmp".to_string(),
             daemon: false,
         })
@@ -747,6 +849,9 @@ async fn a_session_forgets_its_oldest_finished_execs() {
 #[tokio::test]
 async fn a_running_exec_is_never_forgotten_however_old() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let manager = Arc::new(SessionManager::new(mirage_supervisor::ManagerConfig {
         replay_bytes: 4096,
         max_finished_execs: 2,
@@ -754,7 +859,7 @@ async fn a_running_exec_is_never_forgotten_however_old() {
     let def = manager
         .session_create(CreateSessionRequest {
             id: None,
-            profile: MaybeRef::Owned(noop_profile()),
+            profile: MaybeRef::Owned(test_profile()),
             workdir: "/tmp".to_string(),
             daemon: false,
         })
@@ -789,6 +894,9 @@ async fn a_running_exec_is_never_forgotten_however_old() {
 #[tokio::test]
 async fn destroying_a_session_kills_its_running_execs() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let tag = marker("destroy-kills");
     let script = tagged_sleep(&tag);
@@ -817,6 +925,9 @@ async fn destroying_a_session_kills_its_running_execs() {
 #[tokio::test]
 async fn destroying_a_session_kills_the_whole_process_tree() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("grandchild.pid");
@@ -854,6 +965,9 @@ async fn a_shutdown_requested_before_anyone_waits_is_still_honoured() {
     // (or in the window between its flag check and its await) was lost,
     // and `mirage daemon stop` would hang.
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.ctl().daemon_shutdown().await.unwrap();
     tokio::time::timeout(Duration::from_secs(5), env.manager.wait_for_shutdown())
         .await
@@ -864,6 +978,9 @@ async fn a_shutdown_requested_before_anyone_waits_is_still_honoured() {
 #[tokio::test]
 async fn many_waiters_all_observe_a_single_shutdown_request() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let waiters: Vec<_> = (0..8)
         .map(|_| {
             let manager = env.manager.clone();
@@ -883,12 +1000,15 @@ async fn many_waiters_all_observe_a_single_shutdown_request() {
 #[tokio::test]
 async fn no_session_can_be_created_once_shutdown_is_requested() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.ctl().daemon_shutdown().await.unwrap();
     let err = env
         .ctl()
         .session_create(CreateSessionRequest {
             id: None,
-            profile: MaybeRef::Owned(noop_profile()),
+            profile: MaybeRef::Owned(test_profile()),
             workdir: "/tmp".to_string(),
             daemon: false,
         })
@@ -901,6 +1021,9 @@ async fn no_session_can_be_created_once_shutdown_is_requested() {
 #[tokio::test]
 async fn shutdown_all_tears_down_every_session() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let mut pids = Vec::new();
     for i in 0..4 {
         let id = env.session_named(Some(&format!("s{i}"))).await;
@@ -926,6 +1049,9 @@ async fn shutdown_all_tears_down_every_session() {
 #[tokio::test]
 async fn no_exec_can_start_into_a_session_being_destroyed() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let id = env.session().await;
 
     let tag = marker("destroy-race");
@@ -969,9 +1095,12 @@ async fn no_exec_can_start_into_a_session_being_destroyed() {
 #[tokio::test]
 async fn profiles_round_trip_through_the_manager() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     assert!(env.ctl().profile_list().await.unwrap().is_empty());
 
-    let mut p = noop_profile();
+    let mut p = test_profile();
     p.name = "Mixed-Case".to_string();
     env.ctl().profile_put(&p).await.unwrap();
 
@@ -993,6 +1122,9 @@ async fn profiles_round_trip_through_the_manager() {
 #[tokio::test]
 async fn deleting_a_missing_profile_reports_not_found() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let err = env.ctl().profile_delete("ghost").await.unwrap_err();
     assert!(matches!(err, MirageError::ProfileNotFound(_)), "{err:?}");
 }
@@ -1000,6 +1132,9 @@ async fn deleting_a_missing_profile_reports_not_found() {
 #[tokio::test]
 async fn exec_lookups_on_a_missing_session_report_the_session() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let r = ExecRef {
         session: SessionId::new("ghost").unwrap(),
         exec: ExecId::from_counter(0),

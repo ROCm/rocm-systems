@@ -24,12 +24,6 @@ use crate::config::OptionDef;
 use crate::emulator::{EmulatorBackendDef, EmulatorDef, EmulatorKind, ExecMode, SupportStatus};
 use crate::topology::TopologyDef;
 
-/// The canonical name of the built-in pass-through emulator. Only used
-/// as a tie-breaker so [`default_emulator`] never picks the no-op
-/// backend when a real one is available; the `noop` backend itself
-/// lives in the `mirage_noop` crate.
-pub const NOOP_NAME: &str = "noop";
-
 /// A registry entry: a backend's static [`EmulatorDescription`]
 /// flattened together with its live runtime status on this host.
 ///
@@ -89,8 +83,14 @@ pub fn find<'a>(specs: &'a [EmulatorInfo], name: &str) -> Option<&'a EmulatorInf
 }
 
 /// The default emulator for new profiles when the user does not pick one
-/// explicitly. Picks the first installed, non-noop entry in name order,
-/// falling back to the `noop` entry, then to the first entry.
+/// explicitly: the first *installed* backend in name order, falling back
+/// to the first backend of any kind.
+///
+/// Preferring an installed one matters because selecting a backend whose
+/// runtime is missing produces a session that fails at bring-up. Falling
+/// back to an uninstalled one is still better than refusing to name a
+/// default: the resulting error names the missing runtime, which is more
+/// use than "no default emulator".
 ///
 /// Returns `None` only when no backend at all was compiled in, which is
 /// reachable: backends are feature-gated, and `--no-default-features`
@@ -101,8 +101,7 @@ pub fn find<'a>(specs: &'a [EmulatorInfo], name: &str) -> Option<&'a EmulatorInf
 pub fn default_emulator(specs: &[EmulatorInfo]) -> Option<&EmulatorInfo> {
     specs
         .iter()
-        .find(|e| e.name != NOOP_NAME && e.installed)
-        .or_else(|| specs.iter().find(|e| e.name == NOOP_NAME))
+        .find(|e| e.installed)
         .or_else(|| specs.first())
 }
 
@@ -138,21 +137,26 @@ mod tests {
 
     #[test]
     fn find_locates_by_name() {
-        let specs = [info("noop", true)];
-        assert_eq!(find(&specs, "noop").map(|e| e.name.as_str()), Some("noop"));
+        let specs = [info("rocjitsu", true)];
+        assert_eq!(
+            find(&specs, "rocjitsu").map(|e| e.name.as_str()),
+            Some("rocjitsu")
+        );
         assert!(find(&specs, "bogus").is_none());
     }
 
     #[test]
-    fn default_prefers_installed_non_noop() {
-        let specs = [info("noop", true), info("rocjitsu", true)];
+    fn default_prefers_an_installed_backend() {
+        let specs = [info("hotswap", false), info("rocjitsu", true)];
         assert_eq!(default_emulator(&specs).unwrap().name, "rocjitsu");
     }
 
     #[test]
-    fn default_falls_back_to_noop() {
-        let specs = [info("noop", true), info("hotswap", false)];
-        assert_eq!(default_emulator(&specs).unwrap().name, "noop");
+    fn default_falls_back_to_an_uninstalled_backend() {
+        // Naming one still produces an actionable error at bring-up
+        // ("rocjitsu runtime not found"); naming none does not.
+        let specs = [info("hotswap", false), info("rocjitsu", false)];
+        assert_eq!(default_emulator(&specs).unwrap().name, "hotswap");
     }
 
     #[test]

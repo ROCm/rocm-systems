@@ -13,7 +13,7 @@ mod harness;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use harness::{Env, marker, pid_alive, tagged_sleep, wait_for};
+use harness::{Env, marker, pid_alive, skip_without_emulator, tagged_sleep, wait_for};
 use mirage_core::proto::{PROTOCOL_VERSION, Request, Response, codec};
 use tokio::net::UnixStream;
 use tokio_util::codec::Framed;
@@ -60,6 +60,9 @@ async fn configuration_commands_do_not_start_a_daemon() {
     // list` is a surprise the user did not ask for. These are answered
     // in-process from the config store and the link-time registry.
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     for args in [
         vec!["paths"],
         vec!["emulators"],
@@ -92,6 +95,9 @@ async fn a_profile_written_offline_is_visible_to_the_daemon() {
     // The two paths write and read the same files, so there is no window
     // in which the CLI and the daemon disagree.
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("shared");
     let id = env.start_session("shared", "uses-it");
     assert_eq!(id, "uses-it");
@@ -140,6 +146,9 @@ async fn only_one_daemon_owns_the_socket() {
 #[tokio::test]
 async fn racing_clients_produce_exactly_one_daemon() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
 
     // Several CLIs starting at once all want a daemon. The lock is what
@@ -273,6 +282,9 @@ async fn errors_keep_their_kind_across_the_wire() {
 #[tokio::test]
 async fn daemon_status_reports_what_it_owns() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "counted");
 
@@ -291,6 +303,9 @@ async fn daemon_status_reports_what_it_owns() {
 #[tokio::test]
 async fn attach_streams_output_and_ends_with_an_exit() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "att");
 
@@ -353,6 +368,9 @@ async fn attach_streams_output_and_ends_with_an_exit() {
 #[tokio::test]
 async fn stdin_and_signals_travel_on_the_attach_connection() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "duplex");
     let tag = marker("duplex");
@@ -425,6 +443,9 @@ async fn stdin_and_signals_travel_on_the_attach_connection() {
 #[tokio::test]
 async fn attaching_to_a_missing_exec_reports_it_rather_than_hanging() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "missing");
 
@@ -483,6 +504,9 @@ async fn the_daemon_exits_when_idle() {
 #[tokio::test]
 async fn the_idle_timeout_does_not_fire_while_a_session_exists() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     let mut child = env
         .mirage()
         .args(["daemon", "--idle-timeout", "1"])
@@ -527,4 +551,11 @@ fn wait_for_exit(
             Err(_) => return None,
         }
     }
+}
+
+#[test]
+fn the_suite_can_actually_run() {
+    // Guards against the rpc suite going green while every test in it skipped
+    // for a missing emulator runtime. See `assert_suite_can_run`.
+    harness::assert_suite_can_run();
 }

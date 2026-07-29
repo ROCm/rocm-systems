@@ -10,7 +10,9 @@ mod harness;
 
 use std::time::Duration;
 
-use harness::{Env, assert_no_leaks, marker, tagged_sleep, wait_for};
+use harness::{
+    Env, TEST_EMULATOR, assert_no_leaks, marker, skip_without_emulator, tagged_sleep, wait_for,
+};
 
 #[test]
 fn paths_reports_the_overridden_directories_and_the_socket() {
@@ -27,6 +29,9 @@ fn paths_reports_the_overridden_directories_and_the_socket() {
 #[test]
 fn profile_create_list_show_delete() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p1");
 
     let list = env.ok(&["profile", "list"]);
@@ -35,7 +40,7 @@ fn profile_create_list_show_delete() {
     let shown = env.ok(&["profile", "show", "p1"]);
     let parsed: serde_json::Value = serde_json::from_str(&shown).unwrap();
     assert_eq!(parsed["name"], "p1");
-    assert_eq!(parsed["emulator"]["emulator"], "noop");
+    assert_eq!(parsed["emulator"]["emulator"], TEST_EMULATOR);
 
     env.ok(&["profile", "delete", "p1", "--force"]);
     let list = env.ok(&["profile", "list"]);
@@ -45,6 +50,9 @@ fn profile_create_list_show_delete() {
 #[test]
 fn run_streams_output_and_propagates_the_exit_code() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
 
     let out = env.run(&[
@@ -71,6 +79,9 @@ fn run_streams_output_and_propagates_the_exit_code() {
 #[test]
 fn run_cleans_up_its_transient_session() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.ok(&["run", "--profile", "p", "--", "/bin/true"]);
 
@@ -86,6 +97,9 @@ fn run_cleans_up_its_transient_session() {
 #[test]
 fn run_keeps_the_session_when_asked() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.ok(&[
         "run",
@@ -104,6 +118,9 @@ fn a_session_started_in_one_invocation_is_usable_from_another() {
     // The reason mirage has a daemon at all: sessions outlive the command
     // that created them.
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let id = env.start_session("p", "cross");
     assert_eq!(id, "cross");
@@ -124,6 +141,9 @@ fn a_session_started_in_one_invocation_is_usable_from_another() {
 #[test]
 fn a_stopped_session_stays_gone() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "gone");
     env.ok(&["session", "stop", "gone"]);
@@ -141,6 +161,9 @@ fn a_stopped_session_stays_gone() {
 #[test]
 fn destroying_a_session_kills_its_running_execs() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "kill-me");
     let tag = marker("destroy");
@@ -169,6 +192,9 @@ fn destroying_a_session_kills_its_running_execs() {
 #[test]
 fn attaching_to_a_long_running_exec_and_signalling_it_ends_it() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "sig");
     let tag = marker("signal");
@@ -207,6 +233,9 @@ fn attaching_to_a_long_running_exec_and_signalling_it_ends_it() {
 #[test]
 fn a_removed_exec_takes_its_processes_with_it() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "rm");
     let tag = marker("remove");
@@ -236,6 +265,9 @@ fn a_removed_exec_takes_its_processes_with_it() {
 #[test]
 fn logs_replays_a_finished_exec() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "logs");
 
@@ -271,6 +303,9 @@ fn logs_are_complete_for_a_process_that_writes_and_exits_immediately() {
     // that stops reading at the exit sees nothing. Repeat, because it
     // only shows up when the forwarder is scheduled late.
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "fast");
 
@@ -307,6 +342,9 @@ fn logs_are_complete_for_a_process_that_writes_and_exits_immediately() {
 #[test]
 fn exec_ids_are_listed_in_order() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "many");
     for _ in 0..3 {
@@ -323,6 +361,9 @@ fn exec_ids_are_listed_in_order() {
 #[test]
 fn json_output_is_parseable() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "js");
 
@@ -349,6 +390,9 @@ fn an_invalid_session_id_is_rejected() {
 #[test]
 fn a_duplicate_session_id_is_rejected() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "dup");
     let err = env.fails(&[
@@ -372,6 +416,9 @@ fn a_session_on_a_missing_profile_fails_clearly() {
 #[test]
 fn running_a_command_that_does_not_exist_reports_why() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let out = env.run(&["run", "--profile", "p", "--", "definitely-not-a-binary"]);
 
@@ -390,6 +437,9 @@ fn running_a_command_that_does_not_exist_reports_why() {
 #[test]
 fn env_flags_reach_the_workload() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let out = env.ok(&[
         "run",
@@ -408,6 +458,9 @@ fn env_flags_reach_the_workload() {
 #[test]
 fn a_malformed_env_flag_is_rejected() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let err = env.fails(&[
         "run",
@@ -424,6 +477,9 @@ fn a_malformed_env_flag_is_rejected() {
 #[test]
 fn the_rank_environment_is_injected() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let out = env.ok(&[
         "run",
@@ -440,6 +496,9 @@ fn the_rank_environment_is_injected() {
 #[test]
 fn a_multi_node_topology_runs_every_node() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let out = env.ok(&[
         "run",
@@ -460,6 +519,9 @@ fn a_multi_node_topology_runs_every_node() {
 #[test]
 fn state_purge_stops_everything_and_removes_the_runtime_directory() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     env.start_session("p", "purged");
     let tag = marker("purge");
@@ -499,6 +561,9 @@ fn stdin_is_forwarded_to_the_workload() {
     use std::process::Stdio;
 
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
 
     let mut child = env
@@ -518,4 +583,11 @@ fn stdin_is_forwarded_to_the_workload() {
     let out = child.wait_with_output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("piped through"), "{stdout}");
+}
+
+#[test]
+fn the_suite_can_actually_run() {
+    // Guards against the e2e suite going green while every test in it skipped
+    // for a missing emulator runtime. See `assert_suite_can_run`.
+    harness::assert_suite_can_run();
 }

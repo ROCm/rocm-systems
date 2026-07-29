@@ -18,7 +18,7 @@ mod harness;
 use std::io::{Read as _, Write as _};
 use std::time::{Duration, Instant};
 
-use harness::Env;
+use harness::{Env, skip_without_emulator};
 
 /// A `mirage` command running on a local pseudo-terminal.
 struct Terminal {
@@ -115,6 +115,9 @@ impl Terminal {
 #[test]
 fn bash_is_a_working_interactive_shell() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
 
     let mut term = Terminal::spawn(
@@ -170,6 +173,9 @@ fn bash_is_a_working_interactive_shell() {
 #[test]
 fn the_workload_sees_the_terminal_size() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
 
     // A program that draws to the screen reads its size from the
@@ -201,6 +207,9 @@ fn the_workload_sees_the_terminal_size() {
 #[test]
 fn resizing_the_terminal_reaches_the_workload() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
 
     // Report the size, then report it again after a resize. The second
@@ -239,6 +248,9 @@ fn resizing_the_terminal_reaches_the_workload() {
 #[test]
 fn a_terminal_exec_reports_its_exit_code() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
     let term = Terminal::spawn(
         &env,
@@ -257,6 +269,9 @@ fn a_terminal_exec_reports_its_exit_code() {
 #[test]
 fn ctrl_c_interrupts_a_foreground_program() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
 
     // Job control is the other half of "a working shell": Ctrl-C must
@@ -295,6 +310,9 @@ fn a_piped_run_stays_on_pipes_and_keeps_streams_separate() {
     // ends, `auto` must not allocate one. A pty would merge stderr into
     // stdout and rewrite newlines, breaking redirection.
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_profile("p");
 
     let out = env.run(&[
@@ -320,4 +338,11 @@ fn a_piped_run_stays_on_pipes_and_keeps_streams_separate() {
         !stdout.contains('\r'),
         "output was translated by a terminal: {stdout:?}"
     );
+}
+
+#[test]
+fn the_suite_can_actually_run() {
+    // Guards against the interactive suite going green while every test in it skipped
+    // for a missing emulator runtime. See `assert_suite_can_run`.
+    harness::assert_suite_can_run();
 }

@@ -12,10 +12,9 @@
 #                           `${CMAKE_INSTALL_PREFIX}/bin/mirage`
 #   * `ctest`             — runs the full Rust test suite via
 #                           `cargo test --release --workspace`. The
-#                           end-to-end suites additionally need the
-#                           `noop` backend (a pass-through emulator that
-#                           runs on any machine), which ctest enables;
-#                           without it those targets are skipped.
+#                           end-to-end suites bring up real sessions on
+#                           the `rocjitsu` backend and skip when its
+#                           runtime library is not discoverable.
 #
 # Options:
 #   * `MIRAGE_ENABLE_DAEMON`  (OFF)   — compile in the daemon's HTTP/WS
@@ -83,13 +82,10 @@ if(_mirage_feature_names)
     set(_mirage_features "--features" "${_mirage_feature_arg}")
 endif()
 
-# The end-to-end suites drive real sessions, so they need an emulator
-# backend that works on any machine: `noop`, the pass-through backend.
-# It is not a default feature, so enable it for tests only — the
-# installed binary is built without it.
-set(_mirage_test_feature_names ${_mirage_feature_names} "noop")
-list(JOIN _mirage_test_feature_names "," _mirage_test_feature_arg)
-set(_mirage_test_features "--features" "${_mirage_test_feature_arg}")
+# The end-to-end suites run their sessions on the default `rocjitsu`
+# backend and skip, loudly, when its runtime library is absent — so they
+# need no extra features beyond whatever the build already selected.
+set(_mirage_test_features ${_mirage_features})
 
 set(_mirage_profile_flag "")
 if(MIRAGE_CARGO_PROFILE STREQUAL "release")

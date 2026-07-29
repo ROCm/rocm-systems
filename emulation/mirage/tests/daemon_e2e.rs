@@ -21,6 +21,9 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio_tungstenite::tungstenite::Message;
 
+mod harness;
+use harness::{TEST_EMULATOR, skip_without_emulator};
+
 /// Pick an unused localhost port. Subject to a race but acceptable
 /// for tests.
 fn free_port() -> u16 {
@@ -164,7 +167,7 @@ fn create_profile(d: &Daemon, name: &str) {
         "name": name,
         "description": "test profile",
         "emulator": {
-            "emulator": "noop",
+            "emulator": TEST_EMULATOR,
             "plugins": {},
             "exec_mode": "Functional",
             "options": {},
@@ -242,6 +245,9 @@ fn invalid_session_id_returns_400() {
 
 #[test]
 fn session_lifecycle_via_http() {
+    if skip_without_emulator() {
+        return;
+    }
     let d = Daemon::spawn();
     create_profile(&d, "demo");
 
@@ -272,6 +278,9 @@ fn session_lifecycle_via_http() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_attach_streams_output_via_websocket() {
+    if skip_without_emulator() {
+        return;
+    }
     // Spawn the daemon on a blocking thread so its Drop (which waits
     // on the subprocess) doesn't run inside the tokio reactor.
     let d = tokio::task::spawn_blocking(Daemon::spawn).await.unwrap();
@@ -378,7 +387,7 @@ async fn create_profile_async(client: &reqwest::Client, d: &Daemon, name: &str) 
         "name": name,
         "description": "test profile",
         "emulator": {
-            "emulator": "noop",
+            "emulator": TEST_EMULATOR,
             "plugins": {},
             "exec_mode": "Functional",
             "options": {},
@@ -400,6 +409,9 @@ async fn create_profile_async(client: &reqwest::Client, d: &Daemon, name: &str) 
 
 #[test]
 fn signal_terminates_long_running_exec() {
+    if skip_without_emulator() {
+        return;
+    }
     let d = Daemon::spawn();
     create_profile(&d, "demo");
 

@@ -31,7 +31,10 @@ mod harness;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use harness::{Env as BaseEnv, assert_no_leaks, marker, tagged_sleep, wait_for};
+use harness::{
+    Env as BaseEnv, TEST_EMULATOR, assert_no_leaks, marker, skip_without_emulator, tagged_sleep,
+    wait_for,
+};
 
 struct Env {
     base: BaseEnv,
@@ -62,7 +65,7 @@ impl Env {
             "create",
             name,
             "--emulator",
-            "noop",
+            TEST_EMULATOR,
             "--no-input",
             "--image",
             "img:latest",
@@ -137,6 +140,9 @@ esac
 #[test]
 fn profile_create_records_containerization() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_containerized_profile("cp");
     let json: serde_json::Value =
         serde_json::from_str(&env.base.ok(&["profile", "show", "cp"])).unwrap();
@@ -150,6 +156,9 @@ fn profile_create_records_containerization() {
 #[test]
 fn a_containerised_run_brings_up_executes_and_cleans_up() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_containerized_profile("cp");
 
     let out = env.base.ok(&[
@@ -189,6 +198,9 @@ fn a_containerised_run_brings_up_executes_and_cleans_up() {
 #[test]
 fn the_node_container_entrypoint_just_idles() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_containerized_profile("cp");
     env.base.start_session("cp", "idle");
 
@@ -211,6 +223,9 @@ fn the_node_container_entrypoint_just_idles() {
 #[test]
 fn the_container_carries_the_in_container_mirage_directories() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_containerized_profile("cp");
     env.base.start_session("cp", "envs");
 
@@ -237,6 +252,9 @@ fn the_container_carries_the_in_container_mirage_directories() {
 #[test]
 fn the_rank_environment_is_injected_at_exec_time() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_containerized_profile("cp");
 
     // Ranks belong to an exec, not to a container: the same container
@@ -274,6 +292,9 @@ fn the_rank_environment_is_injected_at_exec_time() {
 #[test]
 fn container_state_is_reported_and_removed_with_the_session() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_containerized_profile("cp");
     env.base.start_session("cp", "s-box");
 
@@ -310,6 +331,9 @@ fn container_state_is_reported_and_removed_with_the_session() {
 #[test]
 fn a_multi_node_containerised_session_launches_one_container_per_node() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_containerized_profile("cp");
 
     let out = env.base.ok(&[
@@ -339,6 +363,9 @@ fn a_multi_node_containerised_session_launches_one_container_per_node() {
 #[test]
 fn destroying_a_containerised_session_kills_the_exec_process() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.create_containerized_profile("cp");
     env.base.start_session("cp", "cbox");
     let tag = marker("container-exec");
@@ -368,12 +395,15 @@ fn destroying_a_containerised_session_kills_the_exec_process() {
 #[test]
 fn a_provider_that_cannot_be_found_fails_the_session_with_a_reason() {
     let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
     env.base.ok(&[
         "profile",
         "create",
         "bad",
         "--emulator",
-        "noop",
+        TEST_EMULATOR,
         "--no-input",
         "--image",
         "img:latest",
@@ -391,4 +421,11 @@ fn a_provider_that_cannot_be_found_fails_the_session_with_a_reason() {
     );
     let list = env.base.ok(&["session", "list"]);
     assert!(!list.contains("nope"), "{list}");
+}
+
+#[test]
+fn the_suite_can_actually_run() {
+    // Guards against the container suite going green while every test in it skipped
+    // for a missing emulator runtime. See `assert_suite_can_run`.
+    harness::assert_suite_can_run();
 }

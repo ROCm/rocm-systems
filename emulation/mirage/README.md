@@ -37,7 +37,7 @@ $ mirage run --profile cdna4 -- ./my-rocm-app --flag
 
 | Concept      | What it is                                                                 |
 | ------------ | -------------------------------------------------------------------------- |
-| **Emulator** | A backend that runs GPU code (`rocjitsu`, `rocjitsu-dbt`, `hotswap`, `noop`). |
+| **Emulator** | A backend that runs GPU code (`rocjitsu`, `rocjitsu-dbt`, `hotswap`). |
 | **Agent**    | A hardware GPU definition (e.g. `MI300X`, `MI350X`, `MI450X`).             |
 | **Topology** | A rack/node/GPU layout that references an agent.                           |
 | **Profile**  | A reusable preset binding an emulator + topology + options.               |
@@ -66,13 +66,10 @@ mirage exec start "$sid" -- ./my-rocm-app
 mirage session stop "$sid"
 ```
 
-If you have no GPU and just want to exercise the tooling, use the `noop`
-emulator, which runs commands directly with no emulation:
-
-```sh
-mirage profile create local --emulator noop
-mirage run --profile local -- echo "hello from mirage"
-```
+No physical GPU is needed: `rocjitsu` emulates one in software. You do
+need its runtime library — see
+[`docs/building.md`](docs/building.md) — and `mirage emulators` reports
+whether this machine has it.
 
 ## Building
 

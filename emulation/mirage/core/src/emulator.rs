@@ -97,7 +97,7 @@ pub struct EmulatorDescription {
 
 /// A backend integration mirage can drive to emulate a workload.
 ///
-/// Every emulator (the pass-through `noop`, `rocjitsu`, `hotswap`, …)
+/// Every emulator (`rocjitsu`, `rocjitsu-dbt`, `hotswap`, …)
 /// lives in its own crate and registers a single stateless
 /// implementation of this trait into the global registry via
 /// [`inventory`]. The core and control-plane crates never name a
@@ -179,7 +179,7 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// workload process has exited.
     ///
     /// Returns `Ok(None)` — the default — for backends that need no
-    /// daemon (`noop`, `hotswap`, or rocjitsu when its runtime library
+    /// daemon (`hotswap`, or rocjitsu when its runtime library
     /// is not installed and the exec will fail loudly anyway).
     ///
     /// # Errors

@@ -55,7 +55,6 @@ mirage emulators [-l|--long]
 ```sh
 $ mirage emulators
 NAME          INSTALLED  SUPPORTED  DESCRIPTION
-noop*         yes        yes        no-op emulator: runs commands directly with no GPU emulation
 rocjitsu      no         yes        ROCm just-in-time GPU emulator (cycle-accurate or functional)
 ...
 * = default emulator for new profiles
@@ -78,8 +77,8 @@ mirage profile import <file>          # use '-' for stdin
 mirage profile delete <name> [-f|--force]
 ```
 
-* `--emulator` defaults to the first installed backend (rocjitsu if present,
-  otherwise noop). `--agent` defaults to `MI350X`.
+* `--emulator` defaults to the first installed backend (`rocjitsu` on a
+  normal install). `--agent` defaults to `MI350X`.
 * `--image` containerises the profile (every node runs inside a container
   built from that image). `--mount HOST[:CONTAINER[:ro|rw]]` and `--container-provider`
   (`podman`, `docker`, or a path) require `--image`.

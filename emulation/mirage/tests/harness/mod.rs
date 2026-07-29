@@ -152,12 +152,19 @@ impl Env {
         String::from_utf8_lossy(&out.stderr).into_owned()
     }
 
-    /// Create a `noop` profile named `name`.
+    /// Create a profile named `name` on the test emulator backend.
     pub fn create_profile(&self, name: &str) {
-        self.ok(&["profile", "create", name, "--emulator", "noop", "--no-input"]);
+        self.ok(&[
+            "profile",
+            "create",
+            name,
+            "--emulator",
+            TEST_EMULATOR,
+            "--no-input",
+        ]);
     }
 
-    /// Start a session on the `noop` profile and return its id.
+    /// Start a session on `profile` and return its id.
     pub fn start_session(&self, profile: &str, id: &str) -> String {
         self.ok(&[
             "session", "start", "--profile", profile, "--id", id, "--no-input",
@@ -211,6 +218,104 @@ impl Drop for Env {
         let _ = std::fs::remove_file(&self.socket);
         let _ = std::fs::remove_file(self.socket.with_extension("lock"));
     }
+}
+
+/// The emulator backend the end-to-end suites run their sessions on.
+///
+/// These tests exercise the session and process lifecycle, not emulation,
+/// but a session still needs a backend that can produce a usable
+/// injection — and mirage ships exactly one, the emulator it exists to
+/// drive. rocjitsu interposes GPU calls the shell commands here never
+/// make, so it adds no behaviour to what is under test, only the
+/// requirement that its runtime library is present.
+pub const TEST_EMULATOR: &str = "rocjitsu";
+
+/// Whether the test emulator's runtime is available on this machine.
+///
+/// rocjitsu is a sibling project in this monorepo and mirage discovers
+/// `librocjitsu.so` relative to its own binary, so a full build has it. A
+/// mirage-only build does not, and these suites cannot run there.
+///
+/// Probed once and cached: it shells out to the binary, and asking
+/// per-test would add a process spawn to every one of them.
+pub fn test_emulator_available() -> bool {
+    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        let probe = match tempfile::tempdir() {
+            Ok(d) => d,
+            Err(_) => return false,
+        };
+        // Isolated, so probing never reads or writes the developer's real
+        // mirage directories and never starts a daemon.
+        let output = Command::new(env!("CARGO_BIN_EXE_mirage"))
+            .args(["--json", "emulators"])
+            .env("XDG_CONFIG_HOME", probe.path().join("config"))
+            .env("XDG_RUNTIME_DIR", probe.path().join("runtime"))
+            .env("XDG_STATE_HOME", probe.path().join("state"))
+            .env("MIRAGE_SOCKET", probe.path().join("probe.sock"))
+            .env("MIRAGE_AUTOSTART", "0")
+            .output();
+        let Ok(output) = output else { return false };
+        let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
+            return false;
+        };
+        json.as_array().is_some_and(|entries| {
+            entries.iter().any(|e| {
+                e["name"] == TEST_EMULATOR
+                    && e["installed"] == true
+                    && e["support"]["supported"] == true
+            })
+        })
+    })
+}
+
+/// Environment variable that acknowledges the emulator is missing.
+///
+/// See [`assert_suite_can_run`].
+pub const ENV_ALLOW_SKIP: &str = "MIRAGE_E2E_ALLOW_SKIP";
+
+/// Skip the calling test when the test emulator is unavailable.
+///
+/// Returns `true` when the test should stop.
+#[must_use]
+pub fn skip_without_emulator() -> bool {
+    if test_emulator_available() {
+        return false;
+    }
+    eprintln!(
+        "SKIP: the `{TEST_EMULATOR}` runtime was not found, so no session          can be brought up."
+    );
+    true
+}
+
+/// Fail unless this machine can actually run the suite.
+///
+/// Every session test skips when the emulator runtime is missing, and a
+/// skipped Rust test still reports `ok` — so without this the whole suite
+/// goes green in half a second while testing nothing, which is worse than
+/// a red run because nobody investigates it. One deliberate failure says
+/// what is missing and how to fix it, while the rest skip quietly.
+///
+/// Set `MIRAGE_E2E_ALLOW_SKIP=1` to accept the skips, for a build that
+/// deliberately does not include rocjitsu.
+///
+/// Call this from exactly one test per suite.
+pub fn assert_suite_can_run() {
+    if test_emulator_available() {
+        return;
+    }
+    if std::env::var_os(ENV_ALLOW_SKIP).is_some() {
+        eprintln!("{ENV_ALLOW_SKIP} is set; accepting a suite that tests nothing.");
+        return;
+    }
+    panic!(
+        "the `{TEST_EMULATOR}` runtime was not found, so every session test \
+in this suite skipped and the suite proves nothing.\n\n\
+         Build the sibling `emulation/rocjitsu` project, or set ROCM_HOME to \
+an install that provides librocjitsu.so.\n\n\
+         If this build deliberately excludes rocjitsu, set \
+{ENV_ALLOW_SKIP}=1 to accept the skips."
+    );
 }
 
 /// A short, unique socket path.

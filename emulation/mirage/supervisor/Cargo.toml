@@ -25,7 +25,7 @@ pty-process = { version = "0.5.3", features = ["async"] }
 [dev-dependencies]
 tempfile = { workspace = true }
 chrono = { workspace = true }
-mirage_noop = { path = "../noop" }
+mirage_rocjitsu = { workspace = true }
 nix = { workspace = true }
 libc = { workspace = true }
 futures = { workspace = true }

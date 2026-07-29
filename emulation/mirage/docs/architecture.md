@@ -24,7 +24,6 @@ subcommand:
 | `mirage_container`  | Container provider abstraction (podman/docker) for containerised sessions. |
 | `mirage_builtin`    | Embedded builtin agents, topologies, and profiles, plus their unpackers. |
 | `mirage_dashboard`  | The embedded React/Vite single-page app served by `mirage_daemon`.   |
-| `mirage_noop`       | The `noop` backend: runs commands directly with no emulation.        |
 | `mirage_rocjitsu`   | The `rocjitsu` (and `rocjitsu-dbt`) backend.                         |
 | `mirage_hotswap`    | The `hotswap` load-time ISA-rewriting backend.                       |
 | `rocjitsu_sys`      | FFI bindings to `librocjitsu.so`, plus safe RAII wrappers over them.  |

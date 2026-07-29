@@ -103,7 +103,7 @@ mod tests {
         let t = TopologyDef {
             num_nodes: 4,
             gpus_per_node: 8,
-            agent: MaybeRef::Ref("noop".to_string()),
+            agent: MaybeRef::Ref("MI350X".to_string()),
         };
         assert_eq!(t.total_nodes(), 4);
         assert_eq!(t.total_gpus(), 32);

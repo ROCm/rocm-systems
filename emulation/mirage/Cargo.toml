@@ -20,7 +20,6 @@ mirage_daemon = { workspace = true }
 # directly — they register themselves into the emulator registry via
 # `inventory` at link time (see `src/main.rs`). Toggle a backend on or
 # off with its feature flag.
-mirage_noop = { workspace = true, optional = true }
 mirage_rocjitsu = { workspace = true, optional = true }
 mirage_hotswap = { workspace = true, optional = true }
 anyhow = { workspace = true }
@@ -37,7 +36,6 @@ tracing-subscriber = { workspace = true }
 # `--features daemon`, or the full dashboard (API + bundled SPA, needs
 # the Node.js toolchain) with `--features webui`.
 default = ["rocjitsu"]
-noop = ["dep:mirage_noop"]
 rocjitsu = ["dep:mirage_rocjitsu"]
 hotswap = ["dep:mirage_hotswap"]
 # Serve the HTTP/WebSocket API alongside the daemon's Unix-socket
@@ -48,35 +46,9 @@ daemon = ["mirage_daemon/http"]
 # `mirage_dashboard/webui`).
 webui = ["daemon", "mirage_daemon/webui"]
 
-# The end-to-end suites drive real sessions, so they need a backend that
-# runs on any machine — `noop`, which is not a default feature. Declaring
-# the requirement means a default build skips them cleanly instead of
-# failing with "unknown emulator". Run the full suite with:
-#
-#     cargo test --workspace --features noop,webui
-[[test]]
-name = "e2e"
-required-features = ["noop"]
-
-[[test]]
-name = "strain"
-required-features = ["noop"]
-
-[[test]]
-name = "rpc_e2e"
-required-features = ["noop"]
-
-[[test]]
-name = "container_e2e"
-required-features = ["noop"]
-
-[[test]]
-name = "matrix_e2e"
-required-features = ["noop"]
-
 [[test]]
 name = "daemon_e2e"
-required-features = ["noop", "webui"]
+required-features = ["webui"]
 
 [lints]
 workspace = true
@@ -113,7 +85,6 @@ members = [
     "daemon",
     "dashboard",
     "hotswap",
-    "noop",
     "rocjitsu",
     "rocjitsu_sys",
     "supervisor",
@@ -191,6 +162,5 @@ mirage_supervisor = { path = "supervisor" }
 mirage_daemon = { path = "daemon" }
 mirage_rocjitsu = { path = "rocjitsu" }
 mirage_hotswap = { path = "hotswap" }
-mirage_noop = { path = "noop" }
 mirage_container = { path = "container" }
 rocjitsu_sys = { path = "rocjitsu_sys" }

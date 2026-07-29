@@ -6,7 +6,7 @@ drives.
 
 mirage is a single Cargo workspace ([`emulation/mirage/`](../)). One
 `cargo build` produces the unified `mirage` binary from a set of crates —
-`core`, `ctl`, `host`, `container`, `builtin`, the emulator backends (`noop`,
+`core`, `ctl`, `supervisor`, `daemon`, `container`, `builtin`, the emulator backends (
 `rocjitsu`, `hotswap`), and the optional `daemon` + `dashboard` web UI. See
 [`architecture.md`](architecture.md) for the full crate map.
 
@@ -108,10 +108,12 @@ MIRAGE_DASHBOARD_SKIP_NPM_CI=1 cargo build
 This skips the Node version check, `npm ci`, and `npm run build`. The
 crate then embeds whatever SPA assets were produced by a previous build.
 
-## Building rocjitsu (optional)
+## Building rocjitsu
 
-mirage works without rocjitsu (the `noop` emulator runs commands
-directly). To get real GPU emulation you need the rocjitsu libraries.
+rocjitsu is the emulator mirage drives, so mirage needs its libraries to
+bring a session up. Without them `mirage emulators` reports the backend as
+not installed, `mirage run` fails at bring-up naming the missing library,
+and the end-to-end test suites skip.
 
 ### Option A — let mirage find them
 

@@ -1081,7 +1081,6 @@ dependencies = [
  "mirage_ctl",
  "mirage_daemon",
  "mirage_hotswap",
- "mirage_noop",
  "mirage_rocjitsu",
  "mirage_supervisor",
  "nix",
@@ -1205,14 +1204,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mirage_noop"
-version = "0.1.0"
-dependencies = [
- "inventory",
- "mirage_core",
-]
-
-[[package]]
 name = "mirage_rocjitsu"
 version = "0.1.0"
 dependencies = [
@@ -1238,7 +1229,7 @@ dependencies = [
  "libc",
  "mirage_container",
  "mirage_core",
- "mirage_noop",
+ "mirage_rocjitsu",
  "nix",
  "pty-process",
  "serde",

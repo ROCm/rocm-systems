@@ -29,8 +29,6 @@ use mirage_daemon::DaemonArgs;
 // dropped from the build entirely.
 #[cfg(feature = "hotswap")]
 extern crate mirage_hotswap as _;
-#[cfg(feature = "noop")]
-extern crate mirage_noop as _;
 #[cfg(feature = "rocjitsu")]
 extern crate mirage_rocjitsu as _;
 

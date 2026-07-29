@@ -91,7 +91,7 @@ Six nouns. Learn these and you know the tool.
 
 | Concept | What it is |
 | ------- | ---------- |
-| **Emulator** | A backend that runs GPU code: `rocjitsu`, `rocjitsu-dbt`, `hotswap`, `noop`. |
+| **Emulator** | A backend that runs GPU code: `rocjitsu`, `rocjitsu-dbt`, `hotswap`. |
 | **Agent** | A hardware GPU definition — `MI300X`, `MI350X`, `MI450X`. |
 | **Topology** | A rack / node / GPU layout that references an agent. |
 | **Profile** | A reusable preset: emulator + topology + options. |
@@ -108,8 +108,7 @@ Six nouns. Learn these and you know the tool.
 ```console
 $ mirage emulators
 NAME          INSTALLED  SUPPORTED  DESCRIPTION
-noop*         yes        yes        no-op emulator: runs commands directly
-rocjitsu      yes        yes        ROCm just-in-time GPU emulator
+rocjitsu*     yes        yes        ROCm just-in-time GPU emulator
 rocjitsu-dbt  yes        no         dynamic binary translation (needs real GPU)
 hotswap       no         yes        load-time ISA-rewriting backend
 * = default emulator for new profiles
@@ -187,7 +186,6 @@ flowchart TB
     root --> builtin["mirage_builtin<br/>embedded agents/topologies/profiles"]
     root --> daemon["mirage_daemon<br/>web API (feature-gated)"]
     daemon --> dash["mirage_dashboard<br/>React SPA"]
-    root -.link-only.-> noop["mirage_noop"]
     root -.link-only.-> rj["mirage_rocjitsu (+ dbt)"]
     root -.link-only.-> hot["mirage_hotswap"]
     rj --> sys["rocjitsu_sys (FFI)"]
@@ -206,7 +204,6 @@ The binary never names a backend.
 | **rocjitsu** | Pure software emulation. Synthesizes `/dev/kfd`, runs the ISA in `rj_vm`. | Debug anywhere — no GPU needed. **The headline.** |
 | **rocjitsu-dbt** | Dynamic Binary Translation: translates guest ISA → host GPU ISA, runs on real HW. | You *have* a GPU but want a *different* arch. |
 | **hotswap** | Load-time ISA rewriting. | Quick arch retargeting on real HW. |
-| **noop** | Runs the command directly, no emulation. | Exercise the tooling with zero deps. |
 
 All four share the **same** mirage UX. Switching is one flag:
 
@@ -778,7 +775,7 @@ flowchart LR
 - **Topology** models the rack; **containers** isolate each node.
 - **Rank + head-node** coordination via `MIRAGE_RANK` / `MIRAGE_HEAD_ADDR/PORT`.
 - **Everything on disk** → inspect, script, recover, replay.
-- One UX for **rocjitsu / rocjitsu-dbt / hotswap / noop**.
+- One UX for **rocjitsu / rocjitsu-dbt / hotswap**.
 
 ```console
 $ mirage profile create cdna4 --emulator rocjitsu --agent MI450X --num-nodes 2

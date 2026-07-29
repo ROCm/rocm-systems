@@ -88,8 +88,8 @@ pub fn find_emulator(name: &str) -> Option<EmulatorInfo> {
     registry().into_iter().find(|e| e.name == name)
 }
 
-/// The default emulator for new profiles: the first installed, non-noop
-/// entry, falling back to `noop`.
+/// The default emulator for new profiles: the first installed backend,
+/// falling back to the first compiled in.
 ///
 /// `None` when this build has no emulator backends compiled in.
 #[must_use]
@@ -273,9 +273,8 @@ pub enum ProfileCmd {
     Create {
         /// Profile name. Prompted for when omitted on a terminal.
         name: Option<String>,
-        /// Emulator name (e.g. `rocjitsu`, `noop`). Defaults to the
-        /// first installed emulator (rocjitsu if present, otherwise
-        /// noop).
+        /// Emulator name (e.g. `rocjitsu`, `hotswap`). Defaults to the
+        /// first installed backend; see `mirage emulators`.
         #[arg(long)]
         emulator: Option<String>,
         /// Agent name from `<MIRAGE_CONFIG>/agent/` (e.g. `MI300X`,
@@ -549,7 +548,7 @@ pub struct RunArgs {
     #[arg(long, default_value = "mi350x")]
     profile: String,
     /// Override the profile's emulator backend (e.g. `rocjitsu`,
-    /// `rocjitsu-dbt`, `hotswap`, `noop`). See `mirage emulators` for
+    /// `rocjitsu-dbt`, `hotswap`). See `mirage emulators` for
     /// the available backends.
     #[arg(long)]
     emulator: Option<String>,

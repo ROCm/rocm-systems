@@ -1,5 +1,5 @@
 //! Performance + accuracy benchmark across the mirage emulator
-//! backends (`noop`, `rocjitsu`, `hotswap`).
+//! backends (`rocjitsu`, `hotswap`).
 //!
 //! This is an *integration benchmark*: it drives the real `mirage`
 //! CLI exactly as a user would (`profile create` → `run`), executing a
@@ -41,12 +41,12 @@ use std::time::Instant;
 use tempfile::TempDir;
 
 /// Emulator backends to compare, in report order.
-const EMULATORS: &[&str] = &["noop", "rocjitsu", "hotswap"];
+const EMULATORS: &[&str] = &["rocjitsu", "hotswap"];
 
-/// GPU architectures baked into the benchmark fat binary so that the
-/// same executable runs natively (`noop`), under the software
-/// simulator (`rocjitsu`), and after a load-time rewrite (`hotswap`,
-/// which retargets `gfx1250` code onto the physical card).
+/// GPU architectures baked into the benchmark fat binary, so the same
+/// executable runs under the software simulator (`rocjitsu`) and after a
+/// load-time rewrite (`hotswap`, which retargets `gfx1250` code onto the
+/// physical card).
 const OFFLOAD_ARCHS: &[&str] = &["gfx942", "gfx950", "gfx1250"];
 
 // ----- capability detection --------------------------------------------------
@@ -264,8 +264,6 @@ fn benchmark_emulators_and_write_report() {
 
     let env = Env::new();
     let registry = env.registry();
-    let has_physical_gpu = !mirage_core::hardware::gpu_gfx_versions().is_empty();
-
     // Build the workload once; shared by every backend.
     let bin_dir = tempfile::tempdir().unwrap();
     let fat = compile_fat_binary(bin_dir.path());
@@ -281,9 +279,6 @@ fn benchmark_emulators_and_write_report() {
             None => Some("not present in the registry".to_string()),
             Some(r) if !r.installed => Some("not installed".to_string()),
             Some(r) if !r.support.supported => Some(format!("unsupported: {}", r.support.reason)),
-            Some(_) if emu == "noop" && !has_physical_gpu => {
-                Some("unsupported for GPU benchmark: no physical GPU detected".to_string())
-            }
             Some(_) => None,
         };
         if let Some(reason) = skip {
@@ -454,12 +449,6 @@ fn render_report(results: &[EmulatorResult], n: usize) -> String {
     writeln!(s, "| --- | --- |").unwrap();
     writeln!(
         s,
-        "| `noop` | Pass-through baseline — runs the workload directly on the \
-         physical GPU with no emulation. |"
-    )
-    .unwrap();
-    writeln!(
-        s,
         "| `rocjitsu` | Software GPU emulator — executes the workload against a \
          simulated AMD GPU (no physical GPU required). |"
     )
@@ -548,16 +537,18 @@ fn render_report(results: &[EmulatorResult], n: usize) -> String {
     .unwrap();
     writeln!(s).unwrap();
 
-    // Relative performance (vs noop), when noop ran.
-    if let Some(base) = results
+    // Relative performance against the fastest backend that ran. There
+    // is no pass-through baseline to compare against any more, so the
+    // reference is whichever emulator was quickest — which is the
+    // comparison a reader actually wants between emulators.
+    if let Some((base_name, base)) = results
         .iter()
-        .find(|r| r.name == "noop")
-        .and_then(|r| r.workload.as_ref())
-        .map(|w| w.median)
+        .filter_map(|r| r.workload.as_ref().map(|w| (r.name.clone(), w.median)))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
     {
-        writeln!(s, "## Relative latency (vs `noop` baseline)").unwrap();
+        writeln!(s, "## Relative latency (vs the fastest backend)").unwrap();
         writeln!(s).unwrap();
-        writeln!(s, "| Emulator | Median | Slowdown vs `noop` |").unwrap();
+        writeln!(s, "| Emulator | Median | Slowdown vs `{base_name}` |").unwrap();
         writeln!(s, "| --- | ---: | ---: |").unwrap();
         for r in results {
             if let Some(w) = &r.workload {

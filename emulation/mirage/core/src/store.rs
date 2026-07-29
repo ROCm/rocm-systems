@@ -180,7 +180,7 @@ mod tests {
             name: name.to_string(),
             description: None,
             emulator: EmulatorDef {
-                emulator: "noop".to_string(),
+                emulator: "rocjitsu".to_string(),
                 plugins: Default::default(),
                 exec_mode: ExecMode::Functional,
                 options: Default::default(),
