@@ -20,6 +20,10 @@ class SimulationEngine;
 namespace rocjitsu {
 template <typename Isa> class AmdgpuIsaOperand;
 
+namespace gfx1250 {
+class Operand;
+}
+
 namespace amdgpu {
 class ComputeUnitCore;
 class GpuMemory;
@@ -70,6 +74,7 @@ private:
   // The ISA operand backend is the only instruction-side code allowed to reach
   // private CU register hooks. It remains private behind Operand/RegisterAccess.
   template <typename Isa> friend class ::rocjitsu::AmdgpuIsaOperand;
+  friend class ::rocjitsu::gfx1250::Operand;
 };
 
 } // namespace amdgpu

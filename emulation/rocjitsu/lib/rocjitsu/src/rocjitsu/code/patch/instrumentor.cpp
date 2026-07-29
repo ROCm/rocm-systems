@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <optional>
@@ -55,6 +56,22 @@ constexpr std::string_view kRfePrefix = "s_rfe_";
   if (mnemonic.size() >= kRfePrefix.size() && mnemonic.substr(0, kRfePrefix.size()) == kRfePrefix)
     return true;
   return false;
+}
+
+[[nodiscard]] bool is_s_clause(const Instruction &inst) { return inst.mnemonic() == "s_clause"; }
+
+[[nodiscard]] uint32_t s_clause_following_instruction_count(const Instruction &inst) {
+  if (!is_s_clause(inst) || inst.size() != sizeof(uint32_t) || inst.num_src_operands() != 1)
+    return 0;
+
+  const Operand *clause = inst.src_operand(0);
+  if (clause == nullptr)
+    return 0;
+
+  // The decoded OPR_CLAUSE retains the packed SIMM16 value. SIMM16[5:0]
+  // encodes one less than the number of following instructions; bits 8:11 are
+  // BREAK_SPAN and are not part of the count.
+  return (static_cast<uint32_t>(clause->encoding_value()) & 0x3fu) + 1u;
 }
 
 // Per-site result of Instrumentor::patch's preflight: the chosen trampoline
@@ -179,6 +196,10 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
   }
   if (is_denylisted_mnemonic(anchor.mnemonic())) {
     report(error_out, "anchor mnemonic is in the PC-relative denylist");
+    return false;
+  }
+  if (is_s_clause(anchor)) {
+    report(error_out, "anchor mnemonic is s_clause");
     return false;
   }
   return true;
@@ -323,6 +344,10 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
 bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   if (blocks_built_)
     return true;
+  if (arch_ == ROCJITSU_CODE_ARCH_RV32I || arch_ == ROCJITSU_CODE_ARCH_RV64I) {
+    report(error_out, "AMDGPU instrumentation does not support RISC-V architectures");
+    return false;
+  }
   auto decoder = Decoder::create(arch_);
   if (!decoder) {
     report(error_out, "no decoder available for the requested architecture");
@@ -330,10 +355,20 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   }
   decoder_ = std::move(decoder);
   blocks_ = BasicBlock::build(obj_, *decoder_, arch_);
+  // BasicBlock::build returns blocks in .text order. Keep clause state across
+  // block boundaries because a branch target may split the linear instruction
+  // stream in the middle of a clause.
+  uint32_t clause_remaining = 0;
   for (const auto &block : blocks_) {
     uint64_t cur = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
+      if (clause_remaining > 0) {
+        clause_blocked_offsets_.insert(cur);
+        --clause_remaining;
+      }
       offset_to_inst_.emplace(cur, &inst);
+      if (is_s_clause(inst))
+        clause_remaining = std::max(clause_remaining, s_clause_following_instruction_count(inst));
       cur += static_cast<uint64_t>(inst.size());
     }
   }
@@ -412,6 +447,12 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     auto site = validate_anchor(*anchor, pt.anchor_offset, text_bytes, pt, arch_, &perr);
     if (!site) {
       out.errors.push_back(std::move(perr));
+      continue;
+    }
+
+    if (clause_blocked_offsets_.contains(pt.anchor_offset)) {
+      out.errors.emplace_back("anchor is inside an s_clause run, anchor_offset = " +
+                              std::to_string(pt.anchor_offset));
       continue;
     }
 

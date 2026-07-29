@@ -271,6 +271,17 @@ TEST(Validator, RejectsDenylistedMnemonic) {
   }
 }
 
+TEST(Validator, RejectsSClauseAnchor) {
+  static constexpr uint32_t kRaw = 0xBF850001u;
+  TestInstruction anchor("s_clause", 4, /*flags=*/0, std::nullopt, &kRaw);
+  auto text = dummy_text();
+  InstrumentationPoint pt;
+
+  std::string err;
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_RDNA4, &err).has_value());
+  EXPECT_NE(err.find("s_clause"), std::string::npos) << "error was: " << err;
+}
+
 // Instruction::size() is a signed int; the `size != 4 && size != 8` check must
 // reject negative sizes (which decoders never emit in practice) rather than let
 // them through to the later cast to unsigned, where they would wrap.
@@ -412,7 +423,9 @@ uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // Build a minimal gfx950 ELF whose .text holds @p words verbatim. Lets a test
 // embed a real multi-word instruction (e.g. an 8-byte SOP1 + literal) rather
 // than only s_nop fillers.
-std::vector<uint8_t> make_gfx950_elf_with_text_words(const std::vector<uint32_t> &words) {
+std::vector<uint8_t>
+make_gfx950_elf_with_text_words(const std::vector<uint32_t> &words,
+                                uint32_t machine_flags = EF_AMDGPU_MACH_AMDGCN_GFX950) {
   const uint64_t text_offset = 0x100;
   const uint64_t text_size = words.size() * sizeof(uint32_t);
   const uint64_t rodata_size = 4;
@@ -437,7 +450,7 @@ std::vector<uint8_t> make_gfx950_elf_with_text_words(const std::vector<uint32_t>
   ehdr.e_machine = EM_AMDGPU;
   ehdr.e_version = 1;
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_flags = machine_flags;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
@@ -698,27 +711,130 @@ TEST(Instrumentor, RejectsOffsetInteriorToMultiWordInstruction) {
       << "error was: " << result.errors.front();
 }
 
+TEST(Instrumentor, UsesGfx12SClauseCountAndAcceptsFirstInstructionAfterRun) {
+  const std::vector<uint32_t> words = {
+      0xBF850A01u,              // s_clause 1, BREAK_SPAN=0xa: covers two instructions.
+      0xF4002200u, 0xF8000020u, // s_load_b64 s[8:9], s[0:1], 0x20
+      0xF4006000u, 0xF8000000u, // s_load_b256 s[0:7], s[0:1], 0x0
+      0x06040F06u,              // v_add_f32_e32 v2, v6, v7
+  };
+  auto image = make_gfx950_elf_with_text_words(words, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor covered(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  covered.add_point_by_offset(/*anchor_offset=*/12);
+
+  auto covered_result = covered.validate_points();
+  EXPECT_TRUE(covered_result.sites.empty());
+  ASSERT_FALSE(covered_result.errors.empty());
+  EXPECT_NE(covered_result.errors.front().find("inside an s_clause run"), std::string::npos)
+      << "error was: " << covered_result.errors.front();
+
+  Instrumentor after(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  after.add_point_by_offset(/*anchor_offset=*/20);
+  auto after_result = after.validate_points();
+  EXPECT_TRUE(after_result.errors.empty())
+      << (after_result.errors.empty() ? std::string{} : after_result.errors.front());
+  ASSERT_EQ(after_result.sites.size(), 1u);
+  EXPECT_EQ(after_result.sites.front().anchor_offset, 20u);
+}
+
+TEST(Instrumentor, CarriesSClauseCoverageAcrossBasicBlockBoundary) {
+  const std::vector<uint32_t> words = {
+      0xBF850001u,              // s_clause 1: covers the next two instructions.
+      0xF4002200u, 0xF8000020u, // s_load_b64 s[8:9], s[0:1], 0x20
+      0xF4006000u, 0xF8000000u, // s_load_b256 s[0:7], s[0:1], 0x0; branch target.
+      0x06040F06u,              // v_add_f32_e32 v2, v6, v7
+      0xBF82FFFCu,              // s_branch from 0x18 back to 0x0c.
+  };
+  auto image = make_gfx950_elf_with_text_words(words, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/12);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("inside an s_clause run"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+TEST(Instrumentor, RejectsAvailableInstructionInTruncatedSClauseRun) {
+  const std::vector<uint32_t> words = {
+      0xBF85003Fu, // s_clause 63: claims 64 following instructions.
+      0x06040F06u, // only one following instruction is present.
+  };
+  auto image = make_gfx950_elf_with_text_words(words, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/4);
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("inside an s_clause run"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+TEST(Instrumentor, PreservesOuterCoverageAcrossOverlappingSClauses) {
+  const std::vector<uint32_t> words = {
+      0xBF850003u, // s_clause 3: covers the next four instructions.
+      0xBF850000u, // s_clause 0: covers only the next instruction.
+      0x06040F06u, // v_add_f32_e32 v2, v6, v7
+      0x06040F06u, // remains covered by the outer clause.
+      0x06040F06u, // final instruction covered by the outer clause.
+      0x06040F06u, // first instruction after both clauses.
+  };
+  auto image = make_gfx950_elf_with_text_words(words, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor covered(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  covered.add_point_by_offset(/*anchor_offset=*/16);
+  auto covered_result = covered.validate_points();
+  EXPECT_TRUE(covered_result.sites.empty());
+  ASSERT_FALSE(covered_result.errors.empty());
+  EXPECT_NE(covered_result.errors.front().find("inside an s_clause run"), std::string::npos)
+      << "error was: " << covered_result.errors.front();
+
+  Instrumentor after(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  after.add_point_by_offset(/*anchor_offset=*/20);
+  auto after_result = after.validate_points();
+  EXPECT_TRUE(after_result.errors.empty())
+      << (after_result.errors.empty() ? std::string{} : after_result.errors.front());
+  ASSERT_EQ(after_result.sites.size(), 1u);
+  EXPECT_EQ(after_result.sites.front().anchor_offset, 20u);
+}
+
 TEST(Instrumentor, UnsupportedArchReportsErrorInsteadOfCrashing) {
-  // Decoder::create returns nullptr for RV32I/RV64I/INVALID. The Instrumentor
-  // must surface that as a structured ValidationResult error rather than
-  // dereferencing a null decoder during block construction.
+  // The RISC-V decoder is available through the generic target registry, but
+  // the AMDGPU Instrumentor must reject it explicitly rather than attempting
+  // to decode an AMDGPU code object with the wrong ISA.
   auto image = make_gfx950_elf_with_two_nops();
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
 
-  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_RV32I);
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_RV64I);
   instrumentor.add_point_by_offset(/*anchor_offset=*/4);
 
   auto result = instrumentor.validate_points();
   EXPECT_TRUE(result.sites.empty());
   ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("does not support RISC-V"), std::string::npos)
+      << "error was: " << result.errors.front();
 
   // patch() must surface the same error rather than crashing.
-  Instrumentor instrumentor2(obj, ROCJITSU_CODE_ARCH_RV32I);
+  Instrumentor instrumentor2(obj, ROCJITSU_CODE_ARCH_RV64I);
   instrumentor2.add_point_by_offset(/*anchor_offset=*/4);
   auto patched = instrumentor2.patch();
   EXPECT_TRUE(patched.elf_bytes.empty());
   ASSERT_FALSE(patched.errors.empty());
+  EXPECT_NE(patched.errors.front().find("does not support RISC-V"), std::string::npos)
+      << "error was: " << patched.errors.front();
 }
 
 //==============================================================================

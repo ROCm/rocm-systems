@@ -16,6 +16,18 @@ namespace rocjitsu {
 
 class Instruction;
 
+/// @brief How indirect-target discovery identifies externally reachable blocks.
+enum class ExternalEntryPolicy : uint8_t {
+  /// Treat every predecessorless block as a possible external function entry.
+  /// This preserves conservative recovery when callers do not have a complete
+  /// list of entries for all functions sharing one .text section.
+  InferPredecessorless,
+  /// Treat only section entry and caller-supplied leaders as external entries.
+  /// Callers may use this when their supplied leader list contains every
+  /// externally reachable entry; other predecessorless blocks remain unreachable.
+  ExplicitOnly,
+};
+
 /// @brief Recovered indirect PC-relative branch through a statically-built PC register.
 ///
 /// @details BasicBlock construction uses this metadata in two ways. A recovered
@@ -33,10 +45,55 @@ struct IndirectCallFixup {
   uint64_t source_target_offset = 0;         ///< Recovered source branch target offset.
   uint16_t source_call_sreg = 0;             ///< Low SGPR of the recovered PC pair.
   bool source_is_call = false;               ///< Whether the consumer is a call-like swappc.
+  /// @brief True when the recovered fact for this consumer was incomplete: at least
+  /// one predecessor path left the PC pair at an unconstrained value. The concrete
+  /// targets are still valid for relocation and liveness, but the consumer must NOT
+  /// be replaced with a direct transfer window — an unconstrained path would be
+  /// redirected to a concrete target it never dynamically reaches.
+  bool source_incomplete = false;
   uint16_t source_return_sreg = 0;           ///< Low SGPR receiving the return PC for calls.
   uint64_t target_getpc_offset = 0;          ///< Relocated offset of the s_getpc_b64 producer.
   uint64_t target_recovery_begin_offset = 0; ///< Relocated first byte of replaceable builder code.
   uint64_t target_recovery_end_offset = 0;   ///< Relocated one-past-end byte of builder code.
+};
+
+/// @brief One statically discovered `s_getpc_b64`-rooted PC-relative address producer.
+///
+/// @details A recovered indirect branch is only one consumer of a getpc builder.
+/// The same construct materializes function pointers that are copied, spilled,
+/// or passed as arguments before they reach a dynamic transfer. DBT relocates
+/// `.text`, so every such builder that is copied verbatim keeps its original
+/// delta and therefore computes `new_pc + old_delta` — a stale address. Reporting
+/// every builder lets the translator prove the complementary property: that no
+/// stale PC-derived value can exist in a kernel scope at all.
+///
+/// One record is produced per `s_getpc_b64` instruction, whether or not the pass
+/// could follow it. @ref resolved distinguishes the two cases.
+struct PcAddressBuilder {
+  uint64_t source_getpc_offset = 0;          ///< Source offset of the s_getpc_b64 producer.
+  uint64_t source_recovery_begin_offset = 0; ///< First source byte of replaceable builder code.
+  uint64_t source_recovery_end_offset = 0;   ///< One-past-end source byte of builder code.
+  /// Text-relative byte offset the builder leaves in its SGPR pair at
+  /// @ref source_recovery_end_offset. Signed because an unrelocatable data
+  /// reference can compute an address below the section.
+  int64_t source_target_offset = 0;
+  uint16_t source_sreg = 0; ///< Low SGPR of the pair the builder writes.
+  /// @brief True when the pass followed this getpc to a single concrete offset.
+  ///
+  /// False means an unmodeled write reached the pair before any stable point,
+  /// or two incompatible values were observed for the same producer. Such a
+  /// producer cannot be made relocation-correct and must clear any whole-scope
+  /// relocation invariant that depends on it.
+  bool resolved = false;
+  /// @brief True when [source_recovery_begin_offset, source_recovery_end_offset)
+  /// holds only the builder's own arithmetic, with no unrelated instruction
+  /// between steps. The relocation patcher rewrites that interval as one
+  /// contiguous run and NOPs the remainder, so a non-contiguous range would
+  /// erase an intervening instruction. A non-contiguous producer cannot back a
+  /// whole-scope relocation invariant even though its final value is known.
+  bool contiguous = true;
+
+  friend bool operator==(const PcAddressBuilder &, const PcAddressBuilder &) = default;
 };
 
 /// @brief Discover concrete targets for statically-built setpc/swappc consumers.
@@ -64,10 +121,17 @@ struct IndirectCallFixup {
 /// @param text Raw .text bytes matching @p insts.
 /// @param arch ISA architecture used for scalar instruction matching.
 /// @param extra_leaders Additional known block starts, usually kernel entries.
+/// @param entry_policy Whether predecessorless blocks are inferred to be external entries.
+/// @param pc_builders Optional sink for every discovered PC-relative address
+///        producer, sorted by `source_getpc_offset`. Populated only when the
+///        section actually contains a recoverable indirect consumer, because a
+///        section with no dynamic transfer has no stale-PC branch hazard to
+///        prove anything about.
 /// @returns Recovered indirect branch/call metadata.
-[[nodiscard]] std::vector<IndirectCallFixup>
-discover_indirect_branch_edges(std::span<const Instruction *const> insts,
-                               std::span<const uint8_t> text, rj_code_arch_t arch,
-                               std::span<const uint64_t> extra_leaders = {});
+[[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const uint64_t> extra_leaders = {},
+    ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
+    std::vector<PcAddressBuilder> *pc_builders = nullptr);
 
 } // namespace rocjitsu

@@ -24,6 +24,7 @@ def test_gfx12_flat_vaddr_width_follows_saddr_mode():
 
     assert CodeGenerator._vflat_vaddr_operand_size_expr('ENC_VSCRATCH', 'vaddr') is None
     assert CodeGenerator._vflat_vaddr_operand_size_expr('ENC_VFLAT', 'vdst') is None
+    assert 'inst->saddr == OPR_SREG_NULL' in CodeGenerator._emit_vflat_helpers()
 
 
 def test_buffer_vaddr_helper_maps_address_modes_to_zero_one_or_two_vgprs():

@@ -663,6 +663,7 @@ def capable_volumes():
     return rows, any(r["capable"] is True for r in rows)
 
 
+# Reimplemented in hipfile/test/common/ais-capability.h.
 def main():
     """
     Parse command-line arguments, check AIS support in kernel/libraries and

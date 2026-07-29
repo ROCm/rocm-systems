@@ -21,6 +21,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadI8Vglobal : public Vglobal {
@@ -30,6 +31,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadU16Vglobal : public Vglobal {
@@ -39,6 +41,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadI16Vglobal : public Vglobal {
@@ -48,6 +51,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadB32Vglobal : public Vglobal {
@@ -57,6 +61,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadB64Vglobal : public Vglobal {
@@ -66,6 +71,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadB96Vglobal : public Vglobal {
@@ -75,6 +81,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadB128Vglobal : public Vglobal {
@@ -84,6 +91,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalStoreB8Vglobal : public Vglobal {
@@ -93,6 +101,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalStoreB16Vglobal : public Vglobal {
@@ -102,6 +111,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalStoreB32Vglobal : public Vglobal {
@@ -111,6 +121,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalStoreB64Vglobal : public Vglobal {
@@ -120,6 +131,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalStoreB96Vglobal : public Vglobal {
@@ -129,6 +141,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalStoreB128Vglobal : public Vglobal {
@@ -138,6 +151,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadD16U8Vglobal : public Vglobal {
@@ -147,6 +161,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadD16I8Vglobal : public Vglobal {
@@ -156,6 +171,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadD16B16Vglobal : public Vglobal {
@@ -165,6 +181,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadD16HiU8Vglobal : public Vglobal {
@@ -174,6 +191,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadD16HiI8Vglobal : public Vglobal {
@@ -183,6 +201,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadD16HiB16Vglobal : public Vglobal {
@@ -192,6 +211,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalStoreD16HiB8Vglobal : public Vglobal {
@@ -201,6 +221,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalStoreD16HiB16Vglobal : public Vglobal {
@@ -210,6 +231,7 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadAddtidB32Vglobal : public Vglobal {
@@ -218,6 +240,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalStoreAddtidB32Vglobal : public Vglobal {
@@ -226,6 +249,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalInvVglobal : public Vglobal {
@@ -248,6 +272,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicCmpswapB32Vglobal : public Vglobal {
@@ -258,6 +284,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicAddU32Vglobal : public Vglobal {
@@ -268,6 +296,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicSubU32Vglobal : public Vglobal {
@@ -278,6 +308,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicSubClampU32Vglobal : public Vglobal {
@@ -288,6 +320,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMinI32Vglobal : public Vglobal {
@@ -298,6 +332,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMinU32Vglobal : public Vglobal {
@@ -308,6 +344,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMaxI32Vglobal : public Vglobal {
@@ -318,6 +356,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMaxU32Vglobal : public Vglobal {
@@ -328,6 +368,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicAndB32Vglobal : public Vglobal {
@@ -338,6 +380,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicOrB32Vglobal : public Vglobal {
@@ -348,6 +392,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicXorB32Vglobal : public Vglobal {
@@ -358,6 +404,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicIncU32Vglobal : public Vglobal {
@@ -368,6 +416,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicDecU32Vglobal : public Vglobal {
@@ -378,6 +428,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicSwapB64Vglobal : public Vglobal {
@@ -388,6 +440,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicCmpswapB64Vglobal : public Vglobal {
@@ -398,6 +452,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicAddU64Vglobal : public Vglobal {
@@ -408,6 +464,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicSubU64Vglobal : public Vglobal {
@@ -418,6 +476,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMinI64Vglobal : public Vglobal {
@@ -428,6 +488,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMinU64Vglobal : public Vglobal {
@@ -438,6 +500,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMaxI64Vglobal : public Vglobal {
@@ -448,6 +512,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMaxU64Vglobal : public Vglobal {
@@ -458,6 +524,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicAndB64Vglobal : public Vglobal {
@@ -468,6 +536,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicOrB64Vglobal : public Vglobal {
@@ -478,6 +548,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicXorB64Vglobal : public Vglobal {
@@ -488,6 +560,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicIncU64Vglobal : public Vglobal {
@@ -498,6 +572,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicDecU64Vglobal : public Vglobal {
@@ -508,6 +584,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalWbinvVglobal : public Vglobal {
@@ -524,6 +602,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMinNumF32Vglobal : public Vglobal {
@@ -534,6 +614,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMaxNumF32Vglobal : public Vglobal {
@@ -544,6 +626,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalLoadBlockVglobal : public Vglobal {
@@ -553,6 +637,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
 };
 
 class GlobalStoreBlockVglobal : public Vglobal {
@@ -562,6 +648,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
 };
 
 class GlobalAtomicAddF64Vglobal : public Vglobal {
@@ -572,6 +660,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicAddF32Vglobal : public Vglobal {
@@ -582,6 +672,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalLoadTr16B128Vglobal : public Vglobal {
@@ -591,6 +683,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadTr8B64Vglobal : public Vglobal {
@@ -600,6 +693,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalAtomicPkAddF16Vglobal : public Vglobal {
@@ -610,6 +704,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicPkAddBf16Vglobal : public Vglobal {
@@ -620,6 +716,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMinNumF64Vglobal : public Vglobal {
@@ -630,6 +728,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalAtomicMaxNumF64Vglobal : public Vglobal {
@@ -640,6 +740,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class GlobalPrefetchB8Vglobal : public Vglobal {
@@ -648,6 +750,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadAsyncToLdsB8Vglobal : public Vglobal {
@@ -657,6 +760,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
 };
 
 class GlobalLoadAsyncToLdsB32Vglobal : public Vglobal {
@@ -666,6 +771,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
 };
 
 class GlobalLoadAsyncToLdsB64Vglobal : public Vglobal {
@@ -675,6 +782,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
 };
 
 class GlobalLoadAsyncToLdsB128Vglobal : public Vglobal {
@@ -684,6 +793,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
 };
 
 class GlobalStoreAsyncFromLdsB8Vglobal : public Vglobal {
@@ -693,6 +804,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand dsmem;
 };
 
 class GlobalStoreAsyncFromLdsB32Vglobal : public Vglobal {
@@ -702,6 +815,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand dsmem;
 };
 
 class GlobalStoreAsyncFromLdsB64Vglobal : public Vglobal {
@@ -711,6 +826,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand dsmem;
 };
 
 class GlobalStoreAsyncFromLdsB128Vglobal : public Vglobal {
@@ -720,6 +837,8 @@ public:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
+  Operand gpumem;
+  Operand dsmem;
 };
 
 class ClusterLoadB32Vglobal : public Vglobal {
@@ -729,6 +848,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
 };
 
 class ClusterLoadB64Vglobal : public Vglobal {
@@ -738,6 +859,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
 };
 
 class ClusterLoadB128Vglobal : public Vglobal {
@@ -747,6 +870,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
+  Operand m0;
 };
 
 class ClusterLoadAsyncToLdsB8Vglobal : public Vglobal {
@@ -756,6 +881,9 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
+  Operand m0;
 };
 
 class ClusterLoadAsyncToLdsB32Vglobal : public Vglobal {
@@ -765,6 +893,9 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
+  Operand m0;
 };
 
 class ClusterLoadAsyncToLdsB64Vglobal : public Vglobal {
@@ -774,6 +905,9 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
+  Operand m0;
 };
 
 class ClusterLoadAsyncToLdsB128Vglobal : public Vglobal {
@@ -783,6 +917,9 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand dsmem;
+  Operand gpumem;
+  Operand m0;
 };
 
 class GlobalLoadMonitorB32Vglobal : public Vglobal {
@@ -792,6 +929,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadMonitorB64Vglobal : public Vglobal {
@@ -801,6 +939,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadMonitorB128Vglobal : public Vglobal {
@@ -810,6 +949,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadTr4B64Vglobal : public Vglobal {
@@ -819,6 +959,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 class GlobalLoadTr6B96Vglobal : public Vglobal {
@@ -828,6 +969,7 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
+  Operand gpumem;
 };
 
 } // namespace gfx1250

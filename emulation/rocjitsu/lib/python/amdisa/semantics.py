@@ -10,7 +10,7 @@ from each instruction's mnemonic name and its encoding format name.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import re
@@ -1612,9 +1612,11 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     if name == 'V_ACCVGPR_WRITE':
         return InstructionSemantics(name, 'accvgpr_write')
 
-    # Additional dot product variants (RDNA3/4 naming)
+    # Additional dot product variants (RDNA3/4 naming). BF16 uses the same dot2
+    # structure as F16 but a different widening (8-bit exponent, no denormal
+    # renormalization), so it gets its own class rather than reusing f32_f16.
     if name == 'V_DOT2_F32_BF16':
-        return InstructionSemantics(name, 'dot2_f32_f16')  # BF16 uses same dot2 pattern
+        return InstructionSemantics(name, 'dot2_f32_bf16')
     if name == 'V_DOT4_I32_IU8':
         return InstructionSemantics(name, 'dot4_i32_iu8')
     if name == 'V_DOT8_I32_IU4':
@@ -2567,6 +2569,9 @@ def derive_all_semantics(isa_spec: IsaSpec) -> SemanticsSpec:
         SemanticsSpec containing all derivable instructions.
     """
     overrides = isa_spec.profile.semantic_overrides if isa_spec.profile else {}
+    class_overrides = (
+        isa_spec.profile.semantic_class_overrides if isa_spec.profile else {}
+    )
     instructions: dict[str, InstructionSemantics] = {}
     for enc in isa_spec.inst_encodings:
         for inst in enc.insts:
@@ -2584,5 +2589,8 @@ def derive_all_semantics(isa_spec: IsaSpec) -> SemanticsSpec:
                 continue
             sem = derive_semantics(inst.name, enc.enc_name)
             if sem is not None:
+                semantic_class = class_overrides.get(inst.name)
+                if semantic_class is not None:
+                    sem = replace(sem, semantic_class=semantic_class)
                 instructions[inst.name] = sem
     return SemanticsSpec(instructions)

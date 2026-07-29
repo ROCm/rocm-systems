@@ -115,7 +115,7 @@ struct SQTTConfig
     MemBarrierMode MemBarrier = MemBarrierMode::Fence;
     bool TraceMemoryAddrs = false; // trace global/buffer/flat addresses
     bool TraceLDSAddrs = false;    // trace LDS addresses
-    unsigned ShaderClockBits = 0; // opt in to clock packing explicitly
+    unsigned ShaderClockBits = 0;  // opt in to clock packing explicitly
     unsigned ShaderClockShift = 4;
 
     bool hasAddressTracing() const { return TraceMemoryAddrs || TraceLDSAddrs; }
@@ -200,8 +200,7 @@ struct SQTTConfig
         if (funcEnv && funcEnv[0] != '\0')
         {
             llvm::StringRef s(funcEnv);
-            if (s.consume_front("cost:"))
-                c.Mode = CostMode::WeightedCost;
+            if (s.consume_front("cost:")) c.Mode = CostMode::WeightedCost;
             s.getAsInteger(10, c.FunctionThreshold);
         }
 

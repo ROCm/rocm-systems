@@ -562,6 +562,11 @@ hsa_status_t AqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value
     case HSA_AMD_QUEUE_INFO_VM_FAULT_REASON:
       *reinterpret_cast<uint32_t*>(value) = vm_fault_reason_;
       break;
+    case HSA_AMD_QUEUE_INFO_ENGINE_TYPE:
+      *static_cast<hsa_amd_queue_engine_t*>(value) = HSA_AMD_QUEUE_ENGINE_COMPUTE;
+      break;
+    case HSA_AMD_QUEUE_INFO_SDMA_ENGINE_ID:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -606,11 +611,19 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
                                 "Trying to allocate an AQL ring buffer in device memory without "
                                 "large BAR PCIe enabled.");
     }
-    // Device-memory ring buffers use the region's default CPU mapping; callers
-    // that select this path are responsible for the required packet-store ordering.
+    // AllocateExecutable: the CP hardware requests execute permissions for
+    // packet buffer accesses — it treats AQL packets as an execution language
+    // and will fault on ring buffers without the execute attribute.
+    //
+    // AllocateUncached: propagates through KFD (KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED)
+    // → AMDGPU (AMDGPU_GEM_CREATE_UNCACHED) and sets the page MTYPE to UC in the
+    // GPU page tables.  This is a GPU-side attribute, not CPU-side.
+    //
+    // Callers are responsible for the required CPU-side packet-store ordering
+    // (non-temporal stores + sfence / MOVDIR64B).
     ring_buf_ = agent_->coarsegrain_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_,
-        core::MemoryRegion::AllocateExecutable);
+        core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
   } else {
     ring_buf_ = agent_->system_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_, 0x1000,
@@ -674,18 +687,19 @@ void AqlQueue::CloseRingBufferFD(const char* ring_buf_shm_path, int fd) const {
 
 int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
                                  uint32_t ring_buf_phys_size_bytes) const {
-#ifdef __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
   int fd;
-#ifdef HAVE_MEMFD_CREATE
-  fd = syscall(__NR_memfd_create, ring_buf_shm_path, 0);
 
-  if (fd == -1) return -1;
+  fd = memfd_create(ring_buf_shm_path, 0);
 
-  if (ftruncate(fd, ring_buf_phys_size_bytes) == -1) {
-    CloseRingBufferFD(ring_buf_shm_path, fd);
+  if (fd != -1) {
+    if (ftruncate(fd, ring_buf_phys_size_bytes) == 0) {
+      return fd;
+    }
+    close(fd);
     return -1;
   }
-#else
+
   fd = shm_open(ring_buf_shm_path, O_CREAT | O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
 
   if (fd == -1) return -1;
@@ -694,10 +708,10 @@ int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
     CloseRingBufferFD(ring_buf_shm_path, fd);
     return -1;
   }
-#endif
+
   return fd;
 #else
-  assert(false && "Function only needed on Linux.");
+  assert(false && "Function only needed on Linux and FreeBSD.");
   return -1;
 #endif
 }
