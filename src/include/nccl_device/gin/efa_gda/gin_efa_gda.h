@@ -293,17 +293,6 @@ NCCL_DEVICE_INLINE static void postRdmaWrite(nccl_ofi_gin_gdaki_dev_endpoint_han
     group.sync();   /* all members' WQE writes for this chunk are done */
 
     if (is_leader) {
-      /* Publish this group's WQE writes to system scope before handing off,
-       * so they are visible to the NIC whenever any doorbell (this group's or
-       * a later draining group's) rings a slot in this range.
-       * Each group must publish its own writes: __threadfence_system()
-       * orders only the calling thread's writes, and the handoff (base_ref)
-       * is device/block scope, so a later thread's fence cannot publish this
-       * group's writes for it. Runs on both the ring and the defer path.
-       *
-       * Use acq_rel (MEMBAR.ALL.SYS) instead of __threadfence_system
-       * (MEMBAR.SC.SYS). */
-      cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_system);
       /* Doorbell-order rendezvous: take the turn in strict slot order. */
       while (base_ref.load(cuda::memory_order_acquire) != chunk_base) {
         /* spin */
@@ -319,6 +308,15 @@ NCCL_DEVICE_INLINE static void postRdmaWrite(nccl_ofi_gin_gdaki_dev_endpoint_han
       bool must_ring = (!aggregate) || (chunk_next - db_rung >= max_batch);
       if (must_ring) {
         ringDoorbell<mode>(qp, submitted_count_ptr, dbrung_ref, db_rung, chunk_next);
+      } else {
+        /* Publish this group's WQE writes to system scope before handing off,
+         * so they are visible to the NIC whenever any doorbell (this group's or
+         * a later draining group's) rings a slot in this range.
+         * Each group must publish its own writes: __threadfence_system()
+         * orders only the calling thread's writes, and the handoff (base_ref)
+         * is device/block scope, so a later thread's fence cannot publish this
+         * group's writes for it. Runs only on the defer path. */
+        cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_system);
       }
       base_ref.store(chunk_next, cuda::memory_order_release);   /* hand off to next group */
     }
