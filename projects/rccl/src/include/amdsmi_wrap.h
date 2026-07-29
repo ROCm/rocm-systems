@@ -3,6 +3,7 @@
 #ifndef AMDSMI_WRAP_H_
 #define AMDSMI_WRAP_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
 
@@ -461,6 +462,20 @@ amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char**
 
 /** @} End rcclFabricCompat */
 #endif // !AMDSMI_FABRIC_DIRECT
+
+/*************************************************************************
+ * Fabric ABI guard
+ *
+ * amdsmi_get_gpu_fabric_info() is reached through dlopen, so it writes this
+ * struct using the shipped library's layout, not ours. If our declaration is
+ * smaller the library writes past the end of the caller's object, and any
+ * shift moves the fields we read. Neither shows up as a compiler diagnostic,
+ * so pin the layout here: a mismatch must be a deliberate update, not a
+ * silent memory bug. Values measured against amdsmi 26.5.0 (ROCm 7.15).
+ ************************************************************************/
+static_assert(sizeof(amdsmi_fabric_info_v1_t) == 244, "amdsmi fabric v1 payload layout changed");
+static_assert(sizeof(amdsmi_fabric_info_t) == 320, "amdsmi fabric info struct size changed");
+static_assert(offsetof(amdsmi_fabric_info_t, reserved) == 256, "amdsmi fabric payload region moved");
 
 /*************************************************************************
  * AMD SMI Fabric Info Cache
