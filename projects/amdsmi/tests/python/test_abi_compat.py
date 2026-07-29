@@ -361,6 +361,40 @@ class WheelLoaderContractTest(unittest.TestCase):
             mod._load_library()
         self.assertIn("refusing to fall back", str(ctx.exception))
 
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_relocatable_unloadable_lib_falls_through_to_system(self):
+        # TheRock relocatable layout: wrapper at <root>/share/amd_smi/amdsmi,
+        # library at <root>/lib. A present-but-unloadable relocatable .so
+        # (missing deps -> OSError) must fall through to the system SONAME
+        # rather than shadow it.
+        import re as _re
+
+        soname = _re.search(r'_AMDSMI_LIB_SONAME = "([^"]+)"', WRAPPER_SRC.read_text()).group(1)
+        pkg = self._tmp / "share" / "amd_smi" / "amdsmi"
+        pkg.mkdir(parents=True)
+        shutil.copy(WRAPPER_SRC, pkg / "amdsmi_wrapper.py")
+        reloc = self._tmp / "lib" / soname
+        reloc.parent.mkdir()
+        reloc.write_bytes(b"")  # present, but CDLL will raise below
+        attempted = []
+        orig = ctypes.CDLL
+
+        def _cdll(path, mode=0):
+            attempted.append(str(path))
+            if str(path) == str(reloc):
+                raise OSError("simulated missing dependency")
+            return FakeCDLL(path, mode, STABLE_SYMBOLS)
+
+        ctypes.CDLL = _cdll
+        try:
+            mod = _import_wrapper_from(str(pkg), self._modname)
+        finally:
+            ctypes.CDLL = orig
+        # the relocatable path was tried, then the loader fell through to the
+        # bare system SONAME instead of returning a broken/_MissingLibrary.
+        self.assertIn(str(reloc), attempted)
+        self.assertEqual(mod._loaded_lib_path, mod._AMDSMI_LIB_SONAME)
+
 
 class DisableSystemFallbackToolTest(unittest.TestCase):
     """tools/disable_system_fallback.py flips the loader flag exactly once."""
@@ -379,7 +413,29 @@ class DisableSystemFallbackToolTest(unittest.TestCase):
             patched = wrapper.read_text()
             self.assertIn("_AMDSMI_ALLOW_SYSTEM_FALLBACK = False", patched)
             self.assertNotIn("_AMDSMI_ALLOW_SYSTEM_FALLBACK = True", patched)
-            # Anchor is gone now -> a second run must fail (count != 1).
+            # Anchor is gone now -> a second run is a no-op (idempotent), so a
+            # rebuild that reuses the already-flipped staged wrapper succeeds.
+            rc = subprocess.call([sys.executable, str(DISABLE_SYSTEM_FALLBACK_TOOL), str(wrapper)])
+            self.assertEqual(rc, 0)
+            self.assertIn("_AMDSMI_ALLOW_SYSTEM_FALLBACK = False", wrapper.read_text())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    @unittest.skipUnless(
+        WRAPPER_SRC.is_file() and DISABLE_SYSTEM_FALLBACK_TOOL.is_file(),
+        "wrapper or disable_system_fallback.py not found (installed layout)",
+    )
+    def test_ambiguous_wrapper_fails_loud(self):
+        # Neither the True anchor nor exactly one False replacement present:
+        # the tool must refuse (non-zero exit) rather than stage a wheel with
+        # an ambiguous loader-fallback flag.
+        tmp = Path(tempfile.mkdtemp(prefix="amdsmi-disable-"))
+        try:
+            wrapper = tmp / "amdsmi_wrapper.py"
+            text = WRAPPER_SRC.read_text().replace(
+                "_AMDSMI_ALLOW_SYSTEM_FALLBACK = True", "_AMDSMI_ALLOW_SYSTEM_FALLBACK_UNSET = True"
+            )
+            wrapper.write_text(text)
             rc = subprocess.call([sys.executable, str(DISABLE_SYSTEM_FALLBACK_TOOL), str(wrapper)])
             self.assertNotEqual(rc, 0)
         finally:

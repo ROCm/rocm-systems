@@ -263,8 +263,6 @@ def main():
 # alternate .so explicitly.
 # ---------------------------------------------------------------------------
 
-_libraries = {{}}
-
 
 # SONAME the system rpm/deb ships and the relocatable tree names. Always the
 # system lib, never the wheel-private libamd_smi_python.so, even when the

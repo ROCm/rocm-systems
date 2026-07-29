@@ -37,7 +37,7 @@ def main(argv: List[str]) -> None:
             f"expected exactly one '{ANCHOR}' in {path}, found {count}; "
             "refusing to build a wheel with an ambiguous loader fallback flag"
         )
-    path.write_text(text.replace(ANCHOR, REPLACEMENT, 1))
+    path.write_text(text.replace(ANCHOR, REPLACEMENT, 1), encoding="utf-8")
     print(f"[disable_system_fallback] {path}: system library fallback disabled for wheel")
 
 
