@@ -98,6 +98,17 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
             return;
         }
 
+        // If finalization completed while we slept, the process is hanging only
+        // in cleanup — profiling output is already written. Exit cleanly rather
+        // than generating backtraces for a shutdown that already succeeded.
+        if(state::process::get() >= state::process::Finalized)
+        {
+            LOG_WARNING("Finalization already completed but process is still "
+                        "running after {} seconds. Exiting cleanly.",
+                        _ci_timeout_seconds);
+            ::_exit(0);
+        }
+
         auto               _tids = pthread_gotcha::get_native_handles();
         const std::int64_t _ci_timeout_pause =
             (_factor * units::sec) / (3 * (_tids.size() + 1));

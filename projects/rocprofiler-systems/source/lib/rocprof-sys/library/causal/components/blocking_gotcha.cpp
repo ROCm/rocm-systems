@@ -115,9 +115,17 @@ blocking_gotcha::configure()
     };
 }
 
+// Set to true by shutdown() so that operator() becomes a pass-through
+// immediately, even though the GOTCHA GOT hook is still installed.
+// blocking_gotcha_t::disable() only sets a timemory runtime_enabled flag
+// which the fast_func dispatch path does not check, so we need our own
+// guard to prevent any causal delay logic from running after shutdown.
+static std::atomic<bool> s_shutdown{ false };
+
 void
 blocking_gotcha::shutdown()
 {
+    s_shutdown.store(true, std::memory_order_release);
     blocking_gotcha_t::disable();
 }
 
@@ -127,6 +135,14 @@ Ret
 blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                             Args... _args) const noexcept
 {
+    // Fast shutdown path: if blocking_gotcha has been shut down, skip all
+    // causal delay logic and pass directly to the real function.  The GOT
+    // hook remains installed so this wrapper is still called, but we make
+    // it a zero-overhead passthrough to unblock any threads that would
+    // otherwise be stuck in block_backtrace_samples() or postblock().
+    if(s_shutdown.load(std::memory_order_relaxed))
+        return (*_func)(_args...);
+
     const std::int64_t _delay_value =
         causal::delay::get_global().load(std::memory_order_relaxed);
 
@@ -155,9 +171,13 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*)(const sigset_t*, int*),
+blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*_func)(const sigset_t*, int*),
                             const sigset_t* _set_v, int* _sig) const noexcept
 {
+    // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
+    if(s_shutdown.load(std::memory_order_relaxed))
+        return (*_func)(_set_v, _sig);
+
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     sigset_t _set = *_set_v;
@@ -190,6 +210,10 @@ blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
                             int (*_func)(const sigset_t*, siginfo_t*),
                             const sigset_t* _set_v, siginfo_t* _info_v) const noexcept
 {
+    // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
+    if(s_shutdown.load(std::memory_order_relaxed))
+        return (*_func)(_set_v, _info_v);
+
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     sigset_t _set = *_set_v;
@@ -218,6 +242,10 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
                             const sigset_t* _set_v, siginfo_t* _info_v,
                             const struct timespec* _wait_v) const noexcept
 {
+    // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
+    if(s_shutdown.load(std::memory_order_relaxed))
+        return (*_func)(_set_v, _info_v, _wait_v);
+
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
     sigset_t _set = *_set_v;
@@ -240,9 +268,13 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*)(const sigset_t*),
+blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*_func)(const sigset_t*),
                             const sigset_t* _set_v) const noexcept
 {
+    // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
+    if(s_shutdown.load(std::memory_order_relaxed))
+        return (*_func)(_set_v);
+
     auto _old_set = sigset_t{};
     int  _sig     = 0;
     ::sigprocmask(SIG_SETMASK, _set_v, &_old_set);

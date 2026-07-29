@@ -1048,6 +1048,38 @@ rocprofsys_finalize_hidden(void)
         process_sampler::shutdown();
     }
 
+    // -----------------------------------------------------------------------
+    // Causal-profiling shutdown must happen BEFORE rocprofiler_sdk::shutdown().
+    //
+    // Why: rocprofiler_sdk uses a PTL (Portable Threading Library) thread pool
+    //   whose workers call pthread_cond_wait while waiting for async work.  That
+    //   call is intercepted by blocking_gotcha, which injects causal delay credits
+    //   after every blocking operation.  When the SDK tries to drain its buffers
+    //   and join its workers, the workers are stuck inside the blocking_gotcha
+    //   wrapper; because blocking_gotcha::shutdown() has not yet been called, the
+    //   wrapper keeps accumulating and applying delays and the workers never return
+    //   — a deadlock that prevents the process from shutting down cleanly.
+    //
+    // Fix 1 – disable blocking_gotcha BEFORE the SDK shutdown so that any
+    //   future pthread_cond_wait calls (or in-flight ones completing their
+    //   postblock step) bypass the delay logic and return immediately.
+    //
+    // Fix 2 – write the causal output files BEFORE the SDK shutdown.  This
+    //   ensures output is on disk even if SDK shutdown takes longer than expected.
+    //
+    // Both causal_gotcha::shutdown() and causal::finish_experimenting() are
+    // idempotent (they check whether they have already run) so calling them a
+    // second time here is safe.
+    // -----------------------------------------------------------------------
+    if(get_use_causal())
+    {
+        LOG_DEBUG("Disabling causal blocking interceptors before SDK shutdown...");
+        causal::component::causal_gotcha::shutdown();
+
+        LOG_DEBUG("Writing causal output before SDK shutdown...");
+        causal::finish_experimenting();
+    }
+
     LOG_DEBUG("Shutting down ROCm...");
     rocprofiler_sdk::shutdown();
 
