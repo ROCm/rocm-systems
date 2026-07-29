@@ -18,7 +18,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 # Library Version is the tool/amdsmi_interface version
-from ._version import __version__
+from ._version import __commit__, __version__
 
 # Library Initialization
 from .amdsmi_interface import amdsmi_init

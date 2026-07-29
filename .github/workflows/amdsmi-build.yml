@@ -165,18 +165,20 @@ jobs:
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Set Project Directory
+        run: |
+          set -euo pipefail
+          # Evaluate inside the container: ${{ github.workspace }} is the host
+          # runner path, but these steps run in a container where the repo is
+          # mounted elsewhere. $GITHUB_WORKSPACE is the in-container mount.
+          echo "PROJECT_DIR=$GITHUB_WORKSPACE/projects/amdsmi" >> $GITHUB_ENV
+
       - name: Set Artifact Metadata
         if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
           echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
           echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
-
-      - name: Set Project Directory
-        run: |
-          set -euo pipefail
-          # sparse-checkout places the project at a fixed path.
-          echo "PROJECT_DIR=$GITHUB_WORKSPACE/projects/amdsmi" >> $GITHUB_ENV
 
       - name: Run AMDSMI Build and Install
         run: |

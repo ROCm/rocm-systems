@@ -944,25 +944,6 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         log_dir=cfg.log_dir,
     )
 
-    smoke_test = (
-        "import amdsmi\n"
-        "print('PASS: import amdsmi OK')\n"
-        "amdsmi.amdsmi_init()\n"
-        "print('PASS: amdsmi_init() OK')\n"
-        "devs = amdsmi.amdsmi_get_processor_handles()\n"
-        "print('PASS: Found %d device(s)' % len(devs))\n"
-        "amdsmi.amdsmi_shut_down()\n"
-        "print('PASS: amdsmi_shut_down() OK')\n"
-        "print('=== Wheel verification passed ===')\n"
-    )
-    run_command(
-        ["python3", "-c", smoke_test],
-        name="wheel-smoke-test",
-        cwd=Path("/tmp"),
-        retries=1,
-        log_dir=cfg.log_dir,
-    )
-
     run_command(
         ["python3", "-m", "pip", "show", "amdsmi"],
         name="pip-show-amdsmi",
@@ -978,6 +959,10 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
     # unconditionally precedes site-packages, so leaving it set would test the
     # environment's path config rather than the package. A bare interpreter
     # (no PYTHONPATH) is the real scripting scenario where pip must win.
+    # This check is hardware-independent and runs before the GPU smoke test
+    # below, so it executes even on GPU-less runners (manylinux, containers)
+    # where amdsmi_init() would otherwise fail first and mask a wrong-path
+    # install.
     priority_check = (
         "import os, subprocess, amdsmi\n"
         "out = subprocess.check_output(['python3', '-m', 'pip', 'show', 'amdsmi'], text=True)\n"
@@ -999,6 +984,74 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         name="wheel-priority-check",
         cwd=Path("/tmp"),
         env=priority_env,
+        retries=1,
+        log_dir=cfg.log_dir,
+    )
+
+    # GPU-dependent smoke test: initialize the library and enumerate devices.
+    # Skip cleanly when no GPU/driver is present so packaging-only runners are
+    # not failed by the absence of hardware.
+    smoke_test = (
+        "import amdsmi\n"
+        "try:\n"
+        "    amdsmi.amdsmi_init()\n"
+        "except amdsmi.AmdSmiException as e:\n"
+        "    print('SKIP: amdsmi_init() failed (no GPU/driver?): %s' % e)\n"
+        "    raise SystemExit(0)\n"
+        "print('PASS: amdsmi_init() OK')\n"
+        "devs = amdsmi.amdsmi_get_processor_handles()\n"
+        "print('PASS: Found %d device(s)' % len(devs))\n"
+        "amdsmi.amdsmi_shut_down()\n"
+        "print('PASS: amdsmi_shut_down() OK')\n"
+        "print('=== Wheel GPU smoke test passed ===')\n"
+    )
+    run_command(
+        ["python3", "-c", smoke_test],
+        name="wheel-smoke-test",
+        cwd=Path("/tmp"),
+        retries=1,
+        log_dir=cfg.log_dir,
+    )
+
+
+def verify_soname_distinct(cfg: "RunnerConfig") -> None:
+    """Assert the system and wheel libraries keep distinct SONAMEs.
+
+    Runs the standalone SONAME conflict check against the build tree. Only
+    meaningful when the wheel library was built (BUILD_PYTHON_WHEEL=ON), so a
+    build tree without libamd_smi_python.so is skipped rather than failed.
+    """
+    wheel_libs = list(cfg.build_dir.glob("**/libamd_smi_python.so.*"))
+    if not wheel_libs:
+        print("Skipping SONAME conflict check: no wheel library in the build tree")
+        return
+
+    test_script = cfg.project_dir / "tests" / "run_amdsmi_pkg_conflict_test.py"
+    run_command(
+        ["python3", str(test_script), "--build-root", str(cfg.build_dir)],
+        name="pkg-conflict-soname",
+        retries=1,
+        log_dir=cfg.log_dir,
+    )
+
+
+def verify_dual_copy(cfg: "RunnerConfig") -> None:
+    """Assert the system package's two module copies are byte-identical.
+
+    The DEB/RPM installs amdsmi into both site-packages and share/amd_smi. Only
+    runs when the share/amd_smi copy exists (system package installed), skipping
+    on a wheel-only install where there is a single copy.
+    """
+    rocm_path = os.environ.get("ROCM_PATH") or os.environ.get("ROCM_HOME") or "/opt/rocm"
+    share_copy = Path(rocm_path) / "share" / "amd_smi" / "amdsmi"
+    if not share_copy.is_dir():
+        print(f"Skipping dual-copy check: {share_copy} not present")
+        return
+
+    test_script = cfg.project_dir / "tests" / "run_amdsmi_dual_copy_test.py"
+    run_command(
+        ["python3", str(test_script)],
+        name="dual-copy-guard",
         retries=1,
         log_dir=cfg.log_dir,
     )
@@ -1365,6 +1418,34 @@ def main() -> None:
             )
             report_and_raise("VERIFY WHEEL", exc)
         _write_result(cfg.test_results_dir, "verify_wheel_result.txt", "VERIFY WHEEL PASSED")
+
+    # 8. SONAME distinctness (system vs wheel library)
+    if not cfg.skip_install:
+        try:
+            verify_soname_distinct(cfg)
+        except CommandError as exc:
+            _write_result(
+                cfg.test_results_dir,
+                "pkg_conflict_result.txt",
+                f"SONAME CHECK FAILED: {exc.name} exited {exc.code}\n\n"
+                f"Log ({exc.log_path}):\n{read_log(exc.log_path)}",
+            )
+            report_and_raise("SONAME CHECK", exc)
+        _write_result(cfg.test_results_dir, "pkg_conflict_result.txt", "SONAME CHECK PASSED")
+
+    # 9. Dual-copy drift guard (system package installs the module twice)
+    if not cfg.skip_install:
+        try:
+            verify_dual_copy(cfg)
+        except CommandError as exc:
+            _write_result(
+                cfg.test_results_dir,
+                "dual_copy_result.txt",
+                f"DUAL COPY CHECK FAILED: {exc.name} exited {exc.code}\n\n"
+                f"Log ({exc.log_path}):\n{read_log(exc.log_path)}",
+            )
+            report_and_raise("DUAL COPY CHECK", exc)
+        _write_result(cfg.test_results_dir, "dual_copy_result.txt", "DUAL COPY CHECK PASSED")
 
     print("AMDSMI workflow complete")
 
