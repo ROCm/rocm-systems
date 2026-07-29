@@ -3077,7 +3077,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     if (!hsaCopyBatch(pinned_copy_ops)) {
       // Release pinned memory on failure path to avoid leaks
       for (const auto& op : pinned_copy_ops) {
-        gpu().addPinnedMem(op.srcMemory);
+        gpu().addPinnedMem(op.dstMemory);
       }
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
