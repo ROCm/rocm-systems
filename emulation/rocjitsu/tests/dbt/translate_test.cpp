@@ -9013,8 +9013,7 @@ TEST(BinaryTranslatorE2E, Gfx1250UsesNeutralScaledK128Fp8Bf8WmmaWhenSourceOpselM
     rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_FALSE(translated.text_sections().empty());
     ASSERT_GE(translated.text_sections()[0]->size(), 5 * sizeof(uint32_t));
-    const auto *words =
-        reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    const auto *words = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
     gfx1250::Vop3pMachineInst prefix{};
     gfx1250::Vop3pMachineInst matrix{};
     std::memcpy(&prefix, words, sizeof(prefix));
@@ -9056,15 +9055,14 @@ TEST(BinaryTranslatorE2E, Gfx1250K128WmmaFallbackUsesScratchForUnmappedOpselAndO
 
   for (const OverlapCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
-    auto source_wmma = gfx1250::build_vop3p(
-        gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-        {.vdst = test_case.vdst,
-         .neg_hi = 4,
-         .opsel = 6,
-         .src0 = test_case.src0,
-         .src1 = test_case.src1,
-         .src2 = 128,
-         .neg = 4});
+    auto source_wmma =
+        gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p, {.vdst = test_case.vdst,
+                                                                      .neg_hi = 4,
+                                                                      .opsel = 6,
+                                                                      .src0 = test_case.src0,
+                                                                      .src1 = test_case.src1,
+                                                                      .src2 = 128,
+                                                                      .neg = 4});
     source_wmma[0] |= uint32_t{1} << 14;
     auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
         {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
@@ -9186,6 +9184,28 @@ TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaRejectsNonVgprMatrixInputs) {
         rocjitsu::has_error_containing(result, rocjitsu::DiagnosticKind::ExpandFailed,
                                        "K=128 WMMA matrix operands are not ordinary VGPR ranges"));
   }
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250F32K128WmmaRejectsClamp) {
+  constexpr auto source_wmma = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3216x16x128Fp8Fp8Vop3p,
+      {.vdst = 54, .clamp = 1, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_wmma[0], source_wmma[1], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(rocjitsu::has_error_containing(
+      result, rocjitsu::DiagnosticKind::ExpandFailed,
+      "Input is malformed, CLAMP \"must be set to zero\" for WMMA/SWMMAC producing "
+      "floating-point results"));
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250F16K128Fp8Bf8WmmaStillFailsClosedForA0) {
@@ -9877,15 +9897,10 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesVop3DppExtensionWord) {
 
 TEST(BinaryTranslatorE2E, Gfx1250SplitsRegularScaleFp4AcrossMForA0) {
   constexpr auto scale =
-      gfx1250::build_vop3p(0x35,
-                           {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0, .opsel_hi = 1});
-  constexpr auto matrix =
-      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p, {.vdst = 96,
-                                                                .neg_hi = 4,
-                                                                .src0 = 256 + 16,
-                                                                .src1 = 256 + 32,
-                                                                .src2 = 256 + 48,
-                                                                .neg = 4});
+      gfx1250::build_vop3p(0x35, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0, .opsel_hi = 1});
+  constexpr auto matrix = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3232x16x128F4Vop3p,
+      {.vdst = 96, .neg_hi = 4, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48, .neg = 4});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
       {scale[0], scale[1], matrix[0], matrix[1], kGfx1250SEndpgm});
@@ -9914,8 +9929,7 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsRegularScaleFp4AcrossMForA0) {
     EXPECT_EQ((words[offset] >> 11) & 0x1u, half);
     EXPECT_EQ(words[offset] & ((1u << 13) | (1u << 14)), 0u);
     EXPECT_EQ((words[offset + 1] >> 18) & 0x1ffu, 0x100u);
-    EXPECT_EQ((words[offset + 1] >> 27) & 0x1u, 1u)
-        << "B scale selection uses SCL_OPSEL_HI[0]";
+    EXPECT_EQ((words[offset + 1] >> 27) & 0x1u, 1u) << "B scale selection uses SCL_OPSEL_HI[0]";
 
     gfx1250::Vop3pMachineInst replacement{};
     std::memcpy(&replacement, words + offset + 2, sizeof(replacement));
@@ -9999,8 +10013,7 @@ TEST(BinaryTranslatorE2E, Gfx1250RegularScaleFp4RejectsScaleSourceOverlap) {
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250RegularScaleFp4AcceptsScalarAndInlineScaleSources) {
-  constexpr auto scale =
-      gfx1250::build_vop3p(0x35, {.src0 = 4, .src1 = 128, .src2 = 0});
+  constexpr auto scale = gfx1250::build_vop3p(0x35, {.src0 = 4, .src1 = 128, .src2 = 0});
   constexpr auto matrix =
       gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
                            {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48});
@@ -10150,23 +10163,17 @@ TEST(BinaryTranslatorE2E, Gfx1250RegularScaleFp4RejectsBank3UpperHalfOverflow) {
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250SplitsScale16Fp4AcrossMOnlyForA0) {
-  auto scale16 = gfx1250::build_vop3p(
-      0x3a,
-      {.neg_hi = 2,
-       .opsel = 4,
-       .src0 = 256 + 64,
-       .src1 = 256 + 66,
-       .src2 = 0,
-       .opsel_hi = 1,
-       .neg = 2});
+  auto scale16 = gfx1250::build_vop3p(0x3a, {.neg_hi = 2,
+                                             .opsel = 4,
+                                             .src0 = 256 + 64,
+                                             .src1 = 256 + 66,
+                                             .src2 = 0,
+                                             .opsel_hi = 1,
+                                             .neg = 2});
   scale16[0] |= uint32_t{1} << 14;
-  constexpr auto matrix =
-      gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p, {.vdst = 96,
-                                                                .neg_hi = 4,
-                                                                .src0 = 256 + 16,
-                                                                .src1 = 256 + 32,
-                                                                .src2 = 256 + 48,
-                                                                .neg = 4});
+  constexpr auto matrix = gfx1250::build_vop3p(
+      gfx1250::kVWmmaF3232x16x128F4Vop3p,
+      {.vdst = 96, .neg_hi = 4, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48, .neg = 4});
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
       {scale16[0], scale16[1], matrix[0], matrix[1], kGfx1250SEndpgm});
@@ -10225,8 +10232,7 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsScale16Fp4AcrossMOnlyForA0) {
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250Scale16Fp4AcceptsScalarAndInlineScaleSources) {
-  constexpr auto scale16 =
-      gfx1250::build_vop3p(0x3a, {.src0 = 4, .src1 = 128, .src2 = 0});
+  constexpr auto scale16 = gfx1250::build_vop3p(0x3a, {.src0 = 4, .src1 = 128, .src2 = 0});
   constexpr auto matrix =
       gfx1250::build_vop3p(gfx1250::kVWmmaF3232x16x128F4Vop3p,
                            {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48});
@@ -10364,15 +10370,13 @@ TEST(BinaryTranslatorE2E, Gfx1250Scale16Fp4RejectsBank3UpperHalfOverflow) {
 TEST(BinaryTranslatorE2E, Gfx1250PreservesNativeM16Scale16ForA0) {
   constexpr auto scale16 = gfx1250::build_vop3p(
       0x3a, {.neg_hi = 2, .opsel = 1, .src0 = 4, .src1 = 6, .src2 = 0, .opsel_hi = 1});
-  auto matrix =
-      gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
-                           {.vdst = 96,
-                            .neg_hi = 4,
-                            .opsel = 3,
-                            .src0 = 256 + 16,
-                            .src1 = 256 + 32,
-                            .src2 = 128,
-                            .neg = 4});
+  auto matrix = gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p, {.vdst = 96,
+                                                                              .neg_hi = 4,
+                                                                              .opsel = 3,
+                                                                              .src0 = 256 + 16,
+                                                                              .src1 = 256 + 32,
+                                                                              .src2 = 128,
+                                                                              .neg = 4});
   matrix[0] |= uint32_t{1} << 14;
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(
@@ -10524,7 +10528,7 @@ TEST(BinaryTranslatorE2E, Gfx1250Scale16M32IgnoresUnavailableScratchSpillSpace) 
   const auto result = translator.translate(source);
 
   EXPECT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
-                                                         : result.diagnostics.front().message);
+                                                          : result.diagnostics.front().message);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250FailsClosedOnStandalone32x16Fp4ForA0) {

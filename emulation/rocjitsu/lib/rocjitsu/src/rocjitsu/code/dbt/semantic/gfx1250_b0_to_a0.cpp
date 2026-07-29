@@ -315,7 +315,6 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
     return ExpandResult::failed(
         "gfx1250 tensor-load mask rule received an unsupported instruction");
   }
-
   gfx1250::VimageMachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
   constexpr uint8_t kLastOrdinarySgpr = 105;
@@ -390,7 +389,6 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
     set_word_field(words[1], 0x100, 18, 9);
     return ExpandResult::success(std::move(words));
   }
-
   constexpr uint16_t kVgprEncoding = 256;
   constexpr uint16_t kHalfDwords = 8;
   if (matrix.src0 < kVgprEncoding || matrix.src1 < kVgprEncoding) {
@@ -422,8 +420,8 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
   const uint16_t upper_a = physical(*src0_bank, static_cast<uint16_t>(src0 + kHalfDwords));
   const uint16_t shared_b = physical(*src1_bank, src1);
   bool first_dst_overlaps_scale = false;
-  const std::array<uint16_t, 2> encoded_scales = {
-      static_cast<uint16_t>(scale.src0), static_cast<uint16_t>(scale.src1)};
+  const std::array<uint16_t, 2> encoded_scales = {static_cast<uint16_t>(scale.src0),
+                                                  static_cast<uint16_t>(scale.src1)};
   for (const uint16_t encoded_scale : encoded_scales) {
     if (encoded_scale >= kVgprEncoding) {
       const uint16_t scale_base = static_cast<uint16_t>(encoded_scale - kVgprEncoding);
@@ -431,8 +429,7 @@ ExpandResult expand_gfx1250_wmma_scale_src2(const Instruction &inst, uint32_t, u
     }
   }
   if (overlaps(first_dst, kHalfDwords, upper_a, kHalfDwords) ||
-      overlaps(first_dst, kHalfDwords, shared_b, kHalfDwords) ||
-      first_dst_overlaps_scale ||
+      overlaps(first_dst, kHalfDwords, shared_b, kHalfDwords) || first_dst_overlaps_scale ||
       (src2_is_vgpr &&
        overlaps(first_dst, kHalfDwords,
                 physical(*src2_bank, static_cast<uint16_t>(src2 + kHalfDwords)), kHalfDwords))) {
@@ -573,8 +570,7 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
   const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
-    return ExpandResult::failed(
-        "gfx1250 Scale16 32x16 FP4 split cannot prove the VGPR-MSB mode");
+    return ExpandResult::failed("gfx1250 Scale16 32x16 FP4 split cannot prove the VGPR-MSB mode");
   }
 
   const auto physical = [](uint8_t bank, uint16_t reg) {
@@ -588,8 +584,8 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   const uint16_t upper_a = physical(*src0_bank, static_cast<uint16_t>(src0 + kHalfDwords));
   const uint16_t shared_b = physical(*src1_bank, src1);
   bool first_dst_overlaps_scale = false;
-  const std::array<uint16_t, 2> encoded_scales = {
-      static_cast<uint16_t>(scale.src0), static_cast<uint16_t>(scale.src1)};
+  const std::array<uint16_t, 2> encoded_scales = {static_cast<uint16_t>(scale.src0),
+                                                  static_cast<uint16_t>(scale.src1)};
   for (const uint16_t encoded_scale : encoded_scales) {
     if (encoded_scale >= kVgprEncoding) {
       const uint16_t scale_base = static_cast<uint16_t>(encoded_scale - kVgprEncoding);
@@ -597,8 +593,7 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
     }
   }
   if (overlaps(first_dst, kHalfDwords, upper_a, kHalfDwords) ||
-      overlaps(first_dst, kHalfDwords, shared_b, kHalfDwords) ||
-      first_dst_overlaps_scale ||
+      overlaps(first_dst, kHalfDwords, shared_b, kHalfDwords) || first_dst_overlaps_scale ||
       (src2_is_vgpr &&
        overlaps(first_dst, kHalfDwords,
                 physical(*src2_bank, static_cast<uint16_t>(src2 + kHalfDwords)), kHalfDwords))) {
@@ -611,8 +606,7 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   const bool src2_crosses = src2_is_vgpr && static_cast<uint32_t>(src2) + kHalfDwords > 0xffu;
   if ((src0_crosses && *src0_bank == 3) || (dst_crosses && *dst_bank == 3) ||
       (src2_crosses && *src2_bank == 3)) {
-    return ExpandResult::failed(
-        "gfx1250 Scale16 32x16 FP4 split exceeds the VGPR address space");
+    return ExpandResult::failed("gfx1250 Scale16 32x16 FP4 split exceeds the VGPR address space");
   }
 
   const uint8_t original_mode =
@@ -1082,30 +1076,29 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
       gfx1250_k128_wmma_formats(inst.opcode(), matrix_a_fmt, matrix_b_fmt)) {
     gfx1250::Vop3pMachineInst source{};
     std::memcpy(&source, inst.raw_encoding(), sizeof(source));
+    if (source.clamp != 0) {
+      return ExpandResult::failed(
+          "Input is malformed, CLAMP \"must be set to zero\" for WMMA/SWMMAC producing "
+          "floating-point results");
+    }
     const bool has_mappable_opsel = (source.opsel & 0x3u) == 0 && source.opsel_hi == 0;
     constexpr uint16_t kVgprEncoding = 256;
     if (has_mappable_opsel && source.src0 >= kVgprEncoding && source.src1 >= kVgprEncoding) {
       std::vector<uint32_t> words;
       words.reserve(4);
-      append_words(
-          words,
-          gfx1250::build_vop3p(
-              kWmmaScaleSrc2PrefixOp,
-              {.src0 = kGfx1250InlineZero,
-               .src1 = kGfx1250InlineZero,
-               .src2 = kVgprEncoding}));
-      append_words(words,
-                   gfx1250::build_vop3p(
-                       gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
-                       {.vdst = static_cast<uint8_t>(source.vdst),
-                        .neg_hi = static_cast<uint8_t>(source.neg_hi),
-                        .opsel = matrix_a_fmt,
-                        .clamp = static_cast<uint8_t>(source.clamp),
-                        .src0 = static_cast<uint16_t>(source.src0),
-                        .src1 = static_cast<uint16_t>(source.src1),
-                        .src2 = static_cast<uint16_t>(source.src2),
-                        .opsel_hi = matrix_b_fmt,
-                        .neg = static_cast<uint8_t>(source.neg)}));
+      append_words(words, gfx1250::build_vop3p(kWmmaScaleSrc2PrefixOp, {.src0 = kGfx1250InlineZero,
+                                                                        .src1 = kGfx1250InlineZero,
+                                                                        .src2 = kVgprEncoding}));
+      append_words(words, gfx1250::build_vop3p(gfx1250::kVWmmaF3216x16x128F8f6f4Vop3p,
+                                               {.vdst = static_cast<uint8_t>(source.vdst),
+                                                .neg_hi = static_cast<uint8_t>(source.neg_hi),
+                                                .opsel = matrix_a_fmt,
+                                                .clamp = static_cast<uint8_t>(source.clamp),
+                                                .src0 = static_cast<uint16_t>(source.src0),
+                                                .src1 = static_cast<uint16_t>(source.src1),
+                                                .src2 = static_cast<uint16_t>(source.src2),
+                                                .opsel_hi = matrix_b_fmt,
+                                                .neg = static_cast<uint8_t>(source.neg)}));
       return ExpandResult::success(std::move(words));
     }
   }
