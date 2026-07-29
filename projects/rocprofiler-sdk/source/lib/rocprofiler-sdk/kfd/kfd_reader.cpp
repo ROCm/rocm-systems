@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
@@ -174,6 +175,13 @@ get_gpuvm_aperture(int kfd, uint32_t gpu_id, uint64_t* base, uint64_t* limit)
 // advantage. This raw-KFD + RAW_MMAP combination matches the validated reference
 // (test-framework dlog_stream_test.cpp). See design notes and
 // ~/kfd_probe/verify_hsa_alloc.cpp for the EOPNOTSUPP evidence.
+//
+// Forward declaration: setup_session arms a scope_destructor that unwinds
+// partially-acquired resources via teardown_session on any failure return after
+// the GTT allocation succeeds (disarmed only on the success path).
+void
+teardown_session(int kfd, dlog_session* s);
+
 bool
 setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
 {
@@ -215,6 +223,14 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
     }
     s->buffer_va    = alloc.va_addr;
     s->alloc_handle = alloc.handle;
+
+    // From here on, resources are acquired (GTT alloc, then map/register/stream/
+    // mmap). Any early return must unwind them. Arm a scope guard that tears down
+    // the partially-built session unless we reach the success path and disarm it.
+    bool                     success = false;
+    common::scope_destructor cleanup{[&]() {
+        if(!success) teardown_session(kfd, s);
+    }};
 
     auto map                 = kfd_ioctl_map_memory_to_gpu_args{};
     map.handle               = alloc.handle;
@@ -277,6 +293,7 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
         s->info.num_regions,
         s->info.region_record_count,
         s->info.fw_record_size);
+    success = true;  // disarm cleanup: the session is fully built
     return true;
 }
 
@@ -423,7 +440,13 @@ reader_loop()
 
     while(!st.stop.load(std::memory_order_acquire))
     {
-        int rc = ::poll(&wake, 1, 1 /* ms */);
+        // Poll cadence: 1 ms while a session is live (records must be drained
+        // promptly), but a coarse 100 ms before any session is published so the
+        // reader is not a 1000-wakeup/sec idle spinner during the (possibly long)
+        // window before the first GPU queue is created. stop_reader() writes wake_fd
+        // to break either wait immediately.
+        const int _timeout_ms = st.session_ready.load(std::memory_order_acquire) ? 1 : 100;
+        int       rc          = ::poll(&wake, 1, _timeout_ms);
         if(rc < 0 && errno != EINTR)
         {
             ROCP_WARNING << "KFD dispatch-log reader: poll failed, exiting reader loop";
