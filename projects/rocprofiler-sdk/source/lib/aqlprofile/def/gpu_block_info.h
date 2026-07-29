@@ -24,6 +24,7 @@
 #define SRC_DEF_GPU_BLOCK_INFO_H_
 
 #include <stdint.h>
+#include "lib/aqlprofile/aql_profile_v2.h"
 #include "lib/aqlprofile/util/reg_offsets.h"
 
 // Counter Block attributes
@@ -132,6 +133,8 @@ struct GpuBlockInfo
     BlockDelayInfo delay_info;
     // SPM block id
     uint32_t spm_block_id;
+    // Maximum number of 16-bit SPM counters that can be enabled at once
+    uint32_t spm_counter_count;
 };
 
 // Block descriptor
@@ -157,6 +160,7 @@ struct counter_des_t
     uint32_t            index;
     block_des_t         block_des;
     const GpuBlockInfo* block_info;
+    aqlprofile_spm_depth_t spm_depth;
 };
 
 #endif  // SRC_DEF_GPU_BLOCK_INFO_H_
