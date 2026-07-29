@@ -16,7 +16,7 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build Linux Packages
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-medium-dev
     permissions:
       id-token: write
     container:
