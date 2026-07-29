@@ -4,8 +4,8 @@
 #
 # SPDX-License-Identifier: MIT
 ###############################################################################
-"""Parse a resource_usage_summary.log (produced by RESOURCE_USAGE=ON builds,
-see resource_usage_report.md) into a normalized CSV, one row per kernel.
+"""Parse a resource_usage_summary.log (produced by a build compiled with
+-Rpass-analysis=kernel-resource-usage) into a normalized CSV, one row per kernel.
 
 Usage:
     python3 scripts/functional_tests/resource_usage_to_csv.py \\

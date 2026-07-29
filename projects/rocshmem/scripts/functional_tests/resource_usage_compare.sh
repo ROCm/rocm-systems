@@ -3,11 +3,10 @@
 # Compare per-kernel GPU resource usage (VGPR/SGPR/AGPR/scratch/LDS/occupancy)
 # between two commits (or one commit vs the current working tree).
 #
-# This is the git-checkout-based counterpart to
-# .claude/skills/rocshmem-resource-usage/scripts/measure.sh (which measures
-# the working tree in place, no checkout). Use this script when you need to
-# bisect a regression across history or compare a PR branch against its
-# merge-base, rather than iterating on local edits.
+# This is the git-checkout-based counterpart to measuring the working tree in
+# place with no checkout. Use this script when you need to bisect a
+# regression across history or compare a PR branch against its merge-base,
+# rather than iterating on local edits.
 #
 # Builds are cached per (gpu_target, build_config, commit) under
 # resource-usage-cache/ so re-comparing COMMIT_1 against a different COMMIT_2
@@ -35,9 +34,7 @@
 #
 # IMPORTANT: this script does `git checkout --force --detach` on the repo you
 # run it from. Stash or commit your working-tree changes first — it will
-# silently check out over uncommitted edits. For same-tree iteration with no
-# checkout, use scripts/functional_tests/measure.sh + compare.sh instead (see
-# the rocshmem-resource-usage skill, section A).
+# silently check out over uncommitted edits.
 #
 # Example:
 # COMMIT_1=d48c64f6e COMMIT_2=3caf8d080 BUILD_CONFIG=all_backends \
@@ -49,10 +46,8 @@
 ###############################################################################
 set -euo pipefail
 
-# COMMIT_1="${COMMIT_1:-HEAD}"
-# COMMIT_2="${COMMIT_2:-}"
-COMMIT_1=f41d40f
-COMMIT_2=749f856
+COMMIT_1="${COMMIT_1:-HEAD}"
+COMMIT_2="${COMMIT_2:-}"
 GPU_TARGET="${GPU_TARGET:-gfx950}"
 BUILD_CONFIG="${BUILD_CONFIG:-all_backends}"
 
