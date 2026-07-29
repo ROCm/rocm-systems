@@ -27,10 +27,11 @@
 // singletons. The reader wraps this with the mmap pointers and the doorbell/results
 // singletons; the test wraps it with a hand-built buffer and recording callbacks.
 //
-// Ring geometry (confirmed on GFX12 2026-07-20): the buffer is split into
-// `num_regions` independent PIPES, one queue/doorbell per pipe. Each pipe i has its
-// OWN wptr[i]/rptr[i] and occupies slots [i*slots_per_pipe, (i+1)*slots_per_pipe),
-// where slots_per_pipe = region_record_count / num_regions is a power of two.
+// Ring geometry: the buffer holds `num_regions` regions, each with its own
+// wptr[i]/rptr[i] and `region_record_count` slots (per-region, a power of two).
+// Region i's records occupy slots [i*region_record_count, (i+1)*region_record_count).
+// Multiple queues can multiplex into one region; records carry their own
+// (doorbell_off, dispatch_id), so interleaving within a region is expected.
 
 #include <algorithm>
 #include <cstdint>
@@ -43,6 +44,10 @@ namespace kfd
 {
 // Firmware wire record: 20 bytes, little-endian, fixed layout (dispatch_log_format).
 constexpr uint32_t kFwRecBytes = 20;
+
+// Maximum regions the drain supports (bounds drain_state::rptr[]). Geometry with
+// more regions than this is rejected rather than partially drained.
+constexpr uint32_t kMaxRegions = 8;
 
 constexpr uint32_t kRecPadding = 0;
 constexpr uint32_t kRecStart   = 1;  // dispatch_start
@@ -63,8 +68,8 @@ static_assert(sizeof(fw_record) == kFwRecBytes,
 // instance lives in dlog_session (reader) or is stack-local (test).
 struct drain_state
 {
-    uint64_t rptr[8]   = {};     // consumer read pos per pipe
-    bool     rptr_init = false;  // sync rptr to wptr on first drain
+    uint64_t rptr[kMaxRegions] = {};     // consumer read pos per region
+    bool     rptr_init         = false;  // sync rptr to wptr on first drain
 
     struct pending_start
     {
@@ -116,12 +121,16 @@ drain_pipes(const uint8_t*           records_base,
             OnRecord&&               on_record,
             OnPair&&                 on_pair)
 {
-    if(num_regions == 0 || (region_record_count % num_regions) != 0) return 0;
+    if(num_regions == 0) return 0;
 
-    const uint32_t npipes         = std::min<uint32_t>(num_regions, 8);
-    const uint32_t slots_per_pipe = region_record_count / num_regions;
+    // Cap at the cursor storage (drain_state::rptr[]); reject anything larger rather
+    // than silently draining a subset.
+    const uint32_t npipes = std::min<uint32_t>(num_regions, kMaxRegions);
+    if(num_regions > kMaxRegions) return 0;
 
-    if(slots_per_pipe == 0 || (slots_per_pipe & (slots_per_pipe - 1)) != 0) return 0;
+    // Per-region slot count. Must be a power of two so idx masks to a physical slot.
+    const uint32_t region_slots = region_record_count;
+    if(region_slots == 0 || (region_slots & (region_slots - 1)) != 0) return 0;
 
     // First drain: sync each pipe's read cursor to the current wptr so we do not
     // replay pre-existing records (mirrors the reference dmabuf_drain_init).
@@ -137,8 +146,8 @@ drain_pipes(const uint8_t*           records_base,
         return 0;
     }
 
-    auto read_rec = [&](uint32_t pipe, uint64_t idx) {
-        uint64_t slot = static_cast<uint64_t>(pipe) * slots_per_pipe + (idx & (slots_per_pipe - 1));
+    auto read_rec = [&](uint32_t region, uint64_t idx) {
+        uint64_t slot = static_cast<uint64_t>(region) * region_slots + (idx & (region_slots - 1));
         auto     rec  = fw_record{};
         std::memcpy(&rec, records_base + slot * kFwRecBytes, sizeof(rec));
         return rec;
@@ -152,9 +161,9 @@ drain_pipes(const uint8_t*           records_base,
 
         if(w <= scan) continue;
         // Overrun recovery: if the producer lapped us, resume just behind it. In a
-        // power-of-two ring, w - slots_per_pipe aliases the producer's current slot,
+        // power-of-two ring, w - region_slots aliases the producer's current slot,
         // so +1 keeps recovery strictly behind it.
-        if(w - scan > slots_per_pipe) scan = w - slots_per_pipe + 1;
+        if(w - scan > region_slots) scan = w - region_slots + 1;
 
         for(uint64_t idx = scan; idx != w; ++idx)
         {

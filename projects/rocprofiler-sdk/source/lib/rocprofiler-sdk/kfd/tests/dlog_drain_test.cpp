@@ -20,11 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// Unit tests for the per-pipe dispatch-log ring drain (dlog_drain.hpp). These
-// exercise the real production drain logic against a hand-built in-memory ring, so
-// the per-pipe geometry and start/eop pairing are verified without a GPU, an mmap,
-// or the reader's singletons. Geometry mirrors GFX12: num_regions=2 pipes,
-// region_record_count=2048 => slots_per_pipe=1024.
+// Unit tests for the dispatch-log ring drain (dlog_drain.hpp). These exercise the
+// real production drain logic against a hand-built in-memory ring, so the region
+// geometry and start/eop pairing are verified without a GPU, an mmap, or the
+// reader's singletons. Geometry mirrors GFX12: num_regions=2 regions,
+// region_record_count=2048 slots per region (region r at slots [r*2048,(r+1)*2048)).
 
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
 
@@ -44,8 +44,7 @@ using namespace rocprofiler::kfd;
 struct fake_ring
 {
     uint32_t              num_regions;
-    uint32_t              rrc;  // region_record_count
-    uint32_t              slots_per_pipe;
+    uint32_t              rrc;  // region_record_count (per-region slot count)
     std::vector<uint8_t>  records;
     std::vector<uint64_t> wptr;
     std::vector<uint64_t> rptr;
@@ -53,21 +52,21 @@ struct fake_ring
     fake_ring(uint32_t nreg, uint32_t region_record_count)
     : num_regions(nreg)
     , rrc(region_record_count)
-    , slots_per_pipe(region_record_count / nreg)
     , records(static_cast<size_t>(nreg) * region_record_count * kFwRecBytes, 0)
     , wptr(nreg, 0)
     , rptr(nreg, 0)
     {}
 
-    // Write a record at pipe p, ring index idx (its physical slot within the pipe).
-    void put(uint32_t pipe,
+    // Write a record into region `region` at ring index idx. Region r's slots are
+    // [r*rrc, (r+1)*rrc); idx masks into that region (rrc is a power of two).
+    void put(uint32_t region,
              uint64_t idx,
              uint32_t rtype,
              uint32_t dispatch_id,
              uint32_t doorbell_off,
              uint64_t ts)
     {
-        uint64_t slot = static_cast<uint64_t>(pipe) * slots_per_pipe + (idx & (slots_per_pipe - 1));
+        uint64_t slot = static_cast<uint64_t>(region) * rrc + (idx & (rrc - 1));
         fw_record rec{};
         rec.ts_lo        = static_cast<uint32_t>(ts & 0xFFFFFFFFu);
         rec.ts_hi        = static_cast<uint32_t>(ts >> 32);
@@ -172,14 +171,14 @@ TEST(dlog_drain, two_pipes_asymmetric_capture_both)
     run_drain(ring, st, rec0);  // sync
 
     const uint32_t dbA = 4100, dbB = 4102;
-    // pipe 0: 20 pairs (doorbell A) at slots 0..39
+    // region 0: 20 pairs (doorbell A) at slots 0..39
     for(uint32_t i = 0; i < 20; ++i)
     {
         ring.put(0, 2 * i, kRecStart, i, dbA, 100 + i);
         ring.put(0, 2 * i + 1, kRecEop, i, dbA, 500 + i);
     }
     ring.wptr[0] = 40;
-    // pipe 1: 40 pairs (doorbell B) at slots 1024..1103
+    // region 1: 40 pairs (doorbell B) at slots 2048..2127
     for(uint32_t i = 0; i < 40; ++i)
     {
         ring.put(1, 2 * i, kRecStart, i, dbB, 700 + i);
@@ -286,41 +285,46 @@ TEST(dlog_drain, evict_stale_starts)
 // --- Degradation: the drain must stay well-behaved under bad geometry, overrun,
 // and ring wrap, always falling back gracefully rather than crashing/looping. ---
 
-// Invalid geometry (num_regions==0, or a non-power-of-two per-pipe slot count) must
-// be rejected up front: drain reports nothing and never divides by / masks with a
-// bad slot count.
+// Invalid geometry (num_regions==0, num_regions beyond the cursor storage, or a
+// non-power-of-two region slot count) must be rejected up front: drain reports
+// nothing and never masks with a bad slot count.
 TEST(dlog_drain, invalid_geometry_rejected)
 {
     drain_state st;
     recorder    rec;
 
-    // num_regions == 0 -> slots_per_pipe computes to 0 -> reject.
+    // num_regions == 0 -> reject.
     EXPECT_EQ(
         drain_pipes(nullptr, 0, 2048, nullptr, nullptr, st, 1000, rec.on_record(), rec.on_pair()),
         0u);
 
-    // region_record_count/num_regions not a power of two (3000/2 = 1500) -> reject.
+    // num_regions beyond kMaxRegions (cursor storage) -> reject.
+    EXPECT_EQ(drain_pipes(nullptr, kMaxRegions + 1, 2048, nullptr, nullptr, st, 1000,
+                          rec.on_record(), rec.on_pair()),
+              0u);
+
+    // region_record_count not a power of two (3000) -> reject.
     fake_ring ring(2, 3000);
     EXPECT_EQ(run_drain(ring, st, rec), 0u);
     EXPECT_TRUE(rec.pairs.empty());
 }
 
-// Overrun: firmware lapped the consumer (wptr - rptr > slots_per_pipe). The drain
-// must resume just behind the producer (w - slots_per_pipe + 1), drain only the
+// Overrun: firmware lapped the consumer (wptr - rptr > region slots). The drain
+// must resume just behind the producer (w - region_slots + 1), drain only the
 // still-valid window, and terminate — no infinite loop, no reads outside the ring,
 // rptr left synced to wptr.
 TEST(dlog_drain, overrun_recovery)
 {
-    fake_ring   ring(2, 2048);  // slots_per_pipe = 1024
+    fake_ring   ring(2, 2048);  // 2048 slots per region
     drain_state st;
     recorder    rec0;
     run_drain(ring, st, rec0);  // first-drain sync -> rptr[*]=0
 
     const uint32_t db = 4100;
-    // Producer has run far ahead: 10000 records written to pipe 0 (>> 1024 slots),
-    // so all but the last ~1024 are already overwritten. Place a valid start/eop
-    // pair in the still-live tail window so we can confirm recovery still pairs it.
-    // Recovery point = w - slots_per_pipe + 1 = 10000 - 1024 + 1 = 8977.
+    // Producer has run far ahead: 10000 records written to region 0 (>> 2048 slots),
+    // so all but the last 2048 are already overwritten. Place a valid start/eop pair
+    // in the still-live tail window to confirm recovery still pairs it.
+    // Recovery point = w - region_slots + 1 = 10000 - 2048 + 1 = 7953.
     ring.put(0, 9990, kRecStart, 42, db, 111);
     ring.put(0, 9991, kRecEop, 42, db, 222);
     ring.wptr[0] = 10000;
@@ -340,17 +344,17 @@ TEST(dlog_drain, overrun_recovery)
 // slots and pair correctly.
 TEST(dlog_drain, ring_wrap_pairs_across_boundary)
 {
-    fake_ring   ring(2, 2048);  // slots_per_pipe = 1024
+    fake_ring   ring(2, 2048);  // 2048 slots per region
     drain_state st;
     recorder    rec_sync;
     run_drain(ring, st, rec_sync);  // first-drain sync at 0
-    // Prime rptr to just before the wrap so we drain [1023, 1025).
-    st.rptr[0] = 1023;
+    // Prime rptr to just before the power-of-two wrap so we drain [2047, 2049).
+    st.rptr[0] = 2047;
 
     const uint32_t db = 4100;
-    ring.put(0, 1023, kRecStart, 7, db, 500);  // physical slot 1023
-    ring.put(0, 1024, kRecEop, 7, db, 600);    // 1024 & 1023 = physical slot 0
-    ring.wptr[0] = 1025;
+    ring.put(0, 2047, kRecStart, 7, db, 500);  // physical slot 2047
+    ring.put(0, 2048, kRecEop, 7, db, 600);    // 2048 & 2047 = physical slot 0 (wrapped)
+    ring.wptr[0] = 2049;
 
     recorder rec;
     uint64_t pairs = run_drain(ring, st, rec);

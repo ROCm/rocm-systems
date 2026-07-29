@@ -43,6 +43,7 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -364,6 +365,25 @@ drain_records(dlog_session* s)
     auto* recs     = base + s->info.records_offset;
     auto* wptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.wptr_offset);
     auto* rptr_arr = reinterpret_cast<volatile uint64_t*>(base + s->info.rptr_offset);
+
+    {
+        // DBGWPTR: does the ring advance at all? Print wptr[]/rptr[] when any wptr moves.
+        static uint64_t s_last[8] = {0};
+        const uint32_t  np        = s->info.num_regions <= 8 ? s->info.num_regions : 8;
+        bool            moved     = false;
+        for(uint32_t p = 0; p < np; ++p)
+            if(wptr_arr[p] != s_last[p]) moved = true;
+        if(moved)
+        {
+            std::string line;
+            for(uint32_t p = 0; p < np; ++p)
+            {
+                line += fmt::format("p{}:w={},r={} ", p, wptr_arr[p], rptr_arr[p]);
+                s_last[p] = wptr_arr[p];
+            }
+            ROCP_WARNING << "DBGWPTR " << line;
+        }
+    }
 
     return drain_pipes(
         recs,
