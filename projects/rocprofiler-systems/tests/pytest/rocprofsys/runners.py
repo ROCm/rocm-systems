@@ -720,6 +720,10 @@ class PythonRunner(BaseRunner):
                 self.environment.set_test_environment(
                     {"PYTHONPATH": os.pathsep.join(entries)}
                 )
+                # BaseRunner.__init__ already cached self.env from the
+                # environment as it stood before this update; refresh it or
+                # the added PYTHONPATH entry would never reach the subprocess.
+                self.env = self.environment.get_merged_environment(config)
 
     def build_command(self) -> list[str]:
         python_executable = self.config.capabilities.get_python_executable(
