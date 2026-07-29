@@ -8,48 +8,73 @@
 Execution contexts
 *******************************************************************************
 
-By default, every kernel you launch competes for the GPU resources available to
-the process. The runtime decides which compute units (CUs) a kernel runs on, and
-kernels that run at the same time share the available pool of CUs and work
-queues. This is efficient for throughput, but it means a small, time-critical
-kernel can be delayed by a large kernel that already occupies the device.
+By default, every kernel you launch uses the device's primary execution context,
+which the HIP runtime manages implicitly. In that primary context, kernels
+launched by the process compete for the GPU resources available to the process.
+The runtime decides which compute units (CUs) a kernel runs on, and kernels that
+run at the same time share the available pool of CUs and work queues.
 
-An execution context lets you define a fixed slice of the available GPU resources
-and bind work to it. When you create an execution context, you associate it with
-selected device resources, currently CUs and work queue configuration. Any kernel
-launched on a stream that belongs to that context is confined to the context's CU
-resources, regardless of the kernel launch configuration. Work queue
-configuration associated with the context guides how the driver dispatches work.
-You set this up entirely on the host; the kernel source does not change.
+In the HIP runtime, an execution context is either the device's primary context
+or a resource-partitioned context that you create with
+:cpp:func:`hipGreenCtxCreate`. A resource-partitioned execution context lets you
+define a fixed slice of the available GPU resources and bind work to it. Any
+kernel launched on a stream that belongs to that context is confined to the
+context's CU resources, regardless of the kernel launch configuration.
 
-Reserving resources this way is useful whenever you want predictable access to
-part of the GPU. For example, you can reserve a handful of CUs so a
-latency-sensitive kernel always has resources available when it launches, or you
-can cap a kernel to a smaller CU count to measure how it scales without changing
-its code.
-
-In the HIP runtime, an execution context is either the device's primary context,
-which the runtime uses implicitly, or a resource-partitioned context you create
-with :cpp:func:`hipGreenCtxCreate`. This feature is analogous to CUDA green
-contexts.
+You set up execution contexts entirely on the host. The kernel source does not
+change, and kernels are launched with the usual HIP launch syntax. This feature
+is analogous to CUDA green contexts.
 
 .. note::
 
-    The device resource structures use the field name ``smCount`` and the
-    resource type ``hipDevResourceTypeSm``. HIP keeps these ``sm`` (streaming
-    multiprocessor) identifiers so that code written against CUDA compiles
-    unchanged. On AMD GPUs, the equivalent physical resource is the compute unit.
-    This page writes "compute unit" or "CU" in the text and keeps the literal
-    identifiers in code.
+    Keep the following terminology and example-code details in mind:
 
-.. note::
+    - The device resource structures use the field name ``smCount`` and the
+      resource type ``hipDevResourceTypeSm``. HIP keeps these ``sm`` identifiers
+      so that code written against CUDA compiles unchanged. On AMD GPUs, the
+      equivalent physical resource is the compute unit. This page writes
+      "compute unit" or "CU" in the text and keeps the literal identifiers in
+      code.
 
-    The snippets on this page are written to show the calling sequence. Build and
-    run them on a ROCm system before using them as the basis for production code.
-    A complete, buildable program is provided as the
-    `HIP-Basic execution context example <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/execution_context>`_.
+    - The snippets on this page are written to show the calling sequence. Build
+      and run them on a ROCm system before using them as the basis for production
+      code. A complete, buildable program is provided as the
+      `HIP-Basic execution context example <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/execution_context>`_.
 
 The full API listing is in :ref:`execution_context_management_reference`.
+
+Concepts of execution contexts
+===============================================================================
+
+An execution context is a host-created scheduling domain for GPU work. The
+context does not change the kernel code and it does not add a new kernel launch
+parameter. Instead, it changes the resources visible to streams created on that
+context.
+
+The usual flow is:
+
+#. Start with the CUs available to the process.
+#. Split that CU resource into one or more partitions.
+#. Bundle one or more resources into a descriptor.
+#. Create one execution context from each descriptor.
+#. Create streams from those contexts.
+#. Launch kernels on the context streams.
+
+A kernel launched on a context stream can only run on the CUs assigned to that
+context. A kernel launched on a regular stream outside an execution context uses
+the device's primary context and can use the CUs available to that primary
+context.
+
+The kernel's grid and block dimensions still control how much work the kernel
+contains. The execution context controls where that work is allowed to execute.
+If a kernel has more thread blocks than the context's CUs can run at once, the
+extra thread blocks wait and are scheduled onto the same CU partition as earlier
+thread blocks retire.
+
+Execution contexts are most useful when an application has multiple classes of
+work that need different resource allocations. They are less useful when the
+application runs one kernel at a time, or when all kernels have the same priority
+and maximum total throughput is the only goal.
 
 Benefits of execution contexts
 ===============================================================================
@@ -75,11 +100,11 @@ priority of the latency-sensitive kernel's stream can reduce this delay, but it
 cannot eliminate it, because the kernel must still wait for in-flight thread
 blocks to drain.
 
-Execution contexts address this contention by partitioning resources at the
-source. For example, the background kernel can be assigned to a context that uses
-most of the CUs, while the latency-sensitive kernel can be assigned to a separate
-context that uses a smaller, dedicated set of CUs. The background kernel cannot
-consume the CUs assigned to the latency-sensitive context, so the
+Execution contexts address this contention by partitioning resources before the
+work is launched. For example, the background kernel can be assigned to a context
+that uses most of the CUs, while the latency-sensitive kernel can be assigned to
+a separate context that uses a smaller, dedicated set of CUs. The background
+kernel cannot consume the CUs assigned to the latency-sensitive context, so the
 latency-sensitive kernel can start with less interference from the background
 workload.
 
@@ -87,6 +112,19 @@ This isolation involves a trade-off: neither kernel can use all available CUs,
 so each may run slightly longer when considered in isolation. In exchange, the
 latency-sensitive workload is no longer blocked by the background workload's use
 of shared CUs.
+
+Use execution contexts when your application design requires predictable access
+to a portion of the GPU. Resource partitioning is an explicit setup step: you
+decide how many CUs each workload should receive, create contexts from those
+partitions, and launch each workload on streams associated with the appropriate
+context.
+
+For example, a service can reserve a handful of CUs for a latency-sensitive
+kernel so that the kernel has resources available when it launches. Another
+application might deliberately cap a kernel to a smaller CU count to measure how
+performance scales as the available compute resources change. In both cases, the
+partition size is a design choice that should be measured and tuned for the
+workload.
 
 Partition sizing is workload dependent. Select the CU count for each execution
 context when the context is created, then tune the allocation based on measured
@@ -113,6 +151,13 @@ allows the application to specify how many concurrent stream-ordered workloads i
 expects. The driver treats this value as a hint and attempts to place work from
 different contexts onto separate queues. The device-wide upper bound on work
 queues is controlled by the ``GPU_MAX_HW_QUEUES`` environment variable.
+
+Work queue configuration is optional. A context can be created with only a CU
+resource. If you omit a work queue configuration resource, the context still
+limits kernels to its assigned CUs, but the driver uses the default work queue
+sharing behavior. Add a work queue configuration when you also want to give the
+driver a hint about how many independent stream-ordered workloads you expect and
+how work queues should be shared across contexts.
 
 .. note::
 
@@ -176,8 +221,8 @@ a CU resource covering every CU available to the process, a work queue
 configuration covering the device's work queues, and the matching work queue
 resource. You can also ask an execution context or a stream what resources it
 holds, using :cpp:func:`hipExecutionCtxGetDevResource` and
-:cpp:func:`hipStreamGetDevResource`. An execution context can hold several resource
-types at once; a stream only ever carries a CU resource.
+:cpp:func:`hipStreamGetDevResource`. An execution context can hold several
+resource types at once; a stream only ever carries a CU resource.
 
 Compute unit resource
 -------------------------------------------------------------------------------
@@ -193,14 +238,14 @@ The CU resource (``hipDevSmResource``) describes a group of compute units:
         unsigned int flags;                  // 0 (default) or hipDevSmResourceGroupBackfill
     } hipDevSmResource;
 
-You never fill these fields in yourself. :cpp:func:`hipDeviceGetDevResource` sets them
-when you query a device, and the split APIs set them on the resources they
+You never fill these fields in yourself. :cpp:func:`hipDeviceGetDevResource` sets
+them when you query a device, and the split APIs set them on the resources they
 produce. Treat ``minSmPartitionSize`` and ``smCoscheduledAlignment`` as
 architecture-dependent values to read at runtime, not constants to hard-code.
 
-The resource returned by :cpp:func:`hipDeviceGetDevResource` is intersected with any
-global CU mask set through the ``ROC_GLOBAL_CU_MASK`` environment variable, so it
-reflects the CUs your process can actually use.
+The resource returned by :cpp:func:`hipDeviceGetDevResource` is intersected with
+any global CU mask set through the ``ROC_GLOBAL_CU_MASK`` environment variable,
+so it reflects the CUs your process can actually use.
 
 Workgroup processor alignment
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -248,13 +293,13 @@ you populate directly:
 
 ``sharingScope`` takes one of two values. ``hipDevWorkqueueConfigScopeDeviceCtx``,
 the default, shares work queues across all contexts.
-``hipDevWorkqueueConfigScopeGreenCtxBalanced`` asks the driver to keep work queues
-from different execution contexts apart where it can, guided by
+``hipDevWorkqueueConfigScopeGreenCtxBalanced`` asks the driver to keep work
+queues from different execution contexts apart where it can, guided by
 ``wqConcurrencyLimit``.
 
 There is no split API for work queue resources: set the fields yourself, or read
-a device's configuration with :cpp:func:`hipDeviceGetDevResource`. The plain work queue
-resource (``hipDevResourceTypeWorkqueue``) exposes no fields you can set.
+a device's configuration with :cpp:func:`hipDeviceGetDevResource`. The plain work
+queue resource (``hipDevResourceTypeWorkqueue``) exposes no fields you can set.
 
 .. tip::
 
@@ -290,8 +335,8 @@ a stream:
     hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
                                        hipDevResourceType type);
 
-Each accepts any resource type, except :cpp:func:`hipStreamGetDevResource`, which is
-limited to CU resources.
+Each accepts any resource type, except :cpp:func:`hipStreamGetDevResource`, which
+is limited to CU resources.
 
 Reading a device's CUs looks like this:
 
@@ -316,9 +361,10 @@ Step 2: Split the CU resource
 -------------------------------------------------------------------------------
 
 Divide the CU resource with one of two APIs. :cpp:func:`hipDevSmResourceSplitByCount`
-produces equal-sized partitions; :cpp:func:`hipDevSmResourceSplit` produces partitions of
-different sizes in a single call. Either way, CUs that do not fit the requested
-partitions land in an optional remainder. Both APIs only operate on CU resources.
+produces equal-sized partitions; :cpp:func:`hipDevSmResourceSplit` produces
+partitions of different sizes in a single call. Either way, CUs that do not fit
+the requested partitions land in an optional remainder. Both APIs only operate
+on CU resources.
 
 Equal-sized partitions
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -378,15 +424,16 @@ Points to keep in mind:
 
 .. note::
 
-    ``hipDevSmResourceSplitIgnoreSmCoscheduling`` is defined but not yet supported
-    by the runtime. Passing it returns ``hipErrorNotSupported``.
+    ``hipDevSmResourceSplitIgnoreSmCoscheduling`` is defined but not yet
+    supported by the runtime. Passing it returns ``hipErrorNotSupported``.
 
 Different-sized partitions
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-When contexts need different CU counts, one :cpp:func:`hipDevSmResourceSplitByCount` call
-is not enough, since it only makes equal groups. :cpp:func:`hipDevSmResourceSplit` builds
-groups of independent sizes at once:
+When contexts need different CU counts, one
+:cpp:func:`hipDevSmResourceSplitByCount` call is not enough, since it only makes
+equal groups. :cpp:func:`hipDevSmResourceSplit` builds groups of independent
+sizes at once:
 
 .. code-block:: cpp
 
@@ -507,17 +554,30 @@ A two-way uneven split:
     HIP_CHECK(hipDevSmResourceSplit(&result[0], 2, &cu_resources,
                                     nullptr /* remainder */, 0 /* flags */, &group_params[0]));
 
-Leaving ``coscheduledSmCount`` or ``preferredCoscheduledSmCount`` at zero requests
-the architecture default, which matches the device's ``smCoscheduledAlignment``.
-To see the value that was chosen, read the ``groupParams`` entry back after a
-successful call.
+Leaving ``coscheduledSmCount`` or ``preferredCoscheduledSmCount`` at zero
+requests the architecture default, which matches the device's
+``smCoscheduledAlignment``. To see the value that was chosen, read the
+``groupParams`` entry back after a successful call.
 
-Step 2.1 (optional): Add a work queue resource
+For a complete example that performs the full sequence -- query the device
+resource, split the CU resource, generate descriptors, create execution
+contexts, create streams, and launch kernels -- see the
+`HIP-Basic execution context example <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/execution_context>`_.
+The example uses separate contexts for a background kernel and a
+latency-sensitive kernel, which is the same setup pattern shown here.
+
+Step 2.1 (optional): Add work queue configuration
 -------------------------------------------------------------------------------
 
-This step is optional. To configure work queues alongside CUs, fill in a work
-queue configuration resource yourself and place it next to the CU resources you
-plan to bundle:
+This step is optional. A context can be created with only a CU resource. If you
+omit a work queue configuration resource, the context still limits kernels to
+its assigned CUs, but the driver uses the default work queue sharing behavior.
+Add a work queue configuration when you also want to give the driver a hint about
+how many independent stream-ordered workloads you expect and how work queues
+should be shared across contexts.
+
+To configure work queues alongside CUs, fill in a work queue configuration
+resource yourself and place it next to the CU resources you plan to bundle:
 
 .. code-block:: cpp
 
@@ -564,8 +624,8 @@ The call requires that:
 Step 4: Create the context
 -------------------------------------------------------------------------------
 
-Turn the descriptor into an execution context with :cpp:func:`hipGreenCtxCreate`. The
-context can use only the resources the descriptor holds:
+Turn the descriptor into an execution context with :cpp:func:`hipGreenCtxCreate`.
+The context can use only the resources the descriptor holds:
 
 .. code-block:: cpp
 
@@ -573,8 +633,8 @@ context can use only the resources the descriptor holds:
                                  int device, unsigned int flags);
 
 Pass ``0`` for ``flags``. Initialize the device's primary context first, with
-``hipInitDevice`` or :cpp:func:`hipSetDevice`, so that primary context setup does not add
-overhead to this call:
+``hipInitDevice`` or :cpp:func:`hipSetDevice`, so that primary context setup does
+not add overhead to this call:
 
 .. code-block:: cpp
 
@@ -587,20 +647,24 @@ overhead to this call:
     hipExecutionCtx_t exec_ctx = {};
     HIP_CHECK(hipGreenCtxCreate(&exec_ctx, desc, current_device, 0));
 
-To confirm what the context received, call :cpp:func:`hipExecutionCtxGetDevResource` on it
-for each resource type.
+To confirm what the context received, call
+:cpp:func:`hipExecutionCtxGetDevResource` on it for each resource type.
 
 You can create several contexts by repeating these steps. Usually each context
 uses a disjoint set of CUs, but you can also let two contexts share some CUs by
-including the same resource in both descriptors. Overlapping CUs like this is
-occasionally useful; apply it deliberately.
+including the same resource in both descriptors. Overlapping CUs can improve
+utilization when strict isolation is not required. For example, two contexts can
+share a small CU subset so that a background workload can use those CUs when the
+latency-sensitive workload is idle. When both contexts are active, however, the
+shared CUs can become a source of interference. Use overlapping partitions
+deliberately and validate the behavior with your workload.
 
 Running work on a context
 ===============================================================================
 
 To send a kernel to an execution context, create a stream on the context with
-:cpp:func:`hipExecutionCtxStreamCreate`. Anything launched on that stream is bound to the
-context's resources:
+:cpp:func:`hipExecutionCtxStreamCreate`. Anything launched on that stream is
+bound to the context's resources:
 
 .. code-block:: cpp
 
@@ -620,11 +684,12 @@ On an execution context, the default stream flag behaves like
 ``hipStreamNonBlocking``.
 
 You can query the CU partition backing any stream with
-:cpp:func:`hipStreamGetDevResource`. It returns the execution context's CU partition for
-a context stream, the explicit mask for a stream created with
-:cpp:func:`hipExtStreamCreateWithCUMask`, and the full available device resource for a
-stream created outside an execution context. Only ``hipDevResourceTypeSm`` is
-supported; other types return ``hipErrorInvalidResourceType``.
+:cpp:func:`hipStreamGetDevResource`. It returns the execution context's CU
+partition for a context stream, the explicit mask for a stream created with
+:cpp:func:`hipExtStreamCreateWithCUMask`, and the full available device resource
+for a stream created outside an execution context. Only
+``hipDevResourceTypeSm`` is supported; other types return
+``hipErrorInvalidResourceType``.
 
 Graphs
 -------------------------------------------------------------------------------
@@ -641,31 +706,32 @@ Thread block clusters
 
 A kernel that uses thread block clusters runs on an execution context stream like
 any other kernel and is bound to the context's CUs. Use the occupancy queries,
-:cpp:func:`hipOccupancyMaxPotentialClusterSize` and :cpp:func:`hipOccupancyMaxActiveClusters`, to
-size clusters. When you give one of these a launch configuration whose ``stream``
-belongs to an execution context, it accounts for that context's CUs.
+:cpp:func:`hipOccupancyMaxPotentialClusterSize` and
+:cpp:func:`hipOccupancyMaxActiveClusters`, to size clusters. When you give one
+of these a launch configuration whose ``stream`` belongs to an execution
+context, it accounts for that context's CUs.
 
 Other context operations
 ===============================================================================
 
 To synchronize with events across a whole context, use
-:cpp:func:`hipExecutionCtxRecordEvent` and :cpp:func:`hipExecutionCtxWaitEvent`. Recording
-captures all of the context's outstanding work in one event; waiting makes later
-work on the context depend on that event. When a context has several streams,
-this is simpler than recording or waiting on each stream separately.
+:cpp:func:`hipExecutionCtxRecordEvent` and :cpp:func:`hipExecutionCtxWaitEvent`.
+Recording captures all of the context's outstanding work in one event; waiting
+makes later work on the context depend on that event. When a context has several
+streams, this is simpler than recording or waiting on each stream separately.
 
-:cpp:func:`hipExecutionCtxSynchronize` blocks the host until the context finishes its
-work. Called on the device's primary context, obtained with
-:cpp:func:`hipDeviceGetExecutionCtx`, it also waits on every execution context created on
-that device.
+:cpp:func:`hipExecutionCtxSynchronize` blocks the host until the context finishes
+its work. Called on the device's primary context, obtained with
+:cpp:func:`hipDeviceGetExecutionCtx`, it also waits on every execution context
+created on that device.
 
 :cpp:func:`hipExecutionCtxGetDevice` returns the device behind a context, and
-:cpp:func:`hipExecutionCtxGetId` returns its unique identifier. Release a context you
-created with :cpp:func:`hipExecutionCtxDestroy`.
+:cpp:func:`hipExecutionCtxGetId` returns its unique identifier. Release a context
+you created with :cpp:func:`hipExecutionCtxDestroy`.
 
-Destroy a context's streams before the context itself. A stream whose context has
-been destroyed is orphaned: operations on it other than :cpp:func:`hipStreamDestroy`
-return ``hipErrorContextIsDestroyed``.
+Destroy a context's streams before the context itself. A stream whose context
+has been destroyed is orphaned: operations on it other than
+:cpp:func:`hipStreamDestroy` return ``hipErrorContextIsDestroyed``.
 
 Migrating from CUDA green contexts
 ===============================================================================
@@ -758,7 +824,7 @@ execution context, so they share the available device resources:
 
 The partitioned run splits the CUs into a group for the background kernel and a
 disjoint group for the critical kernel, then follows the four-step setup: read
-the device's CUs, split them, wrap each group in a descriptor, and create an
+the device's CUs, split them, bundle each group into a descriptor, and create an
 execution context per group. A stream on each context confines its kernel to that
 context's CUs. The ``time_partitioned_case`` helper carries out these steps for a
 requested critical-CU count and returns the same ``timings`` struct as the
