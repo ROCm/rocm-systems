@@ -82,7 +82,7 @@ Legend: ✅ supported and tested · 🟡 supported, pick one recommended · ⛔ 
 | tarball | ✅ | ⛔ (module not installed) |
 | ROCm pip | ✅ | ✅ |
 | ROCm pip in venv | ✅ | ✅ |
-| PyPI wheel | ✅ | ✅ |
+| PyPI wheel | ⛔ (Python bindings only) | ✅ |
 
 ### Two paths together
 
