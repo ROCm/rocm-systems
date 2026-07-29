@@ -67,7 +67,8 @@ Disabling the build
 Because ROCm SMI is deprecated, its build can be skipped entirely. Set
 ``ROCM_SMI_DISABLE=True`` as either an environment variable or a CMake cache
 variable and the project configures to a no-op, building and installing nothing.
-Composite builds such as TheRock use this to drop ROCm SMI from the ROCm stack.
+As of ROCm 7.15, TheRock uses this to exclude ROCm SMI from the ROCm stack; it
+can still be built from source if desired.
 
 .. code-block:: shell
 
