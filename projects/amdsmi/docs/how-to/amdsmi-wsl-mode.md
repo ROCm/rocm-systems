@@ -21,9 +21,9 @@ the WDDM path instead of DRM/sysfs; everything else behaves as before.
 ```{note}
 The WSL backend is experimental and gated behind a build flag that is **off by
 default**. A default AMD SMI build and its packages are byte-for-byte the native
-tool. The current backend ships a mock data provider so the path can be
-exercised without a WSL host; the production D3DKMT implementation is being
-brought up incrementally.
+tool. When enabled, the backend reads real GPU telemetry through `librocdxg`
+(`rocdxg_smi_*` APIs); queries with no WDDM equivalent return
+`AMDSMI_STATUS_NOT_SUPPORTED`.
 ```
 
 ## How it works
@@ -78,7 +78,7 @@ The WSL backend is designed to be a drop-in. For users with existing automation:
   than wrong. Scripts should already tolerate `N/A` for unsupported hardware;
   the same handling covers WSL.
 - **Native installs are unaffected.** If you never build with
-  `-DENABLE_WSL_BACKEND=ON` or never set `=1`, nothing changes.
+  `-DENABLE_WSL_BACKEND=ON`, nothing changes.
 
 ## Verifying
 
@@ -97,8 +97,9 @@ fields and `N/A` for the rest.
 
 ## Limitations
 
-- Experimental: the supported-query set is a subset of the native API and is
-  growing.
-- The shipped backend is a mock until the D3DKMT implementation lands; values
-  are placeholders when built from the current tree.
-- CPU/ESMI, NIC, switch, and fabric features are not available under WSL.
+- Experimental: the supported-query set is a subset of the native API and will
+  grow as `librocdxg` exposes more telemetry.
+- CPU/ESMI, NIC, switch, fabric, ECC, and partition features are not available
+  under WSL; those queries return `AMDSMI_STATUS_NOT_SUPPORTED`.
+- PCIe info, VRAM type, subvendor/subsystem IDs, and full VBIOS fields depend on
+  the installed `librocdxg` version and may show `N/A` on older drivers.

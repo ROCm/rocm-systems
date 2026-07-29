@@ -72,13 +72,29 @@ AMD_VENDOR_ID = 4098
 
 
 def check_wsl_dxg():
-    """Returns true if running under WSL2 with an AMD GPU (/dev/dxg present)."""
-    return Path("/dev/dxg").exists()
+    """Returns true if running under WSL2 (not Hyper-V) with /dev/dxg present.
+
+    /dev/dxg is created by dxgkrnl for any WDDM GPU, so we additionally require
+    the WSL2 kernel signature in /proc/version to avoid false-positives on
+    Hyper-V Linux guests or native hosts where dxgkrnl may be loaded.
+    Vendor confirmation (AMD 0x1002) is deferred to amdsmi_init(), which calls
+    into librocdxg and rejects non-AMD adapters.
+    """
+    if not Path("/dev/dxg").exists():
+        return False
+    try:
+        osrelease = Path("/proc/sys/kernel/osrelease").read_text(encoding="ascii").lower()
+        return "microsoft" in osrelease and "wsl" in osrelease
+    except OSError:
+        return False
 
 
 def check_amdgpu_driver():
     """Returns true if amdgpu is found in the list of initialized modules"""
-    # WSL2: /dev/dxg is the WDDM device node used instead of amdgpu
+    # WSL2: no native amdgpu module; use /dev/dxg via dxgkrnl instead.
+    # check_wsl_dxg() requires the WSL2 kernel string, so this is safe for
+    # Hyper-V guests (which lack "wsl" in osrelease) and bare-metal hosts.
+    # Vendor confirmation (AMD 0x1002) is done inside librocdxg during amdsmi_init().
     if check_wsl_dxg():
         return True
 
