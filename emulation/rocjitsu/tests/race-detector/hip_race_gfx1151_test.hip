@@ -24,6 +24,7 @@ namespace {
 
 struct RaceRecord {
   std::string type;
+  std::string access;
   std::string message;
 };
 
@@ -45,6 +46,12 @@ std::vector<RaceRecord> parse_race_log() {
       auto value_begin = type_pos + 5;
       auto value_end = line.find(' ', value_begin);
       record.type = line.substr(value_begin, value_end - value_begin);
+    }
+    auto access_pos = line.find("access=");
+    if (access_pos != std::string::npos) {
+      auto value_begin = access_pos + 7;
+      auto value_end = line.find(' ', value_begin);
+      record.access = line.substr(value_begin, value_end - value_begin);
     }
 
     while (std::getline(f, line)) {
@@ -156,6 +163,20 @@ __global__ void d16_global_load_missing_waitcnt_kernel(const uint8_t *src, uint3
   dst[tid] = val;
 }
 
+__global__ void waw_global_load_then_wmma_kernel(const int *src, int *out) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  asm volatile("global_load_dwordx4 v[0:3], %0, off\n"
+               // BUG: no s_waitcnt before WMMA writes the same VGPR region.
+               "v_wmma_f32_16x16x16_f16 v[0:7], v[8:15], v[16:23], 0\n"
+               "s_waitcnt vmcnt(0)\n"
+               :
+               : "v"(&src[tid * 4])
+               : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11",
+                 "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", "v20", "v21", "v22",
+                 "v23", "memory");
+  out[tid] = tid;
+}
+
 __attribute__((amdgpu_flat_work_group_size(64, 64))) __global__ void
 lds_wave32_cross_wave_safe_kernel(int *out) {
   __shared__ int lds[64];
@@ -242,6 +263,19 @@ TEST_F(Gfx1151RaceTest, lds_wave32_cross_wave_race) {
   auto records = ExpectRace();
   ASSERT_FALSE(records.empty());
   EXPECT_EQ(records[0].type, "LDS");
+}
+
+TEST_F(Gfx1151RaceTest, waw_global_load_then_wmma) {
+  auto *src = allocWithData<int>(128);
+  auto *out = alloc<int>(32);
+  waw_global_load_then_wmma_kernel<<<1, 32>>>(src, out);
+  sync();
+  auto records = ExpectRace();
+  ASSERT_FALSE(records.empty());
+  EXPECT_EQ(records[0].type, "VGPR");
+  EXPECT_EQ(records[0].access, "write");
+  EXPECT_NE(records[0].message.find("global_load"), std::string::npos);
+  EXPECT_NE(records[0].message.find("v_wmma"), std::string::npos);
 }
 
 } // namespace

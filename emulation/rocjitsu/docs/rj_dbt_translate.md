@@ -96,6 +96,19 @@ verification fail. A failure does not by itself mean that the first output is
 invalid; it means the translation is not a byte-level fixed point. This mode is
 intended to expose such instability while developing or auditing the translator.
 
+### Generated Artifact Markers
+
+Translated control-flow artifacts use `s_nop` immediates `0x1250` and `0x1251`
+to mark canonical long transfers and branch-island pools. These values belong
+to DBT's reserved marker range. A marker word alone is never authoritative:
+recognition also validates the complete instruction sequence, decoded CFG
+adjacency, and artifact-specific bounds before preserving generated code.
+
+Add any future marker through the shared range constants in
+`kernel_text_layout.h`, give it a canonical structural recognizer, and add
+near-miss tests proving that marker-shaped guest instructions are not accepted
+on their own.
+
 ## Diff Mode
 
 `diff` mode is the primary debugging mode. It prints a compact translation
