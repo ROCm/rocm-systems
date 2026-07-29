@@ -38,9 +38,7 @@ def validate_wakeup_instructions(all_samples, wakeup_samples):
         assert (
             issued["Instruction_Type"]
             == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NO_INST"
-        ).all(), (
-            "s_wakeup must have NO_INST instruction type when issued"
-        )
+        ).all(), "s_wakeup must have NO_INST instruction type when issued"
 
     # -- stalled --
     stalled = wakeup_samples[wakeup_samples["Wave_Issued_Instruction"] == False]

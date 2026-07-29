@@ -239,9 +239,7 @@ def _validate_barrier_wait(sample_records):
         assert record["inst"].startswith(
             "s_barrier_wait"
         ), "Barrier wait instruction must start with s_barrier_wait"
-        assert (
-            record["wave_issued"] == 0
-        ), "s_barrier_wait should never be issued"
+        assert record["wave_issued"] == 0, "s_barrier_wait should never be issued"
         stall_reason = record["snapshot"]["stall_reason"]
         assert (
             stall_reason in allowed_stall_reasons
@@ -250,7 +248,9 @@ def _validate_barrier_wait(sample_records):
 
 def validate_barrier_instructions(sample_records):
     """Validate barrier instructions by splitting into signal and wait."""
-    signal_records = [r for r in sample_records if r["inst"].startswith("s_barrier_signal")]
+    signal_records = [
+        r for r in sample_records if r["inst"].startswith("s_barrier_signal")
+    ]
     wait_records = [r for r in sample_records if r["inst"].startswith("s_barrier_wait")]
 
     if signal_records:
@@ -274,8 +274,7 @@ def validate_jump_instructions(sample_records):
         snapshot = record["snapshot"]
         if record["wave_issued"] == 1:
             assert (
-                record["inst_type"]
-                == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_JUMP"
+                record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_JUMP"
             ), "Invalid jump instruction type"
             assert (
                 snapshot["arb_state_issue_brmsg"] == 1
@@ -309,8 +308,7 @@ def validate_message_instructions(sample_records):
         snapshot = record["snapshot"]
         if record["wave_issued"] == 1:
             assert (
-                record["inst_type"]
-                == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_MESSAGE"
+                record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_MESSAGE"
             ), "Invalid message instruction type"
             assert (
                 snapshot["arb_state_issue_brmsg"] == 1
@@ -341,8 +339,7 @@ def validate_other_s_instructions(sample_records):
         snapshot = record["snapshot"]
         if record["wave_issued"] == 1:
             assert (
-                record["inst_type"]
-                == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_OTHER"
+                record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_OTHER"
             ), "Invalid OTHER instruction type"
         else:
             stall_reason = snapshot["stall_reason"]
@@ -371,8 +368,7 @@ def validate_s_wakeup(sample_records):
         snapshot = record["snapshot"]
         if record["wave_issued"] == 1:
             assert (
-                record["inst_type"]
-                == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NO_INST"
+                record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NO_INST"
             ), "s_wakeup must have NO_INST instruction type"
             assert (
                 snapshot["arb_state_issue_brmsg"] == 1
@@ -421,9 +417,7 @@ def validate_delay_alu_instructions(sample_records):
         stall_reason = record["snapshot"]["stall_reason"]
         assert (
             stall_reason in allowed_stall_reasons
-        ), (
-            f"Invalid stall reason for s_delay_alu: {stall_reason}"
-        )
+        ), f"Invalid stall reason for s_delay_alu: {stall_reason}"
 
 
 def validate_clause_instructions(sample_records):
@@ -447,12 +441,8 @@ def validate_clause_instructions(sample_records):
         assert record["inst"].startswith(
             "s_clause"
         ), "CLAUSE instruction must start with s_clause"
-        assert (
-            record["wave_issued"] == 0
-        ), "s_clause should never be issued"
+        assert record["wave_issued"] == 0, "s_clause should never be issued"
         stall_reason = record["snapshot"]["stall_reason"]
         assert (
             stall_reason in allowed_stall_reasons
-        ), (
-            f"Invalid stall reason for s_clause: {stall_reason}"
-        )
+        ), f"Invalid stall reason for s_clause: {stall_reason}"

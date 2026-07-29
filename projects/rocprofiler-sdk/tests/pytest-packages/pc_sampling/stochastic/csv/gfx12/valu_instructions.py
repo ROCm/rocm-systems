@@ -51,7 +51,9 @@ def validate_valu_instructions_issued(samples_issued):
 
 def validate_valu_instructions_stalled(samples):
     valu_samples = samples[
-        samples["Instruction"].apply(lambda x: x.startswith("v_") and ("wmma" not in x) and ("dual" not in x))
+        samples["Instruction"].apply(
+            lambda x: x.startswith("v_") and ("wmma" not in x) and ("dual" not in x)
+        )
     ]
     valu_stalled = valu_samples[valu_samples["Wave_Issued_Instruction"] == False]
 
@@ -64,8 +66,7 @@ def validate_valu_instructions_stalled(samples):
             == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE"
             or x
             == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN"
-            or x
-            == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY"
+            or x == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY"
         )
         .all()
     )

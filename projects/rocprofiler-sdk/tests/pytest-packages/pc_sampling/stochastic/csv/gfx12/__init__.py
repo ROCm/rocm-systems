@@ -44,7 +44,9 @@ def validate_wave_count(df):
 
 def validate_issued_instruction_type_other(samples):
     # ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_OTHER type of instructions still to be determined
-    issued_type_other = samples[samples["Instruction_Type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_OTHER"]
+    issued_type_other = samples[
+        samples["Instruction_Type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_OTHER"
+    ]
     assert len(issued_type_other) == 0, "OTHER type of instruction observed first time"
 
 

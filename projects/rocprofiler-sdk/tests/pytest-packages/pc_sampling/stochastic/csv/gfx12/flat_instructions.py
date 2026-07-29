@@ -30,21 +30,14 @@ def validate_flat_instructions_issued(samples_issued):
         samples_issued["Instruction_Type"]
         == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_FLAT"
     ]
-    assert (
-        issued_type_flat["Instruction"]
-        .apply(lambda x: x.startswith("flat_"))
-        .all()
-    )
+    assert issued_type_flat["Instruction"].apply(lambda x: x.startswith("flat_")).all()
 
     # if issued instruction starts with flat_ -> its type must be FLAT
     issued_flat = samples_issued[
-        samples_issued["Instruction"].apply(
-            lambda x: x.startswith("flat_")
-        )
+        samples_issued["Instruction"].apply(lambda x: x.startswith("flat_"))
     ]
     assert (
-        issued_flat["Instruction_Type"]
-        == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_FLAT"
+        issued_flat["Instruction_Type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_FLAT"
     ).all()
 
 

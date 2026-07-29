@@ -37,12 +37,12 @@ def validate_scalar_instructions_issued(all_samples, scalar_samples):
     # The PC sampling correction WA ensures no skid samples for internal or wait
     # instructions reach the validator. All issued SCALAR samples must be genuine
     # scalar instructions (not s_nop or s_wait_*).
-    assert not scalar_type_samples_issued["Instruction"].str.startswith("s_nop").any(), (
-        "s_nop must not appear as issued SCALAR — PC correction WA should have removed these"
-    )
-    assert not scalar_type_samples_issued["Instruction"].str.startswith("s_wait").any(), (
-        "s_wait_* must not appear as issued SCALAR — PC correction WA should have removed these"
-    )
+    assert (
+        not scalar_type_samples_issued["Instruction"].str.startswith("s_nop").any()
+    ), "s_nop must not appear as issued SCALAR — PC correction WA should have removed these"
+    assert (
+        not scalar_type_samples_issued["Instruction"].str.startswith("s_wait").any()
+    ), "s_wait_* must not appear as issued SCALAR — PC correction WA should have removed these"
 
     # scalar_samples contains instructions starting with `s_`
     scalar_samples_issued = scalar_samples[scalar_samples["Wave_Issued_Instruction"]]
@@ -65,8 +65,7 @@ def validate_scalar_instructions_stalled(scalar_samples):
         .apply(
             lambda x: x
             == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE"
-            or x
-            == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT"
+            or x == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT"
             or x
             == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN"
             or x == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY"

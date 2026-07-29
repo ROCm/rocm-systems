@@ -36,9 +36,9 @@ def validate_matrix_instructions_issued(samples_issued):
         samples_issued["Instruction_Type"]
         == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_MATRIX"
     ]
-    assert issued_type_matrix["Instruction"].apply(
-        lambda x: x.startswith("v_wmma")
-    ).all(), "All issued MATRIX type instructions should start with v_wmma"
+    assert (
+        issued_type_matrix["Instruction"].apply(lambda x: x.startswith("v_wmma")).all()
+    ), "All issued MATRIX type instructions should start with v_wmma"
 
     # All v_wmma issued instructions should have MATRIX instruction type
     v_wmma_issued = samples_issued[
@@ -61,9 +61,7 @@ def validate_matrix_instructions_stalled(samples):
     v_wmma_samples = samples[
         samples["Instruction"].apply(lambda x: x.startswith("v_wmma"))
     ]
-    v_wmma_stalled = v_wmma_samples[
-        v_wmma_samples["Wave_Issued_Instruction"] == False
-    ]
+    v_wmma_stalled = v_wmma_samples[v_wmma_samples["Wave_Issued_Instruction"] == False]
 
     if v_wmma_stalled.empty:
         return
@@ -74,9 +72,9 @@ def validate_matrix_instructions_stalled(samples):
         "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN",
         "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
     }
-    assert v_wmma_stalled["Stall_Reason"].apply(
-        lambda x: x in allowed_stall_reasons
-    ).all(), (
+    assert (
+        v_wmma_stalled["Stall_Reason"].apply(lambda x: x in allowed_stall_reasons).all()
+    ), (
         "All stalled v_wmma instructions should have an allowed stall reason. "
         f"Unexpected reasons: "
         f"{set(v_wmma_stalled['Stall_Reason'].unique()) - allowed_stall_reasons}"
