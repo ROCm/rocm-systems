@@ -11,12 +11,18 @@
 #   * `install` (default) — copies the release binary to
 #                           `${CMAKE_INSTALL_PREFIX}/bin/mirage`
 #   * `ctest`             — runs the full Rust test suite via
-#                           `cargo test --release --workspace`
+#                           `cargo test --release --workspace`. The
+#                           end-to-end suites additionally need the
+#                           `noop` backend (a pass-through emulator that
+#                           runs on any machine), which ctest enables;
+#                           without it those targets are skipped.
 #
 # Options:
-#   * `MIRAGE_ENABLE_DAEMON`  (OFF)   — compile in the `mirage webui`
-#                                       HTTP/WS API server (cargo
-#                                       feature `daemon`)
+#   * `MIRAGE_ENABLE_DAEMON`  (OFF)   — compile in the daemon's HTTP/WS
+#                                       API server (cargo feature
+#                                       `daemon`). The daemon itself is
+#                                       always built; this only adds its
+#                                       HTTP surface.
 #   * `MIRAGE_ENABLE_WEBUI`   (OFF)   — compile in the full web UI:
 #                                       the daemon plus the bundled
 #                                       dashboard SPA (cargo feature
@@ -30,13 +36,25 @@ project(mirage NONE)
 
 # Web UI is opt-in and off by default: a plain build/test never needs
 # Node.js or builds the daemon/dashboard crates.
-option(MIRAGE_ENABLE_DAEMON "Build the mirage webui HTTP/WS API server" OFF)
-option(MIRAGE_ENABLE_WEBUI "Build the full web UI (daemon + dashboard SPA; needs Node.js)" OFF)
+option(MIRAGE_ENABLE_DAEMON "Build the daemon's HTTP/WS API server" OFF)
+option(
+    MIRAGE_ENABLE_WEBUI
+    "Build the full web UI (daemon + dashboard SPA; needs Node.js)"
+    OFF
+)
 # HotSwap is a full LLVM + COMGR + ROCR source build, so it is opt-in. When ON,
 # cmake/Hotswap.cmake builds and stages the HotSwap artifacts mirage discovers.
-option(MIRAGE_BUILD_HOTSWAP "Build HotSwap (COMGR + patched ROCR + intercept) from source" OFF)
+option(
+    MIRAGE_BUILD_HOTSWAP
+    "Build HotSwap (COMGR + patched ROCR + intercept) from source"
+    OFF
+)
 set(MIRAGE_CARGO_PROFILE "release" CACHE STRING "Cargo build profile")
-set(MIRAGE_CARGO "" CACHE FILEPATH "Path to cargo binary (auto-detect if empty)")
+set(MIRAGE_CARGO
+    ""
+    CACHE FILEPATH
+    "Path to cargo binary (auto-detect if empty)"
+)
 
 if(NOT MIRAGE_CARGO)
     find_program(MIRAGE_CARGO_FOUND cargo REQUIRED)
@@ -45,31 +63,52 @@ endif()
 message(STATUS "mirage: using cargo at ${MIRAGE_CARGO}")
 
 set(_mirage_env)
-# Select the cargo feature flags for the (optional) web UI. `webui`
-# pulls in the daemon plus the bundled SPA; `daemon` is just the API
-# server. Both are off by default.
-set(_mirage_features)
+
+# Select the cargo features for the (optional) web UI. `webui` pulls in
+# the daemon's HTTP surface plus the bundled SPA; `daemon` is just the
+# API server. Both are off by default; the emulator default is
+# `rocjitsu`.
+set(_mirage_feature_names)
 if(MIRAGE_ENABLE_WEBUI)
-    list(APPEND _mirage_features "--features" "webui")
+    list(APPEND _mirage_feature_names "webui")
     message(STATUS "mirage: web UI enabled (cargo --features webui)")
 elseif(MIRAGE_ENABLE_DAEMON)
-    list(APPEND _mirage_features "--features" "daemon")
+    list(APPEND _mirage_feature_names "daemon")
     message(STATUS "mirage: daemon enabled (cargo --features daemon)")
 endif()
+
+set(_mirage_features)
+if(_mirage_feature_names)
+    list(JOIN _mirage_feature_names "," _mirage_feature_arg)
+    set(_mirage_features "--features" "${_mirage_feature_arg}")
+endif()
+
+# The end-to-end suites drive real sessions, so they need an emulator
+# backend that works on any machine: `noop`, the pass-through backend.
+# It is not a default feature, so enable it for tests only — the
+# installed binary is built without it.
+set(_mirage_test_feature_names ${_mirage_feature_names} "noop")
+list(JOIN _mirage_test_feature_names "," _mirage_test_feature_arg)
+set(_mirage_test_features "--features" "${_mirage_test_feature_arg}")
 
 set(_mirage_profile_flag "")
 if(MIRAGE_CARGO_PROFILE STREQUAL "release")
     set(_mirage_profile_flag "--release")
     set(_mirage_target_dir "${CMAKE_CURRENT_SOURCE_DIR}/target/release")
 else()
-    set(_mirage_target_dir "${CMAKE_CURRENT_SOURCE_DIR}/target/${MIRAGE_CARGO_PROFILE}")
+    set(_mirage_target_dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/target/${MIRAGE_CARGO_PROFILE}"
+    )
 endif()
 
 set(_mirage_bin "${_mirage_target_dir}/mirage")
 
-add_custom_target(mirage_build ALL
-    COMMAND ${CMAKE_COMMAND} -E env ${_mirage_env}
-            ${MIRAGE_CARGO} build ${_mirage_profile_flag} ${_mirage_features}
+add_custom_target(
+    mirage_build
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E env ${_mirage_env} ${MIRAGE_CARGO} build
+        ${_mirage_profile_flag} ${_mirage_features}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     BYPRODUCTS ${_mirage_bin}
     COMMENT "Building mirage with cargo (${MIRAGE_CARGO_PROFILE})"
@@ -82,18 +121,18 @@ if(MIRAGE_BUILD_HOTSWAP)
     include(${CMAKE_CURRENT_SOURCE_DIR}/hotswap/cmake/Hotswap.cmake)
 endif()
 
-install(PROGRAMS ${_mirage_bin}
-        DESTINATION bin
-        RENAME mirage)
+install(PROGRAMS ${_mirage_bin} DESTINATION bin RENAME mirage)
 
 enable_testing()
 
 # Full Rust workspace test suite. Picks up: core unit tests, daemon
 # e2e, lifecycle e2e, and the env-gated ml_scenarios tests (which
 # auto-skip when their prerequisites are missing).
-add_test(NAME cargo_test
-    COMMAND ${CMAKE_COMMAND} -E env ${_mirage_env}
-            ${MIRAGE_CARGO} test ${_mirage_profile_flag} --workspace ${_mirage_features}
+add_test(
+    NAME cargo_test
+    COMMAND
+        ${CMAKE_COMMAND} -E env ${_mirage_env} ${MIRAGE_CARGO} test
+        ${_mirage_profile_flag} --workspace ${_mirage_test_features}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(cargo_test PROPERTIES TIMEOUT 1800)
