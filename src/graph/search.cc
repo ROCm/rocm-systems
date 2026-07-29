@@ -130,14 +130,15 @@ static ncclResult_t ncclTopoFollowPath(struct ncclTopoSystem* system, struct ncc
   *node = system->nodes[type2].nodes + index2;
   if (type1 == -1) return ncclSuccess;
   struct ncclTopoNode* node1 = system->nodes[type1].nodes + index1;
-  struct ncclTopoLinkList* path = node1->paths[type2] + index2;
   struct ncclTopoNode* node2 = system->nodes[type2].nodes + index2;
-  struct ncclTopoLinkList* revPath = node2->paths[type1] + index1;
 
-  if (path == NULL) {
+  if (node1->paths[type2] == nullptr || node2->paths[type1] == nullptr) {
     WARN("No path computed to go from %s/%d to %s/%d", topoNodeTypeStr[type1], index1, topoNodeTypeStr[type2], index2);
     return ncclInternalError;
   }
+
+  struct ncclTopoLinkList* path = node1->paths[type2] + index2;
+  struct ncclTopoLinkList* revPath = node2->paths[type1] + index1;
 
   // Now check link type
   *node = NULL;

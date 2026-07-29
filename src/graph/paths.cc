@@ -35,6 +35,20 @@ static ncclResult_t getPath(struct ncclTopoSystem* system, struct ncclTopoNode* 
 
 NCCL_PARAM(NvbDisable, "NVB_DISABLE", 0);
 
+static ncclResult_t ncclTopoPathReserve(struct ncclTopoLinkList* path, int required) {
+  if (required <= path->capacity) return ncclSuccess;
+  if (required > NCCL_TOPO_MAX_HOPS) {
+    WARN("Path has %d hops, maximum is %d", required, NCCL_TOPO_MAX_HOPS);
+    return ncclInternalError;
+  }
+
+  int capacity = std::max(required + 2, path->capacity * 2);
+  capacity = std::min(capacity, NCCL_TOPO_MAX_HOPS);
+  NCCLCHECK(ncclReallocQuiet(&path->list, path->capacity, capacity));
+  path->capacity = capacity;
+  return ncclSuccess;
+}
+
 static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclTopoSystem* system) {
   if (baseNode->paths[baseNode->type] == NULL) {
     NCCLCHECK(ncclCalloc(baseNode->paths + baseNode->type, system->nodes[baseNode->type].count));
@@ -98,17 +112,20 @@ static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclT
         if (newType < remPath->type || (newType == remPath->type && remPath->bw < bw) ||
             (newType == remPath->type && remPath->bw == bw && remPath->count > (path->count + 1))) {
           // Find reverse link
+          struct ncclTopoLink* reverseLink = nullptr;
           for (int l = 0; l < remNode->nlinks; l++) {
             if (remNode->links[l].remNode == node && remNode->links[l].type == link->type) {
-              remPath->list[0] = remNode->links + l;
+              reverseLink = remNode->links + l;
               break;
             }
           }
-          if (remPath->list[0] == NULL) {
+          if (reverseLink == nullptr) {
             WARN("Failed to find reverse path from remNode %d/%lx nlinks %d to node %d/%lx", remNode->type, remNode->id,
                  remNode->nlinks, node->type, node->id);
             return ncclInternalError;
           }
+          NCCLCHECK(ncclTopoPathReserve(remPath, path->count + 1));
+          remPath->list[0] = reverseLink;
           // Copy the rest of the path
           for (int i = 0; i < path->count; i++) remPath->list[i + 1] = path->list[i];
           remPath->count = path->count + 1;
@@ -210,31 +227,35 @@ static int mergePathType(int type0, int type1) {
 static ncclResult_t addInterStep(struct ncclTopoSystem* system, int tx, int ix, int t1, int i1, int t2, int i2) {
   struct ncclTopoNode* cpuNode = system->nodes[tx].nodes + ix;
   struct ncclTopoNode* srcNode = system->nodes[t1].nodes + i1;
+  struct ncclTopoLinkList* path = srcNode->paths[t2] + i2;
+  int count = srcNode->paths[tx][ix].count + cpuNode->paths[t2][i2].count;
+  NCCLCHECK(ncclTopoPathReserve(path, count));
 
   int l = 0;
   // Node 1 -> CPU
-  for (int i = 0; i < srcNode->paths[tx][ix].count; i++)
-    srcNode->paths[t2][i2].list[l++] = srcNode->paths[tx][ix].list[i];
+  for (int i = 0; i < srcNode->paths[tx][ix].count; i++) path->list[l++] = srcNode->paths[tx][ix].list[i];
   // CPU -> Node 2
-  for (int i = 0; i < cpuNode->paths[t2][i2].count; i++)
-    srcNode->paths[t2][i2].list[l++] = cpuNode->paths[t2][i2].list[i];
+  for (int i = 0; i < cpuNode->paths[t2][i2].count; i++) path->list[l++] = cpuNode->paths[t2][i2].list[i];
 
   // Update path characteristics
-  srcNode->paths[t2][i2].count = l;
-  srcNode->paths[t2][i2].type = mergePathType(srcNode->paths[tx][ix].type, cpuNode->paths[t2][i2].type);
-  if (tx == GPU) srcNode->paths[t2][i2].type = PATH_PXN;
-  srcNode->paths[t2][i2].bw = std::min(srcNode->paths[tx][ix].bw, cpuNode->paths[t2][i2].bw);
+  path->count = l;
+  path->type = mergePathType(srcNode->paths[tx][ix].type, cpuNode->paths[t2][i2].type);
+  if (tx == GPU) path->type = PATH_PXN;
+  path->bw = std::min(srcNode->paths[tx][ix].bw, cpuNode->paths[t2][i2].bw);
   return ncclSuccess;
 }
 
 // Remove/free all paths
-static void ncclTopoRemovePaths(struct ncclTopoSystem* system) {
+void ncclTopoRemovePaths(struct ncclTopoSystem* system) {
   for (int t1 = 0; t1 < NCCL_TOPO_NODE_TYPES; t1++) {
     for (int n = 0; n < system->nodes[t1].count; n++) {
       struct ncclTopoNode* node = system->nodes[t1].nodes + n;
       for (int t2 = 0; t2 < NCCL_TOPO_NODE_TYPES; t2++) {
-        if (node->paths[t2]) free(node->paths[t2]);
-        node->paths[t2] = NULL;
+        if (node->paths[t2]) {
+          for (int p = 0; p < system->nodes[t2].count; p++) free(node->paths[t2][p].list);
+          free(node->paths[t2]);
+          node->paths[t2] = nullptr;
+        }
       }
     }
   }
@@ -893,6 +914,7 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
     if (gpu->gpu.rank == comm->rank) myDomain = domains[g];
   }
 
+  ncclTopoRemovePaths(system);
   for (int i = 0; i < ngpus; i++) {
     if (domains[i] == myDomain) continue;
     struct ncclTopoNode* gpu = NULL;

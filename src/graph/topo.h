@@ -80,8 +80,9 @@ struct ncclTopoLink {
 #define NCCL_TOPO_MAX_HOPS (NCCL_TOPO_MAX_NODES * NCCL_TOPO_NODE_TYPES)
 
 struct ncclTopoLinkList {
-  struct ncclTopoLink* list[NCCL_TOPO_MAX_HOPS];
-  int count;
+  struct ncclTopoLink** list;
+  int count;     // Number of links stored in list.
+  int capacity;  // Number of entries allocated for list.
   float bw;
   int type;
 };
@@ -172,7 +173,10 @@ struct ncclTopoSystem {
 
 ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);
 ncclResult_t ncclTopoCreateNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);
+// Removing a node invalidates computed paths. Callers must remove any paths before calling this
+// function and recompute them before using the topology for path-dependent operations.
 ncclResult_t ncclTopoRemoveNode(struct ncclTopoSystem* system, int type, int id);
+void ncclTopoRemovePaths(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoConnectNodes(struct ncclTopoNode* node, struct ncclTopoNode* remNode, int type, float bw);
 ncclResult_t ncclTopoPrintPaths(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoLoadSystem(const char* xmlTopoFile, struct ncclTopoSystem* system);
