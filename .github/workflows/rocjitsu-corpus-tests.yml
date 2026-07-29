@@ -67,7 +67,12 @@ jobs:
       matrix:
         include:
           - name: release
-            allow_failure: true
+            allow_failure: false
+            # 20,000 verified objects completed in 148.97s locally; 20 minutes
+            # leaves substantial runner headroom while this release-only gate lands.
+            verify_dbt_idempotence: 1
+            dbt_timeout: 60
+            dbt_job_timeout: 20
             test_regex: ''
             build_type: Release
             enable_asan: 0
@@ -77,6 +82,11 @@ jobs:
             sanitizer_runtime: STATIC
           - name: asan-ubsan
             allow_failure: true
+            # Keep the first corpus gate on the fastest lane. Focused second-pass
+            # paths remain covered by the sanitizer test suite.
+            verify_dbt_idempotence: 0
+            dbt_timeout: 90
+            dbt_job_timeout: 30
             test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 1
@@ -86,6 +96,9 @@ jobs:
             sanitizer_runtime: SHARED
           - name: tsan
             allow_failure: false
+            verify_dbt_idempotence: 0
+            dbt_timeout: 30
+            dbt_job_timeout: 20
             run_static_asan_launch: true
             test_regex: ''
             build_type: RelWithDebInfo
@@ -96,6 +109,9 @@ jobs:
             sanitizer_runtime: SHARED
           - name: asan-ubsan-gcc
             allow_failure: true
+            verify_dbt_idempotence: 0
+            dbt_timeout: 90
+            dbt_job_timeout: 30
             test_regex: ''
             build_type: RelWithDebInfo
             enable_asan: 1
@@ -348,11 +364,20 @@ jobs:
 
       - name: Run gfx1250 DBT corpus tests
         if: ${{ !cancelled() && matrix.enable_tsan == 0 && steps.extract_dbt.outcome == 'success' }}
-        timeout-minutes: ${{ matrix.enable_asan == 1 && 30 || 20 }}
+        timeout-minutes: ${{ matrix.dbt_job_timeout }}
         working-directory: ${{ env.ROCJITSU_DBT_CORPUS_DIR }}
         shell: bash
         run: |
           DBT_ROCM_PATH="$("${ROCJITSU_DBT_VENV}/bin/rocm-sdk" path --root)"
+          DBT_TRANSLATOR_BINARY="${ROCJITSU_BUILD_DIR}/tools/rj_dbt_translate"
+          DBT_TRANSLATOR="${DBT_TRANSLATOR_BINARY}"
+          if [[ "${{ matrix.verify_dbt_idempotence }}" == "1" ]]; then
+            DBT_TRANSLATOR="${RUNNER_TEMP}/rj_dbt_translate-verify-idempotence"
+            printf '#!/usr/bin/env bash\nexec %q --verify-idempotence "$@"\n' \
+              "${DBT_TRANSLATOR_BINARY}" \
+              > "${DBT_TRANSLATOR}"
+            chmod +x "${DBT_TRANSLATOR}"
+          fi
           DBT_WORKERS="$(nproc)"
           if (( DBT_WORKERS > 16 )); then
             DBT_WORKERS=16
@@ -361,13 +386,13 @@ jobs:
             --target gfx1250 \
             --suite dbt \
             --dbt-corpus "${ROCJITSU_HSACO_CORPUS}" \
-            --dbt-translator "${ROCJITSU_BUILD_DIR}/tools/rj_dbt_translate" \
+            --dbt-translator "${DBT_TRANSLATOR}" \
             --dbt-llvm-objdump "${DBT_ROCM_PATH}/lib/llvm/bin/llvm-objdump" \
             --dbt-package-lock "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_20260726_package_lock.json" \
             --dbt-expected-failures "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_failures.json" \
             --dbt-expected-rewrites "${ROCJITSU_SOURCE_DIR}/tests/corpus/dbt/gfx1250_b0_a0_expected_rewrites.json" \
             --dbt-allow-incomplete-corpus \
-            --dbt-timeout "${{ matrix.enable_asan == 1 && 90 || 30 }}" \
+            --dbt-timeout "${{ matrix.dbt_timeout }}" \
             --artifact-directory .pytest-artifacts/gfx1250-dbt \
             -n "${DBT_WORKERS}" \
             -q \

@@ -98,6 +98,45 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return word;
 }
 
+[[nodiscard]] std::unordered_set<uint64_t>
+generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch_t arch) {
+  std::unordered_set<uint64_t> offsets;
+  auto decoder = Decoder::create(arch);
+  if (!decoder)
+    return offsets;
+
+  const uint32_t marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
+  const uint32_t skip_pool =
+      build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), arch);
+  constexpr uint64_t kPoolBytes = (kGeneratedIslandPoolHeaderWords + kDirectBranchIslandPoolSlots) *
+                                  static_cast<uint64_t>(sizeof(uint32_t));
+  for (uint64_t offset = 0;
+       offset + kGeneratedIslandPoolHeaderWords * sizeof(uint32_t) <= text.size();
+       offset += sizeof(uint32_t)) {
+    if (text_word_at(text, offset) != marker ||
+        text_word_at(text, offset + sizeof(uint32_t)) != skip_pool || text.size() < kPoolBytes ||
+        offset > text.size() - kPoolBytes) {
+      continue;
+    }
+
+    bool has_canonical_slots = true;
+    for (uint16_t slot = 0; slot < kDirectBranchIslandPoolSlots; ++slot) {
+      const uint64_t slot_offset =
+          offset + (kGeneratedIslandPoolHeaderWords + slot) * sizeof(uint32_t);
+      uint32_t slot_word = text_word_at(text, slot_offset);
+      std::unique_ptr<Instruction> slot_inst(decoder->decode(&slot_word));
+      if (!slot_inst || slot_inst->size() != static_cast<int>(sizeof(uint32_t)) ||
+          slot_inst->mnemonic() != "s_branch" || !slot_inst->branch_offset_bytes()) {
+        has_canonical_slots = false;
+        break;
+      }
+    }
+    if (has_canonical_slots)
+      offsets.insert(offset);
+  }
+  return offsets;
+}
+
 [[nodiscard]] bool words_changed(std::span<const uint32_t> before,
                                  std::span<const uint32_t> after) {
   if (before.size() != after.size())
@@ -1151,6 +1190,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                  "code object does not expose a non-empty .text section for translation");
     return leave_unchanged();
   }
+  std::unordered_set<uint64_t> generated_island_pool_candidates;
+  if (guest_arch_ == host_arch_)
+    generated_island_pool_candidates = generated_branch_island_pool_offsets(text, guest_arch_);
 
   // DBT relocates instructions within .text (compaction, expansion, per-kernel
   // block placement) but does not rewrite relocation places that land inside
@@ -1709,19 +1751,119 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_options, liveness_edges);
     }
 
+    std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;
+    std::unordered_map<uint64_t, const BasicBlock *> source_block_by_end_offset;
+    for (BasicBlock *block : scope.blocks) {
+      for (const Instruction &inst : block->instructions())
+        source_instruction_by_offset.emplace(inst.src_loc(), &inst);
+      source_block_by_end_offset.emplace(block->end_offset(), block);
+    }
+
+    // Raw marker bytes are only candidates. Preserve a pool for this kernel
+    // when either its marker and skip are adjacent decoded instructions in this
+    // CFG scope, a reachable private slot proves that the kernel uses it, or a
+    // reachable direct branch immediately before the pool skips exactly to the
+    // first instruction after it. The latter two forms cover used and unused
+    // pools whose headers became unreachable after relocation. Candidate
+    // discovery already proved that every private slot is a one-word direct
+    // branch; requiring reachable code here rejects marker-shaped literal data
+    // and keeps preservation local to the kernel that owns the generated pool.
+    constexpr uint64_t kGeneratedIslandPoolWords =
+        kGeneratedIslandPoolHeaderWords + kDirectBranchIslandPoolSlots;
+    constexpr uint64_t kGeneratedIslandPoolBytes =
+        kGeneratedIslandPoolWords * static_cast<uint64_t>(sizeof(uint32_t));
+    std::unordered_set<uint64_t> generated_island_pool_offsets;
+    std::unordered_map<uint64_t, uint64_t> generated_island_pool_by_source_offset;
+    if (guest_arch_ == host_arch_) {
+      for (const uint64_t pool_offset : generated_island_pool_candidates) {
+        const auto marker_it = source_instruction_by_offset.find(pool_offset);
+        const auto skip_it = source_instruction_by_offset.find(pool_offset + sizeof(uint32_t));
+        bool reachable_header = false;
+        if (marker_it != source_instruction_by_offset.end() &&
+            skip_it != source_instruction_by_offset.end()) {
+          const Instruction *marker = marker_it->second;
+          const Instruction *skip = skip_it->second;
+          const auto skip_delta = skip->branch_offset_bytes();
+          reachable_header =
+              marker->size() == static_cast<int>(sizeof(uint32_t)) &&
+              marker->raw_encoding() != nullptr &&
+              marker->raw_encoding()[0] ==
+                  build_s_nop(kBranchIslandPoolMarkerNopImmediate, guest_arch_) &&
+              marker->next_instruction() == skip &&
+              skip->size() == static_cast<int>(sizeof(uint32_t)) &&
+              skip->raw_encoding() != nullptr &&
+              skip->raw_encoding()[0] ==
+                  build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), guest_arch_) &&
+              skip_delta &&
+              pool_offset + kGeneratedIslandPoolHeaderWords * sizeof(uint32_t) +
+                      static_cast<uint64_t>(*skip_delta) ==
+                  pool_offset + kGeneratedIslandPoolBytes;
+        }
+
+        bool reachable_slot = false;
+        for (uint64_t word_index = kGeneratedIslandPoolHeaderWords;
+             word_index < kGeneratedIslandPoolWords; ++word_index) {
+          const uint64_t source_offset = pool_offset + word_index * sizeof(uint32_t);
+          if (source_instruction_by_offset.contains(source_offset)) {
+            reachable_slot = true;
+            break;
+          }
+        }
+        const uint64_t pool_end = pool_offset + kGeneratedIslandPoolBytes;
+        const auto preceding_block_it = source_block_by_end_offset.find(pool_offset);
+        const BasicBlock *preceding_block = preceding_block_it == source_block_by_end_offset.end()
+                                                ? nullptr
+                                                : preceding_block_it->second;
+        const Instruction *preceding_terminator =
+            preceding_block == nullptr ? nullptr : preceding_block->terminator();
+        int64_t preceding_branch_target = -1;
+        if (preceding_terminator != nullptr) {
+          if (const auto delta = preceding_terminator->branch_offset_bytes()) {
+            preceding_branch_target = static_cast<int64_t>(preceding_terminator->src_loc() +
+                                                           preceding_terminator->size()) +
+                                      static_cast<int64_t>(*delta);
+          }
+        }
+        const bool reachable_skip_over_pool =
+            preceding_terminator != nullptr && preceding_terminator->mnemonic() == "s_branch" &&
+            source_instruction_by_offset.contains(pool_end) && preceding_branch_target >= 0 &&
+            static_cast<uint64_t>(preceding_branch_target) == pool_end;
+        if (!reachable_header && !reachable_slot && !reachable_skip_over_pool)
+          continue;
+
+        generated_island_pool_offsets.insert(pool_offset);
+        for (uint64_t word_index = 0; word_index < kGeneratedIslandPoolWords; ++word_index) {
+          generated_island_pool_by_source_offset.emplace(
+              pool_offset + word_index * sizeof(uint32_t), pool_offset);
+        }
+        if (!reachable_header && !reachable_slot)
+          generated_island_pool_by_source_offset.emplace(pool_end, pool_offset);
+      }
+    }
+    // A recognized pool comes from an already translated body. Reuse that
+    // deterministic grid instead of appending another set on the verification
+    // pass. If preserved capacity is insufficient after an unexpected body
+    // change, relocation fails closed; fixed-size pool slots are not widened.
+    const bool preserve_generated_branch_island_pools = !generated_island_pool_offsets.empty();
+
     // Phase 4: translate each relocated body instruction at the current cursor.
     // Return-like s_setpc_b64 instructions are accepted only when they are the
     // terminator of a block reached from a validated call edge in this
     // kernel-local scope. Recovered indirect setpc/swappc consumers reserve a
-    // fixed maximum-size window when recovery proves one effective target. When
-    // one dynamic consumer has multiple recovered targets, no single direct
-    // window can preserve semantics; DBT keeps the original indirect consumer
-    // and asks the patch layer to rewrite each source-side PC builder once.
+    // compact window when recovery proves one effective target. A
+    // marked long direct transfer generated by an earlier pass is instead
+    // preserved as one exact getpc-through-consumer window. When one dynamic
+    // consumer has multiple recovered targets, no single direct window can
+    // preserve semantics; DBT keeps the original indirect consumer and asks the
+    // patch layer to rewrite each source-side PC builder once.
     const std::unordered_set<uint64_t> valid_call_return_offsets =
         scoped_call_return_offsets(KernelBlockScope(scope.blocks), text);
     struct RecoveredConsumer {
       std::vector<IndirectCallFixup> fixups;
       bool use_transfer_window = false;
+      bool preserve_marked_long_transfer = false;
+      uint64_t marked_window_begin = 0;
+      uint64_t marked_window_end = 0;
       IndirectCallFixup window_fixup;
     };
     std::unordered_map<uint64_t, RecoveredConsumer> recovered_indirect_by_call;
@@ -1807,12 +1949,65 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         continue;
       }
 
-      // A complete consumer with one effective target can become a direct window.
-      // A complete multi-target consumer keeps the dynamic consumer and rewrites
-      // each source-side builder (relocation/liveness).
+      // A complete consumer with one effective target can become a direct
+      // window. Preserve a translator-generated long direct transfer as one
+      // marked source window so a repeated pass cannot wrap its setpc/swappc
+      // consumer a second time. A complete multi-target consumer keeps the
+      // dynamic consumer and rewrites each source-side builder
+      // (relocation/liveness).
       if (single_effective_target) {
-        consumer.use_transfer_window = true;
         consumer.window_fixup = first;
+        const bool contiguous_builder =
+            consumer.fixups.size() == 1 && first.source_getpc_offset >= sizeof(uint32_t) &&
+            first.source_recovery_begin_offset == first.source_getpc_offset + sizeof(uint32_t) &&
+            first.source_recovery_end_offset == first.source_call_offset &&
+            first.source_call_offset <= text.size() &&
+            sizeof(uint32_t) <= text.size() - first.source_call_offset;
+        const auto getpc_it = source_instruction_by_offset.find(first.source_getpc_offset);
+        const Instruction *getpc =
+            getpc_it == source_instruction_by_offset.end() ? nullptr : getpc_it->second;
+        const Instruction *marker = getpc == nullptr ? nullptr : getpc->previous_instruction();
+        const auto call_it = source_instruction_by_offset.find(first.source_call_offset);
+        const Instruction *call =
+            call_it == source_instruction_by_offset.end() ? nullptr : call_it->second;
+        const bool has_interior_block_entry =
+            std::ranges::any_of(scope.blocks, [&](const BasicBlock *candidate) {
+              return candidate->start_offset() > first.source_getpc_offset &&
+                     candidate->start_offset() < first.source_call_offset;
+            });
+        const auto builder_block_it =
+            std::ranges::find_if(scope.blocks, [&](const BasicBlock *candidate) {
+              return candidate->start_offset() <= first.source_getpc_offset &&
+                     candidate->end_offset() == first.source_call_offset;
+            });
+        const auto call_block_it =
+            std::ranges::find_if(scope.blocks, [&](const BasicBlock *candidate) {
+              return candidate->start_offset() == first.source_call_offset;
+            });
+        // Recovered consumers are block leaders by construction, so their
+        // canonical fallthrough block is expected. Reject only an additional
+        // CFG predecessor that can enter at the consumer and bypass the builder.
+        const bool has_external_call_entry =
+            builder_block_it == scope.blocks.end() || call_block_it == scope.blocks.end() ||
+            std::ranges::any_of(
+                (*call_block_it)->predecessors(),
+                [&](const BasicBlock *predecessor) { return predecessor != *builder_block_it; });
+        const bool canonical_marked_window =
+            contiguous_builder && marker != nullptr &&
+            marker->size() == static_cast<int>(sizeof(uint32_t)) &&
+            marker->src_loc() + sizeof(uint32_t) == first.source_getpc_offset &&
+            marker->raw_encoding() != nullptr &&
+            marker->raw_encoding()[0] ==
+                build_s_nop(kLongDirectBranchMarkerNopImmediate, guest_arch_) &&
+            call != nullptr && call->size() == static_cast<int>(sizeof(uint32_t)) &&
+            !has_interior_block_entry && !has_external_call_entry;
+        if (canonical_marked_window) {
+          consumer.preserve_marked_long_transfer = true;
+          consumer.marked_window_begin = marker->src_loc();
+          consumer.marked_window_end = first.source_call_offset + sizeof(uint32_t);
+        } else {
+          consumer.use_transfer_window = true;
+        }
       } else {
         pending_builder_fixups.insert(pending_builder_fixups.end(), consumer.fixups.begin(),
                                       consumer.fixups.end());
@@ -1831,6 +2026,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                                     whole_scope_builder_fixups->end());
     }
 
+    std::unordered_map<uint64_t, const RecoveredConsumer *> marked_long_transfer_by_start;
+    for (const auto &[source_call_offset, consumer] : recovered_indirect_by_call) {
+      (void)source_call_offset;
+      if (consumer.preserve_marked_long_transfer)
+        marked_long_transfer_by_start.emplace(consumer.marked_window_begin, &consumer);
+    }
+
     std::vector<uint8_t> kernel_text;
     std::vector<PendingTrace> pending_traces;
     uint64_t source_body_size = 0;
@@ -1847,18 +2049,164 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     layout.body_begin = 0;
     layout.blocks.reserve(scope.blocks.size());
     uint64_t next_branch_island_pool_offset = first_direct_branch_island_pool_offset();
+    struct ActiveMarkedLongTransfer {
+      uint64_t source_end = 0;
+    };
+    std::optional<ActiveMarkedLongTransfer> active_marked_long_transfer;
+    struct ActiveGeneratedIslandPool {
+      uint64_t source_begin = 0;
+      uint64_t source_end = 0;
+      uint64_t target_begin = 0;
+    };
+    std::optional<ActiveGeneratedIslandPool> active_generated_island_pool;
+    // reachable_kernel_blocks() materializes reached indices in source order.
+    // Pool preservation relies on that ordering while one copied pool spans
+    // several reachable slot blocks.
+    assert(std::ranges::is_sorted(scope.blocks, [](const BasicBlock *lhs, const BasicBlock *rhs) {
+      return lhs->start_offset() < rhs->start_offset();
+    }));
     for (BasicBlock *block : scope.blocks) {
+      std::optional<ActiveGeneratedIslandPool> block_generated_island_pool;
+      if (active_generated_island_pool &&
+          block->start_offset() < active_generated_island_pool->source_end) {
+        block_generated_island_pool = active_generated_island_pool;
+      }
+      const uint64_t block_target_start =
+          block_generated_island_pool
+              ? block_generated_island_pool->target_begin +
+                    (block->start_offset() - block_generated_island_pool->source_begin)
+              : kernel_text.size();
       BlockPlacement placement{.block = block,
                                .source_start = block->start_offset(),
                                .source_end = block->end_offset(),
-                               .target_start = kernel_text.size(),
-                               .target_end = kernel_text.size()};
+                               .target_start = block_target_start,
+                               .target_end = block_target_start};
 
       for (auto it = block->instructions().begin(); it != block->instructions().end(); ++it) {
         const auto &inst = *it;
         const uint64_t offset = inst.src_loc();
-        const uint64_t target_offset = kernel_text.size();
+        uint64_t target_offset = kernel_text.size();
         const uint32_t inst_size = inst.size();
+
+        if (active_generated_island_pool && offset < active_generated_island_pool->source_end)
+          continue;
+        active_generated_island_pool.reset();
+
+        if (const auto pool_it = generated_island_pool_by_source_offset.find(offset);
+            pool_it != generated_island_pool_by_source_offset.end()) {
+          const uint64_t pool_offset = pool_it->second;
+          const uint64_t source_end = pool_offset + kGeneratedIslandPoolBytes;
+          const bool source_instruction_in_pool = offset < source_end;
+          // Candidate qualification already bounds the complete pool.
+          assert(source_end <= text.size());
+          for (uint64_t word_index = kGeneratedIslandPoolHeaderWords;
+               word_index < kGeneratedIslandPoolWords; ++word_index) {
+            const uint64_t source_branch_offset = pool_offset + word_index * sizeof(uint32_t);
+            const auto source_branch_it = source_instruction_by_offset.find(source_branch_offset);
+            // Unused placeholder slots are unreachable and absent from this
+            // scope. Make those slots available to repair any new layout drift;
+            // an unused slot remains s_branch 0 when no fixup allocates it.
+            if (source_branch_it == source_instruction_by_offset.end()) {
+              layout.branch_island_slots.push_back(target_offset + word_index * sizeof(uint32_t));
+              continue;
+            }
+            const Instruction *source_branch = source_branch_it->second;
+            const auto source_branch_delta = source_branch->branch_offset_bytes();
+            assert(source_branch->raw_encoding() != nullptr && source_branch_delta &&
+                   "candidate qualification proved every generated pool slot");
+            if (source_branch->raw_encoding() == nullptr || !source_branch_delta) {
+              auto failure = make_kernel_failure(
+                  DiagnosticKind::Legalization,
+                  "generated direct branch island pool contains malformed live slot",
+                  source_branch_offset);
+              if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                      text_relocations_begin, data_relocations_begin)) {
+                skip_scope = true;
+                break;
+              }
+              return leave_unchanged();
+            }
+            const int64_t source_target =
+                static_cast<int64_t>(source_branch_offset + sizeof(uint32_t)) +
+                static_cast<int64_t>(*source_branch_delta);
+            if (source_target < 0 || static_cast<uint64_t>(source_target) > text.size()) {
+              auto failure = make_kernel_failure(
+                  DiagnosticKind::Legalization,
+                  "generated direct branch island pool targets outside source .text",
+                  source_branch_offset);
+              if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                                      text_relocations_begin, data_relocations_begin)) {
+                skip_scope = true;
+                break;
+              }
+              return leave_unchanged();
+            }
+            layout.branch_fixups.push_back(
+                {.inst = source_branch,
+                 .source_inst_offset = source_branch_offset,
+                 .source_target_offset = static_cast<uint64_t>(source_target),
+                 .target_inst_offset = target_offset + word_index * sizeof(uint32_t),
+                 .target_window_bytes = sizeof(uint32_t),
+                 .allow_window_growth = false,
+                 .translated_words = {source_branch->raw_encoding()[0]}});
+          }
+          if (skip_scope)
+            break;
+          for (uint64_t source_word = pool_offset; source_word < source_end;
+               source_word += sizeof(uint32_t)) {
+            target_offset_by_source_offset.emplace(source_word,
+                                                   target_offset + (source_word - pool_offset));
+          }
+          kernel_text.insert(kernel_text.end(),
+                             text.begin() + static_cast<std::ptrdiff_t>(pool_offset),
+                             text.begin() + static_cast<std::ptrdiff_t>(source_end));
+          if (source_instruction_in_pool) {
+            active_generated_island_pool = {
+                .source_begin = pool_offset,
+                .source_end = source_end,
+                .target_begin = target_offset,
+            };
+            block_generated_island_pool = active_generated_island_pool;
+            if (block->start_offset() >= pool_offset) {
+              placement.target_start = target_offset + (block->start_offset() - pool_offset);
+            }
+            continue;
+          }
+          placement.target_start = kernel_text.size();
+          target_offset = kernel_text.size();
+        }
+
+        if (active_marked_long_transfer && offset < active_marked_long_transfer->source_end) {
+          // The patch layer regenerates the marked window, so its interior
+          // source instructions have no stable one-to-one target offsets.
+          if (offset + inst_size >= active_marked_long_transfer->source_end)
+            active_marked_long_transfer.reset();
+          continue;
+        }
+        active_marked_long_transfer.reset();
+
+        if (const auto marked = marked_long_transfer_by_start.find(offset);
+            marked != marked_long_transfer_by_start.end()) {
+          const RecoveredConsumer &consumer = *marked->second;
+          const IndirectCallFixup &source_fixup = consumer.window_fixup;
+          const uint64_t window_bytes = consumer.marked_window_end - consumer.marked_window_begin;
+          target_offset_by_source_offset.emplace(offset, target_offset);
+          layout.recovered_indirect_fixups.push_back(
+              {.source_call_offset = source_fixup.source_call_offset,
+               .source_target_offset = source_fixup.source_target_offset,
+               .target_window_offset = target_offset,
+               .target_window_bytes = window_bytes,
+               .target_sreg = source_fixup.source_call_sreg,
+               .return_sreg = source_fixup.source_return_sreg,
+               .is_call = source_fixup.source_is_call,
+               .preserve_marked_long_transfer = true});
+          append_nop_padding(kernel_text, window_bytes, host_arch_);
+          active_marked_long_transfer = {
+              .source_end = consumer.marked_window_end,
+          };
+          continue;
+        }
+
         // Ask the semantic translator directly whether this instruction has an
         // expand rule. The previous positional cursor into live_before_instructions
         // silently depended on that vector being built in the exact same block/
@@ -1904,10 +2252,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           // Record direct branches while emitting the body, but patch only after
           // every block has a final target placement. This keeps fallthrough
           // implicit and limits fixups to explicit PC-relative edges. Emit the
-          // branch into a fixed-size patch window. Kernels with a legal
-          // descriptor-backed SGPR pair reserve the long form up front; kernels
-          // already at the SGPR allocation limit keep compact branch slots so
-          // DBT does not create artificial range pressure it cannot repair.
+          // branch into an initially compact patch window. Kernels with a legal
+          // descriptor-backed SGPR pair can grow that window later if the final
+          // target moves out of range; kernels already at the SGPR allocation
+          // limit grow only an out-of-range conditional into the two-word
+          // SGPR-free island form.
           const int64_t source_target =
               static_cast<int64_t>(offset + inst_size) + static_cast<int64_t>(*direct_branch_delta);
           if (source_target < 0) {
@@ -1929,14 +2278,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             }
             return leave_unchanged();
           }
-          const uint64_t branch_window_bytes = direct_branch_patch_window_bytes(
-              inst, offset, static_cast<uint64_t>(source_target), can_use_long_direct_branches);
-          layout.branch_fixups.push_back(
-              {.inst = &inst,
-               .source_inst_offset = offset,
-               .source_target_offset = static_cast<uint64_t>(source_target),
-               .target_inst_offset = target_offset,
-               .target_window_bytes = branch_window_bytes});
+          const uint64_t branch_window_bytes = initial_direct_branch_patch_window_bytes(inst);
 
           if (!inst.raw_encoding()) {
             auto failure = make_kernel_failure(DiagnosticKind::Legalization,
@@ -1956,13 +2298,19 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           bool copied_original = false;
           bool changed = false;
           std::vector<uint32_t> target_words;
-          if (!handle_encoding(inst, offset, kernel_text, branch_dst_opcode, text,
-                               trace_callback_ != nullptr, copied_original, changed,
-                               target_words)) {
+          if (!handle_encoding(inst, offset, kernel_text, branch_dst_opcode, text, true,
+                               copied_original, changed, target_words)) {
             if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces))
               continue;
             return leave_unchanged();
           }
+          layout.branch_fixups.push_back(
+              {.inst = &inst,
+               .source_inst_offset = offset,
+               .source_target_offset = static_cast<uint64_t>(source_target),
+               .target_inst_offset = target_offset,
+               .target_window_bytes = branch_window_bytes,
+               .translated_words = target_words});
           append_nop_padding(kernel_text, branch_window_bytes - inst.size(), host_arch_);
           queue_trace(pending_traces, inst, offset, branch_leg, copied_original, false, changed,
                       target_offset, std::move(target_words));
@@ -1978,8 +2326,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                .target_sreg = source_fixup.source_call_sreg,
                .return_sreg = source_fixup.source_return_sreg,
                .is_call = source_fixup.source_is_call});
-          append_nop_padding(kernel_text, kMaxRecoveredIndirectTransferWords * sizeof(uint32_t),
-                             host_arch_);
+          append_nop_padding(kernel_text, sizeof(uint32_t), host_arch_);
           continue;
         }
 
@@ -2152,11 +2499,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         const uint32_t endpgm = build_s_endpgm(host_arch_);
         append_words(kernel_text, std::span<const uint32_t>(&endpgm, 1));
       }
-      placement.target_end = kernel_text.size();
+      placement.target_end =
+          block_generated_island_pool &&
+                  block->end_offset() <= block_generated_island_pool->source_end
+              ? block_generated_island_pool->target_begin +
+                    (block->end_offset() - block_generated_island_pool->source_begin)
+              : kernel_text.size();
       layout.blocks.push_back(placement);
-      target_offset_by_source_offset.emplace(block->end_offset(), kernel_text.size());
-      if (!can_use_long_direct_branches && block != scope.blocks.back() &&
-          kernel_text.size() >= next_branch_island_pool_offset) {
+      target_offset_by_source_offset.emplace(block->end_offset(), placement.target_end);
+      if (!can_use_long_direct_branches && !preserve_generated_branch_island_pools &&
+          block != scope.blocks.back() && kernel_text.size() >= next_branch_island_pool_offset) {
         append_direct_branch_island_pool(kernel_text, layout, host_arch_);
         next_branch_island_pool_offset = next_direct_branch_island_pool_offset(kernel_text.size());
       }
@@ -2195,6 +2547,143 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     if (skip_scope)
       continue;
 
+    // Resolve control flow against the kernel-local body before materializing
+    // it in the output section. Direct and recovered-indirect transfers both
+    // start compact. If final placement proves a long transfer is required,
+    // grow all requested windows in one rebuild and retry. Insertions can move a
+    // later transfer across the range boundary, so repeat until the monotonic
+    // layout is fixed.
+    const auto patch_control_flow = [&]() {
+      TextRelocationResult patched = patch_direct_branch_fixups(kernel_text, layout, host_arch_);
+      if (!patched.ok)
+        return patched;
+      return patch_recovered_indirect_fixups(kernel_text, layout, host_arch_);
+    };
+    TextRelocationResult patched_control_flow = patch_control_flow();
+    constexpr uint64_t kDirectGrowthWords = kMaxDirectBranchTransferWords - 1;
+    constexpr uint64_t kRecoveredGrowthWords = kMaxRecoveredIndirectTransferWords - 1;
+    // Each fixup grows monotonically and is capped at its format-specific
+    // maximum. Its cumulative growth is therefore bounded by the maximum minus
+    // the one-word initial window, no matter how many rounds request it. The sum
+    // below is a proof-sized convergence budget. Exhaustion or an invalid
+    // request is not constructible from a valid code object; keep the runtime
+    // checks fail-closed against future patcher changes.
+    uint64_t remaining_growth_words = 0;
+    if (layout.branch_fixups.size() > std::numeric_limits<uint64_t>::max() / kDirectGrowthWords ||
+        layout.recovered_indirect_fixups.size() >
+            std::numeric_limits<uint64_t>::max() / kRecoveredGrowthWords) {
+      remaining_growth_words = std::numeric_limits<uint64_t>::max();
+    } else {
+      const uint64_t direct_words = layout.branch_fixups.size() * kDirectGrowthWords;
+      const uint64_t recovered_words =
+          layout.recovered_indirect_fixups.size() * kRecoveredGrowthWords;
+      remaining_growth_words = direct_words > std::numeric_limits<uint64_t>::max() - recovered_words
+                                   ? std::numeric_limits<uint64_t>::max()
+                                   : direct_words + recovered_words;
+    }
+    while (!patched_control_flow.ok) {
+      if (patched_control_flow.reason != TextLayoutFailureReason::BranchOutOfRange)
+        break;
+
+      if (!patched_control_flow.required_windows.empty()) {
+        uint64_t requested_growth_words = 0;
+        bool valid_growth_budget = true;
+        for (const ControlFlowWindowRequirement &requirement :
+             patched_control_flow.required_windows) {
+          uint64_t current_window_bytes = 0;
+          uint64_t maximum_window_bytes = 0;
+          if (requirement.kind == ControlFlowWindowKind::DirectBranch) {
+            const auto fixup =
+                std::ranges::find_if(layout.branch_fixups, [&](const BranchFixup &candidate) {
+                  return candidate.source_inst_offset == requirement.source_inst_offset;
+                });
+            if (fixup == layout.branch_fixups.end()) {
+              valid_growth_budget = false;
+              break;
+            }
+            current_window_bytes = fixup->target_window_bytes;
+            maximum_window_bytes = kMaxDirectBranchTransferWords * sizeof(uint32_t);
+          } else {
+            const auto fixup = std::ranges::find_if(
+                layout.recovered_indirect_fixups, [&](const RecoveredIndirectFixup &candidate) {
+                  return candidate.source_call_offset == requirement.source_inst_offset;
+                });
+            if (fixup == layout.recovered_indirect_fixups.end()) {
+              valid_growth_budget = false;
+              break;
+            }
+            current_window_bytes = fixup->target_window_bytes;
+            maximum_window_bytes = kMaxRecoveredIndirectTransferWords * sizeof(uint32_t);
+          }
+          if (requirement.required_window_bytes <= current_window_bytes ||
+              requirement.required_window_bytes > maximum_window_bytes) {
+            valid_growth_budget = false;
+            break;
+          }
+          requested_growth_words +=
+              (requirement.required_window_bytes - current_window_bytes) / sizeof(uint32_t);
+        }
+        if (!valid_growth_budget || requested_growth_words > remaining_growth_words) {
+          patched_control_flow = {
+              .ok = false,
+              .failure = TextLayoutFailureCategory::InvalidLayout,
+              .source_offset = patched_control_flow.source_offset,
+              .required_windows = {},
+              .message = "control-flow layout growth did not converge",
+          };
+          break;
+        }
+
+        const auto insertions = grow_control_flow_windows(
+            kernel_text, layout, patched_control_flow.required_windows, host_arch_);
+        if (!insertions) {
+          patched_control_flow = {
+              .ok = false,
+              .failure = TextLayoutFailureCategory::InvalidLayout,
+              .source_offset = patched_control_flow.source_offset,
+              .required_windows = {},
+              .message = "control-flow layout returned an invalid growth request",
+          };
+          break;
+        }
+        for (auto &[source_offset, target_offset] : target_offset_by_source_offset) {
+          (void)source_offset;
+          rebase_text_offset(target_offset, *insertions);
+        }
+        for (PendingTrace &trace : pending_traces)
+          rebase_text_offset(trace.target_offset, *insertions);
+        remaining_growth_words -= requested_growth_words;
+      } else if (!layout.long_branch_sgpr) {
+        auto sgpr = reserve_long_branch_sgpr_pair(kernel_context);
+        if (!sgpr)
+          break;
+        layout.long_branch_sgpr = *sgpr;
+      } else {
+        break;
+      }
+
+      patched_control_flow = patch_control_flow();
+    }
+    if (!patched_control_flow.ok) {
+      auto failure =
+          make_kernel_failure(relocation_diagnostic_kind(patched_control_flow),
+                              patched_control_flow.message, patched_control_flow.source_offset);
+      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                              text_relocations_begin, data_relocations_begin))
+        continue;
+      return leave_unchanged();
+    }
+
+    if (auto patched = patch_recovered_builder_fixups(kernel_text, layout, host_arch_);
+        !patched.ok) {
+      auto failure = make_kernel_failure(relocation_diagnostic_kind(patched), patched.message,
+                                         patched.source_offset, "indirect branch");
+      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
+                              text_relocations_begin, data_relocations_begin))
+        continue;
+      return leave_unchanged();
+    }
+
     auto materialized =
         append_relocated_kernel_text(translated_text, layout, kernel_text, host_arch_);
     if (!materialized.ok) {
@@ -2227,47 +2716,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           {.target_getpc_offset = getpc->second + target_delta,
            .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
            .source_target_vaddr = dispatch.source_table_address_vaddr});
-    }
-
-    // Phase 5: now that every emitted source block has a final target offset,
-    // patch explicit direct branches, recovered source-side builders, and
-    // recovered indirect transfer windows.
-    auto patched_direct_branches = patch_direct_branch_fixups(translated_text, layout, host_arch_);
-    if (!patched_direct_branches.ok &&
-        patched_direct_branches.reason == TextLayoutFailureReason::BranchOutOfRange) {
-      if (auto sgpr = reserve_long_branch_sgpr_pair(kernel_context)) {
-        layout.long_branch_sgpr = *sgpr;
-        patched_direct_branches = patch_direct_branch_fixups(translated_text, layout, host_arch_);
-      }
-    }
-    if (!patched_direct_branches.ok) {
-      auto failure = make_kernel_failure(relocation_diagnostic_kind(patched_direct_branches),
-                                         patched_direct_branches.message,
-                                         patched_direct_branches.source_offset);
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
-                              text_relocations_begin, data_relocations_begin))
-        continue;
-      return leave_unchanged();
-    }
-
-    if (auto patched = patch_recovered_builder_fixups(translated_text, layout, host_arch_);
-        !patched.ok) {
-      auto failure = make_kernel_failure(relocation_diagnostic_kind(patched), patched.message,
-                                         patched.source_offset, "indirect branch");
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
-                              text_relocations_begin, data_relocations_begin))
-        continue;
-      return leave_unchanged();
-    }
-
-    if (auto patched = patch_recovered_indirect_fixups(translated_text, layout, host_arch_);
-        !patched.ok) {
-      auto failure = make_kernel_failure(relocation_diagnostic_kind(patched), patched.message,
-                                         patched.source_offset, "indirect branch");
-      if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot,
-                              text_relocations_begin, data_relocations_begin))
-        continue;
-      return leave_unchanged();
     }
 
     if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
@@ -2423,20 +2871,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
 bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
                                        std::vector<uint8_t> &text, uint16_t dst_opcode,
-                                       std::span<const uint8_t> orig_text, bool collect_trace_words,
-                                       bool &copied_original, bool &changed,
-                                       std::vector<uint32_t> &target_words) {
+                                       std::span<const uint8_t> orig_text,
+                                       bool collect_target_words, bool &copied_original,
+                                       bool &changed, std::vector<uint32_t> &target_words) {
   const uint32_t *raw = inst.raw_encoding();
   assert(raw && "handle_encoding called without raw encoding");
   copied_original = false;
   changed = false;
-  if (collect_trace_words)
+  if (collect_target_words)
     target_words.clear();
 
   if (!encoding_translate_) {
     copied_original = true;
     const size_t word_count = inst.size() / sizeof(uint32_t);
-    if (collect_trace_words)
+    if (collect_target_words)
       target_words.assign(raw, raw + word_count);
     append_words(text, std::span<const uint32_t>(raw, word_count));
     return true;
@@ -2451,7 +2899,7 @@ bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   if (tr.word_count == 0) {
     copied_original = true;
     const size_t word_count = inst.size() / sizeof(uint32_t);
-    if (collect_trace_words)
+    if (collect_target_words)
       target_words.assign(raw, raw + word_count);
     append_words(text, std::span<const uint32_t>(raw, word_count));
     return true;
@@ -2473,7 +2921,7 @@ bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   }
 
   append_words(text, std::span<const uint32_t>(tr.words, tr.word_count));
-  if (collect_trace_words) {
+  if (collect_target_words) {
     target_words.assign(tr.words, tr.words + tr.word_count);
     changed = words_changed(raw_words_for_inst(inst), target_words);
   }
