@@ -226,7 +226,9 @@ jobs:
           ARTIFACT_GROUP: ${{ inputs.artifact_group }}
           OUTPUT_ARTIFACTS_DIR: ${{ github.workspace }}/${{ env.CI_SUBDIR }}/.ci-out/rocm
           VENV_DIR: ${{ env.VENV_DIR }}
-          FETCH_ARTIFACT_ARGS: "--base-only"
+          # --run-github-repo: the run-id is TheRock's, but the installer defaults
+          # to GITHUB_REPOSITORY (rocm-systems) and 404s without this override.
+          FETCH_ARTIFACT_ARGS: "--base-only --run-github-repo=ROCm/TheRock"
 
       # Write rocm.env (ROCM_PATH, ROCM_RELEASE) for the compute-node scripts, from
       # rocm_path (used as-is) or the fetched tree. Fetched-only: rewrite the RHEL
