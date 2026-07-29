@@ -311,8 +311,9 @@ if (NOT BUILD_TESTS_ONLY)
       endif()
     endif()
 
-    if(USE_GDA AND NOT TARGET numa::numa)
-      message(STATUS "libnuma not found. Unable to build GDA")
+    if(NOT TARGET numa::numa)
+      message(STATUS "libnuma not found. Unable to build GDA or SDMA")
+      set(USE_SDMA OFF)
       set(USE_GDA OFF)
       set(GDA_IONIC OFF)
       set(GDA_BNXT OFF)
@@ -360,13 +361,6 @@ if (NOT BUILD_TESTS_ONLY)
     endif()
     set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
     unset(_hsakmt_iface_libs)
-  endif()
-
-  if(USE_ROCPROFILER_REGISTER)
-    find_package(rocprofiler-register QUIET)
-    if(NOT rocprofiler-register_FOUND)
-      message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
-    endif()
   endif()
 
   if(USE_ROCPROFILER_REGISTER)
@@ -507,10 +501,11 @@ if (NOT BUILD_TESTS_ONLY)
     )
   endif()
 
-  if(rocprofiler-register_FOUND)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCSHMEM_ROCPROFILER_REGISTER=1)
+  if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    target_compile_definitions(${PROJECT_NAME}
+      PRIVATE ROCSHMEM_ROCPROFILER_REGISTER=1)
     target_link_libraries(${PROJECT_NAME}
-                          PRIVATE rocprofiler-register::rocprofiler-register)
+      PRIVATE rocprofiler-register::rocprofiler-register)
   endif()
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
@@ -556,11 +551,41 @@ if (NOT BUILD_TESTS_ONLY)
       rocm-dev
   )
 
+  # Generate a baked numa::numa imported target file from the paths resolved at
+  # rocshmem build time. This avoids re-detecting NUMA at consumer configure
+  # time (no find_dependency(NUMA), no FindNUMA.cmake, no CMAKE_MODULE_PATH
+  # manipulation) and works regardless of whether a NUMAConfig.cmake exists.
+  if(TARGET numa::numa)
+    get_target_property(_numa_lib numa::numa IMPORTED_LOCATION)
+    get_target_property(_numa_inc numa::numa INTERFACE_INCLUDE_DIRECTORIES)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake"
+      "if(NOT TARGET numa::numa)\n"
+      "  add_library(numa::numa SHARED IMPORTED)\n"
+      "  set_target_properties(numa::numa PROPERTIES\n"
+      "    IMPORTED_LOCATION \"${_numa_lib}\"\n"
+      "    INTERFACE_INCLUDE_DIRECTORIES \"${_numa_inc}\")\n"
+      "endif()\n"
+      "set(NUMA_FOUND TRUE)\n")
+    unset(_numa_lib)
+    unset(_numa_inc)
+  else()
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake" "")
+  endif()
+
+  set(_rocshmem_export_deps)
+  if(USE_SDMA AND TARGET hsakmt::hsakmt)
+    list(APPEND _rocshmem_export_deps PACKAGE hsakmt)
+  endif()
+  if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    list(APPEND _rocshmem_export_deps PACKAGE rocprofiler-register)
+  endif()
   rocm_export_targets(
     TARGETS roc::rocshmem
     NAMESPACE roc::
-    DEPENDS PACKAGE NUMA
+    DEPENDS ${_rocshmem_export_deps}
+    INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-numa-targets.cmake"
   )
+  unset(_rocshmem_export_deps)
   include(ROCMPackageConfigHelpers)
   include(ROCMClients)
   rocm_package_setup_component(clients)
