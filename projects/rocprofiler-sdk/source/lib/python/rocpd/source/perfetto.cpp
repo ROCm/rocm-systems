@@ -241,9 +241,13 @@ write_perfetto(
 
     auto read_pmc_events = [&conn, &process, &ocfg](uint64_t event_id) {
         if(!ocfg.annotate_pmc) return std::vector<types::pmc_event>{};
+        // Filter out SPM pmc_events (sample_id IS NOT NULL) - they carry hardware
+        // timestamps in a different clock domain and should not be associated with
+        // regions or kernel dispatches in the Perfetto timeline.
         return rocpd::read_sql_query<types::pmc_event>(
             conn,
-            fmt::format("SELECT * FROM rocpd_pmc_event WHERE guid='{}' AND event_id={}",
+            fmt::format("SELECT * FROM rocpd_pmc_event WHERE guid='{}' AND event_id={} AND "
+                        "sample_id IS NULL",
                         process.guid,
                         event_id));
     };

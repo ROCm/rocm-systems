@@ -523,6 +523,25 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                pitr.pid);
                         };
 
+                        // Exclude SPM samples from the Perfetto trace. SPM samples reference
+                        // kernel dispatch events via event_id and use GPU hardware timestamps
+                        // that are in a different clock domain from CPU-monotonic timestamps,
+                        // causing the timeline to render incorrectly.
+                        // The subquery against rocpd_kernel_dispatch is small (one row per
+                        // dispatch, typically ~100s) and fast.
+                        auto samples_query =
+                            fmt::format("SELECT * FROM samples"
+                                        " WHERE guid = '{}' AND nid = {} AND pid = {}"
+                                        " AND event_id NOT IN ("
+                                        "  SELECT event_id FROM rocpd_kernel_dispatch"
+                                        "  WHERE guid = '{}'"
+                                        " )",
+                                        pitr.guid,
+                                        nitr.id,
+                                        pitr.pid,
+                                        pitr.guid);
+                        // if(!spm_supported) samples_query = select_guid_nid_pid("samples");
+
                         auto _sqlgen_perft = common::simple_timer{fmt::format(
                             "Perfetto generation from SQL for process {} (total)", pitr.pid)};
 
@@ -549,7 +568,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                             conn, select_guid_nid_pid("regions"), region_order_by};
 
                         auto samples = rocpd::sql_generator<rocpd::types::sample>{
-                            conn, select_guid_nid_pid("samples"), sample_order_by};
+                            conn, samples_query, sample_order_by};
 
                         auto threads = rocpd::sql_generator<rocpd::types::thread>{
                             conn, select_guid_nid_pid("threads")};
