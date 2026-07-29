@@ -37,6 +37,7 @@ struct RaceRecord {
   std::string symbol;   // exact ELF symbol name, or "?" if unresolved
   int dispatch = -1;    // rocjitsu dispatch id
   std::string type;     // "VGPR", "SGPR", "LDS"
+  std::string access;   // "read" or "write"
   int reg = -1;         // register index (VGPR/SGPR) or byte address (LDS)
   int wave = -1;
   int lane = -1;
@@ -51,7 +52,7 @@ struct RaceRecord {
 /// Example log file content:
 ///
 ///   RACE kernel=vgpr_race_kernel symbol=_Z16vgpr_race_kernelPKfPf dispatch=1
-///       type=VGPR reg=2 wave=0 lane=0 wg=0,0,0 conflict=global_load_dword
+///       type=VGPR access=read reg=2 wave=0 lane=0 wg=0,0,0 conflict=global_load_dword
 ///   Race on VGPR v2 [workgroup (0, 0, 0), wave 0, lane 0]
 ///    ==>  0x5400021940  global_load_dword v2, v[2:3], off
 ///         0x5400021948  s_nop 0
@@ -88,6 +89,7 @@ static std::vector<RaceRecord> parse_race_log() {
       else if (key == "symbol")   r.symbol = val;
       else if (key == "dispatch") r.dispatch = std::stoi(val);
       else if (key == "type")     r.type = val;
+      else if (key == "access")   r.access = val;
       else if (key == "reg")      r.reg = std::stoi(val);
       else if (key == "wave")     r.wave = val.empty() ? -1 : std::stoi(val);
       else if (key == "lane")     r.lane = val.empty() ? -1 : std::stoi(val);
@@ -1120,39 +1122,83 @@ TEST_F(Gfx950RaceTest, scratch_vmcnt_race) {
 // conservative. A more precise (but much harder) approach would track
 // whether tainted values reach observable side effects.
 
-// --- WAW: global load then ALU write to same register ---
-//
-// TODO(newling): the detector does not currently flag this. A global load targets
-// a VGPR, then an ALU instruction overwrites the same VGPR before
-// s_waitcnt retires the load. The final register value is ambiguous —
-// if the load completes after the ALU write, it silently clobbers the
-// ALU result. This is a WAW (write-after-write) race that should be
-// detected but isn't, because the detector only checks reads against
-// pending loads (checkVgprRead), not ALU writes.
+// --- VGPR WAW: pending load then instruction write ---
 
 __global__ void waw_global_load_then_alu_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float val;
+  float tmp = static_cast<float>(tid);
   asm volatile(
       "global_load_dword %0, %1, off\n"
       // BUG: no s_waitcnt before ALU write to the same register.
-      "v_add_f32 %0, %0, %0\n"
-      : "=v"(val) : "v"(&src[tid])
+      // Use a separate source so this isolates WAW rather than RAW.
+      "v_add_f32 %0, %2, %2\n"
+      : "=&v"(val) : "v"(&src[tid]), "v"(tmp)
   );
+  // Keep the racy load and overwrite in one asm block. This separate wait only
+  // orders the later store and is not part of the race being exercised.
   asm volatile("s_waitcnt vmcnt(0)\n" ::: "memory");
   dst[tid] = val;
+}
+
+__global__ void waw_global_load_then_alu_safe_kernel(const float *src, float *dst) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  float val;
+  float tmp = static_cast<float>(tid);
+  asm volatile(
+      "global_load_dword %0, %1, off\n"
+      "s_waitcnt vmcnt(0)\n"
+      "v_add_f32 %0, %2, %2\n"
+      : "=&v"(val) : "v"(&src[tid]), "v"(tmp)
+  );
+  dst[tid] = val;
+}
+
+__global__ void waw_global_load_then_mfma_kernel(const int *src, int *out) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  asm volatile(
+      "global_load_dwordx4 v[0:3], %0, off\n"
+      // BUG: no s_waitcnt before MFMA writes the same VGPR region.
+      "v_mfma_f32_4x4x1_16b_f32 v[0:3], v4, v5, 0\n"
+      "s_waitcnt vmcnt(0)\n"
+      :
+      : "v"(&src[tid * 4])
+      : "v0", "v1", "v2", "v3", "v4", "v5", "memory"
+  );
+  out[tid] = tid;
 }
 
 TEST_F(Gfx950RaceTest, waw_global_load_then_alu) {
   auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
   waw_global_load_then_alu_kernel<<<1, 64>>>(src, dst);
   sync();
-  // TODO(newling): this should detect a VGPR WAW race, but currently
-  // doesn't. When WAW detection is implemented, change to:
-  //   auto r = records();
-  //   ASSERT_GE(r.size(), 1u);
-  //   EXPECT_NE(r[0].type.find("VGPR"), npos);
+  auto r = records();
+  ASSERT_GE(r.size(), 1u);
+  EXPECT_EQ(r[0].type, "VGPR");
+  EXPECT_EQ(r[0].access, "write");
+  auto t = parseTrace(r[0]);
+  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
+  EXPECT_NE(t.mark1.find("v_add_f32"), npos) << "mark1: " << t.mark1;
+}
+
+TEST_F(Gfx950RaceTest, waw_global_load_then_alu_safe) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  waw_global_load_then_alu_safe_kernel<<<1, 64>>>(src, dst);
+  sync();
   ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, waw_global_load_then_mfma) {
+  auto *src = allocWithData<int>(256), *out = alloc<int>(64);
+  waw_global_load_then_mfma_kernel<<<1, 64>>>(src, out);
+  sync();
+  auto r = records();
+  ASSERT_GE(r.size(), 1u);
+  EXPECT_EQ(r[0].type, "VGPR");
+  EXPECT_EQ(r[0].access, "write");
+  auto t = parseTrace(r[0]);
+  EXPECT_NE(t.mark0.find("global_load_dwordx4"), npos) << "mark0: " << t.mark0;
+  EXPECT_NE(t.mark1.find("v_mfma"), npos) << "mark1: " << t.mark1;
 }
 
 // --- f64 VGPR race (64-bit global load + use without waitcnt) ---
@@ -1185,6 +1231,20 @@ __global__ void f64_vgpr_safe_kernel(const double *src, double *dst) {
   dst[tid] = result;
 }
 
+__global__ void f64_vgpr_waw_kernel(const double *src, double *dst) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  double val;
+  double tmp = static_cast<double>(tid) + 1.0;
+  asm volatile(
+      "global_load_dwordx2 %0, %1, off\n"
+      // BUG: no s_waitcnt before a 64-bit ALU write to the same VGPR pair.
+      "v_fma_f64 %0, %2, 1.0, 1.0\n"
+      "s_waitcnt vmcnt(0)\n"
+      : "=&v"(val) : "v"(&src[tid]), "v"(tmp)
+  );
+  dst[tid] = val;
+}
+
 TEST_F(Gfx950RaceTest, f64_vgpr_race) {
   double *src = allocWithData<double>(64);
   double *dst = alloc<double>(64);
@@ -1201,6 +1261,20 @@ TEST_F(Gfx950RaceTest, f64_vgpr_safe) {
   f64_vgpr_safe_kernel<<<1, 64>>>(src, dst);
   sync();
   ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, f64_vgpr_waw) {
+  double *src = allocWithData<double>(64);
+  double *dst = alloc<double>(64);
+  f64_vgpr_waw_kernel<<<1, 64>>>(src, dst);
+  sync();
+  auto r = records();
+  ASSERT_GE(r.size(), 1u);
+  EXPECT_EQ(r[0].type, "VGPR");
+  EXPECT_EQ(r[0].access, "write");
+  auto t = parseTrace(r[0]);
+  EXPECT_NE(t.mark0.find("global_load_dwordx2"), npos) << "mark0: " << t.mark0;
+  EXPECT_NE(t.mark1.find("v_fma_f64"), npos) << "mark1: " << t.mark1;
 }
 
 int main(int argc, char **argv) {

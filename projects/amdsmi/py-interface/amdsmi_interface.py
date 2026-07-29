@@ -4774,10 +4774,6 @@ def amdsmi_reset_gpu(processor_handle: processor_handle_t):
     _check_res(amdsmi_wrapper.amdsmi_reset_gpu(processor_handle))
 
 
-def amdsmi_gpu_driver_reload():
-    _check_res(amdsmi_wrapper.amdsmi_gpu_driver_reload())
-
-
 def amdsmi_set_gpu_fan_speed(processor_handle: processor_handle_t, sensor_idx: int, fan_speed: int):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -5717,10 +5713,10 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
             gpu_metrics.pcie_link_speed, MaxUIntegerTypes.UINT16_T
         ),
         "gfx_activity_acc": _validate_if_max_uint(
-            gpu_metrics.gfx_activity_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.gfx_activity_acc, MaxUIntegerTypes.UINT64_T
         ),
         "mem_activity_acc": _validate_if_max_uint(
-            gpu_metrics.mem_activity_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.mem_activity_acc, MaxUIntegerTypes.UINT64_T
         ),
         "temperature_hbm": _validate_if_max_uint(
             list(gpu_metrics.temperature_hbm), MaxUIntegerTypes.UINT16_T
@@ -5786,10 +5782,10 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
             list(gpu_metrics.jpeg_activity), MaxUIntegerTypes.UINT16_T, isActivity=True
         ),
         "pcie_nak_sent_count_acc": _validate_if_max_uint(
-            gpu_metrics.pcie_nak_sent_count_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_nak_sent_count_acc, MaxUIntegerTypes.UINT64_T
         ),
         "pcie_nak_rcvd_count_acc": _validate_if_max_uint(
-            gpu_metrics.pcie_nak_rcvd_count_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_nak_rcvd_count_acc, MaxUIntegerTypes.UINT64_T
         ),
         "accumulation_counter": _validate_if_max_uint(
             gpu_metrics.accumulation_counter, MaxUIntegerTypes.UINT64_T
@@ -5823,7 +5819,7 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
         "xcp_stats.gfx_below_host_limit_total_acc": list(gpu_metrics.xcp_stats),
         "xcp_stats.temperature_xcd": list(gpu_metrics.xcp_stats),
         "pcie_lc_perf_other_end_recovery": _validate_if_max_uint(
-            gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT64_T
         ),
         "vram_max_bandwidth": _validate_if_max_uint(
             gpu_metrics.vram_max_bandwidth, MaxUIntegerTypes.UINT64_T
@@ -6053,10 +6049,10 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
             gpu_metrics.pcie_link_speed, MaxUIntegerTypes.UINT16_T
         ),
         "gfx_activity_acc": _validate_if_max_uint(
-            gpu_metrics.gfx_activity_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.gfx_activity_acc, MaxUIntegerTypes.UINT64_T
         ),
         "mem_activity_acc": _validate_if_max_uint(
-            gpu_metrics.mem_activity_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.mem_activity_acc, MaxUIntegerTypes.UINT64_T
         ),
         "temperature_hbm": _validate_if_max_uint(
             list(gpu_metrics.temperature_hbm), MaxUIntegerTypes.UINT16_T
@@ -6122,10 +6118,10 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
             list(gpu_metrics.jpeg_activity), MaxUIntegerTypes.UINT16_T, isActivity=True
         ),
         "pcie_nak_sent_count_acc": _validate_if_max_uint(
-            gpu_metrics.pcie_nak_sent_count_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_nak_sent_count_acc, MaxUIntegerTypes.UINT64_T
         ),
         "pcie_nak_rcvd_count_acc": _validate_if_max_uint(
-            gpu_metrics.pcie_nak_rcvd_count_acc, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_nak_rcvd_count_acc, MaxUIntegerTypes.UINT64_T
         ),
         "accumulation_counter": _validate_if_max_uint(
             gpu_metrics.accumulation_counter, MaxUIntegerTypes.UINT64_T
@@ -6159,7 +6155,7 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
         "xcp_stats.gfx_below_host_limit_total_acc": list(gpu_metrics.xcp_stats),
         "xcp_stats.temperature_xcd": list(gpu_metrics.xcp_stats),
         "pcie_lc_perf_other_end_recovery": _validate_if_max_uint(
-            gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT32_T
+            gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT64_T
         ),
         "vram_max_bandwidth": _validate_if_max_uint(
             gpu_metrics.vram_max_bandwidth, MaxUIntegerTypes.UINT64_T
@@ -6744,42 +6740,26 @@ def amdsmi_get_rocm_version() -> Tuple[bool, str]:
         else:
             print(f"Error: {version_message}")
     """
-    # librocm-core.so can be located in found using several different methods.
-    # Look for it with below priority:
-    # 1. ROCM_HOME/ROCM_PATH environment variables
-    #    - ROCM_HOME/lib
-    #    - ROCM_PATH/lib (usually set to /opt/rocm/)
-    # 2. Decided by the linker
-    #    - LD_LIBRARY_PATH env var
-    #    - defined path in /etc/ld.so.conf.d/
-    # 3. Relative to amdsmi_wrapper.py in /opt/rocm/share/amd_smi
-    #    - parent directory
-
+    # Resolve librocm-core.so, most specific first. Path 0 mirrors
+    # _load_library() in amdsmi_wrapper.py: this file is staged at
+    # <root>/share/amd_smi/amdsmi and the library at <root>/lib (relocatable
+    # ROCm tree / TheRock rocm-sdk wheel). The rest are best-effort fallbacks
+    # for a system install (ROCM_HOME/ROCM_PATH, /opt/rocm, then the linker).
     try:
         possible_locations = list()
-        # 0. Relative to amdsmi_interface.py in TheRock:
-        #    `amdsmi_interface.py` is located in
-        #    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
-        #    `_rocm_sdk_core/lib`.
-        librocm_core_path = (
-            Path(__file__).resolve().parent.parent.parent.parent / "lib/librocm-core.so.1"
-        )
-        possible_locations.append(librocm_core_path)
-        # 1.
+        # 0. Relocatable tree: <root>/lib relative to this file.
+        here = Path(__file__).resolve()
+        if len(here.parents) > 3:
+            possible_locations.append(here.parents[3] / "lib/librocm-core.so.1")
+        # 1. ROCM_HOME / ROCM_PATH.
         rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
         if rocm_path:
             possible_locations.append(os.path.join(rocm_path, "lib/librocm-core.so"))
-
-        # Check if /opt/rocm/lib/librocm-core.so exists and add it to the list
+        # 2. Default /opt/rocm system install.
         if os.path.exists("/opt/rocm/lib/librocm-core.so"):
             possible_locations.append("/opt/rocm/lib/librocm-core.so")
-        # 2.
+        # 3. Bare SONAME via the dynamic linker (LD_LIBRARY_PATH, ld.so.conf.d).
         possible_locations.append("librocm-core.so")
-        # 3.
-        librocm_core_parent_dir = (
-            Path(__file__).resolve().parent.parent.parent / "lib" / "librocm-core.so"
-        )
-        possible_locations.append(librocm_core_parent_dir)
 
         for librocm_core_file_path in possible_locations:
             try:

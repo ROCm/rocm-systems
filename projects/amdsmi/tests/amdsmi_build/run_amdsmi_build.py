@@ -875,9 +875,7 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
 
     # Verify installation: CLI version + Python import/init/shutdown under the
     # interpreter the module was actually installed for. The system package
-    # installs amdsmi/ into a specific interpreter's site-packages, and the
-    # amd-smi CLI shebang is pinned to that same interpreter (see
-    # py-interface/CMakeLists.txt + amdsmi_cli/CMakeLists.txt). We must verify
+    # installs amdsmi/ into a specific interpreter's site-packages, so verify
     # against THAT interpreter, not a bare /usr/bin/python3: this harness itself
     # repoints /usr/bin/python3 via `alternatives` when it has to bootstrap a
     # newer python on an old base image (e.g. el8's 3.6), so /usr/bin/python3 at
@@ -891,9 +889,15 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
         if cli_target and cli_target.exists():
             first_line = cli_target.read_text(errors="replace").splitlines()[:1]
             if first_line and first_line[0].startswith("#!"):
-                interp = first_line[0][2:].strip().split()[0]
-                if interp and Path(interp).exists():
-                    verify_python = interp
+                tokens = first_line[0][2:].strip().split()
+                interp = tokens[0] if tokens else ""
+                # "#!/usr/bin/env python3" names the interpreter in the second
+                # token; the first is env itself.
+                if os.path.basename(interp) == "env" and len(tokens) > 1:
+                    interp = tokens[1]
+                resolved = interp if Path(interp).exists() else shutil.which(interp)
+                if resolved:
+                    verify_python = resolved
     except (OSError, IndexError):
         pass
     print(f"Verifying import under interpreter: {verify_python}")
@@ -1152,11 +1156,18 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             details.append(f"#### {stage}\n\n" + _fenced(content))
             print(f"FAILED: {stage}")
 
-    # 2. amd-smi command test logs -- logged but non-fatal
+    # 2. amd-smi command test logs -- logged but non-fatal. The workflow
+    # appends "Error code: <rc>" (space + digit, same line) only on a real
+    # non-zero exit. The CLI's debug logging also prints an unsupported-feature
+    # status code, but wrapped onto the next line ("Error code:\n\t2 | ..."),
+    # so restrict the match to a same-line digit to skip that benign noise.
+    import re as _re
+
+    err_code_re = _re.compile(r"Error code:[ \t]*\d")
     cmd_fails: List[str] = []
     for log in sorted(results_dir.glob("amd-smi_*.log")):
         log_text = log.read_text(encoding="utf-8", errors="replace")
-        if any(token in log_text for token in ("Traceback", "AmdSmiException", "Error code:")):
+        if "Traceback" in log_text or "AmdSmiException" in log_text or err_code_re.search(log_text):
             cmd_fails.append(log.stem.replace("amd-smi_", ""))
     if cmd_fails:
         joined = " ".join(cmd_fails)
@@ -1174,8 +1185,6 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
             )
 
     # 4. Python test outputs
-    import re as _re
-
     fail_re = _re.compile(r"^(FAIL|ERROR):", _re.MULTILINE)
     for test_file in ("integration_test_output.txt", "unit_test_output.txt", "perf_test_output.txt"):
         full = results_dir / test_file
