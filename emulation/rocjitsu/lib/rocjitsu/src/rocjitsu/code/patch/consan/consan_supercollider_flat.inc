@@ -72,10 +72,8 @@ flat_check_trap_delay_source_sgpr(const ConSanOptions &options) {
   return find_pair(0);
 }
 
-[[nodiscard]] std::optional<uint16_t>
-choose_flat_check_trap_scalar_spill_pair(uint16_t allocated_sgpr_count,
-                                         const ConSanOptions &options,
-                                         bool preserve_dynamic_stack_abi) {
+[[nodiscard]] std::optional<uint16_t> choose_flat_check_trap_scalar_spill_pair(
+    uint16_t allocated_sgpr_count, const ConSanOptions &options, bool preserve_dynamic_stack_abi) {
   // The caller spills and restores the returned live pair, so any ordinary
   // allocated pair is legal except the active delay source. Staying within
   // the descriptor allocation (and every owner's common minimum for shared
@@ -272,8 +270,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   if (std::ranges::none_of(canonical_sites, [&](const CanonicalFlatSite &canonical) {
         return is_supported_flat_check_trap_site(canonical.site, options.flat_provenance_mode);
       })) {
-    publish_sc_access_coverage_support(
-        result, ConSanScAccessCoverageKind::FlatGroup, [](uint64_t) { return false; });
+    publish_sc_access_coverage_support(result, ConSanScAccessCoverageKind::FlatGroup,
+                                       [](uint64_t) { return false; });
     result.warnings.emplace_back(
         "ConSan flat check/trap proof found no supported likely group-FLAT load/store site");
     return;
@@ -385,24 +383,24 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     Mixed,
   };
 
-  const auto make_candidate =
-      [](const ConSanFlatSite *site, const LocalNopCave *local_cave,
-         const LocalNopCave *entry_island, uint16_t scratch_vgpr, uint64_t requested_words,
-         bool use_local_cave, bool use_appended_cave,
-         std::optional<LdsCheckTrapIndirectScalarScratch> indirect_scratch,
-         const std::vector<uint64_t> &owner_descriptor_file_offsets) {
-        FlatCheckTrapCandidate candidate;
-        candidate.site = site;
-        candidate.local_cave = local_cave;
-        candidate.entry_island = entry_island;
-        candidate.scratch_vgpr = scratch_vgpr;
-        candidate.requested_words = requested_words;
-        candidate.use_local_cave = use_local_cave;
-        candidate.use_appended_cave = use_appended_cave;
-        candidate.indirect_scratch = indirect_scratch;
-        candidate.owner_descriptor_file_offsets = owner_descriptor_file_offsets;
-        return candidate;
-      };
+  const auto make_candidate = [](const ConSanFlatSite *site, const LocalNopCave *local_cave,
+                                 const LocalNopCave *entry_island, uint16_t scratch_vgpr,
+                                 uint64_t requested_words, bool use_local_cave,
+                                 bool use_appended_cave,
+                                 std::optional<LdsCheckTrapIndirectScalarScratch> indirect_scratch,
+                                 const std::vector<uint64_t> &owner_descriptor_file_offsets) {
+    FlatCheckTrapCandidate candidate;
+    candidate.site = site;
+    candidate.local_cave = local_cave;
+    candidate.entry_island = entry_island;
+    candidate.scratch_vgpr = scratch_vgpr;
+    candidate.requested_words = requested_words;
+    candidate.use_local_cave = use_local_cave;
+    candidate.use_appended_cave = use_appended_cave;
+    candidate.indirect_scratch = indirect_scratch;
+    candidate.owner_descriptor_file_offsets = owner_descriptor_file_offsets;
+    return candidate;
+  };
 
   std::vector<FlatCheckTrapCandidate> inline_candidates;
   std::vector<FlatCheckTrapCandidate> local_cave_candidates;
@@ -511,8 +509,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                                          options, preserve_dynamic_stack_abi);
     bool spill_vcc_save_pair_to_vgprs = false;
     if (!vcc_save && is_rdna4_family_arch(arch) && allocated_sgpr_count) {
-      vcc_save = choose_flat_check_trap_scalar_spill_pair(
-          *allocated_sgpr_count, options, preserve_dynamic_stack_abi);
+      vcc_save = choose_flat_check_trap_scalar_spill_pair(*allocated_sgpr_count, options,
+                                                          preserve_dynamic_stack_abi);
       spill_vcc_save_pair_to_vgprs = vcc_save.has_value();
     }
     if (!vcc_save) {
@@ -541,8 +539,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
             uses_dynamic_stack ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
                                : static_cast<uint16_t>(spill_vcc_save_pair_to_vgprs ? 2u : 0u);
         scratch_vgprs = instrumentation_scratch_vgprs + scalar_reservoir_count;
-        scratch =
-            choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
+        scratch = choose_flat_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
         if (scratch && uses_dynamic_stack) {
           dynamic_stack_spill = build_dynamic_stack_borrowed_sgpr_spill_sequence(
               *scratch, scratch_vgprs, *vcc_save,
@@ -552,8 +549,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
           const auto private_limit = address_free_scratch_private_limit(arch);
           if (private_limit) {
             SpillManager manager(original_private_segment_size, *private_limit);
-            vgpr_spill =
-                build_vgpr_spill_sequence(manager, *scratch, scratch_vgprs, arch);
+            vgpr_spill = build_vgpr_spill_sequence(manager, *scratch, scratch_vgprs, arch);
           }
         }
         if (vgpr_spill || dynamic_stack_spill) {
@@ -707,10 +703,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
     if (observed_padding < padding_words)
       return;
-    inline_candidates.push_back(
-        make_candidate(&site, nullptr, nullptr, *scratch, requested_words,
-                       /*use_local_cave=*/false, /*use_appended_cave=*/false, std::nullopt,
-                       owner_descriptor_file_offsets));
+    inline_candidates.push_back(make_candidate(&site, nullptr, nullptr, *scratch, requested_words,
+                                               /*use_local_cave=*/false,
+                                               /*use_appended_cave=*/false, std::nullopt,
+                                               owner_descriptor_file_offsets));
     finish_candidate(inline_candidates.back());
   };
 
@@ -804,14 +800,14 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       const Instruction *owner_site_inst =
           owner_context == nullptr
               ? nullptr
-              : find_instruction_at_text_offset(
-                    KernelBlockScope(owner_context->scope.blocks), site.text_offset);
+              : find_instruction_at_text_offset(KernelBlockScope(owner_context->scope.blocks),
+                                                site.text_offset);
       if (owner_kernel == kernels_by_descriptor.end() ||
           owner_kernel->second->preflight_action == ConSanPreflightAction::Reject ||
           owner_context == nullptr || owner_context->liveness == nullptr ||
-          owner_site_inst != site_inst ||
-          refs == max_refs_by_descriptor.end() || !allocated_vgprs ||
-          owner > original_bytes.size() || sizeof(KD) > original_bytes.size() - owner) {
+          owner_site_inst != site_inst || refs == max_refs_by_descriptor.end() ||
+          !allocated_vgprs || owner > original_bytes.size() ||
+          sizeof(KD) > original_bytes.size() - owner) {
         complete_context = false;
         break;
       }
@@ -920,9 +916,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                     canonical.site.text_offset + canonical.site.size);
     }
     for (const LocalNopCave &cave : local_nop_caves) {
-      protected_ranges.emplace_back(
-          cave.text_offset,
-          cave.text_offset + static_cast<uint64_t>(cave.word_count) * sizeof(uint32_t));
+      protected_ranges.emplace_back(cave.text_offset,
+                                    cave.text_offset +
+                                        static_cast<uint64_t>(cave.word_count) * sizeof(uint32_t));
     }
     const auto protect_sync_sites = [&](const auto &container) {
       const auto append = [&](const auto &sites) {
@@ -944,18 +940,17 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges)
       protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
     for (const ConSanPatchInfo &patch : result.patches) {
-      protected_ranges.emplace_back(
-          patch.anchor_offset,
-          patch.anchor_offset + std::max<uint32_t>(patch.original_size, sizeof(uint32_t)));
+      protected_ranges.emplace_back(patch.anchor_offset,
+                                    patch.anchor_offset +
+                                        std::max<uint32_t>(patch.original_size, sizeof(uint32_t)));
       if (patch.trampoline_size != 0u) {
         protected_ranges.emplace_back(patch.trampoline_offset,
                                       patch.trampoline_offset + patch.trampoline_size);
       }
     }
     const auto latest_candidate =
-        std::ranges::max_element(branch_only_appended_candidates, {}, [](const auto &candidate) {
-          return candidate.site->text_offset;
-        });
+        std::ranges::max_element(branch_only_appended_candidates, {},
+                                 [](const auto &candidate) { return candidate.site->text_offset; });
     const uint64_t latest_source = latest_candidate->site->text_offset;
     const uint64_t route_midpoint =
         latest_source + (placement_planner.appended_end() - latest_source) / 2u;
@@ -973,6 +968,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   size_t branch_only_placement_failures = 0;
   size_t branch_only_entry_route_failures = 0;
   size_t branch_only_return_route_failures = 0;
+  size_t branch_only_search_budget_failures = 0;
   size_t branch_only_reservation_failures = 0;
   size_t branch_only_selected = 0;
   const auto publish_flat_anchor_relays = [&](const FlatCheckTrapCandidate &candidate,
@@ -1046,13 +1042,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
 
       std::string relay_error;
       BranchOnlyRelayPlanFailure relay_failure = BranchOnlyRelayPlanFailure::None;
-      auto route = branch_router.plan_pair(
-          tentative_planner, site.text_offset, placement->body_offset,
-          placement->body_offset + body_bytes, site.text_offset + original_size,
-          &relay_error, &relay_failure);
+      auto route =
+          branch_router.plan_pair(tentative_planner, site.text_offset, placement->body_offset,
+                                  placement->body_offset + body_bytes,
+                                  site.text_offset + original_size, &relay_error, &relay_failure);
       if (!route) {
         if (relay_failure == BranchOnlyRelayPlanFailure::ReturnRoute)
           ++branch_only_return_route_failures;
+        else if (relay_failure == BranchOnlyRelayPlanFailure::SearchBudget)
+          ++branch_only_search_budget_failures;
         else if (relay_failure == BranchOnlyRelayPlanFailure::Reservation)
           ++branch_only_reservation_failures;
         else
@@ -1082,11 +1080,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       const auto placement = tentative_planner.plan_indirect_appended(
           site.text_offset, original_size,
           body_bytes + kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t));
-      if (!placement ||
-          (candidate.entry_island != nullptr &&
-           !tentative_planner.reserve_existing_range(
-               candidate.entry_island->text_offset,
-               kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t)))) {
+      if (!placement || (candidate.entry_island != nullptr &&
+                         !tentative_planner.reserve_existing_range(
+                             candidate.entry_island->text_offset,
+                             kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t)))) {
         return;
       }
       placement_planner = std::move(tentative_planner);
@@ -1132,9 +1129,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     } else {
       publish_flat_anchor_relays(selected_candidates.back(), original_size);
       if (placement->kind == DbiPatchPlacementKind::LocalCave) {
-        branch_router.retire_range(
-            placement->body_offset,
-            placement->return_branch_offset + sizeof(uint32_t) - placement->body_offset);
+        branch_router.retire_range(placement->body_offset, placement->return_branch_offset +
+                                                               sizeof(uint32_t) -
+                                                               placement->body_offset);
       }
     }
   };
@@ -1148,7 +1145,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
 
   const auto branch_failure_baseline =
       std::tuple{branch_only_placement_failures, branch_only_entry_route_failures,
-                 branch_only_return_route_failures, branch_only_reservation_failures};
+                 branch_only_return_route_failures, branch_only_search_budget_failures,
+                 branch_only_reservation_failures};
   for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
     try_select_candidate(candidate);
   if (selected_candidates.size() < max_patches && !branch_only_appended_candidates.empty()) {
@@ -1159,8 +1157,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       return;
 
     std::tie(branch_only_placement_failures, branch_only_entry_route_failures,
-             branch_only_return_route_failures, branch_only_reservation_failures) =
-        branch_failure_baseline;
+             branch_only_return_route_failures, branch_only_search_budget_failures,
+             branch_only_reservation_failures) = branch_failure_baseline;
     for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
       try_select_candidate(candidate);
 
@@ -1192,6 +1190,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       .branch_only_placement_failure_count = branch_only_placement_failures,
       .branch_only_entry_route_failure_count = branch_only_entry_route_failures,
       .branch_only_return_route_failure_count = branch_only_return_route_failures,
+      .branch_only_search_budget_failure_count = branch_only_search_budget_failures,
       .branch_only_reservation_failure_count = branch_only_reservation_failures,
       .original_nop_relay_slot_count = branch_relay_word_count,
       .selected_anchor_relay_slot_count = selected_flat_anchor_relay_offsets.size(),
@@ -1318,10 +1317,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     planned.info.kind = patch_kind;
     planned.info.anchor_offset = site.text_offset;
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
-    planned.info.scalar_vcc_spill_sgpr =
-        candidate.scalar_vcc_spill_vgpr
-            ? std::optional<uint16_t>(candidate.vcc_save_sgpr)
-            : std::nullopt;
+    planned.info.scalar_vcc_spill_sgpr = candidate.scalar_vcc_spill_vgpr
+                                             ? std::optional<uint16_t>(candidate.vcc_save_sgpr)
+                                             : std::nullopt;
     planned.info.scalar_vcc_spill_vgpr = candidate.scalar_vcc_spill_vgpr;
     planned.info.scalar_vcc_spill_vgpr_count = candidate.scalar_vcc_spill_vgpr_count;
     planned.info.owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets;
@@ -1531,8 +1529,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
               "ConSan flat check/trap proof dynamic spill guard exceeds s_cbranch_execz range");
           return;
         }
-        const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
-            static_cast<int16_t>(guarded_words), arch);
+        const auto skip_empty_wave =
+            instrumentation::build_s_cbranch_execz(static_cast<int16_t>(guarded_words), arch);
         if (!skip_empty_wave) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof could not encode its dynamic empty-wave spill guard");
@@ -1583,8 +1581,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
               "ConSan flat check/trap proof spill guard exceeds s_cbranch_execz range");
           return;
         }
-        const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
-            static_cast<int16_t>(guarded_words), arch);
+        const auto skip_empty_wave =
+            instrumentation::build_s_cbranch_execz(static_cast<int16_t>(guarded_words), arch);
         if (!skip_empty_wave) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof could not encode its empty-wave spill guard");
@@ -1874,8 +1872,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       }
       std::array<uint8_t, sizeof(KD)> descriptor{};
       std::memcpy(descriptor.data(), image.data() + descriptor_offset, descriptor.size());
-      const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-          descriptor, 0, required_private_bytes);
+      const SpillDescriptorUpdate update =
+          update_kernel_descriptor_for_spills(descriptor, 0, required_private_bytes);
       if ((update != SpillDescriptorUpdate::Updated &&
            update != SpillDescriptorUpdate::Unchanged) ||
           !patcher.patch_kernel_descriptor(descriptor_offset, descriptor)) {
@@ -1885,11 +1883,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       }
     }
     std::vector<uint8_t> new_text(patcher.text_bytes().begin(), patcher.text_bytes().end());
-    for (const BranchOnlyDirectRelayReservoir &reservoir :
-         direct_branch_reservoirs.reservoirs) {
+    for (const BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs) {
       std::string relay_error;
-      if (!BranchOnlyRelayRouter::emit_direct_reservoir(
-              new_text, reservoir, arch, new_patch_infos, &relay_error)) {
+      if (!BranchOnlyRelayRouter::emit_direct_reservoir(new_text, reservoir, arch, new_patch_infos,
+                                                        &relay_error)) {
         result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
         return;
       }
@@ -1934,8 +1931,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         std::string relay_error;
         if (!BranchOnlyRelayRouter::emit_and_record(
                 new_text, *planned.branch_only_route, planned.info.trampoline_offset,
-                planned.info.anchor_offset + planned.info.original_size, arch,
-                new_patch_infos, &relay_error)) {
+                planned.info.anchor_offset + planned.info.original_size, arch, new_patch_infos,
+                &relay_error)) {
           result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
           return;
         }
@@ -1958,8 +1955,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                             &AmdGpuKernelInfo::descriptor_file_offset);
       if (original_kernel == code_object.kernels().end())
         return std::nullopt;
-      const auto current_kernel = std::ranges::find(
-          current_object->kernels(), original_kernel->name, &AmdGpuKernelInfo::name);
+      const auto current_kernel = std::ranges::find(current_object->kernels(),
+                                                    original_kernel->name, &AmdGpuKernelInfo::name);
       if (current_kernel == current_object->kernels().end())
         return std::nullopt;
       return current_kernel->descriptor_file_offset;
@@ -1998,8 +1995,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       }
       const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
           patched_bytes, *active_descriptor_offset, required_private_bytes);
-      if (update != SpillDescriptorUpdate::Updated &&
-          update != SpillDescriptorUpdate::Unchanged) {
+      if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
         result.errors.emplace_back(
             "ConSan flat check/trap could not grow its private spill descriptor");
         return;

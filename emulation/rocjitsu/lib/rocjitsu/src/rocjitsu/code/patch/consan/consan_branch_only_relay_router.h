@@ -40,6 +40,9 @@ struct BranchOnlyRelayClaim {
 struct BranchOnlyRelayRoute {
   std::vector<uint64_t> entry_relay_offsets;
   std::vector<uint64_t> return_relay_offsets;
+  /// Offered words that overlap committed branch endpoints. They are not
+  /// emitted as relays, but commit retires them from future plans.
+  std::vector<uint64_t> retired_relay_offsets;
   std::vector<BranchOnlyRelayClaim> claims;
 };
 
@@ -54,13 +57,32 @@ enum class BranchOnlyRelayPlanFailure : uint8_t {
   None,
   EntryRoute,
   ReturnRoute,
+  SearchBudget,
   Reservation,
+};
+
+enum class BranchOnlyRelayPairRejection : uint8_t {
+  None,
+  InvalidEntryCoordinates,
+  InvalidReturnCoordinates,
+  EntryUnreachable,
+  ReturnUnreachable,
+  SearchBudget,
+};
+
+enum class BranchOnlyRelayPlanStrategy : uint8_t {
+  ExactBatch,
+  ExactPairFallback,
+  GreedyPairFallback,
 };
 
 struct BranchOnlyRelayBatchPlan {
   std::vector<BranchOnlyRelayRoute> routes;
+  std::vector<BranchOnlyRelayPairRejection> rejection_reasons;
   std::vector<size_t> rejected_pair_indices;
   BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
+  BranchOnlyRelayPlanStrategy strategy = BranchOnlyRelayPlanStrategy::ExactBatch;
+  bool search_budget_exhausted = false;
 
   [[nodiscard]] bool complete() const {
     return failure == BranchOnlyRelayPlanFailure::None && rejected_pair_indices.empty();
@@ -103,12 +125,14 @@ public:
 
   /// Plans fixed request pairs and transactionally reserves pristine relay
   /// words in @p tentative_planner. Exact backtracking has a deterministic work
-  /// budget; exhaustion falls back to linear pair-atomic routing and is
-  /// reported if that fallback is partial. A failed plan leaves the planner
-  /// unchanged.
+  /// budget; exhaustion falls back to bounded exact pair routing, then to
+  /// greedy pair-atomic routing. `strategy` and `search_budget_exhausted`
+  /// report degradation even when fallback completes the batch. A failed plan
+  /// leaves the planner unchanged.
   /// If no complete disjoint assignment exists, returned partial routes are
-  /// pair-atomic and `rejected_pair_indices` identifies every omitted pair;
-  /// callers may inspect their claims for convergence but must not commit them.
+  /// pair-atomic. `rejection_reasons` is indexed like the requests, and
+  /// `rejected_pair_indices` identifies every omitted pair; callers may inspect
+  /// their claims for convergence but must not commit them.
   /// A successful plan updates the planner but does not consume router capacity;
   /// the caller must either commit every returned route or discard its planner
   /// copy together with the plan.

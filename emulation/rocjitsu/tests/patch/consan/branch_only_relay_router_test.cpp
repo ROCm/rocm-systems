@@ -13,7 +13,6 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <chrono>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -21,6 +20,7 @@
 #include <optional>
 #include <random>
 #include <ranges>
+#include <set>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
@@ -139,6 +139,51 @@ bool brute_force_fixed_relay_batch(std::span<const BranchOnlyRelayPairRequest> r
     return false;
   };
   return solve_demand(0u);
+}
+
+void expect_valid_complete_batch(std::span<const BranchOnlyRelayPairRequest> requests,
+                                 std::span<const uint64_t> offered_relays,
+                                 const BranchOnlyRelayBatchPlan &plan) {
+  ASSERT_TRUE(plan.complete());
+  ASSERT_EQ(plan.routes.size(), requests.size());
+  const std::set<uint64_t> offered(offered_relays.begin(), offered_relays.end());
+  std::set<uint64_t> used;
+  for (size_t pair = 0u; pair < requests.size(); ++pair) {
+    const BranchOnlyRelayPairRequest &request = requests[pair];
+    const BranchOnlyRelayRoute &route = plan.routes[pair];
+    const auto expect_route = [&](std::span<const uint64_t> relays, uint64_t source,
+                                  uint64_t target) {
+      uint64_t cursor = source;
+      const bool forward = target > source;
+      for (uint64_t relay : relays) {
+        EXPECT_TRUE(offered.contains(relay));
+        EXPECT_TRUE(used.insert(relay).second) << "relay reused across demands";
+        EXPECT_TRUE(forward ? cursor < relay && relay < target : target < relay && relay < cursor);
+        EXPECT_TRUE(compute_sopp_branch_simm16(cursor, relay).has_value());
+        cursor = relay;
+      }
+      EXPECT_TRUE(compute_sopp_branch_simm16(cursor, target).has_value());
+    };
+    expect_route(route.entry_relay_offsets, request.entry_source, request.entry_target);
+    expect_route(route.return_relay_offsets, request.return_source, request.return_target);
+    EXPECT_EQ(route.claims.size(),
+              route.entry_relay_offsets.size() + route.return_relay_offsets.size());
+  }
+}
+
+void expect_same_batch_plan(const BranchOnlyRelayBatchPlan &lhs,
+                            const BranchOnlyRelayBatchPlan &rhs) {
+  EXPECT_EQ(lhs.failure, rhs.failure);
+  EXPECT_EQ(lhs.strategy, rhs.strategy);
+  EXPECT_EQ(lhs.search_budget_exhausted, rhs.search_budget_exhausted);
+  EXPECT_EQ(lhs.rejected_pair_indices, rhs.rejected_pair_indices);
+  EXPECT_EQ(lhs.rejection_reasons, rhs.rejection_reasons);
+  ASSERT_EQ(lhs.routes.size(), rhs.routes.size());
+  for (size_t pair = 0u; pair < lhs.routes.size(); ++pair) {
+    EXPECT_EQ(lhs.routes[pair].entry_relay_offsets, rhs.routes[pair].entry_relay_offsets);
+    EXPECT_EQ(lhs.routes[pair].return_relay_offsets, rhs.routes[pair].return_relay_offsets);
+    EXPECT_EQ(lhs.routes[pair].retired_relay_offsets, rhs.routes[pair].retired_relay_offsets);
+  }
 }
 
 TEST(ConSanBranchOnlyRelayRouter, PlansCommitsEmitsAndRecordsTypedRelayOwnership) {
@@ -297,18 +342,19 @@ TEST(ConSanBranchOnlyRelayRouter, ReportsUnreachableEntryAndReservationWithoutPa
 TEST(ConSanBranchOnlyRelayRouter, RejectsCrossedDestinationAssignment) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   BranchOnlyRelayRouter router;
+  ASSERT_TRUE(router.offer(100'000u, BranchOnlyRelayProvenance::OwnedReservoir));
   const std::array requests = {
       BranchOnlyRelayPairRequest{
           .entry_source = 0u,
           .entry_target = 200'000u,
           .return_source = 200'004u,
-          .return_target = 100'000u,
+          .return_target = 100'004u,
       },
       BranchOnlyRelayPairRequest{
           .entry_source = 130'000u,
           .entry_target = 120'000u,
           .return_source = 120'004u,
-          .return_target = 100'004u,
+          .return_target = 100'008u,
       },
   };
   DbiPatchPlacementPlanner planner(kArch, 200'008u);
@@ -318,8 +364,10 @@ TEST(ConSanBranchOnlyRelayRouter, RejectsCrossedDestinationAssignment) {
 
   EXPECT_FALSE(plan.complete());
   EXPECT_EQ(plan.failure, BranchOnlyRelayPlanFailure::EntryRoute);
-  EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u, 1u}));
-  EXPECT_EQ(error, "branch-only router requires distinct dword-aligned monotonic pair coordinates");
+  EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{1u}));
+  EXPECT_EQ(plan.rejection_reasons[1], BranchOnlyRelayPairRejection::InvalidEntryCoordinates);
+  EXPECT_EQ(plan.routes[0].entry_relay_offsets, (std::vector<uint64_t>{100'000u}));
+  EXPECT_NE(error.find("invalid entry-coordinate"), std::string::npos);
   EXPECT_TRUE(planner.occupied_ranges().empty());
 }
 
@@ -470,8 +518,9 @@ TEST(ConSanBranchOnlyRelayRouter, IgnoresRelayAliasingAnyFixedPairCoordinate) {
   ASSERT_TRUE(plan.complete()) << error;
   EXPECT_EQ(plan.routes[0].entry_relay_offsets, (std::vector<uint64_t>{100'000u}));
   EXPECT_TRUE(plan.routes[1].entry_relay_offsets.empty());
+  EXPECT_EQ(plan.routes[1].retired_relay_offsets, (std::vector<uint64_t>{130'000u}));
   ASSERT_TRUE(router.commit(plan.routes, &error)) << error;
-  EXPECT_EQ(router.available_count(), 1u);
+  EXPECT_EQ(router.available_count(), 0u);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, RejectsInvalidCoordinatesBeforeSearching) {
@@ -497,7 +546,7 @@ TEST(ConSanBranchOnlyRelayRouter, InvalidPairDoesNotSuppressValidPartialClaims) 
   ASSERT_TRUE(router.offer(100'000u, BranchOnlyRelayProvenance::OwnedReservoir));
   DbiPatchPlacementPlanner planner(kArch, 700'004u);
   const std::array requests = {
-      BranchOnlyRelayPairRequest{500'000u, 400'000u, 400'004u, 300'004u},
+      BranchOnlyRelayPairRequest{2u, 100'000u, 600'004u, 500'004u},
       BranchOnlyRelayPairRequest{0u, 200'000u, 200'004u, 100'004u},
   };
   std::string error;
@@ -507,10 +556,85 @@ TEST(ConSanBranchOnlyRelayRouter, InvalidPairDoesNotSuppressValidPartialClaims) 
   EXPECT_FALSE(plan.complete());
   EXPECT_EQ(plan.failure, BranchOnlyRelayPlanFailure::EntryRoute);
   EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u}));
+  EXPECT_EQ(plan.rejection_reasons[0], BranchOnlyRelayPairRejection::InvalidEntryCoordinates);
   EXPECT_TRUE(plan.routes[0].claims.empty());
   EXPECT_EQ(plan.routes[1].entry_relay_offsets, (std::vector<uint64_t>{100'000u}));
   ASSERT_EQ(plan.routes[1].claims.size(), 1u);
   EXPECT_EQ(plan.routes[1].claims.front().offset, 100'000u);
+}
+
+TEST(ConSanBranchOnlyRelayRouter, DuplicateEntryCoordinateRejectsBothOwningPairs) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  BranchOnlyRelayRouter router;
+  ASSERT_TRUE(router.offer(100'000u, BranchOnlyRelayProvenance::OwnedReservoir));
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{0u, 100'004u, 500'004u, 400'004u},
+      BranchOnlyRelayPairRequest{0u, 120'004u, 520'004u, 420'004u},
+      BranchOnlyRelayPairRequest{4u, 200'000u, 300'004u, 200'004u},
+  };
+  DbiPatchPlacementPlanner planner(kArch, 520'008u);
+  std::string error;
+
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
+
+  EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u, 1u}));
+  EXPECT_EQ(plan.rejection_reasons[0], BranchOnlyRelayPairRejection::InvalidEntryCoordinates);
+  EXPECT_EQ(plan.rejection_reasons[1], BranchOnlyRelayPairRejection::InvalidEntryCoordinates);
+  EXPECT_EQ(plan.routes[2].entry_relay_offsets, (std::vector<uint64_t>{100'000u}));
+}
+
+TEST(ConSanBranchOnlyRelayRouter, DuplicateReturnCoordinateRejectsBothOwningPairs) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  BranchOnlyRelayRouter router;
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{0u, 100'000u, 300'004u, 200'004u},
+      BranchOnlyRelayPairRequest{4u, 120'004u, 300'004u, 220'004u},
+  };
+  DbiPatchPlacementPlanner planner(kArch, 300'008u);
+
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests);
+
+  EXPECT_EQ(plan.failure, BranchOnlyRelayPlanFailure::ReturnRoute);
+  EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u, 1u}));
+  EXPECT_EQ(plan.rejection_reasons[0], BranchOnlyRelayPairRejection::InvalidReturnCoordinates);
+  EXPECT_EQ(plan.rejection_reasons[1], BranchOnlyRelayPairRejection::InvalidReturnCoordinates);
+}
+
+TEST(ConSanBranchOnlyRelayRouter, NonMonotonicReturnAloneReportsReturnRoute) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  BranchOnlyRelayRouter router;
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{0u, 100'000u, 200'004u, 300'004u},
+  };
+  DbiPatchPlacementPlanner planner(kArch, 300'008u);
+  std::string error;
+
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
+
+  EXPECT_EQ(plan.failure, BranchOnlyRelayPlanFailure::ReturnRoute);
+  EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u}));
+  EXPECT_EQ(plan.rejection_reasons[0], BranchOnlyRelayPairRejection::InvalidReturnCoordinates);
+  EXPECT_NE(error.find("invalid return-coordinate"), std::string::npos);
+}
+
+TEST(ConSanBranchOnlyRelayRouter, MixedRejectionsReportEachPairCause) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  BranchOnlyRelayRouter router;
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{100'000u, 80'000u, 300'004u, 200'004u},
+      BranchOnlyRelayPairRequest{0u, 200'000u, 500'004u, 400'004u},
+  };
+  DbiPatchPlacementPlanner planner(kArch, 500'008u);
+  std::string error;
+
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
+
+  EXPECT_EQ(plan.failure, BranchOnlyRelayPlanFailure::EntryRoute);
+  EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u, 1u}));
+  EXPECT_EQ(plan.rejection_reasons[0], BranchOnlyRelayPairRejection::InvalidEntryCoordinates);
+  EXPECT_EQ(plan.rejection_reasons[1], BranchOnlyRelayPairRejection::EntryUnreachable);
+  EXPECT_NE(error.find("invalid entry-coordinate"), std::string::npos);
+  EXPECT_NE(error.find("unreachable appended entry"), std::string::npos);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, RejectsAPairOnlyOnceWhenBothHalvesAreUnreachable) {
@@ -552,6 +676,29 @@ TEST(ConSanBranchOnlyRelayRouter, RejectedPairCannotConsumeARelayFromAFeasiblePa
   EXPECT_EQ(plan.routes[1].claims.front().offset, 200'000u);
 }
 
+TEST(ConSanBranchOnlyRelayRouter, PairExactFallbackPreservesEntryReturnFeasibility) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  BranchOnlyRelayRouter router;
+  const std::array relays = {128'840u, 157'124u, 203'900u};
+  for (uint64_t relay : relays)
+    ASSERT_TRUE(router.offer(relay, BranchOnlyRelayProvenance::OwnedReservoir));
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{0u, 400'000u, 700'004u, 600'004u},
+      BranchOnlyRelayPairRequest{80'056u, 288'192u, 288'196u, 80'060u},
+  };
+  DbiPatchPlacementPlanner planner(kArch, 700'008u);
+  std::string error;
+
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
+
+  EXPECT_FALSE(plan.complete());
+  EXPECT_EQ(plan.strategy, BranchOnlyRelayPlanStrategy::ExactPairFallback);
+  EXPECT_FALSE(plan.search_budget_exhausted);
+  EXPECT_EQ(plan.rejected_pair_indices, (std::vector<size_t>{0u}));
+  EXPECT_EQ(plan.routes[1].entry_relay_offsets, (std::vector<uint64_t>{157'124u}));
+  EXPECT_EQ(plan.routes[1].return_relay_offsets, (std::vector<uint64_t>{203'900u}));
+}
+
 TEST(ConSanBranchOnlyRelayRouter, InfeasibleCorridorBatchStopsAtDeterministicWorkBudget) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   BranchOnlyRelayRouter router;
@@ -571,37 +718,92 @@ TEST(ConSanBranchOnlyRelayRouter, InfeasibleCorridorBatchStopsAtDeterministicWor
     });
   }
   DbiPatchPlacementPlanner planner(kArch, 400'200u);
+  DbiPatchPlacementPlanner repeated_planner(kArch, 400'200u);
   std::string error;
+  std::string repeated_error;
 
-  const auto start = std::chrono::steady_clock::now();
   const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
-  const auto elapsed = std::chrono::steady_clock::now() - start;
+  const BranchOnlyRelayBatchPlan repeated =
+      router.plan_pairs(repeated_planner, requests, &repeated_error);
 
   EXPECT_FALSE(plan.complete());
+  EXPECT_EQ(plan.failure, BranchOnlyRelayPlanFailure::SearchBudget);
+  EXPECT_EQ(plan.strategy, BranchOnlyRelayPlanStrategy::ExactPairFallback);
+  EXPECT_TRUE(plan.search_budget_exhausted);
   EXPECT_NE(error.find("search budget exhausted"), std::string::npos);
-  EXPECT_LT(elapsed, std::chrono::seconds(1));
+  EXPECT_TRUE(std::ranges::any_of(
+      plan.routes, [](const BranchOnlyRelayRoute &route) { return !route.claims.empty(); }));
+  EXPECT_EQ(error, repeated_error);
+  expect_same_batch_plan(plan, repeated);
+}
+
+TEST(ConSanBranchOnlyRelayRouter, IndependentPairsDoNotStarveExactBatchSearch) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  std::vector<BranchOnlyRelayPairRequest> requests = {
+      BranchOnlyRelayPairRequest{0u, 200'008u, 200'012u, 100'004u},
+      BranchOnlyRelayPairRequest{110'000u, 250'000u, 250'004u, 130'000u},
+  };
+  std::vector<uint64_t> relays = {100'000u, 120'000u};
+  constexpr size_t kIndependentPairCount = 32u;
+  for (size_t pair = 0u; pair < kIndependentPairCount; ++pair) {
+    const uint64_t base = (pair + 1u) * 1'000'000u;
+    requests.push_back(
+        BranchOnlyRelayPairRequest{base, base + 200'000u, base + 400'004u, base + 200'004u});
+    relays.push_back(base + 100'000u);
+    relays.push_back(base + 300'004u);
+  }
+
+  BranchOnlyRelayRouter core_router;
+  ASSERT_TRUE(core_router.offer(100'000u, BranchOnlyRelayProvenance::OwnedReservoir));
+  ASSERT_TRUE(core_router.offer(120'000u, BranchOnlyRelayProvenance::OwnedReservoir));
+  DbiPatchPlacementPlanner core_planner(kArch, 250'008u);
+  const BranchOnlyRelayBatchPlan core_plan =
+      core_router.plan_pairs(core_planner, std::span(requests).first(2u));
+  ASSERT_TRUE(core_plan.complete());
+
+  BranchOnlyRelayRouter router;
+  for (uint64_t relay : relays)
+    ASSERT_TRUE(router.offer(relay, BranchOnlyRelayProvenance::OwnedReservoir));
+  DbiPatchPlacementPlanner planner(kArch, 33'000'000u);
+  DbiPatchPlacementPlanner repeated_planner(kArch, 33'000'000u);
+  std::string error;
+  std::string repeated_error;
+
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
+  const BranchOnlyRelayBatchPlan repeated =
+      router.plan_pairs(repeated_planner, requests, &repeated_error);
+
+  ASSERT_TRUE(plan.complete()) << error;
+  EXPECT_EQ(plan.strategy, BranchOnlyRelayPlanStrategy::ExactBatch);
+  EXPECT_FALSE(plan.search_budget_exhausted);
+  EXPECT_EQ(plan.routes[0].entry_relay_offsets, core_plan.routes[0].entry_relay_offsets);
+  EXPECT_EQ(plan.routes[1].entry_relay_offsets, core_plan.routes[1].entry_relay_offsets);
+  expect_valid_complete_batch(requests, relays, plan);
+  EXPECT_EQ(error, repeated_error);
+  expect_same_batch_plan(plan, repeated);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, BoundedSolverMatchesBruteForceOnSmallRandomBatches) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
-  std::mt19937_64 random(0x5a17c0deu);
+  std::mt19937_64 rng(0x5a17c0deu);
   std::uniform_int_distribution<uint64_t> offset_words(0u, 4'999u);
-  std::uniform_int_distribution<size_t> relay_count(0u, 6u);
-  std::uniform_int_distribution<uint64_t> relay_words(10'000u, 89'999u);
+  std::uniform_int_distribution<size_t> extra_relay_count(0u, 6u);
+  std::uniform_int_distribution<size_t> demand_choice(0u, 3u);
+  size_t feasible_trials = 0u;
 
-  for (size_t trial = 0u; trial < 64u; ++trial) {
+  for (size_t trial = 0u; trial < 96u; ++trial) {
     const std::array requests = {
         BranchOnlyRelayPairRequest{
-            .entry_source = offset_words(random) * sizeof(uint32_t),
-            .entry_target = 180'000u + offset_words(random) * sizeof(uint32_t),
-            .return_source = 320'000u + offset_words(random) * sizeof(uint32_t),
-            .return_target = 140'000u + offset_words(random) * sizeof(uint32_t),
+            .entry_source = offset_words(rng) * sizeof(uint32_t),
+            .entry_target = 180'000u + offset_words(rng) * sizeof(uint32_t),
+            .return_source = 320'000u + offset_words(rng) * sizeof(uint32_t),
+            .return_target = 140'000u + offset_words(rng) * sizeof(uint32_t),
         },
         BranchOnlyRelayPairRequest{
-            .entry_source = 20'000u + offset_words(random) * sizeof(uint32_t),
-            .entry_target = 220'000u + offset_words(random) * sizeof(uint32_t),
-            .return_source = 360'000u + offset_words(random) * sizeof(uint32_t),
-            .return_target = 100'000u + offset_words(random) * sizeof(uint32_t),
+            .entry_source = 20'000u + offset_words(rng) * sizeof(uint32_t),
+            .entry_target = 220'000u + offset_words(rng) * sizeof(uint32_t),
+            .return_source = 340'000u + offset_words(rng) * sizeof(uint32_t),
+            .return_target = 100'000u + offset_words(rng) * sizeof(uint32_t),
         },
     };
     std::set<uint64_t> endpoints;
@@ -612,14 +814,43 @@ TEST(ConSanBranchOnlyRelayRouter, BoundedSolverMatchesBruteForceOnSmallRandomBat
       endpoints.insert(request.return_target);
     }
     std::set<uint64_t> relay_set;
-    const size_t desired_relay_count = relay_count(random);
-    while (relay_set.size() < desired_relay_count) {
-      const uint64_t relay = relay_words(random) * sizeof(uint32_t);
+    const std::array demands = {
+        std::pair{requests[0].entry_source, requests[0].entry_target},
+        std::pair{requests[0].return_source, requests[0].return_target},
+        std::pair{requests[1].entry_source, requests[1].entry_target},
+        std::pair{requests[1].return_source, requests[1].return_target},
+    };
+    if (trial % 2u == 0u) {
+      // Seed half the corpus with a legal independent route for every demand,
+      // then add noise. The other half remains unconstrained so the oracle
+      // exercises both feasible and infeasible results.
+      for (const auto &[source, target] : demands) {
+        const uint64_t lower = std::min(source, target);
+        const uint64_t upper = std::max(source, target);
+        uint64_t relay = ((lower + (upper - lower) / 2u) / sizeof(uint32_t)) * sizeof(uint32_t);
+        while ((endpoints.contains(relay) || relay_set.contains(relay)) &&
+               relay + sizeof(uint32_t) < upper) {
+          relay += sizeof(uint32_t);
+        }
+        ASSERT_GT(relay, lower);
+        ASSERT_LT(relay, upper);
+        relay_set.insert(relay);
+      }
+    }
+    const size_t desired_size = relay_set.size() + (trial % 2u == 0u ? extra_relay_count(rng) % 4u
+                                                                     : extra_relay_count(rng));
+    while (relay_set.size() < desired_size) {
+      const auto [source, target] = demands[demand_choice(rng)];
+      const uint64_t lower_word = std::min(source, target) / sizeof(uint32_t) + 1u;
+      const uint64_t upper_word = std::max(source, target) / sizeof(uint32_t) - 1u;
+      std::uniform_int_distribution<uint64_t> relay_word(lower_word, upper_word);
+      const uint64_t relay = relay_word(rng) * sizeof(uint32_t);
       if (!endpoints.contains(relay))
         relay_set.insert(relay);
     }
     const std::vector<uint64_t> relays(relay_set.begin(), relay_set.end());
     const bool expected = brute_force_fixed_relay_batch(requests, relays);
+    feasible_trials += expected ? 1u : 0u;
 
     BranchOnlyRelayRouter router;
     for (uint64_t relay : relays)
@@ -629,7 +860,11 @@ TEST(ConSanBranchOnlyRelayRouter, BoundedSolverMatchesBruteForceOnSmallRandomBat
     const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
 
     EXPECT_EQ(plan.complete(), expected) << "trial=" << trial << " diagnostic=" << error;
+    if (plan.complete())
+      expect_valid_complete_batch(requests, relays, plan);
   }
+  EXPECT_GE(feasible_trials, 32u);
+  EXPECT_LE(feasible_trials, 80u);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, PlansMultipleDisjointEntryAndReturnPairsAtomically) {

@@ -105,6 +105,7 @@ struct ConSanFlatSelectionTelemetry {
   size_t branch_only_placement_failure_count = 0;
   size_t branch_only_entry_route_failure_count = 0;
   size_t branch_only_return_route_failure_count = 0;
+  size_t branch_only_search_budget_failure_count = 0;
   size_t branch_only_reservation_failure_count = 0;
   size_t original_nop_relay_slot_count = 0;
   size_t selected_anchor_relay_slot_count = 0;

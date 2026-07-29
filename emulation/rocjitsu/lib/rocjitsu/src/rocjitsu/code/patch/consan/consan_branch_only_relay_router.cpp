@@ -14,9 +14,10 @@
 #include <cstring>
 #include <limits>
 #include <map>
-#include <numeric>
 #include <ranges>
 #include <set>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_set>
 
@@ -36,6 +37,22 @@ struct FixedRelayDemand {
   uint64_t target = 0u;
 };
 
+// The base cap bounds heavily contended searches after 100k explored states or
+// feasible alternatives. Per-demand headroom prevents independent batch scale
+// from consuming that cap, while the smaller two-demand allowance keeps total
+// fallback work linear in the number of pairs.
+constexpr size_t kBaseBacktrackWorkBudget = 100'000u;
+constexpr size_t kBacktrackWorkPerDemand = 4'096u;
+constexpr size_t kPairFallbackBacktrackWorkBudget = 8'192u;
+
+[[nodiscard]] size_t exact_batch_work_budget(size_t demand_count) {
+  if (demand_count >
+      (std::numeric_limits<size_t>::max() - kBaseBacktrackWorkBudget) / kBacktrackWorkPerDemand) {
+    return std::numeric_limits<size_t>::max();
+  }
+  return kBaseBacktrackWorkBudget + demand_count * kBacktrackWorkPerDemand;
+}
+
 /// Exact disjoint-path solver for fixed SOPP source/target pairs.
 ///
 /// The relay graph is a one-dimensional DAG: every hop moves monotonically
@@ -45,7 +62,9 @@ struct FixedRelayDemand {
 /// Route enumeration stops as soon as the target is directly reachable;
 /// adding another relay at that point is strictly dominated because removing
 /// it preserves the route while freeing capacity. Relay offsets must be
-/// sorted and unique. A deterministic work budget bounds infeasible searches.
+/// sorted and unique; the only caller derives them from the router's ordered
+/// map. A deterministic budget counts search states and feasible relay
+/// alternatives, leaving terminating polynomial summaries outside the meter.
 class ExactFixedRelayBatchSolver {
 public:
   enum class Result : uint8_t {
@@ -55,9 +74,9 @@ public:
   };
 
   ExactFixedRelayBatchSolver(std::span<const FixedRelayDemand> demands,
-                             std::span<const uint64_t> relays)
+                             std::span<const uint64_t> relays, size_t work_budget)
       : demands_(demands), relays_(relays), available_(relays.size(), true),
-        assigned_(demands.size(), false), routes_(demands.size()) {
+        assigned_(demands.size(), false), routes_(demands.size()), remaining_work_(work_budget) {
     assert(std::ranges::is_sorted(relays_));
     assert(std::ranges::adjacent_find(relays_) == relays_.end());
   }
@@ -105,14 +124,12 @@ private:
   }
 
   [[nodiscard]] std::optional<size_t> minimum_relay_count(const FixedRelayDemand &demand,
-                                                          uint64_t cursor) {
+                                                          uint64_t cursor) const {
     size_t count = 0u;
     while (!can_hop(cursor, demand.target)) {
       std::optional<size_t> best;
       if (is_forward(demand)) {
         for (size_t relay = relays_.size(); relay-- != 0u;) {
-          if (!consume_work())
-            return std::nullopt;
           if (available_[relay] && is_between(demand, cursor, relays_[relay]) &&
               can_hop(cursor, relays_[relay])) {
             best = relay;
@@ -121,8 +138,6 @@ private:
         }
       } else {
         for (size_t relay = 0u; relay < relays_.size(); ++relay) {
-          if (!consume_work())
-            return std::nullopt;
           if (available_[relay] && is_between(demand, cursor, relays_[relay]) &&
               can_hop(cursor, relays_[relay])) {
             best = relay;
@@ -138,14 +153,12 @@ private:
     return count;
   }
 
-  [[nodiscard]] std::optional<DemandSummary> summarize(const FixedRelayDemand &demand) {
+  [[nodiscard]] std::optional<DemandSummary> summarize(const FixedRelayDemand &demand) const {
     const auto minimum = minimum_relay_count(demand, demand.source);
     if (!minimum)
       return std::nullopt;
     DemandSummary summary{.minimum_relay_count = *minimum};
     for (size_t relay = 0u; relay < relays_.size(); ++relay) {
-      if (!consume_work())
-        return std::nullopt;
       if (!available_[relay] || !is_between(demand, demand.source, relays_[relay]))
         continue;
       ++summary.corridor_relays;
@@ -164,7 +177,10 @@ private:
 
     const auto try_relay = [&](size_t relay) {
       if (!available_[relay] || !is_between(demand, cursor, relays_[relay]) ||
-          !can_hop(cursor, relays_[relay]) || !minimum_relay_count(demand, relays_[relay])) {
+          !can_hop(cursor, relays_[relay])) {
+        return false;
+      }
+      if (!consume_work() || !minimum_relay_count(demand, relays_[relay])) {
         return false;
       }
       route.push_back(relay);
@@ -177,14 +193,14 @@ private:
     // comes from exploring every alternative when a later demand is stranded.
     if (is_forward(demand)) {
       for (size_t relay = relays_.size(); relay-- != 0u;) {
-        if (!consume_work())
+        if (work_budget_exhausted_)
           return false;
         if (try_relay(relay))
           return true;
       }
     } else {
       for (size_t relay = 0u; relay < relays_.size(); ++relay) {
-        if (!consume_work())
+        if (work_budget_exhausted_)
           return false;
         if (try_relay(relay))
           return true;
@@ -254,13 +270,17 @@ private:
   std::vector<bool> available_;
   std::vector<bool> assigned_;
   std::vector<std::vector<size_t>> routes_;
-  static constexpr size_t kWorkBudget = 100'000u;
-  size_t remaining_work_ = kWorkBudget;
+  size_t remaining_work_ = 0u;
   bool work_budget_exhausted_ = false;
 };
 
+/// Exact for one validated monotonic demand. On failure the relay set is
+/// restored, so callers may use it transactionally or pass a pair-local copy.
 [[nodiscard]] std::optional<std::vector<uint64_t>>
 plan_greedy_fixed_relay_route(const FixedRelayDemand &demand, std::set<uint64_t> &unused_relays) {
+  assert(demand.source % sizeof(uint32_t) == 0u);
+  assert(demand.target % sizeof(uint32_t) == 0u);
+  assert(demand.source != demand.target);
   const bool forward = demand.target > demand.source;
   uint64_t cursor = demand.source;
   std::vector<uint64_t> route;
@@ -363,6 +383,7 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
                                   std::string *error_out) const {
   BranchOnlyRelayBatchPlan batch;
   batch.routes.resize(requests.size());
+  batch.rejection_reasons.resize(requests.size());
   if (requests.empty())
     return batch;
 
@@ -373,20 +394,12 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
     relay_offsets.push_back(offset);
   }
 
-  std::map<uint64_t, size_t> entry_coordinate_owner;
-  std::map<uint64_t, size_t> return_coordinate_owner;
-  std::set<uint64_t> pair_coordinates;
   std::vector<bool> invalid_entry(requests.size(), false);
   std::vector<bool> invalid_return(requests.size(), false);
   for (size_t request_index = 0u; request_index < requests.size(); ++request_index) {
     const BranchOnlyRelayPairRequest &request = requests[request_index];
     const std::array entry_endpoints = {request.entry_source, request.entry_target};
     const std::array return_endpoints = {request.return_source, request.return_target};
-    for (uint64_t offset : entry_endpoints)
-      pair_coordinates.insert(offset);
-    for (uint64_t offset : return_endpoints)
-      pair_coordinates.insert(offset);
-
     invalid_entry[request_index] = request.entry_target <= request.entry_source ||
                                    std::ranges::any_of(entry_endpoints, [](uint64_t offset) {
                                      return offset % sizeof(uint32_t) != 0u;
@@ -395,6 +408,18 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
                                     std::ranges::any_of(return_endpoints, [](uint64_t offset) {
                                       return offset % sizeof(uint32_t) != 0u;
                                     });
+  }
+
+  // Intrinsically invalid requests are already omitted from the batch. Do not
+  // let their coordinates invalidate or consume capacity from valid requests.
+  std::map<uint64_t, size_t> entry_coordinate_owner;
+  std::map<uint64_t, size_t> return_coordinate_owner;
+  for (size_t request_index = 0u; request_index < requests.size(); ++request_index) {
+    if (invalid_entry[request_index] || invalid_return[request_index])
+      continue;
+    const BranchOnlyRelayPairRequest &request = requests[request_index];
+    const std::array entry_endpoints = {request.entry_source, request.entry_target};
+    const std::array return_endpoints = {request.return_source, request.return_target};
     const auto register_coordinates = [&](std::span<const uint64_t> coordinates,
                                           std::map<uint64_t, size_t> &owners,
                                           std::vector<bool> &invalid) {
@@ -411,20 +436,35 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
   }
 
   std::vector<bool> valid_request(requests.size(), true);
-  bool rejected_entry = false;
-  bool invalid_request = false;
   for (size_t request_index = 0u; request_index < requests.size(); ++request_index) {
     if (!invalid_entry[request_index] && !invalid_return[request_index])
       continue;
     valid_request[request_index] = false;
+    batch.rejection_reasons[request_index] =
+        invalid_entry[request_index] ? BranchOnlyRelayPairRejection::InvalidEntryCoordinates
+                                     : BranchOnlyRelayPairRejection::InvalidReturnCoordinates;
     batch.rejected_pair_indices.push_back(request_index);
-    rejected_entry |= invalid_entry[request_index];
-    invalid_request = true;
+  }
+
+  std::set<uint64_t> pair_coordinates;
+  for (size_t request_index = 0u; request_index < requests.size(); ++request_index) {
+    if (!valid_request[request_index])
+      continue;
+    const BranchOnlyRelayPairRequest &request = requests[request_index];
+    for (uint64_t offset : {request.entry_source, request.entry_target, request.return_source,
+                            request.return_target}) {
+      pair_coordinates.insert(offset);
+      if (!relays_.contains(offset))
+        continue;
+      std::vector<uint64_t> &retired = batch.routes[request_index].retired_relay_offsets;
+      if (std::ranges::find(retired, offset) == retired.end())
+        retired.push_back(offset);
+    }
   }
 
   // Offered storage that aliases a branch source or destination is not relay
-  // capacity. Ignore it while preserving the rest of the batch and the
-  // router's ownership record.
+  // capacity. A successful commit retires it so later plans cannot overwrite a
+  // branch endpoint; a rejected transaction leaves router state untouched.
   std::erase_if(relay_offsets, [&](uint64_t relay) { return pair_coordinates.contains(relay); });
 
   std::vector<FixedRelayDemand> demands;
@@ -455,7 +495,8 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
   ExactFixedRelayBatchSolver::Result exact_result = ExactFixedRelayBatchSolver::Result::Infeasible;
   std::vector<std::vector<uint64_t>> solved_routes;
   if (!demands.empty()) {
-    ExactFixedRelayBatchSolver exact_solver(demands, relay_offsets);
+    ExactFixedRelayBatchSolver exact_solver(demands, relay_offsets,
+                                            exact_batch_work_budget(demands.size()));
     exact_result = exact_solver.solve(solved_routes);
   }
   if (exact_result == ExactFixedRelayBatchSolver::Result::Solved) {
@@ -467,33 +508,68 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
       route = std::move(solved_routes[demand_index]);
     }
   } else if (!demands.empty()) {
+    batch.strategy = BranchOnlyRelayPlanStrategy::ExactPairFallback;
+    batch.search_budget_exhausted =
+        exact_result == ExactFixedRelayBatchSolver::Result::WorkBudgetExhausted;
+
     // A failed or bounded full assignment still returns pair-atomic partial
-    // routes. The linear greedy fallback lets the convergence loop materialize
-    // useful optimistic storage without repeating the exponential search.
+    // routes. Each pair gets a bounded exact solve before the final greedy tier
+    // so entry routing cannot strand an otherwise feasible return route.
     std::set<uint64_t> unused_relays(relay_offsets.begin(), relay_offsets.end());
     for (size_t request_index = 0u; request_index < requests.size(); ++request_index) {
       if (!valid_request[request_index])
         continue;
       const BranchOnlyRelayPairRequest &request = requests[request_index];
-      std::set<uint64_t> pair_relays = unused_relays;
-      const FixedRelayDemand entry_demand{request_index, true, request.entry_source,
-                                          request.entry_target};
-      const FixedRelayDemand return_demand{request_index, false, request.return_source,
-                                           request.return_target};
-      auto entry_route = plan_greedy_fixed_relay_route(entry_demand, pair_relays);
-      if (!entry_route) {
-        rejected_entry = true;
-        batch.rejected_pair_indices.push_back(request_index);
+      const std::array pair_demands = {
+          FixedRelayDemand{request_index, true, request.entry_source, request.entry_target},
+          FixedRelayDemand{request_index, false, request.return_source, request.return_target},
+      };
+      const std::vector<uint64_t> available_relays(unused_relays.begin(), unused_relays.end());
+      std::vector<std::vector<uint64_t>> pair_routes;
+      ExactFixedRelayBatchSolver pair_solver(pair_demands, available_relays,
+                                             kPairFallbackBacktrackWorkBudget);
+      const ExactFixedRelayBatchSolver::Result pair_result = pair_solver.solve(pair_routes);
+      if (pair_result == ExactFixedRelayBatchSolver::Result::Solved) {
+        batch.routes[request_index].entry_relay_offsets = std::move(pair_routes[0]);
+        batch.routes[request_index].return_relay_offsets = std::move(pair_routes[1]);
+        for (uint64_t relay : batch.routes[request_index].entry_relay_offsets)
+          unused_relays.erase(relay);
+        for (uint64_t relay : batch.routes[request_index].return_relay_offsets)
+          unused_relays.erase(relay);
         continue;
       }
-      auto return_route = plan_greedy_fixed_relay_route(return_demand, pair_relays);
-      if (!return_route) {
-        batch.rejected_pair_indices.push_back(request_index);
+
+      if (pair_result == ExactFixedRelayBatchSolver::Result::WorkBudgetExhausted) {
+        batch.strategy = BranchOnlyRelayPlanStrategy::GreedyPairFallback;
+        batch.search_budget_exhausted = true;
+        std::set<uint64_t> pair_relays = unused_relays;
+        auto entry_route = plan_greedy_fixed_relay_route(pair_demands[0], pair_relays);
+        auto return_route = entry_route
+                                ? plan_greedy_fixed_relay_route(pair_demands[1], pair_relays)
+                                : std::nullopt;
+        if (entry_route && return_route) {
+          batch.routes[request_index].entry_relay_offsets = std::move(*entry_route);
+          batch.routes[request_index].return_relay_offsets = std::move(*return_route);
+          unused_relays = std::move(pair_relays);
+          continue;
+        }
+      }
+
+      batch.rejected_pair_indices.push_back(request_index);
+      if (exact_result == ExactFixedRelayBatchSolver::Result::WorkBudgetExhausted ||
+          pair_result == ExactFixedRelayBatchSolver::Result::WorkBudgetExhausted) {
+        batch.rejection_reasons[request_index] = BranchOnlyRelayPairRejection::SearchBudget;
         continue;
       }
-      batch.routes[request_index].entry_relay_offsets = std::move(*entry_route);
-      batch.routes[request_index].return_relay_offsets = std::move(*return_route);
-      unused_relays = std::move(pair_relays);
+
+      // A single monotonic demand is feasible exactly when farthest-progress
+      // greedy routing succeeds. Use that fact only to classify the failed
+      // pair-exact solve.
+      std::set<uint64_t> classification_relays = unused_relays;
+      batch.rejection_reasons[request_index] =
+          plan_greedy_fixed_relay_route(pair_demands[0], classification_relays)
+              ? BranchOnlyRelayPairRejection::ReturnUnreachable
+              : BranchOnlyRelayPairRejection::EntryUnreachable;
     }
   }
 
@@ -501,19 +577,62 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
     std::ranges::sort(batch.rejected_pair_indices);
     batch.rejected_pair_indices.erase(std::ranges::unique(batch.rejected_pair_indices).begin(),
                                       batch.rejected_pair_indices.end());
-    batch.failure = rejected_entry ? BranchOnlyRelayPlanFailure::EntryRoute
-                                   : BranchOnlyRelayPlanFailure::ReturnRoute;
-    if (exact_result == ExactFixedRelayBatchSolver::Result::WorkBudgetExhausted) {
-      report(error_out,
-             "branch-only router exact search budget exhausted; returned a partial route plan");
-    } else if (invalid_request) {
-      report(error_out,
-             "branch-only router requires distinct dword-aligned monotonic pair coordinates");
+
+    std::array<size_t, 6> rejection_counts{};
+    for (BranchOnlyRelayPairRejection reason : batch.rejection_reasons)
+      ++rejection_counts[static_cast<size_t>(reason)];
+    const size_t invalid_entry_count = rejection_counts[static_cast<size_t>(
+        BranchOnlyRelayPairRejection::InvalidEntryCoordinates)];
+    const size_t invalid_return_count = rejection_counts[static_cast<size_t>(
+        BranchOnlyRelayPairRejection::InvalidReturnCoordinates)];
+    const size_t entry_unreachable_count =
+        rejection_counts[static_cast<size_t>(BranchOnlyRelayPairRejection::EntryUnreachable)];
+    const size_t return_unreachable_count =
+        rejection_counts[static_cast<size_t>(BranchOnlyRelayPairRejection::ReturnUnreachable)];
+    const size_t search_budget_count =
+        rejection_counts[static_cast<size_t>(BranchOnlyRelayPairRejection::SearchBudget)];
+
+    if (search_budget_count != 0u) {
+      batch.failure = BranchOnlyRelayPlanFailure::SearchBudget;
+    } else if (invalid_entry_count != 0u || entry_unreachable_count != 0u) {
+      batch.failure = BranchOnlyRelayPlanFailure::EntryRoute;
     } else {
-      report(error_out, batch.failure == BranchOnlyRelayPlanFailure::EntryRoute
-                            ? "branch-only router could not reach every appended entry"
-                            : "branch-only router could not reach every original continuation");
+      batch.failure = BranchOnlyRelayPlanFailure::ReturnRoute;
     }
+
+    const auto pair_count_phrase = [](size_t count, std::string_view description) {
+      return std::to_string(count) + " " + std::string(description) +
+             (count == 1u ? " pair" : " pairs");
+    };
+    std::vector<std::string> reasons;
+    if (invalid_entry_count != 0u)
+      reasons.push_back(pair_count_phrase(
+          invalid_entry_count,
+          "invalid entry-coordinate (coordinates must be distinct, dword-aligned, and monotonic)"));
+    if (invalid_return_count != 0u)
+      reasons.push_back(pair_count_phrase(invalid_return_count,
+                                          "invalid return-coordinate (coordinates must be "
+                                          "distinct, dword-aligned, and monotonic)"));
+    if (entry_unreachable_count != 0u)
+      reasons.push_back(
+          pair_count_phrase(entry_unreachable_count, "unreachable appended entry route"));
+    if (return_unreachable_count != 0u)
+      reasons.push_back(
+          pair_count_phrase(return_unreachable_count, "unreachable original continuation route"));
+    if (search_budget_count != 0u)
+      reasons.push_back(pair_count_phrase(search_budget_count, "search-budget-limited"));
+    if (batch.search_budget_exhausted)
+      reasons.emplace_back("exact search budget exhausted");
+
+    std::string diagnostic = "branch-only router rejected " +
+                             std::to_string(batch.rejected_pair_indices.size()) +
+                             (batch.rejected_pair_indices.size() == 1u ? " pair: " : " pairs: ");
+    for (size_t reason = 0u; reason < reasons.size(); ++reason) {
+      if (reason != 0u)
+        diagnostic += "; ";
+      diagnostic += reasons[reason];
+    }
+    report(error_out, std::move(diagnostic));
   }
 
   for (BranchOnlyRelayRoute &route : batch.routes) {
@@ -567,7 +686,19 @@ bool BranchOnlyRelayRouter::commit(std::span<const BranchOnlyRelayRoute> routes,
       }
     }
   }
+  std::unordered_set<uint64_t> retired_offsets;
+  for (const BranchOnlyRelayRoute &route : routes) {
+    for (uint64_t offset : route.retired_relay_offsets) {
+      if (!relays_.contains(offset) || claimed_offsets.contains(offset)) {
+        report(error_out, "branch-only router endpoint retirement changed before commit");
+        return false;
+      }
+      retired_offsets.insert(offset);
+    }
+  }
   for (uint64_t offset : claimed_offsets)
+    relays_.erase(offset);
+  for (uint64_t offset : retired_offsets)
     relays_.erase(offset);
   return true;
 }
