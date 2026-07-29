@@ -67,12 +67,6 @@ if [ -e "${DIR}/build/CMakeCache.txt" ]; then
     echo "ENABLE_ESMI_LIB: [$ENABLE_ESMI_LIB]"
 fi
 
-if [ -d "$DIR/../cuid" ]; then
-    CUID_DIR=$(cd "$DIR/../cuid" && pwd -P)
-else
-    CUID_DIR=""
-fi
-
 DOCKER_TTY_FLAGS=(-i)
 if [ -t 0 ]; then DOCKER_TTY_FLAGS=(-t -i); fi
 
