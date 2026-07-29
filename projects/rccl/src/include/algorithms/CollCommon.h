@@ -168,6 +168,15 @@ inline uint32_t divRoundUp(size_t a, size_t b) {
   return y;
 }
 
+// True if per-rank data fits in one CUDA block (512 threads, 16-byte loads per thread).
+// Same threshold as getGridAndBlockDims(). DDA AlltoAll uses it to choose in-kernel
+// staging copy for small messages vs pre-kernel cudaMemcpyAsync for larger ones.
+inline bool ddaAlltoAllSingleBlockGrid(size_t count, int typeSize) {
+  constexpr uint32_t kThreadsPerBlock = 512;
+  const uint32_t elementsPerThread = 16 / typeSize;
+  return count < elementsPerThread * kThreadsPerBlock;
+}
+
 constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
   const auto uNumThreads = static_cast<uint64_t>(numThreads);
   const auto uThreadsPerBlock = static_cast<uint64_t>(threadsPerBlock);
@@ -190,7 +199,7 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
 
   dim3 threads(0, 1, 1);
   dim3 blocks(0, 1, 1);
-  if (count < elementsPerThread * kThreadsPerBlock) {
+  if (ddaAlltoAllSingleBlockGrid(count, typeSize)) {
     threads.x = divRoundUp(count, elementsPerWarp) * kThreadsPerWarp;
     blocks.x = 1;
   } else {

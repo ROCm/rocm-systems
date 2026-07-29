@@ -8,6 +8,7 @@
 
 #include <cstring>
 
+#include "algorithms/CollCommon.h"
 #include "archinfo.h"
 #include "collectives.h"
 #include "comm.h"
@@ -58,6 +59,12 @@ inline bool testRcclDdaAlltoAllThresholdEnabled(
       kDdaAlltoAllGfx950ThresholdBytes);
 }
 
+// Mirrors dda_alltoall_{ipc,fabric}.cu: in-kernel staging copy on single-block launches only.
+inline bool testAlltoAllUsesInKernelStagingCopy(size_t countPerRank, ncclDataType_t datatype) {
+  const size_t bytesPerRank = countPerRank * static_cast<size_t>(ncclTypeSize(datatype));
+  return meta::comms::ddaAlltoAllSingleBlockGrid(bytesPerRank, /* typeSize= */ 1);
+}
+
 inline size_t testAlltoAllDdaIpcStagingBytes(size_t count, int nRanks, size_t typeSize) {
   return count * static_cast<size_t>(nRanks) * typeSize;
 }
@@ -65,14 +72,16 @@ inline size_t testAlltoAllDdaIpcStagingBytes(size_t count, int nRanks, size_t ty
 struct DdaAlltoAllMockComm
 {
     ncclComm comm{};
+    char archNameBuf[64]{};
 
     DdaAlltoAllMockComm() { reset("gfx950:sramecc+:xnack-"); }
 
     void reset(const char* archName)
     {
         std::memset(&comm, 0, sizeof(comm));
-        std::strncpy(comm.archName, archName, sizeof(comm.archName) - 1);
-        comm.archName[sizeof(comm.archName) - 1] = '\0';
+        std::strncpy(archNameBuf, archName, sizeof(archNameBuf) - 1);
+        archNameBuf[sizeof(archNameBuf) - 1] = '\0';
+        comm.archName = archNameBuf;
         comm.nNodes = 1;
         comm.nRanks = nccl_dda_detail::kDdaNranks;
         comm.symmetricSupport = 0;
@@ -85,5 +94,11 @@ struct DdaAlltoAllMockComm
 constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
     kDdaAlltoAllGfx950ThresholdBytes /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
+
+// 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).
+constexpr size_t kAlltoAllFloat32CountAt4KbPerRank = 1024;
+
+// 8 KiB/rank float32: multi-block grid (pre-kernel memcpy path).
+constexpr size_t kAlltoAllFloat32CountAt8KbPerRank = 2048;
 
 } // namespace RcclUnitTesting

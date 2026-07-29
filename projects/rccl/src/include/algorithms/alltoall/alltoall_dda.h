@@ -15,14 +15,12 @@
 
 namespace meta::comms {
 
-template <typename T, int NRANKS, bool hasAcc>
+template <typename T, int NRANKS, bool hasAcc, bool kStagingCopyInKernel = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllToAllIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                  const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
-
   // use uint4 to do 16-byte loads to maximize memory efficiency
   // We assume that count % countPerThread == 0. This assumption is enforced
   // before kernel launch
@@ -34,6 +32,21 @@ __launch_bounds__(512)
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = countPerRank;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
+
+  if constexpr (kStagingCopyInKernel) {
+    // Small messages: fuse sendbuff -> scratch copy into the kernel to avoid
+    // cudaMemcpyAsync launch overhead on ROCm.
+    const size_t copyCount = count * NRANKS;
+    copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
+    barrier.syncOnSameBlockIdx<
+        true /* hasPreviousMemAccess */,
+        true /* hasSubsequentMemAccess */>();
+  } else {
+    // Large messages: host enqueues cudaMemcpyAsync into ddaScratch before launch.
+    barrier.syncOnSameBlockIdx<
+        false /* hasPreviousMemAccess */,
+        true /* hasSubsequentMemAccess */>();
+  }
 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
 #pragma unroll NRANKS

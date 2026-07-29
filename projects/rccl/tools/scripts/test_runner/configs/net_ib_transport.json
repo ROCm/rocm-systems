@@ -61,6 +61,50 @@
       }
     },
 
+    "net_ib_gdr_flush": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlush_CuMemDmaBuf_NoAsyncFatal",
+          "description": "Whitebox ncclIbIflush over a dma-buf (cuMem/UBR) RO=0 flush scratchpad - the exact path that used to raise the mlx5 'invalid request local work queue error'. The read-only flush (RDMA_READ fence, WRITE removed) must complete cleanly with correct data.",
+          "test_filter": "GdrFlushTest.CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal"
+        },
+        {
+          "name": "GdrFlush_Peermem_NoAsyncFatal",
+          "description": "Whitebox ncclIbIflush over a legacy peermem (ibv_reg_mr) RO=0 scratchpad. Confirms the fix keeps the peermem read path working (never regressed).",
+          "test_filter": "GdrFlushTest.Peermem_GpuRecvFlush_NoAsyncFatal",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "0"
+          }
+        },
+        {
+          "name": "GdrFlush_FeatureDisabled_Fallback",
+          "description": "Whitebox ncclIbIflush fallback branch: with the dedicated RO=0 scratchpad disabled it reads the received buffer directly (upstream-NCCL behaviour).",
+          "test_filter": "GdrFlushTest.FeatureDisabled_FallbackReadRecvBuffer",
+          "env_variables": {
+            "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+          }
+        },
+        {
+          "name": "GdrFlush_RepeatedFlushBurst",
+          "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
+          "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        },
+        {
+          "name": "GdrFlush_ForcedScratchpadWrite_ReproducesFault",
+          "description": "Regression guard (ENABLE_FAULT_INJECTION debug builds only): forces the removed scratchpad RDMA_WRITE back on a dma-buf buffer and asserts the flush QP faults, proving the WRITE was the culprit. Absent/skipped when fault injection is not compiled in.",
+          "test_filter": "GdrFlushTest.ForcedScratchpadWrite_ReproducesFault"
+        }
+      ]
+    },
+
     "net_ib_initialization": {
       "extends": "net_ib_base",
       "timeout": 60,
@@ -916,6 +960,12 @@
       "name": "NET IB - Initialization",
       "description": "InfiniBand plugin initialization and device enumeration",
       "config": "net_ib_initialization",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - GDR Flush (Whitebox ncclIbIflush)",
+      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard",
+      "config": "net_ib_gdr_flush",
       "enabled": true
     },
     {

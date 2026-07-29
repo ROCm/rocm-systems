@@ -20,15 +20,13 @@
 
 namespace meta::comms {
 
-template <typename T, int NRANKS_CT>
+template <typename T, int NRANKS_CT, bool kStagingCopyInKernel = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__
   void ddaAllToAllFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                          const T* __restrict__ sendbuff, int selfRank, int nRanks, FabricGpuBarrier barrier) {
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
-
   // use uint4 to do 16-byte loads to maximize memory efficiency. We assume
   // that count % countPerThread == 0, enforced before kernel launch.
   const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
@@ -42,6 +40,18 @@ __launch_bounds__(512)
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = countPerRank;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
+
+  if constexpr (kStagingCopyInKernel) {
+    const size_t copyCount = count * nRanksEff;
+    copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
+    barrier.syncOnSameBlockIdx<
+        true /* hasPreviousMemAccess */,
+        true /* hasSubsequentMemAccess */>();
+  } else {
+    barrier.syncOnSameBlockIdx<
+        false /* hasPreviousMemAccess */,
+        true /* hasSubsequentMemAccess */>();
+  }
 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
 #pragma unroll kUnroll

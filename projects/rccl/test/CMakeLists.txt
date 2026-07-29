@@ -110,7 +110,7 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
     ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
-    ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h, net_ib/net_ib_flush_fault_inject.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
   )
@@ -344,6 +344,7 @@ if(BUILD_TESTS)
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
       EnqueueTests.cpp
+      LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
       NetSocketTests.cpp
@@ -410,6 +411,7 @@ if(BUILD_TESTS)
       transport/NetMPITests.cpp
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
+      transport/NetIbMPI/GdrFlushTests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp

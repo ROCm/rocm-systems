@@ -61,6 +61,14 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Set to false to skip building librccl.so entirely (e.g. perf configs whose binaries come from an external build). Defaults to true."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable note about this build configuration (not interpreted by the runner)"
+        },
         "install_flags": {
           "type": "array",
           "items": { "type": "string" },
