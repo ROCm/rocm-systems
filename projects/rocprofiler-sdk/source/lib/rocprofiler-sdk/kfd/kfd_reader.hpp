@@ -50,11 +50,17 @@ start_kfd_reader();
 void
 stop_kfd_reader();
 
-// Ensure a dispatch-log session exists for the given gpu_id. Called from the
-// queue-creation path (queue_controller.cpp), which guarantees the SDK's HSA
-// agent cache is populated and the device is acquired -- the preconditions the
-// session's HSA allocation needs. Idempotent: sets up at most one session per
-// gpu_id. No-op if KFD dispatch-log is unavailable or the GPU is unsupported.
+// Ensure the dispatch-log session exists, set up for the given gpu_id. Called
+// from the queue-creation path (queue_controller.cpp), which guarantees the SDK's
+// HSA agent cache is populated and the device is acquired -- the preconditions the
+// session's HSA allocation needs. No-op if KFD dispatch-log is unavailable or the
+// GPU is unsupported.
+//
+// Scope (current): a SINGLE process-wide session, established for the first
+// supported GPU that calls this. Once that session is up, subsequent calls
+// (including for a different gpu_id) are a no-op -- a second GPU does not get its
+// own session and its dispatches fall back to HSA. Multi-GPU sessions are a
+// documented follow-up, not implemented here.
 void
 ensure_reader_session(uint32_t gpu_id);
 }  // namespace kfd

@@ -31,10 +31,13 @@
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 
 #include <hsa/amd_hsa_queue.h>
+#include <hsa/amd_hsa_signal.h>
 
 #include <rocprofiler-sdk/fwd.h>
+#include <unistd.h>
 #include <algorithm>
 #include <memory>
+#include <optional>
 
 namespace rocprofiler
 {
@@ -762,6 +765,36 @@ queue_controller_init(RocAttachDispatchTable* attach_table)
     *(get_attach_table()) = attach_table;
 
     if(enable_queue_intercept()) queue_init();
+}
+
+std::optional<kfd::queue_doorbell_entry>
+capture_doorbell_key(rocprofiler_queue_id_t queue_id, const hsa_queue_t* intercept_queue)
+{
+    // Extract the queue's hardware doorbell pointer from its intercept queue's
+    // doorbell signal (HSA-internal amd_signal_t layout; same pattern as
+    // hsa/async_copy.cpp). nullopt if unavailable -> caller falls back to HSA.
+    uint64_t hwptr = 0;
+    if(intercept_queue != nullptr && intercept_queue->doorbell_signal.handle != 0)
+    {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        const auto* sig =
+            reinterpret_cast<const amd_signal_t*>(intercept_queue->doorbell_signal.handle);
+        hwptr = reinterpret_cast<uint64_t>(sig->hardware_doorbell_ptr);
+    }
+    if(hwptr == 0) return std::nullopt;
+
+    // Page size is constant for the process; cache it rather than syscall on every
+    // dispatch.
+    static const uint64_t page_size = []() {
+        long ps = sysconf(_SC_PAGESIZE);
+        return (ps > 0) ? static_cast<uint64_t>(ps) : 4096ull;
+    }();
+
+    // Page-relative doorbell slot; must match what the reader derives from each
+    // firmware record (kfd::doorbell_off_to_page_slot). bind_and_resolve binds once
+    // per queue (write lock on the first dispatch), then is a plain read lock.
+    const uint32_t slot = kfd::doorbell_ptr_to_page_slot(hwptr, page_size);
+    return kfd::doorbell_map().bind_and_resolve(queue_id, slot);
 }
 
 }  // namespace hsa

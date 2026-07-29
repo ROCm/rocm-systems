@@ -51,11 +51,8 @@
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
-
-#include <unistd.h>
 
 #include <atomic>
 #include <memory>
@@ -682,33 +679,13 @@ WriteInterceptor(const void* packets,
                 {
                     kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id));
 
-                    // Compute the page-relative doorbell slot directly from the
-                    // queue's hardware doorbell pointer (matches what the reader
-                    // derives from each firmware record) and bind it. No empirical
-                    // first-record binding is needed.
-                    uint64_t    _hwptr = 0;
-                    const auto* _iq    = queue.intercept_queue();
-                    if(_iq && _iq->doorbell_signal.handle)
+                    // Resolve + bind the queue's page-relative doorbell slot (shared
+                    // helper with the inline path so the slot math cannot drift).
+                    // nullopt when the doorbell pointer is unavailable -> HSA fallback.
+                    if(auto _db = capture_doorbell_key(queue.get_id(), queue.intercept_queue()))
                     {
-                        const auto* _sig =
-                            reinterpret_cast<const amd_signal_t*>(_iq->doorbell_signal.handle);
-                        _hwptr = reinterpret_cast<uint64_t>(_sig->hardware_doorbell_ptr);
-                    }
-                    if(_hwptr != 0)
-                    {
-                        // Page size is constant for the process; cache it rather
-                        // than syscall on every dispatch.
-                        static const uint64_t _page_size = []() {
-                            long ps = sysconf(_SC_PAGESIZE);
-                            return (ps > 0) ? static_cast<uint64_t>(ps) : 4096ull;
-                        }();
-                        const uint32_t _slot = kfd::doorbell_ptr_to_page_slot(_hwptr, _page_size);
-
-                        // bind_and_resolve binds once per queue (write lock on the
-                        // first dispatch), then is a plain read lock thereafter.
-                        auto _db = kfd::doorbell_map().bind_and_resolve(queue.get_id(), _slot);
-                        _packet_data.kfd_doorbell_off          = _db.doorbell_off;
-                        _packet_data.kfd_generation            = _db.generation;
+                        _packet_data.kfd_doorbell_off          = _db->doorbell_off;
+                        _packet_data.kfd_generation            = _db->generation;
                         _packet_data.kfd_correlation_key_valid = true;
                     }
                 }

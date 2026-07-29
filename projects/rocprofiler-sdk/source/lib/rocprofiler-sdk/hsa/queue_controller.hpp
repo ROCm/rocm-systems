@@ -24,6 +24,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/profile_serializer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
 
 #include "lib/rocprofiler-sdk-attach/table.h"
 
@@ -149,5 +150,17 @@ queue_controller_init(RocAttachDispatchTable* table);
 
 void
 profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);
+
+// Resolve a queue's page-relative doorbell slot from its intercept queue's
+// hardware doorbell pointer and bind it (once per queue) in the KFD DoorbellMap,
+// returning the doorbell_off + generation to snapshot into packet_data_t at
+// enqueue. Shared by both capture paths (queue.cpp batch + queue_interposition.cpp
+// inline) so the slot math cannot drift between them -- capture and the reader
+// MUST compute the identical slot for correlation to work. nullopt when the
+// doorbell pointer is unavailable (dispatch then falls back to HSA). Assumes the
+// KFD dispatch-log availability + per-GPU support have already been checked and
+// the reader session ensured by the caller.
+std::optional<kfd::queue_doorbell_entry>
+capture_doorbell_key(rocprofiler_queue_id_t queue_id, const hsa_queue_t* intercept_queue);
 }  // namespace hsa
 }  // namespace rocprofiler
