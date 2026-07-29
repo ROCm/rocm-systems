@@ -325,12 +325,14 @@ static ncclResult_t ncclGinPluginFinalize(struct ncclComm* comm, int pluginIndex
 }
 
 ncclResult_t ncclGinInit(struct ncclComm* comm) {
+#if !defined(__HIP_PLATFORM_AMD__)
   if (comm->compCap < 70) {
     /* GIN only supported for Volta and later */
     INFO(NCCL_INIT, "Compute Capability (%d) is not sufficient to enable GIN.  Require Volta (70) or newer.",
          comm->compCap);
     return ncclSuccess;
   }
+#endif
 
   bool initialized = false;
   std::call_once(initPluginLibsOnceFlag, initPluginLibsOnceFunc);
