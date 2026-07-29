@@ -90,12 +90,10 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    ARGS ${PYTEST_ARGS} -k
-         "not test_granular and not test_ompt_all_form_is_complete and not test_sys_trace"
+    ARGS ${PYTEST_ARGS} -k "not test_granular and not test_ompt_all_form_is_complete"
          --rocpd-input ${ompt-tracing-output-dir}/out_results.db
-    DISCOVERY_ARGS
-        ${PYTEST_ARGS} -k
-        "not test_granular and not test_ompt_all_form_is_complete and not test_sys_trace"
+    DISCOVERY_ARGS ${PYTEST_ARGS} -k
+                   "not test_granular and not test_ompt_all_form_is_complete"
     TIMEOUT 45
     LABELS "integration-tests;openmp-target"
     FIXTURES_REQUIRED rocprofv3-test-ompt-tracing
@@ -224,35 +222,3 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;openmp-target"
     FIXTURES_REQUIRED rocprofv3-test-ompt-all
     DISABLED "${IS_DISABLED}")
-
-# --sys-trace implicit OMPT: profiling with --sys-trace (no explicit --ompt-trace) and a
-# non-rocpd --output-format must still implicitly enable OMPT and auto-add the rocpd
-# output so OMPT records are captured. Uses --output-format csv to exercise the auto-add
-# path. Runs on the host workload so it is not gated on target-offload support.
-set(ompt-sys-trace-output-dir ${CMAKE_CURRENT_BINARY_DIR}/openmp-host-sys-trace)
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-ompt-sys-trace
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace -d
-        ${ompt-sys-trace-output-dir} -o out --output-format csv --log-level env --
-        $<IF:$<TARGET_EXISTS:openmp-host>,$<TARGET_FILE:openmp-host>,openmp-host>
-    DEPENDS openmp-host
-    TIMEOUT 100
-    LABELS "integration-tests;openmp-host"
-    ENVIRONMENT "${ompt-host-env}"
-    PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-ompt-sys-trace
-    DISABLED "${IS_HOST_DISABLED}")
-
-rocprofiler_add_integration_validate_test(
-    rocprofv3-test-ompt-sys-trace
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    ARGS ${PYTEST_ARGS} -k test_sys_trace_implicit_ompt_in_rocpd --rocpd-input
-         ${ompt-sys-trace-output-dir}/out_results.db
-    DISCOVERY_ARGS ${PYTEST_ARGS} -k test_sys_trace_implicit_ompt_in_rocpd
-    TIMEOUT 45
-    LABELS "integration-tests;openmp-host"
-    FIXTURES_REQUIRED rocprofv3-test-ompt-sys-trace
-    DISABLED "${IS_HOST_DISABLED}")

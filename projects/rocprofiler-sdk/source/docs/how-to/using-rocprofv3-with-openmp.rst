@@ -96,7 +96,7 @@ The preceding files contain detailed profiling information about GPU kernel exec
 Tracing OpenMP runtime events with ``--ompt-trace``
 ====================================================
 
-The flags shown above capture HIP / HSA / kernel-dispatch / memory activity but not OpenMP-level structure. To trace OpenMP itself, pass ``--ompt-trace`` (or ``ROCPROF_OMPT_TRACE=1``; it is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``). This is a host-side facility: it records CPU-side OpenMP execution (thread lifecycle, parallel regions, work-sharing, tasks, sync regions, mutexes, dispatch) even for applications that never offload, plus host-side target-offload events (``target``, ``target_data_op``, ``target_submit``, ``device_initialize`` / ``device_load`` / ``device_finalize``) for offloading applications.
+The flags shown above capture HIP / HSA / kernel-dispatch / memory activity but not OpenMP-level structure. To trace OpenMP itself, pass ``--ompt-trace`` (or ``ROCPROF_OMPT_TRACE=1``); it is not enabled by ``--sys-trace`` or ``--runtime-trace``. This is a host-side facility: it records CPU-side OpenMP execution (thread lifecycle, parallel regions, work-sharing, tasks, sync regions, mutexes, dispatch) even for applications that never offload, plus host-side target-offload events (``target``, ``target_data_op``, ``target_submit``, ``device_initialize`` / ``device_load`` / ``device_finalize``) for offloading applications.
 
 .. code-block:: bash
 

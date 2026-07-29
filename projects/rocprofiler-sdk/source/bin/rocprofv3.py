@@ -1679,7 +1679,6 @@ def run(app_args, args, **kwargs):
             "memory_allocation_trace",
             "scratch_memory_trace",
             "rccl_trace",
-            "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
             "rocshmem_trace",
@@ -1697,7 +1696,6 @@ def run(app_args, args, **kwargs):
             "memory_allocation_trace",
             "scratch_memory_trace",
             "rccl_trace",
-            "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
             "rocshmem_trace",
@@ -1707,10 +1705,9 @@ def run(app_args, args, **kwargs):
 
     # OMPT is a rocpd-only trace: it is written to the rocpd database and exported to
     # other formats via `rocpd convert`; the direct csv/json/pftrace/otf2 emitters do
-    # not contain OMPT records. This runs after the --sys-trace/--runtime-trace folds
-    # have resolved args.ompt_trace, which honors an explicit --ompt-trace=false. If
-    # OMPT tracing is effectively enabled but rocpd was not requested, add it so OMPT
-    # data is not silently dropped, and warn the user.
+    # not contain OMPT records. OMPT is intentionally not folded into --sys-trace or
+    # --runtime-trace, so args.ompt_trace is truthy only for an explicit --ompt-trace;
+    # if rocpd was not requested, add it so OMPT data is not silently dropped, and warn.
     if bool(getattr(args, "ompt_trace", None)) and "rocpd" not in args.output_format:
         warning(
             "--ompt-trace: OMPT data is only emitted to the 'rocpd' output format; "

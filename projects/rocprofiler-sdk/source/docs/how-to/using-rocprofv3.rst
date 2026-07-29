@@ -628,7 +628,7 @@ OMPT trace
 
     rocprofv3 --ompt-trace --output-format rocpd -- <application_path>
 
-OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is used with another ``--output-format``, ``rocprofv3`` warns and adds ``rocpd`` automatically; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` is also enabled implicitly by ``--sys-trace`` and ``--runtime-trace``.
+OMPT is a rocpd-only trace: records are written to the rocpd database (the default output format) and are not emitted by the direct CSV / JSON / Perfetto / OTF2 generators. If ``--ompt-trace`` is used with another ``--output-format``, ``rocprofv3`` warns and adds ``rocpd`` automatically; use ``rocpd convert`` to export OMPT to CSV / Perfetto / OTF2. ``--ompt-trace`` must be requested explicitly: like ``--kokkos-trace``, it traces a programming model rather than a ROCm runtime API, so it is not enabled by ``--sys-trace`` or ``--runtime-trace``.
 
 .. note::
 
