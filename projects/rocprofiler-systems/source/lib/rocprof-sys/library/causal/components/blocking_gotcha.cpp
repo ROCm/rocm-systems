@@ -140,8 +140,7 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
     // hook remains installed so this wrapper is still called, but we make
     // it a zero-overhead passthrough to unblock any threads that would
     // otherwise be stuck in block_backtrace_samples() or postblock().
-    if(s_shutdown.load(std::memory_order_relaxed))
-        return (*_func)(_args...);
+    if(s_shutdown.load(std::memory_order_relaxed)) return (*_func)(_args...);
 
     const std::int64_t _delay_value =
         causal::delay::get_global().load(std::memory_order_relaxed);
@@ -171,12 +170,12 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*_func)(const sigset_t*, int*),
-                            const sigset_t* _set_v, int* _sig) const noexcept
+blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
+                            int (*_func)(const sigset_t*, int*), const sigset_t* _set_v,
+                            int* _sig) const noexcept
 {
     // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
-    if(s_shutdown.load(std::memory_order_relaxed))
-        return (*_func)(_set_v, _sig);
+    if(s_shutdown.load(std::memory_order_relaxed)) return (*_func)(_set_v, _sig);
 
     auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
 
