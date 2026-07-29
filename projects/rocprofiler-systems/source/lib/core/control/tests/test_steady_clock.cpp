@@ -53,14 +53,14 @@ TEST(steady_clock_test, window_started_on_a_stopped_clock_still_runs)
 
     constexpr auto long_delay = clock_duration{ 10'000'000'000LL };  // 10 s
     {
-        time_window_t first{ s_ptr, clk, time_window_t::config{ long_delay, {} } };
+        time_window_t first{ s_ptr, clk, { long_delay, {} } };
         first.start();
         first.stop();
     }
 
     // No duration: the active state is terminal, so the poll cannot miss it.
     constexpr auto delay = clock_duration{ 20'000'000 };  // 20 ms
-    time_window_t  second{ s_ptr, clk, time_window_t::config{ delay, {} } };
+    time_window_t  second{ s_ptr, clk, { delay, {} } };
 
     ASSERT_FALSE(s.is_active()) << "a pending delay should leave the session paused";
 
