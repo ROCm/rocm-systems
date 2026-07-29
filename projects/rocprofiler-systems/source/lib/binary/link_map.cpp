@@ -3,15 +3,10 @@
 
 #include "link_map.hpp"
 #include "common/path.hpp"
-#include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/timemory.hpp"
-
-#include <timemory/utility/filepath.hpp>
 
 #include "logger/debug.hpp"
 
-#include <cstdint>
 #include <dlfcn.h>
 #include <link.h>
 #include <set>

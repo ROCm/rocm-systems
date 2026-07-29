@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <gnu/lib-names.h>
 #include <iostream>
 #include <regex>

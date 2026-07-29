@@ -890,7 +890,6 @@ error_func_fake(error_level_t level, int num, const char* const* params)
 #include "internal_libs.hpp"
 
 #include <timemory/components/timing/wall_clock.hpp>
-#include <timemory/utility/filepath.hpp>
 
 //======================================================================================//
 //
