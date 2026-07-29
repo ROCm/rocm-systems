@@ -65,6 +65,19 @@ endif ()
 if ( "${CMAKE_BUILD_TYPE}" STREQUAL Debug )
   set ( HSA_COMMON_CXX_FLAGS ${HSA_COMMON_CXX_FLAGS} "-O0" "-ggdb")
 endif ()
+
+## Security hardening. ROCmHardening.cmake lives at the rocr-runtime root so
+## that libhsakmt can share it; the EXISTS guard keeps hsa-runtime configurable
+## on its own, where that root is not present.
+set ( ROCR_HARDENING_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../cmake_modules" )
+if ( EXISTS "${ROCR_HARDENING_MODULE_DIR}/ROCmHardening.cmake" )
+  list ( APPEND CMAKE_MODULE_PATH "${ROCR_HARDENING_MODULE_DIR}" )
+  include ( ROCmHardening )
+  rocm_hardening_probe()
+  set ( HSA_COMMON_CXX_FLAGS ${HSA_COMMON_CXX_FLAGS} ${ROCM_HARDENING_CXX_FLAGS} )
+endif ()
+unset ( ROCR_HARDENING_MODULE_DIR )
+
 set( HSA_COMMON_DEFS "__STDC_LIMIT_MACROS")
 set( HSA_COMMON_DEFS ${HSA_COMMON_DEFS} "__STDC_CONSTANT_MACROS")
 set( HSA_COMMON_DEFS ${HSA_COMMON_DEFS} "__STDC_FORMAT_MACROS")

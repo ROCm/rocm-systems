@@ -55,6 +55,17 @@ else()
   include ( utils )
   include ( GNUInstallDirs )
 
+  ## Security hardening. ROCmHardening.cmake lives at the rocr-runtime root so
+  ## that hsa-runtime can share it; the EXISTS guard keeps libhsakmt
+  ## configurable on its own, where that root is not present.
+  set ( HSAKMT_HARDENING_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}/../cmake_modules" )
+  if ( EXISTS "${HSAKMT_HARDENING_MODULE_DIR}/ROCmHardening.cmake" )
+    list ( APPEND CMAKE_MODULE_PATH "${HSAKMT_HARDENING_MODULE_DIR}" )
+    include ( ROCmHardening )
+    rocm_hardening_probe()
+  endif ()
+  unset ( HSAKMT_HARDENING_MODULE_DIR )
+
   ## Define default paths and packages.
   if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
     set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
@@ -98,6 +109,7 @@ else()
     else()
       set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -g )
     endif()
+    set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" ${ROCM_HARDENING_C_FLAGS} )
   endif()
 
   if (UNIX)
@@ -112,7 +124,9 @@ else()
 
     ## Linker Flags
     ## Add --enable-new-dtags to generate DT_RUNPATH
-    set (HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,--enable-new-dtags -Wl,--version-script=${HSAKMT_LINKER_SCRIPT_PROCESSED} -Wl,-soname=${HSAKMT_COMPONENT}.so.${LIB_VERSION_MAJOR} -Wl,-z,nodelete")
+    ## The hardening flags here only bite if hsakmt is built shared again: it is
+    ## a static archive today, so the hardened link happens in libhsa-runtime64.
+    set (HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,--enable-new-dtags -Wl,--version-script=${HSAKMT_LINKER_SCRIPT_PROCESSED} -Wl,-soname=${HSAKMT_COMPONENT}.so.${LIB_VERSION_MAJOR} -Wl,-z,nodelete ${ROCM_HARDENING_LINK_FLAGS_STR}")
   endif()
 
   ## Address Sanitize Flag

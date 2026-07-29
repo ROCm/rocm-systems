@@ -28,6 +28,16 @@ set ( HSAKMT_VIRTIO_TARGET "${HSAKMT_VIRTIO}" )
 
 project ( ${HSAKMT_VIRTIO_TARGET} VERSION 1.0)
 
+## Security hardening. ROCmHardening.cmake lives at the rocr-runtime root; the
+## EXISTS guard keeps this configurable on its own, where that root is absent.
+set ( HSAKMT_VIRTIO_HARDENING_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../cmake_modules" )
+if ( EXISTS "${HSAKMT_VIRTIO_HARDENING_MODULE_DIR}/ROCmHardening.cmake" )
+    list ( APPEND CMAKE_MODULE_PATH "${HSAKMT_VIRTIO_HARDENING_MODULE_DIR}" )
+    include ( ROCmHardening )
+    rocm_hardening_probe()
+endif ()
+unset ( HSAKMT_VIRTIO_HARDENING_MODULE_DIR )
+
 ## Compiler flags
 set ( HSAKMT_VIRTIO_C_FLAGS -fPIC -W -Wall -Wextra -Wno-unused-parameter -Wformat-security -Wswitch-default -Wundef -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-qual -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wunreachable-code -std=gnu99 -fvisibility=hidden )
 if ( CMAKE_COMPILER_IS_GNUCC )
@@ -43,6 +53,10 @@ if ( "${CMAKE_BUILD_TYPE}" STREQUAL Release )
 else ()
     set ( HSAKMT_VIRTIO_C_FLAGS "${HSAKMT_VIRTIO_C_FLAGS}" -g )
 endif ()
+
+## Compile flags only: this target is a static archive, so the link flags below
+## are never invoked. Hardened linking happens where the archive is consumed.
+set ( HSAKMT_VIRTIO_C_FLAGS "${HSAKMT_VIRTIO_C_FLAGS}" ${ROCM_HARDENING_C_FLAGS} )
 
 set ( HSAKMT_VIRTIO_SRC "virtio_gpu.c"
                         "hsakmt_virtio_vm.c"
