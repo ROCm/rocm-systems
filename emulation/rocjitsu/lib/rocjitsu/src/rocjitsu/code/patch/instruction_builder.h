@@ -372,6 +372,15 @@ normalize_address_free_scratch_private_size(rj_code_arch_t arch, uint32_t reques
   return static_cast<uint16_t>(kVectorSourceVgprBase + vgpr);
 }
 
+/// Maximum byte distances encodable by SOPP's signed dword displacement.
+inline constexpr uint64_t kSoppBranchMaximumForwardReachBytes =
+    sizeof(uint32_t) +
+    static_cast<uint64_t>(std::numeric_limits<int16_t>::max()) * sizeof(uint32_t);
+inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
+    static_cast<uint64_t>(-static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
+        sizeof(uint32_t) -
+    sizeof(uint32_t);
+
 /// @brief Compute the SOPP simm16 dword field for a branch from @p branch_pc
 ///        to @p target under SOPP semantics: target = branch_pc + 4 + simm16*4.
 ///

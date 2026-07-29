@@ -357,6 +357,7 @@ void restore_signal_backtrace_handlers() {
 }
 
 /// @brief Emit a hook log message through the rocjitsu logger.
+[[gnu::format(printf, 2, 3)]]
 void log_message(int required_level, const char *format, ...) {
   if (g_log_level.load(std::memory_order_relaxed) < required_level)
     return;
@@ -379,6 +380,7 @@ void log_message(int required_level, const char *format, ...) {
 [[nodiscard]] bool trace_virtual_lds_dispatch_enabled() { return log_level_enabled(kLogDebug); }
 
 /// @brief Emit a virtual-LDS dispatch trace line through public hook logging.
+[[gnu::format(printf, 1, 2)]]
 void trace_virtual_lds_dispatch(const char *format, ...) {
   if (!trace_virtual_lds_dispatch_enabled())
     return;

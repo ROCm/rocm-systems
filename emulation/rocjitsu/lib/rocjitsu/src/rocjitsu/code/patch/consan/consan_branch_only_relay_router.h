@@ -87,6 +87,9 @@ struct BranchOnlyDirectRelayReservoirSet {
 /// Original NOPs require a placement reservation. Generated banks, anchor
 /// tails, and reservoirs are offered only after their storage or donor patch
 /// is selected, so their ranges are already owned.
+///
+/// This router preserves fixed source/target pairs. The generic SOPP relay
+/// planners are for interchangeable island destinations instead.
 class BranchOnlyRelayRouter {
 public:
   [[nodiscard]] bool offer(uint64_t offset, BranchOnlyRelayProvenance provenance);
@@ -100,6 +103,9 @@ public:
 
   /// Plans exact request pairs and transactionally reserves pristine relay
   /// words in @p tentative_planner. A failed plan leaves the planner unchanged.
+  /// If no complete disjoint assignment exists, returned partial routes are
+  /// pair-atomic and `rejected_pair_indices` identifies every omitted pair;
+  /// callers may inspect their claims for convergence but must not commit them.
   /// A successful plan updates the planner but does not consume router capacity;
   /// the caller must either commit every returned route or discard its planner
   /// copy together with the plan.

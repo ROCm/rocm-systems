@@ -177,6 +177,9 @@ struct SoppBranchRelayPlan {
 /// The result has maximum possible route cardinality. Ties are deterministic:
 /// coordinates are considered in ascending order, then original input order.
 /// Invalid coordinate sets return std::nullopt without a partial plan.
+///
+/// Island offsets are interchangeable destinations. Use
+/// `BranchOnlyRelayRouter::plan_pairs` when each source has one fixed target.
 [[nodiscard]] std::optional<SoppBranchRelayPlan> plan_forward_sopp_branch_relays(
     std::span<const uint64_t> source_offsets, std::span<const uint64_t> relay_offsets,
     std::span<const uint64_t> island_offsets, std::string *error_out = nullptr);
@@ -188,6 +191,9 @@ struct SoppBranchRelayPlan {
 /// -> island is a valid backward `s_branch` hop and every relay/island still
 /// has capacity one. Returned relay offsets are in execution order, from the
 /// higher source toward the lower island.
+///
+/// Island offsets are interchangeable destinations. Use
+/// `BranchOnlyRelayRouter::plan_pairs` when each source has one fixed target.
 [[nodiscard]] std::optional<SoppBranchRelayPlan> plan_backward_sopp_branch_relays(
     std::span<const uint64_t> source_offsets, std::span<const uint64_t> relay_offsets,
     std::span<const uint64_t> island_offsets, std::string *error_out = nullptr);

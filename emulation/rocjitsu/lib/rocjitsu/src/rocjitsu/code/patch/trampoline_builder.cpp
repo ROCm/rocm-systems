@@ -683,9 +683,8 @@ std::optional<SoppBranchRelayPlan>
 plan_forward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
                                 std::span<const uint64_t> relay_offsets,
                                 std::span<const uint64_t> island_offsets, std::string *error_out) {
-  constexpr uint64_t kMaximumForwardSoppBranchBytes = 4u + 32767u * 4u;
   return plan_monotonic_sopp_branch_relays(source_offsets, relay_offsets, island_offsets,
-                                           kMaximumForwardSoppBranchBytes, error_out);
+                                           kSoppBranchMaximumForwardReachBytes, error_out);
 }
 
 std::optional<SoppBranchRelayPlan>
@@ -710,11 +709,8 @@ plan_backward_sopp_branch_relays(std::span<const uint64_t> source_offsets,
   const std::vector<uint64_t> mirrored_sources = mirror_offsets(source_offsets);
   const std::vector<uint64_t> mirrored_relays = mirror_offsets(relay_offsets);
   const std::vector<uint64_t> mirrored_islands = mirror_offsets(island_offsets);
-  // The most-negative SOPP displacement reaches 131,068 bytes backward from
-  // an instruction address: target = source + 4 - 32,768 * 4.
-  constexpr uint64_t kMaximumBackwardSoppBranchBytes = 32768u * 4u - 4u;
   auto plan = plan_monotonic_sopp_branch_relays(mirrored_sources, mirrored_relays, mirrored_islands,
-                                                kMaximumBackwardSoppBranchBytes, error_out);
+                                                kSoppBranchMaximumBackwardReachBytes, error_out);
   if (!plan)
     return std::nullopt;
   for (SoppBranchRelayRoute &route : plan->routes) {
