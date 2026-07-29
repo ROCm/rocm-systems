@@ -23,7 +23,7 @@ from cuda.core import system
 
 from nccl.bindings import nccl as _nccl_bindings
 
-from nccl._binding_helpers import LowppSpec, Field
+from nccl.core._binding_helpers import LowppSpec, Field
 from nccl.core.buffer import NcclBuffer
 from nccl.core.constants import (
     CTAPolicy,

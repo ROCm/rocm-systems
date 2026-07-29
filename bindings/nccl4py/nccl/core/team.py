@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from nccl.bindings import nccl as _nccl_bindings
 
-from nccl._binding_helpers import LowppSpec
+from nccl.core._binding_helpers import LowppSpec
 
 __all__ = ["NCCLTeam"]
 

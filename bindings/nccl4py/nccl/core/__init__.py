@@ -8,6 +8,8 @@
 This module provides the main public API for NCCL operations.
 """
 
+from nccl.core._version import __version__  # noqa: I001
+
 # Core types and enums
 from nccl.core.typing import *
 
@@ -38,7 +40,7 @@ from nccl.core.params import *
 # The following __all__ exports define the stable, public API surface of NCCL4Py.
 # Semantic versioning guarantees apply only to the symbols explicitly listed below.
 # All other modules, functions, and symbols are internal implementation details and are subject to change without notice.
-__all__ = [
+__all__ = [  # noqa: RUF022
     # Types and specs
     "NcclDataType",
     "NcclRedOp",
@@ -106,10 +108,11 @@ __all__ = [
     "group_end",
     "GroupSimInfo",
     # Utilities
-    "Version",
+    "__version__",
+    "LibraryInfo",
+    "VersionInfo",
     "get_version",
-    "get_lib_version",
-    "get_lib_path",
+    "show_versions",
     "UniqueId",
     "get_unique_id",
     "get_error_string",

@@ -3,4 +3,8 @@
 #
 # See LICENSE.txt for more license information
 
-"""NCCL EP interop modules: PyTorch integration helpers."""
+"""Device-side NCCL4Py bindings.
+
+Subpackages are opt-in; importing this package pulls in no optional
+dependencies.
+"""

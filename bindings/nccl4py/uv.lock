@@ -406,7 +406,6 @@ dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*' or (extra == 'extra-7-nccl4py-cu12' and extra == 'extra-7-nccl4py-cu13')" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-nccl4py-cu12' and extra == 'extra-7-nccl4py-cu13')" },
     { name = "packaging" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'extra-7-nccl4py-cu12' and extra == 'extra-7-nccl4py-cu13')" },
 ]
 
 [package.optional-dependencies]
@@ -443,7 +442,6 @@ requires-dist = [
     { name = "nvidia-nccl-cu12", marker = "extra == 'cu12'" },
     { name = "nvidia-nccl-cu13", marker = "extra == 'cu13'" },
     { name = "packaging" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
 provides-extras = ["cu12", "cu13"]
 

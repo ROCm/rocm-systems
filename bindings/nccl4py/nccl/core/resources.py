@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 
 from nccl.bindings import nccl as _nccl_bindings
 
-from nccl._binding_helpers import LowppView
+from nccl.core._binding_helpers import LowppView
 from nccl.core.constants import WindowFlag
 from nccl.core.team import NCCLTeam
 from nccl.core.typing import NcclDataType, NcclInvalid
