@@ -111,9 +111,34 @@ crate then embeds whatever SPA assets were produced by a previous build.
 ## Building rocjitsu
 
 rocjitsu is the emulator mirage drives, so mirage needs its libraries to
-bring a session up. Without them `mirage emulators` reports the backend as
-not installed, `mirage run` fails at bring-up naming the missing library,
-and the end-to-end test suites skip.
+bring a session up. Without them:
+
+* `mirage emulators` reports the backend as not installed;
+* `mirage run` fails at bring-up, naming the missing library;
+* the end-to-end test suites cannot bring a session up, so every test in
+  them skips.
+
+Because a skipped Rust test still reports `ok`, each of those suites
+carries one guard test that **fails** in that situation rather than
+letting the suite go green while proving nothing. So a `cargo test` in a
+checkout without rocjitsu built reports a handful of deliberate failures
+whose message says exactly what is missing:
+
+```console
+the `rocjitsu` runtime was not found, so every session test in this suite
+skipped and the suite proves nothing.
+
+Build the sibling `emulation/rocjitsu` project, or set ROCM_HOME to an
+install that provides librocjitsu.so.
+
+If this build deliberately excludes rocjitsu, set MIRAGE_E2E_ALLOW_SKIP=1
+to accept the skips.
+```
+
+Set `MIRAGE_E2E_ALLOW_SKIP=1` for a build that intentionally excludes
+rocjitsu — a docs-only CI job, say. Prefer building rocjitsu where you
+can: those suites are where mirage's session and process lifecycle is
+actually covered.
 
 ### Option A — let mirage find them
 
