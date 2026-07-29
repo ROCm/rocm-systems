@@ -560,47 +560,10 @@ static inline ncclResult_t ncclIbPortRecoveryQpsRestore(ncclIbPortRecoveryContex
 
     INFO(NCCL_NET, "NET/IB: %s: Restoring QP %d on device %d (comm=%p, devIndex=%d, qp_num=%u)", __func__, qpIndex,
          recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryContext->devIndex, localQp->qp->qp_num);
-    res = ncclIbQpReset(localQp);
-    if (res != ncclSuccess) {
-      INFO(NCCL_NET, "NET/IB: %s: Failed to reset QP index %d on device %d (comm=%p, devIndex=%d, qp_num=%u)", __func__,
-           qpIndex, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryContext->devIndex,
-           localQp->qp->qp_num);
-      *success = false;
-      return ncclSuccess;
-    }
-    res = ncclIbQpInit(localQp);
-    if (res != ncclSuccess) {
-      INFO(NCCL_NET, "NET/IB: %s: Failed to init QP index %d on device %d (comm=%p, devIndex=%d, qp_num=%u)", __func__,
-           qpIndex, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryContext->devIndex,
-           localQp->qp->qp_num);
-      *success = false;
-      return ncclSuccess;
-    }
-    if (localQp->eceSupported) {
-      res = wrap_ibv_set_ece(localQp->qp, &localQp->ece, &localQp->eceSupported);
-      if (res != ncclSuccess) {
-        INFO(NCCL_NET, "NET/IB: %s: Failed to set ECE for QP index %d on device %d (comm=%p, devIndex=%d, qp_num=%u)",
-             __func__, qpIndex, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryContext->devIndex,
-             localQp->qp->qp_num);
-        *success = false;
-        return ncclSuccess;
-      }
-    }
-    localQp->rtrAttr.localGid = devBase->gidInfo.localGid;
-    localQp->rtrAttr.localGidIndex = devBase->gidInfo.localGidIndex;
-    res = ncclIbQpRtr(localQp);
-    if (res != ncclSuccess) {
-      INFO(NCCL_NET, "NET/IB: %s: Failed to modify to RTR QP index %d on device %d (comm=%p, devIndex=%d, qp_num=%u)",
-           __func__, qpIndex, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryContext->devIndex,
-           localQp->qp->qp_num);
-      *success = false;
-      return ncclSuccess;
-    }
-    res = ncclIbQpRts(localQp);
-    if (res != ncclSuccess) {
-      INFO(NCCL_NET, "NET/IB: %s: Failed to modify to RTS QP index %d on device %d (comm=%p, devIndex=%d, qp_num=%u)",
-           __func__, qpIndex, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryContext->devIndex,
-           localQp->qp->qp_num);
+    bool qpRestored = false;
+    NCCLCHECK(ncclIbResiliencyQpReconfigure(recoveryContext->resCtx, localQp, devBase, recoveryContext->devIndex,
+                                            &qpRestored));
+    if (!qpRestored) {
       *success = false;
       return ncclSuccess;
     }
@@ -634,38 +597,16 @@ static inline ncclResult_t ncclIbPortRecoveryQpsRestore(ncclIbPortRecoveryContex
         ncclIbQp* flushQp = &rCommDev->gpuFlush.qp;
         TRACE(NCCL_NET, "NET/IB: %s: Restoring Flush QP on device %d (comm=%p)", __func__, i,
               recoveryContext->resCtx->baseComm);
-        res = ncclIbQpReset(flushQp);
-        if (res != ncclSuccess) {
-          INFO(NCCL_NET, "NET/IB: %s: Failed to reset Flush QP on device %d (comm=%p, devIndex=%d, qp_num=%u)",
-               __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryContext->devIndex,
-               flushQp->qp->qp_num);
-          *success = false;
-          return ncclSuccess;
-        }
-        res = ncclIbQpInit(flushQp);
-        if (res != ncclSuccess) {
-          INFO(NCCL_NET, "NET/IB: %s: Failed to init Flush QP on device %d (comm=%p, devIndex=%d, qp_num=%u)", __func__,
-               recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryContext->devIndex,
-               flushQp->qp->qp_num);
-          *success = false;
-          return ncclSuccess;
-        }
-        flushQp->rtrAttr.localGid = rCommDev->base.gidInfo.localGid;
-        flushQp->rtrAttr.localGidIndex = rCommDev->base.gidInfo.localGidIndex;
+        // The flush QP is loopback, so its remote GID is the local one. ncclIbResiliencyQpReconfigure() repopulates
+        // localGid / localGidIndex from the per-comm snapshot but does not touch remoteGid, so set it here from the
+        // same source, before the modify-to-RTR the helper performs.
         flushQp->rtrAttr.remoteGid = rCommDev->base.gidInfo.localGid;
-        res = ncclIbQpRtr(flushQp);
-        if (res != ncclSuccess) {
-          INFO(NCCL_NET, "NET/IB: %s: Failed to modify to RTR Flush QP on device %d (comm=%p, devIndex=%d, qp_num=%u)",
-               __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryContext->devIndex,
-               flushQp->qp->qp_num);
-          *success = false;
-          return ncclSuccess;
-        }
-        res = ncclIbQpRts(flushQp);
-        if (res != ncclSuccess) {
-          INFO(NCCL_NET, "NET/IB: %s: Failed to modify to RTS Flush QP on device %d (comm=%p, devIndex=%d, qp_num=%u)",
-               __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, recoveryContext->devIndex,
-               flushQp->qp->qp_num);
+        bool flushQpRestored = false;
+        NCCLCHECK(ncclIbResiliencyQpReconfigure(recoveryContext->resCtx, flushQp, &rCommDev->base,
+                                                recoveryContext->devIndex, &flushQpRestored));
+        if (!flushQpRestored) {
+          INFO(NCCL_NET, "NET/IB: %s: Failed to restore Flush QP on device %d (comm=%p)", __func__, i,
+               recoveryContext->resCtx->baseComm);
           *success = false;
           return ncclSuccess;
         }
