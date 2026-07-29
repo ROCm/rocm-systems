@@ -1935,30 +1935,29 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
     // Sub-test 3: above the limit — must be rejected, no device added
     //
     // ncclNetVDeviceProps_t::devs[] holds exactly NCCL_NET_MAX_DEVS_PER_NIC entries, so an
-    // over-limit request cannot be expressed in that struct. Use a layout-compatible
-    // oversized buffer: the plugin must reject on the ndevs count alone, before it ever
-    // indexes devs[]. Backing the extra entries with real memory keeps this test free of
-    // out-of-bounds access even if the guard regresses.
+    // over-limit request cannot be expressed in that struct. Pad a real props object with one
+    // spare devs[] slot: the plugin must reject on the ndevs count alone, before it ever
+    // indexes devs[], and a regressed guard that walks one entry too far stays inside memory
+    // this test owns.
     // =========================================================================
     {
         int ndevBefore = 0;
         ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
 
         constexpr int kOverLimit = kMaxDevsPerNic + 1;
-        struct {
-            int ndevs;
-            int devs[kOverLimit];
-        } oversized;
-        static_assert(offsetof(ncclNetVDeviceProps_t, devs) == offsetof(decltype(oversized), devs),
-                      "oversized request must stay layout-compatible with ncclNetVDeviceProps_t");
-        oversized.ndevs = kOverLimit;
-        for (int i = 0; i < kOverLimit; i++) {
-            oversized.devs[i] = selected[i % mergeCount];
+        union {
+            ncclNetVDeviceProps_t props;
+            char padded[sizeof(ncclNetVDeviceProps_t) + sizeof(int)];
+        } request;
+
+        memset(&request, 0, sizeof(request));
+        request.props.ndevs = kOverLimit;
+        for (int i = 0; i < kMaxDevsPerNic; i++) {
+            request.props.devs[i] = selected[i % mergeCount];
         }
 
         int vdev = -1;
-        ncclResult_t result =
-            MakeVirtualDevice(&vdev, reinterpret_cast<ncclNetVDeviceProps_t*>(&oversized));
+        ncclResult_t result = MakeVirtualDevice(&vdev, &request.props);
 
         EXPECT_EQ(result, ncclInvalidUsage)
             << "Merging " << kOverLimit << " devices must be rejected (limit is "
