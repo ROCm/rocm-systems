@@ -17,20 +17,29 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
-axum = { version = "0.8", features = ["ws"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "cors"] }
+async-trait = { workspace = true }
+nix = { workspace = true }
+tokio-util = { workspace = true }
+mirage_supervisor = { workspace = true }
+axum = { version = "0.8", features = ["ws"], optional = true }
+tower = { version = "0.5", optional = true }
+tower-http = { version = "0.6", features = ["trace", "cors"], optional = true }
 
 [features]
-# Serve the bundled dashboard SPA (and its client-side routing
-# fallback) in addition to the JSON API. Pulls in `mirage_dashboard`
-# with its own `webui` feature, which is what actually builds and
-# embeds the SPA (and requires the Node.js toolchain). Without it the
-# daemon serves the `/api` surface only.
-webui = ["dep:mirage_dashboard", "mirage_dashboard/webui"]
+# Serve the HTTP/WebSocket JSON API (`/api`) alongside the daemon's
+# always-present Unix-socket control plane. Pulls in axum and friends.
+http = ["dep:axum", "dep:tower", "dep:tower-http"]
+# Everything in `http` plus the bundled dashboard SPA and its
+# client-side routing fallback. Pulls in `mirage_dashboard` with its own
+# `webui` feature, which is what actually builds and embeds the SPA (and
+# requires the Node.js toolchain).
+webui = ["http", "dep:mirage_dashboard", "mirage_dashboard/webui"]
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }
 tempfile = { workspace = true }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+
+[lints]
+workspace = true

@@ -1,5 +1,8 @@
 //! Integration tests for the shared in-process RocJitsu daemon API.
 //!
+//! The safe RAII wrapper lives in `rocjitsu_sys`, the one crate allowed
+//! to write `unsafe`, so these tests drive it without any of their own.
+//!
 //! Stands up the `librocjitsu` daemon through the Rust lifecycle wrapper,
 //! connects a client speaking the daemon RPC protocol, performs the
 //! handshake the KMD interposer would, and verifies the daemon serves a
@@ -7,14 +10,16 @@
 //! library is discoverable on this machine (install rocjitsu under
 //! `$ROCM_HOME` or a sibling monorepo build to exercise it).
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 
 use mirage_core::common::MaybeRef;
-use mirage_core::emulator::{EmulatorDaemon, EmulatorDef, ExecMode};
-use mirage_rocjitsu::daemon::Daemon;
+use mirage_core::emulator::{EmulatorDef, ExecMode};
 use mirage_rocjitsu::{kmd_config, kmd_preload};
 use rocjitsu_sys::RjDaemonStatus;
+use rocjitsu_sys::daemon::Daemon;
 
 /// Build the 16-byte RPC header the wire protocol uses.
 fn header(opcode: u16, request_id: u32, payload_bytes: u32, result: i32) -> [u8; 16] {
@@ -111,10 +116,51 @@ fn daemon_serves_handshake() {
 
     // Shutting the daemon down removes its socket.
     let socket_path = daemon.socket_path().to_path_buf();
-    Box::new(daemon).stop();
+    daemon.stop();
     assert!(
         !socket_path.exists(),
         "daemon socket should be removed on shutdown"
+    );
+}
+
+/// Dropping the handle must tear the daemon down just as `stop` does, so
+/// an unwind past the owner cannot leak the simulated device or leave a
+/// stale socket behind.
+#[test]
+fn dropping_the_handle_stops_the_daemon() {
+    let _g = mirage_core::paths::test_env_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    mirage_core::paths::set_test_root(tmp.path());
+
+    let Some(lib) = kmd_preload() else {
+        eprintln!("rocjitsu KMD library not found; skipping daemon test");
+        return;
+    };
+    let agent_report = mirage_builtin::ensure_agents(false).unwrap();
+    let agent_name = agent_report.iter().map(|(n, _)| n.clone()).next().unwrap();
+    let def = EmulatorDef {
+        emulator: "rocjitsu".to_string(),
+        plugins: Default::default(),
+        exec_mode: ExecMode::Functional,
+        options: Default::default(),
+        topology: MaybeRef::Owned(mirage_core::topology::TopologyDef {
+            num_nodes: 1,
+            gpus_per_node: 1,
+            agent: MaybeRef::Ref(agent_name),
+        }),
+    };
+    let config = kmd_config(&def, None).unwrap();
+    let runtime_dir = tmp.path().join("rt");
+
+    let socket_path = {
+        let daemon = Daemon::start(&lib, &config, &runtime_dir).expect("daemon should start");
+        let path = daemon.socket_path().to_path_buf();
+        assert!(path.exists());
+        path
+    };
+    assert!(
+        !socket_path.exists(),
+        "dropping the daemon handle must remove its socket"
     );
 }
 

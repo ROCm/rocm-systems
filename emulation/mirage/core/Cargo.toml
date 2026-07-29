@@ -7,6 +7,7 @@ edition = "2024"
 path = "src/lib.rs"
 
 [dependencies]
+async-trait = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -22,3 +23,6 @@ inventory = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -88,17 +88,22 @@ pub fn find<'a>(specs: &'a [EmulatorInfo], name: &str) -> Option<&'a EmulatorInf
     specs.iter().find(|e| e.name == name)
 }
 
-/// The default emulator for new profiles when the user doesn't pick
-/// one explicitly. Picks the first installed, non-noop entry in name
-/// order, falling back to the `noop` entry (or the first entry if
-/// `noop` is somehow absent).
-pub fn default_emulator(specs: &[EmulatorInfo]) -> &EmulatorInfo {
+/// The default emulator for new profiles when the user does not pick one
+/// explicitly. Picks the first installed, non-noop entry in name order,
+/// falling back to the `noop` entry, then to the first entry.
+///
+/// Returns `None` only when no backend at all was compiled in, which is
+/// reachable: backends are feature-gated, and `--no-default-features`
+/// with none selected produces exactly that binary. Reporting it lets the
+/// caller say "this build has no emulator backends" instead of panicking
+/// somewhere far from the cause.
+#[must_use]
+pub fn default_emulator(specs: &[EmulatorInfo]) -> Option<&EmulatorInfo> {
     specs
         .iter()
         .find(|e| e.name != NOOP_NAME && e.installed)
         .or_else(|| specs.iter().find(|e| e.name == NOOP_NAME))
         .or_else(|| specs.first())
-        .expect("emulator registry must not be empty")
 }
 
 /// Build an [`EmulatorDef`] for the given registry entry, using the
@@ -115,6 +120,8 @@ pub fn make_def(spec: &EmulatorInfo, topology: TopologyDef) -> EmulatorDef {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     fn info(name: &str, installed: bool) -> EmulatorInfo {
@@ -139,13 +146,13 @@ mod tests {
     #[test]
     fn default_prefers_installed_non_noop() {
         let specs = [info("noop", true), info("rocjitsu", true)];
-        assert_eq!(default_emulator(&specs).name, "rocjitsu");
+        assert_eq!(default_emulator(&specs).unwrap().name, "rocjitsu");
     }
 
     #[test]
     fn default_falls_back_to_noop() {
         let specs = [info("noop", true), info("hotswap", false)];
-        assert_eq!(default_emulator(&specs).name, "noop");
+        assert_eq!(default_emulator(&specs).unwrap().name, "noop");
     }
 
     #[test]
@@ -154,5 +161,12 @@ mod tests {
         emulator.plugins = vec!["logging".to_string(), "race".to_string()];
         let json = serde_json::to_value(&emulator).unwrap();
         assert_eq!(json["plugins"], serde_json::json!(["logging", "race"]));
+    }
+
+    #[test]
+    fn an_empty_registry_has_no_default_rather_than_panicking() {
+        // Backends are feature-gated, so a build with none selected is a
+        // real configuration. It should report the problem, not crash.
+        assert!(default_emulator(&[]).is_none());
     }
 }

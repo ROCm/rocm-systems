@@ -1,0 +1,35 @@
+[package]
+name = "mirage_supervisor"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+mirage_core = { workspace = true }
+mirage_container = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+libc = { workspace = true }
+nix = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+pty-process = { version = "0.5.3", features = ["async"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+chrono = { workspace = true }
+mirage_noop = { path = "../noop" }
+nix = { workspace = true }
+libc = { workspace = true }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+
+[lints]
+workspace = true

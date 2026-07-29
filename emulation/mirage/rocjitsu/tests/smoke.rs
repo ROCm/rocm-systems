@@ -4,6 +4,8 @@
 //! The `kmd_config` round-trip is skipped when no KMD library is
 //! discoverable on this machine (rocjitsu not installed).
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use mirage_core::common::MaybeRef;
 use mirage_core::emulator::{EmulatorDef, ExecMode};
 use mirage_rocjitsu::{kmd_config, kmd_preload};
@@ -81,7 +83,7 @@ fn gpus_per_node_drives_num_gpus() {
 fn injection_emits_rccl_env_defaults() {
     use mirage_core::emulator::get_emulator_backend;
     use mirage_core::profile::ProfileDef;
-    use mirage_core::session::{SessionDef, SessionId};
+    use mirage_core::session::{SessionContext, SessionId};
 
     let _g = mirage_core::paths::test_env_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -109,26 +111,23 @@ fn injection_emits_rccl_env_defaults() {
             agent: MaybeRef::Ref(agent_name),
         }),
     };
-    let id = SessionId::new("rccl-env-test").unwrap();
-    let profile = ProfileDef {
-        name: "rccl-env-test".to_string(),
-        description: None,
-        emulator,
-        containerize: None,
-    };
-    let def = SessionDef {
-        id: id.clone(),
-        profile: MaybeRef::Owned(profile),
-        workdir: ".".to_string(),
+    let runtime_dir = tmp.path().join("scratch");
+    std::fs::create_dir_all(&runtime_dir).unwrap();
+    let ctx = SessionContext {
+        id: SessionId::new("rccl-env-test").unwrap(),
+        profile: ProfileDef {
+            name: "rccl-env-test".to_string(),
+            description: None,
+            emulator,
+            containerize: None,
+        },
+        runtime_dir,
         daemon: false,
-        created_at: chrono::Utc::now(),
     };
-    let layout = mirage_core::paths::SessionLayout::for_id(&id);
-    mirage_core::state::write_json(&layout.def(), &def).unwrap();
 
     let backend = get_emulator_backend("rocjitsu").expect("rocjitsu backend registered");
     let injection = backend
-        .injection_def(&id)
+        .injection_def(&ctx)
         .expect("injection should succeed with a discoverable KMD library");
 
     for (key, value) in [

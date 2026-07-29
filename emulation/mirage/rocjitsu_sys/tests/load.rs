@@ -5,6 +5,8 @@
 //! (`$ROCM_HOME/lib`, `/opt/rocm/lib`) for one; otherwise it skips so
 //! the suite stays green on machines without rocjitsu.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::path::PathBuf;
 
 use rocjitsu_sys::Lib;

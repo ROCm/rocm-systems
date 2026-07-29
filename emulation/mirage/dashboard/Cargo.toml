@@ -13,3 +13,6 @@ build = "build.rs"
 webui = []
 
 [dependencies]
+
+[lints]
+workspace = true

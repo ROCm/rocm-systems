@@ -31,6 +31,8 @@
 //! `MIRAGE_BENCH_REPORT`). Iteration count is configurable via
 //! `MIRAGE_BENCH_ITERS` (default 5).
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -79,16 +81,23 @@ struct Env {
     runtime: PathBuf,
     state: PathBuf,
     mirage_bin: PathBuf,
+    /// A private daemon per benchmark run, kept on a short path: Unix
+    /// `sun_path` is a fixed-size array and a socket nested in a long
+    /// tempdir can exceed it.
+    socket: PathBuf,
 }
 
 impl Env {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
+        let socket =
+            std::env::temp_dir().join(format!("mrgb-{}.sock", std::process::id()));
         Self {
             config: dir.path().join("config"),
             runtime: dir.path().join("runtime"),
             state: dir.path().join("state"),
             mirage_bin: PathBuf::from(env!("CARGO_BIN_EXE_mirage")),
+            socket,
             _dir: dir,
         }
     }
@@ -99,6 +108,7 @@ impl Env {
             .env("XDG_RUNTIME_DIR", &self.runtime)
             .env("XDG_STATE_HOME", &self.state)
             .env("MIRAGE_BIN", &self.mirage_bin)
+            .env("MIRAGE_SOCKET", &self.socket)
             .env_remove("MIRAGE_LOG");
         c
     }
@@ -111,6 +121,17 @@ impl Env {
             .output()
             .expect("failed to run `mirage emulators --json`");
         serde_json::from_slice(&out.stdout).expect("malformed emulators JSON")
+    }
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        // Stop the daemon this run started. Without this it would linger
+        // until its idle timeout, holding a process long after the test
+        // binary has exited.
+        let _ = self.mirage().args(["daemon", "stop"]).output();
+        let _ = std::fs::remove_file(&self.socket);
+        let _ = std::fs::remove_file(self.socket.with_extension("lock"));
     }
 }
 

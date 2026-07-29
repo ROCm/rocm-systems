@@ -150,7 +150,7 @@ impl LibSearch<'_> {
 
 /// Locate the emulator library described by `search`, returning the
 /// first existing path found in priority order (see the module docs).
-pub fn find_emulator_lib(search: &LibSearch) -> Option<PathBuf> {
+pub fn find_emulator_lib(search: &LibSearch<'_>) -> Option<PathBuf> {
     // Explicit absolute file overrides.
     for key in search.file_env {
         if let Some(p) = non_empty_var(key) {
@@ -190,7 +190,7 @@ pub fn find_emulator_lib(search: &LibSearch) -> Option<PathBuf> {
 
 /// Returns `true` if the emulator library can be located on this
 /// machine.
-pub fn is_lib_installed(search: &LibSearch) -> bool {
+pub fn is_lib_installed(search: &LibSearch<'_>) -> bool {
     find_emulator_lib(search).is_some()
 }
 
@@ -198,7 +198,7 @@ pub fn is_lib_installed(search: &LibSearch) -> bool {
 /// install `display_name` so mirage can find `search.lib_name`. Lists
 /// the locations that were searched and the most common install
 /// options.
-pub fn install_guidance(display_name: &str, search: &LibSearch) -> String {
+pub fn install_guidance(display_name: &str, search: &LibSearch<'_>) -> String {
     let mut msg = format!(
         "{display_name} is not installed, or mirage could not find `{lib}`.\n\
          mirage does not build {display_name}; install it yourself and place \
@@ -262,6 +262,8 @@ pub fn dir_has_lib(dir: &Path, lib_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     #[test]

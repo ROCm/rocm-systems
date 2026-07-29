@@ -304,6 +304,8 @@ fn range(var_name: &str, start: u32, end: u32) -> ForRange {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     #[test]

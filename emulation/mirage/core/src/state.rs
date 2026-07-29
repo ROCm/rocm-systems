@@ -114,6 +114,8 @@ pub fn read_small_str(path: &Path) -> Result<Option<String>> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
     use serde::Deserialize;
 

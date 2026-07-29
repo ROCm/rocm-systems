@@ -1,3 +1,10 @@
+// Build scripts are allowed to panic: a missing `OUT_DIR` or an
+// unwritable output means cargo itself is misbehaving, and there is no
+// caller to return an error to. A panic here fails the build with the
+// right message, which is the correct outcome.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+
 use std::env;
 use std::ffi::OsString;
 use std::fs;

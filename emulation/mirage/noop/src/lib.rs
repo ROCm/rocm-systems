@@ -16,7 +16,7 @@ use mirage_core::error::Result;
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::ProfileDef;
-use mirage_core::session::{SessionHealth, SessionId};
+use mirage_core::session::{SessionContext, SessionHealth};
 
 /// Canonical name the pass-through backend registers under.
 pub const NAME: &str = "noop";
@@ -24,6 +24,7 @@ pub const NAME: &str = "noop";
 /// The built-in pass-through emulator: runs the workload directly with
 /// no GPU emulation. Stateless; a single shared instance is registered
 /// in the emulator registry.
+#[derive(Debug)]
 pub struct Noop;
 
 impl EmulatorBackend for Noop {
@@ -44,7 +45,7 @@ impl EmulatorBackend for Noop {
         Vec::new()
     }
 
-    fn shutdown(&self, _session: &SessionId) {}
+    fn shutdown(&self, _ctx: &SessionContext) {}
 
     fn validate_profile(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
         Ok(())
@@ -62,7 +63,7 @@ impl EmulatorBackend for Noop {
         Vec::new()
     }
 
-    fn health(&self, _session: &SessionId) -> SessionHealth {
+    fn health(&self, _ctx: &SessionContext) -> SessionHealth {
         SessionHealth {
             healthy: true,
             state: Some("ready".to_string()),
@@ -72,7 +73,7 @@ impl EmulatorBackend for Noop {
         }
     }
 
-    fn injection_def(&self, _session: &SessionId) -> Result<InjectionDef> {
+    fn injection_def(&self, _ctx: &SessionContext) -> Result<InjectionDef> {
         Ok(InjectionDef::default())
     }
 }

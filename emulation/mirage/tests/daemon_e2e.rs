@@ -1,15 +1,15 @@
-//! End-to-end tests for the `mirage daemon` HTTP/WebSocket server.
+//! End-to-end tests for the daemon's HTTP/WebSocket API.
 //!
-//! Each test spawns a real `mirage daemon` subprocess against a fresh
-//! temp XDG root and exercises the REST + WS surface using `reqwest`
-//! and `tokio-tungstenite`. The daemon in turn spawns per-session
-//! `mirage host` subprocesses via `MIRAGE_BIN` (set to the test
-//! mirage binary), giving us full end-to-end coverage of the same
-//! code path users hit.
+//! Each test spawns a real `mirage daemon --addr` subprocess against a
+//! fresh temp XDG root and exercises the REST + WS surface with `reqwest`
+//! and `tokio-tungstenite`. The daemon owns its sessions in-process, so
+//! these cover the same manager the CLI reaches over the Unix socket —
+//! and, by construction, prove the two surfaces agree.
 //!
-//! Gated on the `webui` feature: the `mirage webui` subcommand and the
-//! served SPA only exist when the web UI is compiled in.
+//! Gated on the `webui` feature: the HTTP API and the served SPA only
+//! exist when the web UI is compiled in.
 #![cfg(feature = "webui")]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -32,8 +32,11 @@ struct Daemon {
     _dir: TempDir,
     child: Child,
     base: String,
+    #[allow(dead_code)]
     config: PathBuf,
+    #[allow(dead_code)]
     runtime: PathBuf,
+    socket: PathBuf,
 }
 
 impl Daemon {
@@ -48,8 +51,20 @@ impl Daemon {
         let mirage_bin = PathBuf::from(env!("CARGO_BIN_EXE_mirage"));
         let port = free_port();
         let addr = format!("127.0.0.1:{port}");
+        // A short socket path: `sun_path` is a fixed 108-byte array, and
+        // a socket nested under a long tempdir silently fails to bind.
+        let socket = std::env::temp_dir().join(format!("mrgd-{}-{port}.sock", std::process::id()));
         let child = Command::new(&mirage_bin)
-            .args(["webui", "--addr", &addr])
+            .args([
+                "daemon",
+                "--addr",
+                &addr,
+                "--socket",
+                socket.to_str().unwrap(),
+                // Never exit mid-test.
+                "--idle-timeout",
+                "0",
+            ])
             .env("XDG_CONFIG_HOME", &config)
             .env("XDG_RUNTIME_DIR", &runtime)
             .env("XDG_STATE_HOME", &state)
@@ -67,6 +82,7 @@ impl Daemon {
             base,
             config,
             runtime,
+            socket,
         };
         d.wait_ready();
         d
@@ -128,26 +144,18 @@ impl Daemon {
 
 impl Drop for Daemon {
     fn drop(&mut self) {
+        // SIGTERM, then wait: the daemon tears every session down on the
+        // way out, so waiting for it is what guarantees no workload
+        // survives the test. There is no separate sweep for stray child
+        // pids any more — with one owner that always reaps, there is
+        // nothing left to sweep.
         let _ = nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(self.child.id() as i32),
             nix::sys::signal::Signal::SIGTERM,
         );
         let _ = self.child.wait();
-        // Also kill any host children still alive under our runtime dir
-        // (in case session_destroy wasn't called from the test).
-        if let Ok(rd) = std::fs::read_dir(self.runtime.join("mirage/session")) {
-            for ent in rd.flatten() {
-                let pidf = ent.path().join("node/0/pid");
-                if let Ok(s) = std::fs::read_to_string(&pidf)
-                    && let Ok(pid) = s.trim().parse::<i32>()
-                {
-                    let _ = nix::sys::signal::kill(
-                        nix::unistd::Pid::from_raw(pid),
-                        nix::sys::signal::Signal::SIGKILL,
-                    );
-                }
-            }
-        }
+        let _ = std::fs::remove_file(&self.socket);
+        let _ = std::fs::remove_file(self.socket.with_extension("lock"));
     }
 }
 
@@ -306,8 +314,8 @@ async fn exec_attach_streams_output_via_websocket() {
     let mut stdout = String::new();
     let mut stderr = String::new();
     let mut exit_code: Option<i32> = None;
-    let deadline = std::time::Instant::now() + Duration::from_secs(15);
-    while std::time::Instant::now() < deadline {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
         let frame = tokio::time::timeout(Duration::from_secs(5), ws.next())
             .await
             .ok()

@@ -1,351 +1,521 @@
 //! End-to-end tests for the `mirage` CLI.
 //!
-//! Each test:
-//!
-//! * Creates a fresh tempdir and points `XDG_CONFIG_HOME`,
-//!   `XDG_RUNTIME_DIR`, and `XDG_STATE_HOME` at it.
-//! * Drives the unified `mirage` binary as a subprocess via
-//!   `assert_cmd`. The CLI re-execs itself with the `host` subcommand
-//!   to spawn per-session hosts - no separate host binary needed.
+//! Each test drives the real binary as a subprocess against a private
+//! XDG root and a private daemon, so what is exercised is the whole
+//! stack: CLI → Unix socket → daemon → supervisor → real processes.
 
-use std::path::PathBuf;
-use std::process::Command;
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use assert_cmd::prelude::*;
-use predicates::str;
-use tempfile::TempDir;
+mod harness;
 
-struct Env {
-    _dir: TempDir,
-    config: PathBuf,
-    runtime: PathBuf,
-    mirage_bin: PathBuf,
-}
+use std::time::Duration;
 
-impl Env {
-    fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        let config = dir.path().join("config");
-        let runtime = dir.path().join("runtime");
-        let mirage_bin = PathBuf::from(env!("CARGO_BIN_EXE_mirage"));
-        Self {
-            _dir: dir,
-            config,
-            runtime,
-            mirage_bin,
-        }
-    }
-
-    fn mirage(&self) -> Command {
-        let mut c = Command::new(&self.mirage_bin);
-        c.env("XDG_CONFIG_HOME", &self.config)
-            .env("XDG_RUNTIME_DIR", &self.runtime)
-            .env("XDG_STATE_HOME", self._dir.path().join("state"))
-            // ensure the CLI re-execs the same binary when spawning
-            // hosts (covers the case where it lives in a non-standard
-            // location during testing).
-            .env("MIRAGE_BIN", &self.mirage_bin)
-            // make sure user env doesn't leak through.
-            .env_remove("MIRAGE_LOG");
-        c
-    }
-}
+use harness::{Env, assert_no_leaks, marker, tagged_sleep, wait_for};
 
 #[test]
-fn paths_prints_overridden_dirs() {
+fn paths_reports_the_overridden_directories_and_the_socket() {
     let env = Env::new();
-    env.mirage()
-        .arg("paths")
-        .assert()
-        .success()
-        .stdout(str::contains(env.config.display().to_string()))
-        .stdout(str::contains(env.runtime.display().to_string()));
+    let out = env.ok(&["paths"]);
+    assert!(out.contains("config:"), "{out}");
+    assert!(out.contains(env.root().to_str().unwrap()), "{out}");
+    // The socket is part of the layout now, and users need to be able to
+    // find it when something goes wrong.
+    assert!(out.contains("socket:"), "{out}");
+    assert!(out.contains(env.socket().to_str().unwrap()), "{out}");
 }
 
 #[test]
 fn profile_create_list_show_delete() {
     let env = Env::new();
-    env.mirage()
-        .args(["profile", "create", "p1", "--description", "the test"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["profile", "list"])
-        .assert()
-        .success()
-        .stdout(str::contains("p1"));
-    env.mirage()
-        .args(["profile", "list", "-l"])
-        .assert()
-        .success()
-        .stdout(str::contains("the test"));
-    env.mirage()
-        .args(["profile", "show", "p1"])
-        .assert()
-        .success()
-        .stdout(str::contains("\"name\": \"p1\""));
-    env.mirage()
-        .args(["profile", "delete", "p1", "-f"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["profile", "show", "p1"])
-        .assert()
-        .failure();
+    env.create_profile("p1");
+
+    let list = env.ok(&["profile", "list"]);
+    assert!(list.lines().any(|l| l.trim() == "p1"), "{list}");
+
+    let shown = env.ok(&["profile", "show", "p1"]);
+    let parsed: serde_json::Value = serde_json::from_str(&shown).unwrap();
+    assert_eq!(parsed["name"], "p1");
+    assert_eq!(parsed["emulator"]["emulator"], "noop");
+
+    env.ok(&["profile", "delete", "p1", "--force"]);
+    let list = env.ok(&["profile", "list"]);
+    assert!(!list.lines().any(|l| l.trim() == "p1"), "{list}");
 }
 
 #[test]
-fn run_command_streams_stdout_stderr_and_exit_code() {
+fn run_streams_output_and_propagates_the_exit_code() {
     let env = Env::new();
-    env.mirage()
-        .args(["profile", "create", "p"])
-        .assert()
-        .success();
-    let out = env
-        .mirage()
-        .args([
-            "run",
-            "--profile",
-            "p",
+    env.create_profile("p");
+
+    let out = env.run(&[
+        "run",
+        "--profile",
+        "p",
+        "--",
+        "/bin/sh",
+        "-c",
+        "echo to-stdout; echo to-stderr 1>&2; exit 42",
+    ]);
+    assert_eq!(out.status.code(), Some(42));
+
+    // stdout and stderr must arrive on the matching streams. Under the
+    // previous pseudo-terminal design they were merged into one, so
+    // redirecting either captured both.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("to-stdout"), "stdout was: {stdout}");
+    assert!(!stdout.contains("to-stderr"), "stderr leaked into stdout: {stdout}");
+    assert!(stderr.contains("to-stderr"), "stderr was: {stderr}");
+}
+
+#[test]
+fn run_cleans_up_its_transient_session() {
+    let env = Env::new();
+    env.create_profile("p");
+    env.ok(&["run", "--profile", "p", "--", "/bin/true"]);
+
+    // `mirage run` creates a session, uses it and destroys it. Leaving it
+    // behind would accumulate one session per invocation.
+    let list = env.ok(&["session", "list"]);
+    assert!(
+        !list.contains("ready"),
+        "a transient session outlived `mirage run`: {list}"
+    );
+}
+
+#[test]
+fn run_keeps_the_session_when_asked() {
+    let env = Env::new();
+    env.create_profile("p");
+    env.ok(&[
+        "run",
+        "--profile",
+        "p",
+        "--keep-session",
+        "--",
+        "/bin/true",
+    ]);
+    let list = env.ok(&["session", "list"]);
+    assert!(list.contains("ready"), "{list}");
+}
+
+#[test]
+fn a_session_started_in_one_invocation_is_usable_from_another() {
+    // The reason mirage has a daemon at all: sessions outlive the command
+    // that created them.
+    let env = Env::new();
+    env.create_profile("p");
+    let id = env.start_session("p", "cross");
+    assert_eq!(id, "cross");
+
+    let out = env.run(&["exec", "start", "cross", "--", "/bin/sh", "-c", "exit 5"]);
+    assert_eq!(out.status.code(), Some(5));
+
+    let state: serde_json::Value =
+        serde_json::from_str(&env.ok(&["session", "show", "cross"])).unwrap();
+    assert_eq!(state["def"]["id"], "cross");
+    assert_eq!(state["health"]["healthy"], true);
+
+    env.ok(&["session", "stop", "cross"]);
+    let list = env.ok(&["session", "list"]);
+    assert!(!list.contains("cross"), "{list}");
+}
+
+#[test]
+fn a_stopped_session_stays_gone() {
+    let env = Env::new();
+    env.create_profile("p");
+    env.start_session("p", "gone");
+    env.ok(&["session", "stop", "gone"]);
+
+    // Nothing may resurrect it. The previous design could: a heartbeat
+    // write racing the destroy re-created the session directory, and the
+    // "stopped" session reappeared in listings.
+    std::thread::sleep(Duration::from_millis(500));
+    let list = env.ok(&["session", "list"]);
+    assert!(!list.contains("gone"), "{list}");
+    let err = env.fails(&["session", "show", "gone"]);
+    assert!(err.contains("not found"), "{err}");
+}
+
+#[test]
+fn destroying_a_session_kills_its_running_execs() {
+    let env = Env::new();
+    env.create_profile("p");
+    env.start_session("p", "kill-me");
+    let tag = marker("destroy");
+
+    env.ok(&[
+        "exec",
+        "start",
+        "kill-me",
+        "--detach",
+        "--",
+        "/bin/sh",
+        "-c",
+        &tagged_sleep(&tag),
+    ]);
+    wait_for("the workload to start", Duration::from_secs(15), || {
+        harness::count_processes(&tag) > 0
+    });
+
+    env.ok(&["session", "stop", "kill-me"]);
+
+    // `session stop` returns only once teardown has finished, so the
+    // process must already be gone rather than eventually gone.
+    assert_no_leaks(&tag);
+}
+
+#[test]
+fn attaching_to_a_long_running_exec_and_signalling_it_ends_it() {
+    let env = Env::new();
+    env.create_profile("p");
+    env.start_session("p", "sig");
+    let tag = marker("signal");
+
+    let exec = env
+        .ok(&[
+            "exec",
+            "start",
+            "sig",
+            "--detach",
+            "--keep",
             "--",
             "/bin/sh",
             "-c",
-            "echo hello; echo oops 1>&2; exit 7",
+            &tagged_sleep(&tag),
         ])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    // The exec runs under a PTY, so stdout and stderr are merged onto the
-    // terminal (the stdout stream), exactly as in a real terminal.
-    let combined = format!("{stdout}{stderr}");
-    assert!(combined.contains("hello"), "output was: {combined:?}");
-    assert!(combined.contains("oops"), "output was: {combined:?}");
-    assert_eq!(out.status.code(), Some(7));
+        .trim()
+        .to_string();
+    wait_for("the workload to start", Duration::from_secs(15), || {
+        harness::count_processes(&tag) > 0
+    });
+
+    env.ok(&["exec", "signal", "sig", &exec, "TERM"]);
+
+    wait_for("the exec to end", Duration::from_secs(15), || {
+        serde_json::from_str::<serde_json::Value>(&env.ok(&["exec", "show", "sig", &exec]))
+            .map(|s| s["ended"] == true)
+            .unwrap_or(false)
+    });
+    let status: serde_json::Value =
+        serde_json::from_str(&env.ok(&["exec", "show", "sig", &exec])).unwrap();
+    assert_eq!(status["exit_code"], 128 + libc::SIGTERM);
+    assert_no_leaks(&tag);
 }
 
 #[test]
-fn run_cleans_up_transient_session() {
+fn a_removed_exec_takes_its_processes_with_it() {
     let env = Env::new();
-    env.mirage()
-        .args(["profile", "create", "p"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["run", "--profile", "p", "--", "/bin/true"])
-        .assert()
-        .success();
-    let out = env.mirage().args(["session", "list"]).output().unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("(no sessions)"),
-        "expected no sessions, got stderr={stderr:?} stdout={:?}",
-        String::from_utf8_lossy(&out.stdout)
-    );
-}
+    env.create_profile("p");
+    env.start_session("p", "rm");
+    let tag = marker("remove");
 
-#[test]
-fn session_start_detach_exec_then_stop() {
-    let env = Env::new();
-    env.mirage()
-        .args(["profile", "create", "p"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["session", "start", "--profile", "p", "--id", "s1"])
-        .assert()
-        .success();
-    // submit an exec without attaching
-    env.mirage()
-        .args([
+    let exec = env
+        .ok(&[
             "exec",
             "start",
-            "s1",
-            "--keep",
+            "rm",
             "--detach",
+            "--keep",
             "--",
-            "/bin/echo",
-            "hi",
+            "/bin/sh",
+            "-c",
+            &tagged_sleep(&tag),
         ])
-        .assert()
-        .success()
-        .stdout(str::contains("e-000000"));
-    // wait for it to finish
-    for _ in 0..100 {
-        let out = env
-            .mirage()
-            .args(["exec", "show", "s1", "e-000000"])
-            .output()
-            .unwrap();
-        if String::from_utf8_lossy(&out.stdout).contains("\"ended\": true") {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    // logs (non-follow) should contain "hi"
-    let out = env
-        .mirage()
-        .args(["logs", "s1", "e-000000"])
-        .output()
-        .unwrap();
-    assert!(
-        String::from_utf8_lossy(&out.stdout).contains("hi"),
-        "stdout={:?}",
-        String::from_utf8_lossy(&out.stdout)
-    );
-    // stop the session
-    env.mirage()
-        .args(["session", "stop", "s1"])
-        .assert()
-        .success();
-    // verify the session dir is gone
-    assert!(!env.runtime.join("mirage/session/s1").exists());
+        .trim()
+        .to_string();
+    wait_for("the workload to start", Duration::from_secs(15), || {
+        harness::count_processes(&tag) > 0
+    });
+
+    env.ok(&["exec", "remove", "rm", &exec]);
+    assert_no_leaks(&tag);
 }
 
 #[test]
-fn stopped_session_stays_gone_past_heartbeat() {
-    // Regression: `session stop` reported success but the orphaned host
-    // process kept re-stamping its heartbeat, which recreated the session
-    // directory (its parent is created on demand) and made the "stopped"
-    // session silently reappear in `session list`. The host must detect
-    // that its session directory was removed and exit instead.
+fn logs_replays_a_finished_exec() {
     let env = Env::new();
-    env.mirage()
-        .args(["profile", "create", "p"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["session", "start", "--profile", "p", "--id", "s9"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["session", "stop", "s9"])
-        .assert()
-        .success();
-    // Wait well past the host's heartbeat interval (2s): a live orphan
-    // would recreate the directory within one beat.
-    std::thread::sleep(std::time::Duration::from_millis(3000));
-    assert!(
-        !env.runtime.join("mirage/session/s9").exists(),
-        "session directory reappeared after stop"
-    );
-    let out = env.mirage().args(["session", "list"]).output().unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("(no sessions)"),
-        "stopped session reappeared in list: stderr={stderr:?} stdout={:?}",
-        String::from_utf8_lossy(&out.stdout)
-    );
+    env.create_profile("p");
+    env.start_session("p", "logs");
+
+    let exec = env
+        .ok(&[
+            "exec",
+            "start",
+            "logs",
+            "--detach",
+            "--keep",
+            "--",
+            "/bin/sh",
+            "-c",
+            "echo recorded-output",
+        ])
+        .trim()
+        .to_string();
+
+    wait_for("the exec to finish", Duration::from_secs(15), || {
+        serde_json::from_str::<serde_json::Value>(&env.ok(&["exec", "show", "logs", &exec]))
+            .map(|s| s["ended"] == true)
+            .unwrap_or(false)
+    });
+
+    let logs = env.ok(&["logs", "logs", &exec]);
+    assert!(logs.contains("recorded-output"), "{logs:?}");
 }
 
 #[test]
-fn attach_to_long_running_exec_then_signal() {
+fn logs_are_complete_for_a_process_that_writes_and_exits_immediately() {
+    // The narrow window: output travels pump -> channel -> hub, and if
+    // the exit packet is published before the last bytes arrive, a client
+    // that stops reading at the exit sees nothing. Repeat, because it
+    // only shows up when the forwarder is scheduled late.
     let env = Env::new();
-    env.mirage()
-        .args(["profile", "create", "p"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["session", "start", "--profile", "p", "--id", "s2"])
-        .assert()
-        .success();
-    env.mirage()
-        .args([
-            "exec", "start", "s2", "--keep", "--detach", "--", "/bin/sh", "-c", "sleep 30",
-        ])
-        .assert()
-        .success();
-    // wait for it to start
-    for _ in 0..100 {
-        let out = env
-            .mirage()
-            .args(["exec", "show", "s2", "e-000000"])
-            .output()
-            .unwrap();
-        if String::from_utf8_lossy(&out.stdout).contains("\"started\": true") {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+    env.create_profile("p");
+    env.start_session("p", "fast");
+
+    for i in 0..15 {
+        let exec = env
+            .ok(&[
+                "exec",
+                "start",
+                "fast",
+                "--detach",
+                "--keep",
+                "--",
+                "/bin/sh",
+                "-c",
+                &format!("echo quick-{i}"),
+            ])
+            .trim()
+            .to_string();
+        wait_for("the exec to finish", Duration::from_secs(30), || {
+            serde_json::from_str::<serde_json::Value>(&env.ok(&["exec", "show", "fast", &exec]))
+                .map(|s| s["ended"] == true)
+                .unwrap_or(false)
+        });
+        let logs = env.ok(&["logs", "fast", &exec]);
+        assert!(
+            logs.contains(&format!("quick-{i}")),
+            "round {i}: output was lost; got {logs:?}"
+        );
     }
-    // signal it
-    env.mirage()
-        .args(["exec", "signal", "s2", "e-000000", "KILL"])
-        .assert()
-        .success();
-    // it should end soon
-    let mut ended = false;
-    for _ in 0..100 {
-        let out = env
-            .mirage()
-            .args(["exec", "show", "s2", "e-000000"])
-            .output()
-            .unwrap();
-        if String::from_utf8_lossy(&out.stdout).contains("\"ended\": true") {
-            ended = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+
+    env.ok(&["session", "stop", "fast"]);
+}
+
+#[test]
+fn exec_ids_are_listed_in_order() {
+    let env = Env::new();
+    env.create_profile("p");
+    env.start_session("p", "many");
+    for _ in 0..3 {
+        env.ok(&[
+            "exec", "start", "many", "--detach", "--keep", "--", "/bin/true",
+        ]);
     }
-    assert!(ended, "exec did not end after SIGKILL");
-    env.mirage()
-        .args(["session", "stop", "s2"])
-        .assert()
-        .success();
+    let list = env.ok(&["exec", "list", "many"]);
+    assert!(list.contains("e-000000"), "{list}");
+    assert!(list.contains("e-000001"), "{list}");
+    assert!(list.contains("e-000002"), "{list}");
 }
 
 #[test]
 fn json_output_is_parseable() {
     let env = Env::new();
-    env.mirage()
-        .args(["profile", "create", "p"])
-        .assert()
-        .success();
-    let out = env
-        .mirage()
-        .args(["--json", "profile", "list"])
-        .output()
-        .unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    // The CLI auto-seeds builtin profiles on first run, so the list also
-    // contains those; just assert it parses as an array that includes the
-    // profile we created.
-    let names = v.as_array().expect("profile list should be a JSON array");
+    env.create_profile("p");
+    env.start_session("p", "js");
+
+    let sessions: serde_json::Value =
+        serde_json::from_str(&env.ok(&["--json", "session", "list"])).unwrap();
+    assert!(sessions.is_array(), "{sessions}");
+    assert_eq!(sessions[0]["def"]["id"], "js");
+
+    let profiles: serde_json::Value =
+        serde_json::from_str(&env.ok(&["--json", "profile", "list"])).unwrap();
+    assert!(profiles.is_array());
+}
+
+#[test]
+fn an_invalid_session_id_is_rejected() {
+    let env = Env::new();
+    let err = env.fails(&["session", "show", "../escape"]);
     assert!(
-        names.contains(&serde_json::json!("p")),
-        "expected created profile in list, got {v}"
+        err.contains("invalid") || err.contains("id"),
+        "an id that could escape the runtime directory must be rejected: {err}"
     );
 }
 
 #[test]
-fn invalid_session_id_is_rejected() {
+fn a_duplicate_session_id_is_rejected() {
     let env = Env::new();
-    env.mirage()
-        .args(["profile", "create", "p"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["session", "start", "--profile", "p", "--id", "../oops"])
-        .assert()
-        .failure();
+    env.create_profile("p");
+    env.start_session("p", "dup");
+    let err = env.fails(&[
+        "session", "start", "--profile", "p", "--id", "dup", "--no-input",
+    ]);
+    assert!(err.contains("already exists"), "{err}");
 }
 
 #[test]
-fn duplicate_session_id_fails() {
+fn a_session_on_a_missing_profile_fails_clearly() {
     let env = Env::new();
-    env.mirage()
-        .args(["profile", "create", "p"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["session", "start", "--profile", "p", "--id", "dup"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["session", "start", "--profile", "p", "--id", "dup"])
-        .assert()
-        .failure();
-    env.mirage()
-        .args(["session", "stop", "dup"])
-        .assert()
-        .success();
+    let err = env.fails(&[
+        "session", "start", "--profile", "nope", "--id", "s", "--no-input",
+    ]);
+    assert!(err.contains("profile not found"), "{err}");
+    // And no half-created session is left behind.
+    let list = env.ok(&["session", "list"]);
+    assert!(!list.contains("\ns "), "{list}");
+}
+
+#[test]
+fn running_a_command_that_does_not_exist_reports_why() {
+    let env = Env::new();
+    env.create_profile("p");
+    let out = env.run(&["run", "--profile", "p", "--", "definitely-not-a-binary"]);
+
+    // The important property is that it terminates at all: an exec with
+    // no terminal state hangs the client forever.
+    assert_eq!(out.status.code(), Some(127));
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(combined.contains("command not found"), "{combined}");
+    assert!(combined.contains("definitely-not-a-binary"), "{combined}");
+}
+
+#[test]
+fn env_flags_reach_the_workload() {
+    let env = Env::new();
+    env.create_profile("p");
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "p",
+        "--env",
+        "MIRAGE_E2E_VALUE=surprise",
+        "--",
+        "/bin/sh",
+        "-c",
+        "echo $MIRAGE_E2E_VALUE",
+    ]);
+    assert_eq!(out.trim(), "surprise");
+}
+
+#[test]
+fn a_malformed_env_flag_is_rejected() {
+    let env = Env::new();
+    env.create_profile("p");
+    let err = env.fails(&[
+        "run",
+        "--profile",
+        "p",
+        "--env",
+        "NO_EQUALS_SIGN",
+        "--",
+        "/bin/true",
+    ]);
+    assert!(err.contains("KEY=VALUE"), "{err}");
+}
+
+#[test]
+fn the_rank_environment_is_injected() {
+    let env = Env::new();
+    env.create_profile("p");
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "p",
+        "--",
+        "/bin/sh",
+        "-c",
+        "echo $MIRAGE_RANK/$RANK/$WORLD_SIZE/$LOCAL_RANK",
+    ]);
+    assert_eq!(out.trim(), "0/0/1/0");
+}
+
+#[test]
+fn a_multi_node_topology_runs_every_node() {
+    let env = Env::new();
+    env.create_profile("p");
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "p",
+        "--num-nodes",
+        "3",
+        "--",
+        "/bin/sh",
+        "-c",
+        "echo node-$MIRAGE_RANK",
+    ]);
+    for rank in 0..3 {
+        assert!(out.contains(&format!("node-{rank}")), "{out}");
+    }
+}
+
+#[test]
+fn state_purge_stops_everything_and_removes_the_runtime_directory() {
+    let env = Env::new();
+    env.create_profile("p");
+    env.start_session("p", "purged");
+    let tag = marker("purge");
+    env.ok(&[
+        "exec",
+        "start",
+        "purged",
+        "--detach",
+        "--",
+        "/bin/sh",
+        "-c",
+        &tagged_sleep(&tag),
+    ]);
+    wait_for("the workload to start", Duration::from_secs(15), || {
+        harness::count_processes(&tag) > 0
+    });
+
+    env.ok(&["state", "purge", "--force"]);
+
+    // Purge must stop the daemon before deleting the runtime tree, or it
+    // races the daemon's own teardown inside the directory it is removing.
+    assert_no_leaks(&tag);
+    assert!(
+        !env.root().join("runtime/mirage").exists(),
+        "the runtime directory survived a purge"
+    );
+    // Configuration is deliberately left alone without `--all`.
+    assert!(
+        env.root().join("config/mirage").exists(),
+        "purge must not remove profiles unless --all is given"
+    );
+}
+
+#[test]
+fn stdin_is_forwarded_to_the_workload() {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    let env = Env::new();
+    env.create_profile("p");
+
+    let mut child = env
+        .mirage()
+        .args(["run", "--profile", "p", "--", "/bin/cat"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"piped through\n").unwrap();
+    // Closing our stdin ends the forwarder, which closes the workload's
+    // stdin, which is what makes `cat` exit.
+    drop(stdin);
+
+    let out = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("piped through"), "{stdout}");
 }

@@ -323,17 +323,23 @@ impl Engine {
     /// Build the argv (after the provider binary) for executing a
     /// command inside an already-running node container.
     ///
-    /// `-i` keeps stdin open so the PTY bridge behaves the same as for a
-    /// non-containerised exec; environment is injected explicitly with
-    /// `-e` rather than inherited from the host.
+    /// `-i` keeps stdin open so input reaches the workload exactly as it
+    /// would for a non-containerised exec; `tty` additionally requests a
+    /// terminal inside the container, which is what an interactive
+    /// program needs to see `isatty`. Environment is injected explicitly
+    /// with `-e` rather than inherited from the host.
     pub fn exec_argv(
         container: &str,
         workdir: Option<&str>,
         env: &[(String, String)],
         command: &str,
         args: &[String],
+        tty: bool,
     ) -> Vec<String> {
         let mut argv = vec!["exec".to_string(), "-i".to_string()];
+        if tty {
+            argv.push("-t".to_string());
+        }
         if let Some(wd) = workdir {
             argv.push("-w".to_string());
             argv.push(wd.to_string());
@@ -351,6 +357,7 @@ impl Engine {
     /// Full argv including the provider binary for executing a command
     /// inside a node container. Convenience for callers that build a
     /// `Command` from a single vector.
+    #[allow(clippy::too_many_arguments)]
     pub fn exec_command_line(
         &self,
         container: &str,
@@ -358,9 +365,10 @@ impl Engine {
         env: &[(String, String)],
         command: &str,
         args: &[String],
+        tty: bool,
     ) -> Vec<String> {
         let mut full = vec![self.provider.clone()];
-        full.extend(Self::exec_argv(container, workdir, env, command, args));
+        full.extend(Self::exec_argv(container, workdir, env, command, args, tty));
         full
     }
 
@@ -432,7 +440,15 @@ impl Engine {
                 std::thread::spawn(move || {
                     for line in BufReader::new(r).lines().map_while(std::result::Result::ok) {
                         tracing::info!(image = %tag, "{line}");
-                        lines_for_thread.lock().unwrap().push(line);
+                        // Recover from poisoning rather than panicking:
+                        // the buffer is plain data with no invariant a
+                        // panic could have broken, and taking down the
+                        // build over a poisoned log buffer would lose the
+                        // diagnostics this thread exists to collect.
+                        lines_for_thread
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(line);
                     }
                 })
             });
@@ -457,9 +473,15 @@ impl Engine {
             Ok(())
         } else {
             // Prefer stderr (where build errors land); fall back to stdout.
-            let mut captured = err_lines.lock().unwrap().join("\n");
+            let mut captured = err_lines
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .join("\n");
             if captured.trim().is_empty() {
-                captured = out_lines.lock().unwrap().join("\n");
+                captured = out_lines
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .join("\n");
             }
             Err(ContainerError::Command {
                 provider: self.provider.clone(),
@@ -797,6 +819,8 @@ fn spawn_retrying_etxtbsy<T>(mut run: impl FnMut() -> std::io::Result<T>) -> std
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
@@ -965,6 +989,7 @@ mod tests {
             &env,
             "/bin/echo",
             &["hi".to_string(), "there".to_string()],
+            false,
         );
         assert_eq!(
             argv,
@@ -984,9 +1009,21 @@ mod tests {
     }
 
     #[test]
+    fn exec_argv_requests_a_terminal_when_asked() {
+        // Without `-t` the program inside the container sees a pipe and
+        // an interactive shell prints no prompt, however the outside is
+        // wired up.
+        let argv = Engine::exec_argv("c", None, &[], "bash", &[], true);
+        assert_eq!(argv, vec!["exec", "-i", "-t", "c", "bash"]);
+
+        let piped = Engine::exec_argv("c", None, &[], "bash", &[], false);
+        assert!(!piped.contains(&"-t".to_string()), "{piped:?}");
+    }
+
+    #[test]
     fn exec_command_line_prefixes_provider() {
         let engine = Engine::with_provider("podman");
-        let line = engine.exec_command_line("c", None, &[], "ls", &[]);
+        let line = engine.exec_command_line("c", None, &[], "ls", &[], false);
         assert_eq!(line, vec!["podman", "exec", "-i", "c", "ls"]);
     }
 

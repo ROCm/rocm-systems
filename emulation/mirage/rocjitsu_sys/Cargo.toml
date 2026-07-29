@@ -8,3 +8,37 @@ path = "src/lib.rs"
 
 [dependencies]
 libloading = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+# `rocjitsu_sys` is the FFI binding layer to `librocjitsu.so`, so it is the
+# one crate in the workspace that is allowed to write `unsafe`. The
+# workspace lint table forbids it, and `forbid` cannot be relaxed by a
+# later `allow`, so this crate carries an equivalent table of its own
+# instead of inheriting with `workspace = true`. Everything else matches
+# the workspace policy.
+[lints.rust]
+unused_must_use = "deny"
+unused_qualifications = "warn"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+mem_forget = "deny"
+# This crate documents safety at *function* granularity: every `unsafe fn`
+# carries a `# Safety` section stating the C API contract its body relies
+# on, and the body is a single call honouring exactly that contract.
+# Requiring a per-block comment as well would mean forty restatements of
+# the sentence directly above each one, which makes the genuinely
+# interesting safety arguments — the ones in `daemon.rs`, where an
+# invariant is upheld across calls — harder to pick out rather than
+# easier.
+undocumented_unsafe_blocks = "allow"

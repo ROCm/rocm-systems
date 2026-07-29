@@ -2,19 +2,28 @@
 //!
 //! It contains:
 //!
-//! * Strongly-typed definitions of mirage's on-disk state
-//!   ([`session::SessionDef`], [`exec::ExecDef`], [`profile::ProfileDef`], …)
-//! * Path-resolution helpers ([`paths`]) implementing the XDG layout
-//! * Atomic file readers/writers ([`state`])
-//! * The control-plane trait ([`ctl::MirageCtl`]) and its file-backed
-//!   implementation ([`ctl::FileCtl`])
-//! * A streaming "attach" helper ([`attach`]) that tails per-node
-//!   stdout/stderr and emits structured packets to clients
+//! * Strongly-typed definitions of mirage's documents and control-plane
+//!   messages ([`session::SessionDef`], [`exec::ExecDef`],
+//!   [`profile::ProfileDef`], …)
+//! * Path resolution for mirage's *configuration* ([`paths`]),
+//!   implementing the XDG layout
+//! * Atomic file readers/writers for those documents ([`state`]) and the
+//!   configuration store built on them ([`store`])
+//! * The async control-plane trait ([`ctl::MirageCtl`]), implemented by
+//!   the supervisor in-process and by the CLI's RPC client over a socket
+//! * The client/daemon wire protocol ([`proto`])
+//! * The emulator backend trait and its link-time registry
+//!   ([`emulator`], [`registry`])
 //!
-//! See the crate-level docs of [`paths`] for the on-disk layout.
+//! # What lives where
+//!
+//! Configuration is on disk; session state is not. Profiles, topologies
+//! and agents are user-authored documents that outlive every process, so
+//! they are files. Sessions, execs, process tables, output and health are
+//! owned in memory by the supervisor daemon and reached over its socket.
+//! See the crate-level docs of [`paths`] for why.
 
 pub mod agent;
-pub mod attach;
 pub mod common;
 pub mod config;
 pub mod container;
@@ -28,8 +37,10 @@ pub mod metric;
 pub mod paths;
 pub mod plugin;
 pub mod profile;
+pub mod proto;
 pub mod registry;
 pub mod session;
 pub mod state;
+pub mod store;
 pub mod topology;
 pub mod workload;

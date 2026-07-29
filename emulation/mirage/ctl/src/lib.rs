@@ -1,13 +1,19 @@
 //! `mirage_ctl`: the user-facing control plane (the `ctl` half of
 //! `mirage`).
 //!
-//! This crate is a **library**: it defines the top-level
-//! [`CtlCmd`] subcommand enum and an async [`dispatch`] function that
-//! drives a [`mirage_core::ctl::MirageCtl`] implementation (by default
-//! `FileCtl`). The unified `mirage` binary wires this up alongside the
-//! `host` and `daemon` subcommands.
+//! This crate is a **library**: it defines the top-level [`CtlCmd`]
+//! subcommand enum and an async [`dispatch`] function that drives a
+//! [`mirage_core::ctl::MirageCtl`] implementation. In the `mirage` binary
+//! that implementation is [`rpc_client::RpcClient`], which forwards every
+//! call to the supervisor daemon over a Unix socket; tests can drive a
+//! `mirage_supervisor::SessionManager` directly instead.
 //!
 //! All commands are documented in `docs/cli.md`.
+
+pub mod local;
+pub mod rpc_client;
+
+pub use local::{LocalCtl, needs_daemon};
 
 use std::io::IsTerminal;
 use std::io::Write;
@@ -16,7 +22,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use anyhow::Context as _;
 use clap::{Args, Subcommand, ValueEnum};
 use mirage_core::common::{MaybeRef, SimpleMap, SimpleValue};
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
@@ -27,13 +32,21 @@ use mirage_core::registry::EmulatorInfo;
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
 
-/// Log directive that detached child processes (notably the per-session
-/// `mirage host`) should inherit, derived from the CLI's `-v`/`-vv`.
+/// Log directive an auto-started daemon should inherit, derived from the
+/// CLI's `-v`/`-vv`.
 ///
-/// Set once by [`init_logging`] and applied explicitly to spawned hosts
-/// by [`spawn_host_for`] via the `MIRAGE_LOG` environment of the child
-/// `Command`, rather than mutating this process's own environment.
-static HOST_LOG_DIRECTIVE: OnceLock<String> = OnceLock::new();
+/// Set once by [`init_logging`] and applied to the spawned daemon's
+/// `Command` environment rather than by mutating this process's own — a
+/// process-wide `set_var` is `unsafe` in Rust 2024 and would race every
+/// other thread reading the environment.
+static DAEMON_LOG_DIRECTIVE: OnceLock<String> = OnceLock::new();
+
+/// The log directive an auto-started daemon should inherit, if the user
+/// asked for one with `-v`/`-vv`.
+#[must_use]
+pub fn daemon_log_directive() -> Option<&'static str> {
+    DAEMON_LOG_DIRECTIVE.get().map(String::as_str)
+}
 
 /// Initialize the global tracing subscriber. Honours `MIRAGE_LOG` if
 /// set, otherwise uses the level implied by `-v` / `-vv`.
@@ -43,17 +56,14 @@ pub fn init_logging(verbose: u8) {
         1 => "info",
         _ => "debug",
     };
-    // Record the chosen level so detached child processes can inherit
-    // it. Most importantly this reaches the detached per-session `mirage
-    // host`, which is re-exec'd from this binary without any `-v` flag
-    // and would otherwise default to `warn`, silently dropping all of
-    // its info/debug host events. `spawn_host_for` applies this directly
-    // to the child `Command`'s environment (only when the user hasn't
-    // set `MIRAGE_LOG` themselves), so a `-v`/`-vv` on the CLI is
-    // honoured by the host's own logger too, and host events land in the
-    // per-session `node/0/host.log` at the requested verbosity.
+    // Record the chosen level so an auto-started daemon inherits it. The
+    // daemon is spawned from this binary with no `-v` flag and would
+    // otherwise default to `warn`, silently dropping the session and exec
+    // events a user passing `-vv` is asking to see. Applied to the
+    // child's environment only when the user has not set `MIRAGE_LOG`
+    // themselves.
     if verbose > 0 && std::env::var_os("MIRAGE_LOG").is_none() {
-        let _ = HOST_LOG_DIRECTIVE.set(level.to_string());
+        let _ = DAEMON_LOG_DIRECTIVE.set(level.to_string());
     }
     let env = tracing_subscriber::EnvFilter::try_from_env("MIRAGE_LOG")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level));
@@ -78,11 +88,20 @@ pub fn find_emulator(name: &str) -> Option<EmulatorInfo> {
     registry().into_iter().find(|e| e.name == name)
 }
 
-/// The default emulator for new profiles: the first installed,
-/// non-noop entry, falling back to `noop`.
-pub fn default_emulator() -> EmulatorInfo {
+/// The default emulator for new profiles: the first installed, non-noop
+/// entry, falling back to `noop`.
+///
+/// `None` when this build has no emulator backends compiled in.
+#[must_use]
+pub fn default_emulator() -> Option<EmulatorInfo> {
     let specs = registry();
-    mirage_core::registry::default_emulator(&specs).clone()
+    mirage_core::registry::default_emulator(&specs).cloned()
+}
+
+/// The default emulator's name, or `"-"` when there is none, for display.
+#[must_use]
+pub fn default_emulator_name() -> String {
+    default_emulator().map_or_else(|| "-".to_string(), |e| e.name)
 }
 
 /// Render the emulator registry for the `mirage emulators` command:
@@ -100,7 +119,7 @@ fn emulators_cmd(long: bool, json: bool) {
         return;
     }
 
-    let default_name = default_emulator().name;
+    let default_name = default_emulator_name();
 
     if long {
         for spec in &specs {
@@ -172,7 +191,7 @@ pub fn ensure_builtins_present() {
 ///
 /// Shared by the CLI profile commands and the daemon's profile
 /// endpoint so both validate identically.
-pub fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
+pub fn validate_profile(def: &ProfileDef) -> Result<(), String> {
     let kind = &def.emulator.emulator;
     match mirage_core::emulator::get_emulator_backend(kind) {
         Some(backend) => backend.validate_profile(def),
@@ -394,11 +413,12 @@ pub struct StartArgs {
     /// Working directory for execs in the session.
     #[arg(long)]
     pub workdir: Option<String>,
-    /// Don't spawn the host (the caller is expected to start it).
+    /// Don't wait for the session to become ready; return as soon as it
+    /// is registered.
     #[arg(long)]
-    pub no_host: bool,
-    /// How long to wait for the host to report ready (seconds).
-    #[arg(long, default_value_t = 10)]
+    pub no_wait: bool,
+    /// How long to wait for the session to become ready (seconds).
+    #[arg(long, default_value_t = 30)]
     pub ready_timeout: u64,
     /// Override/enable containerisation: run every node inside a
     /// container built from this image.
@@ -477,6 +497,13 @@ pub struct ExecStartArgs {
     /// Don't attach to the exec; just submit and return its id.
     #[arg(long)]
     detach: bool,
+    /// Allocate a pseudo-terminal for the workload.
+    ///
+    /// `auto` (the default) allocates one when this command's own stdin
+    /// and stdout are terminals, so interactive programs work and
+    /// redirected ones keep byte-exact, separated output.
+    #[arg(long, value_enum, default_value_t = TtyArg::Auto)]
+    tty: TtyArg,
     /// Extra environment variables to inject into the exec, in
     /// `KEY=VALUE` form. May be repeated.
     #[arg(long = "env", value_name = "KEY=VALUE")]
@@ -603,6 +630,14 @@ pub struct RunArgs {
     /// daemon (the default).
     #[arg(long = "in-process")]
     in_process: bool,
+    /// Allocate a pseudo-terminal for the workload.
+    ///
+    /// `auto` (the default) allocates one when this command's own stdin
+    /// and stdout are terminals, which is what makes `mirage run -- bash`
+    /// an interactive shell. Redirected or piped runs stay on pipes, so
+    /// their output is byte-exact and stdout stays separate from stderr.
+    #[arg(long, value_enum, default_value_t = TtyArg::Auto)]
+    tty: TtyArg,
     /// The command and its arguments.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
     argv: Vec<String>,
@@ -643,9 +678,9 @@ pub async fn dispatch<C: MirageCtl + 'static>(
     ensure_builtins_present();
     let ctl = Arc::new(ctl);
     match cmd {
-        CtlCmd::Profile(c) => profile_cmd(&*ctl, c, json),
-        CtlCmd::Topology(c) => topology_cmd(&*ctl, c, json),
-        CtlCmd::Agent(c) => agent_cmd(&*ctl, c, json),
+        CtlCmd::Profile(c) => profile_cmd(&*ctl, c, json).await,
+        CtlCmd::Topology(c) => topology_cmd(&*ctl, c, json).await,
+        CtlCmd::Agent(c) => agent_cmd(&*ctl, c, json).await,
         CtlCmd::Emulators { long } => {
             emulators_cmd(long, json);
             Ok(ExitCode::from(0))
@@ -665,10 +700,14 @@ pub async fn dispatch<C: MirageCtl + 'static>(
 
 // ----- profile dispatch ------------------------------------------------------
 
-fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Result<ExitCode> {
+async fn profile_cmd<C: MirageCtl + ?Sized>(
+    ctl: &C,
+    cmd: ProfileCmd,
+    json: bool,
+) -> anyhow::Result<ExitCode> {
     match cmd {
         ProfileCmd::List { long } => {
-            let names = ctl.profile_list()?;
+            let names = ctl.profile_list().await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&names)?);
             } else if long {
@@ -677,7 +716,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 }
                 println!("{:<24} {:<16} DESCRIPTION", "NAME", "EMULATOR");
                 for n in names {
-                    match ctl.profile_get(&n) {
+                    match ctl.profile_get(&n).await {
                         Ok(p) => println!(
                             "{:<24} {:<16} {}",
                             p.name,
@@ -694,7 +733,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             }
         }
         ProfileCmd::Show { name } => {
-            let p = ctl.profile_get(&name)?;
+            let p = ctl.profile_get(&name).await?;
             println!("{}", serde_json::to_string_pretty(&p)?);
         }
         ProfileCmd::Create {
@@ -727,7 +766,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             if let Err(e) = validate_profile(&p) {
                 anyhow::bail!("cannot create profile {}: {e}", p.name);
             }
-            ctl.profile_put(&p)?;
+            ctl.profile_put(&p).await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&p)?);
             } else {
@@ -743,14 +782,14 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 std::fs::read(&file)?
             };
             let p: ProfileDef = serde_json::from_slice(&bytes)?;
-            ctl.profile_put(&p)?;
+            ctl.profile_put(&p).await?;
             println!("imported profile {}", p.name);
         }
         ProfileCmd::Delete { name, force } => {
             if !force && !confirm(&format!("delete profile {name}?"))? {
                 return Ok(ExitCode::from(0));
             }
-            ctl.profile_delete(&name)?;
+            ctl.profile_delete(&name).await?;
             println!("deleted profile {name}");
         }
     }
@@ -759,10 +798,14 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
 
 // ----- topology dispatch -----------------------------------------------------
 
-fn topology_cmd(ctl: &dyn MirageCtl, cmd: TopologyCmd, json: bool) -> anyhow::Result<ExitCode> {
+async fn topology_cmd<C: MirageCtl + ?Sized>(
+    ctl: &C,
+    cmd: TopologyCmd,
+    json: bool,
+) -> anyhow::Result<ExitCode> {
     match cmd {
         TopologyCmd::List => {
-            let names = ctl.topology_list()?;
+            let names = ctl.topology_list().await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&names)?);
             } else {
@@ -772,7 +815,7 @@ fn topology_cmd(ctl: &dyn MirageCtl, cmd: TopologyCmd, json: bool) -> anyhow::Re
             }
         }
         TopologyCmd::Show { name } => {
-            let t = ctl.topology_get(&name)?;
+            let t = ctl.topology_get(&name).await?;
             println!("{}", serde_json::to_string_pretty(&t)?);
         }
         TopologyCmd::Create {
@@ -786,7 +829,7 @@ fn topology_cmd(ctl: &dyn MirageCtl, cmd: TopologyCmd, json: bool) -> anyhow::Re
                 gpus_per_node,
                 agent: MaybeRef::Ref(agent),
             };
-            ctl.topology_put(&name, &t)?;
+            ctl.topology_put(&name, &t).await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&t)?);
             } else {
@@ -796,14 +839,14 @@ fn topology_cmd(ctl: &dyn MirageCtl, cmd: TopologyCmd, json: bool) -> anyhow::Re
         TopologyCmd::Import { name, file } => {
             let bytes = read_input(&file)?;
             let t: mirage_core::topology::TopologyDef = serde_json::from_slice(&bytes)?;
-            ctl.topology_put(&name, &t)?;
+            ctl.topology_put(&name, &t).await?;
             println!("imported topology {name}");
         }
         TopologyCmd::Delete { name, force } => {
             if !force && !confirm(&format!("delete topology {name}?"))? {
                 return Ok(ExitCode::from(0));
             }
-            ctl.topology_delete(&name)?;
+            ctl.topology_delete(&name).await?;
             println!("deleted topology {name}");
         }
     }
@@ -812,10 +855,14 @@ fn topology_cmd(ctl: &dyn MirageCtl, cmd: TopologyCmd, json: bool) -> anyhow::Re
 
 // ----- agent dispatch --------------------------------------------------------
 
-fn agent_cmd(ctl: &dyn MirageCtl, cmd: AgentCmd, json: bool) -> anyhow::Result<ExitCode> {
+async fn agent_cmd<C: MirageCtl + ?Sized>(
+    ctl: &C,
+    cmd: AgentCmd,
+    json: bool,
+) -> anyhow::Result<ExitCode> {
     match cmd {
         AgentCmd::List => {
-            let names = ctl.agent_list()?;
+            let names = ctl.agent_list().await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&names)?);
             } else {
@@ -825,20 +872,20 @@ fn agent_cmd(ctl: &dyn MirageCtl, cmd: AgentCmd, json: bool) -> anyhow::Result<E
             }
         }
         AgentCmd::Show { name } => {
-            let a = ctl.agent_get(&name)?;
+            let a = ctl.agent_get(&name).await?;
             println!("{}", serde_json::to_string_pretty(&a)?);
         }
         AgentCmd::Import { name, file } => {
             let bytes = read_input(&file)?;
             let a: mirage_core::agent::AgentDef = serde_json::from_slice(&bytes)?;
-            ctl.agent_put(&name, &a)?;
+            ctl.agent_put(&name, &a).await?;
             println!("imported agent {name}");
         }
         AgentCmd::Delete { name, force } => {
             if !force && !confirm(&format!("delete agent {name}?"))? {
                 return Ok(ExitCode::from(0));
             }
-            ctl.agent_delete(&name)?;
+            ctl.agent_delete(&name).await?;
             println!("deleted agent {name}");
         }
     }
@@ -864,12 +911,14 @@ async fn session_cmd<C: MirageCtl>(
 ) -> anyhow::Result<ExitCode> {
     match cmd {
         SessionCmd::List => {
-            let ids = ctl.session_list()?;
+            let ids = ctl.session_list().await?;
             if json {
-                let states: Vec<_> = ids
-                    .iter()
-                    .filter_map(|i| ctl.session_state(i).ok())
-                    .collect();
+                let mut states = Vec::with_capacity(ids.len());
+                for id in &ids {
+                    if let Ok(state) = ctl.session_state(id).await {
+                        states.push(state);
+                    }
+                }
                 println!("{}", serde_json::to_string_pretty(&states)?);
             } else {
                 if ids.is_empty() {
@@ -877,12 +926,11 @@ async fn session_cmd<C: MirageCtl>(
                 }
                 println!("{:<32} {:<10} {:<12} CONTAINER", "ID", "HEALTHY", "STATE");
                 for id in ids {
-                    let state = ctl.session_state(&id).ok();
-                    let h = state
-                        .as_ref()
-                        .map(|s| s.health.clone())
-                        .or_else(|| ctl.session_health(&id).ok())
-                        .unwrap_or_default();
+                    let state = ctl.session_state(&id).await.ok();
+                    let h = match state.as_ref() {
+                        Some(s) => s.health.clone(),
+                        None => ctl.session_health(&id).await.unwrap_or_default(),
+                    };
                     let container = match state.as_ref().and_then(|s| s.container.as_ref()) {
                         Some(c) => format!(
                             "{} {} ({} node{})",
@@ -910,11 +958,11 @@ async fn session_cmd<C: MirageCtl>(
             }
         }
         SessionCmd::Show { id } => {
-            let s = ctl.session_state(&id)?;
+            let s = ctl.session_state(&id).await?;
             println!("{}", serde_json::to_string_pretty(&s)?);
         }
         SessionCmd::Wait { id, timeout } => {
-            let h = ctl.session_wait_ready(&id, Duration::from_secs(timeout))?;
+            let h = ctl.session_wait_ready(&id, Duration::from_secs(timeout)).await?;
             if !h.healthy {
                 let state = h.state.clone().unwrap_or_default();
                 match h.message.as_deref() {
@@ -927,12 +975,19 @@ async fn session_cmd<C: MirageCtl>(
         }
         SessionCmd::Start(args) => return session_start(ctl, args, json).await,
         SessionCmd::Stop { id } => {
-            ctl.session_destroy(&id)?;
+            ctl.session_destroy(&id).await?;
             println!("stopped {id}");
         }
         SessionCmd::Dir { id } => {
-            let p = mirage_core::paths::session_dir(&id);
-            println!("{}", p.display());
+            // The per-session directory now holds only emulator runtime
+            // assets (rocjitsu's config and daemon socket); mirage keeps
+            // no session state on disk. Verify the session exists so this
+            // does not print a path for something that is not running.
+            ctl.session_state(&id).await?;
+            println!(
+                "{}",
+                mirage_core::paths::session_runtime_dir(&id).display()
+            );
         }
     }
     Ok(ExitCode::from(0))
@@ -1023,7 +1078,7 @@ fn build_profile_create(
         },
         None if interactive => {
             let specs = registry();
-            let default_name = default_emulator().name;
+            let default_name = default_emulator_name();
             let default_idx = specs
                 .iter()
                 .position(|s| s.name == default_name)
@@ -1051,7 +1106,12 @@ fn build_profile_create(
                 .interact()?;
             specs[pick].clone()
         }
-        None => default_emulator(),
+        None => default_emulator().ok_or_else(|| {
+            anyhow::anyhow!(
+                "this build of mirage has no emulator backends compiled in; \
+                 rebuild with at least one (e.g. --features rocjitsu)"
+            )
+        })?,
     };
 
     // ----- topology -----
@@ -1419,23 +1479,22 @@ fn apply_profile_overrides(
     Ok(MaybeRef::Owned(profile.clone()))
 }
 
-/// Wait for a freshly-spawned session host to become ready, turning a
-/// terminal bring-up failure into a hard error.
+/// Wait for a session to become ready, turning a terminal bring-up
+/// failure into a hard error.
 ///
-/// `session_wait_ready` resolves as soon as the session is either
-/// healthy *or* terminal, so a failed host/container bring-up (a bad
-/// image, a node that won't start, a missing emulator asset, …) returns
-/// `Ok` carrying an *unhealthy, terminal* health rather than an error.
-/// Callers about to run a workload must treat that as fatal: otherwise
-/// they submit an exec that no (now-exited) host will ever process and
-/// the client blocks forever. This surfaces the detailed health message
-/// (image pull error, node bring-up failure, …) as an error instead.
-fn wait_ready_or_bail<C: MirageCtl>(
+/// `session_wait_ready` resolves as soon as the session is either healthy
+/// *or* terminal, so a failed bring-up (a bad image, a node that won't
+/// start, a missing emulator asset) returns `Ok` carrying an *unhealthy,
+/// terminal* health rather than an error. Callers about to run a workload
+/// must treat that as fatal: otherwise they submit an exec into a session
+/// that can never run it. This surfaces the detailed health message
+/// instead.
+async fn wait_ready_or_bail<C: MirageCtl + ?Sized>(
     ctl: &C,
     id: &SessionId,
     timeout: Duration,
 ) -> anyhow::Result<()> {
-    let h = ctl.session_wait_ready(id, timeout)?;
+    let h = ctl.session_wait_ready(id, timeout).await?;
     if !h.healthy {
         let state = h.state.unwrap_or_else(|| "failed".to_string());
         match h.message {
@@ -1457,14 +1516,14 @@ async fn session_start<C: MirageCtl>(
     // staying fully non-interactive in scripts, pipes and tests.
     let interactive = !args.no_input && std::io::stdin().is_terminal();
 
-    let profile_name = resolve_start_profile(ctl, args.profile, interactive)?;
+    let profile_name = resolve_start_profile(ctl, args.profile, interactive).await?;
     let id = resolve_start_id(args.id, interactive)?;
     let workdir = resolve_start_workdir(args.workdir, interactive)?;
     let ready_timeout = resolve_start_ready_timeout(args.ready_timeout, interactive)?;
 
     // Validate profile exists and resolve it so container overrides can
     // be applied.
-    let mut profile = ctl.profile_get(&profile_name)?;
+    let mut profile = ctl.profile_get(&profile_name).await?;
     let profile_ref = apply_profile_overrides(
         &mut profile,
         args.image,
@@ -1481,18 +1540,29 @@ async fn session_start<C: MirageCtl>(
         &[],
         &profile_name,
     )?;
-    let def = ctl.session_create(CreateSessionRequest {
-        id,
-        profile: profile_ref,
-        workdir,
-        daemon: !args.in_process,
-    })?;
-    if !args.no_host {
-        spawn_host_for(&def.id)?;
-        wait_ready_or_bail(ctl, &def.id, Duration::from_secs(ready_timeout))?;
+    let def = ctl
+        .session_create(CreateSessionRequest {
+            id,
+            profile: profile_ref,
+            workdir,
+            daemon: !args.in_process,
+        })
+        .await?;
+    if args.no_wait {
+        println!("{}", def.id);
+        return Ok(ExitCode::from(0));
+    }
+    // Bring-up failing must be fatal here. `session_wait_ready` resolves
+    // as soon as the session settles either way, so a caller that ignored
+    // the health would go on to submit execs into a session that can
+    // never run them.
+    if let Err(e) = wait_ready_or_bail(ctl, &def.id, Duration::from_secs(ready_timeout)).await {
+        // Do not leave a dead session behind for the user to clean up.
+        let _ = ctl.session_destroy(&def.id).await;
+        return Err(e);
     }
     if json {
-        let s = ctl.session_state(&def.id)?;
+        let s = ctl.session_state(&def.id).await?;
         println!("{}", serde_json::to_string_pretty(&s)?);
     } else {
         println!("{}", def.id);
@@ -1503,7 +1573,7 @@ async fn session_start<C: MirageCtl>(
 /// Resolve the profile name for `session start`: the `--profile` flag, an
 /// interactive picker over the known profiles, or a hard error when no
 /// profile was given and we can't prompt.
-fn resolve_start_profile<C: MirageCtl>(
+async fn resolve_start_profile<C: MirageCtl + ?Sized>(
     ctl: &C,
     profile: Option<String>,
     interactive: bool,
@@ -1514,7 +1584,7 @@ fn resolve_start_profile<C: MirageCtl>(
     if !interactive {
         anyhow::bail!("a profile is required (pass --profile NAME)");
     }
-    let profiles = ctl.profile_list()?;
+    let profiles = ctl.profile_list().await?;
     if profiles.is_empty() {
         anyhow::bail!("no profiles found; run `mirage profile create` first");
     }
@@ -1577,99 +1647,6 @@ fn resolve_start_ready_timeout(ready_timeout: u64, interactive: bool) -> anyhow:
     )
 }
 
-/// Look up an executable named `name` on `PATH`, returning the first hit.
-fn which_on_path(name: &str) -> Option<std::path::PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-/// Resolve the `mirage` binary used to spawn a per-session host process.
-///
-/// Resolution order, skipping any candidate that no longer exists on disk
-/// (e.g. `current_exe()` going stale after the binary was rebuilt or
-/// reinstalled while a long-running daemon kept executing):
-///   1. `MIRAGE_BIN` (tests / explicit override)
-///   2. the current executable, if its path still points at a real file
-///   3. a `mirage` binary discovered on `PATH`
-fn find_host_bin_for_session_spawn() -> anyhow::Result<std::path::PathBuf> {
-    if let Some(b) = std::env::var_os("MIRAGE_BIN") {
-        let p = std::path::PathBuf::from(b);
-        if p.is_file() {
-            return Ok(p);
-        }
-        anyhow::bail!(
-            "MIRAGE_BIN points at `{}`, which does not exist",
-            p.display()
-        );
-    }
-    if let Ok(exe) = std::env::current_exe()
-        && exe.is_file()
-    {
-        return Ok(exe);
-    }
-    if let Some(p) = which_on_path("mirage") {
-        return Ok(p);
-    }
-    anyhow::bail!(
-        "could not locate the `mirage` binary to launch a session host. \
-         The running daemon's own executable path is stale (it was likely \
-         rebuilt or reinstalled while running). Restart the daemon, or set \
-         MIRAGE_BIN to the path of the `mirage` binary."
-    )
-}
-
-/// Spawn the per-session `mirage host` process for `id` and detach it.
-///
-/// This is `pub` so other binaries (notably `mirage_daemon`) can reuse
-/// the exact same host-spawning logic the CLI uses.
-pub fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
-    // The unified `mirage` binary is its own host: we re-exec
-    // ourselves with the `host` subcommand. Tests may override which
-    // binary is used via `MIRAGE_BIN`.
-    let bin = find_host_bin_for_session_spawn()?;
-    let layout = mirage_core::paths::SessionLayout::for_id(id);
-    // The session host is node 0's host: redirect its stderr to
-    // `node/0/host.log`. Ensure the node directory exists first.
-    let node0 = layout.node(0);
-    std::fs::create_dir_all(&node0.root)?;
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(node0.host_log())?;
-    // spawn and detach into its own process group so terminal-generated
-    // signals (e.g. Ctrl-C in the foreground shell) are not delivered to
-    // the detached host.
-    let mut cmd = std::process::Command::new(bin);
-    cmd.arg("host")
-        .arg("--session")
-        .arg(id.as_str())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::from(log));
-    // Propagate the CLI's chosen log level to the detached host so its
-    // events are logged at the requested verbosity. Only set when the
-    // user didn't already provide `MIRAGE_LOG` (in which case the host
-    // inherits it from our environment as usual).
-    if let Some(level) = HOST_LOG_DIRECTIVE.get() {
-        cmd.env("MIRAGE_LOG", level);
-    }
-    use std::os::unix::process::CommandExt;
-    cmd.process_group(0);
-    cmd.spawn().with_context(|| {
-        format!(
-            "failed to launch session host via `{}`",
-            cmd.get_program().to_string_lossy()
-        )
-    })?;
-    Ok(())
-}
-
 // ----- exec dispatch ---------------------------------------------------------
 
 async fn exec_cmd<C: MirageCtl + 'static>(
@@ -1679,7 +1656,7 @@ async fn exec_cmd<C: MirageCtl + 'static>(
 ) -> anyhow::Result<ExitCode> {
     match cmd {
         ExecCmd::List { session } => {
-            let ids = ctl.exec_list(&session)?;
+            let ids = ctl.exec_list(&session).await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&ids)?);
             } else {
@@ -1692,7 +1669,7 @@ async fn exec_cmd<C: MirageCtl + 'static>(
                         session: session.clone(),
                         exec: id.clone(),
                     };
-                    let s = ctl.exec_status(&r).unwrap_or_default();
+                    let s = ctl.exec_status(&r).await.unwrap_or_default();
                     println!(
                         "{:<14} {:<8} {:<8} {}",
                         id,
@@ -1707,18 +1684,18 @@ async fn exec_cmd<C: MirageCtl + 'static>(
         }
         ExecCmd::Show { session, exec } => {
             let r = ExecRef { session, exec };
-            let s = ctl.exec_status(&r)?;
+            let s = ctl.exec_status(&r).await?;
             println!("{}", serde_json::to_string_pretty(&s)?);
         }
         ExecCmd::Start(a) => return exec_start(ctl, a).await,
         ExecCmd::Signal { session, exec, sig } => {
             let n = parse_signal(&sig)?;
             let r = ExecRef { session, exec };
-            ctl.exec_signal(&r, n)?;
+            ctl.exec_signal(&r, n).await?;
         }
         ExecCmd::Remove { session, exec } => {
             let r = ExecRef { session, exec };
-            ctl.exec_remove(&r)?;
+            ctl.exec_remove(&r).await?;
             println!("removed");
         }
     }
@@ -1731,6 +1708,15 @@ async fn exec_start<C: MirageCtl + 'static>(
 ) -> anyhow::Result<ExitCode> {
     let (cmd, args) = split_argv(&a.argv);
     let env = parse_envs(&a.envs)?;
+    // A detached exec has no client attached to its terminal, so there is
+    // nothing for `auto` to detect against; only an explicit `--tty
+    // always` gives one.
+    let tty = if a.detach {
+        a.tty == TtyArg::Always
+    } else {
+        resolve_tty(a.tty)
+    };
+    let (tty_rows, tty_cols) = terminal_size();
     let def = ExecDef {
         timestamp: chrono::Utc::now(),
         session: a.session.clone(),
@@ -1741,20 +1727,25 @@ async fn exec_start<C: MirageCtl + 'static>(
             workdir: None,
         },
         worker_exec: None,
-        // when attaching, we always keep the exec until after attach
-        // completes; otherwise the host might remove the dir before we
-        // finish tailing.
         nproc_per_node: 1,
+        tty,
+        tty_rows,
+        tty_cols,
+        // Keep the exec until the attach has drained it; otherwise it
+        // could be forgotten before the client has read its output.
         keep: a.keep || !a.detach,
     };
-    let r = ctl.session_exec(&def)?;
+    let r = ctl.session_exec(&def).await?;
     if a.detach {
         println!("{}", r.exec);
         return Ok(ExitCode::from(0));
     }
     let code = follow_attach(ctl.clone(), &r).await?;
-    if !a.keep {
-        let _ = ctl.exec_remove(&r);
+    if !a.keep
+        && let Err(e) = ctl.exec_remove(&r).await
+        && !e.is_not_found()
+    {
+        tracing::warn!(exec = %r.exec, "could not remove the exec: {e}");
     }
     Ok(code)
 }
@@ -1812,105 +1803,207 @@ async fn attach_cmd<C: MirageCtl + 'static>(
     follow_attach(ctl, &r).await
 }
 
-/// Put the controlling terminal into raw mode for the duration of an
-/// interactive attach, restoring the original settings on drop.
+/// Whether to allocate a pseudo-terminal for an exec, as a CLI flag.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, ValueEnum)]
+pub enum TtyArg {
+    /// Allocate one when this command's own stdin and stdout are both
+    /// terminals (the default).
+    #[default]
+    Auto,
+    /// Always allocate one.
+    Always,
+    /// Never allocate one.
+    Never,
+}
+
+/// Resolve whether this exec should run on a terminal.
 ///
-/// When attached to an interactive workload (e.g. `bash`) the remote
-/// PTY owns echo and line editing, so the local terminal must forward
-/// every keystroke verbatim instead of cooking/echoing it. Returns
-/// `None` (a no-op) when stdin isn't a TTY, e.g. piped or redirected.
+/// `auto` mirrors what a user means by running an interactive command:
+/// allocate a terminal when this process has one on both ends. That makes
+/// `mirage run -- bash` a working shell — a shell prints no prompt and
+/// echoes nothing unless `isatty` is true — while keeping
+/// `mirage run -- app > out.txt` and `mirage run -- app | grep x` on
+/// pipes, where output is byte-exact and stdout stays separate from
+/// stderr. A terminal cannot preserve either: it has one stream, and the
+/// line discipline rewrites `\n` to `\r\n`.
+#[must_use]
+pub fn resolve_tty(arg: TtyArg) -> bool {
+    match arg {
+        TtyArg::Always => true,
+        TtyArg::Never => false,
+        TtyArg::Auto => std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
+    }
+}
+
+/// The local terminal's size as `(rows, cols)`, for sizing the remote
+/// one.
+///
+/// Falls back to the conventional 24x80 when this process has no
+/// terminal — the same default the supervisor would pick.
+///
+/// Reading the window size is a `TIOCGWINSZ` ioctl, which `nix` only
+/// exposes through an `unsafe` generated wrapper. The `terminal_size`
+/// crate wraps it safely, so this crate stays `forbid(unsafe_code)`.
+#[must_use]
+pub fn terminal_size() -> (u16, u16) {
+    terminal_size::terminal_size()
+        .map_or((24, 80), |(terminal_size::Width(cols), terminal_size::Height(rows))| (rows, cols))
+}
+
+/// Put the *local* terminal into raw mode for the duration of an
+/// interactive attach, restoring it on drop.
+///
+/// Workloads run on ordinary pipes, not a pseudo-terminal, so there is no
+/// remote line discipline to echo or edit input. `mirage attach` therefore
+/// does that job on the client's own tty: raw mode stops the local shell
+/// from cooking input, so each keystroke is forwarded as it is typed, and
+/// the terminal renders whatever the workload writes back.
+///
+/// Restoration on drop is what makes this safe to use: leaving a terminal
+/// in raw mode after the process exits gives the user a shell that no
+/// longer echoes what they type.
+///
+/// Returns `None` — a no-op — when stdin is not a tty, e.g. piped or
+/// redirected.
+///
+/// This uses `nix`'s safe `termios` wrappers. The previous version called
+/// `libc::tcgetattr`/`cfmakeraw`/`tcsetattr` inside an `unsafe` block
+/// around a `std::mem::zeroed()` termios; the safe API needs neither.
 struct RawModeGuard {
-    fd: i32,
-    original: libc::termios,
+    stdin: std::io::Stdin,
+    original: nix::sys::termios::Termios,
 }
 
 impl RawModeGuard {
+    /// Enable raw mode if stdin is a terminal.
     fn enable_if_tty() -> Option<Self> {
-        use std::os::fd::AsRawFd as _;
-        let fd = std::io::stdin().as_raw_fd();
-        // SAFETY: `fd` is the process stdin; the termios calls only read
-        // and write a stack-allocated `termios` we own.
-        unsafe {
-            if libc::isatty(fd) != 1 {
-                return None;
-            }
-            let mut original: libc::termios = std::mem::zeroed();
-            if libc::tcgetattr(fd, &mut original) != 0 {
-                return None;
-            }
-            let mut raw = original;
-            libc::cfmakeraw(&mut raw);
-            if libc::tcsetattr(fd, libc::TCSANOW, &raw) != 0 {
-                return None;
-            }
-            Some(RawModeGuard { fd, original })
+        let stdin = std::io::stdin();
+        if !stdin.is_terminal() {
+            return None;
         }
+        let original = nix::sys::termios::tcgetattr(&stdin).ok()?;
+        let mut raw = original.clone();
+        nix::sys::termios::cfmakeraw(&mut raw);
+        nix::sys::termios::tcsetattr(&stdin, nix::sys::termios::SetArg::TCSANOW, &raw).ok()?;
+        Some(Self { stdin, original })
     }
 }
 
 impl Drop for RawModeGuard {
     fn drop(&mut self) {
-        // SAFETY: restoring the saved termios on the same fd.
-        unsafe {
-            libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
-        }
+        let _ = nix::sys::termios::tcsetattr(
+            &self.stdin,
+            nix::sys::termios::SetArg::TCSANOW,
+            &self.original,
+        );
     }
 }
 
+/// Forward this terminal's size to the exec, now and on every `SIGWINCH`.
+///
+/// Returns `None` when this process has no terminal, in which case there
+/// is no size to track.
+fn spawn_resize_forwarder<C: MirageCtl + 'static>(
+    ctl: Arc<C>,
+    exec: ExecRef,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if !std::io::stdout().is_terminal() {
+        return None;
+    }
+    Some(tokio::spawn(async move {
+        // Send the current size immediately: the exec was created with
+        // whatever size the client reported at submission, which may
+        // already be stale by the time the attach lands.
+        let (rows, cols) = terminal_size();
+        let _ = ctl.exec_resize(&exec, rows, cols).await;
+
+        let mut winch =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change()) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::debug!("cannot watch for terminal resizes: {e}");
+                    return;
+                }
+            };
+        while winch.recv().await.is_some() {
+            let (rows, cols) = terminal_size();
+            if ctl.exec_resize(&exec, rows, cols).await.is_err() {
+                // The exec has gone; the attach loop will notice.
+                return;
+            }
+        }
+    }))
+}
+
+/// Attach to an exec: stream its output to this terminal and forward this
+/// terminal's input to it, until the exec exits.
+///
+/// Returns the exec's exit code so `mirage run` can exit with it.
 async fn follow_attach<C: MirageCtl + 'static>(
     ctl: Arc<C>,
     r: &ExecRef,
 ) -> anyhow::Result<ExitCode> {
-    let mut s = ctl.session_attach(r)?;
+    let mut stream = ctl.session_attach(r).await?;
 
-    // Forward this process's stdin to the workload's stdin (node 0).
-    // Without this an interactive workload such as `bash` blocks forever
-    // waiting for input that never arrives. The host exposes node 0's
-    // stdin as a FIFO that a bridge task pumps into the workload's PTY;
-    // `session_stdin` writes there. Reads are blocking, so they run on a
-    // dedicated thread that exits on EOF or the first write error (the
-    // workload went away). The thread is detached: the attach loop below
-    // owns the lifetime and the process exits shortly after it returns.
     let _raw = RawModeGuard::enable_if_tty();
-    let stdin_ctl = ctl.clone();
-    let stdin_ref = r.clone();
+
+    // Keep the remote terminal the same size as this one. A program that
+    // draws to the screen reads its window size from the terminal and
+    // redraws on `SIGWINCH`; without this it keeps whatever size the exec
+    // was created with and renders into the wrong shape the moment the
+    // user resizes their window.
+    let resizer = spawn_resize_forwarder(ctl.clone(), r.clone());
+
+    // Forward this process's stdin to the workload. Reading stdin is
+    // blocking, so it happens on a dedicated blocking task rather than on
+    // the runtime; the attach loop below owns the lifetime and the task
+    // ends when the process does.
+    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(16);
     std::thread::spawn(move || {
         use std::io::Read as _;
         let mut stdin = std::io::stdin().lock();
         let mut buf = [0u8; 4096];
         loop {
             match stdin.read(&mut buf) {
-                Ok(0) => break,
+                // EOF on our own stdin.
+                Ok(0) => return,
                 Ok(n) => {
-                    // The exec's stdin FIFO is created asynchronously by
-                    // the host just after the exec is submitted, so the
-                    // first write can briefly race ahead of it. Retry
-                    // transient failures so opening keystrokes aren't
-                    // dropped; give up if it never appears (the workload
-                    // is gone) so the thread can't spin forever.
-                    let mut attempts = 0;
-                    loop {
-                        match stdin_ctl.session_stdin(&stdin_ref, &buf[..n]) {
-                            Ok(()) => break,
-                            Err(_) if attempts < 250 => {
-                                attempts += 1;
-                                std::thread::sleep(Duration::from_millis(20));
-                            }
-                            Err(_) => return,
-                        }
+                    if stdin_tx.blocking_send(buf[..n].to_vec()).is_err() {
+                        return;
                     }
                 }
-                Err(_) => break,
+                Err(_) => return,
             }
         }
+    });
+
+    let stdin_ctl = ctl.clone();
+    let stdin_ref = r.clone();
+    let forwarder = tokio::spawn(async move {
+        while let Some(chunk) = stdin_rx.recv().await {
+            // A write failing means the workload closed its stdin or
+            // exited. That is normal, not an error worth reporting: stop
+            // forwarding and let the output loop decide when we are done.
+            if stdin_ctl.session_stdin(&stdin_ref, &chunk).await.is_err() {
+                return;
+            }
+        }
+        // Our own stdin reached EOF. Propagate it, or a workload that
+        // reads to EOF never finishes: `echo hi | mirage run -- cat`
+        // would hang forever waiting for an end-of-input that the
+        // pipeline already delivered to us.
+        let _ = stdin_ctl.session_stdin_close(&stdin_ref).await;
     });
 
     let mut stdout = std::io::stdout().lock();
     let mut stderr = std::io::stderr().lock();
     let mut exit: i32 = 0;
-    while let Some(pkt) = s.next().await {
-        match pkt {
+    while let Some(packet) = stream.next().await {
+        match packet {
             StreamPacket::Output { stream, data, .. } => match stream {
+                // stdout and stderr are distinct again now that workloads
+                // are not funnelled through a shared pseudo-terminal, so
+                // each goes to the matching stream and redirection works.
                 StdStream::Stdout => {
                     let _ = stdout.write_all(&data);
                     let _ = stdout.flush();
@@ -1928,39 +2021,72 @@ async fn follow_attach<C: MirageCtl + 'static>(
             }
         }
     }
+    forwarder.abort();
+    if let Some(resizer) = resizer {
+        resizer.abort();
+    }
+
+    // Exit codes are a byte. Preserve the sign convention for
+    // signal-killed workloads (128 + signal) by masking rather than
+    // saturating, which is what a shell reports too.
     Ok(ExitCode::from((exit & 0xff) as u8))
 }
 
+/// `mirage logs`: print (or follow) an exec's output.
+///
+/// Both modes read through the control plane rather than off disk. An
+/// exec's output has no on-disk representation any more — having one is
+/// how the previous design ended up with output files outliving the
+/// process that wrote them, and with no way to tell a finished exec's
+/// logs from an abandoned one's.
 async fn logs_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: LogsArgs) -> anyhow::Result<ExitCode> {
-    let layout = mirage_core::paths::SessionLayout::for_id(&a.session).exec(&a.exec);
-    if !layout.root.exists() {
-        anyhow::bail!("exec not found: {}", a.exec);
-    }
-    let mut nodes = vec![];
-    if let Ok(rd) = std::fs::read_dir(layout.node_root()) {
-        for e in rd.flatten() {
-            if let Some(s) = e.file_name().to_str()
-                && let Ok(n) = s.parse::<u32>()
-            {
-                nodes.push(n);
-            }
-        }
-    }
-    nodes.sort();
-    if !a.follow {
-        for n in &nodes {
-            let nl = layout.node(*n);
-            if let Ok(b) = std::fs::read(nl.stdout()) {
-                let _ = std::io::stdout().write_all(&b);
-            }
-        }
-        return Ok(ExitCode::from(0));
-    }
     let r = ExecRef {
         session: a.session,
         exec: a.exec,
     };
-    follow_attach(ctl, &r).await?;
+    // Surface a missing exec as an error rather than as empty output.
+    let status = ctl.exec_status(&r).await?;
+
+    if a.follow {
+        return follow_attach(ctl, &r).await;
+    }
+
+    let mut stream = ctl.session_attach(&r).await?;
+    let mut stdout = std::io::stdout().lock();
+    let mut stderr = std::io::stderr().lock();
+    loop {
+        // A finished exec's replay ends with `ExecExit`, so reading to it
+        // is exact. A *running* exec has no such boundary: its retained
+        // output is followed by live output that will keep arriving.
+        // Without `--follow` the user asked for a snapshot, so stop once
+        // the retained frames — which are already queued and arrive
+        // immediately — have drained.
+        let next = if status.ended {
+            stream.next().await
+        } else {
+            const DRAIN_IDLE: Duration = Duration::from_millis(250);
+            match tokio::time::timeout(DRAIN_IDLE, stream.next()).await {
+                Ok(packet) => packet,
+                Err(_) => break,
+            }
+        };
+        let Some(packet) = next else { break };
+        match packet {
+            StreamPacket::Output { stream, data, .. } => match stream {
+                StdStream::Stdout => {
+                    let _ = stdout.write_all(&data);
+                }
+                StdStream::Stderr => {
+                    let _ = stderr.write_all(&data);
+                }
+                StdStream::Stdin => {}
+            },
+            StreamPacket::NodeExit { .. } => {}
+            StreamPacket::ExecExit { .. } => break,
+        }
+    }
+    let _ = stdout.flush();
+    let _ = stderr.flush();
     Ok(ExitCode::from(0))
 }
 
@@ -1970,7 +2096,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         Some(id) => (id, false),
         None => {
             // create transient session
-            let mut profile = ctl.profile_get(&a.profile)?;
+            let mut profile = ctl.profile_get(&a.profile).await?;
             let profile_ref = apply_profile_overrides(
                 &mut profile,
                 a.image.clone(),
@@ -1988,25 +2114,28 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                 &a.profile,
             )?;
             tracing::info!(profile = %a.profile, "creating transient session");
-            let def = ctl.session_create(CreateSessionRequest {
-                id: None,
-                profile: profile_ref,
-                workdir: a.workdir.clone().unwrap_or_else(|| {
-                    std::env::current_dir()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or("/".to_string())
-                }),
-                daemon: !a.in_process,
-            })?;
-            tracing::info!(session = %def.id, "session created; spawning host");
-            spawn_host_for(&def.id)?;
-            if let Err(e) = wait_ready_or_bail(ctl.as_ref(), &def.id, Duration::from_secs(10)) {
+            let def = ctl
+                .session_create(CreateSessionRequest {
+                    id: None,
+                    profile: profile_ref,
+                    workdir: a.workdir.clone().unwrap_or_else(|| {
+                        std::env::current_dir()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|_| "/".to_string())
+                    }),
+                    daemon: !a.in_process,
+                })
+                .await?;
+            tracing::info!(session = %def.id, "session created; waiting for it to be ready");
+            if let Err(e) =
+                wait_ready_or_bail(ctl.as_ref(), &def.id, Duration::from_secs(60)).await
+            {
                 // The transient session we just created never came up
-                // (e.g. a container image that couldn't be pulled or a
-                // node that wouldn't start). Tear it down so we don't
+                // (e.g. a container image that could not be pulled, or a
+                // missing emulator runtime). Tear it down so we do not
                 // leak a dead session, then surface the failure instead
-                // of submitting an exec no host will ever run.
-                let _ = ctl.session_destroy(&def.id);
+                // of submitting an exec that can never run.
+                let _ = ctl.session_destroy(&def.id).await;
                 return Err(e);
             }
             tracing::info!(session = %def.id, "session ready");
@@ -2015,6 +2144,8 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
     };
     let (cmd, args) = split_argv(&a.argv);
     let env = parse_envs(&a.envs)?;
+    let tty = resolve_tty(a.tty);
+    let (tty_rows, tty_cols) = terminal_size();
     let def = ExecDef {
         timestamp: chrono::Utc::now(),
         session: sid.clone(),
@@ -2026,15 +2157,23 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         },
         worker_exec: None,
         nproc_per_node: a.nproc_per_node.unwrap_or(1).max(1),
+        tty,
+        tty_rows,
+        tty_cols,
         // keep until after attach drains; we may still destroy the
         // whole session below.
         keep: true,
     };
-    let r = ctl.session_exec(&def)?;
+    let r = ctl.session_exec(&def).await?;
     tracing::info!(session = %sid, exec = %r.exec, "exec submitted; attaching");
     let code = follow_attach(ctl.clone(), &r).await?;
     if created && !a.keep_session {
-        let _ = ctl.session_destroy(&sid);
+        // Awaited, not fired and forgotten: `session_destroy` only
+        // returns once every workload process has been reaped, so this is
+        // what makes `mirage run` leave nothing behind.
+        if let Err(e) = ctl.session_destroy(&sid).await {
+            tracing::warn!(session = %sid, "could not destroy the transient session: {e}");
+        }
     }
     Ok(code)
 }
@@ -2107,24 +2246,54 @@ async fn state_cmd<C: MirageCtl + 'static>(
             if !force && !confirm(prompt)? {
                 return Ok(ExitCode::from(0));
             }
-            purge(&*ctl, all)?;
+            purge(&*ctl, all).await?;
             println!("purged");
         }
     }
     Ok(ExitCode::from(0))
 }
 
+/// Wait, briefly, for the daemon to stop answering.
+///
+/// Once it has exited its socket is unlinked, so any request fails. This
+/// polls rather than watching the process because the control-plane trait
+/// deliberately exposes no pid: a client should not need one.
+async fn wait_for_daemon_exit<C: MirageCtl + ?Sized>(ctl: &C) {
+    const TIMEOUT: Duration = Duration::from_secs(30);
+    const POLL: Duration = Duration::from_millis(25);
+
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    while tokio::time::Instant::now() < deadline {
+        if ctl.session_list().await.is_err() {
+            return;
+        }
+        tokio::time::sleep(POLL).await;
+    }
+    tracing::warn!("the daemon did not exit within {TIMEOUT:?}; purging anyway");
+}
+
 /// Stop every session and remove mirage's on-disk state.
-fn purge<C: MirageCtl + ?Sized>(ctl: &C, all: bool) -> anyhow::Result<()> {
+async fn purge<C: MirageCtl + ?Sized>(ctl: &C, all: bool) -> anyhow::Result<()> {
     // Best effort: stop every known session (this also wipes their
     // per-session directory under `mirage_runtime_dir`).
-    if let Ok(ids) = ctl.session_list() {
+    if let Ok(ids) = ctl.session_list().await {
         for id in ids {
-            if let Err(e) = ctl.session_destroy(&id) {
+            if let Err(e) = ctl.session_destroy(&id).await {
                 tracing::warn!("failed to stop session {id}: {e:#}");
             }
         }
     }
+
+    // Ask the daemon to exit, then wait for it to actually be gone.
+    //
+    // `daemon_shutdown` is acknowledged when the request is *accepted*,
+    // not when the daemon has finished. Deleting the runtime directory in
+    // that window races its teardown — which is still removing scratch
+    // directories and unlinking its socket inside the tree we are about
+    // to delete — and can leave the daemon re-creating parts of it after
+    // the purge has finished.
+    let _ = ctl.daemon_shutdown().await;
+    wait_for_daemon_exit(ctl).await;
 
     let mut targets = vec![
         mirage_core::paths::mirage_runtime_dir(),
@@ -2164,10 +2333,17 @@ fn print_paths(json: bool) {
         "runtime": mirage_core::paths::mirage_runtime_dir(),
         "state": mirage_core::paths::mirage_state_dir(),
         "profiles": mirage_core::paths::profile_root(),
-        "sessions": mirage_core::paths::session_root(),
+        "sessions": mirage_core::paths::session_runtime_root(),
+        "socket": rpc_client::default_socket(),
     });
     if json {
-        println!("{}", serde_json::to_string_pretty(&info).unwrap());
+        // A `serde_json::Value` built from string paths cannot fail to
+        // serialize; print something useful rather than panicking if the
+        // impossible happens.
+        match serde_json::to_string_pretty(&info) {
+            Ok(text) => println!("{text}"),
+            Err(e) => eprintln!("could not render paths as JSON: {e}"),
+        }
     } else {
         println!(
             "config:   {}",
@@ -2182,12 +2358,18 @@ fn print_paths(json: bool) {
             mirage_core::paths::mirage_state_dir().display()
         );
         println!("profiles: {}", mirage_core::paths::profile_root().display());
-        println!("sessions: {}", mirage_core::paths::session_root().display());
+        println!(
+            "sessions: {}",
+            mirage_core::paths::session_runtime_root().display()
+        );
+        println!("socket:   {}", rpc_client::default_socket().display());
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
     use mirage_core::common::SimpleMap;
     use mirage_core::emulator::{EmulatorDef, EmulatorKind};

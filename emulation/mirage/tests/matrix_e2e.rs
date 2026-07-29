@@ -10,7 +10,7 @@
 //!
 //! Every combination is exercised end-to-end against the real `mirage`
 //! binary (via `assert_cmd`) under an isolated XDG root. Combinations
-//! that the current host *cannot* run are deliberately **skipped** with
+//! that the current machine *cannot* run are deliberately **skipped** with
 //! a recorded reason rather than failed, so the same suite is
 //! meaningful on a laptop, in CI, and on an emulation host:
 //!
@@ -25,6 +25,8 @@
 //! container CLI — so the provider bring-up/teardown contract is
 //! exercised without requiring a real image or daemon, mirroring
 //! `tests/container_e2e.rs`.
+
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -272,8 +274,18 @@ impl Caps {
 /// Query `mirage emulators --json` for the install/support state of
 /// every backend and the plugins they advertise.
 fn probe_caps(mirage_bin: &Path) -> Caps {
+    // Isolated, like every other invocation in this suite. `emulators` is
+    // answered in-process and starts no daemon, but a test must not read
+    // or write the developer's real mirage directories regardless.
+    let probe_dir = tempfile::tempdir().expect("tempdir");
     let mut cmd = Command::new(mirage_bin);
-    cmd.args(["--json", "emulators"]).env_remove("MIRAGE_LOG");
+    cmd.args(["--json", "emulators"])
+        .env("XDG_CONFIG_HOME", probe_dir.path().join("config"))
+        .env("XDG_RUNTIME_DIR", probe_dir.path().join("runtime"))
+        .env("XDG_STATE_HOME", probe_dir.path().join("state"))
+        .env("MIRAGE_SOCKET", probe_dir.path().join("probe.sock"))
+        .env("MIRAGE_AUTOSTART", "0")
+        .env_remove("MIRAGE_LOG");
     let out = cmd.output().expect("run `mirage emulators`");
     let json: serde_json::Value =
         serde_json::from_slice(&out.stdout).expect("emulators output should be JSON");
@@ -311,6 +323,10 @@ struct Env {
     state: PathBuf,
     provider: PathBuf,
     mirage_bin: PathBuf,
+    /// Each combination gets its own daemon, so one cannot see another's
+    /// sessions. Kept short: `sun_path` is a fixed 108-byte array and a
+    /// socket nested in a long tempdir silently fails to bind.
+    socket: PathBuf,
 }
 
 impl Env {
@@ -321,6 +337,15 @@ impl Env {
         let state = dir.path().join("state");
         let provider = dir.path().join("mock-provider.sh");
         write_mock_provider(&provider);
+        let socket = {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static SEQ: AtomicU32 = AtomicU32::new(0);
+            std::env::temp_dir().join(format!(
+                "mrgm-{}-{}.sock",
+                std::process::id(),
+                SEQ.fetch_add(1, Ordering::Relaxed)
+            ))
+        };
         Self {
             _dir: dir,
             runtime,
@@ -328,6 +353,7 @@ impl Env {
             state,
             provider,
             mirage_bin: PathBuf::from(env!("CARGO_BIN_EXE_mirage")),
+            socket,
         }
     }
 
@@ -337,30 +363,47 @@ impl Env {
             .env("XDG_RUNTIME_DIR", &self.runtime)
             .env("XDG_STATE_HOME", &self.state)
             .env("MIRAGE_BIN", &self.mirage_bin)
-            // The mock provider records every node's pid under this dir.
+            .env("MIRAGE_SOCKET", &self.socket)
             .env("MOCK_DIR", self._dir.path())
             .env_remove("MIRAGE_LOG");
         c
     }
 
-    fn session_root(&self) -> PathBuf {
-        self.runtime.join("mirage/session")
+    /// True when the daemon reports no sessions.
+    ///
+    /// Asked over the control plane rather than by listing directories:
+    /// sessions have no on-disk representation to count, and inferring
+    /// liveness from files is what the previous design got wrong.
+    fn no_sessions_left(&self) -> bool {
+        let Ok(out) = self.mirage().args(["--json", "session", "list"]).output() else {
+            return false;
+        };
+        let text = String::from_utf8_lossy(&out.stdout);
+        serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.as_array().map(Vec::is_empty))
+            .unwrap_or(false)
     }
 
-    /// True when no session directories remain.
-    fn no_sessions_left(&self) -> bool {
-        match std::fs::read_dir(self.session_root()) {
-            Ok(mut entries) => entries.next().is_none(),
-            Err(_) => true,
-        }
+    /// Stop this combo's daemon, so each combination is fully isolated
+    /// and nothing it started outlives it.
+    fn shutdown(&self) {
+        let _ = self.mirage().args(["daemon", "stop"]).output();
+        let _ = std::fs::remove_file(&self.socket);
+        let _ = std::fs::remove_file(self.socket.with_extension("lock"));
     }
 }
 
-/// A hermetic `docker`/`podman` stand-in. It satisfies the host's
-/// bring-up path (pull/network/run/rm) and, for `run`, launches the
-/// per-node host (`mirage host --session <id> --rank <n>`) directly so
-/// the workload actually executes — exactly the contract the real
-/// container entrypoint provides. Mirrors `tests/container_e2e.rs`.
+impl Drop for Env {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+/// A hermetic `docker`/`podman` stand-in. It satisfies bring-up
+/// (pull/network/run/rm) and executes `exec` invocations locally, which
+/// is where workloads now arrive: a node container's own process just
+/// idles. Mirrors `tests/container_e2e.rs`.
 fn write_mock_provider(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
     let script = r#"#!/bin/sh
@@ -368,32 +411,26 @@ case "$1" in
   pull) exit 0 ;;
   image) [ "$2" = inspect ] && exit 1; exit 0 ;;
   network) [ "$2" = inspect ] && exit 1; exit 0 ;;
-  run)
-    shift; name=""; sid=""; rank=""
+  run) echo "cid-0"; exit 0 ;;
+  exec)
+    shift
+    envs=""
+    workdir=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --name) name="$2"; shift 2 ;;
-        --session) sid="$2"; shift 2 ;;
-        --rank) rank="$2"; shift 2 ;;
-        *) shift ;;
+        -i|-t|-it) shift ;;
+        -w) workdir="$2"; shift 2 ;;
+        -e) envs="$envs $2"; shift 2 ;;
+        *) break ;;
       esac
     done
-    if [ -n "$sid" ] && [ -n "$rank" ]; then
-      "$MIRAGE_BIN" host --session "$sid" --rank "$rank" </dev/null >/dev/null 2>&1 &
-      [ -n "$name" ] && echo $! > "$MOCK_DIR/$name.pid"
+    shift
+    [ -n "$workdir" ] && cd "$workdir" 2>/dev/null
+    if [ -n "$envs" ]; then
+      exec env $envs "$@"
     fi
-    echo "cid-$rank"; exit 0 ;;
-  rm)
-    for a in "$@"; do
-      case "$a" in
-        mirage-*)
-          if [ -f "$MOCK_DIR/$a.pid" ]; then
-            kill "$(cat "$MOCK_DIR/$a.pid")" 2>/dev/null
-            rm -f "$MOCK_DIR/$a.pid"
-          fi ;;
-      esac
-    done
-    exit 0 ;;
+    exec "$@" ;;
+  rm) exit 0 ;;
   inspect) echo true; exit 0 ;;
   *) exit 0 ;;
 esac

@@ -34,7 +34,7 @@ use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::{FileMount, ProfileDef};
-use mirage_core::session::{SessionHealth, SessionId};
+use mirage_core::session::{SessionContext, SessionHealth};
 
 /// The HIP intercept library HotSwap ships. It is the artifact mirage
 /// anchors discovery on (its directory is the HotSwap lib dir) and the
@@ -88,6 +88,7 @@ pub const SUPPORTED_GPUS: &[(u32, &str)] = &[(90402, "gfx942"), (90500, "gfx950"
 /// and the `HSA_HOTSWAP_*` variables select the source target and policy.
 /// Stateless; a single shared instance is registered in the emulator
 /// registry.
+#[derive(Debug)]
 pub struct Hotswap;
 
 impl EmulatorBackend for Hotswap {
@@ -103,7 +104,7 @@ impl EmulatorBackend for Hotswap {
         Vec::new()
     }
 
-    fn shutdown(&self, _session: &SessionId) {}
+    fn shutdown(&self, _ctx: &SessionContext) {}
 
     fn validate_profile(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
         // HotSwap is not bundled or built by mirage; it must be
@@ -129,7 +130,7 @@ impl EmulatorBackend for Hotswap {
         Vec::new()
     }
 
-    fn health(&self, _session: &SessionId) -> SessionHealth {
+    fn health(&self, _ctx: &SessionContext) -> SessionHealth {
         let support = support_status();
         let installed = is_installed();
         let healthy = installed && support.supported;
@@ -148,10 +149,7 @@ impl EmulatorBackend for Hotswap {
         }
     }
 
-    fn injection_def(&self, session: &SessionId) -> Result<InjectionDef> {
-        // The trait hands us only the session id, so recover the profile
-        // it was started with to learn whether it is containerised.
-        let profile = mirage_core::session::resolve_profile(session)?;
+    fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
         // Refuse to run unemulated: without the HotSwap tree the
         // workload would silently run on real hardware, so fail loudly
         // with guidance instead.
@@ -162,7 +160,7 @@ impl EmulatorBackend for Hotswap {
             ))
         })?;
 
-        let containerized = profile.containerize.is_some();
+        let containerized = ctx.profile.containerize.is_some();
         let (ld_preload, env, mounts) = build_hotswap_env(&dir, containerized);
 
         // HotSwap retargets device code onto a *physical* GPU, so the
@@ -462,6 +460,8 @@ pub fn install_guidance() -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     #[test]

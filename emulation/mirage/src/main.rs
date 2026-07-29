@@ -1,28 +1,24 @@
-//! `mirage` — a single executable that bundles the user-facing
-//! control plane (`ctl`), the per-session `host`, and the (optional)
-//! cross-session `daemon`.
+//! `mirage` — a single executable that is both the CLI and the
+//! supervisor daemon.
 //!
 //! Top-level layout:
 //!
 //! * `mirage <ctl-command>` — every control-plane subcommand
 //!   (`profile`, `topology`, `agent`, `emulators`, `session`, `exec`,
 //!   `state`, `run`, `attach`, `logs`, `paths`). These are flattened in
-//!   from [`mirage_ctl::CtlCmd`].
-//! * `mirage host --session <id>` — runs the per-session host.
-//! * `mirage webui` — runs the web UI server (formerly `mirage
-//!   daemon`, still accepted as an alias).
+//!   from [`mirage_ctl::CtlCmd`] and reach their sessions by talking to
+//!   the daemon over its Unix socket, auto-starting one if none is
+//!   running.
+//! * `mirage daemon` — runs the supervisor daemon in the foreground,
+//!   plus `stop`, `status` and `install` subcommands. `webui` is accepted
+//!   as an alias for compatibility.
 
 use std::process::ExitCode;
-use std::sync::Arc;
 
-use clap::{Args, Parser, Subcommand};
-use mirage_core::ctl::FileCtl;
-use mirage_core::session::SessionId;
+use clap::{Parser, Subcommand};
 use mirage_ctl::CtlCmd;
-#[cfg(feature = "daemon")]
-use mirage_daemon::WebuiArgs;
-use mirage_host::{HostConfig, run as host_run};
-use tokio::sync::Notify;
+use mirage_ctl::rpc_client::RpcClient;
+use mirage_daemon::DaemonArgs;
 
 // Link-only dependencies on the emulator backend crates. The binary
 // never names them: each crate registers itself into the emulator
@@ -65,15 +61,14 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 #[allow(clippy::large_enum_variant)]
 enum TopCmd {
-    /// Run the per-session host process (used internally by `mirage
-    /// session start` and `mirage run`; rarely invoked directly).
-    Host(HostArgs),
-
-    /// Run the web UI server (formerly `daemon`). Use `mirage webui
-    /// install` to register it as a systemd service.
-    #[cfg(feature = "daemon")]
-    #[command(alias = "daemon")]
-    Webui(WebuiArgs),
+    /// Run the supervisor daemon, or manage a running one
+    /// (`stop`, `status`, `install`).
+    ///
+    /// The CLI starts one automatically when needed, so this is mainly
+    /// for running it in the foreground, inspecting it, or installing it
+    /// as a service.
+    #[command(alias = "webui")]
+    Daemon(DaemonArgs),
 
     /// Show version, copyright, and the third-party crates mirage is
     /// built from (with their licenses).
@@ -84,23 +79,6 @@ enum TopCmd {
     /// flattened in here.
     #[command(flatten)]
     Ctl(CtlCmd),
-}
-
-#[derive(Args, Debug)]
-struct HostArgs {
-    /// Session id (must match the directory under
-    /// `$XDG_RUNTIME_DIR/mirage/session/<id>`).
-    #[arg(long)]
-    session: SessionId,
-
-    /// Node rank this host serves. Set internally when a containerised
-    /// session launches a per-node host *inside* its container: that
-    /// host runs only its own node's execs and never manages
-    /// containers. Omitted for the orchestrator host on the real host,
-    /// which brings up the containers and (for non-containerised
-    /// sessions) runs every node directly.
-    #[arg(long)]
-    rank: Option<u32>,
 }
 
 fn main() -> ExitCode {
@@ -120,7 +98,6 @@ fn main() -> ExitCode {
 /// `rocjitsu`-style `mirage [--config …] [--daemon] -- <app>` call that
 /// should be routed to `run`.
 const SUBCOMMANDS: &[&str] = &[
-    "host",
     "webui",
     "daemon",
     "profile",
@@ -212,24 +189,7 @@ fn dropin_argv(args: Vec<String>) -> Vec<String> {
 
 fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
     match cli.command {
-        TopCmd::Host(args) => {
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(async move {
-                let shutdown = Arc::new(Notify::new());
-                host_run(
-                    HostConfig {
-                        session: args.session,
-                        rank: args.rank,
-                    },
-                    shutdown,
-                )
-                .await
-                .map_err(anyhow::Error::from)
-            })?;
-            Ok(ExitCode::from(0))
-        }
-        #[cfg(feature = "daemon")]
-        TopCmd::Webui(args) => {
+        TopCmd::Daemon(args) => {
             mirage_daemon::run(args)?;
             Ok(ExitCode::from(0))
         }
@@ -238,16 +198,32 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
             Ok(ExitCode::from(0))
         }
         TopCmd::Ctl(cmd) => {
-            let ctl = FileCtl::new();
             let json = cli.json;
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(async move { mirage_ctl::dispatch(cmd, ctl, json).await })
+            rt.block_on(async move {
+                if mirage_ctl::needs_daemon(&cmd) {
+                    // Anything touching a session runs against the
+                    // daemon, which owns them. It is started on demand,
+                    // so a first-time user never has to know it exists.
+                    let ctl = RpcClient::connect().await?;
+                    mirage_ctl::dispatch(cmd, ctl, json).await
+                } else {
+                    // Configuration and registry queries are answered
+                    // here. Starting a background daemon to read a
+                    // directory would be a surprise the user did not ask
+                    // for — and, in a test harness, a stray process in
+                    // the real user's runtime directory.
+                    mirage_ctl::dispatch(cmd, mirage_ctl::LocalCtl, json).await
+                }
+            })
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::dropin_argv;
 
     fn v(args: &[&str]) -> Vec<String> {

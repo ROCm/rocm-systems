@@ -28,10 +28,9 @@ use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::ProfileDef;
-use mirage_core::session::{SessionHealth, SessionId};
+use mirage_core::session::{SessionContext, SessionHealth};
 use mirage_core::topology::TopologyDef;
 
-pub mod daemon;
 pub mod dbt;
 
 /// Overridable default environment for workloads run under rocjitsu.
@@ -66,6 +65,7 @@ const RCCL_ENV_DEFAULTS: &[(&str, &str)] = &[
 /// it points at) and profile validation so callers dispatch generically
 /// through [`mirage_core::emulator::get_emulator_backend`]. Stateless; a
 /// single shared instance is registered in the emulator registry.
+#[derive(Debug)]
 pub struct Rocjitsu;
 
 impl EmulatorBackend for Rocjitsu {
@@ -81,7 +81,7 @@ impl EmulatorBackend for Rocjitsu {
         Vec::new()
     }
 
-    fn shutdown(&self, _session: &SessionId) {}
+    fn shutdown(&self, _ctx: &SessionContext) {}
 
     fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String> {
         // Building the kmd config resolves the topology + agent
@@ -119,7 +119,7 @@ impl EmulatorBackend for Rocjitsu {
             .collect()
     }
 
-    fn health(&self, _session: &SessionId) -> SessionHealth {
+    fn health(&self, _ctx: &SessionContext) -> SessionHealth {
         let installed = is_installed();
         SessionHealth {
             healthy: installed,
@@ -134,12 +134,9 @@ impl EmulatorBackend for Rocjitsu {
         }
     }
 
-    fn injection_def(&self, session: &SessionId) -> Result<InjectionDef> {
-        // The trait hands us only the session id, so recover the profile
-        // (and thus the emulator def) it was started with.
-        let profile = mirage_core::session::resolve_profile(session)?;
-        let def = &profile.emulator;
-        let config = kmd_config(def, Some(session))?;
+    fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
+        let def = ctx.emulator();
+        let config = kmd_config(def, Some(&ctx.runtime_dir))?;
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
@@ -201,7 +198,7 @@ impl EmulatorBackend for Rocjitsu {
         // in-container resolution finds the library there with no extra
         // configuration. Without it the in-container host fails to locate
         // the library and the exec can never start.
-        let libraries = if profile.containerize.is_some() {
+        let libraries = if ctx.profile.containerize.is_some() {
             // Bind-mount the interposer plus the shared object for each
             // plugin this profile enables so the in-container plugin loader
             // can resolve it next to the interposer (the loader searches the
@@ -231,13 +228,11 @@ impl EmulatorBackend for Rocjitsu {
         })
     }
 
-    fn start_daemon(&self, session: &SessionId) -> Result<Option<Box<dyn EmulatorDaemon>>> {
-        // The per-node host hosts one rocjitsu daemon per node. If the
-        // KMD library cannot be located there is nothing to host the
-        // emulated device with; return `None` rather than erroring, since
-        // the per-exec `injection_def` already fails loudly in that case
-        // (and a non-rocjitsu host must not be blocked by a missing
-        // rocjitsu library).
+    fn start_daemon(&self, ctx: &SessionContext) -> Result<Option<Box<dyn EmulatorDaemon>>> {
+        // One rocjitsu daemon per session. If the KMD library cannot be
+        // located there is nothing to host the emulated device with;
+        // return `None` rather than erroring, since the per-exec
+        // `injection_def` already fails loudly in that case.
         let Some(lib) = kmd_preload() else {
             tracing::warn!(
                 "rocjitsu: KMD library ({LIB_NAME}) not found; \
@@ -245,16 +240,15 @@ impl EmulatorBackend for Rocjitsu {
             );
             return Ok(None);
         };
-        let profile = mirage_core::session::resolve_profile(session)?;
-        let config = kmd_config(&profile.emulator, Some(session))?;
+        let config = kmd_config(ctx.emulator(), Some(&ctx.runtime_dir))?;
         // The daemon binds its socket under the same runtime directory the
         // workload's interposer probes (`$ROCJITSU_RUNTIME_DIR`), which is
         // exactly what `injection_def` exports — so the workload connects
         // to *this* daemon with no extra wiring.
         let runtime_dir = write_config_discovery(&config)?;
-        let daemon =
-            daemon::Daemon::start(&lib, &config, &runtime_dir).map_err(MirageError::Other)?;
-        Ok(Some(Box::new(daemon)))
+        let daemon = rocjitsu_sys::daemon::Daemon::start(&lib, &config, &runtime_dir)
+            .map_err(|e| MirageError::Other(format!("rocjitsu daemon: {e}")))?;
+        Ok(Some(Box::new(RocjitsuDaemon(daemon))))
     }
 }
 
@@ -349,14 +343,26 @@ pub fn enabled_plugin_libs(preload: &std::path::Path, plugins: &PluginsDef) -> V
         .collect()
 }
 
-/// Name of the synthesised rocjitsu `SimulationConfig` written into the
-/// per-session directory (`<session>/rj_config.json`).
+/// Name of the synthesised rocjitsu `SimulationConfig` written into a
+/// session's scratch directory.
 pub const RJ_CONFIG_NAME: &str = "rj_config.json";
 
-/// On-disk path of the synthesised `SimulationConfig` for `session`
-/// (`<MIRAGE_RUNTIME>/session/<id>/rj_config.json`).
-pub fn rj_config_path(session: &SessionId) -> PathBuf {
-    mirage_core::paths::session_dir(session).join(RJ_CONFIG_NAME)
+/// Path of the synthesised `SimulationConfig` inside a session's scratch
+/// directory.
+#[must_use]
+pub fn rj_config_path(runtime_dir: &std::path::Path) -> PathBuf {
+    runtime_dir.join(RJ_CONFIG_NAME)
+}
+
+/// Adapter making a [`rocjitsu_sys::daemon::Daemon`] usable as the
+/// emulator-agnostic handle mirage's supervisor holds.
+#[derive(Debug)]
+struct RocjitsuDaemon(rocjitsu_sys::daemon::Daemon);
+
+impl EmulatorDaemon for RocjitsuDaemon {
+    fn stop(self: Box<Self>) {
+        self.0.stop();
+    }
 }
 
 /// Point the KMD interposer at `config` by writing the `config_path`
@@ -484,14 +490,18 @@ fn plugins_to_json(plugins: &PluginsDef) -> serde_json::Value {
 /// 2. Wraps the agent's `vm` + `topology` with rocjitsu runtime
 ///    fields (`exec_mode` is taken from `def.exec_mode`; the other
 ///    fields use sane defaults).
-/// 3. Writes the result to `<session>/rj_config.json` when `session`
-///    is supplied (the per-session runtime location, alongside
-///    `def.json`/`health.json`). When `session` is `None` — e.g. at
+/// 3. Writes the result into `runtime_dir` when one is supplied (a
+///    session's scratch directory). When it is `None` — e.g. at
 ///    profile-validation time, before any session exists — it falls
 ///    back to a content-addressed `sim_<hash>.json` in the system temp
 ///    directory so identical configs share a file and stale files are
 ///    never overwritten in-place.
-pub fn kmd_config(def: &EmulatorDef, session: Option<&SessionId>) -> Result<PathBuf> {
+///
+/// # Errors
+///
+/// Returns an error when the topology or agent references cannot be
+/// resolved, or the config cannot be written.
+pub fn kmd_config(def: &EmulatorDef, runtime_dir: Option<&std::path::Path>) -> Result<PathBuf> {
     // Drop-in `--config <path>`: when an explicit rocjitsu simulation
     // config is supplied (mirage being used as a `rocjitsu` replacement)
     // use that file verbatim instead of synthesising one from the
@@ -550,12 +560,12 @@ pub fn kmd_config(def: &EmulatorDef, session: Option<&SessionId>) -> Result<Path
     let bytes = serde_json::to_vec_pretty(&sim).map_err(|e| {
         MirageError::Other(format!("rocjitsu kmd_config: serialize sim config: {e}"))
     })?;
-    let cfg = match session {
-        // Runtime: write the per-session config alongside the session's
-        // other state. One file per session, rewritten each time so it
-        // always reflects the current profile.
-        Some(id) => {
-            let cfg = rj_config_path(id);
+    let cfg = match runtime_dir {
+        // Runtime: write the config into the session's scratch directory.
+        // One file per session, rewritten each time so it always
+        // reflects the current profile.
+        Some(dir) => {
+            let cfg = rj_config_path(dir);
             mirage_core::state::write_bytes(&cfg, &bytes)?;
             cfg
         }
@@ -586,6 +596,8 @@ pub fn is_installed() -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     #[test]

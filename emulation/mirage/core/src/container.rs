@@ -4,23 +4,22 @@
 //! provider) lives on the profile as [`crate::profile::ContainerizedDef`].
 //! This module holds the *runtime* pieces:
 //!
-//! * [`ContainerState`] — the record the host writes to
-//!   `<session>/container/state.json` once it has launched a session's
-//!   per-node containers and virtual network. It is the single source
-//!   of truth used to tear everything down again.
+//! * [`ContainerState`] — the record the supervisor builds once it has
+//!   launched a session's per-node containers and virtual network. It is
+//!   held in memory alongside the session and is the single source of
+//!   truth used to tear everything down again.
 //! * Naming helpers ([`container_name`], [`network_name`]) so every
 //!   crate derives the same deterministic names.
 //! * Provider resolution ([`detect_provider`], [`resolve_provider`])
 //!   implementing the "prefer podman, fall back to docker" policy.
 //! * [`teardown`] — a dependency-free, best-effort removal of a
-//!   session's containers and network, used both by the host on
-//!   shutdown and by the control plane when a session is destroyed.
+//!   session's containers and network, run during session teardown and
+//!   again as a backstop when the daemon shuts down.
 //!
 //! The richer orchestration (pulling images, creating the network,
 //! starting containers, building `exec` argv) lives in the
 //! `mirage_container` crate, which builds on these shared types.
 
-use std::path::Path;
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
@@ -141,11 +140,11 @@ pub struct NodeContainer {
     pub name: String,
 }
 
-/// Persisted record of the containers + network backing a session.
+/// Record of the containers + network backing a session.
 ///
-/// Written by the host to `<session>/container/state.json` after it
-/// launches a containerised session, and consumed by [`teardown`] to
-/// remove everything again.
+/// Built by the supervisor after it launches a containerised session,
+/// held in memory for the session's lifetime, and consumed by
+/// [`teardown`] to remove everything again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ContainerState {
     /// Resolved provider binary used to manage these containers.
@@ -164,16 +163,15 @@ pub struct ContainerState {
 
 /// Best-effort teardown of a session's containers and network.
 ///
-/// Reads the [`ContainerState`] at `state_path` (a no-op if it is
-/// absent, e.g. a non-containerised session) and asks the recorded
-/// provider to `rm -f` every node container, then remove the network.
-/// Every command is best-effort: failures are ignored so a missing or
-/// already-removed container/network never blocks session cleanup, and
-/// the operation is idempotent.
-pub fn teardown(state_path: &Path) {
-    let Ok(Some(state)) = crate::state::read_json_opt::<ContainerState>(state_path) else {
-        return;
-    };
+/// Asks the recorded provider to `rm -f` every node container, then to
+/// remove the network. Every command is best-effort: failures are ignored
+/// so a missing or already-removed container never blocks session
+/// cleanup, and the operation is idempotent — running it twice, or
+/// against a session whose containers are already gone, is a no-op.
+///
+/// This blocks on the provider binary, so async callers must run it on a
+/// blocking task.
+pub fn teardown(state: &ContainerState) {
     for node in &state.nodes {
         run_quiet(&state.provider, &["rm", "-f", &node.name]);
     }
@@ -182,14 +180,43 @@ pub fn teardown(state_path: &Path) {
     }
 }
 
-/// Run `<provider> <args...>` discarding all stdio, ignoring failures.
+/// Run `<provider> <args...>` discarding all stdio.
+///
+/// Teardown is best-effort by design: a container that is already gone,
+/// or a provider that reports failure removing it, must not block the
+/// rest of session cleanup. Spawn failures are the one thing worth
+/// retrying — `ExecutableFileBusy` is transient and means the provider
+/// binary was still being written when we tried to exec it, so giving up
+/// on it would silently skip a removal and leak the container. Real
+/// providers (podman/docker) are stable binaries that never hit this;
+/// the guard matters for a freshly-written wrapper script.
 fn run_quiet(provider: &str, args: &[&str]) {
-    let _ = Command::new(provider)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    const MAX_ATTEMPTS: u32 = 50;
+    const BACKOFF: std::time::Duration = std::time::Duration::from_millis(10);
+
+    let mut attempts = 0;
+    loop {
+        let status = Command::new(provider)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        match status {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && attempts < MAX_ATTEMPTS =>
+            {
+                attempts += 1;
+                std::thread::sleep(BACKOFF);
+            }
+            Err(e) => {
+                tracing::debug!(provider, ?args, "teardown command could not run: {e}");
+                return;
+            }
+            Ok(_) => return,
+        }
+    }
 }
 
 /// Locate an executable named `name` on `PATH`.
@@ -212,7 +239,10 @@ fn which_on_path(name: &str) -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
+    use std::path::Path;
     use std::os::unix::fs::PermissionsExt;
 
     fn mock_provider(dir: &Path, log: &Path) -> std::path::PathBuf {
@@ -240,10 +270,10 @@ mod tests {
     }
 
     #[test]
-    fn teardown_noop_when_state_missing() {
-        let dir = tempfile::tempdir().unwrap();
-        // Must not panic / must be a no-op.
-        teardown(&dir.path().join("nope.json"));
+    fn teardown_of_an_empty_state_is_a_no_op() {
+        // A non-containerised session has nothing to remove; teardown must
+        // not invent a provider invocation (or panic) for it.
+        teardown(&ContainerState::default());
     }
 
     #[test]
@@ -268,14 +298,40 @@ mod tests {
                 },
             ],
         };
-        let state_path = dir.path().join("state.json");
-        crate::state::write_json(&state_path, &state).unwrap();
-
-        teardown(&state_path);
+        teardown(&state);
 
         let recorded = std::fs::read_to_string(&log).unwrap();
         assert!(recorded.contains("rm -f mirage-s1-node-0"), "{recorded:?}");
         assert!(recorded.contains("rm -f mirage-s1-node-1"), "{recorded:?}");
         assert!(recorded.contains("network rm mirage-s1"), "{recorded:?}");
+    }
+
+    #[test]
+    fn teardown_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("provider.log");
+        let provider = mock_provider(dir.path(), &log);
+        let state = ContainerState {
+            provider: provider.to_string_lossy().to_string(),
+            image: "img:latest".to_string(),
+            network: Some("mirage-s2".to_string()),
+            head_port: 1,
+            nodes: vec![NodeContainer {
+                rank: 0,
+                name: "mirage-s2-node-0".to_string(),
+            }],
+        };
+        // Running teardown twice must not error; the second pass simply
+        // asks the provider to remove things that are already gone. This
+        // is relied upon: the session teardown path and the daemon's
+        // shutdown backstop can both fire for the same session.
+        teardown(&state);
+        teardown(&state);
+        let recorded = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(
+            recorded.matches("rm -f mirage-s2-node-0").count(),
+            2,
+            "{recorded:?}"
+        );
     }
 }

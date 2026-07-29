@@ -1,16 +1,19 @@
 //! Exec: a single command invocation within a session.
 //!
-//! An exec is started by writing an [`ExecDef`] to
-//! `<session>/exec/<exec-id>/def.json`. The session's host picks the
-//! file up (via filesystem polling) and spawns one process per node
-//! whose stdio is wired through `node/<n>/{stdin,stdout,stderr}`.
+//! An exec is requested with an [`ExecDef`] and identified afterwards by
+//! an [`ExecRef`]. The supervisor expands it into a process grid —
+//! `num_nodes * nproc_per_node` processes, each with piped stdio — and
+//! reports back through [`ExecStatus`]:
 //!
-//! Lifecycle is published in two granularities:
+//! * the aggregate: started, ended, and the overall exit code (the exit
+//!   furthest from zero across every process, so a job where one worker
+//!   crashed is reported as a failure);
+//! * per process: its pid and its own exit code, keyed by global rank.
 //!
-//! * `exec/<id>/status.json` — the aggregate [`ExecStatus`] for the exec
-//!   as a whole (started, ended, overall exit code: the worst exit
-//!   across nodes).
-//! * `exec/<id>/node/<n>/{pid,exit_code}` — per-node state.
+//! None of this is on disk. An exec used to be started by writing a
+//! `def.json` into a directory a per-session host polled, with its
+//! output tailed from a file and its completion read from a
+//! `status.json`; see [`crate::paths`] for why that changed.
 
 use std::collections::BTreeMap;
 
@@ -48,7 +51,7 @@ pub struct ExecId(String);
 impl ExecId {
     pub fn new(s: impl Into<String>) -> Result<Self, crate::session::IdError> {
         let s = s.into();
-        crate::session::SessionId::new(&s)?; // reuse validator
+        SessionId::new(&s)?; // reuse validator
         Ok(Self(s))
     }
 
@@ -64,7 +67,9 @@ impl ExecId {
 
 impl std::fmt::Display for ExecId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        // `pad` so the CLI's aligned `{:<14}` columns work; `write_str`
+        // would ignore the width.
+        f.pad(&self.0)
     }
 }
 
@@ -121,13 +126,49 @@ pub struct ExecDef {
     #[serde(default = "one_proc", skip_serializing_if = "is_one_proc")]
     pub nproc_per_node: u32,
 
-    /// If `false`, the host removes the exec directory after it exits.
+    /// Run the workload on a pseudo-terminal instead of pipes.
+    ///
+    /// Interactive programs need a real terminal: a shell only prints a
+    /// prompt, echoes input and enables line editing and job control when
+    /// `isatty(0)` is true. `mirage run -- bash` is unusable without one.
+    ///
+    /// The cost is that a PTY has a single stream, so stdout and stderr
+    /// are merged and reported as [`StdStream::Stdout`], and the terminal
+    /// may translate output (`\n` becomes `\r\n`). Non-interactive runs
+    /// therefore default to pipes, where the two streams stay distinct
+    /// and output is byte-exact.
+    ///
+    /// [`StdStream::Stdout`]: crate::ctl::StdStream::Stdout
+    #[serde(default)]
+    pub tty: bool,
+
+    /// Initial terminal height, in character cells. Ignored without
+    /// [`ExecDef::tty`]; `0` means "use a sensible default".
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub tty_rows: u16,
+
+    /// Initial terminal width, in character cells. Ignored without
+    /// [`ExecDef::tty`]; `0` means "use a sensible default".
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub tty_cols: u16,
+
+    /// Whether the client intends to keep this exec after it finishes.
+    ///
+    /// Advisory: the supervisor never removes an exec on its own, because
+    /// doing so would race a client attaching to read its result. The CLI
+    /// calls `exec_remove` explicitly when this is `false`. Independently,
+    /// a session forgets its oldest *finished* execs once too many
+    /// accumulate, so history is bounded either way.
     #[serde(default)]
     pub keep: bool,
 }
 
 fn one_proc() -> u32 {
     1
+}
+
+fn is_zero(n: &u16) -> bool {
+    *n == 0
 }
 
 fn is_one_proc(n: &u32) -> bool {
@@ -211,12 +252,54 @@ pub struct InjectionDef {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
+
+    #[test]
+    fn tty_defaults_to_off_for_documents_that_omit_it() {
+        // Pipes are the safe default: byte-exact output with stdout and
+        // stderr distinct. A document written before `tty` existed, or by
+        // a client that does not set it, must not silently gain a
+        // terminal and start rewriting newlines.
+        let json = r#"{
+            "timestamp": "2026-01-01T00:00:00Z",
+            "session": "s",
+            "exec": {"command": "/bin/true"}
+        }"#;
+        let def: ExecDef = serde_json::from_str(json).unwrap();
+        assert!(!def.tty);
+        assert_eq!(def.nproc_per_node, 1);
+    }
 
     #[test]
     fn exec_id_validates() {
         assert!(ExecId::new("e-000001").is_ok());
         assert!(ExecId::new("/bad").is_err());
         assert_eq!(ExecId::from_counter(7).as_str(), "e-000007");
+    }
+
+    #[test]
+    fn ids_honour_format_width() {
+        // The CLI renders tables with `{:<14}`/`{:<32}`; a Display impl
+        // that writes straight to the formatter ignores the width and
+        // produces a ragged table.
+        assert_eq!(format!("[{:<10}]", ExecId::from_counter(1)), "[e-000001  ]");
+        assert_eq!(
+            format!("[{:<6}]", SessionId::new("s1").unwrap()),
+            "[s1    ]"
+        );
+    }
+
+    #[test]
+    fn counter_ids_sort_lexicographically_in_creation_order() {
+        // Exec ids are listed sorted as strings, so the zero padding is
+        // what keeps e-000009 before e-000010.
+        let mut ids: Vec<String> = (0..12)
+            .map(|n| ExecId::from_counter(n).as_str().to_string())
+            .collect();
+        let expected = ids.clone();
+        ids.sort();
+        assert_eq!(ids, expected);
     }
 }

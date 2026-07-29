@@ -1,9 +1,10 @@
 //! REST + WebSocket API mounted at `/api`.
 //!
-//! Every handler delegates to a [`mirage_core::ctl::MirageCtl`]
-//! (currently [`mirage_core::ctl::FileCtl`]). The daemon never touches
-//! the filesystem layout directly — `ctl` is the single source of
-//! truth, exactly the same one the CLI uses.
+//! Every handler delegates to the daemon's
+//! [`SessionManager`](mirage_supervisor::SessionManager) through the
+//! [`MirageCtl`] trait — the same object, and the same trait, the
+//! Unix-socket control plane serves. There is one source of truth, so the
+//! dashboard cannot show a session the CLI does not see.
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -30,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
 
-pub fn router(state: Arc<AppState>) -> Router {
+pub(crate) fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/paths", get(get_paths))
         .route("/system", get(get_system))
@@ -146,7 +147,9 @@ async fn get_paths() -> Json<PathsResponse> {
             .to_string(),
         state: mirage_core::paths::mirage_state_dir().display().to_string(),
         profiles: mirage_core::paths::profile_root().display().to_string(),
-        sessions: mirage_core::paths::session_root().display().to_string(),
+        sessions: mirage_core::paths::session_runtime_root()
+            .display()
+            .to_string(),
     })
 }
 
@@ -161,7 +164,7 @@ struct SystemResponse {
 async fn get_system() -> Json<SystemResponse> {
     Json(SystemResponse {
         daemon_version: env!("CARGO_PKG_VERSION"),
-        default_emulator: mirage_ctl::default_emulator().name,
+        default_emulator: mirage_ctl::default_emulator_name(),
     })
 }
 
@@ -179,7 +182,7 @@ struct EmulatorEntry {
 }
 
 async fn list_emulators() -> Json<Vec<EmulatorEntry>> {
-    let default_name = mirage_ctl::default_emulator().name;
+    let default_name = mirage_ctl::default_emulator_name();
     let entries = mirage_ctl::registry()
         .into_iter()
         .map(|spec| {
@@ -209,28 +212,28 @@ struct MetricsResponse {
 }
 
 async fn get_metrics(State(s): State<Arc<AppState>>) -> Result<Json<MetricsResponse>, ApiError> {
-    let profiles = s.ctl.profile_list()?.len();
-    let session_ids = s.ctl.session_list().unwrap_or_default();
+    let profiles = s.ctl.profile_list().await?.len();
+    let session_ids = s.ctl.session_list().await.unwrap_or_default();
     let mut healthy = 0usize;
     let mut starting = 0usize;
     let mut execs_running = 0usize;
     let mut execs_total = 0usize;
     for id in &session_ids {
-        if let Ok(state) = s.ctl.session_state(id) {
+        if let Ok(state) = s.ctl.session_state(id).await {
             if state.health.healthy {
                 healthy += 1;
             } else if !state.health.terminal {
                 starting += 1;
             }
         }
-        if let Ok(eids) = s.ctl.exec_list(id) {
+        if let Ok(eids) = s.ctl.exec_list(id).await {
             execs_total += eids.len();
             for eid in eids {
                 let r = ExecRef {
                     session: id.clone(),
                     exec: eid,
                 };
-                if let Ok(status) = s.ctl.exec_status(&r)
+                if let Ok(status) = s.ctl.exec_status(&r).await
                     && status.started
                     && !status.ended
                 {
@@ -252,14 +255,14 @@ async fn get_metrics(State(s): State<Arc<AppState>>) -> Result<Json<MetricsRespo
 // ---- profiles --------------------------------------------------------------
 
 async fn list_profiles(State(s): State<Arc<AppState>>) -> Result<Json<Vec<String>>, ApiError> {
-    Ok(Json(s.ctl.profile_list()?))
+    Ok(Json(s.ctl.profile_list().await?))
 }
 
 async fn get_profile(
     State(s): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<ProfileDef>, ApiError> {
-    Ok(Json(s.ctl.profile_get(&name)?))
+    Ok(Json(s.ctl.profile_get(&name).await?))
 }
 
 async fn put_profile(
@@ -276,7 +279,7 @@ async fn put_profile(
         status: StatusCode::BAD_REQUEST,
         message,
     })?;
-    s.ctl.profile_put(&profile)?;
+    s.ctl.profile_put(&profile).await?;
     Ok(ok())
 }
 
@@ -284,21 +287,21 @@ async fn delete_profile(
     State(s): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<Ok>, ApiError> {
-    s.ctl.profile_delete(&name)?;
+    s.ctl.profile_delete(&name).await?;
     Ok(ok())
 }
 
 // ---- topologies ------------------------------------------------------------
 
 async fn list_topologies(State(s): State<Arc<AppState>>) -> Result<Json<Vec<String>>, ApiError> {
-    Ok(Json(s.ctl.topology_list()?))
+    Ok(Json(s.ctl.topology_list().await?))
 }
 
 async fn get_topology(
     State(s): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<TopologyDef>, ApiError> {
-    Ok(Json(s.ctl.topology_get(&name)?))
+    Ok(Json(s.ctl.topology_get(&name).await?))
 }
 
 async fn put_topology(
@@ -306,7 +309,7 @@ async fn put_topology(
     Path(name): Path<String>,
     Json(topology): Json<TopologyDef>,
 ) -> Result<Json<Ok>, ApiError> {
-    s.ctl.topology_put(&name, &topology)?;
+    s.ctl.topology_put(&name, &topology).await?;
     Ok(ok())
 }
 
@@ -314,21 +317,21 @@ async fn delete_topology(
     State(s): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<Ok>, ApiError> {
-    s.ctl.topology_delete(&name)?;
+    s.ctl.topology_delete(&name).await?;
     Ok(ok())
 }
 
 // ---- agents ----------------------------------------------------------------
 
 async fn list_agents(State(s): State<Arc<AppState>>) -> Result<Json<Vec<String>>, ApiError> {
-    Ok(Json(s.ctl.agent_list()?))
+    Ok(Json(s.ctl.agent_list().await?))
 }
 
 async fn get_agent(
     State(s): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<AgentDef>, ApiError> {
-    Ok(Json(s.ctl.agent_get(&name)?))
+    Ok(Json(s.ctl.agent_get(&name).await?))
 }
 
 async fn put_agent(
@@ -336,7 +339,7 @@ async fn put_agent(
     Path(name): Path<String>,
     Json(agent): Json<AgentDef>,
 ) -> Result<Json<Ok>, ApiError> {
-    s.ctl.agent_put(&name, &agent)?;
+    s.ctl.agent_put(&name, &agent).await?;
     Ok(ok())
 }
 
@@ -344,7 +347,7 @@ async fn delete_agent(
     State(s): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<Ok>, ApiError> {
-    s.ctl.agent_delete(&name)?;
+    s.ctl.agent_delete(&name).await?;
     Ok(ok())
 }
 
@@ -372,31 +375,23 @@ struct CreateSessionBody {
     /// when omitted.
     #[serde(default)]
     provider: Option<String>,
-    /// If true (default), the daemon spawns the per-session host
-    /// process. Tests can set this to false to drive the host
-    /// themselves.
-    #[serde(default = "default_true")]
-    spawn_host: bool,
-    /// Seconds to wait for the host to become healthy. 0 = don't wait.
+    /// Seconds to wait for the session to become ready. `0` returns as
+    /// soon as it is registered, without waiting for bring-up.
     #[serde(default = "default_ready_timeout")]
     ready_timeout: u64,
 }
 
-fn default_true() -> bool {
-    true
-}
-
 fn default_ready_timeout() -> u64 {
-    10
+    30
 }
 
 async fn list_sessions(
     State(s): State<Arc<AppState>>,
 ) -> Result<Json<Vec<SessionState>>, ApiError> {
-    let ids = s.ctl.session_list()?;
+    let ids = s.ctl.session_list().await?;
     let mut states = Vec::with_capacity(ids.len());
     for id in ids {
-        match s.ctl.session_state(&id) {
+        match s.ctl.session_state(&id).await {
             Ok(state) => states.push(state),
             Err(_) => continue,
         }
@@ -409,7 +404,7 @@ async fn create_session(
     Json(body): Json<CreateSessionBody>,
 ) -> Result<Json<SessionDef>, ApiError> {
     // validate profile, resolving it so container overrides can apply.
-    let mut profile = s.ctl.profile_get(&body.profile)?;
+    let mut profile = s.ctl.profile_get(&body.profile).await?;
     let profile_ref = if body.image.is_some() || !body.mounts.is_empty() || body.provider.is_some()
     {
         let mut mounts = Vec::with_capacity(body.mounts.len());
@@ -459,13 +454,13 @@ async fn create_session(
                 .unwrap_or("/".to_string())
         }),
         daemon: body.daemon,
-    })?;
-    if body.spawn_host {
-        mirage_ctl::spawn_host_for(&def.id)?;
-        if body.ready_timeout > 0 {
-            s.ctl
-                .session_wait_ready(&def.id, Duration::from_secs(body.ready_timeout))?;
-        }
+    }).await?;
+    // Bring-up is already under way; optionally wait for it to settle so
+    // the caller gets a session it can immediately run execs in.
+    if body.ready_timeout > 0 {
+        s.ctl
+            .session_wait_ready(&def.id, Duration::from_secs(body.ready_timeout))
+            .await?;
     }
     Ok(Json(def))
 }
@@ -475,7 +470,7 @@ async fn get_session(
     Path(id): Path<String>,
 ) -> Result<Json<SessionState>, ApiError> {
     let id = parse_session_id(&id)?;
-    Ok(Json(s.ctl.session_state(&id)?))
+    Ok(Json(s.ctl.session_state(&id).await?))
 }
 
 async fn delete_session(
@@ -483,7 +478,7 @@ async fn delete_session(
     Path(id): Path<String>,
 ) -> Result<Json<Ok>, ApiError> {
     let id = parse_session_id(&id)?;
-    s.ctl.session_destroy(&id)?;
+    s.ctl.session_destroy(&id).await?;
     Ok(ok())
 }
 
@@ -500,14 +495,14 @@ async fn list_execs(
     Path(id): Path<String>,
 ) -> Result<Json<Vec<ExecListItem>>, ApiError> {
     let id = parse_session_id(&id)?;
-    let ids = s.ctl.exec_list(&id)?;
+    let ids = s.ctl.exec_list(&id).await?;
     let mut out = Vec::with_capacity(ids.len());
     for eid in ids {
         let r = ExecRef {
             session: id.clone(),
             exec: eid.clone(),
         };
-        let status = s.ctl.exec_status(&r).unwrap_or_default();
+        let status = s.ctl.exec_status(&r).await.unwrap_or_default();
         out.push(ExecListItem { id: eid, status });
     }
     Ok(Json(out))
@@ -524,6 +519,16 @@ struct CreateExecBody {
     workdir: Option<String>,
     #[serde(default)]
     keep: bool,
+    /// Run the workload on a pseudo-terminal. A browser terminal widget
+    /// wants one; a programmatic caller reading JSON does not.
+    #[serde(default)]
+    tty: bool,
+    /// Initial terminal size, when `tty` is set.
+    #[serde(default)]
+    rows: u16,
+    /// Initial terminal size, when `tty` is set.
+    #[serde(default)]
+    cols: u16,
 }
 
 #[derive(Serialize)]
@@ -548,9 +553,12 @@ async fn create_exec(
         },
         worker_exec: None,
         nproc_per_node: 1,
+        tty: body.tty,
+        tty_rows: body.rows,
+        tty_cols: body.cols,
         keep: body.keep,
     };
-    let r = s.ctl.session_exec(&def)?;
+    let r = s.ctl.session_exec(&def).await?;
     Ok(Json(CreateExecResp { id: r.exec }))
 }
 
@@ -562,7 +570,7 @@ async fn get_exec(
         session: parse_session_id(&id)?,
         exec: parse_exec_id(&exec)?,
     };
-    Ok(Json(s.ctl.exec_status(&r)?))
+    Ok(Json(s.ctl.exec_status(&r).await?))
 }
 
 async fn delete_exec(
@@ -573,7 +581,7 @@ async fn delete_exec(
         session: parse_session_id(&id)?,
         exec: parse_exec_id(&exec)?,
     };
-    s.ctl.exec_remove(&r)?;
+    s.ctl.exec_remove(&r).await?;
     Ok(ok())
 }
 
@@ -591,7 +599,7 @@ async fn signal_exec(
         session: parse_session_id(&id)?,
         exec: parse_exec_id(&exec)?,
     };
-    s.ctl.exec_signal(&r, body.signal)?;
+    s.ctl.exec_signal(&r, body.signal).await?;
     Ok(ok())
 }
 
@@ -627,13 +635,13 @@ async fn stdin_exec(
             message: "must supply `data` or `data_b64`".to_string(),
         });
     };
-    s.ctl.session_stdin(&r, &bytes)?;
+    s.ctl.session_stdin(&r, &bytes).await?;
     Ok(ok())
 }
 
 // Tiny dependency-free base64 decoder (only need decode for stdin).
 mod base64_decode {
-    pub fn decode(input: &str) -> Result<Vec<u8>, &'static str> {
+    pub(crate) fn decode(input: &str) -> Result<Vec<u8>, &'static str> {
         let input: String = input.chars().filter(|c| !c.is_whitespace()).collect();
         let bytes = input.as_bytes();
         let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
@@ -673,21 +681,20 @@ async fn attach_exec(
     };
     // Validate up-front so callers get a clean HTTP error instead of a
     // mysterious closed websocket.
-    let _ = s.ctl.exec_status(&r)?;
+    let _ = s.ctl.exec_status(&r).await?;
     Ok(ws.on_upgrade(move |socket| attach_loop(s, r, socket)))
 }
 
 async fn attach_loop(state: Arc<AppState>, r: ExecRef, mut socket: WebSocket) {
-    let mut stream = match state.ctl.session_attach(&r) {
+    let mut stream = match state.ctl.session_attach(&r).await {
         Ok(s) => s,
         Err(e) => {
-            let _ = socket
-                .send(Message::Text(
-                    serde_json::to_string(&serde_json::json!({"error": e.to_string()}))
-                        .unwrap()
-                        .into(),
-                ))
-                .await;
+            // Report the reason over the socket before closing it. A
+            // websocket that simply closes tells the dashboard nothing
+            // about why the attach failed.
+            let frame = serde_json::to_string(&serde_json::json!({"error": e.to_string()}))
+                .unwrap_or_else(|_| r#"{"error":"attach failed"}"#.to_string());
+            let _ = socket.send(Message::Text(frame.into())).await;
             let _ = socket.close().await;
             return;
         }

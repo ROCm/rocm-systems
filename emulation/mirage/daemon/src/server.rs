@@ -25,7 +25,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(CorsLayer::permissive())
 }
 
-/// Bind to `addr` and serve `router` until the process is killed.
+/// Bind to `addr` and serve `router` until the task is cancelled.
 pub async fn serve(addr: SocketAddr, router: Router) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;

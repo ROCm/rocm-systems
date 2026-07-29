@@ -17,10 +17,17 @@
 //!
 //! # Safety
 //!
-//! Every function here is `unsafe`: callers must uphold the C API's
+//! The raw [`Lib`] bindings are `unsafe`: callers must uphold the C API's
 //! contract (valid pointers, correct lifetimes, single-threaded VM
-//! creation, etc.). Higher layers (`mirage_rocjitsu`) wrap these in
-//! safe, RAII-managed abstractions.
+//! creation, and so on).
+//!
+//! Safe, RAII-managed wrappers live here too, in [`daemon`], rather than
+//! in the crates that use them. This crate is the one place in the
+//! workspace permitted to write `unsafe`; every other crate is
+//! `forbid(unsafe_code)`. Keeping the wrapper here means the invariants
+//! and the `unsafe` that relies on them sit in the same file and are
+//! reviewed together, instead of the invariants living in a doc comment
+//! that a caller in another crate has to remember to honour.
 
 use std::ffi::{CStr, OsStr};
 use std::os::raw::{c_char, c_int, c_void};
@@ -212,7 +219,7 @@ impl RjVmGpuInfo {
         unsafe {
             std::slice::from_raw_parts(
                 self as *const Self as *const u8,
-                std::mem::size_of::<Self>(),
+                size_of::<Self>(),
             )
         }
     }
@@ -595,8 +602,12 @@ impl Lib {
     }
 }
 
+pub mod daemon;
+
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     /// The C `rj_vm_*` structs must match the rocjitsu headers exactly,
@@ -604,15 +615,15 @@ mod tests {
     /// code relies on.
     #[test]
     fn struct_sizes_match_c_abi() {
-        assert_eq!(std::mem::size_of::<RjVmMap>(), 40);
-        assert_eq!(std::mem::size_of::<RjVmUnmap>(), 16);
+        assert_eq!(size_of::<RjVmMap>(), 40);
+        assert_eq!(size_of::<RjVmUnmap>(), 16);
         // rj_vm_cmd_t: u32 + (pad) + ptr + usize + i32 + i32 + i32 + (pad)
         // on 64-bit.
-        assert_eq!(std::mem::size_of::<RjVmCmd>(), 40);
+        assert_eq!(size_of::<RjVmCmd>(), 40);
         assert_eq!(RjVmMode::Daemon as i32, 2);
         // rj_vm_gpu_info_t — must match the 312-byte RpcGpuInfo the
         // daemon handshake embeds (static_assert in rpc.h).
-        assert_eq!(std::mem::size_of::<RjVmGpuInfo>(), 312);
+        assert_eq!(size_of::<RjVmGpuInfo>(), 312);
         assert_eq!(RjDaemonStatus::Stopped as i32, 0);
         assert_eq!(RjDaemonStatus::Running as i32, 2);
         assert_eq!(RjDaemonStatus::Error as i32, 4);

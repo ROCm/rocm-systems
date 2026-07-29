@@ -1,3 +1,6 @@
+//! Emulator backends: the trait every GPU emulator integration
+//! implements, and the link-time registry they are discovered through.
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -7,19 +10,25 @@ use crate::{
     exec::InjectionDef,
     plugin::PluginsDef,
     profile::ProfileDef,
-    session::{SessionHealth, SessionId},
+    session::{SessionContext, SessionHealth},
     topology::TopologyDef,
 };
 
+/// How faithfully the emulator models the device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ExecMode {
+    /// Correct results, no timing model.
     #[default]
     Functional,
+    /// Model device timing as well as results.
     Clocked,
 }
 
+/// The canonical lowercase name of an emulator backend.
 pub type EmulatorKind = String;
 
+/// The emulator half of a profile: which backend, how it runs, and the
+/// system it emulates.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmulatorDef {
     /// which emulator backend to use, e.g. "rocjitsu"
@@ -28,6 +37,7 @@ pub struct EmulatorDef {
     /// plugins to use with the emulator, e.g. "rocjitsu" plugin for AMD GPU simulation
     pub plugins: PluginsDef,
 
+    /// Functional or clocked emulation.
     pub exec_mode: ExecMode,
 
     /// extra options to configure the emulator, e.g. {"gpu_model": "cdna3"}
@@ -98,23 +108,32 @@ pub struct EmulatorDescription {
 /// Implementations are stateless singletons (a unit struct is typical);
 /// any per-session state is resolved on demand from the on-disk session
 /// definition (see [`crate::session::resolve_profile`]).
-pub trait EmulatorBackend: Sync + Send {
+pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// Returns a description of the emulator, including its name, version, and a brief description.
     fn description(&self) -> EmulatorDescription;
 
-    /// Bring the emulator up for the given profile. Returns a
-    /// human-readable reason on failure.
+    /// Bring the emulator up for the given profile.
+    ///
+    /// # Errors
+    ///
+    /// Returns a human-readable reason on failure.
     fn boot(&self, def: &ProfileDef) -> std::result::Result<(), String>;
 
     /// Schema for the options that this emulator supports. Empty when
     /// the emulator takes no options.
     fn options(&self) -> Vec<OptionDef>;
 
-    /// shuts down the emulator and releases any resources it holds.
-    fn shutdown(&self, session: &SessionId);
+    /// Shut the emulator down for a session and release any resources it
+    /// holds. Called exactly once, during session teardown, after every
+    /// workload process is gone.
+    fn shutdown(&self, ctx: &SessionContext);
 
     /// Validate that `def` can be used with this emulator before it is
-    /// persisted. Returns a human-readable reason on rejection.
+    /// persisted.
+    ///
+    /// # Errors
+    ///
+    /// Returns a human-readable reason on rejection.
     fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String>;
 
     /// Returns true if the emulator is properly installed and can be used.
@@ -126,8 +145,9 @@ pub trait EmulatorBackend: Sync + Send {
     /// Discovers available plugins for the emulator.
     fn discover_plugins(&self) -> Vec<PluginsDef>;
 
-    /// get health status of the emulator, e.g. check if the underlying runtime is responsive
-    fn health(&self, session: &SessionId) -> SessionHealth;
+    /// Health of the emulator for a session, e.g. whether the underlying
+    /// runtime is present and responsive.
+    fn health(&self, ctx: &SessionContext) -> SessionHealth;
 
     /// Compute the env vars / `LD_PRELOAD` / files to inject into a
     /// workload run under this emulator. Returns an error when the
@@ -135,29 +155,39 @@ pub trait EmulatorBackend: Sync + Send {
     /// missing, so a misconfigured session fails loudly instead of
     /// silently running unemulated.
     ///
-    /// `session` is the id of the session the workload runs in, so
-    /// emulators can resolve the session's profile and materialise
-    /// per-session runtime assets under the session directory.
-    fn injection_def(&self, session: &SessionId) -> Result<InjectionDef>;
+    /// `ctx` carries the session's resolved profile and a scratch
+    /// directory the backend may materialise runtime assets in.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backend is selected but cannot produce a
+    /// usable injection — a missing runtime library, an unresolvable
+    /// topology or agent reference, an unwritable scratch directory. This
+    /// must fail loudly: silently returning an empty injection would run
+    /// the workload unemulated on whatever hardware is actually present.
+    fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef>;
 
     /// Start a host-side emulator *daemon* for `session`, if this
     /// backend hosts one.
     ///
-    /// The per-node host process calls this once, on startup, before it
-    /// runs any exec. A backend that emulates the GPU out-of-process
+    /// The supervisor calls this once during session bring-up, before
+    /// any exec runs. A backend that emulates the GPU out-of-process
     /// (e.g. rocjitsu's daemon, which owns the simulated device and
     /// serves the workload's KFD ioctls over a Unix socket) stands the
-    /// daemon up here and returns a handle the host keeps alive for the
-    /// whole session; the handle is stopped (dropped) when the host
-    /// shuts down. There is exactly one daemon per node host, matching
-    /// the "one emulated GPU per node" model.
+    /// daemon up here and returns a handle the supervisor keeps alive for
+    /// the whole session, stopping it during teardown after every
+    /// workload process has exited.
     ///
     /// Returns `Ok(None)` — the default — for backends that need no
     /// daemon (`noop`, `hotswap`, or rocjitsu when its runtime library
-    /// is not installed and the exec will fail loudly anyway). Returns
-    /// `Err` only when a daemon was expected but could not be started.
-    fn start_daemon(&self, session: &SessionId) -> Result<Option<Box<dyn EmulatorDaemon>>> {
-        let _ = session;
+    /// is not installed and the exec will fail loudly anyway).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` only when a daemon was expected but could not be
+    /// started.
+    fn start_daemon(&self, ctx: &SessionContext) -> Result<Option<Box<dyn EmulatorDaemon>>> {
+        let _ = ctx;
         Ok(None)
     }
 }
@@ -171,9 +201,11 @@ pub trait EmulatorBackend: Sync + Send {
 /// dropping the handle.
 ///
 /// [`stop`]: EmulatorDaemon::stop
-pub trait EmulatorDaemon: Send {
-    /// Stop the daemon and release its resources. Blocking. The default
-    /// drops the handle, which must perform the teardown.
+pub trait EmulatorDaemon: Send + std::fmt::Debug {
+    /// Stop the daemon and release its resources. Blocking, so the
+    /// supervisor calls it from a blocking task rather than inline on the
+    /// runtime. The default drops the handle, which must perform the
+    /// teardown.
     fn stop(self: Box<Self>) {}
 }
 
@@ -182,6 +214,7 @@ pub trait EmulatorDaemon: Send {
 /// these via [`inventory::submit!`]; the backend is a `'static`
 /// reference to a stateless singleton (typically a unit struct), so the
 /// entry is const-constructible and needs no allocation.
+#[derive(Debug)]
 pub struct EmulatorBackendDef {
     /// Canonical lowercase name the backend registers under (the value
     /// stored in [`EmulatorDef::emulator`]).
@@ -195,6 +228,7 @@ inventory::collect!(EmulatorBackendDef);
 /// Look up the [`EmulatorBackend`] registered for `kind`, or `None` if
 /// no backend with that name was compiled into this binary (e.g. its
 /// crate's feature is disabled).
+#[must_use]
 pub fn get_emulator_backend(kind: &str) -> Option<&'static dyn EmulatorBackend> {
     inventory::iter::<EmulatorBackendDef>
         .into_iter()
