@@ -187,11 +187,20 @@ if(NOT BUILD_PYTHON_WHEEL)
     set(_amdsmi_wheelhouse ${CMAKE_CURRENT_BINARY_DIR}/wheelhouse)
     set(_amdsmi_wheel_stamp ${_amdsmi_wheelhouse}/.built)
     # Model the wheel as a generated artifact (OUTPUT) so it is a real build
-    # dependency, not just an ALL side effect. VERBATIM + quoting keeps paths
-    # with spaces/special chars intact.
+    # dependency, not just an ALL side effect. Depend on the staged module files
+    # (not just the python_package target) so the wheel rebuilds when any
+    # packaged .py changes under Ninja. VERBATIM + quoting keeps paths intact.
     add_custom_command(
         OUTPUT ${_amdsmi_wheel_stamp}
-        DEPENDS python_package ${PROJECT_SOURCE_DIR}/tools/build_system_wheel.py
+        DEPENDS
+            python_package
+            ${PROJECT_SOURCE_DIR}/tools/build_system_wheel.py
+            ${PY_PACKAGE_DIR}/__init__.py
+            ${PY_PACKAGE_DIR}/amdsmi_interface.py
+            ${PY_PACKAGE_DIR}/amdsmi_interface_utils.py
+            ${PY_PACKAGE_DIR}/amdsmi_exception.py
+            ${PY_PACKAGE_DIR}/amdsmi_wrapper.py
+            ${PY_PACKAGE_DIR}/_version.py
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_amdsmi_wheelhouse}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_amdsmi_wheelhouse}"
         COMMAND

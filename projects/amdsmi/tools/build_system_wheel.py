@@ -63,6 +63,10 @@ def main() -> int:
                 if name.endswith((".so", ".pyc")):
                     continue
                 abs_path = os.path.join(root, name)
+                # Skip symlinks so a link in the source tree cannot copy an
+                # arbitrary host file into the distributed wheel.
+                if os.path.islink(abs_path):
+                    continue
                 arcname = os.path.relpath(abs_path, pkg_root)
                 with open(abs_path, "rb") as handle:
                     data = handle.read()

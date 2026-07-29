@@ -89,7 +89,7 @@ def _extract(wheel: Path, dest: Path) -> None:
     prior = dest / "amdsmi"
     if prior.is_dir():
         shutil.rmtree(prior, ignore_errors=True)
-    dest_root = str(dest.resolve())
+    dest_root = str(dest.resolve()) + os.sep
     with zipfile.ZipFile(wheel) as archive:
         for name in archive.namelist():
             top = name.split("/", 1)[0]
@@ -97,9 +97,15 @@ def _extract(wheel: Path, dest: Path) -> None:
                 continue
             # Defense in depth: ZipFile.extract() already strips traversal, but
             # skip anything that would still resolve outside dest.
-            if not str((dest / name).resolve()).startswith(dest_root):
+            if not (str((dest / name).resolve()) + os.sep).startswith(dest_root):
                 continue
             archive.extract(name, dest)
+
+
+def _remove_installed(sitelib: Path, version: "str | None") -> None:
+    shutil.rmtree(sitelib / "amdsmi", ignore_errors=True)
+    if version:
+        shutil.rmtree(sitelib / "amdsmi-{}.dist-info".format(version), ignore_errors=True)
 
 
 def install() -> int:
@@ -108,6 +114,11 @@ def install() -> int:
         sys.stderr.write("[amdsmi] no packaged wheel found; skipping module install\n")
         return 0
     sitelib = _target_sitelib()
+    version = _wheel_version(wheel)
+    # Deterministic replace: clear any prior copy first so both the pip --target
+    # path (which does not reliably overwrite an existing target) and the extract
+    # fallback start from a clean state.
+    _remove_installed(sitelib, version)
     if _pip_available():
         cmd = [
             sys.executable,
@@ -138,8 +149,7 @@ def uninstall() -> int:
     # (a user pip-installed their own amdsmi over ours), leave it untouched.
     our_distinfo = sitelib / "amdsmi-{}.dist-info".format(version) if version else None
     if our_distinfo is not None and our_distinfo.is_dir():
-        shutil.rmtree(sitelib / "amdsmi", ignore_errors=True)
-        shutil.rmtree(our_distinfo, ignore_errors=True)
+        _remove_installed(sitelib, version)
     elif version is None:
         # No shipped wheel to identify our version: remove only the module tree
         # we would have installed, not any dist-info we cannot attribute here.

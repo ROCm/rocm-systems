@@ -85,6 +85,8 @@ class NormalizeVersionTest(unittest.TestCase):
             "27.0.0+af02525-dirty": "27.0.0+af02525.dirty",
             "27.0.0+a.b.c": "27.0.0+a.b.c",
             "27.0.0+---": "27.0.0",
+            "27.0.0+": "27.0.0",
+            "27.0.0+.foo.": "27.0.0+foo",
         }
         for raw, expected in cases.items():
             self.assertEqual(self.builder._normalize_version(raw), expected)
@@ -165,8 +167,24 @@ class TargetSitelibTest(unittest.TestCase):
         )
 
     def test_empty_falls_back_to_purelib(self):
-        # Should not raise; returns some path.
-        self.assertTrue(self._select([]))
+        import sysconfig
+
+        self.assertEqual(self._select([]), sysconfig.get_paths()["purelib"])
+
+    def test_versioned_dist_packages(self):
+        self.assertEqual(
+            self._select(["/usr/lib/python3.11/dist-packages"]), "/usr/lib/python3.11/dist-packages"
+        )
+
+    def test_lib64_only_site_packages(self):
+        self.assertEqual(
+            self._select(["/usr/lib64/python3.9/site-packages"]),
+            "/usr/lib64/python3.9/site-packages",
+        )
+
+    def test_getsitepackages_attributeerror_falls_back(self):
+        with mock.patch.object(self.installer.site, "getsitepackages", side_effect=AttributeError):
+            self.assertTrue(str(self.installer._target_sitelib()))
 
 
 class WheelVersionTest(unittest.TestCase):
@@ -244,6 +262,43 @@ class InstallUninstallTest(unittest.TestCase):
         ):
             self.installer.uninstall()
         self.assertTrue(foreign_di.is_dir())
+        self.assertTrue((self.sitelib / "amdsmi" / "__init__.py").is_file())
+
+    def test_install_uses_pip_target_then_extract_on_failure(self):
+        calls = {}
+
+        def fake_run(cmd, **kwargs):
+            calls["cmd"] = cmd
+
+            class R:
+                returncode = 1
+
+            return R()
+
+        with (
+            mock.patch.object(self.installer, "_target_sitelib", return_value=self.sitelib),
+            mock.patch.object(self.installer, "_find_wheel", return_value=self.wheel),
+            mock.patch.object(self.installer, "_pip_available", return_value=True),
+            mock.patch.object(self.installer.subprocess, "run", side_effect=fake_run),
+        ):
+            self.installer.install()
+        # pip was invoked with --target pointing at the detected sitelib...
+        self.assertIn("--target", calls["cmd"])
+        self.assertIn(str(self.sitelib), calls["cmd"])
+        # ...and the non-zero pip exit fell back to a working stdlib extract.
+        self.assertTrue((self.sitelib / "amdsmi" / "__init__.py").is_file())
+
+    def test_extract_drops_path_traversal_entries(self):
+        import zipfile as zf
+
+        evil = self.base / "evil.whl"
+        with zf.ZipFile(evil, "w") as archive:
+            archive.writestr("amdsmi/__init__.py", "ok\n")
+            archive.writestr("amdsmi/../../escape.py", "evil\n")
+        self.installer._extract(evil, self.sitelib)
+        self.assertFalse((self.base / "escape.py").exists())
+        self.assertFalse((self.sitelib / "escape.py").exists())
+        self.assertTrue((self.sitelib / "amdsmi" / "__init__.py").is_file())
 
 
 if __name__ == "__main__":
