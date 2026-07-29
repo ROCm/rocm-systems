@@ -110,6 +110,7 @@ pub const AMDSMI_MAX_CP_PROFILE_RESOURCES: u32 = 32;
 pub const AMDSMI_MAX_ACCELERATOR_PARTITIONS: u32 = 8;
 pub const AMDSMI_MAX_NUM_NUMA_NODES: u32 = 32;
 pub const AMDSMI_GPU_UUID_SIZE: u32 = 38;
+pub const AMDSMI_GPU_CUID_SIZE: u32 = 38;
 pub const AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK: u32 = 64;
 pub const AMDSMI_MAX_CONTAINER_TYPE: u32 = 2;
 pub const AMDSMI_NUM_HBM_INSTANCES: u32 = 4;
@@ -3792,6 +3793,13 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_gpu_device_cuid(
+        processor_handle: AmdsmiProcessorHandle,
+        cuid_length: *mut ::std::os::raw::c_uint,
+        cuid: *mut ::std::os::raw::c_char,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_gpu_enumeration_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiEnumerationInfoT,
@@ -5155,9 +5163,6 @@ extern "C" {
         procs: *mut AmdsmiProcInfoByPidT,
         max_processes: *mut u32,
     ) -> AmdsmiStatusT;
-}
-extern "C" {
-    pub fn amdsmi_gpu_driver_reload() -> AmdsmiStatusT;
 }
 extern "C" {
     pub fn amdsmi_get_gpu_ptl_state(
