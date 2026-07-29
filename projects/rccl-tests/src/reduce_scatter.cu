@@ -25,10 +25,16 @@ testResult_t ReduceScatterInitData(struct threadArgs* args, ncclDataType_t type,
   for (int i=0; i<args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
+    // gfx1250 odd-PCI-function devices do not order null-stream blits (memset,
+    // memcpy) against adjacent null-stream kernels in either direction, so every
+    // blit below is separated from its neighbouring kernel by an explicit sync.
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
+    CUDACHECK(cudaDeviceSynchronize());
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
     TESTCHECK(InitData(data, sendcount, 0, type, op, rep, nranks, rank));
+    CUDACHECK(cudaDeviceSynchronize());
     CUDACHECK(cudaMemcpy(args->expected[i], args->recvbuffs[i], args->expectedBytes, cudaMemcpyDefault));
+    CUDACHECK(cudaDeviceSynchronize());
     TESTCHECK(InitDataReduce(args->expected[i], recvcount, rank*recvcount, type, op, rep, nranks));
     CUDACHECK(cudaDeviceSynchronize());
   }

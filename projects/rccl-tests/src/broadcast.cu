@@ -23,7 +23,10 @@ testResult_t BroadcastInitData(struct threadArgs* args, ncclDataType_t type, ncc
   for (int i=0; i<args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
+    // gfx1250 odd-PCI-function devices do not order a null-stream memset against
+    // the next null-stream kernel, so the zeros can land on top of the fill below.
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
+    CUDACHECK(cudaDeviceSynchronize());
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
     if (rank == root) TESTCHECK(InitData(data, sendcount, 0, type, ncclSum, rep, 1, 0));
     TESTCHECK(InitData(args->expected[i], recvcount, 0, type, ncclSum, rep, 1, 0));
