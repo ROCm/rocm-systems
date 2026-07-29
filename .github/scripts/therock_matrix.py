@@ -5,7 +5,7 @@ This dictionary is used to map specific file directory changes to the correspond
 subtree_to_project_map = {
     "emulation/rocjitsu": "emulation",
     "emulation/mirage": "emulation",
-    "projects/amdsmi": "core",
+    "projects/amdsmi": "nightly",  # amdsmi changes run the full rocm-systems + rocm-libraries suite
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
     "projects/cuid": "rdc",

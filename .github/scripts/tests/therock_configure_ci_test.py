@@ -472,6 +472,29 @@ class ConfigureCITest(unittest.TestCase):
         self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
 
     @patch("therock_configure_ci.get_modified_paths")
+    def test_amdsmi_pr_triggers_full_suite(self, mock_get_modified):
+        """PR with amdsmi changes should run the full suite: THEROCK_ENABLE_ALL=ON
+        and the complete rocm-systems + rocm-libraries (math-lib) test list."""
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "linux",
+        }
+
+        mock_get_modified.return_value = [
+            "projects/amdsmi/src/amdsmi.cpp",
+        ]
+
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+        cmake_options = project_to_run[0]["cmake_options"]
+        self.assertIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
+        # rocm-libraries components built inside TheRock must be tested.
+        projects_to_test = project_to_run[0]["projects_to_test"]
+        self.assertIn("rocblas", projects_to_test)
+        self.assertIn("miopen", projects_to_test)
+
+    @patch("therock_configure_ci.get_modified_paths")
     def test_hipfile_pr_skips_windows_ci(self, mock_get_modified):
         """PR with only hipfile changes should not trigger Windows CI (Linux-only component)."""
         args = {
