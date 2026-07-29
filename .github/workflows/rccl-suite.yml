@@ -200,11 +200,12 @@ jobs:
             exit 0
           fi
           run_id="$(python3 - <<'PY'
-          import os, sys
+          import os, sys, contextlib
           sys.path.insert(0, "build_tools")
           import find_latest_artifacts as fla
           group = os.environ["ARTIFACT_GROUP"]
-          results = fla.find_latest_artifacts(artifact_groups=[group], verbose=True)
+          with contextlib.redirect_stdout(sys.stderr):
+              results = fla.find_latest_artifacts(artifact_groups=[group], verbose=True)
           if not results:
               sys.stderr.write(f"No TheRock artifacts found for group '{group}'\n")
               sys.exit(1)
