@@ -4,12 +4,31 @@ project(rccl-PureUnitTests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Use system GTest
-find_package(GTest REQUIRED)
 find_package(Threads REQUIRED)
+include(FetchContent)
+
+# --- Resolve GTest: system → RCCL-vendored → FetchContent fallback ---
+find_package(GTest QUIET)
+if(NOT GTest_FOUND)
+  # Check RCCL's vendored GTest (built by the main RCCL CMake into build/gtest/)
+  set(_rccl_gtest_root "${CMAKE_CURRENT_SOURCE_DIR}/../../build/gtest")
+  if(EXISTS "${_rccl_gtest_root}/lib/libgtest.a" OR EXISTS "${_rccl_gtest_root}/lib64/libgtest.a")
+    message(STATUS "Using RCCL-vendored GTest: ${_rccl_gtest_root}")
+    find_package(GTest REQUIRED PATHS "${_rccl_gtest_root}" NO_DEFAULT_PATH)
+  else()
+    message(STATUS "System GTest not found, RCCL-vendored GTest not found — downloading via FetchContent")
+    FetchContent_Declare(
+      googletest
+      GIT_REPOSITORY https://github.com/google/googletest.git
+      GIT_TAG        v1.14.0
+      GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(googletest)
+    add_library(GTest::GTest ALIAS gtest)
+  endif()
+endif()
 
 # Fetch fmt (header-only) for VersionInfoTests
-include(FetchContent)
 FetchContent_Declare(
   fmt
   GIT_REPOSITORY https://github.com/fmtlib/fmt.git
@@ -20,7 +39,24 @@ FetchContent_MakeAvailable(fmt)
 
 set(RCCL_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
 set(RCCL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
-set(RCCL_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build")
+
+# --- Resolve RCCL build directory ---
+# The RCCL build may use a flat layout (build/hipify/) or a typed layout
+# (build/release/hipify/, build/debug/hipify/) depending on build system.
+# Accept -DRCCL_BUILD_DIR=... to override; otherwise auto-detect.
+set(RCCL_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build" CACHE PATH
+    "RCCL build directory (auto-detects release/debug subdirs)")
+
+if(NOT EXISTS "${RCCL_BUILD_DIR}/hipify")
+  foreach(_subdir release debug Release Debug RelWithDebInfo)
+    if(EXISTS "${RCCL_BUILD_DIR}/${_subdir}/hipify")
+      set(RCCL_BUILD_DIR "${RCCL_BUILD_DIR}/${_subdir}")
+      message(STATUS "Detected build subdir layout: ${RCCL_BUILD_DIR}")
+      break()
+    endif()
+  endforeach()
+endif()
+
 set(RCCL_HIPIFY_DIR "${RCCL_BUILD_DIR}/hipify")
 
 # --- Detect hipcc for compiling real RCCL source wrappers ---
@@ -60,9 +96,30 @@ if(HAVE_HIPCC_WRAPPERS)
   )
   get_filename_component(GCC_INSTALL_DIR "${_gcc_libstdcpp}" DIRECTORY)
 
+  # Resolve GTest include dir for hipcc custom commands
+  if(TARGET GTest::GTest)
+    get_target_property(_gtest_inc GTest::GTest INTERFACE_INCLUDE_DIRECTORIES)
+  elseif(TARGET gtest)
+    get_target_property(_gtest_inc gtest INTERFACE_INCLUDE_DIRECTORIES)
+  endif()
+  if(NOT _gtest_inc)
+    set(_gtest_inc "")
+  endif()
+
+  # Resolve fmt include dir for hipcc (may be FetchContent or RCCL-vendored)
+  if(EXISTS "${RCCL_BUILD_DIR}/_deps/fmt-src/include")
+    set(_fmt_inc "${RCCL_BUILD_DIR}/_deps/fmt-src/include")
+  else()
+    get_target_property(_fmt_inc fmt-header-only INTERFACE_INCLUDE_DIRECTORIES)
+    if(NOT _fmt_inc)
+      set(_fmt_inc "")
+    endif()
+  endif()
+
   set(HIPCC_COMPILE_FLAGS
     --offload-host-only
     -std=c++17
+    -fPIC
     --gcc-install-dir=${GCC_INSTALL_DIR}
     -D__HIP_PLATFORM_AMD__
     -DNCCL_OS_LINUX
@@ -78,8 +135,13 @@ if(HAVE_HIPCC_WRAPPERS)
     -I${RCCL_HIPIFY_DIR}/src/graph
     -I${RCCL_TEST_DIR}
     -I${RCCL_TEST_DIR}/common
-    -I${RCCL_BUILD_DIR}/_deps/fmt-src/include
   )
+  if(_fmt_inc)
+    list(APPEND HIPCC_INCLUDE_FLAGS -I${_fmt_inc})
+  endif()
+  if(_gtest_inc)
+    list(APPEND HIPCC_INCLUDE_FLAGS -I${_gtest_inc})
+  endif()
 
   # Compile each wrapper file with hipcc (custom commands)
   foreach(wrapper paths_wrapper search_wrapper NullParentTests_wrapper
@@ -153,7 +215,7 @@ target_include_directories(rccl-PureUnitTests PRIVATE
   ${RCCL_SRC_DIR}/include
   ${RCCL_SRC_DIR}/include/plugin
   ${RCCL_SRC_DIR}/include/plugin/tuner
-  ${RCCL_SRC_DIR}/../build/include
+  ${RCCL_BUILD_DIR}/include
   ${RCCL_SRC_DIR}
   ${RCCL_SRC_DIR}/graph
   ${RCCL_TEST_DIR}
