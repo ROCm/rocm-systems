@@ -28,6 +28,7 @@ from rccl_ci_utils import (
     find_rocm_sdk_lib_dirs,
     override_bundled_rccl,
     parse_junit_xml,
+    quarantine_rocm_sysdeps,
     send_email_report,
     set_github_output,
     verify_rccl_override,
@@ -426,6 +427,7 @@ def main() -> None:
         return
 
     # Step 2: Set up LD_LIBRARY_PATH and replace pip-bundled RCCL
+    quarantine_rocm_sysdeps(rccl_lib_dir)
     rocm_sdk_lib_dirs = find_rocm_sdk_lib_dirs()
     setup_ld_library_path(rccl_lib_dir, rocm_lib_dir, extra_lib_dirs=rocm_sdk_lib_dirs)
     override_bundled_rccl(rccl_lib_dir)

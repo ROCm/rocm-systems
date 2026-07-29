@@ -25,6 +25,7 @@ from pathlib import Path
 from rccl_ci_utils import (
     find_rccl_library,
     parse_junit_xml,
+    quarantine_rocm_sysdeps,
     send_email_report,
     set_github_output,
     setup_rccl_preload,
@@ -377,6 +378,7 @@ def main() -> None:
         return
 
     # Step 2: Set up library paths and use LD_PRELOAD for CI-built RCCL
+    quarantine_rocm_sysdeps(args.artifact_dir)
     populate_rocm_lib_dir(lib_dirs)
     setup_ld_library_path(lib_dirs)
     setup_rccl_preload(rccl_lib_dir)

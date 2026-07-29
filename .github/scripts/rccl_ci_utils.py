@@ -13,6 +13,25 @@ log = logging.getLogger(__name__)
 SMTP_SERVERS = ["smtp.amd.com", "aussmtp.amd.com", "mail.amd.com", "localhost"]
 
 
+def quarantine_rocm_sysdeps(artifact_lib_dir: Path) -> None:
+    """Rename rocm_sysdeps/ dirs under artifact lib dirs so the linker can't load them.
+
+    TheRock CI flattens artifacts into build/lib/, which places libamd_smi.so
+    alongside librccl.so.  libamd_smi has RPATH $ORIGIN/rocm_sysdeps/lib that
+    pulls in librocm_sysdeps_nl_genl_3.so.200 — a bundled libnl-genl whose
+    destructor (genl_unregister_family) crashes on process exit, causing every
+    pytest/JAX worker to exit with SIGSEGV (exit code -11).
+
+    Renaming the directory breaks the RPATH resolution so the system libnl
+    (which has a working destructor) is used instead.
+    """
+    for sysdeps in artifact_lib_dir.rglob("rocm_sysdeps"):
+        if sysdeps.is_dir():
+            quarantined = sysdeps.with_name("rocm_sysdeps.quarantined")
+            sysdeps.rename(quarantined)
+            log.info("Quarantined %s -> %s", sysdeps, quarantined)
+
+
 def find_rccl_library(artifact_dir: Path) -> Path:
     """Find librccl.so in the artifact directory tree."""
     matches = list(artifact_dir.rglob("librccl.so"))
