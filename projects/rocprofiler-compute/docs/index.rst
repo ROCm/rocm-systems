@@ -1,6 +1,7 @@
 .. meta::
    :description: ROCm Compute Profiler documentation and reference
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, GPUs, accelerator, AMD
+   :keywords: Omniperf, ROCm, profiler, tool, Instinct, GPUs, accelerator, AMD,
+              ROCm Optiq, graphical analysis
 
 *******************************************
 ROCm Compute Profiler (rocprofiler-compute)
@@ -51,6 +52,9 @@ in practice.
 
       * :doc:`how-to/profile/mode`
       * :doc:`how-to/analyze/mode`
+
+        * :doc:`ROCm Optiq (Beta) <how-to/analyze/optiq>` for graphical analysis of
+          ROCm Compute Profiler analysis data
 
         * :doc:`how-to/analyze/cli`
 
