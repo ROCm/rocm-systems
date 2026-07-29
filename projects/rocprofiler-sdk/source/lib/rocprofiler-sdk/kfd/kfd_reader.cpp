@@ -272,6 +272,15 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
         return false;
     }
 
+    if(s->info.fw_record_size != kFwRecBytes || s->info.num_regions == 0 || s->info.num_regions > 8)
+    {
+        ROCP_WARNING << fmt::format(
+            "KFD dispatch-log: unsupported stream geometry (fw_record_size={} num_regions={})",
+            s->info.fw_record_size,
+            s->info.num_regions);
+        return false;
+    }
+
     s->smap_len = round_up_page(s->info.mmap_size);
     s->smap     = mmap(nullptr, s->smap_len, PROT_READ | PROT_WRITE, MAP_SHARED, s->stream_fd, 0);
     if(s->smap == MAP_FAILED)
