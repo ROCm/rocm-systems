@@ -7,7 +7,7 @@ import os
 import shlex
 import time
 from pathlib import Path
-from typing import Optional, Union, cast
+from typing import Optional, TypedDict, Union, cast
 
 from utils.logger import console_debug, console_error, console_log
 from utils.utils_common import (
@@ -23,10 +23,18 @@ from utils.utils_profile import ProfilerOptions, is_live_attach
 PC_SAMPLING_DEFAULT_INTERVALS = {"stochastic": 1048576, "host_trap": 512}
 
 
+class PCSamplingLimits(TypedDict):
+    """Interval bounds a sampling method accepts, and whether it needs pow2."""
+
+    min_interval: int
+    max_interval: int
+    interval_pow2: bool
+
+
 def pc_sampling_interval_limits(
     method: str,
     sdk_tool_path: Optional[str] = None,
-) -> Optional[dict[str, int]]:
+) -> Optional[PCSamplingLimits]:
     """Return the interval limits the GPUs report for one sampling method.
 
     Mirrors `rocprofv3-avail info --pc-sampling`.
@@ -38,7 +46,7 @@ def pc_sampling_interval_limits(
     """
     # Limits rocprofiler-sdk falls back to, see its
     # source/lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.cpp
-    fallback = {
+    fallback: PCSamplingLimits = {
         "min_interval": 1,
         "max_interval": 1048576,
         "interval_pow2": method == "stochastic",
@@ -108,7 +116,9 @@ def _query_agent_configs(
     return configs
 
 
-def _query_agent_interval_limits(library: ctypes.CDLL) -> dict[str, dict[str, int]]:
+def _query_agent_interval_limits(
+    library: ctypes.CDLL,
+) -> dict[str, PCSamplingLimits]:
     """Merge every agent's configurations into per-method interval limits.
 
     The SDK configures PC sampling when any single agent supports the request,
@@ -122,7 +132,7 @@ def _query_agent_interval_limits(library: ctypes.CDLL) -> dict[str, dict[str, in
     # Keyed on (method id, unit id) from rocprofiler-sdk/fwd.h, since the SDK
     # matches a requested configuration on both fields.
     supported = {(1, 2): "stochastic", (2, 3): "host_trap"}
-    limits: dict[str, dict[str, int]] = {}
+    limits: dict[str, PCSamplingLimits] = {}
     for agent_handle in agent_handles:
         for method_id, unit, minimum, maximum, flags in _query_agent_configs(
             library, agent_handle
