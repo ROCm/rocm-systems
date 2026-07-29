@@ -34,7 +34,7 @@ Run these four commands separately:
 
 1. `cmake -B build -DENABLE_EXTENDED_TESTS=ON`
 2. `make clean -C build`
-3. `make -j32 -C build`
+3. `make -j"$(nproc)" -C build`
 4. `make install -C build`
 
 ## Step 2 — Build all sample apps
