@@ -134,10 +134,23 @@ measure_commit() {
 
 echo "=== resource usage: $COMMIT_1${COMMIT_2:+ vs $COMMIT_2} ($GPU_TARGET / $BUILD_CONFIG) ==="
 
+# Only restore if we're not already on it -- `checkout --force` to the ref
+# you're already on still overwrites any uncommitted changes to tracked
+# files (e.g. edits made to other scripts while this one was running, or on
+# a cache hit where measure_commit never checked anything out to begin with).
+_restore_original_ref() {
+  local current_ref
+  current_ref="$(git rev-parse --abbrev-ref HEAD)"
+  [[ "$current_ref" == "HEAD" ]] && current_ref="$(git rev-parse HEAD)"
+  if [[ "$current_ref" != "$ORIGINAL_REF" ]]; then
+    git checkout --quiet --force "$ORIGINAL_REF" 2>/dev/null || true
+  fi
+}
+
 CSV_1="$(measure_commit "$COMMIT_1")"
 SHA_1="$(git rev-parse --short=12 "$COMMIT_1")"
 
-git checkout --quiet --force "$ORIGINAL_REF" 2>/dev/null || true
+_restore_original_ref
 
 if [[ -z "$COMMIT_2" ]]; then
   echo ""
@@ -148,7 +161,7 @@ fi
 CSV_2="$(measure_commit "$COMMIT_2")"
 SHA_2="$(git rev-parse --short=12 "$COMMIT_2")"
 
-git checkout --quiet --force "$ORIGINAL_REF" 2>/dev/null || true
+_restore_original_ref
 
 OUTDIR="$ROCSHMEM_DIR/resource-usage-${GPU_TARGET}-${BUILD_CONFIG}-${SHA_1}-vs-${SHA_2}"
 mkdir -p "$OUTDIR"
