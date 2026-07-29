@@ -127,7 +127,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Upcoming changes
 
-* Roofline support for RDNA3.5 gfx115x devices.
+* Roofline support for gfx1153 devices.
 
 ### Known issues
 
