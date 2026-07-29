@@ -52,7 +52,7 @@ run(const char* _name, int nchildren)
                 };
                 roctxRangePushA("child_process");
                 std::thread{ _sleep }.join();
-                roctxRangePushA("child_process");
+                roctxRangePop();
                 printf("[%s][%i] child job complete\n", _name, getpid());
                 exit(EXIT_SUCCESS);
             }

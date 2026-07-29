@@ -709,6 +709,18 @@ class PythonRunner(BaseRunner):
         self.standalone = standalone
         self.profile_args = profile_args or []
 
+        # ROCm's roctx Python bindings are installed in a version-specific
+        # directory outside rocprofsys's own (ABI-agnostic) site-packages, so
+        # they must be appended to PYTHONPATH for the interpreter under test.
+        if self.python_version:
+            roctx_site_packages = config.get_roctx_site_packages(self.python_version)
+            if roctx_site_packages:
+                existing = self.environment.base.get("PYTHONPATH", "")
+                entries = [p for p in (existing, str(roctx_site_packages)) if p]
+                self.environment.set_test_environment(
+                    {"PYTHONPATH": os.pathsep.join(entries)}
+                )
+
     def build_command(self) -> list[str]:
         python_executable = self.config.capabilities.get_python_executable(
             self.python_version
