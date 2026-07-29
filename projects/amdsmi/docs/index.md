@@ -34,6 +34,7 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 :::{grid-item-card} Install
 * [Library and CLI tool installation](./install/install.md)
 * [Build from source](./install/build.md)
+* [Packaging and install paths](./packaging.md)
 :::
 
 :::{grid-item-card} How to

@@ -61,9 +61,13 @@ rm_logrotateConfig() {
 }
 
 if [ "$1" -le 1 ]; then
-    # perform the below actions for rpm remove($1=0) or upgrade($1=1) operations
-    # remove old gpuv-smi symlink
+    # remove old gpuv-smi symlink on both remove($1=0) and upgrade($1=1)
     rm -f $RPM_INSTALL_PREFIX0/bin/gpuv-smi &> /dev/null
+fi
+
+if [ "$1" -eq 0 ]; then
+    # only on a full erase -- on upgrade($1=1) these would delete the
+    # incoming package's logs, test dir and logrotate config
     rm_leftovers
     rm_logFolder
     rm_rocm_tests_dir
