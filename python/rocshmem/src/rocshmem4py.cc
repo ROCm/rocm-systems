@@ -27,6 +27,11 @@ NB_MODULE(_rocshmem4py, m) {
   // Keep host-facing symbol coverage aligned with
   // python/rocshmem4py/__init__.py:_HOST_API_BINDINGS.
 
+  // Version of the rocSHMEM library this extension was compiled and statically
+  // linked against (from <rocshmem/rocshmem_config.h>). Baked in at build time
+  // so it is authoritative even for a wheel copied to another machine.
+  m.attr("__rocshmem_version__") = ROCSHMEM_VERSION;
+
   // Initialization
   m.def("rocshmem_init", []() { rocshmem_init(); });
   m.def("rocshmem_finalize", []() { rocshmem_finalize(); });

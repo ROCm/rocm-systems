@@ -32,9 +32,14 @@ Host-facing symbols are exported directly from the compiled extension module
 ## Prerequisites
 
 - AMD ROCm 6.0+ with HIP
-- An **installed** rocSHMEM (built with RO, IPC, or GDA backend, with
-  `-DCMAKE_POSITION_INDEPENDENT_CODE=ON`) exposing its CMake package at
-  `<prefix>/lib/cmake/rocshmem/`, discoverable via `CMAKE_PREFIX_PATH`
+- An **installed** rocSHMEM, **version 3.5.0 or newer** (built with RO, IPC, or
+  GDA backend, with `-DCMAKE_POSITION_INDEPENDENT_CODE=ON`) exposing its CMake
+  package at `<prefix>/lib/cmake/rocshmem/`, discoverable via `CMAKE_PREFIX_PATH`.
+  The build enforces this floor via `find_package(rocshmem 3.5 ...)`; an older
+  install is rejected at configure time (the binding wraps APIs added in 3.5.0).
+  The linked version is recorded in the wheel version as a local segment
+  (`rocshmem4py-0.1.0+rocshmem<ver>`) and exposed at runtime as
+  `rocshmem4py.__rocshmem_version__`.
 - Python 3.8+
 - CMake 3.20+
 - nanobind 2.12.0+ (binding backend)

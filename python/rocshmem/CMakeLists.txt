@@ -136,7 +136,14 @@ if(DEFINED ENV{ROCSHMEM_HOME})
   list(APPEND CMAKE_PREFIX_PATH "$ENV{ROCSHMEM_HOME}")
 endif()
 
-find_package(rocshmem CONFIG REQUIRED)
+# Minimum rocSHMEM (vendor/package) version this binding is API-compatible with.
+# The binding wraps rocshmem_align / rocshmem_calloc / rocshmem_buffer_unregister_all,
+# which were introduced in rocSHMEM 3.5.0 (see projects/rocshmem/CHANGELOG.md);
+# building against an older install fails at compile time on the missing symbols.
+# rocSHMEM's config-version file treats "installed >= requested" as compatible,
+# so this accepts 3.5.0 and newer and rejects anything older with a clear error.
+set(ROCSHMEM_MIN_VERSION 3.5.0)
+find_package(rocshmem ${ROCSHMEM_MIN_VERSION} CONFIG REQUIRED)
 
 set(ROCSHMEM_LINK_TARGET roc::rocshmem)
 set(ROCSHMEM_INCLUDE_DIRS ${rocshmem_INCLUDE_DIRS})

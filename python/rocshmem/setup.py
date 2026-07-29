@@ -7,10 +7,59 @@ Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 """
 
 import os
+import re
 import sys
 import subprocess
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
+
+# Base release version of the binding's own Python API. The full version
+# reported to pip is this plus a PEP 440 local segment recording the linked
+# rocSHMEM library version (e.g. "0.1.0+rocshmem3.6.0"), so a built wheel is
+# self-documenting about which rocSHMEM it was compiled against.
+BASE_VERSION = "0.1.0"
+
+
+def _rocshmem_prefixes():
+    """Candidate rocSHMEM install prefixes, in the same precedence order that
+    CMakeLists uses for find_package: CMAKE_PREFIX_PATH first, then
+    ROCSHMEM_HOME, then ROCM_PATH, then the /opt/rocm default."""
+    prefixes = []
+    if os.environ.get("CMAKE_PREFIX_PATH"):
+        prefixes += os.environ["CMAKE_PREFIX_PATH"].split(os.pathsep)
+    for var in ("ROCSHMEM_HOME", "ROCM_PATH"):
+        if os.environ.get(var):
+            prefixes.append(os.environ[var])
+    prefixes.append("/opt/rocm")
+    return [p for p in prefixes if p]
+
+
+def _detect_rocshmem_version():
+    """Parse ROCSHMEM_VERSION from the installed rocshmem_config.h so the wheel
+    records the linked library version. Returns None if it cannot be found, in
+    which case the version falls back to BASE_VERSION (CMake still enforces the
+    minimum-version gate at configure time)."""
+    pattern = re.compile(r'#define\s+ROCSHMEM_VERSION\s+"([^"]+)"')
+    for prefix in _rocshmem_prefixes():
+        header = os.path.join(prefix, "include", "rocshmem", "rocshmem_config.h")
+        try:
+            with open(header) as fh:
+                for line in fh:
+                    m = pattern.search(line)
+                    if m:
+                        return m.group(1)
+        except OSError:
+            continue
+    return None
+
+
+def _package_version():
+    lib_version = _detect_rocshmem_version()
+    if not lib_version:
+        return BASE_VERSION
+    # PEP 440 local version label: alphanumerics and periods only.
+    local = "rocshmem" + re.sub(r"[^0-9A-Za-z.]", ".", lib_version)
+    return f"{BASE_VERSION}+{local}"
 
 
 class CMakeExtension(Extension):
@@ -77,6 +126,7 @@ class CMakeBuild(build_ext):
 
 
 setup(
+    version=_package_version(),
     ext_modules=[CMakeExtension("_rocshmem4py", sourcedir=".")],
     cmdclass={"build_ext": CMakeBuild},
 )
