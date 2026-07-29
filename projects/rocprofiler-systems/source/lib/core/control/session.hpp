@@ -128,7 +128,7 @@ public:
     {
         assert(static_cast<std::size_t>(event_scope) < SCOPE_COUNT);
         return m_scope_tracing[static_cast<std::size_t>(event_scope)].load(
-            std::memory_order_relaxed);
+            std::memory_order_acquire);
     }
 
     /// True iff every trigger of @p event_scope except @p name currently has
