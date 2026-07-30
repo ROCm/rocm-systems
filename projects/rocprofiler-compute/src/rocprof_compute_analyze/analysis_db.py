@@ -180,7 +180,6 @@ class db_analysis(OmniAnalyze_Base):
                 Database.get_session().add(
                     orm.Dispatch(
                         dispatch_id=dispatch.dispatch_id,
-                        pid=dispatch_pid,
                         gpu_id=dispatch.gpu_id,
                         start_timestamp=dispatch.start_timestamp,
                         end_timestamp=dispatch.end_timestamp,
@@ -436,6 +435,7 @@ class db_analysis(OmniAnalyze_Base):
                 if code_object_store is None:
                     code_object_store = orm.CodeObjectStore(
                         code_object_id=code_object.code_object_id,
+                        pid=pid,
                         load_base=code_object.load_base,
                         workload=workload_obj,
                     )
@@ -540,6 +540,7 @@ class db_analysis(OmniAnalyze_Base):
                 if code_object_store is None:
                     code_object_store = orm.CodeObjectStore(
                         code_object_id=disassembly.code_object_id,
+                        pid=pid,
                         load_base=load_base_by_id.get(disassembly.code_object_id),
                         workload=workload_obj,
                     )

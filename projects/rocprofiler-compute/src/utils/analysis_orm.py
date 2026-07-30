@@ -132,7 +132,6 @@ class Dispatch(Base):
         Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
     dispatch_id = Column(Integer)
-    pid = Column(Integer)
     gpu_id = Column(Integer)
     start_timestamp = Column(Integer)
     end_timestamp = Column(Integer)
@@ -164,11 +163,14 @@ class Kernel(Base):
 
 class CodeObjectStore(Base):
     __tablename__ = f"{PREFIX}code_object_store"
+    # code_object_id is process-local within a workload.
+    __table_args__ = (UniqueConstraint("workload_id", "pid", "code_object_id"),)
 
     code_object_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
         Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
+    pid = Column(Integer)
     code_object_id = Column(Integer)
     load_base = Column(Integer, nullable=True)
 
