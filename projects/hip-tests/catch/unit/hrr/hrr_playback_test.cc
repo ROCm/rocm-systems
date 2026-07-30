@@ -25,6 +25,22 @@ HIP_TEST_CASE(Unit_HRR_Playback_ReplayedH2DDrainGraphGuard) {
   REQUIRE_FALSE(hrr_replayed_h2d_needs_drain(true));
 }
 
+// ROCM-27985: hipMalloc is host-synchronous, so the zero-init injected after a
+// host-synchronous replay allocation must be drained before the handler
+// returns. Without that edge the null-stream zero-init races every later
+// replayed event on a hipStreamNonBlocking stream and can overwrite a restored
+// kernel input with zeros. Draining is skipped when zero-init is turned off and
+// during graph capture, where the zero-init is never issued.
+HIP_TEST_CASE(Unit_HRR_Playback_ZeroInitDrainGuard) {
+  // Normal replay: the zero-init must be ordered ahead of later events.
+  REQUIRE(hrr_zero_init_needs_drain(true, false));
+  // HIP_HRR_REPLAY_ZERO_INIT=0: nothing was issued, so nothing to drain.
+  REQUIRE_FALSE(hrr_zero_init_needs_drain(false, false));
+  // During graph capture: zero-init is skipped and a sync would be illegal.
+  REQUIRE_FALSE(hrr_zero_init_needs_drain(true, true));
+  REQUIRE_FALSE(hrr_zero_init_needs_drain(false, true));
+}
+
 /**
  * End doxygen group HRR.
  * @}
