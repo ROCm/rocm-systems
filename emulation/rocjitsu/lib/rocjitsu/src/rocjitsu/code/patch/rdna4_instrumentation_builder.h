@@ -218,6 +218,17 @@ build_v_min_u32_e32_literal(uint16_t vdst, uint32_t literal, uint16_t vsrc1, rj_
   return std::array<uint32_t, 2>{pack_vop2(*op, vdst, kVopLiteralSource, vsrc1), literal};
 }
 
+/// @brief Encode VOP2 `v_min_u32 vdst, src0, vsrc1`.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_v_min_u32_e32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
+  if (vdst > 255 || src0 > 511 || vsrc1 > 255)
+    return std::nullopt;
+  const std::optional<uint32_t> op = vop2_op_min_u32(arch);
+  if (!op)
+    return std::nullopt;
+  return pack_vop2(*op, vdst, src0, vsrc1);
+}
+
 /// @brief Encode VOP2 `v_and_b32 vdst, src0, vsrc1`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_v_and_b32_e32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {

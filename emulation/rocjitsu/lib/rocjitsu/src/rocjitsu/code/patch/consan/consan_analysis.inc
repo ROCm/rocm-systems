@@ -759,10 +759,30 @@ void set_sgpr_pair_from_hint(FlatPointerTracker &tracker, uint16_t index,
   return std::nullopt;
 }
 
-[[nodiscard]] bool is_vector_pointer_component_arithmetic(std::string_view mnemonic) {
-  return starts_with_any(mnemonic,
-                         {"v_add_u32", "v_add_co_u32", "v_add_co_ci_u32", "v_add_nc_u32",
-                          "v_sub_u32", "v_sub_co_u32", "v_sub_co_ci_u32", "v_sub_nc_u32"});
+[[nodiscard]] bool has_lane_permuting_vop2_source(const Instruction &inst) {
+  // VOP2 occupies encoding IDs below the VOPC/VOP1 range on every supported
+  // AMDGPU profile. Extended VOP3 encodings store a destination in these low
+  // bits, so only interpret them as src0 for a compact VOP2 instruction.
+  if (inst.encoding_id() >= 248u || inst.raw_encoding() == nullptr)
+    return false;
+
+  constexpr uint32_t kSrc0Mask = (1u << 9u) - 1u;
+  const uint32_t src0 = inst.raw_encoding()[0] & kSrc0Mask;
+  return src0 == amdgpu::SRC_DPP || src0 == amdgpu::SRC_SDWA || amdgpu::dpp::is_src_dpp8(src0);
+}
+
+[[nodiscard]] bool is_vector_pointer_component_arithmetic(const Instruction &inst) {
+  const std::string_view mnemonic = inst.mnemonic();
+  for (const std::string_view base :
+       {"v_add_u32", "v_add_co_u32", "v_add_co_ci_u32", "v_add_nc_u32", "v_sub_u32", "v_sub_co_u32",
+        "v_sub_co_ci_u32", "v_sub_nc_u32"}) {
+    const bool exact_match = mnemonic == base;
+    const bool width_suffix = mnemonic.size() == base.size() + 4u && mnemonic.starts_with(base) &&
+                              (mnemonic.ends_with("_e32") || mnemonic.ends_with("_e64"));
+    if (exact_match || width_suffix)
+      return !has_lane_permuting_vop2_source(inst);
+  }
+  return false;
 }
 
 [[nodiscard]] uint64_t scratch_component_key(uint32_t saddr, uint32_t ioffset) {
@@ -1277,7 +1297,7 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     return;
   }
 
-  if (is_vector_pointer_component_arithmetic(mnemonic)) {
+  if (is_vector_pointer_component_arithmetic(inst)) {
     const auto dst = first_vgpr_dst_index(inst);
     const auto selected = merge_source_component_hints(inst, tracker);
     clear_destination_components(inst, tracker);

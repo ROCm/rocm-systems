@@ -166,6 +166,11 @@ build_cdna4_v_and_b32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
+build_cdna4_v_min_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
+  return build_cdna4_vop2(cdna4::kVMinU32Vop2, vdst, src0, vsrc1, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<uint32_t>
 build_cdna4_v_xor_b32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
   return build_cdna4_vop2(cdna4::kVXorB32Vop2, vdst, src0, vsrc1, arch);
 }

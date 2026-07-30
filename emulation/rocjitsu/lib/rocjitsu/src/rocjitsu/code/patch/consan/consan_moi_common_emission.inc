@@ -203,10 +203,12 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
       return std::nullopt;
     }
     // Exact-byte provenance uses the canonical full-width cell on every
-    // target. RDNA4 can avoid clearing that mirror eagerly when its packed
-    // validity bitmap also fits. Other targets retain the full eager layout;
-    // if that layout does not fit, the caller uses the semantically equivalent
-    // external exact-shadow table.
+    // target. The former generation tag avoided relying on entry clearing, but
+    // it occupies the field now carrying local byte provenance. CDNA entry
+    // clearing completes before any instrumented access, so the full eager
+    // mirror establishes the same validity invariant without that tag. RDNA4
+    // can instead use its packed first-use bitmap. If either full layout does
+    // not fit, the caller uses the semantically equivalent external table.
     if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) {
       if (auto lazy_layout = plan_consan_moi_lazy_workgroup_shadow(
               descriptor.group_segment_fixed_size, max_workgroup_lds_bytes)) {

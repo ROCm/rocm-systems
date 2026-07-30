@@ -153,6 +153,16 @@ build_cdna3_v_and_b32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch
       {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1), .vdst = static_cast<uint8_t>(vdst)})[0];
 }
 
+/// @brief Encode CDNA3 `v_min_u32`.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_cdna3_v_min_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
+  if (!is_cdna3_arch(arch) || vdst > 255 || src0 > 511 || vsrc1 > 255)
+    return std::nullopt;
+  return cdna3::build_vop2(
+      cdna3::kVMinU32Vop2,
+      {.src0 = src0, .vsrc1 = static_cast<uint8_t>(vsrc1), .vdst = static_cast<uint8_t>(vdst)})[0];
+}
+
 /// @brief Encode CDNA3 `v_xor_b32`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_cdna3_v_xor_b32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {

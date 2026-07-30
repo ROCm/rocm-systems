@@ -3119,7 +3119,10 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       const std::array<uint32_t, 1> duplicate_compact_metadata = {
           build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 3u),
                               vector_source_vgpr(static_cast<uint16_t>(scratch + 2u)), arch)};
-      const uint16_t diagnostic_claim_offset = cdna ? 12u : 3u;
+      // Exact-byte publication reserves v14:v15 for the diagnostic
+      // compare-swap tuple. Keep this independent of the emitter's scratch
+      // arithmetic so final validation catches accidental tuple relocation.
+      const uint16_t diagnostic_claim_offset = 14u;
       const auto expected_first_diagnostic_claim = instrumentation::build_flat_atomic_cmpswap_b32(
           scratch, static_cast<uint16_t>(scratch + diagnostic_claim_offset),
           static_cast<uint16_t>(scratch + diagnostic_claim_offset),

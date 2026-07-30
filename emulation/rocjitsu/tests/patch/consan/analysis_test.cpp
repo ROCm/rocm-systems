@@ -354,6 +354,35 @@ TEST(ConSan, ClassifiesCdnaSharedBaseAfterLowHalfVectorAdd) {
   }
 }
 
+TEST(ConSan, DoesNotTreatCdnaDppAddAsLaneLocalPointerArithmetic) {
+  const std::array<uint32_t, 8> text_words = {
+      0xBE8E01EBu,              // s_mov_b64 s[14:15], src_shared_base
+      0x7E00020Eu,              // v_mov_b32_e32 v0, s14
+      0x7E02020Fu,              // v_mov_b32_e32 v1, s15
+      0x680006FAu, 0xFF011100u, // v_add_u32_dpp v0, v0, v3 row_shr:1
+      0xDC500000u, 0x04000000u, // flat_load_dword v4, v[0:1]
+      0xBF810000u,              // s_endpgm
+  };
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(static_cast<uint32_t>(arch));
+    const std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, "cdna_dpp_low_half_add")
+            : make_cdna4_lds_code_object(text_words, "cdna_dpp_low_half_add");
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result));
+    ASSERT_EQ(result.kernels.size(), 1u);
+    ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
+    EXPECT_NE(result.kernels.front().flat_sites.front().address_space_hint,
+              ConSanFlatAddressSpaceHint::Group);
+    EXPECT_EQ(result.kernels.front().stats.flat_group_hint_count, 0u);
+  }
+}
+
 TEST(ConSan, PropagatesSharedPointerThroughExactScratchSlot) {
   const std::array<uint32_t, 13> text_words = {
       0xBE9201EBu,                           // s_mov_b64 s[18:19], src_shared_base

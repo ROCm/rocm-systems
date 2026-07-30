@@ -213,6 +213,16 @@ build_v_and_b32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arc
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
+build_v_min_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
+  if (!is_admitted_arch(arch))
+    return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return build_cdna3_v_min_u32(vdst, src0, vsrc1, arch);
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_v_min_u32(vdst, src0, vsrc1, arch)
+                                          : rocjitsu::build_v_min_u32_e32(vdst, src0, vsrc1, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<uint32_t>
 build_v_xor_b32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
   if (!is_admitted_arch(arch))
     return std::nullopt;

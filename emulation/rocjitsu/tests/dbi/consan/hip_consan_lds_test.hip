@@ -37,7 +37,8 @@ int main(int argc, char **argv) {
 #define RJ_CONSAN_TEST_DS_LOAD_B32 "ds_read_b32 %[loaded], %[lds_addr]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_dword v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED "flat_store_dword v[0:1], %[value]\n\t"
-#define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_byte v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_byte v[0:1], %[value]\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_LOW_B16 "flat_store_short v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_V_ADD_U32 "v_add_u32 v0, v0, %[offset]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B8 "flat_store_byte_d16_hi v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B16 "flat_store_short_d16_hi v[0:1], %0\n\t"
@@ -53,7 +54,8 @@ int main(int argc, char **argv) {
 #define RJ_CONSAN_TEST_DS_LOAD_B32 "ds_load_b32 %[loaded], %[lds_addr]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_b32 v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED "flat_store_b32 v[0:1], %[value]\n\t"
-#define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_b8 v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_b8 v[0:1], %[value]\n\t"
+#define RJ_CONSAN_TEST_FLAT_STORE_LOW_B16 "flat_store_b16 v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_V_ADD_U32 "v_add_nc_u32 v0, v0, %[offset]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B8 "flat_store_d16_hi_b8 v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B16 "flat_store_d16_hi_b16 v[0:1], %0\n\t"
@@ -519,7 +521,7 @@ __device__ __forceinline__ void padded_flat_low_b8_store(uint32_t value) {
                "v_mov_b32 v0, s14\n\t"
                "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 RJ_CONSAN_TEST_NOP_CAVE
                :
-               : "v"(value)
+               : [value] "v"(value)
                : "s14", "s15", "v0", "v1", "memory");
 }
 
@@ -529,7 +531,17 @@ __device__ __forceinline__ void padded_flat_low_b8_store_at(uint32_t byte_offset
                "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_V_ADD_U32
                    RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 RJ_CONSAN_TEST_NOP_CAVE
                :
-               : [offset] "v"(byte_offset), "v"(value)
+               : [offset] "v"(byte_offset), [value] "v"(value)
+               : "s14", "s15", "v0", "v1", "vcc", "memory");
+}
+
+__device__ __forceinline__ void padded_flat_low_b16_store_at(uint32_t byte_offset, uint32_t value) {
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_V_ADD_U32
+                   RJ_CONSAN_TEST_FLAT_STORE_LOW_B16 RJ_CONSAN_TEST_NOP_CAVE
+               :
+               : [offset] "v"(byte_offset), [value] "v"(value)
                : "s14", "s15", "v0", "v1", "vcc", "memory");
 }
 
@@ -580,6 +592,32 @@ __global__ __launch_bounds__(128) void padded_inline_exact_external_overlapping_
   __syncthreads();
   if (threadIdx.x == 0)
     out[0] = 0x1e22u;
+}
+
+__global__ __launch_bounds__(128) void padded_inline_exact_local_tail_b16(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  asm volatile("v_mov_b32 v20, 0" ::: "v20");
+  if (threadIdx.x == 0)
+    padded_flat_low_b16_store_at(/*byte_offset=*/2u, /*value=*/0x3344u);
+  __syncthreads();
+  if (threadIdx.x == 0)
+    out[0] = 0x1a33u;
+}
+
+__global__ __launch_bounds__(128) void
+padded_inline_exact_external_unequal_high_byte_overlap(uint32_t *out) {
+  extern __shared__ uint32_t lds[];
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  asm volatile("v_mov_b32 v20, 0" ::: "v20");
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  if (tid == 0)
+    padded_flat_low_b8_store_at(/*byte_offset=*/3u, /*value=*/0x55u);
+  else if (tid == 64)
+    padded_flat_low_b16_store_at(/*byte_offset=*/2u, /*value=*/0x6677u);
+  __syncthreads();
+  if (threadIdx.x == 0)
+    out[0] = 0x1e44u;
 }
 
 __device__ __forceinline__ void padded_flat_high_b16_store(uint32_t value) {
@@ -815,56 +853,57 @@ TEST(ConSanLdsTest, PaddedHighHalfD16FlatStoresProduceExpectedResults) {
   EXPECT_EQ(out[3], 0xAAAA55EFu);
 }
 
-TEST(ConSanLdsTest, InlineExactLocalAdjacentBytesStayIndependent) {
+template <typename Launch>
+void run_inline_exact_kernel(Launch &&launch, uint32_t expected) {
   uint32_t *d_out = nullptr;
   HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
   HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
-  padded_inline_exact_local_adjacent_bytes<<<1, 128>>>(d_out);
+  launch(d_out);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
   uint32_t out = 0;
   HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
   free_device_ptr(d_out);
-  EXPECT_EQ(out, 0x1a11u);
+  EXPECT_EQ(out, expected);
+}
+
+TEST(ConSanLdsTest, InlineExactLocalAdjacentBytesStayIndependent) {
+  run_inline_exact_kernel(
+      [](uint32_t *out) { padded_inline_exact_local_adjacent_bytes<<<1, 128>>>(out); }, 0x1a11u);
 }
 
 TEST(ConSanLdsTest, InlineExactLocalOverlappingByteCompletes) {
-  uint32_t *d_out = nullptr;
-  HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
-  HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
-  padded_inline_exact_local_overlapping_byte<<<1, 128>>>(d_out);
-  HIP_ASSERT(hipGetLastError());
-  HIP_ASSERT(hipDeviceSynchronize());
-  uint32_t out = 0;
-  HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
-  free_device_ptr(d_out);
-  EXPECT_EQ(out, 0x1a22u);
+  run_inline_exact_kernel(
+      [](uint32_t *out) { padded_inline_exact_local_overlapping_byte<<<1, 128>>>(out); }, 0x1a22u);
 }
 
 TEST(ConSanLdsTest, InlineExactExternalAdjacentBytesStayIndependent) {
-  uint32_t *d_out = nullptr;
-  HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
-  HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
-  padded_inline_exact_external_adjacent_bytes<<<1, 128, sizeof(uint32_t)>>>(d_out);
-  HIP_ASSERT(hipGetLastError());
-  HIP_ASSERT(hipDeviceSynchronize());
-  uint32_t out = 0;
-  HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
-  free_device_ptr(d_out);
-  EXPECT_EQ(out, 0x1e11u);
+  run_inline_exact_kernel(
+      [](uint32_t *out) {
+        padded_inline_exact_external_adjacent_bytes<<<1, 128, sizeof(uint32_t)>>>(out);
+      },
+      0x1e11u);
 }
 
 TEST(ConSanLdsTest, InlineExactExternalOverlappingByteCompletes) {
-  uint32_t *d_out = nullptr;
-  HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
-  HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
-  padded_inline_exact_external_overlapping_byte<<<1, 128, sizeof(uint32_t)>>>(d_out);
-  HIP_ASSERT(hipGetLastError());
-  HIP_ASSERT(hipDeviceSynchronize());
-  uint32_t out = 0;
-  HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
-  free_device_ptr(d_out);
-  EXPECT_EQ(out, 0x1e22u);
+  run_inline_exact_kernel(
+      [](uint32_t *out) {
+        padded_inline_exact_external_overlapping_byte<<<1, 128, sizeof(uint32_t)>>>(out);
+      },
+      0x1e22u);
+}
+
+TEST(ConSanLdsTest, InlineExactLocalTailB16StaysWithinCoverage) {
+  run_inline_exact_kernel(
+      [](uint32_t *out) { padded_inline_exact_local_tail_b16<<<1, 128>>>(out); }, 0x1a33u);
+}
+
+TEST(ConSanLdsTest, InlineExactExternalUnequalHighByteOverlapCompletes) {
+  run_inline_exact_kernel(
+      [](uint32_t *out) {
+        padded_inline_exact_external_unequal_high_byte_overlap<<<1, 128, sizeof(uint32_t)>>>(out);
+      },
+      0x1e44u);
 }
 
 TEST(ConSanLdsTest, PaddedRacyStoreCompletesOrTripsDbiTrap) {

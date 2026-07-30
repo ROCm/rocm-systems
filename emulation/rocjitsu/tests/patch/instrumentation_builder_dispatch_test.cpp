@@ -32,6 +32,14 @@ TEST(InstrumentationBuilderDispatch, VectorAndWaitSemanticsSelectTargetBackend) 
             0x20140683u);
   EXPECT_EQ(ib::build_v_lshrrev_b32(10, scalar_positive_inline_u32(3), 3, ROCJITSU_CODE_ARCH_CDNA4),
             0x20140683u);
+  EXPECT_EQ(ib::build_v_min_u32(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA3),
+            0x1c140702u);
+  EXPECT_EQ(ib::build_v_min_u32(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA4),
+            0x1c140702u);
+  EXPECT_EQ(ib::build_v_min_u32(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_RDNA4),
+            0x26140702u);
+  EXPECT_EQ(ib::build_v_min_u32(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_GFX1250),
+            0x26140702u);
   EXPECT_EQ(ib::build_v_cmp_eq_u32_vcc(vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA4),
             0x7d940702u);
   EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0070u);
@@ -55,6 +63,7 @@ TEST(InstrumentationBuilderDispatch, UnsupportedArchitectureFailsClosed) {
   EXPECT_FALSE(ib::build_s_and_saveexec_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(
       ib::build_v_lshrrev_b32(10, scalar_positive_inline_u32(3), 3, ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_FALSE(ib::build_v_min_u32(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_s_wait_scalar_load0(ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_salu_dependency_delay(ROCJITSU_CODE_ARCH_CDNA2));

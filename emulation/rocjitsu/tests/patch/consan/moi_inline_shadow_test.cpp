@@ -188,7 +188,9 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
 }
 
 TEST(ConSanMoi, Cdna4InlineShadowProbeEmitsNativeTransactions) {
-  std::vector<uint32_t> text_words(1200, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  // Leave enough dense padding for the complete exact-byte transaction so
+  // this fixture continues to exercise the native inline placement.
+  std::vector<uint32_t> text_words(1210, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   text_words[0] = 0xd81a0004u;
   text_words[1] = 0x00000302u; // ds_write_b32 v2, v3 offset:4
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
@@ -549,7 +551,9 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   EXPECT_NE(std::ranges::find(patch_words, *pack_lane), patch_words.end())
       << "the full local cell must carry exact-byte representative-lane evidence";
 
-  const uint16_t diagnostic_slot_vgpr = static_cast<uint16_t>(*patch->scratch_vgpr + 12u);
+  // The exact-byte provenance inputs occupy the preceding transaction
+  // registers; the diagnostic compare-swap tuple is pinned to v14:v15.
+  const uint16_t diagnostic_slot_vgpr = static_cast<uint16_t>(*patch->scratch_vgpr + 14u);
   const auto diagnostic_claim = build_cdna4_flat_atomic_cmpswap_b32(
       *patch->scratch_vgpr, diagnostic_slot_vgpr, diagnostic_slot_vgpr,
       /*return_old_value=*/true, /*scope=*/2u, ROCJITSU_CODE_ARCH_CDNA4);
@@ -1292,14 +1296,15 @@ TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesInitializedWorkgroupLocalLdsMirro
   const auto local_exchange = build_ds_storexchg_rtn_b64(
       static_cast<uint16_t>(access_scratch + 5u), access_scratch,
       static_cast<uint16_t>(access_scratch + 2u), /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto global_version_claim = build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(
+  const auto diagnostic_count_claim = build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(
       access_scratch, static_cast<uint16_t>(access_scratch + 14u),
       static_cast<uint16_t>(access_scratch + 14u), /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(local_exchange);
-  ASSERT_TRUE(global_version_claim);
+  ASSERT_TRUE(diagnostic_count_claim);
   EXPECT_TRUE(contains_subsequence(access_words, *local_exchange));
-  EXPECT_EQ(count_subsequence(access_words, *global_version_claim), 0u);
+  EXPECT_EQ(count_subsequence(access_words, *diagnostic_count_claim), 1u)
+      << "the local mirror uses DS exchange; its only compare-swap is the cold diagnostic claim";
   const auto shadow_capacity = build_v_mov_b32_e64_literal(
       access_scratch, /*4352 guest bytes / 4-byte cells=*/1088u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto bounds_check = build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(access_scratch),
@@ -1703,16 +1708,21 @@ TEST(ConSanMoi, InlineShadowLoopsOverEveryWideWorkgroupLocalCellCompactly) {
   const uint16_t loop_counter_vgpr =
       consan_detail::inline_shadow_loop_counter_vgpr(scratch, /*has_exec_save=*/true,
                                                      /*track_atomics=*/false);
+  const auto saturate_cell_start = ib::build_v_min_u32(
+      static_cast<uint16_t>(scratch + 4u), vector_source_vgpr(static_cast<uint16_t>(scratch + 8u)),
+      static_cast<uint16_t>(scratch + 4u), ROCJITSU_CODE_ARCH_RDNA4);
   const auto advance_counter =
       ib::build_v_add_u32(loop_counter_vgpr, scalar_positive_inline_u32(1u), loop_counter_vgpr,
                           ROCJITSU_CODE_ARCH_RDNA4);
   const auto more_cells = ib::build_v_cmp_gt_u32_vcc(
-      scalar_positive_inline_u32(
-          consan_moi_maximum_cell_count_for_unaligned_bytes(/*access_byte_count=*/16u)),
-      loop_counter_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+      // An unaligned sixteen-byte access touches at most five four-byte cells.
+      scalar_positive_inline_u32(5u), loop_counter_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(masked_predicate);
+  ASSERT_TRUE(saturate_cell_start);
   ASSERT_TRUE(advance_counter);
   ASSERT_TRUE(more_cells);
+  EXPECT_EQ(std::ranges::count(body, *saturate_cell_start), 1u)
+      << "the worst-case fifth cell must saturate at the access end";
   std::vector<uint32_t> expected_loop_control(advance_counter->begin(), advance_counter->end());
   expected_loop_control.push_back(*more_cells);
   expected_loop_control.push_back(*masked_predicate);
@@ -1867,17 +1877,19 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
   const uint16_t initializer_offset = static_cast<uint16_t>(*result.resolved_moi_epoch_vgpr + 1u);
   const auto scale_x = ib::build_v_lshlrev_b32(initializer_offset, scalar_positive_inline_u32(4u),
                                                /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_EQ(prologue->workgroup_shadow_validity_base, 13080u);
+  EXPECT_EQ(prologue->workgroup_shadow_validity_size, 288u);
   const auto add_shadow_base =
-      ib::build_v_add_u32_literal(initializer_address, prologue->workgroup_shadow_validity_base,
-                                  initializer_offset, ROCJITSU_CODE_ARCH_GFX1250);
+      ib::build_v_add_u32_literal(initializer_address, /*validity base=*/13080u, initializer_offset,
+                                  ROCJITSU_CODE_ARCH_GFX1250);
   const auto advance_row = ib::build_v_add_u32(
       initializer_address, static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 4u),
       initializer_address, ROCJITSU_CODE_ARCH_GFX1250);
   const auto select_x_zero = ib::build_v_cmp_eq_u32_vcc(
       scalar_positive_inline_u32(0u), /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_GFX1250);
   const auto end_address = ib::build_v_cmp_gt_u32_literal_vcc(
-      prologue->workgroup_shadow_validity_base + prologue->workgroup_shadow_validity_size,
-      initializer_address, ROCJITSU_CODE_ARCH_GFX1250);
+      /*13080-byte base + 288-byte validity state=*/13368u, initializer_address,
+      ROCJITSU_CODE_ARCH_GFX1250);
   const auto store_wide = ib::build_ds_store_b128(
       initializer_address, *result.resolved_moi_epoch_vgpr, 0u, ROCJITSU_CODE_ARCH_GFX1250);
   const auto count_lanes =
@@ -4003,9 +4015,9 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
       static_cast<uint32_t>((report_base + offsetof(ConSanMoiReportHeader, diagnostic_count)) >>
                             32u),
       ROCJITSU_CODE_ARCH_RDNA4);
-  const auto count_one = build_v_mov_b32_e64_literal(/*vdst=*/11, 1u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto count_one = build_v_mov_b32_e64_literal(/*vdst=*/22, 1u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto count_add = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
-      /*vaddr=*/8, /*vsrc=*/11, /*vdst=*/11, /*return_old_value=*/true, /*scope=*/2,
+      /*vaddr=*/8, /*vsrc=*/22, /*vdst=*/22, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto count_wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(count_address_lo);
@@ -6515,6 +6527,10 @@ TEST(ConSanMoi, ExactByteCellProvenanceRoundTripsBoundariesAndRejectsCorruption)
 }
 
 TEST(ConSanMoi, ExactByteCellMasksCoverEveryUnalignedBoundary) {
+  EXPECT_EQ(consan_moi_maximum_cell_count_for_unaligned_bytes(0u), 0u);
+  EXPECT_EQ(consan_moi_exact_byte_mask_for_cell(/*byte_offset=*/0u, /*byte_count=*/0u,
+                                                /*relative_cell_index=*/0u),
+            0u);
   EXPECT_EQ(consan_moi_maximum_cell_count_for_unaligned_bytes(std::numeric_limits<uint32_t>::max()),
             1073741825u);
   for (uint32_t byte_count = 1u; byte_count <= 16u; ++byte_count) {
@@ -6552,6 +6568,11 @@ TEST(ConSanMoi, ExactByteCellConflictMatchesSharedRangeContract) {
   auto current_byte = decode_consan_moi_exact_byte_cell_provenance(
       pack_consan_moi_exact_byte_cell_provenance(0xcu, 1u));
 
+  const ConSanMoiExactByteCellProvenance invalid_byte{};
+  EXPECT_FALSE(
+      consan_moi_exact_byte_cells_conflict(current_access, invalid_byte, prior_access, prior_byte));
+  EXPECT_FALSE(consan_moi_exact_byte_cells_conflict(current_access, current_byte, prior_access,
+                                                    invalid_byte));
   EXPECT_FALSE(
       consan_moi_exact_byte_cells_conflict(current_access, current_byte, prior_access, prior_byte));
   current_byte = decode_consan_moi_exact_byte_cell_provenance(

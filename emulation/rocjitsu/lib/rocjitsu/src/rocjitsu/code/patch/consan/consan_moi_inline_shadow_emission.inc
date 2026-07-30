@@ -528,13 +528,21 @@
   const bool compact_local_diagnostic =
       options.moi_inline_workgroup_shadow && !options.moi_track_atomics;
   // The first-diagnostic claim uses SLOT as both the returned value and the
-  // low half of the compare-swap data tuple. CDNA3/4 require that tuple to
-  // start at an even VGPR. The +2 temporary is dead after atomic-order
-  // filtering as well as in the compact access-only path.
-  const uint16_t slot_vgpr =
-      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
-          ? static_cast<uint16_t>(old_value_vgpr + (prior_byte_provenance_vgpr ? 6u : 2u))
-          : current_field_vgpr;
+  // low half of the compare-swap data tuple. Keep it in the dead tail of the
+  // ordinary transaction window on every target: exact-range construction
+  // reuses current_field_vgpr, so aliasing SLOT with that temporary redirects
+  // later record stores through a byte offset or negative range endpoint.
+  // CDNA3/4 additionally require the tuple to start at an even VGPR.
+  constexpr uint16_t diagnostic_tuple_offset =
+      consan_detail::inline_shadow_transaction_scratch_count(/*has_exec_save=*/true,
+                                                             /*track_atomics=*/false) -
+      2u;
+  const uint16_t diagnostic_tuple_candidate =
+      static_cast<uint16_t>(*options.scratch_vgpr + diagnostic_tuple_offset);
+  const uint16_t cdna_slot_vgpr = static_cast<uint16_t>(diagnostic_tuple_candidate & ~1u);
+  const uint16_t slot_vgpr = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
+                                 ? cdna_slot_vgpr
+                                 : diagnostic_tuple_candidate;
   const auto save_conflict_exec = instrumentation::build_s_mov_b64(
       static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4ExecLo, arch);
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
@@ -1055,9 +1063,12 @@
   if (!require_equal_literal(cas_new_vgpr, 0))
     return false;
   words.insert(words.end(), provenance_mask->begin(), provenance_mask->end());
-  for (const uint32_t invalid_mask : {0u, 0x5u, 0x9u, 0xau, 0xbu, 0xdu}) {
-    if (!require_not_equal_literal(cas_new_vgpr, invalid_mask))
+  for (uint32_t byte_mask = 0; byte_mask <= consan_moi_exact_byte_cell::byte_mask_mask;
+       ++byte_mask) {
+    if (!consan_moi_exact_byte_cell_mask_is_contiguous(byte_mask) &&
+        !require_not_equal_literal(cas_new_vgpr, byte_mask)) {
       return false;
+    }
   }
   const auto require_canonical_provenance_field = [&](uint32_t field_shift, uint32_t field_lookup) {
     const auto mask = instrumentation::build_v_and_b32_literal(
@@ -1474,19 +1485,34 @@
   words.insert(words.end(), access_end->begin(), access_end->end());
 
   if (relative_cell_index_vgpr) {
-    const auto negative_cell_bytes = instrumentation::build_v_mul_lo_u32_literal(
-        temporary_vgpr, provenance_vgpr, 0u - consan_moi_exact_shadow::granule_bytes,
+    const auto cell_bytes = instrumentation::build_v_mul_lo_u32_literal(
+        temporary_vgpr, provenance_vgpr, consan_moi_exact_shadow::granule_bytes,
         *relative_cell_index_vgpr, arch);
-    if (!negative_cell_bytes)
+    if (!cell_bytes)
       return false;
+    words.insert(words.end(), cell_bytes->begin(), cell_bytes->end());
+    // The loop bound covers the worst runtime alignment. Clamp an iteration's
+    // cell start to the access end before subtraction so favorable alignments
+    // produce an empty mask instead of wrapping to a phantom full cell.
+    const auto clamped_cell_bytes = instrumentation::build_v_min_u32(
+        temporary_vgpr, vector_source_vgpr(high_vgpr), temporary_vgpr, arch);
+    const auto negative_cell_bytes = instrumentation::build_v_mul_lo_u32_literal(
+        temporary_vgpr, provenance_vgpr, std::numeric_limits<uint32_t>::max(), temporary_vgpr,
+        arch);
+    if (!clamped_cell_bytes || !negative_cell_bytes)
+      return false;
+    words.push_back(*clamped_cell_bytes);
     words.insert(words.end(), negative_cell_bytes->begin(), negative_cell_bytes->end());
     const auto remaining = instrumentation::build_v_add_u32(
         high_vgpr, vector_source_vgpr(temporary_vgpr), high_vgpr, arch);
+    const auto first_cell = instrumentation::build_v_min_u32_literal(
+        temporary_vgpr, 1u, *relative_cell_index_vgpr, arch);
     const auto low_shift = instrumentation::build_v_lshlrev_b32(
-        temporary_vgpr, scalar_positive_inline_u32(1u), *relative_cell_index_vgpr, arch);
-    if (!remaining || !low_shift)
+        temporary_vgpr, scalar_positive_inline_u32(1u), temporary_vgpr, arch);
+    if (!remaining || !first_cell || !low_shift)
       return false;
     words.insert(words.end(), remaining->begin(), remaining->end());
+    words.insert(words.end(), first_cell->begin(), first_cell->end());
     words.push_back(*low_shift);
     const auto low = instrumentation::build_v_lshrrev_b32(
         temporary_vgpr, vector_source_vgpr(temporary_vgpr), mask_vgpr, arch);
@@ -2112,12 +2138,11 @@
     uint16_t current_low_vgpr, uint16_t current_high_vgpr, uint16_t old_value_vgpr,
     uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t cell_index,
     uint32_t byte_count, uint16_t diagnostic_lds_byte_offset_vgpr,
-    uint32_t diagnostic_static_byte_offset, uint32_t compact_cell_count,
-    std::optional<uint16_t> relative_cell_index_vgpr, std::vector<std::string> &errors) {
+    uint32_t diagnostic_static_byte_offset, std::optional<uint16_t> relative_cell_index_vgpr,
+    std::vector<std::string> &errors) {
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr)
     return false;
-  if (compact_cell_count != 1u || workgroup_shadow.compact ||
-      consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow)) {
+  if (workgroup_shadow.compact || consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow)) {
     errors.emplace_back(
         "ConSan MOI exact-byte local publish requires one full-width initialized cell");
     return false;
@@ -2132,6 +2157,38 @@
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 14u);
   const uint16_t bounded_exec_sgpr = static_cast<uint16_t>(exec_base + 16u);
   const uint16_t valid_workgroup_exec_sgpr = static_cast<uint16_t>(exec_base + 22u);
+  const uint16_t provenance_temporary_vgpr = static_cast<uint16_t>(old_value_vgpr + 3u);
+  const auto restore_valid_workgroup =
+      instrumentation::build_s_mov_b64(kRdna4ExecLo, valid_workgroup_exec_sgpr, arch);
+  if (!restore_valid_workgroup) {
+    errors.emplace_back(
+        "ConSan MOI inline-shadow local publish could not restore its workgroup lanes");
+    return false;
+  }
+
+  words.push_back(
+      build_v_mov_b32_e32(saved_current_low_vgpr, vector_source_vgpr(current_low_vgpr), arch));
+  words.push_back(
+      build_v_mov_b32_e32(saved_current_high_vgpr, vector_source_vgpr(current_high_vgpr), arch));
+  if (!append_exact_byte_cell_provenance_base(
+          words, arch, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset,
+          relative_cell_index_vgpr, byte_count, current_low_vgpr, current_high_vgpr,
+          provenance_temporary_vgpr, temporary_vgpr)) {
+    errors.emplace_back("ConSan MOI local publish could not encode exact byte-cell provenance");
+    return false;
+  }
+  // Worst-case cell loops deliberately include iterations that are empty for
+  // some runtime alignments. Remove those lanes before bounds accounting or
+  // LDS traffic so only bytes actually touched can consume shadow coverage.
+  const auto mask_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u),
+                                                                    current_high_vgpr, arch);
+  const auto narrow_nonzero =
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+  if (!mask_nonzero || !narrow_nonzero)
+    return false;
+  words.push_back(*mask_nonzero);
+  words.push_back(*narrow_nonzero);
+
   uint16_t effective_offset_vgpr = lds_byte_offset_vgpr;
   if (static_byte_offset != 0u) {
     if (!append_compute_effective_lds_byte_offset(words, temporary_vgpr, lds_byte_offset_vgpr,
@@ -2143,9 +2200,8 @@
   const auto cell = instrumentation::build_v_lshrrev_b32(
       temporary_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
       effective_offset_vgpr, arch);
-  const uint32_t shadow_cell_capacity =
-      workgroup_shadow.size / (workgroup_shadow.compact ? sizeof(uint32_t) : sizeof(uint64_t));
-  const uint32_t final_cell_index = cell_index + compact_cell_count - 1u;
+  const uint32_t shadow_cell_capacity = workgroup_shadow.size / sizeof(uint64_t);
+  const uint32_t final_cell_index = cell_index;
   const uint32_t cell_capacity =
       final_cell_index < shadow_cell_capacity ? shadow_cell_capacity - final_cell_index : 0u;
   const auto capacity = instrumentation::build_v_mov_b32_literal(address_vgpr, cell_capacity, arch);
@@ -2162,17 +2218,12 @@
   const auto restore_bounded_exec =
       instrumentation::build_s_mov_b64(kRdna4ExecLo, bounded_exec_sgpr, arch);
   const auto shadow_byte_offset = instrumentation::build_v_lshlrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(workgroup_shadow.compact ? 2u : 3u),
-      temporary_vgpr, arch);
-  const uint32_t local_base =
-      workgroup_shadow.base +
-      cell_index * (workgroup_shadow.compact ? sizeof(uint32_t) : sizeof(uint64_t));
+      temporary_vgpr, scalar_positive_inline_u32(3u), temporary_vgpr, arch);
+  const uint32_t local_base = workgroup_shadow.base + cell_index * sizeof(uint64_t);
   const auto local_address =
       instrumentation::build_v_add_u32_literal(address_vgpr, local_base, temporary_vgpr, arch);
   const auto exchange = instrumentation::build_ds_storexchg_rtn_b64(old_value_vgpr, address_vgpr,
                                                                     current_low_vgpr, 0u, arch);
-  const auto restore_valid_workgroup =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, valid_workgroup_exec_sgpr, arch);
   if (!cell || !capacity || !in_bounds || !shadow_byte_offset || !local_address || !exchange) {
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not encode CDNA vector/DS operations");
@@ -2185,15 +2236,11 @@
     return false;
   }
 
-  words.push_back(
-      build_v_mov_b32_e32(saved_current_low_vgpr, vector_source_vgpr(current_low_vgpr), arch));
-  words.push_back(
-      build_v_mov_b32_e32(saved_current_high_vgpr, vector_source_vgpr(current_high_vgpr), arch));
+  words.push_back(*save_incoming_exec);
   words.push_back(*cell);
   words.push_back(build_v_mov_b32_e32(saved_cell_vgpr, vector_source_vgpr(temporary_vgpr), arch));
   words.insert(words.end(), capacity->begin(), capacity->end());
   words.push_back(*in_bounds);
-  words.push_back(*save_incoming_exec);
   words.push_back(*narrow_bounded);
   words.push_back(*save_bounded_exec);
   words.push_back(*select_out_of_bounds);
@@ -2230,22 +2277,6 @@
                                                 saved_cell_vgpr, errors)) {
     return false;
   }
-  const uint16_t provenance_temporary_vgpr = static_cast<uint16_t>(old_value_vgpr + 3u);
-  if (!append_exact_byte_cell_provenance_base(
-          words, arch, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset,
-          relative_cell_index_vgpr, byte_count, current_low_vgpr, current_high_vgpr,
-          provenance_temporary_vgpr, temporary_vgpr)) {
-    errors.emplace_back("ConSan MOI local publish could not encode exact byte-cell provenance");
-    return false;
-  }
-  const auto mask_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u),
-                                                                    current_high_vgpr, arch);
-  const auto narrow_nonzero =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
-  if (!mask_nonzero || !narrow_nonzero)
-    return false;
-  words.push_back(*mask_nonzero);
-  words.push_back(*narrow_nonzero);
   words.push_back(
       build_v_mov_b32_e32(provenance_temporary_vgpr, vector_source_vgpr(current_low_vgpr), arch));
   if (!append_exact_byte_representative_lane(words, arch, provenance_temporary_vgpr,
@@ -2691,27 +2722,13 @@
   for (const ConSanMoiAccessRange &range : *access_ranges) {
     ConSanMoiLdsCellRange cell_range =
         consan_moi_lds_cell_range_for_bytes(range.static_byte_offset, range.byte_count);
+    // The register-sourced LDS base can have any byte alignment even when the
+    // instruction's static offset is aligned. Emit the target-neutral maximum
+    // and let the exact mask remove empty per-lane iterations before coverage
+    // accounting and publication.
     cell_range.cell_count = consan_moi_maximum_cell_count_for_unaligned_bytes(range.byte_count);
     for (uint32_t cell_index = 0; cell_index < cell_range.cell_count; ++cell_index) {
       if (workgroup_shadow) {
-        const bool use_compact_pairs = workgroup_shadow->compact && cell_range.cell_count > 1u &&
-                                       cell_range.cell_count % 2u == 0u;
-        const uint32_t cells_per_iteration = use_compact_pairs ? 2u : 1u;
-        const uint32_t iteration_count = cell_range.cell_count / cells_per_iteration;
-        if (use_compact_pairs && cell_range.cell_count == 2u) {
-          if (!reload_spill_backed_lds_byte_offset() ||
-              !append_workgroup_local_exact_shadow_swap(
-                  words, candidate, options, arch, layout, *workgroup_shadow, address_lo_vgpr,
-                  low_vgpr, high_vgpr, local_old_value_vgpr, *lds_byte_offset_vgpr,
-                  range.static_byte_offset, /*cell_index=*/0u, range.byte_count,
-                  *lds_byte_offset_vgpr, range.static_byte_offset, /*compact_cell_count=*/2u,
-                  /*relative_cell_index_vgpr=*/std::nullopt, errors)) {
-            errors.emplace_back(
-                "ConSan MOI inline-shadow probe could not encode paired local LDS shadow publish");
-            return std::nullopt;
-          }
-          break;
-        }
         if (cell_range.cell_count > 1u) {
           if (cell_index != 0u)
             continue;
@@ -2741,21 +2758,18 @@
                   words, candidate, options, arch, layout, *workgroup_shadow, address_lo_vgpr,
                   low_vgpr, high_vgpr, local_old_value_vgpr, loop_offset_vgpr,
                   /*static_byte_offset=*/0u, /*cell_index=*/0u, range.byte_count,
-                  *lds_byte_offset_vgpr, range.static_byte_offset, cells_per_iteration,
-                  loop_counter_vgpr, errors)) {
+                  *lds_byte_offset_vgpr, range.static_byte_offset, loop_counter_vgpr, errors)) {
             errors.emplace_back(
                 "ConSan MOI inline-shadow probe could not encode looped local LDS shadow publish");
             return std::nullopt;
           }
           const auto advance_offset = instrumentation::build_v_add_u32(
-              loop_offset_vgpr,
-              scalar_positive_inline_u32(consan_moi_exact_shadow::granule_bytes *
-                                         cells_per_iteration),
+              loop_offset_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_bytes),
               loop_offset_vgpr, arch);
           const auto advance_counter = instrumentation::build_v_add_u32(
               loop_counter_vgpr, scalar_positive_inline_u32(1), loop_counter_vgpr, arch);
           const auto more_cells = instrumentation::build_v_cmp_gt_u32_vcc(
-              scalar_positive_inline_u32(iteration_count), loop_counter_vgpr, arch);
+              scalar_positive_inline_u32(cell_range.cell_count), loop_counter_vgpr, arch);
           const uint16_t loop_exec_save_sgpr =
               static_cast<uint16_t>(*options.moi_exec_save_sgpr + 14u);
           const uint16_t valid_workgroup_exec_sgpr =
@@ -2803,7 +2817,6 @@
                        low_vgpr, high_vgpr, local_old_value_vgpr, *lds_byte_offset_vgpr,
                        range.static_byte_offset, cell_index, range.byte_count,
                        *lds_byte_offset_vgpr, range.static_byte_offset,
-                       /*compact_cell_count=*/1u,
                        /*relative_cell_index_vgpr=*/std::nullopt, errors)) {
           errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode local LDS shadow publish");

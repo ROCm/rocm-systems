@@ -769,10 +769,9 @@ void expect_moi_engines_admit_native_b96_accesses(
         const uint16_t reserved_end =
             static_cast<uint16_t>(*resource_plan->scratch_vgpr + resource_plan->scratch_vgpr_count);
         EXPECT_LT(loop_counter_vgpr, reserved_end);
+        // Three dwords starting at an arbitrary byte offset span at most four cells.
         const auto four_cell_bound = instrumentation::build_v_cmp_gt_u32_vcc(
-            scalar_positive_inline_u32(
-                consan_moi_maximum_cell_count_for_unaligned_bytes(3u * sizeof(uint32_t))),
-            loop_counter_vgpr, arch);
+            scalar_positive_inline_u32(4u), loop_counter_vgpr, arch);
         ASSERT_TRUE(four_cell_bound);
         EXPECT_NE(std::ranges::find(body, *four_cell_bound), body.end());
         if (load_clobbers_address) {

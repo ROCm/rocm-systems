@@ -314,6 +314,12 @@ set(RJ_CONSAN_INLINE_EXACT_EXTERNAL_ADJACENT_TEST
 set(RJ_CONSAN_INLINE_EXACT_EXTERNAL_OVERLAP_TEST
     "ConSanLdsTest.InlineExactExternalOverlappingByteCompletes"
 )
+set(RJ_CONSAN_INLINE_EXACT_LOCAL_TAIL_B16_TEST
+    "ConSanLdsTest.InlineExactLocalTailB16StaysWithinCoverage"
+)
+set(RJ_CONSAN_INLINE_EXACT_EXTERNAL_UNEQUAL_TEST
+    "ConSanLdsTest.InlineExactExternalUnequalHighByteOverlapCompletes"
+)
 set(RJ_CONSAN_CDNA_MOI_FORCED_SPILL_RECORD_TEST
     "ConSanMoiCdnaTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
 )
@@ -461,6 +467,37 @@ function(rj_add_consan_inline_exact_byte_cases prefix target config)
             "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=padded_inline_exact_external_overlapping_byte"
             "RJ_CONSAN_MAX_PATCHES=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${prefix}.InlineExactLocalTailB16Clean"
+        TARGET ${target}
+        FILTER "${RJ_CONSAN_INLINE_EXACT_LOCAL_TAIL_B16_TEST}"
+        CONFIG "${config}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "workgroup_shadow_bytes=[1-9][0-9]*"
+        FAIL_REGEX "RJ_CONSAN_MOI_(REQUIRE_RECORDS|FORBID_DIAGNOSTICS|FORBID_OVERFLOW) requested"
+        ENVIRONMENT
+            ${_exact_common_environment}
+            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_inline_exact_local_tail_b16"
+            "RJ_CONSAN_MAX_PATCHES=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${prefix}.InlineExactExternalUnequalHighByteOverlapReports"
+        TARGET ${target}
+        FILTER "${RJ_CONSAN_INLINE_EXACT_EXTERNAL_UNEQUAL_TEST}"
+        CONFIG "${config}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX
+            "(first_owner=1 second_owner=[23].*first_lds=\\[3,4\\) second_lds=\\[2,4\\)|first_owner=[23] second_owner=1.*first_lds=\\[2,4\\) second_lds=\\[3,4\\))"
+        FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
+        ENVIRONMENT
+            ${_exact_common_environment}
+            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_inline_exact_external_unequal_high_byte_overlap"
+            "RJ_CONSAN_MAX_PATCHES=2"
     )
 endfunction()
 

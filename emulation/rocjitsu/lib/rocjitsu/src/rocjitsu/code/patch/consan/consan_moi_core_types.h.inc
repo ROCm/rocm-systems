@@ -114,6 +114,11 @@ plan_consan_moi_lazy_workgroup_shadow(uint32_t original_group_segment_size,
   return layout;
 }
 
+/// Generic layout primitive retained for sizing and policy experiments. The
+/// exact-byte Inline engine does not select it because local byte provenance
+/// occupies the generation field; that engine uses an initialized full-width
+/// layout instead.
+///
 /// Keep one canonical eight-byte exact cell per guest-LDS granule and use its
 /// existing 20-bit generation field as the workgroup identity. Unlike an
 /// eagerly cleared mirror or a bitmap-backed lazy mirror, stale LDS is rejected
@@ -130,6 +135,10 @@ plan_consan_moi_generation_tagged_workgroup_shadow(uint32_t original_group_segme
   return layout;
 }
 
+/// Generic layout primitive retained for sizing and policy experiments. The
+/// exact-byte Inline engine does not select it because a four-byte cell cannot
+/// carry the complete packed access and byte provenance atomically.
+///
 /// Use one four-byte local cell per four-byte guest-LDS granule. The compact
 /// cell keeps exact kind, owner, and epoch fields; its nine remaining bits are
 /// an object-unique site token resolved to the full instruction offset by the
@@ -400,6 +409,10 @@ inline constexpr uint32_t kConSanMoiReportKnownLayoutFlags =
     static_cast<uint32_t>(ConSanMoiReportLayoutFlag::DispatchQualifiedInlineMetadata) |
     static_cast<uint32_t>(ConSanMoiReportLayoutFlag::InlineCausalSnapshots) |
     static_cast<uint32_t>(ConSanMoiReportLayoutFlag::InlineExactByteProvenance);
+// Inline writers and readers are built and deployed together. This exact flag
+// set is therefore a layout-version stamp, not a negotiable capability set:
+// changing any Inline slot layout intentionally makes mixed-build buffers fail
+// validation instead of decoding an older payload under newer assumptions.
 
 [[nodiscard]] constexpr uint64_t
 consan_moi_default_auto_report_buffer_size(ConSanMoiEngine engine) {

@@ -85,6 +85,8 @@ inline constexpr uint32_t compact_diagnostic_token_tag = 0x80000000u;
 
 namespace consan_moi_exact_byte_cell {
 
+static_assert(consan_moi_exact_shadow::granule_bytes == 4u,
+              "exact byte-cell field widths and lookup packing require four-byte cells");
 inline constexpr uint32_t byte_mask_shift = 0;
 inline constexpr uint32_t byte_mask_bits = consan_moi_exact_shadow::granule_bytes;
 inline constexpr uint32_t byte_offset_shift = byte_mask_shift + byte_mask_bits;
@@ -424,6 +426,12 @@ consan_moi_exact_byte_cells_conflict(const ConSanMoiExactShadowEntry &current_ac
                                      const ConSanMoiExactByteCellProvenance &current_byte,
                                      const ConSanMoiExactShadowEntry &prior_access,
                                      const ConSanMoiExactByteCellProvenance &prior_byte) {
+  // Specification model for the emitted Inline predicate. Exact address
+  // grouping and byte-mask partitioning happen before publication, so they do
+  // not need separate flags here. When owners match, the owner must be
+  // wave-unique within the comparison scope and representative_lane is the
+  // wave-relative workitem discriminator. Multidimensional workitem identity
+  // requires a stronger owner source before this last rule is fully general.
   if (!current_byte.valid || !prior_byte.valid ||
       (current_byte.byte_mask & prior_byte.byte_mask) == 0u ||
       current_access.epoch != prior_access.epoch ||
