@@ -622,8 +622,10 @@ mod tests {
 
     #[test]
     fn status_codes_match_c_api() {
-        const C_STATUS_HEADER: &str =
-            include_str!("../../../rocjitsu/lib/rocjitsu/include/rocjitsu/base/rj_status.h");
+        const C_STATUS_HEADER: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../rocjitsu/lib/rocjitsu/include/rocjitsu/base/rj_status.h"
+        ));
         let c_statuses: Vec<String> = C_STATUS_HEADER
             .lines()
             .map(str::trim)

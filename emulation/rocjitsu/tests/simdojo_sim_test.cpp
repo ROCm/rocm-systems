@@ -199,6 +199,7 @@ PartitionID partition_by_name_suffix(Component *comp) {
 } // namespace
 
 TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
+  // Topology borrows external endpoint owners, so external must outlive topology.
   ProducerComponent external("external", 0, 1, false);
   Topology topology;
   auto root = std::make_unique<CompositeComponent>("root");
@@ -220,6 +221,7 @@ TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
 }
 
 TEST(TopologyPartitionTest, ManualPartitionRunsExternalProducerOnAssignedPartition) {
+  // SimulationEngine borrows external endpoint owners, so external must outlive engine.
   ProducerComponent external("external", 3);
   SimulationEngine engine({.num_threads = 2});
   auto root = std::make_unique<CompositeComponent>("root");
@@ -244,6 +246,7 @@ TEST(TopologyPartitionTest, ManualPartitionRunsExternalProducerOnAssignedPartiti
 }
 
 TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
+  // Topology borrows external endpoint owners, so external must outlive topology.
   ProducerComponent external("external", 0, 1, false);
   Topology topology;
   auto root = std::make_unique<CompositeComponent>("root");
@@ -264,6 +267,7 @@ TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
 }
 
 TEST(TopologyPartitionTest, BalancedRepartitionRetainsExternalLinkOwnerOnce) {
+  // Topology borrows external endpoint owners, so external must outlive topology.
   ProducerComponent external("external", 0, 1, false);
   Topology topology;
   auto root = std::make_unique<CompositeComponent>("root");

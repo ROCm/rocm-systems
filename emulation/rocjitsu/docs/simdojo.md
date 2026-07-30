@@ -262,9 +262,12 @@ its own incoming queues at the start of each barrier epoch (Phase 1).
 
 ## Topology and Partitioning
 
-The `Topology` owns the entire simulation graph: the root composite, all
-links, clock domains, and partition assignments. It serves as the single
-entry point for building and wiring a model.
+The `Topology` owns the component tree reachable from the root composite,
+all links, clock domains, and partition assignments. Link-endpoint owners
+outside the root tree are borrowed. Those external components and their ports
+must remain alive through every repartition and engine create, run, and
+shutdown operation that retains them. It serves as the single entry point for
+building and wiring a model.
 
 ### Building a Model
 

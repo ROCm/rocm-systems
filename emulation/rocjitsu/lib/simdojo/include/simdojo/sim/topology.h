@@ -72,9 +72,12 @@ public:
 
 /// @brief The simulation compound graph.
 ///
-/// @details Topology owns all components (via the root CompositeComponent), all links,
-/// and all partitions. It provides component creation, link creation,
-/// graph traversal, and partitioning into sub-graphs for parallel execution.
+/// @details Topology owns the component tree reachable from the root
+/// CompositeComponent, all links, and all partitions. Link-endpoint owners
+/// outside the root tree are borrowed; they and their ports must remain alive
+/// through every repartition and SimulationEngine create/run/shutdown operation
+/// that retains them. Topology provides component creation, link creation, graph
+/// traversal, and partitioning into sub-graphs for parallel execution.
 class Topology {
 public:
   Topology() = default;
@@ -88,6 +91,11 @@ public:
   CompositeComponent *root() const { return root_.get(); }
 
   /// @brief Create a link between two ports with a given latency.
+  ///
+  /// @details Topology owns the link but borrows @p src, @p dst, and their
+  /// owners. An endpoint owner outside the root component tree and its ports
+  /// must remain alive through every repartition and SimulationEngine
+  /// create/run/shutdown operation that retains them.
   /// @param src Source port.
   /// @param dst Destination port.
   /// @param latency Propagation delay in simulation ticks.
@@ -100,7 +108,10 @@ public:
   /// @details Topology owns links, so topology builders use this factory when
   /// bounded-capacity transport is required. Queued links may only connect
   /// components in the same topology partition. SimulationEngine::create()
-  /// rejects cross-partition queued links.
+  /// rejects cross-partition queued links. Topology borrows @p src, @p dst,
+  /// and their owners; an endpoint owner outside the root component tree and
+  /// its ports must remain alive through every repartition and SimulationEngine
+  /// create/run/shutdown operation that retains them.
   /// @param src Source port.
   /// @param dst Destination port.
   /// @param latency Propagation delay in simulation ticks.
@@ -113,7 +124,8 @@ public:
   /// @brief Create two unidirectional links for bidirectional communication.
   ///
   /// @details Wires a_out -> b_in (forward, fwd_latency) and b_out -> a_in (reverse,
-  /// rev_latency). Equivalent to calling add_link() twice.
+  /// rev_latency). Equivalent to calling add_link() twice, including its
+  /// endpoint-owner lifetime requirements.
   /// @param a_out Output port on component A.
   /// @param b_in Input port on component B.
   /// @param b_out Output port on component B.
@@ -165,6 +177,9 @@ public:
   ///
   /// @details This invokes the generic Fiduccia-Mattheyses partitioner. Callers
   /// with hardware or ownership constraints should use partition_manual().
+  /// External link-endpoint owners retained in the resulting partitions are
+  /// borrowed and must remain alive through every subsequent repartition and
+  /// SimulationEngine create/run/shutdown operation that retains them.
   /// @param num_partitions Number of partitions to create (one per thread).
   /// @throws std::invalid_argument if @p num_partitions is zero.
   void partition_balanced(uint32_t num_partitions);
@@ -183,7 +198,10 @@ public:
   /// @details Bypasses the FM partitioner. The caller's callback assigns every
   /// component in the topology tree and every external link-endpoint owner.
   /// This is the explicit policy entry point for hardware or ownership
-  /// constraints and deterministic partition layouts.
+  /// constraints and deterministic partition layouts. External endpoint owners
+  /// retained in the resulting partitions are borrowed and must remain alive
+  /// through every subsequent repartition and SimulationEngine
+  /// create/run/shutdown operation that retains them.
   /// @param num_partitions Number of partitions to create.
   /// @param assigner Callback returning the partition ID for each component.
   /// @throws std::invalid_argument if @p num_partitions is zero or @p assigner
