@@ -22,9 +22,14 @@
 
 #if defined(__HIPCC__) || defined(__HIP_PLATFORM_AMD__)
 #define NCCL_HIP_PLATFORM 1
-#define NCCL_DEVICE_COMPILE 1
 #elif defined(__CUDACC__)
 #define NCCL_CUDA_PLATFORM 1
+#endif
+// Key device-compile on an actual device pass, not the platform macro, so a
+// host-only build (which must still define __HIP_PLATFORM_AMD__) does not drag
+// device template bodies into the host compile. hipcc's device pass still sets
+// __HIP_DEVICE_COMPILE__, so real builds are unaffected.
+#if defined(__HIP_DEVICE_COMPILE__) || defined(__CUDA_ARCH__)
 #define NCCL_DEVICE_COMPILE 1
 #else
 #define NCCL_DEVICE_COMPILE 0
