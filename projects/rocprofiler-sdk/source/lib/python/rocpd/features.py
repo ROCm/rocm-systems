@@ -23,19 +23,54 @@
 # THE SOFTWARE.
 ###############################################################################
 
+from typing import Dict, NamedTuple, Optional
+
 from . import libpyrocpd
 
-# Single source of truth: feature name -> minimum schema version required.
-# All output backends (csv, otf2, perfetto) derive their feature sets from this table.
-FEATURE_SCHEMA_VERSIONS = {
-    "graph_launch": libpyrocpd.schema_version(3, 0, 2),
+
+class FeatureVersionRange(NamedTuple):
+    """Version range over which a named feature is supported.
+
+    Attributes:
+        min_version: The earliest schema version that introduced this feature (inclusive).
+        max_version: The latest schema version that supports this feature (inclusive),
+                     or None if the feature has no known upper bound.
+    """
+
+    min_version: libpyrocpd.schema_version
+    max_version: Optional[libpyrocpd.schema_version] = None
+
+
+# Single source of truth for feature availability by schema version.
+#
+# Each entry maps a feature name to a FeatureVersionRange(min_version, max_version):
+#   - min_version (inclusive): the schema version that introduced the feature.
+#   - max_version (inclusive): the last schema version supporting the feature,
+#                              or None if it remains supported in all later versions.
+#
+# All output backends (csv, otf2, perfetto) derive their active feature sets from this
+# table via get_supported_features(). Adding or retiring a feature only requires editing
+# this table — no changes are needed in any backend.
+FEATURE_SCHEMA_VERSIONS: Dict[str, FeatureVersionRange] = {
+    "graph_launch": FeatureVersionRange(
+        min_version=libpyrocpd.schema_version(3, 0, 2),
+        max_version=None,
+    ),
 }
 
 
 def get_supported_features(importData) -> frozenset:
-    """Return the frozenset of feature names supported by importData's schema version."""
+    """Return the frozenset of feature names supported by importData's schema version.
+
+    A feature is included if:
+        vrange.min_version <= importData.schema_version
+        and (vrange.max_version is None or importData.schema_version <= vrange.max_version)
+    """
     return frozenset(
         feature
-        for feature, version in FEATURE_SCHEMA_VERSIONS.items()
-        if importData.schema_version >= version
+        for feature, vrange in FEATURE_SCHEMA_VERSIONS.items()
+        if importData.schema_version >= vrange.min_version
+        and (
+            vrange.max_version is None or importData.schema_version <= vrange.max_version
+        )
     )
