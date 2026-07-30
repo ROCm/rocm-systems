@@ -26,7 +26,6 @@ ROCm Compute Profiler. Compatibility requirements for ROCm Optiq and ROCm Comput
 independently.
 
 For information about opening the analysis databases and using the interface, see the `ROCm Optiq analysis guide`_.
-details.
 
 .. _ROCm Optiq analysis guide: https://rocm.docs.amd.com/projects/roc-optiq/en/latest/how-to/view-analysis.html
 .. _ROCm Optiq system requirements: https://rocm.docs.amd.com/projects/roc-optiq/en/latest/install/optiq-install.html#system-requirements
