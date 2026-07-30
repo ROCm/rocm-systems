@@ -110,6 +110,7 @@ set ( ROCDXG_SRC "src/dxg/debug.cpp"
                  "src/dxg/perfctr.cpp"
                  "src/dxg/queues.cpp"
                  "src/dxg/rocrstub.cpp"
+                 "src/dxg/rocdxg_smi.cpp"
                  "src/dxg/time.cpp"
                  "src/dxg/topology.cpp"
                  "src/dxg/topology_lnx.cpp"
@@ -157,7 +158,8 @@ add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
 # Ensure version macro is defined for this target
 target_compile_definitions(${ROCDXG_TARGET} PRIVATE ROCDXG_VERSION="${ROCDXG_VERSION}")
 
-target_link_directories(${ROCDXG_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/lnx/lib)
+target_link_directories(${ROCDXG_TARGET} PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/lnx/lib)
 target_link_libraries(${ROCDXG_TARGET} PRIVATE wkmi)
 
 set_property(TARGET ${ROCDXG_TARGET} PROPERTY LINK_FLAGS ${ROCDXG_LINK_FLAGS})
@@ -195,6 +197,12 @@ install ( TARGETS ${ROCDXG_TARGET} EXPORT ${ROCDXG_TARGET}Targets
 # Install public headers
 #install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${ROCDXG_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 #  COMPONENT dev PATTERN "*drm*" EXCLUDE )
+install ( FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/hsakmt.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/hsakmttypes.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/rocdxg_smi.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hsakmt
+  COMPONENT dev )
 
 # Record our usage data for clients find_package calls.
 install ( EXPORT ${ROCDXG_TARGET}Targets
