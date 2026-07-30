@@ -59,6 +59,14 @@ def main():
 
         # Build RCCL (if not --no-build)
         if not args.no_build:
+            # Build rocSHMEM first if the config provides a
+            # rocshmem_build_configuration section (RCCL's rocSHMEM GIN backend
+            # links its install); no-op otherwise.
+            if not executor.build_rocshmem():
+                print("ERROR: rocSHMEM build failed")
+                if args.verbose:
+                    print("Exiting: rocSHMEM build failed")
+                sys.exit(1)
             if not executor.build_rccl():
                 print("ERROR: Build failed")
                 if args.verbose:

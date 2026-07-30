@@ -657,7 +657,12 @@ if(BUILD_TESTS)
       target_link_libraries(${test_executable} PRIVATE
           ${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a
           ibverbs hsa-runtime64 hsakmt numa ${_ROCSHMEM_DRM} ${_ROCSHMEM_DRM_AMDGPU})
-      target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic)
+      # ROCm < 7.14 emits cooperative_groups::this_cluster() as a non-inline stub, so -fgpu-rdc device TUs collide; keep one copy. Fixed (inline) in 7.14.
+      set(_ROCSHMEM_DEVLINK_EXTRA "")
+      if(ROCM_VERSION VERSION_LESS "71400")
+        set(_ROCSHMEM_DEVLINK_EXTRA "SHELL:-Xoffload-linker --allow-multiple-definition")
+      endif()
+      target_link_options(${test_executable} PRIVATE -fgpu-rdc --hip-link ${_ROCSHMEM_OFFLOAD_FLAGS} -rdynamic ${_ROCSHMEM_DEVLINK_EXTRA})
     endif()
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)

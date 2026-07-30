@@ -128,9 +128,9 @@ std::string ginProxyTestSkipReason() {
 // rocSHMEM-GDA (type 4)/SDMA (type 5) implements only INDEXED signals; VA signals are
 // unsupported (Put/PutValue address the signal via indexedSignal.signalId).
 std::string vaSignalTestSkipReason() {
-  if (requestedGinType() == 4)
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
     return "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=4)";
-  if (requestedGinType() == 5)
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
     return "VA signals not supported by SDMA (NCCL_GIN_TYPE=5)";
   return "";
 }

@@ -492,6 +492,16 @@ class TestConfigProcessor:
         """
         return self.config.get("rccl_tests_build_configuration", {})
 
+    def get_rocshmem_build_config(self):
+        """
+        Get the rocSHMEM build configuration settings.
+
+        Returns:
+            dict: rocSHMEM build configuration (source_dir, build_command,
+                  install_flags, env_variables, etc.). Empty dict if not present.
+        """
+        return self.config.get("rocshmem_build_configuration", {})
+
     def validate_config(self):
         """
         Validate the configuration for required fields.

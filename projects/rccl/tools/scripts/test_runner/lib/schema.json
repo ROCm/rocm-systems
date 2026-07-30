@@ -132,6 +132,49 @@
       }
     },
 
+    "rocshmem_build_configuration": {
+      "description": "Controls how rocSHMEM is built BEFORE RCCL (RCCL's rocSHMEM GIN backend links the rocSHMEM install). Runs first in the build sequence. Absent section => step skipped.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Set to false to skip building rocSHMEM. Default: true when the section is present."
+        },
+        "source_dir": {
+          "type": "string",
+          "description": "Path to the rocSHMEM checkout. Supports ~ and $VAR expansion. Default: $workdir/../rocshmem."
+        },
+        "checkout_command": {
+          "description": "Optional command run only when source_dir is absent, to fetch/materialize it. String runs via shell; argv array runs without one. Supports ~ and $VAR expansion.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "install_script": {
+          "type": "string",
+          "description": "Name of the build script inside source_dir. Default: 'install.sh'."
+        },
+        "build_command": {
+          "description": "Explicit build command (string run via shell, or argv array). Overrides install_script + install_flags.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "install_flags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Flags passed to install_script. Supports ~ and $VAR expansion."
+        },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Environment variables set only during the rocSHMEM build step"
+        }
+      }
+    },
+
     "test_configurations": {
       "description": "Named test configuration blocks. Each key is a configuration name referenced by test_suites or via 'extends'.",
       "type": "object",

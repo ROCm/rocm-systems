@@ -271,6 +271,7 @@ class TestExecutor:
                 print(f"WARNING: No system_env_variables for '{system}'. Available: {available}")
         self.build_config = config_processor.get_build_config()
         self.rccl_tests_build_config = config_processor.get_rccl_tests_build_config()
+        self.rocshmem_build_config = config_processor.get_rocshmem_build_config()
 
         # Setup directories
         self.setup_directories()
@@ -597,6 +598,144 @@ class TestExecutor:
         print('        ./install.sh --cmake-options "-DENABLE_CODE_COVERAGE=ON" ...')
         print("=" * 80)
 
+    def build_rocshmem(self):
+        """
+        Build rocSHMEM from source BEFORE RCCL.
+
+        RCCL's rocSHMEM GIN backend links against a prebuilt rocSHMEM install
+        (``-DROCSHMEM_INSTALL_DIR=...``), so this must run before build_rccl().
+        Mirrors build_rccl_tests(): configured via the rocshmem_build_configuration
+        block (source_dir + build_command, or install_script + install_flags).
+        An absent section (or enabled=false) makes this a no-op.
+
+        Like rccl-tests, this builds an existing checkout at source_dir; it does
+        not clone the repo.
+
+        Returns:
+            bool: True if the build succeeded or was skipped.
+        """
+        if self.using_custom_lib:
+            if self.args.verbose:
+                print("SKIP: rocSHMEM build skipped (using custom RCCL library from environment)")
+            return True
+
+        if self.args.no_build:
+            if self.args.verbose:
+                print("SKIP: rocSHMEM build skipped (--no-build)")
+            return True
+
+        cfg = self.rocshmem_build_config
+        if not cfg:
+            if self.args.verbose:
+                print("SKIP: no rocshmem_build_configuration; skipping rocSHMEM build")
+            return True
+        if not cfg.get("enabled", True):
+            print("SKIP: rocSHMEM build disabled (rocshmem_build_configuration.enabled=false)")
+            return True
+
+        print("="*80)
+        print("BUILDING rocSHMEM")
+        print("="*80)
+
+        workdir = self.paths.get("workdir", os.getcwd())
+        rocm_path = self._rocm_root()
+        mpi_path = self.paths.get("mpi_path", "")
+
+        def _expand(p):
+            return os.path.expanduser(expand_env_vars(str(p)))
+
+        source_dir = _expand(cfg.get("source_dir", os.path.join(workdir, "..", "rocshmem")))
+        if not os.path.isdir(source_dir):
+            # source_dir absent (e.g. a sparse monorepo checkout that excludes
+            # rocSHMEM). If a checkout_command is configured, run it to obtain
+            # the source (e.g. `git sparse-checkout add projects/rocshmem`),
+            # then re-check. A string runs through the shell; an argv array does not.
+            checkout_command = cfg.get("checkout_command")
+            if checkout_command:
+                print(f"rocSHMEM source not present at {source_dir}; "
+                      "running checkout_command to obtain it")
+                if isinstance(checkout_command, (list, tuple)):
+                    ccmd = [_expand(a) for a in checkout_command]
+                    cuse_shell = False
+                else:
+                    ccmd = _expand(checkout_command)
+                    cuse_shell = True
+                print(f"  checkout_command: {ccmd if cuse_shell else ' '.join(ccmd)}")
+                try:
+                    cresult = subprocess.run(
+                        ccmd, cwd=workdir, env=os.environ.copy(),
+                        shell=cuse_shell, capture_output=False,
+                    )
+                except Exception as e:
+                    print(f"ERROR: rocSHMEM checkout_command raised: {e}")
+                    return False
+                if cresult.returncode != 0:
+                    print("ERROR: rocSHMEM checkout_command failed")
+                    return False
+            if not os.path.isdir(source_dir):
+                print(f"ERROR: rocSHMEM source directory not found: {source_dir}")
+                print("       Provide rocshmem_build_configuration.source_dir (an existing "
+                      "checkout) or a checkout_command that materializes it.")
+                return False
+
+        install_flags = [_expand(f) for f in cfg.get("install_flags", [])]
+        build_env_vars = cfg.get("env_variables", {})
+
+        # Explicit build_command wins; a string runs through the shell (so &&,
+        # $(nproc), cd, etc. work), an argv array runs without one.
+        build_command = cfg.get("build_command")
+        if build_command:
+            if isinstance(build_command, (list, tuple)):
+                cmd = [_expand(arg) for arg in build_command]
+                use_shell = False
+            else:
+                cmd = _expand(build_command)
+                use_shell = True
+        else:
+            install_script = os.path.join(source_dir, cfg.get("install_script", "install.sh"))
+            if not os.path.isfile(install_script):
+                print(f"ERROR: rocSHMEM build script not found: {install_script}")
+                print("       Provide rocshmem_build_configuration.build_command or "
+                      "install_script.")
+                return False
+            cmd = [install_script] + install_flags
+            use_shell = False
+
+        env = os.environ.copy()
+        env['ROCM_PATH'] = rocm_path
+        if mpi_path:
+            env['MPI_PATH'] = mpi_path
+            env['MPI_HOME'] = mpi_path
+        for key, value in build_env_vars.items():
+            env[key] = str(value)
+
+        if self.args.verbose:
+            print(f"Source directory: {source_dir}")
+            print(f"ROCm path:        {rocm_path}")
+            print(f"MPI path:         {mpi_path}")
+            print(f"Command:          {cmd if use_shell else ' '.join(cmd)}")
+            if build_env_vars:
+                print("Build environment variables:")
+                for key, value in build_env_vars.items():
+                    print(f"  {key}={value}")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=source_dir,
+                env=env,
+                shell=use_shell,
+                capture_output=False,
+            )
+            if result.returncode != 0:
+                print("ERROR: rocSHMEM build failed")
+                return False
+            print("rocSHMEM build completed successfully")
+            return True
+        except Exception as e:
+            print(f"ERROR: rocSHMEM build failed with exception: {e}")
+            return False
+
     def build_rccl(self):
         """
         Build RCCL using install.sh with configurable build settings.
@@ -630,10 +769,18 @@ class TestExecutor:
         rocm_path = self._rocm_root()
         mpi_path = self.paths.get("mpi_path", "")
 
-        install_flags = list(self.build_config.get("install_flags", []))
+        # Expand env vars / ~ (e.g. ${WORKDIR}, ${ROCM_SYSTEMS:-...}) so build
+        # paths need not be hardcoded. Mirrors build_rccl_tests(); a no-op for
+        # flags/options that contain no ${VAR} references.
+        def _expand(p):
+            return os.path.expanduser(expand_env_vars(str(p)))
+
+        install_flags = [_expand(f) for f in self.build_config.get("install_flags", [])]
         cmake_options = self.build_config.get("cmake_options", "")
         if isinstance(cmake_options, dict):
-            cmake_options = " ".join(f"-D{k}={v}" for k, v in cmake_options.items())
+            cmake_options = " ".join(f"-D{k}={_expand(v)}" for k, v in cmake_options.items())
+        else:
+            cmake_options = _expand(cmake_options)
         build_env_vars = self.build_config.get("env_variables", {})
         parallel_jobs = self.build_config.get("parallel_jobs")
 
