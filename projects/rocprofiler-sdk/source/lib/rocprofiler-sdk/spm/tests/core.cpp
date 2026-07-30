@@ -930,7 +930,7 @@ TEST(spm_core, stop_context_removes_callbacks)
     ASSERT_TRUE(ctx.dispatch_spm);
     ASSERT_EQ(ctx.dispatch_spm->callbacks.size(), 1);
 
-    // Stop exercises queue_controller_sync + context teardown.
+    // Stop disables collection and tears the context down (no GPU drain; see spm::stop_context).
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
     bool enabled = true;
@@ -971,7 +971,7 @@ TEST(spm_core, stop_context_sync_and_restart)
 
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
-    // Restart to verify queue controller is in a clean state after sync + teardown
+    // Restart to verify the queue controller is in a clean state after teardown
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "restart context");
 
     bool enabled = false;

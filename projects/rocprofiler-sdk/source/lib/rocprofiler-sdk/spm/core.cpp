@@ -290,7 +290,14 @@ stop_context(const context::context* ctx)
 
     if(controller)
     {
-        hsa::queue_controller_sync();
+        // No GPU drain here. The sync this replaced existed to (a) avoid dangling callback
+        // pointers once the per-queue callbacks were unregistered and (b) let in-flight
+        // dispatches complete. (a) no longer applies -- nothing is registered, and
+        // signal_completion_hook resolves contexts at completion time. (b) is handled by that
+        // hook routing over registered rather than active contexts. Neither the serializer
+        // transition nor anything else in this function requires an idle GPU:
+        // profiler_serializer::disable() pushes an hsa_barrier carrying the previous state, so
+        // in-flight serialized dispatches are reconciled GPU-side.
         controller->disable_serialization();
         // No per-queue callback to remove; spm::write_hook no-ops once dispatch_spm is
         // disabled above.
