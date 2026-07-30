@@ -108,12 +108,13 @@ struct alignas(8) ConSanMoiReportHeader {
 struct alignas(8) ConSanMoiAccessRecord {
   /// Internal publication identity. Record/Replay atomically claims a bounded
   /// identity-table slot with a compact fingerprint derived from the hardware
-  /// dispatch ID, static site, workgroup, and wave. Zero remains the unpublished
-  /// sentinel; any identity whose fingerprint maps to zero fails closed through
-  /// the report saturation flag. access_kind is the atomic payload commit;
-  /// occupied-slot reuse additionally requires exact qualification of every
-  /// identity field after that commit. Host replay deliberately ignores the
-  /// claim field.
+  /// dispatch ID, workgroup, wave, and effective LDS byte address. The bounded
+  /// slot selection additionally includes the static site. Zero remains the
+  /// unpublished sentinel; any identity whose fingerprint maps to zero fails
+  /// closed through the report saturation flag. access_kind is the atomic
+  /// payload commit; occupied-slot reuse additionally requires exact
+  /// qualification of every identity field after that commit. Host replay
+  /// deliberately ignores the claim field.
   uint64_t claim_token = 0;
   uint64_t generation = 0;
   uint32_t workgroup_x = 0;

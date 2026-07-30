@@ -758,6 +758,68 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   EXPECT_TRUE(contains_subsequence(access_words, *dispatch_saturation_flag));
   EXPECT_TRUE(contains_subsequence(access_words, *owner_saturation_flag));
   EXPECT_TRUE(contains_subsequence(access_words, *saturation_or));
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  const uint16_t exec_save = *result.resolved_moi_exec_save_sgpr;
+  const uint16_t original_exec = static_cast<uint16_t>(exec_save + 8u);
+  const uint16_t address_key = static_cast<uint16_t>(exec_save + 10u);
+  const uint16_t address_group_exec = static_cast<uint16_t>(exec_save + 12u);
+  const auto save_original_exec =
+      instrumentation::build_s_mov_b64(original_exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto read_address = instrumentation::build_v_readfirstlane_b32(
+      address_key, /*address_vgpr=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto select_address = instrumentation::build_v_cmp_eq_u32_vcc(
+      address_key, /*address_vgpr=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto narrow_address =
+      instrumentation::build_s_and_saveexec_b64(exec_save, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_address_group =
+      instrumentation::build_s_mov_b64(address_group_exec, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto rank_address_group_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
+      static_cast<uint16_t>(scratch + 2u), address_group_exec, scalar_positive_inline_u32(0),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto rank_address_group_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
+      static_cast<uint16_t>(scratch + 2u), static_cast<uint16_t>(address_group_exec + 1u),
+      vector_source_vgpr(static_cast<uint16_t>(scratch + 2u)), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto narrow_representative = instrumentation::build_s_and_saveexec_b64(
+      address_group_exec, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto remove_address_group = instrumentation::build_s_xor_b64(
+      exec_save, exec_save, address_group_exec, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto select_remaining =
+      instrumentation::build_s_mov_b64(kRdna4ExecLo, exec_save, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_original =
+      instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto combine_address_identity = instrumentation::build_v_xor_b32(
+      static_cast<uint16_t>(scratch + 7u), vector_source_vgpr(static_cast<uint16_t>(scratch + 7u)),
+      address_key, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto loop_branch =
+      instrumentation::build_s_cbranch_execnz(/*offset_dwords=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(save_original_exec && read_address && select_address && narrow_address &&
+              save_address_group && rank_address_group_lo && rank_address_group_hi &&
+              narrow_representative && remove_address_group && select_remaining &&
+              restore_original && combine_address_identity && loop_branch);
+  EXPECT_NE(std::ranges::find(access_words, *save_original_exec), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, *read_address), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, *select_address), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, *narrow_address), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, *save_address_group), access_words.end());
+  EXPECT_TRUE(contains_subsequence(access_words, *rank_address_group_lo));
+  EXPECT_TRUE(contains_subsequence(access_words, *rank_address_group_hi));
+  EXPECT_NE(std::ranges::find(access_words, *narrow_representative), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, *remove_address_group), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, *select_remaining), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, *restore_original), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, *combine_address_identity), access_words.end());
+  const auto backward_group_branch = std::ranges::find_if(access_words, [&](uint32_t word) {
+    return (word & 0xffff0000u) == (*loop_branch & 0xffff0000u) &&
+           static_cast<int16_t>(word & 0xffffu) < 0;
+  });
+  EXPECT_NE(backward_group_branch, access_words.end());
+  EXPECT_TRUE(contains_subsequence(
+      access_words, make_expected_scalar_offset_store_words(
+                        offsetof(ConSanMoiAccessRecord, lane_mask), address_group_exec, scratch)));
+  EXPECT_TRUE(contains_subsequence(
+      access_words, make_expected_scalar_offset_store_words(
+                        offsetof(ConSanMoiAccessRecord, lane_mask) + sizeof(uint32_t),
+                        static_cast<uint16_t>(address_group_exec + 1u), scratch)));
   EXPECT_EQ(report_plan.layout.record_replay_dispatch_token_capacity,
             kConSanMoiRecordReplayMaximumDispatchTokenCount);
   EXPECT_EQ(report_plan.layout.record_replay_logical_access_range_count, 2u);
@@ -770,11 +832,17 @@ TEST(ConSanMoi, AutoRecordReplayCapturesDispatchIdentityInPersistentVgprsAtScala
       0x00000000u, // ds_store_b32
       0xBFC60000u, // s_wait_dscnt
   };
-  constexpr uint16_t kExecSaveSgpr = 100u;
-  constexpr uint16_t kExecSaveSgprCount = 6u;
+  constexpr uint16_t kExecSaveSgpr = 88u;
+  constexpr uint16_t kExecSaveSgprCount = 14u;
   for (uint16_t sgpr = 0u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
     if (sgpr >= kExecSaveSgpr && sgpr < kExecSaveSgpr + kExecSaveSgprCount)
       continue;
+    const auto use =
+        build_s_cmp_eq_u32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(use);
+    text_words.push_back(*use);
+  }
+  for (uint16_t sgpr = 102u; sgpr < 106u; ++sgpr) {
     const auto use =
         build_s_cmp_eq_u32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
     ASSERT_TRUE(use);
@@ -871,8 +939,14 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
   text_words.push_back(0xD8340000u);
   text_words.push_back(0x00000000u); // ds_store_b32
   for (uint16_t sgpr = 0u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
-    if (sgpr >= 100u)
+    if (sgpr >= 90u)
       continue;
+    const auto use =
+        build_s_cmp_eq_u32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(use);
+    text_words.push_back(*use);
+  }
+  for (uint16_t sgpr = 102u; sgpr < 106u; ++sgpr) {
     const auto use =
         build_s_cmp_eq_u32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
     ASSERT_TRUE(use);
@@ -892,7 +966,7 @@ TEST(ConSanMoi, AutoRecordReplayRejectsDispatchIdentityWithoutPersistentVgprPair
   options.moi_report_layout = *layout_override;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
-  options.moi_exec_save_sgpr = 100u;
+  options.moi_exec_save_sgpr = 90u;
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
@@ -2133,19 +2207,23 @@ TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
   EXPECT_TRUE(contains_subsequence(rewritten_words, commit_words));
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   const uint16_t exec_save = *result.resolved_moi_exec_save_sgpr;
-  const auto lane_rank_lo = build_v_mbcnt_lo_u32_b32(
-      10, /*src0=*/0xC1, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto lane_rank_hi =
-      build_v_mbcnt_hi_u32_b32(10, /*src0=*/0xC1, vector_source_vgpr(10), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_incoming_exec =
+      build_s_mov_b64(exec_save, kRdna4ExecLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto lane_rank_lo = build_v_mbcnt_lo_u32_b32(10, exec_save, scalar_positive_inline_u32(0),
+                                                     ROCJITSU_CODE_ARCH_RDNA4);
+  const auto lane_rank_hi = build_v_mbcnt_hi_u32_b32(
+      10, static_cast<uint16_t>(exec_save + 1u), vector_source_vgpr(10), ROCJITSU_CODE_ARCH_RDNA4);
   const auto first_active =
       build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0), 10, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow = build_s_and_saveexec_b64(exec_save, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore = build_s_mov_b64(kRdna4ExecLo, exec_save, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(save_incoming_exec);
   ASSERT_TRUE(lane_rank_lo);
   ASSERT_TRUE(lane_rank_hi);
   ASSERT_TRUE(first_active);
   ASSERT_TRUE(narrow);
   ASSERT_TRUE(restore);
+  EXPECT_NE(std::ranges::find(rewritten_words, *save_incoming_exec), rewritten_words.end());
   EXPECT_TRUE(contains_subsequence(rewritten_words, *lane_rank_lo));
   EXPECT_TRUE(contains_subsequence(rewritten_words, *lane_rank_hi));
   EXPECT_TRUE(contains_subsequence(rewritten_words, std::span<const uint32_t>(&*first_active, 1u)));
@@ -2163,13 +2241,15 @@ TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
   EXPECT_LT(narrow_position, publication_claim_position);
   EXPECT_LT(publication_claim_position, atomic_position);
   EXPECT_LT(atomic_position, restore_position);
-  EXPECT_TRUE(contains_subsequence(rewritten_words, make_expected_scalar_offset_store_words(
-                                                        offsetof(ConSanMoiAccessRecord, lane_mask),
-                                                        exec_save, /*address_vgpr=*/8)));
+  EXPECT_TRUE(contains_subsequence(
+      rewritten_words,
+      make_expected_scalar_offset_store_words(offsetof(ConSanMoiAccessRecord, lane_mask), exec_save,
+                                              /*address_vgpr=*/8)));
   EXPECT_TRUE(contains_subsequence(
       rewritten_words, make_expected_scalar_offset_store_words(
                            offsetof(ConSanMoiAccessRecord, lane_mask) + sizeof(uint32_t),
-                           static_cast<uint16_t>(exec_save + 1u), /*address_vgpr=*/8)));
+                           static_cast<uint16_t>(exec_save + 1u),
+                           /*address_vgpr=*/8)));
 }
 
 TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
@@ -2216,13 +2296,19 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
       8, 10, 10, /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
   const auto event_index = build_cdna4_flat_atomic_add_u32(8, 12, 12, /*return_old_value=*/true,
                                                            /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  const uint16_t exec_save = *result.resolved_moi_exec_save_sgpr;
+  const auto save_incoming_exec =
+      instrumentation::build_s_mov_b64(exec_save, kRdna4ExecLo, ROCJITSU_CODE_ARCH_CDNA4);
   const auto lane_rank_lo = build_cdna4_v_mbcnt_lo_u32_b32(
-      10, /*src0=*/0xc1, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4);
+      10, exec_save, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4);
   const auto lane_rank_hi = build_cdna4_v_mbcnt_hi_u32_b32(
-      10, /*src0=*/0xc1, vector_source_vgpr(10), ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_TRUE(publication_claim && event_index && lane_rank_lo && lane_rank_hi);
+      10, static_cast<uint16_t>(exec_save + 1u), vector_source_vgpr(10), ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(publication_claim && event_index && save_incoming_exec && lane_rank_lo &&
+              lane_rank_hi);
   EXPECT_EQ(count_subsequence(rewritten_words, *publication_claim), 1u);
   EXPECT_TRUE(contains_subsequence(rewritten_words, *event_index));
+  EXPECT_NE(std::ranges::find(rewritten_words, *save_incoming_exec), rewritten_words.end());
   EXPECT_TRUE(contains_subsequence(rewritten_words, *lane_rank_lo));
   EXPECT_TRUE(contains_subsequence(rewritten_words, *lane_rank_hi));
 }
@@ -3320,16 +3406,22 @@ TEST(ConSanMoi, Cdna4StaticRecordReplayRestoresOverlappingStoreOperandsBeforeGue
   ASSERT_TRUE(reload_address && combine_dispatch_identity && range_store);
   const auto identity_selection_position =
       std::ranges::find(cave_words, *combine_dispatch_identity);
-  const auto reload_address_position = std::search(cave_words.begin(), cave_words.end(),
-                                                   reload_address->begin(), reload_address->end());
+  const auto address_group_reload_position = std::search(
+      cave_words.begin(), cave_words.end(), reload_address->begin(), reload_address->end());
+  const auto publication_reload_position =
+      std::search(identity_selection_position, cave_words.end(), reload_address->begin(),
+                  reload_address->end());
   const auto range_store_position =
       std::search(cave_words.begin(), cave_words.end(), range_store->begin(), range_store->end());
   ASSERT_NE(identity_selection_position, cave_words.end());
-  ASSERT_NE(reload_address_position, cave_words.end());
+  ASSERT_NE(address_group_reload_position, cave_words.end());
+  ASSERT_NE(publication_reload_position, cave_words.end());
   ASSERT_NE(range_store_position, cave_words.end());
-  EXPECT_LT(identity_selection_position, reload_address_position)
-      << "identity-bank selection must finish before recovering an overlapping LDS address";
-  EXPECT_LT(reload_address_position, range_store_position)
+  EXPECT_LT(address_group_reload_position, identity_selection_position)
+      << "address-group selection must recover the authoritative overlapping LDS address";
+  EXPECT_LT(identity_selection_position, publication_reload_position)
+      << "identity-bank selection may reuse the recovered address VGPR";
+  EXPECT_LT(publication_reload_position, range_store_position)
       << "the static record must recover the spilled LDS address before publishing its range";
   std::vector<uint32_t> restore;
   for (uint16_t index = 0; index < patch->spilled_vgpr_count; ++index) {
@@ -6303,14 +6395,14 @@ TEST(ConSanMoi, Cdna4AutomaticBankedReplaySkipsOccupiedExactTupleScalarHole) {
   // Reference every scalar below s72 and s74 after the access. A five-register
   // automatic owner/epoch/x/y/z tuple beginning at s72 would therefore
   // overlap its third register even though s72:s73 themselves are untouched.
-  // The next complete owner-scope hole is s75:s79; s88:s89 and s92:s96 are
-  // reserved explicitly for dispatch and transient state.
+  // The next complete owner-scope hole is s75:s79; s80:s93 and s94:s95 are
+  // reserved explicitly for transient and dispatch state.
   for (uint16_t sgpr = 0u; sgpr < 72u; ++sgpr)
     text_words[cursor++] = build_s_mov_b32(/*sdst=*/87u, sgpr, ROCJITSU_CODE_ARCH_CDNA4);
   text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/74u, ROCJITSU_CODE_ARCH_CDNA4);
   text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/87u, ROCJITSU_CODE_ARCH_CDNA4);
-  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/90u, ROCJITSU_CODE_ARCH_CDNA4);
-  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/91u, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/96u, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/97u, ROCJITSU_CODE_ARCH_CDNA4);
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   // A separate linked kernel does use s75:s79. It is not an owner of the LDS
   // site and therefore must not poison the complete owner-scope proof.
@@ -6342,8 +6434,8 @@ TEST(ConSanMoi, Cdna4AutomaticBankedReplaySkipsOccupiedExactTupleScalarHole) {
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
-  options.moi_exec_save_sgpr = 92u;
-  options.moi_dispatch_id_sgpr = 88u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_dispatch_id_sgpr = 94u;
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1});
   ASSERT_TRUE(report_plan.complete());

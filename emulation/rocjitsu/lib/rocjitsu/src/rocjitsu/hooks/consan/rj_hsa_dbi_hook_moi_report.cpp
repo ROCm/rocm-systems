@@ -19,8 +19,6 @@
 
 namespace rocjitsu::consan_hook {
 
-constexpr uint32_t kAutoReplayDiagnosticCapacity = 4;
-
 class AutoMoiReportBufferRegistry {
 public:
   static AutoMoiReportBufferRegistry &instance() {
@@ -1346,7 +1344,7 @@ private:
       } else {
         rocjitsu::ConSanMoiReportHeader replay_header = *header;
         replay_header.diagnostic_count = 0;
-        replay_header.diagnostic_capacity = kAutoReplayDiagnosticCapacity;
+        replay_header.diagnostic_capacity = std::min(header->diagnostic_capacity, visible_records);
         std::vector<rocjitsu::ConSanMoiDiagnosticRecord> diagnostics(
             replay_header.diagnostic_capacity);
         std::vector<uint64_t> exact_shadow_entries(

@@ -5221,7 +5221,7 @@ TEST(HsaHooksUnitTest, RecordReplayProvenanceUsesActualConflictingWorkgroupCell)
   EXPECT_EQ(diagnostic.second_lds_byte_count, 8u);
 }
 
-TEST(HsaHooksUnitTest, RecordReplayModelDiagnosticRepairsWithExactEventProvenance) {
+TEST(HsaHooksUnitTest, RecordReplayModelDiagnosticCarriesExactEventProvenance) {
   using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
   rocjitsu::ConSanMoiReportHeader header = rocjitsu::make_consan_moi_report_header(
       /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
@@ -5234,7 +5234,7 @@ TEST(HsaHooksUnitTest, RecordReplayModelDiagnosticRepairsWithExactEventProvenanc
           .generation = 7,
           .workgroup_x = 2,
           .wave_id = 1,
-          .lane_mask = 0x5,
+          .lane_mask = 0x1,
           .instruction_offset = 0x10,
           .access_kind = static_cast<uint32_t>(AccessKind::Write),
           .lds_byte_offset = 12,
@@ -5248,7 +5248,7 @@ TEST(HsaHooksUnitTest, RecordReplayModelDiagnosticRepairsWithExactEventProvenanc
           .generation = 7,
           .workgroup_x = 2,
           .wave_id = 2,
-          .lane_mask = 0xa,
+          .lane_mask = 0x2,
           .instruction_offset = 0x20,
           .access_kind = static_cast<uint32_t>(AccessKind::Write),
           .lds_byte_offset = 12,
@@ -5268,13 +5268,13 @@ TEST(HsaHooksUnitTest, RecordReplayModelDiagnosticRepairsWithExactEventProvenanc
   ASSERT_EQ(replay.emitted_diagnostic_count, 1u);
   ASSERT_EQ(header.diagnostic_count, 1u);
   EXPECT_EQ(diagnostics[0].reserved, records[1].event_index);
-  EXPECT_EQ(diagnostics[0].first_lane_mask, 0u);
-  EXPECT_EQ(diagnostics[0].first_lds_byte_count, 0u);
+  EXPECT_EQ(diagnostics[0].first_lane_mask, records[0].lane_mask);
+  EXPECT_EQ(diagnostics[0].first_lds_byte_count, records[0].lds_byte_count);
 
   const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
       rocjitsu::repair_consan_moi_record_replay_provenance(records, diagnostics);
 
-  EXPECT_EQ(repair.repaired_diagnostic_count, 1u);
+  EXPECT_EQ(repair.repaired_diagnostic_count, 0u);
   EXPECT_EQ(repair.unresolved_diagnostic_count, 0u);
   EXPECT_EQ(diagnostics[0].first_lane_mask, records[0].lane_mask);
   EXPECT_EQ(diagnostics[0].first_lds_byte_offset, records[0].lds_byte_offset);
@@ -5282,6 +5282,53 @@ TEST(HsaHooksUnitTest, RecordReplayModelDiagnosticRepairsWithExactEventProvenanc
   EXPECT_EQ(diagnostics[0].second_lane_mask, records[1].lane_mask);
   EXPECT_EQ(diagnostics[0].second_lds_byte_offset, records[1].lds_byte_offset);
   EXPECT_EQ(diagnostics[0].second_lds_byte_count, records[1].lds_byte_count);
+}
+
+TEST(HsaHooksUnitTest, RecordReplayProvenanceAcceptsAlreadyExactDiagnostic) {
+  using AccessKind = rocjitsu::ConSanMoiShadowAccessKind;
+  const rocjitsu::ConSanMoiAccessRecord record{
+      .generation = 7,
+      .workgroup_x = 2,
+      .wave_id = 1,
+      .lane_mask = 0xff,
+      .instruction_offset = 0x30,
+      .access_kind = static_cast<uint32_t>(AccessKind::Write),
+      .lds_byte_offset = 12,
+      .lds_byte_count = 2,
+      .start_cell = 3,
+      .cell_count = 1,
+      .epoch = 4,
+      .event_index = 57,
+  };
+  rocjitsu::ConSanMoiDiagnosticRecord diagnostic{
+      .kind = static_cast<uint32_t>(rocjitsu::ConSanMoiDiagnosticKind::AccessConflict),
+      .backend = static_cast<uint32_t>(rocjitsu::ConSanMoiEngine::RecordReplay),
+      .generation = 7,
+      .epoch = 4,
+      .first_owner_id = 1,
+      .second_owner_id = 1,
+      .reserved = 57,
+      .first_lane_mask = 0x1,
+      .second_lane_mask = 0xfe,
+      .first_instruction_offset = 0x30,
+      .second_instruction_offset = 0x30,
+      .first_lds_byte_offset = 12,
+      .first_lds_byte_count = 2,
+      .second_lds_byte_offset = 12,
+      .second_lds_byte_count = 2,
+      .first_access_kind = static_cast<uint32_t>(AccessKind::Write),
+      .second_access_kind = static_cast<uint32_t>(AccessKind::Write),
+  };
+
+  const rocjitsu::ConSanMoiReplayProvenanceRepair repair =
+      rocjitsu::repair_consan_moi_record_replay_provenance({&record, 1}, {&diagnostic, 1});
+
+  EXPECT_EQ(repair.repaired_diagnostic_count, 0u);
+  EXPECT_EQ(repair.unresolved_diagnostic_count, 0u);
+  EXPECT_EQ(diagnostic.first_lane_mask, 0x1u);
+  EXPECT_EQ(diagnostic.second_lane_mask, 0xfeu);
+  EXPECT_EQ(diagnostic.first_lds_byte_offset, 12u);
+  EXPECT_EQ(diagnostic.first_lds_byte_count, 2u);
 }
 
 TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageContractFields) {
@@ -5322,7 +5369,7 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageContractFields) {
   for (std::string_view field :
        {"reader=101", "generation=", "code_object=fnv1a64:0123456789abcdef", "diagnostics=1",
         "conflict=true", "metadata_full=false", "diagnostic_capacity_exhausted=false",
-        "diagnostic_capacity=4", "provenance_repaired=1", "provenance_unresolved=0"}) {
+        "diagnostic_capacity=1", "provenance_repaired=0", "provenance_unresolved=0"}) {
     EXPECT_NE(log.find(field), std::string::npos) << field << "\n" << log;
   }
   const size_t detail = log.find("ConSan MOI auto replay diagnostic reader=101");

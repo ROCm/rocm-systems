@@ -1140,6 +1140,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const uint16_t owner_bank_vgpr = static_cast<uint16_t>(record_address_vgpr + 7u);
   const uint16_t bank_probe_count_vgpr = static_cast<uint16_t>(record_address_vgpr + 8u);
   const uint16_t identity_claim_hash_vgpr = static_cast<uint16_t>(record_address_vgpr + 9u);
+  const uint16_t original_exec_sgpr =
+      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u);
+  const uint16_t address_key_sgpr =
+      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u);
+  const uint16_t address_group_exec_sgpr =
+      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u);
   const std::optional<uint16_t> spilled_lds_byte_offset_vgpr =
       !materialize_flat_offset && !save_clobbered_address && spill != nullptr &&
               options.moi_spill_overlaps_guest_operands &&
@@ -1150,7 +1156,6 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   if (spilled_lds_byte_offset_vgpr)
     lds_byte_offset_vgpr = record_compare_high_vgpr;
   ConSanMoiRecordEmitter record(words, record_address_vgpr, record_value_vgpr, arch);
-  constexpr uint16_t kScalarInlineMinusOne = 0xC1;
   const uint64_t access_bank_count =
       static_cast<uint64_t>(access_dispatch_bank_count) * access_owner_bank_count;
   if (access_dispatch_bank_count == 0u ||
@@ -1269,22 +1274,76 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     lds_byte_offset_vgpr = materialized_address_vgpr;
   }
-  const auto lane_rank_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-      record_value_vgpr, kScalarInlineMinusOne, scalar_positive_inline_u32(0), arch);
-  const auto lane_rank_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-      record_value_vgpr, kScalarInlineMinusOne, vector_source_vgpr(record_value_vgpr), arch);
-  const auto first_active = instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
-                                                                    record_value_vgpr, arch);
-  const auto narrow_first =
-      instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
-  if (!lane_rank_lo || !lane_rank_hi || !first_active || !narrow_first) {
-    errors.emplace_back("ConSan MOI first-light probe could not elect a representative lane");
-    return std::nullopt;
+  std::optional<size_t> address_group_loop;
+  if (automatic_banked_capture) {
+    const auto save_original_exec =
+        instrumentation::build_s_mov_b64(original_exec_sgpr, kRdna4ExecLo, arch);
+    if (!save_original_exec) {
+      errors.emplace_back("ConSan MOI first-light probe could not retain its incoming EXEC");
+      return std::nullopt;
+    }
+    words.push_back(*save_original_exec);
+    address_group_loop = words.size();
+    if (!reload_spilled_lds_byte_offset()) {
+      errors.emplace_back(
+          "ConSan MOI first-light probe could not recover its address-group source");
+      return std::nullopt;
+    }
+    const auto read_address =
+        instrumentation::build_v_readfirstlane_b32(address_key_sgpr, *lds_byte_offset_vgpr, arch);
+    const auto select_address =
+        instrumentation::build_v_cmp_eq_u32_vcc(address_key_sgpr, *lds_byte_offset_vgpr, arch);
+    const auto narrow_group =
+        instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+    const auto save_address_group =
+        instrumentation::build_s_mov_b64(address_group_exec_sgpr, kRdna4ExecLo, arch);
+    const auto lane_rank_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
+        record_value_vgpr, address_group_exec_sgpr, scalar_positive_inline_u32(0), arch);
+    const auto lane_rank_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
+        record_value_vgpr, static_cast<uint16_t>(address_group_exec_sgpr + 1u),
+        vector_source_vgpr(record_value_vgpr), arch);
+    const auto first_in_group = instrumentation::build_v_cmp_eq_u32_vcc(
+        scalar_positive_inline_u32(0), record_value_vgpr, arch);
+    const auto narrow_representative = instrumentation::build_s_and_saveexec_b64(
+        address_group_exec_sgpr, kRdna4VccLo, arch);
+    if (!read_address || !select_address || !narrow_group || !save_address_group || !lane_rank_lo ||
+        !lane_rank_hi || !first_in_group || !narrow_representative) {
+      errors.emplace_back(
+          "ConSan MOI first-light probe could not select one exact LDS address-group owner");
+      return std::nullopt;
+    }
+    words.push_back(*read_address);
+    words.push_back(*select_address);
+    words.push_back(*narrow_group);
+    words.push_back(*save_address_group);
+    words.insert(words.end(), lane_rank_lo->begin(), lane_rank_lo->end());
+    words.insert(words.end(), lane_rank_hi->begin(), lane_rank_hi->end());
+    words.push_back(*first_in_group);
+    // Keep the full group mask for replay provenance while one elected lane
+    // performs the bounded table transaction.
+    words.push_back(*narrow_representative);
+  } else {
+    const auto save_incoming_exec =
+        instrumentation::build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4ExecLo, arch);
+    const auto lane_rank_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
+        record_value_vgpr, *options.moi_exec_save_sgpr, scalar_positive_inline_u32(0), arch);
+    const auto lane_rank_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
+        record_value_vgpr, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u),
+        vector_source_vgpr(record_value_vgpr), arch);
+    const auto first_active = instrumentation::build_v_cmp_eq_u32_vcc(
+        scalar_positive_inline_u32(0), record_value_vgpr, arch);
+    const auto narrow_first =
+        instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+    if (!save_incoming_exec || !lane_rank_lo || !lane_rank_hi || !first_active || !narrow_first) {
+      errors.emplace_back("ConSan MOI first-light probe could not elect a representative lane");
+      return std::nullopt;
+    }
+    words.push_back(*save_incoming_exec);
+    words.insert(words.end(), lane_rank_lo->begin(), lane_rank_lo->end());
+    words.insert(words.end(), lane_rank_hi->begin(), lane_rank_hi->end());
+    words.push_back(*first_active);
+    words.push_back(*narrow_first);
   }
-  words.insert(words.end(), lane_rank_lo->begin(), lane_rank_lo->end());
-  words.insert(words.end(), lane_rank_hi->begin(), lane_rank_hi->end());
-  words.push_back(*first_active);
-  words.push_back(*narrow_first);
   if (automatic_banked_capture) {
     // The bounded bank hashes the complete persistent tuple. Descriptor SGPRs
     // and launch TTMPs are entry inputs, not probe-lifetime state, so falling
@@ -1544,6 +1603,11 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         owner_bank_vgpr, arch);
     const auto combine_dispatch = instrumentation::build_v_xor_b32(
         owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr), dispatch_bank_vgpr, arch);
+    const auto mix_address = instrumentation::build_v_mul_lo_u32_literal(
+        owner_bank_vgpr, record_value_high_vgpr, kConSanMoiRecordReplayIdentityHashMultiplier,
+        owner_bank_vgpr, arch);
+    const auto combine_address = instrumentation::build_v_xor_b32(
+        owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr), address_key_sgpr, arch);
     const auto mix_site = instrumentation::build_v_mul_lo_u32_literal(
         owner_bank_vgpr, record_value_high_vgpr, kConSanMoiRecordReplayIdentityHashMultiplier,
         owner_bank_vgpr, arch);
@@ -1553,14 +1617,16 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         owner_bank_vgpr, vector_source_vgpr(owner_bank_vgpr), record_value_vgpr, arch);
     const auto bound = instrumentation::build_v_and_b32_literal(
         owner_bank_vgpr, access_record_capacity - 1u, owner_bank_vgpr, arch);
-    if (!mix_dispatch || !combine_dispatch || !mix_site || !materialize_site || !combine_site ||
-        !bound)
+    if (!mix_dispatch || !combine_dispatch || !mix_address || !combine_address || !mix_site ||
+        !materialize_site || !combine_site || !bound)
       return false;
     words.insert(words.end(), mix_dispatch->begin(), mix_dispatch->end());
     words.push_back(*combine_dispatch);
-    // Preserve the unbounded owner/workgroup/dispatch hash for the access
-    // publication token. The bounded table slot is mixed with the static site
-    // below and may then advance independently while probing.
+    words.insert(words.end(), mix_address->begin(), mix_address->end());
+    words.push_back(*combine_address);
+    // Preserve the unbounded owner/workgroup/dispatch/address hash for the
+    // access publication token. The bounded table slot additionally mixes the
+    // static site before it advances independently while probing.
     words.push_back(
         build_v_mov_b32_e32(identity_claim_hash_vgpr, vector_source_vgpr(owner_bank_vgpr), arch));
     words.insert(words.end(), mix_site->begin(), mix_site->end());
@@ -1572,10 +1638,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     return true;
   };
 
-  // Fixed first-light records need one representative execution per site, but
-  // the site may be control-dependent on a nonzero wave or workgroup. Let the
-  // per-slot atomic claim below elect the first lane that actually executes the
-  // access instead of suppressing valid evidence through an identity gate.
+  // Each automatic publication represents one exact address group. Direct
+  // caller-owned layouts retain their historical one-record capacity and let
+  // the per-slot atomic claim elect the first lane that executes the site.
   for (size_t range_index = 0; range_index < access_ranges->size(); ++range_index) {
     const auto publication_done_label = sequence.make_label();
     const auto token_ready_label = sequence.make_label();
@@ -1695,9 +1760,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         !record.store_workgroup(offsetof(ConSanMoiAccessRecord, workgroup_z),
                                 workgroup_sources.z) ||
         !record.store_sgpr(offsetof(ConSanMoiAccessRecord, lane_mask),
-                           *options.moi_exec_save_sgpr) ||
+                           automatic_banked_capture ? address_group_exec_sgpr
+                                                    : *options.moi_exec_save_sgpr) ||
         !record.store_sgpr(offsetof(ConSanMoiAccessRecord, lane_mask) + sizeof(uint32_t),
-                           static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u)) ||
+                           automatic_banked_capture
+                               ? static_cast<uint16_t>(address_group_exec_sgpr + 1u)
+                               : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u)) ||
         (options.moi_owner_vgpr &&
          !record.store_vgpr(offsetof(ConSanMoiAccessRecord, wave_id), *options.moi_owner_vgpr)) ||
         (options.moi_persistent_owner_sgpr &&
@@ -1903,14 +1971,14 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
 
     // Use a no-op atomic compare-and-swap as an acquire-style read of the
     // access_kind commit. One lane publishes for each
-    // dispatch/workgroup/wave/site identity, and a wave cannot execute the
-    // same site concurrently with itself. Therefore an incomplete automatic
-    // claim with the same compact token belongs to a distinct identity whose
-    // fingerprint collided; probe another slot instead of waiting for a wave
-    // that may not be scheduled while this wave is resident. A committed
-    // record is qualified against the complete identity below. The legacy
-    // direct layout has nowhere else to probe and retains its fail-closed
-    // result.
+    // dispatch/workgroup/wave/site/address-group identity, and a wave cannot
+    // publish that same first-light identity concurrently with itself.
+    // Therefore an incomplete automatic claim with the same compact token
+    // belongs to a distinct identity whose fingerprint collided; probe another
+    // slot instead of waiting for a wave that may not be scheduled while this
+    // wave is resident. A committed record is qualified against the complete
+    // identity below. The legacy direct layout has nowhere else to probe and
+    // retains its fail-closed result.
     if (!sequence.bind(publication_observe_label)) {
       return fail("ConSan MOI first-light probe could not bind its publication observer");
     }
@@ -2041,6 +2109,41 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         errors.emplace_back("ConSan MOI first-light probe could not qualify its retained owner");
         return std::nullopt;
       }
+
+      if (!record.load(offsetof(ConSanMoiAccessRecord, lds_byte_offset), record_value_vgpr)) {
+        errors.emplace_back(
+            "ConSan MOI first-light probe could not load its retained address group");
+        return std::nullopt;
+      }
+      words.push_back(build_v_mov_b32_e32(record_compare_vgpr, address_key_sgpr, arch));
+      if (range.static_byte_offset != 0u) {
+        const auto materialize_static_offset = instrumentation::build_v_mov_b32_literal(
+            record_compare_high_vgpr, range.static_byte_offset, arch);
+        const auto add_static_offset = instrumentation::build_v_add_u32(
+            record_compare_vgpr, vector_source_vgpr(record_compare_vgpr),
+            record_compare_high_vgpr, arch);
+        if (!materialize_static_offset || !add_static_offset) {
+          errors.emplace_back(
+              "ConSan MOI first-light probe could not qualify its retained address group");
+          return std::nullopt;
+        }
+        words.insert(words.end(), materialize_static_offset->begin(),
+                     materialize_static_offset->end());
+        words.insert(words.end(), add_static_offset->begin(), add_static_offset->end());
+      }
+      const auto address_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
+          vector_source_vgpr(record_compare_vgpr), record_value_vgpr, arch);
+      if (!address_mismatch) {
+        errors.emplace_back(
+            "ConSan MOI first-light probe could not compare its retained address group");
+        return std::nullopt;
+      }
+      words.push_back(*address_mismatch);
+      if (!sequence.emit_branch(owner_retry_label, InstructionSequence::BranchKind::VccNonzero)) {
+        errors.emplace_back(
+            "ConSan MOI first-light probe could not qualify its retained address group");
+        return std::nullopt;
+      }
     }
     if (!sequence.emit_branch(publication_done_label,
                               InstructionSequence::BranchKind::Unconditional)) {
@@ -2116,8 +2219,49 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
   }
 
+  if (automatic_banked_capture) {
+    if (!address_group_loop) {
+      errors.emplace_back("ConSan MOI first-light probe lost its address-group loop");
+      return std::nullopt;
+    }
+    const auto remove_group = instrumentation::build_s_xor_b64(
+        *options.moi_exec_save_sgpr, *options.moi_exec_save_sgpr,
+        address_group_exec_sgpr, arch);
+    const auto select_remaining =
+        instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+    if (!remove_group || !select_remaining) {
+      errors.emplace_back(
+          "ConSan MOI first-light probe could not advance its address-group loop");
+      return std::nullopt;
+    }
+    words.push_back(*remove_group);
+    // Keep the scalar-mask dependency explicit before installing the next
+    // EXEC. This matches the proven Inline Shadow traversal and prevents the
+    // final divergent address group from being skipped on live hardware.
+    words.push_back(build_s_nop(0, arch));
+    words.push_back(build_s_nop(0, arch));
+    words.push_back(*select_remaining);
+    const int64_t loop_delta = static_cast<int64_t>(*address_group_loop) -
+                               static_cast<int64_t>(words.size() + 1u);
+    if (loop_delta < std::numeric_limits<int16_t>::min() ||
+        loop_delta > std::numeric_limits<int16_t>::max()) {
+      errors.emplace_back("ConSan MOI first-light address-group loop is out of branch reach");
+      return std::nullopt;
+    }
+    const auto continue_loop =
+        instrumentation::build_s_cbranch_execnz(static_cast<int16_t>(loop_delta), arch);
+    if (!continue_loop) {
+      errors.emplace_back(
+          "ConSan MOI first-light probe could not branch to its next address group");
+      return std::nullopt;
+    }
+    words.push_back(*continue_loop);
+  }
+
+  const uint16_t restore_exec_sgpr =
+      automatic_banked_capture ? original_exec_sgpr : *options.moi_exec_save_sgpr;
   const auto restore_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+      instrumentation::build_s_mov_b64(kRdna4ExecLo, restore_exec_sgpr, arch);
   if (!restore_exec) {
     errors.emplace_back("ConSan MOI first-light probe could not restore EXEC");
     return std::nullopt;

@@ -964,8 +964,13 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     uint32_t workgroup_z = 0;
     std::vector<uint32_t> owner_epochs;
     std::vector<uint64_t> exact_shadow_entries;
+    // One-based indices keep per-byte exactness compact while the table owns
+    // one complete provenance record per replayed access.
+    std::vector<uint32_t> exact_byte_provenance_indices;
+    std::vector<ConSanMoiRecordReplayAccess> exact_provenance_entries;
     std::vector<ConSanMoiAtomicReleaseRecord> atomic_release_records;
     std::vector<ConSanMoiAcquiredEpochToken> acquired_epoch_tokens;
+    std::unordered_set<uint64_t> reported_diagnostic_sites;
     bool in_barrier_run = false;
   };
   std::vector<ReplayWorkgroupState> workgroups;
@@ -985,12 +990,160 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     state.workgroup_z = workgroup_z;
     state.owner_epochs.resize(consan_moi_exact_shadow::max_owner + 1u);
     state.exact_shadow_entries.resize(exact_shadow_entries.size());
+    const size_t exact_byte_capacity =
+        exact_shadow_entries.size() <=
+                std::numeric_limits<size_t>::max() / consan_moi_exact_shadow::granule_bytes
+            ? exact_shadow_entries.size() * consan_moi_exact_shadow::granule_bytes
+            : 0;
+    state.exact_byte_provenance_indices.resize(exact_byte_capacity);
     state.atomic_release_records.resize(atomic_events.size());
     state.acquired_epoch_tokens.resize(atomic_events.size() + fence_events.size());
     workgroups.push_back(std::move(state));
     if (!first_workgroup_index)
       first_workgroup_index = workgroups.size() - 1u;
     return workgroups.back();
+  };
+
+  const auto make_access_conflict_diagnostic = [](const ConSanMoiRecordReplayAccess &first,
+                                                  const ConSanMoiRecordReplayAccess &second) {
+    ConSanMoiDiagnosticRecord diagnostic;
+    diagnostic.kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict);
+    diagnostic.backend = static_cast<uint32_t>(ConSanMoiEngine::RecordReplay);
+    diagnostic.generation = second.generation;
+    diagnostic.epoch = second.epoch;
+    diagnostic.first_owner_id = first.owner_id;
+    diagnostic.second_owner_id = second.owner_id;
+    diagnostic.first_lane_mask = first.lane_mask;
+    diagnostic.second_lane_mask = second.lane_mask;
+    diagnostic.first_instruction_offset = first.instruction_offset;
+    diagnostic.second_instruction_offset = second.instruction_offset;
+    diagnostic.first_lds_byte_offset = first.lds_byte_offset;
+    diagnostic.first_lds_byte_count = first.lds_byte_count;
+    diagnostic.second_lds_byte_offset = second.lds_byte_offset;
+    diagnostic.second_lds_byte_count = second.lds_byte_count;
+    diagnostic.first_access_kind = static_cast<uint32_t>(first.kind);
+    diagnostic.second_access_kind = static_cast<uint32_t>(second.kind);
+    return diagnostic;
+  };
+
+  const auto make_metadata_full_diagnostic = [](const ConSanMoiRecordReplayAccess &access) {
+    ConSanMoiDiagnosticRecord diagnostic;
+    diagnostic.kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::MetadataFull);
+    diagnostic.backend = static_cast<uint32_t>(ConSanMoiEngine::RecordReplay);
+    diagnostic.generation = access.generation;
+    diagnostic.epoch = access.epoch;
+    diagnostic.second_owner_id = access.owner_id;
+    diagnostic.second_lane_mask = access.lane_mask;
+    diagnostic.second_instruction_offset = access.instruction_offset;
+    diagnostic.second_lds_byte_offset = access.lds_byte_offset;
+    diagnostic.second_lds_byte_count = access.lds_byte_count;
+    diagnostic.second_access_kind = static_cast<uint32_t>(access.kind);
+    return diagnostic;
+  };
+
+  const auto replay_exact_byte_access = [&](ReplayWorkgroupState &state,
+                                            const ConSanMoiRecordReplayAccess &access) {
+    ConSanMoiRecordReplayAccessResult result;
+    if (access.lds_byte_count == 0 || consan_moi_shadow_kind_is_empty(access.kind))
+      return result;
+
+    const uint64_t byte_end = static_cast<uint64_t>(access.lds_byte_offset) + access.lds_byte_count;
+    const uint64_t end_cell = static_cast<uint64_t>(access.start_cell) + access.cell_count;
+    if (byte_end > state.exact_byte_provenance_indices.size() ||
+        end_cell > state.exact_shadow_entries.size()) {
+      result.metadata_full = true;
+      result.conflict = true;
+      result.diagnostic = make_metadata_full_diagnostic(access);
+      return result;
+    }
+
+    const ConSanMoiExactShadowEntry current{
+        access.kind,
+        access.owner_id,
+        access.epoch,
+        static_cast<uint32_t>(access.generation),
+        access.instruction_offset,
+    };
+    for (uint64_t byte = access.lds_byte_offset; byte < byte_end; ++byte) {
+      const uint32_t prior_index = state.exact_byte_provenance_indices[byte];
+      if (prior_index == 0)
+        continue;
+      if (prior_index > state.exact_provenance_entries.size()) {
+        result.metadata_full = true;
+        result.conflict = true;
+        result.diagnostic = make_metadata_full_diagnostic(access);
+        return result;
+      }
+      const ConSanMoiRecordReplayAccess &prior = state.exact_provenance_entries[prior_index - 1u];
+      if ((prior.owner_id == access.owner_id && prior.lane_mask == access.lane_mask) ||
+          prior.epoch != access.epoch || prior.generation != access.generation ||
+          !consan_moi_shadow_kind_conflicts(access.kind, prior.kind)) {
+        continue;
+      }
+      const ConSanMoiExactShadowEntry prior_entry{
+          prior.kind,
+          prior.owner_id,
+          prior.epoch,
+          static_cast<uint32_t>(prior.generation),
+          prior.instruction_offset,
+      };
+      if (consan_moi_acquired_epoch_orders(state.acquired_epoch_tokens, current, prior_entry))
+        continue;
+      result.conflict = true;
+      result.diagnostic = make_access_conflict_diagnostic(prior, access);
+      return result;
+    }
+
+    if (state.exact_provenance_entries.size() >= std::numeric_limits<uint32_t>::max()) {
+      result.metadata_full = true;
+      result.conflict = true;
+      result.diagnostic = make_metadata_full_diagnostic(access);
+      return result;
+    }
+    state.exact_provenance_entries.push_back(access);
+    const uint32_t provenance_index = static_cast<uint32_t>(state.exact_provenance_entries.size());
+    for (uint64_t byte = access.lds_byte_offset; byte < byte_end; ++byte)
+      state.exact_byte_provenance_indices[byte] = provenance_index;
+
+    const uint64_t packed = pack_consan_moi_exact_shadow_entry(
+        access.kind, access.owner_id, access.epoch, static_cast<uint32_t>(access.generation),
+        access.instruction_offset);
+    for (uint64_t cell = access.start_cell; cell < end_cell; ++cell)
+      state.exact_shadow_entries[cell] = packed;
+    return result;
+  };
+
+  const auto make_intra_wave_write_diagnostic =
+      [&](const ConSanMoiRecordReplayAccess &access) -> std::optional<ConSanMoiDiagnosticRecord> {
+    if (access.kind != ConSanMoiShadowAccessKind::Write || std::popcount(access.lane_mask) < 2) {
+      return std::nullopt;
+    }
+    ConSanMoiRecordReplayAccess first = access;
+    ConSanMoiRecordReplayAccess second = access;
+    first.lane_mask = access.lane_mask & (~access.lane_mask + uint64_t{1});
+    second.lane_mask = access.lane_mask ^ first.lane_mask;
+    return make_access_conflict_diagnostic(first, second);
+  };
+
+  const auto append_diagnostic = [&](ReplayWorkgroupState &state,
+                                     const ConSanMoiDiagnosticRecord &diagnostic,
+                                     uint32_t event_index) {
+    const uint32_t first_site =
+        std::min(diagnostic.first_instruction_offset, diagnostic.second_instruction_offset);
+    const uint32_t second_site =
+        std::max(diagnostic.first_instruction_offset, diagnostic.second_instruction_offset);
+    const uint64_t site_key = static_cast<uint64_t>(first_site) << 32u | second_site;
+    if (!state.reported_diagnostic_sites.insert(site_key).second)
+      return;
+    if (header.diagnostic_count < diagnostic_capacity) {
+      ConSanMoiDiagnosticRecord published = diagnostic;
+      published.reserved = event_index;
+      diagnostic_records[header.diagnostic_count] = published;
+      ++header.diagnostic_count;
+      ++replay.emitted_diagnostic_count;
+    } else {
+      replay.diagnostic_capacity_exhausted = true;
+    }
   };
 
   struct ReplayEvent {
@@ -1194,16 +1347,42 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       ++replay.unsupported_access_count;
       continue;
     }
-    ConSanMoiLdsCellRange range{record.start_cell, record.cell_count};
-    if (range.cell_count == 0 && record.lds_byte_count != 0)
-      range = consan_moi_lds_cell_range_for_bytes(record.lds_byte_offset, record.lds_byte_count);
-
     if (record.wave_id > consan_moi_exact_shadow::max_owner) {
       ++replay.processed_access_count;
       ++replay.unsupported_access_count;
       replay.metadata_full = true;
       continue;
     }
+
+    const uint64_t lds_byte_offset_u64 =
+        record.lds_byte_count != 0
+            ? record.lds_byte_offset
+            : static_cast<uint64_t>(record.start_cell) * consan_moi_exact_shadow::granule_bytes;
+    const uint64_t lds_byte_count_u64 =
+        record.lds_byte_count != 0
+            ? record.lds_byte_count
+            : static_cast<uint64_t>(record.cell_count) * consan_moi_exact_shadow::granule_bytes;
+    const uint64_t lds_byte_end_u64 = lds_byte_offset_u64 + lds_byte_count_u64;
+    const uint64_t start_cell_u64 = lds_byte_offset_u64 >> consan_moi_exact_shadow::granule_shift;
+    const uint64_t end_cell_u64 =
+        (lds_byte_end_u64 + consan_moi_exact_shadow::granule_bytes - 1u) >>
+        consan_moi_exact_shadow::granule_shift;
+    if (lds_byte_offset_u64 > std::numeric_limits<uint32_t>::max() ||
+        lds_byte_count_u64 > std::numeric_limits<uint32_t>::max() ||
+        start_cell_u64 > std::numeric_limits<uint32_t>::max() ||
+        end_cell_u64 > std::numeric_limits<uint32_t>::max()) {
+      ++replay.processed_access_count;
+      ++replay.unsupported_access_count;
+      replay.metadata_full = true;
+      replay.conflict = true;
+      continue;
+    }
+    const uint32_t lds_byte_offset = static_cast<uint32_t>(lds_byte_offset_u64);
+    const uint32_t lds_byte_count = static_cast<uint32_t>(lds_byte_count_u64);
+    const ConSanMoiLdsCellRange range{
+        static_cast<uint32_t>(start_cell_u64),
+        static_cast<uint32_t>(end_cell_u64 - start_cell_u64),
+    };
 
     const uint64_t generation = record.generation != 0 ? record.generation : header.generation;
     ReplayWorkgroupState &state = find_workgroup_state(generation, record.workgroup_x,
@@ -1214,30 +1393,27 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         /*owner_id=*/record.wave_id,
         record.epoch != 0 ? record.epoch : state.owner_epochs[record.wave_id],
         *access_kind,
-        record.lds_byte_offset,
-        record.lds_byte_count,
+        lds_byte_offset,
+        lds_byte_count,
         range.start_cell,
         range.cell_count,
         record.instruction_offset,
         record.lane_mask,
     };
-    const ConSanMoiRecordReplayAccessResult access_result = consan_moi_record_replay_access(
-        state.exact_shadow_entries, access, state.acquired_epoch_tokens);
+    const ConSanMoiRecordReplayAccessResult access_result = replay_exact_byte_access(state, access);
     ++replay.processed_access_count;
-    if (!access_result.conflict)
-      continue;
-
-    replay.conflict = true;
     replay.metadata_full |= access_result.metadata_full;
-    if (header.diagnostic_count < diagnostic_capacity) {
-      ConSanMoiDiagnosticRecord diagnostic = access_result.diagnostic;
-      diagnostic.reserved = record.event_index;
-      diagnostic_records[header.diagnostic_count] = diagnostic;
-      ++header.diagnostic_count;
-      ++replay.emitted_diagnostic_count;
-    } else {
-      replay.diagnostic_capacity_exhausted = true;
+    if (access_result.conflict) {
+      replay.conflict = true;
+      append_diagnostic(state, access_result.diagnostic, record.event_index);
+      continue;
     }
+    const std::optional<ConSanMoiDiagnosticRecord> intra_wave =
+        make_intra_wave_write_diagnostic(access);
+    if (!intra_wave)
+      continue;
+    replay.conflict = true;
+    append_diagnostic(state, *intra_wave, record.event_index);
   }
   if (first_workgroup_index)
     std::copy(workgroups[*first_workgroup_index].exact_shadow_entries.begin(),

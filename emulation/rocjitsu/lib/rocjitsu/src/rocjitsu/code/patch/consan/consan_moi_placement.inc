@@ -2562,6 +2562,15 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
             : 0u;
     return std::max(engine_count, dynamic_stack_count);
   }
+  if (record_replay_uses_automatic_banked_capture(options)) {
+    // Automatic access capture keeps the application EXEC pair through the
+    // full distinct-address traversal, uses one scalar address key, and keeps
+    // the selected group's EXEC in an aligned pair through +13 while one lane
+    // performs publication.
+    // Dense routing already occupies the call-return pair through +7, while
+    // dynamic stack owners retain their frame-base snapshot at +5.
+    return 14u;
+  }
   if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
       options.moi_record_replay_dense_barrier_router)
     return 8u;
@@ -2712,10 +2721,10 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
         .scc_save_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u),
     };
   }
-  // Record/Replay reserves five SGPRs. Its indirect island runs before the
-  // body snapshots EXEC/VCC/SCC, and its return runs after those snapshots
-  // have been restored, so the EXEC-save pair and SCC slot are free scratch
-  // at both boundaries. Do not address Inline's wider +10/+12 slots here.
+  // Record/Replay's indirect island runs before the body snapshots
+  // EXEC/VCC/SCC, and its return runs after those snapshots have been
+  // restored, so the EXEC-save pair and SCC slot are free scratch at both
+  // boundaries. The wider automatic-access window remains body-local.
   return MoiIndirectJumpSgprs{
       .pc_sgpr = *options.moi_exec_save_sgpr,
       .scc_save_sgpr = special_state->scc_save_sgpr,
@@ -3202,7 +3211,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       // One dead pair is therefore sufficient for both transient roles.
       if (spill_key)
         spill_call_return = spill_pc;
-      const uint16_t spilled_scalar_count = component_local_sampled ? 8u : 4u;
+      const uint16_t spilled_scalar_count = component_local_sampled ? 8u : count;
       for (uint32_t base = 0; spill_call_return && base + spilled_scalar_count <= limit;
            base += 2u) {
         const uint16_t candidate = static_cast<uint16_t>(base);

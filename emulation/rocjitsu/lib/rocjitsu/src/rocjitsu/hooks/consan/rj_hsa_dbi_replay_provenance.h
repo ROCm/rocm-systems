@@ -86,6 +86,10 @@ struct ConSanMoiReplayProvenanceRepair {
                (record.instruction_offset & consan_moi_exact_shadow::max_instruction_offset) &&
            diagnostic.first_access_kind == record.access_kind;
   };
+  const auto diagnostic_has_complete_provenance = [](const ConSanMoiDiagnosticRecord &diagnostic) {
+    return diagnostic.first_lane_mask != 0 && diagnostic.second_lane_mask != 0 &&
+           diagnostic.first_lds_byte_count != 0 && diagnostic.second_lds_byte_count != 0;
+  };
 
   std::vector<size_t> order(access_records.size());
   for (size_t i = 0; i < order.size(); ++i)
@@ -120,6 +124,8 @@ struct ConSanMoiReplayProvenanceRepair {
     }
     if (diagnostic != nullptr) {
       if (diagnostic->kind != static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict))
+        continue;
+      if (diagnostic_has_complete_provenance(*diagnostic))
         continue;
       const ConSanMoiAccessRecord *prior = nullptr;
       const uint32_t end = range->start_cell + range->cell_count;
