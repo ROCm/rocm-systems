@@ -160,6 +160,65 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
 
 
 # ---------------------------------------------------------------------------
+# sanitize() rejects ML API tracing flags for PC-sampling-only runs
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "filter_blocks, trace_flags, expect_error, expected_frameworks",
+    [
+        pytest.param(
+            ["21"],
+            {"torch_trace": True},
+            True,
+            None,
+            id="pc_only_torch_trace_errors",
+        ),
+        pytest.param(
+            ["pc_sampling"],
+            {"ml_api_trace": True},
+            True,
+            None,
+            id="pc_only_ml_api_trace_errors",
+        ),
+        pytest.param(
+            ["21"],
+            {"triton_trace": True},
+            True,
+            None,
+            id="pc_only_triton_trace_errors",
+        ),
+        pytest.param(
+            ["2", "21"],
+            {"torch_trace": True},
+            False,
+            {"torch"},
+            id="mixed_torch_trace_preserved",
+        ),
+        pytest.param(
+            ["21"],
+            {},
+            False,
+            set(),
+            id="pc_only_no_trace_flag",
+        ),
+    ],
+)
+def test_sanitize_pc_sampling_only_rejects_ml_api_tracing_flags(
+    tmp_path, filter_blocks, trace_flags, expect_error, expected_frameworks
+):
+    """ML API tracing flags are rejected for PC-sampling-only runs and retained when a
+    counter block is also requested."""
+    remaining = _setup_test_files(tmp_path, ["{binary}"], "binary")
+    args = _make_sanitize_args(remaining, filter_blocks=filter_blocks, **trace_flags)
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
+    if expect_error:
+        with pytest.raises(SystemExit):
+            profiler.sanitize()
+    else:
+        profiler.sanitize()
+        assert profiler._selected_frameworks == expected_frameworks
+
+
+# ---------------------------------------------------------------------------
 # sanitize() without --torch-trace
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
