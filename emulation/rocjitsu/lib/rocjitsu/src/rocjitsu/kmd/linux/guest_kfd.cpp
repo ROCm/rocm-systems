@@ -536,8 +536,11 @@ GuestKfd::GuestKfd(config::DbtGuestConfig config, LinuxKfd *execution_driver)
       overlay_(std::make_unique<TopologyOverlay>()),
       owns_execution_driver_open_(execution_driver && execution_driver->fd() >= 0) {
   libc_passthrough().resolve();
-  guest_ = gpu_info_from_config(config_.guest_device,
-                                std::max(1u, config_.guest_device.num_shader_engines));
+  // The guest overlay describes a single synthetic node with no XCD topology
+  // behind it, so its XCC count is 1. (num_shader_engines is the node's shader
+  // *array* count, which sysfs multiplies by num_xcc -- passing it here would
+  // square it.)
+  guest_ = gpu_info_from_config(config_.guest_device, 1u);
   guest_.drm_render_minor = choose_render_minor(guest_.drm_render_minor);
   host_gpu_id_ = config_.host.gpu_id;
 }
