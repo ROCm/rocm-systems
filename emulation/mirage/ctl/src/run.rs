@@ -117,6 +117,7 @@ async fn run_owned(
         worker_exec: None,
         nproc_per_node: a.nproc_per_node.unwrap_or(1).max(1),
         capture_all: a.capture_all,
+        clear_env: a.clear_env_vars,
     };
     let _ = workdir;
 
@@ -155,6 +156,7 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
         worker_exec: None,
         nproc_per_node: a.nproc_per_node.unwrap_or(1).max(1),
         capture_all: a.capture_all,
+        clear_env: a.clear_env_vars,
     };
 
     // A client-side exec id, distinct from anything the run process is

@@ -345,15 +345,27 @@ pub struct SpawnSpec {
     pub workdir: Option<String>,
     /// Pipes or a pseudo-terminal.
     pub stdio: StdioMode,
-    /// When set, the process inherits the parent's full environment and
-    /// only `env` is layered on top. When clear, the environment is
-    /// cleared first and only a small allowlist plus `env` is passed.
+    /// When set — the default — the process inherits the caller's whole
+    /// environment and `env` is layered on top. When clear, the
+    /// environment is emptied first and only a small allowlist
+    /// ([`INHERITED_ENV`]) plus `env` is passed.
     ///
-    /// Container execs need the former (the provider CLI needs its own
-    /// environment to find its socket and config); direct workloads get
-    /// the latter, so a session's behaviour does not silently depend on
-    /// whatever happened to be exported in the shell that started the
-    /// daemon.
+    /// Inheriting is the default because mirage runs in the terminal the
+    /// user typed in, and everything they exported there — an API token,
+    /// a `PYTHONPATH`, a proxy, a tuning variable their framework reads —
+    /// is something they meant for the workload. Dropping all of it made
+    /// sense when a detached daemon ran the workload, because the daemon
+    /// had inherited its environment from whichever shell happened to
+    /// start it hours earlier; it makes no sense now that the workload's
+    /// parent *is* the user's shell.
+    ///
+    /// `mirage run --clear-env-vars` asks for the strict form, for a run
+    /// that must not depend on ambient state.
+    ///
+    /// Container execs always inherit: the value here governs the
+    /// provider *client*, which needs its own environment to find its
+    /// socket and configuration. What the containerised workload sees is
+    /// passed explicitly with `-e` and never inherited from the host.
     pub inherit_env: bool,
     /// Set when this spec launches a container provider client rather
     /// than the workload itself, so signals can be forwarded into the
@@ -362,8 +374,14 @@ pub struct SpawnSpec {
     pub container: Option<ContainerProc>,
 }
 
-/// Environment variables a directly-spawned workload inherits from the
-/// daemon when `inherit_env` is false.
+/// The only environment variables a workload keeps under
+/// `--clear-env-vars`.
+///
+/// Not an empty set, because an empty environment is not a useful one:
+/// without `PATH` most commands cannot be found at all, and without
+/// `HOME` a great deal of tooling writes to `/`. This is the floor a
+/// process needs to behave like a process, with everything
+/// workload-specific left to the emulator's injection and `--env`.
 const INHERITED_ENV: &[&str] = &[
     "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "SHELL",
 ];
@@ -466,14 +484,12 @@ fn resolved_env(spec: &SpawnSpec) -> Vec<(std::ffi::OsString, std::ffi::OsString
                 env.push(((*key).into(), value));
             }
         }
-        // A terminal program needs `TERM` to be *something*, and the
-        // daemon frequently has none: a systemd service has no terminal,
-        // so `mirage daemon install` produces an environment where the
-        // allowlist above copies nothing and `mirage run -- bash` gives
-        // the shell an unset `TERM` — no prompt colours, and `clear`,
-        // `less` and anything ncurses failing outright with "TERM
-        // environment variable not set". Naming a default costs nothing
-        // and is what the per-session host used to do.
+        // A terminal program needs `TERM` to be *something*. The
+        // allowlist copies it when the caller has one, but a run from
+        // cron, a CI runner or a bare `sh` has none — and then `bash`
+        // gets an unset `TERM`: no prompt colours, and `clear`, `less`
+        // and anything ncurses failing outright with "TERM environment
+        // variable not set". Naming a default costs nothing.
         if std::env::var_os("TERM").is_none() {
             env.push(("TERM".into(), "xterm-256color".into()));
         }

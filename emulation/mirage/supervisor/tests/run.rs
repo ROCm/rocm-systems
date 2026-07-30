@@ -156,6 +156,12 @@ async fn start(nodes: u32) -> Arc<Run> {
     run
 }
 
+fn def_env(run: &Run, script: &str, capture_all: bool, clear_env: bool) -> ExecDef {
+    let mut d = def(run, script, capture_all);
+    d.clear_env = clear_env;
+    d
+}
+
 fn def(run: &Run, script: &str, capture_all: bool) -> ExecDef {
     ExecDef {
         timestamp: chrono::Utc::now(),
@@ -169,6 +175,7 @@ fn def(run: &Run, script: &str, capture_all: bool) -> ExecDef {
         worker_exec: None,
         nproc_per_node: 1,
         capture_all,
+        clear_env: false,
     }
 }
 
@@ -347,6 +354,118 @@ async fn an_exec_cannot_start_in_a_destroyed_session() {
         started.is_err(),
         "a destroyed session must refuse new work, not start it"
     );
+}
+
+/// The environment variables `--clear-env-vars` keeps, mirrored from
+/// `mirage_supervisor::process::INHERITED_ENV` (private there).
+const KEPT_WHEN_CLEARED: &[&str] = &[
+    "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "SHELL",
+];
+
+/// A variable this process has that a cleared workload would lose.
+///
+/// Chosen from the live environment rather than exported by the test:
+/// `std::env::set_var` is `unsafe` in Rust 2024 and this workspace
+/// forbids `unsafe`, and a process-wide mutation would race the other
+/// tests in this binary regardless. The value only has to be something a
+/// shell comparison can match, so anything awkward is skipped.
+fn ambient_variable() -> Option<(String, String)> {
+    std::env::vars().find(|(k, v)| {
+        !KEPT_WHEN_CLEARED.contains(&k.as_str())
+            && !k.starts_with("MIRAGE_")
+            && !k.is_empty()
+            && !v.is_empty()
+            && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && v.chars().all(|c| c.is_ascii_alphanumeric() || "._-/:".contains(c))
+    })
+}
+
+#[tokio::test]
+async fn the_callers_environment_reaches_the_workload() {
+    // The default, and the point of it: mirage's parent is the terminal
+    // the user typed in, so a variable exported there — an API token, a
+    // PYTHONPATH, a proxy, a framework tuning knob — is one they meant
+    // for the workload. Dropping it silently is the failure this guards.
+    let Some((key, value)) = ambient_variable() else {
+        eprintln!("SKIP: this process has no ambient variable to test with");
+        return;
+    };
+    let run = start(1).await;
+    let code = run_to_completion(&run, &format!("test \"${key}\" = \"{value}\"")).await;
+    assert_eq!(
+        code, 0,
+        "{key} was exported in the calling environment and must reach the workload"
+    );
+    run.destroy().await;
+}
+
+#[tokio::test]
+async fn clear_env_vars_drops_the_callers_environment() {
+    // The opt-out, for a run whose result must not depend on ambient
+    // state: a benchmark, a reproduction, a CI job against a baseline.
+    let Some((key, _)) = ambient_variable() else {
+        eprintln!("SKIP: this process has no ambient variable to test with");
+        return;
+    };
+    let run = start(1).await;
+    let (exec, mut output) = run
+        .exec(&def_env(&run, &format!("test -z \"${key}\""), true, true))
+        .await
+        .expect("exec starts");
+    let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
+    tokio::time::timeout(Duration::from_secs(30), exec.wait_finished())
+        .await
+        .expect("exec finishes");
+    let _ = drain.await;
+    assert_eq!(
+        exec.status().exit_code,
+        Some(0),
+        "--clear-env-vars must drop {key}, which the caller exported"
+    );
+    run.destroy().await;
+}
+
+#[tokio::test]
+async fn clearing_the_environment_keeps_what_a_process_needs() {
+    // An empty environment is not a useful one: without PATH a workload
+    // cannot find the commands it runs. The strict form is "almost
+    // empty", not "empty".
+    let run = start(1).await;
+    let (exec, mut output) = run
+        .exec(&def_env(&run, "test -n \"$PATH\" && test -n \"$HOME\"", true, true))
+        .await
+        .expect("exec starts");
+    let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
+    tokio::time::timeout(Duration::from_secs(30), exec.wait_finished())
+        .await
+        .expect("exec finishes");
+    let _ = drain.await;
+    assert_eq!(exec.status().exit_code, Some(0));
+    run.destroy().await;
+}
+
+#[tokio::test]
+async fn the_emulator_injection_survives_clear_env_vars() {
+    // The injection is layered on explicitly rather than inherited, so
+    // clearing must not reach it — a workload that lost it would run
+    // unemulated on whatever hardware is present and still exit 0.
+    let run = start(1).await;
+    let (exec, mut output) = run
+        .exec(&def_env(
+            &run,
+            &format!("test -n \"${STUB_ENV}\""),
+            true,
+            true,
+        ))
+        .await
+        .expect("exec starts");
+    let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
+    tokio::time::timeout(Duration::from_secs(30), exec.wait_finished())
+        .await
+        .expect("exec finishes");
+    let _ = drain.await;
+    assert_eq!(exec.status().exit_code, Some(0));
+    run.destroy().await;
 }
 
 /// Whether `pid` still exists. `kill(pid, 0)` is the standard probe.

@@ -157,7 +157,9 @@ pub fn build_specs(
                     // default for a process running on the host.
                     workdir: args.workdir.clone().or_else(|| Some(desc.workdir.clone())),
                     stdio,
-                    inherit_env: false,
+                    // The caller's environment, unless they asked for a
+                    // clean one. See [`SpawnSpec::inherit_env`].
+                    inherit_env: !def.clear_env,
                     // The process we spawn *is* the workload, so
                     // signalling its group reaches it directly.
                     container: None,
@@ -309,6 +311,7 @@ mod tests {
             worker_exec: None,
             nproc_per_node: nproc,
             capture_all,
+            clear_env: false,
         }
     }
 
@@ -413,6 +416,46 @@ mod tests {
         // The directory the wrapper redirects into must exist before the
         // container tries to write there.
         assert!(scratch.path().join("exec").join("e-1").is_dir());
+    }
+
+    #[test]
+    fn a_workload_inherits_the_callers_environment_by_default() {
+        // Mirage's parent is the terminal the user typed in, so what they
+        // exported there — a token, a PYTHONPATH, a proxy — they meant
+        // for the workload.
+        let specs = build_specs(&desc(1), &exec_def(1, false), &id()).unwrap();
+        assert!(specs[0].inherit_env);
+    }
+
+    #[test]
+    fn clear_env_asks_for_an_almost_empty_environment() {
+        let mut def = exec_def(1, false);
+        def.clear_env = true;
+        let specs = build_specs(&desc(1), &def, &id()).unwrap();
+        assert!(!specs[0].inherit_env);
+        // The emulator's own variables survive either way: they are
+        // layered on explicitly, not inherited, and a workload that lost
+        // them would run unemulated.
+        assert_eq!(specs[0].env.get("EMU").map(String::as_str), Some("1"));
+    }
+
+    #[test]
+    fn clearing_the_environment_does_not_change_a_containerised_exec() {
+        // A container never inherits the host environment; the workload
+        // sees exactly what mirage passes with `-e`. The flag governs the
+        // provider *client*, which needs its own environment to find its
+        // socket whatever the user asked for.
+        let scratch = tempfile::tempdir().unwrap();
+        let mut d = desc(1);
+        d.containers = Some(ContainerTargets {
+            provider: "podman".to_string(),
+            names: vec!["mirage-s-node-0".to_string()],
+            scratch: scratch.path().to_path_buf(),
+        });
+        let mut def = exec_def(1, false);
+        def.clear_env = true;
+        let specs = build_specs(&d, &def, &id()).unwrap();
+        assert!(specs[0].inherit_env);
     }
 
     #[test]

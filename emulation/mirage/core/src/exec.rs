@@ -156,6 +156,25 @@ pub struct ExecDef {
     /// therefore closed for all of them.
     #[serde(default)]
     pub capture_all: bool,
+
+    /// Start the workload with an almost-empty environment instead of
+    /// the caller's.
+    ///
+    /// By default a workload inherits everything the terminal mirage was
+    /// started from had exported: mirage's parent *is* the user's shell,
+    /// so what is in it was put there deliberately. This drops all of it,
+    /// keeping only what a process needs to function (`PATH`, `HOME`,
+    /// `TERM`, …) plus the emulator's injection and any `--env`.
+    ///
+    /// Worth having for a run whose result must not depend on ambient
+    /// state — a benchmark, a reproduction, a CI job comparing against a
+    /// recorded baseline.
+    ///
+    /// Has no effect on a containerised session: a container never
+    /// inherits the host's environment in the first place, and only
+    /// what mirage passes explicitly reaches the workload.
+    #[serde(default)]
+    pub clear_env: bool,
 }
 
 fn one_proc() -> u32 {

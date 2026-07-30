@@ -401,6 +401,24 @@ pub struct ExecArgsCli {
     #[arg(long)]
     pub capture_all: bool,
 
+    /// Start the workload with an almost-empty environment instead of
+    /// inheriting this terminal's.
+    ///
+    /// By default everything you have exported reaches the workload —
+    /// an API token, a `PYTHONPATH`, a proxy, a framework tuning
+    /// variable — because mirage's parent is your shell and what is in
+    /// it you put there. This drops all of it, keeping only what a
+    /// process needs to run (`PATH`, `HOME`, `TERM`, …) plus the
+    /// emulator's own variables and any `--env`.
+    ///
+    /// Use it when a result must not depend on ambient state: a
+    /// benchmark, a reproduction, a CI job compared against a baseline.
+    ///
+    /// No effect on a containerised session, which never inherits the
+    /// host environment anyway.
+    #[arg(long)]
+    pub clear_env_vars: bool,
+
     /// Extra environment variables, in `KEY=VALUE` form. May be repeated.
     #[arg(long = "env", value_name = "KEY=VALUE")]
     pub envs: Vec<String>,
@@ -539,6 +557,23 @@ pub struct RunArgs {
     /// every line, at the cost of stdin, which is closed for all ranks.
     #[arg(long)]
     capture_all: bool,
+    /// Start the workload with an almost-empty environment instead of
+    /// inheriting this terminal's.
+    ///
+    /// By default everything you have exported reaches the workload —
+    /// an API token, a `PYTHONPATH`, a proxy, a framework tuning
+    /// variable — because mirage's parent is your shell and what is in
+    /// it you put there. This drops all of it, keeping only what a
+    /// process needs to run (`PATH`, `HOME`, `TERM`, …) plus the
+    /// emulator's own variables and any `--env`.
+    ///
+    /// Use it when a result must not depend on ambient state: a
+    /// benchmark, a reproduction, a CI job compared against a baseline.
+    ///
+    /// No effect on a containerised session, which never inherits the
+    /// host environment anyway.
+    #[arg(long)]
+    clear_env_vars: bool,
     /// The command and its arguments.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
     argv: Vec<String>,

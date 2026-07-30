@@ -384,6 +384,7 @@ mod tests {
             worker_exec: None,
             nproc_per_node: 1,
             capture_all: true,
+            clear_env: false,
         }
     }
 
