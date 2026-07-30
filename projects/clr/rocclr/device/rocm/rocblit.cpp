@@ -3085,7 +3085,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     }
     // Release pinned memory after batch copy completes
     for (const auto& op : pinned_copy_ops) {
-      gpu().addPinnedMem(op.srcMemory);
+      gpu().addPinnedMem(op.dstMemory);
     }
     pinned_copy_ops.clear();
   }
