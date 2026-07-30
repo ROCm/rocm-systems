@@ -262,7 +262,7 @@ def validate_barrier_instructions(sample_records):
 def validate_jump_instructions(sample_records):
     """Validate jump instructions (s_swappc, s_setpc, s_sleep).
 
-    When issued, inst_type must be JUMP and arbiter must have issued on brmsg pipe.
+    When issued, inst_type must be JUMP and arbiter must have issued on scalar pipe.
     When stalled, only NO_INSTRUCTION_AVAILABLE or ARBITER_NOT_WIN is allowed.
     """
     allowed_stall_reasons = set(
@@ -277,13 +277,12 @@ def validate_jump_instructions(sample_records):
             assert (
                 record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_JUMP"
             ), "Invalid jump instruction type"
-            # TODO: verify the expected behavior
-            # assert (
-            #     snapshot["arb_state_issue_brmsg"] == 1
-            # ), "Arbiter must have issued brmsg instruction for jump"
             assert (
-                snapshot["arb_state_stall_brmsg"] == 0
-            ), "Arbiter must not have stalled brmsg instruction for jump"
+                snapshot["arb_state_issue_scalar"] == 1
+            ), "Arbiter must have issued scalar instruction for jump"
+            assert (
+                snapshot["arb_state_stall_scalar"] == 0
+            ), "Arbiter must not have stalled scalar instruction for jump"
         else:
             stall_reason = snapshot["stall_reason"]
             assert (
@@ -294,15 +293,10 @@ def validate_jump_instructions(sample_records):
                 stall_reason
                 == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN"
             ):
-                # TODO: verify the expected behavior with HW team - seen a case where
-                # ARBITER_NOT_WIN stall reason is reported for a JUMP instruction while
-                # neither arb_state_issue_brmsg nor arb_state_stall_brmsg is set (some
-                # other pipe, e.g. valu, was issuing/stalling instead)
-                # assert (
-                #     snapshot["arb_state_issue_brmsg"] == 1
-                #     or snapshot["arb_state_stall_brmsg"] == 1
-                # ), "Arbiter must have issued or stalled brmsg instruction for jump"
-                pass
+                assert (
+                    snapshot["arb_state_issue_scalar"] == 1
+                    or snapshot["arb_state_stall_scalar"] == 1
+                ), "Arbiter must have issued or stalled scalar instruction for jump"
 
 
 def validate_message_instructions(sample_records):
