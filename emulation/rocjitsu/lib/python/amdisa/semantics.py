@@ -2028,16 +2028,26 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
     return InstructionSemantics(name, 'nop')
 
 
-_BUFFER_FORMAT_MAP: dict[str, tuple[int, int]] = {
-    'FORMAT_X': (4, 1),
-    'FORMAT_XY': (4, 2),
-    'FORMAT_XYZ': (4, 3),
-    'FORMAT_XYZW': (4, 4),
-    'FORMAT_D16_X': (2, 1),
-    'FORMAT_D16_XY': (2, 2),
-    'FORMAT_D16_XYZ': (2, 3),
-    'FORMAT_D16_XYZW': (2, 4),
+_BUFFER_FORMAT_MAP: dict[str, tuple[int, int, bool]] = {
+    'FORMAT_X': (4, 1, False),
+    'FORMAT_XY': (4, 2, False),
+    'FORMAT_XYZ': (4, 3, False),
+    'FORMAT_XYZW': (4, 4, False),
+    'FORMAT_D16_X': (2, 1, False),
+    'FORMAT_D16_XY': (2, 2, False),
+    'FORMAT_D16_XYZ': (2, 3, False),
+    'FORMAT_D16_XYZW': (2, 4, False),
+    'FORMAT_D16_HI_X': (2, 1, False),
 }
+
+
+def _normalize_buffer_format_suffix(suffix: str) -> str:
+    """Map RDNA3+ ``D16[_HI]_FORMAT_*`` ordering back to legacy ``FORMAT_D16[_HI]_*``."""
+    if suffix.startswith('D16_HI_FORMAT'):
+        return 'FORMAT_D16_HI' + suffix[len('D16_HI_FORMAT') :]
+    if suffix.startswith('D16_FORMAT'):
+        return 'FORMAT_D16' + suffix[len('D16_FORMAT') :]
+    return suffix
 
 
 def _derive_mubuf(name: str) -> InstructionSemantics | None:
@@ -2076,8 +2086,8 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
     is_store = '_STORE_' in upper
     for prefix in ('BUFFER_LOAD_', 'BUFFER_STORE_'):
         if upper.startswith(prefix):
-            suffix = upper[len(prefix) :]
-            info = _FLAT_DATA_MAP.get(suffix)
+            suffix = _normalize_buffer_format_suffix(upper[len(prefix) :])
+            info = _FLAT_DATA_MAP.get(suffix) or _BUFFER_FORMAT_MAP.get(suffix)
             if info:
                 esz, ne, se = info
                 cls = 'buffer_store' if is_store else 'buffer_load'
@@ -2093,26 +2103,14 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
     return InstructionSemantics(name, 'nop')
 
 
-_MTBUF_FORMAT_MAP: dict[str, tuple[int, int, bool]] = {
-    'FORMAT_X': (4, 1, False),
-    'FORMAT_XY': (4, 2, False),
-    'FORMAT_XYZ': (4, 3, False),
-    'FORMAT_XYZW': (4, 4, False),
-    'FORMAT_D16_X': (2, 1, False),
-    'FORMAT_D16_XY': (2, 2, False),
-    'FORMAT_D16_XYZ': (2, 3, False),
-    'FORMAT_D16_XYZW': (2, 4, False),
-}
-
-
 def _derive_mtbuf(name: str) -> InstructionSemantics | None:
     """Derive semantics for an MTBUF (Typed Buffer memory) instruction."""
     upper = name.upper()
     is_store = '_STORE_' in upper
     for prefix in ('TBUFFER_LOAD_', 'TBUFFER_STORE_'):
         if upper.startswith(prefix):
-            suffix = upper[len(prefix) :]
-            info = _FLAT_DATA_MAP.get(suffix) or _MTBUF_FORMAT_MAP.get(suffix)
+            suffix = _normalize_buffer_format_suffix(upper[len(prefix) :])
+            info = _FLAT_DATA_MAP.get(suffix) or _BUFFER_FORMAT_MAP.get(suffix)
             if info:
                 esz, ne, se = info
                 cls = 'tbuffer_store' if is_store else 'tbuffer_load'

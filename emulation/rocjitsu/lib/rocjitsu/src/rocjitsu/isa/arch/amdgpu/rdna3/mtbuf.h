@@ -98,6 +98,7 @@ class TbufferLoadD16FormatXMtbuf : public Mtbuf {
 public:
   TbufferLoadD16FormatXMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;

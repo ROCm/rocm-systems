@@ -98,6 +98,7 @@ class BufferLoadD16FormatXMubuf : public Mubuf {
 public:
   BufferLoadD16FormatXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -404,6 +405,7 @@ class BufferLoadD16HiFormatXMubuf : public Mubuf {
 public:
   BufferLoadD16HiFormatXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
