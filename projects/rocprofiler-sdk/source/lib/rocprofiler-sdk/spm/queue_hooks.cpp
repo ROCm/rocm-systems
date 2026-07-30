@@ -31,7 +31,7 @@ namespace spm
 namespace
 {
 auto
-active_spm_contexts_filter()
+spm_contexts_filter()
 {
     return [](const context::context* ctx) -> bool { return ctx && ctx->dispatch_spm != nullptr; };
 }
@@ -48,7 +48,7 @@ write_hook(const hsa::Queue&                                        queue,
            hsa::inst_pkt_t&                                         inst_pkt,
            bool&                                                    is_serialized)
 {
-    auto active = context::get_active_contexts(active_spm_contexts_filter());
+    auto active = context::get_active_contexts(spm_contexts_filter());
     for(const auto* ctx : active)
     {
         for(auto& cb : ctx->dispatch_spm->callbacks)
@@ -76,8 +76,11 @@ signal_completion_hook(const hsa::Queue& /*queue*/,
                        hsa::inst_pkt_t&                inst_pkt,
                        kernel_dispatch::profiling_time dispatch_time)
 {
-    auto active = context::get_active_contexts(active_spm_contexts_filter());
-    for(const auto* ctx : active)
+    // Route by packet provenance, not current activeness: post_kernel_call self-filters via
+    // packet_return_map, so in-flight dispatches still complete after stop_context removes the
+    // context from the active list.
+    auto contexts = context::get_registered_contexts(spm_contexts_filter());
+    for(const auto* ctx : contexts)
     {
         for(auto& cb : ctx->dispatch_spm->callbacks)
         {
@@ -89,7 +92,7 @@ signal_completion_hook(const hsa::Queue& /*queue*/,
 bool
 is_any_active()
 {
-    return !context::get_active_contexts(active_spm_contexts_filter()).empty();
+    return !context::get_active_contexts(spm_contexts_filter()).empty();
 }
 }  // namespace spm
 }  // namespace rocprofiler

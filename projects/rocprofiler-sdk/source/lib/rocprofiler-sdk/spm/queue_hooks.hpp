@@ -49,8 +49,10 @@ write_hook(const hsa::Queue&                                        queue,
            hsa::inst_pkt_t&                                         inst_pkt,
            bool&                                                    is_serialized);
 
-// Explicit replacement for the SPM completion callback. Iterates active
-// dispatch_spm contexts and calls each callback's post_kernel_call.
+// Explicit replacement for the SPM completion callback. Iterates registered
+// dispatch_spm contexts (not only active ones) and calls each callback's
+// post_kernel_call; post_kernel_call self-filters via packet_return_map so
+// in-flight dispatches still complete after stop_context.
 void
 signal_completion_hook(const hsa::Queue&                           queue,
                        const hsa::rocprofiler_packet&              kernel_packet,
