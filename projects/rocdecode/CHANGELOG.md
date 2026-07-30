@@ -2,12 +2,18 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## (Unreleased) rocDecode 2.0.0
+## (Unreleased) rocDecode 1.9.0
 
 ### Added
 
 * Invalid video size handling for AVC/HEVC.
 * Windows support (experimental): hardware-accelerated video decoding on Windows via the vaon12 backend (Mesa's VA-API on D3D12 translation layer). Supports H.264, HEVC, AV1, and VP9. Requires HIP from TheRock for Windows and the vaon12 NuGet package.
+
+### Resolved issues
+
+* Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
+* Corrected fake CTest passes.
+* Resolved vendored libva link issue in samples without extra env vars.
 
 ## rocDecode 1.8.0 for ROCm 7.13
 

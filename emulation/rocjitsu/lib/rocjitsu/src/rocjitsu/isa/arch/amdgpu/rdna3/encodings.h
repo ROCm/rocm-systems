@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/instruction.h"
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -23,6 +24,7 @@ namespace encoding {
 /// @brief Primary decode selector constants generated from the ISA XML.
 ///
 /// These values match Instruction::encoding_id(), which is word0 >> 23.
+/// They are not necessarily the narrower MachineInst::encoding bitfield value.
 inline constexpr uint16_t kSop1 = 381;
 inline constexpr uint16_t kSopc = 382;
 inline constexpr uint16_t kSopp = 383;
@@ -45,7 +47,6 @@ inline constexpr uint16_t kSopkOpHi15 = 367;
 inline constexpr uint16_t kSopkOpHi16 = 368;
 inline constexpr uint16_t kSopkOpHi17 = 369;
 inline constexpr uint16_t kSopkOpHi18 = 370;
-inline constexpr uint16_t kSopkOpHi19 = 371;
 inline constexpr uint16_t kSopkOpHi20 = 372;
 inline constexpr uint16_t kSopkOpHi24 = 376;
 inline constexpr uint16_t kSopkOpHi25 = 377;
@@ -241,14 +242,6 @@ inline constexpr uint16_t kVop2OpHi168 = 172;
 inline constexpr uint16_t kVop2OpHi169 = 173;
 inline constexpr uint16_t kVop2OpHi170 = 174;
 inline constexpr uint16_t kVop2OpHi171 = 175;
-inline constexpr uint16_t kVop2OpHi172 = 176;
-inline constexpr uint16_t kVop2OpHi173 = 177;
-inline constexpr uint16_t kVop2OpHi174 = 178;
-inline constexpr uint16_t kVop2OpHi175 = 179;
-inline constexpr uint16_t kVop2OpHi176 = 180;
-inline constexpr uint16_t kVop2OpHi177 = 181;
-inline constexpr uint16_t kVop2OpHi178 = 182;
-inline constexpr uint16_t kVop2OpHi179 = 183;
 inline constexpr uint16_t kVop2OpHi184 = 188;
 inline constexpr uint16_t kVop2OpHi185 = 189;
 inline constexpr uint16_t kVop2OpHi186 = 190;
@@ -273,14 +266,6 @@ inline constexpr uint16_t kVop2OpHi212 = 216;
 inline constexpr uint16_t kVop2OpHi213 = 217;
 inline constexpr uint16_t kVop2OpHi214 = 218;
 inline constexpr uint16_t kVop2OpHi215 = 219;
-inline constexpr uint16_t kVop2OpHi216 = 220;
-inline constexpr uint16_t kVop2OpHi217 = 221;
-inline constexpr uint16_t kVop2OpHi218 = 222;
-inline constexpr uint16_t kVop2OpHi219 = 223;
-inline constexpr uint16_t kVop2OpHi220 = 224;
-inline constexpr uint16_t kVop2OpHi221 = 225;
-inline constexpr uint16_t kVop2OpHi222 = 226;
-inline constexpr uint16_t kVop2OpHi223 = 227;
 inline constexpr uint16_t kVop2OpHi224 = 228;
 inline constexpr uint16_t kVop2OpHi225 = 229;
 inline constexpr uint16_t kVop2OpHi226 = 230;
@@ -302,14 +287,13 @@ inline constexpr uint16_t kVop3OpHi1 = 425;
 inline constexpr uint16_t kVop3OpHi2 = 426;
 inline constexpr uint16_t kVop3OpHi3 = 427;
 inline constexpr uint16_t kVop3OpHi4 = 428;
-inline constexpr uint16_t kVop3OpHi5 = 429;
 inline constexpr uint16_t kVop3OpHi6 = 430;
 inline constexpr uint16_t kVop3p = 408;
-inline constexpr uint16_t kVop3pOpHi1 = 409;
+inline constexpr uint16_t kVop3pHi1 = 409;
 inline constexpr uint16_t kVinterp = 410;
-inline constexpr uint16_t kVinterpOpHi1 = 411;
+inline constexpr uint16_t kVinterpHi1 = 411;
 inline constexpr uint16_t kLdsdir = 412;
-inline constexpr uint16_t kLdsdirOpHi1 = 413;
+inline constexpr uint16_t kLdsdirHi1 = 413;
 inline constexpr uint16_t kDs = 432;
 inline constexpr uint16_t kDsOpHi1 = 433;
 inline constexpr uint16_t kDsOpHi2 = 434;
@@ -321,41 +305,37 @@ inline constexpr uint16_t kMubuf = 448;
 inline constexpr uint16_t kMubufOpHi1 = 449;
 inline constexpr uint16_t kMubufOpHi2 = 450;
 inline constexpr uint16_t kMtbuf = 464;
-inline constexpr uint16_t kMtbufOpHi1 = 465;
-inline constexpr uint16_t kMtbufOpHi2 = 466;
-inline constexpr uint16_t kMtbufOpHi3 = 467;
-inline constexpr uint16_t kMtbufOpHi4 = 468;
-inline constexpr uint16_t kMtbufOpHi5 = 469;
-inline constexpr uint16_t kMtbufOpHi6 = 470;
-inline constexpr uint16_t kMtbufOpHi7 = 471;
+inline constexpr uint16_t kMtbufHi1 = 465;
+inline constexpr uint16_t kMtbufHi2 = 466;
+inline constexpr uint16_t kMtbufHi3 = 467;
+inline constexpr uint16_t kMtbufHi4 = 468;
+inline constexpr uint16_t kMtbufHi5 = 469;
+inline constexpr uint16_t kMtbufHi6 = 470;
+inline constexpr uint16_t kMtbufHi7 = 471;
 inline constexpr uint16_t kMimg = 480;
 inline constexpr uint16_t kMimgOpHi1 = 481;
 inline constexpr uint16_t kMimgOpHi2 = 482;
 inline constexpr uint16_t kMimgOpHi3 = 483;
 inline constexpr uint16_t kMimgOpHi4 = 484;
 inline constexpr uint16_t kExp = 496;
-inline constexpr uint16_t kExpOpHi1 = 497;
-inline constexpr uint16_t kExpOpHi2 = 498;
-inline constexpr uint16_t kExpOpHi3 = 499;
-inline constexpr uint16_t kExpOpHi4 = 500;
-inline constexpr uint16_t kExpOpHi5 = 501;
-inline constexpr uint16_t kExpOpHi6 = 502;
-inline constexpr uint16_t kExpOpHi7 = 503;
+inline constexpr uint16_t kExpHi1 = 497;
+inline constexpr uint16_t kExpHi2 = 498;
+inline constexpr uint16_t kExpHi3 = 499;
+inline constexpr uint16_t kExpHi4 = 500;
+inline constexpr uint16_t kExpHi5 = 501;
+inline constexpr uint16_t kExpHi6 = 502;
+inline constexpr uint16_t kExpHi7 = 503;
 inline constexpr uint16_t kFlat = 440;
-inline constexpr uint16_t kFlatOpHi1 = 441;
-inline constexpr uint16_t kFlatOpHi2 = 442;
-inline constexpr uint16_t kFlatOpHi3 = 443;
-inline constexpr uint16_t kFlatOpHi4 = 444;
-inline constexpr uint16_t kFlatOpHi5 = 445;
-inline constexpr uint16_t kFlatOpHi6 = 446;
-inline constexpr uint16_t kFlatOpHi7 = 447;
-inline constexpr uint16_t kVop3SdstEnc = 424;
-inline constexpr uint16_t kVop3SdstEncOpHi1 = 425;
-inline constexpr uint16_t kVop3SdstEncOpHi2 = 426;
-inline constexpr uint16_t kVop3SdstEncOpHi3 = 427;
-inline constexpr uint16_t kVop3SdstEncOpHi4 = 428;
-inline constexpr uint16_t kVop3SdstEncOpHi5 = 429;
-inline constexpr uint16_t kVop3SdstEncOpHi6 = 430;
+inline constexpr uint16_t kFlatHi1 = 441;
+inline constexpr uint16_t kFlatHi2 = 442;
+inline constexpr uint16_t kFlatHi3 = 443;
+inline constexpr uint16_t kFlatHi4 = 444;
+inline constexpr uint16_t kFlatHi5 = 445;
+inline constexpr uint16_t kFlatHi6 = 446;
+inline constexpr uint16_t kFlatHi7 = 447;
+inline constexpr uint16_t kVop3SdstEnc = 426;
+inline constexpr uint16_t kVop3SdstEncOpHi3 = 429;
+inline constexpr uint16_t kVop3SdstEncOpHi4 = 430;
 
 } // namespace encoding
 
@@ -419,10 +399,12 @@ public:
 class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
   using OpEncoding = Vop1MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -451,6 +433,7 @@ public:
   bool has_lit();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -474,11 +457,13 @@ public:
 class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
   bool hasImpliedLiteral();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
   uint32_t literal_ = 0;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
@@ -504,6 +489,7 @@ public:
 class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -513,6 +499,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -526,6 +513,7 @@ public:
 class Vop3p : public IsaInstruction<Isa> {
 public:
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -535,6 +523,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
@@ -611,6 +600,7 @@ public:
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -620,6 +610,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 3> raw_words_{};
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;

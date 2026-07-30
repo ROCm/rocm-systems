@@ -83,6 +83,7 @@ typedef enum {
 typedef struct {
     int device_id;
     std::string gpu_uuid;
+    std::string gpu_pci_bdf;
 #ifdef _WIN32
     LUID adapter_luid;
 #else
@@ -208,6 +209,10 @@ private:
      */
     std::unordered_map<std::string, int> gpu_uuids_to_render_nodes_map_;
     std::unordered_map<std::string, ComputePartition> gpu_uuids_to_compute_partition_map_;
+
+    // GPU PCI BDF -> render node index / compute partition (primary match key).
+    std::unordered_map<std::string, int> gpu_pci_bdf_to_render_nodes_map_;
+    std::unordered_map<std::string, ComputePartition> gpu_pci_bdf_to_compute_partition_map_;
 #endif
     VaContext();
     VaContext(const VaContext&) = delete;
@@ -222,5 +227,11 @@ private:
     void GetVisibleDevices(std::vector<int>& visible_devices_vetor);
     void GetDrmNodeOffset(std::string device_name, uint8_t device_id, std::vector<int>& visible_devices, ComputePartition current_compute_partition, int &offset);
     void GetGpuUuids();
+
+    // Returns the lowercased PCI BDF (function suffix stripped) for a render node, or "" if not a PCI device.
+    std::string GetRenderNodeBusId(const std::string& render_node_name);
+
+    // Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
+    std::string GetFirstAvailableDrmNode();
 #endif
 };

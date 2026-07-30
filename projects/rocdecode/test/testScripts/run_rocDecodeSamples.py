@@ -143,7 +143,10 @@ if resultsDir == '':
     elif sampleMode == 1:
         resultsPath = scriptPath+'/rocDecode_videoDecodePerf_results'
 else:
-    resultsPath = resultsDir+'/rocDecode_videoDecode_results'
+    if sampleMode == 0:
+        resultsPath = resultsDir+'/rocDecode_videoDecode_results'
+    elif sampleMode == 1:
+        resultsPath = resultsDir+'/rocDecode_videoDecodePerf_results'
 
 run_rocDecode_app = os.path.abspath(rocDecode_exe)
 os.makedirs(resultsPath, exist_ok=True)

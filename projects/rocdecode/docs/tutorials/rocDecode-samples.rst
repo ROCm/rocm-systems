@@ -11,13 +11,11 @@ rocDecode samples are available in the `rocDecode GitHub repository <https://git
 Linux setup
 -----------
 
-To run the samples on Linux, set the ``ROCM_PATH`` to point to the location of your ROCm installation, and set ``LD_PRELOAD`` and ``LIBVA_DRIVERS_PATH`` to point to the ROCm systems libraries and drivers:
+To run the samples on Linux, set the ``ROCM_PATH`` to point to the location of your ROCm installation:
 
 .. code:: shell
 
-  export LD_PRELOAD=$ROCM_PATH/lib/rocm_sysdeps/lib/librocm_sysdeps_va.so.2:$ROCM_PATH/lib/rocm_sysdeps/lib/librocm_sysdeps_va-drm.so.2
-
-  export LIBVA_DRIVERS_PATH=$ROCM_PATH/lib/rocm_sysdeps/lib/
+  export ROCM_PATH=path_to_rocm_installation
 
 FFmpeg development libraries must be installed to build and run samples that use FFmpeg for either demultiplexing or decoding:
 

@@ -467,6 +467,14 @@ inline native<float> f16_to_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>(bits);
 }
 
+/// Vectorized, bit-exact port of `bf16_to_f32` (util/data_types.h). BF16 shares
+/// the f32 exponent width, so widening is just a 16-bit left shift of the low
+/// half — no exponent rebias or denormal handling, and NaN/Inf survive
+/// unchanged. The high 16 bits of each input lane are ignored.
+inline native<float> bf16_to_f32_simd(native<uint32_t> v) {
+  return std::bit_cast<native<float>>((v & 0xFFFFu) << 16);
+}
+
 /// Vectorized, bit-exact port of `f32_to_f16` (util/data_types.h). Returns the
 /// f16 bits in the low 16 bits of each lane (high bits zero). All conditions
 /// are expressed as unsigned comparisons on the biased f32 exponent `fe`, so
@@ -515,6 +523,48 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
   stdx::where(fe >= 143u && fe <= 254u, out) = sign | 0x7C00u;
 
   // Inf / NaN (fe == 255): NaN keeps payload MSBs and forces the low bit.
+  stdx::where(fe == 255u, out) = sign | 0x7C00u;
+  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | (fm >> 13) | 1u;
+
+  return out;
+}
+
+/// Vectorized counterpart of `f32_to_f16_mode`.
+inline native<uint32_t> f32_to_f16_mode_simd(native<float> val, bool fp16_ovfl) {
+  native<uint32_t> out = f32_to_f16_simd(val);
+  if (!fp16_ovfl)
+    return out;
+
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const U fe = (f >> 23) & 0xFFu;
+  stdx::where(fe != 0xFFu && (out & 0x7FFFu) == 0x7C00u, out) = (out & 0x8000u) | 0x7BFFu;
+  return out;
+}
+
+/// One-argument helper for generated lambdas used only on the `FP16_OVFL` path.
+inline native<uint32_t> f32_to_f16_ovfl_simd(native<float> val) {
+  return f32_to_f16_mode_simd(val, true);
+}
+
+/// Vectorized, bit-exact port of `f32_to_f16_rtz` (util/data_types.h).
+inline native<uint32_t> f32_to_f16_rtz_simd(native<float> val) {
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const U sign = (f >> 16) & 0x8000u;
+  const U fe = (f >> 23) & 0xFFu;
+  const U fm = f & 0x7FFFFFu;
+
+  U out = sign | ((fe - 112u) << 10) | (fm >> 13);
+
+  const U mm = fm | 0x800000u;
+  U sh = 126u - fe;
+  stdx::where(sh > 31u, sh) = 31u;
+  stdx::where(fe <= 112u, out) = sign | (mm >> sh);
+
+  stdx::where(fe < 102u, out) = sign;
+  stdx::where(fe >= 143u && fe <= 254u, out) = sign | 0x7BFFu;
+
   stdx::where(fe == 255u, out) = sign | 0x7C00u;
   stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | (fm >> 13) | 1u;
 

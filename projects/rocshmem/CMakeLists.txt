@@ -53,18 +53,20 @@ option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
 option(USE_HEAP_DEVICE_UNCACHED "Heap uses GPU memory in uncached mode" OFF)
 option(USE_HEAP_DEVICE_COARSEGRAIN "Heap uses GPU memory in coarsegrain mode" OFF)
-option(USE_HEAP_DEVICE_VMM_POSIX "Heap uses GPU memory with VMM and POSIX FD IPC (requires ROCm 7.0+)" OFF)
+option(USE_HEAP_DEVICE_VMM_POSIX "Heap uses GPU memory with VMM and POSIX FD IPC (requires ROCm 7.2+)" OFF)
 option(USE_HEAP_DEVICE_VMM_FABRIC "Heap uses GPU memory with VMM and Fabric handles (requires ROCm 7.next)" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
 option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
 option(USE_HDP_FLUSH "Force flush the HDP cache." OFF)
 option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on the host." OFF)
+option(USE_ROCPROFILER_REGISTER "Register rocSHMEM API tables with rocprofiler-register so rocprofiler-sdk tools can trace host-stream APIs." ON)
 
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (uses MPI if available, otherwise SLR)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
+option(BUILD_PYTHON_BINDING "Build and install the rocshmem4py Python binding" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
@@ -97,7 +99,7 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
-set(VERSION_STRING 3.5.0)
+set(VERSION_STRING 3.6.0)
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
@@ -113,8 +115,8 @@ rocm_setup_version(VERSION ${VERSION_STRING})
 # VALIDATE VMM POSIX ALLOCATOR OPTION
 #############################################################################
 if(USE_HEAP_DEVICE_VMM_POSIX)
-  if(${ROCM_MAJOR_VERSION} LESS 7)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+  if(${ROCM_MAJOR_VERSION} LESS 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} LESS 2))
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.2 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
   endif()
 endif()
 
@@ -124,18 +126,43 @@ endif()
 # Try to find AMD SMI library
 find_package(amd_smi QUIET)
 
+set(HAVE_AMDSMI_GPU_FABRIC_INFO FALSE)
+
 if(TARGET amd_smi)
   include(CheckLibraryExists)
+  include(CheckCXXSourceCompiles)
   include(CMakePushCheckState)
+
+  # Check if AMD SMI library has fabric info support
   cmake_push_check_state(RESET)
   set(CMAKE_REQUIRED_LIBRARIES amd_smi)
-  check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_GPU_FABRIC_INFO)
+  check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_FABRIC_FUNC)
   cmake_pop_check_state()
 
-  if(HAVE_AMDSMI_GPU_FABRIC_INFO)
+  # Check if HIP runtime has hipMemFabricHandle_t
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+  check_cxx_source_compiles("
+    #include <hip/hip_runtime_api.h>
+    int main() {
+      hipMemFabricHandle_t handle;
+      (void)handle;
+      return 0;
+    }
+  " HAVE_HIP_FABRIC_HANDLE)
+  cmake_pop_check_state()
+
+  # Both conditions must be met for full fabric support
+  if(HAVE_AMDSMI_FABRIC_FUNC AND HAVE_HIP_FABRIC_HANDLE)
+    set(HAVE_AMDSMI_GPU_FABRIC_INFO TRUE)
     message(STATUS "AMD SMI library found with fabric info support - enabling pod-based IPC capability detection")
   else()
-    message(STATUS "AMD SMI library found but lacks amdsmi_get_gpu_fabric_info - disabling pod-based IPC capability detection")
+    if(NOT HAVE_AMDSMI_FABRIC_FUNC)
+      message(STATUS "AMD SMI library found but lacks amdsmi_get_gpu_fabric_info - disabling pod-based IPC capability detection")
+    endif()
+    if(NOT HAVE_HIP_FABRIC_HANDLE)
+      message(STATUS "HIP runtime lacks hipMemFabricHandle_t support (requires ROCm 7.14+) - disabling fabric handle features")
+    endif()
   endif()
 else()
   message(STATUS "AMD SMI library not found - disabling pod-based IPC capability detection")
@@ -145,18 +172,19 @@ endif()
 # VALIDATE VMM FABRIC ALLOCATOR OPTION
 #############################################################################
 if(USE_HEAP_DEVICE_VMM_FABRIC)
-  if(${ROCM_MAJOR_VERSION} LESS 7)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.next or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+  if(${ROCM_MAJOR_VERSION} LESS 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} LESS 2))
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.2 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
   endif()
 
-  # VMM Fabric allocator requires fabric info support for pod-based IPC
+  # VMM Fabric allocator requires both AMD SMI fabric info and HIP fabric handle support
   if(NOT HAVE_AMDSMI_GPU_FABRIC_INFO)
-    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires AMD SMI library with amdsmi_get_gpu_fabric_info support. "
-                        "Either update to a newer AMD SMI version or disable USE_HEAP_DEVICE_VMM_FABRIC.")
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires both:\n"
+                        "  1. AMD SMI library with amdsmi_get_gpu_fabric_info support\n"
+                        "  2. HIP runtime with hipMemFabricHandle_t support (ROCm 7.14+)\n"
+                        "Either update to ROCm 7.14 or newer, or disable USE_HEAP_DEVICE_VMM_FABRIC.")
   endif()
 
-  # Note: Fabric handle support will be available in a future ROCm 7.x release
-  message(STATUS "USE_HEAP_DEVICE_VMM_FABRIC enabled. Requires fabric handle support (ROCm 7.next)")
+  message(STATUS "USE_HEAP_DEVICE_VMM_FABRIC enabled with full fabric handle support")
 endif()
 
 #############################################################################
@@ -172,6 +200,9 @@ set(DEFAULT_GPUS
 
 if(${ROCM_MAJOR_VERSION} GREATER 6)
   list(APPEND DEFAULT_GPUS gfx950)
+endif()
+
+if(${ROCM_MAJOR_VERSION} GREATER 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 14))
   list(APPEND DEFAULT_GPUS gfx1250)
 endif()
 
@@ -314,6 +345,35 @@ if (NOT BUILD_TESTS_ONLY)
 
   if (USE_SDMA)
     find_package(hsakmt REQUIRED)
+    # Workaround for RoCM 7.13/14
+    # hsakmtTargets.cmake contains paths baked in from the ROCm RHEL CI build:
+    #   /usr/lib64/libc.so      — bare libc path instead of -lc (always implicit)
+    #   -L/__w/rockrel/...      — hardcoded CI search path for libdrm/libdrm_amdgpu
+    # Strip both and inject the correct search path for libdrm.
+    get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
+    list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "(/libc\\.so|/__w/)")
+    find_library(_DRM_LIB drm HINTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    if(_DRM_LIB)
+      get_filename_component(_drm_dir "${_DRM_LIB}" DIRECTORY)
+      list(PREPEND _hsakmt_iface_libs "-L${_drm_dir}")
+      unset(_drm_dir)
+    endif()
+    set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
+    unset(_hsakmt_iface_libs)
+  endif()
+
+  if(USE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register QUIET)
+    if(NOT rocprofiler-register_FOUND)
+      message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
+    endif()
+  endif()
+
+  if(USE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register QUIET)
+    if(NOT rocprofiler-register_FOUND)
+      message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
+    endif()
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -447,6 +507,12 @@ if (NOT BUILD_TESTS_ONLY)
     )
   endif()
 
+  if(rocprofiler-register_FOUND)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCSHMEM_ROCPROFILER_REGISTER=1)
+    target_link_libraries(${PROJECT_NAME}
+                          PRIVATE rocprofiler-register::rocprofiler-register)
+  endif()
+
   if(${ROCM_MAJOR_VERSION} LESS 7)
     # ROCm 6.x requires us to explicitly enable warp sync builtins
     target_compile_definitions(${PROJECT_NAME} PUBLIC $<BUILD_INTERFACE:HIP_ENABLE_WARP_SYNC_BUILTINS=1>)
@@ -524,5 +590,17 @@ add_subdirectory(tests)
 
 if (BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+###############################################################################
+# PYTHON BINDING (rocshmem4py)
+#
+# Opt-in build of the rocshmem4py Python extension as a sub-project. Decoupled
+# from BUILD_PYTHON_TESTS so packagers (e.g. TheRock) can ship the binding
+# without test assets, and vice versa. python/CMakeLists.txt detects sub-
+# project mode and links against the in-tree `rocshmem` target directly.
+###############################################################################
+if (BUILD_PYTHON_BINDING AND NOT BUILD_TESTS_ONLY)
+  add_subdirectory(python)
 endif()
 
