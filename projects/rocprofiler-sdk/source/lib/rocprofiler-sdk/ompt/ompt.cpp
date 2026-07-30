@@ -190,14 +190,9 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     auto* state_prior = as_task_state(pprior);
     if(state_prior == nullptr)
     {
-        // An empty slot is only expected for the trailing early_fulfill case; a
-        // non-empty slot here is an implicit task (ompt_save_state), which has no
-        // explicit-task correlation to pop/retire -- fall through to handle next_task.
-        if(pprior->ptr == nullptr)
-        {
-            if(prior_task_status == ompt_task_early_fulfill) return;
-            ROCP_FATAL << "state_prior == nullptr prior_task_status: " << prior_task_status << ".";
-        }
+        // An implicit task has no explicit-task correlation to pop or retire, and has no
+        // saved state at all unless implicit_task is among the enabled operations.
+        if(pprior->ptr == nullptr && prior_task_status == ompt_task_early_fulfill) return;
     }
     else
     {

@@ -55,6 +55,15 @@ PARALLEL_CATEGORY_OPS = {
     "omp_masked",
 }
 
+# Likewise for the "task" category. Note that omp_implicit_task is not in this set: it
+# belongs to "parallel".
+TASK_CATEGORY_OPS = {
+    "omp_task_create",
+    "omp_task_schedule",
+    "omp_dependences",
+    "omp_task_dependence",
+}
+
 # Representative host-side (CPU) OpenMP operations
 HOST_PARALLEL_OPS = ("omp_parallel_begin", "omp_parallel_end")
 HOST_WORK_OPS = ("omp_work", "omp_sync_region", "omp_dispatch")
@@ -186,6 +195,25 @@ def test_granular_host_filter_only_parallel_ops(rocpd_conn):
         op in ops
         for op in ("omp_parallel_begin", "omp_parallel_end", "omp_implicit_task")
     ), f"--ompt-trace parallel produced no parallel-region records; saw: {sorted(ops)}"
+
+
+def test_granular_host_filter_only_task_ops(rocpd_conn):
+    """Counterpart to the parallel filter: --ompt-trace task must record only the
+    task-category operations, must not leak parallel/sync/mutex/target ops, and must
+    record the explicit tasks the workload creates."""
+    ops = set(_ompt_op_counts(rocpd_conn))
+    if not ops:
+        pytest.skip("no OMPT records present; the task-filter run was likely not run")
+
+    leaks = {op for op in ops if op not in TASK_CATEGORY_OPS}
+    assert not leaks, (
+        f"--ompt-trace task leaked non-task-category operations into the trace: "
+        f"{sorted(leaks)}"
+    )
+    for op in ("omp_task_create", "omp_task_schedule"):
+        assert (
+            op in ops
+        ), f"--ompt-trace task produced no {op!r} records; saw: {sorted(ops)}"
 
 
 def test_ompt_all_form_is_complete(rocpd_conn):
