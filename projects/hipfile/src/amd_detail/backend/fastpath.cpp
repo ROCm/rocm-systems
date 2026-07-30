@@ -301,6 +301,15 @@ async_fastpath_copy(void *userArgs)
         return;
     }
 
+    // Ensure HIP Runtime is initialized. This is a temporary fix to a SEGFAULT
+    // in the HIP Runtime when hipFileRead/hipFileWrite is the first HIP API
+    // call of a new thread.
+    thread_local bool hip_inited{false};
+    if (!hip_inited) {
+        Context<Hip>::get()->hipInit();
+        hip_inited = true;
+    }
+
     hipAmdFileHandle_t handle{};
     handle.fd = op->file->unbufferedFd().value();
     void *devptr =

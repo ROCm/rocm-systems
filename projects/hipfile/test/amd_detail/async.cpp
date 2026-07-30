@@ -886,6 +886,7 @@ struct AsyncFastpathCopyOp : public ::testing::Test,
         EXPECT_CALL(*mbuffer, getBuffer)
             .Times(AnyNumber())
             .WillRepeatedly(Return(reinterpret_cast<hipStream_t>(0xFEFEFEFE)));
+        EXPECT_CALL(mhip, hipInit).Times(AnyNumber());
 
         op = std::make_shared<AsyncOp>(io_type, mfile, mbuffer, mstream, &size, &file_offset, &buffer_offset,
                                        &bytes_transferred);
