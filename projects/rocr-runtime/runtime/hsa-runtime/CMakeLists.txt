@@ -67,6 +67,11 @@ list ( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
 include ( utils )
 include ( hsa_common )
 include ( GNUInstallDirs )
+include ( "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake_modules/ROCRBuildFlags.cmake" )
+
+rocr_configure_build_flags(
+  "${CMAKE_CURRENT_BINARY_DIR}/core/inc/rocr_build_flags.h"
+)
 
 ## Adjust target name for static builds
 ## Original name will be an interface target that adds --whole-archive linker options around the target.
@@ -170,6 +175,7 @@ target_include_directories( ${CORE_RUNTIME_TARGET}
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/libamdhsacode
   ${CMAKE_CURRENT_BINARY_DIR}/core/runtime/trap_handler
   ${CMAKE_CURRENT_BINARY_DIR}/core/runtime/blit_shaders)

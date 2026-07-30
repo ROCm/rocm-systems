@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "core/inc/hotswap.hpp"
+#include "core/inc/rocr_build_flags.h"
 #include "core/inc/hotswap_gfx_query.hpp"
 #include "core/inc/hsa_internal.h"
 #include "core/util/os.h"
@@ -244,11 +245,24 @@ rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target, uint
 
 TEST(HotswapBackendSelection, ConfigurationIsImmutableWithinRuntimeGeneration) {
   ResetRuntimeTestEnv();
+  const auto build_default = ROCM_BUILD_FLAG(HSA_HOTSWAP_ENABLE) == 0
+      ? rocr::hotswap::HotswapBackend::kDisabled
+      : (ROCM_BUILD_FLAG(HSA_HOTSWAP_ENABLE) == 2 ? rocr::hotswap::HotswapBackend::kRocjitsu
+                                                  : rocr::hotswap::HotswapBackend::kComgr);
+  EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), build_default);
+
+  g_fake_env_vars["HSA_HOTSWAP_ENABLE"] = "0";
+  EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), build_default);
+
+  rocr::hotswap::ConfigureHotswapBackend();
+  EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), rocr::hotswap::HotswapBackend::kDisabled);
+  EXPECT_FALSE(rocr::hotswap::IsRocjitsuHotswapEnabled());
+
+  g_fake_env_vars["HSA_HOTSWAP_ENABLE"] = "1";
+  rocr::hotswap::ConfigureHotswapBackend();
   EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), rocr::hotswap::HotswapBackend::kComgr);
 
   g_fake_env_vars["HSA_HOTSWAP_ENABLE"] = "2";
-  EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), rocr::hotswap::HotswapBackend::kComgr);
-
   rocr::hotswap::ConfigureHotswapBackend();
   EXPECT_EQ(rocr::hotswap::GetHotswapBackend(), rocr::hotswap::HotswapBackend::kRocjitsu);
   EXPECT_TRUE(rocr::hotswap::IsRocjitsuHotswapEnabled());

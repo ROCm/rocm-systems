@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "core/inc/hotswap.hpp"
+#include "core/inc/rocr_build_flags.h"
 
 #include <algorithm>
 #include <atomic>
@@ -68,6 +69,9 @@
 namespace rocr {
 namespace hotswap {
 namespace {
+
+static_assert(ROCM_BUILD_FLAG(HSA_HOTSWAP_ENABLE) >= 0 && ROCM_BUILD_FLAG(HSA_HOTSWAP_ENABLE) <= 2,
+              "HSA_HOTSWAP_ENABLE must select disabled, COMGR, or ROCJIT");
 
 std::mutex g_retained_rewritten_elf_buffers_mutex;
 std::unordered_map<uint64_t, std::vector<OwnedElfBuffer>> g_retained_rewritten_elf_buffers;
@@ -383,10 +387,14 @@ std::optional<RewriteDecision> DecideHotswapRewrite(const AgentGfxRevision& gfx,
 }  // namespace
 
 void ConfigureHotswapBackend() {
-  HotswapBackend backend = HotswapBackend::kComgr;
+  const std::string enable = os::GetEnvVar("HSA_HOTSWAP_ENABLE");
+  const int selection = enable.empty() ? ROCM_BUILD_FLAG(HSA_HOTSWAP_ENABLE)
+                                       : (enable == "0" ? 0 : (enable == "2" ? 2 : 1));
+
+  HotswapBackend backend = selection == 0 ? HotswapBackend::kDisabled : HotswapBackend::kComgr;
   if (IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE")) {
     backend = HotswapBackend::kDisabled;
-  } else if (os::GetEnvVar("HSA_HOTSWAP_ENABLE") == "2") {
+  } else if (selection == 2) {
     backend = HotswapBackend::kRocjitsu;
   }
   g_hotswap_backend.store(backend, std::memory_order_release);

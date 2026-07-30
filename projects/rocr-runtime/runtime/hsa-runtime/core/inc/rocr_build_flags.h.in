@@ -1,0 +1,20 @@
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#ifndef ROCR_BUILD_FLAGS_H_
+#define ROCR_BUILD_FLAGS_H_
+
+#ifndef ROCM_BUILD_FLAG
+#define ROCM_BUILD_FLAG_CAT_IMPL(a, b) a##b
+#define ROCM_BUILD_FLAG_CAT(a, b) ROCM_BUILD_FLAG_CAT_IMPL(a, b)
+#define ROCM_BUILD_FLAG(name) \
+  (ROCM_BUILD_FLAG_CAT(ROCM_BUILD_FLAG_INTERNAL_, name)())
+#endif
+
+#ifdef ROCM_BUILD_FLAG_INTERNAL_HSA_HOTSWAP_ENABLE
+#error "ROCm build flag macro already defined"
+#endif
+#define ROCM_BUILD_FLAG_INTERNAL_HSA_HOTSWAP_ENABLE() \
+  @_hsa_hotswap_enable@
+
+#endif  // ROCR_BUILD_FLAGS_H_

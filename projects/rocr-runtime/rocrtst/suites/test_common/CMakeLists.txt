@@ -781,6 +781,10 @@ enable_testing()
 
 get_filename_component(HSA_RUNTIME_ROOT "${ROCRTST_ROOT}/../runtime/hsa-runtime" ABSOLUTE)
 set(HOTSWAP_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/hotswap")
+include("${HSA_RUNTIME_ROOT}/../../cmake_modules/ROCRBuildFlags.cmake")
+rocr_configure_build_flags(
+  "${PROJECT_BINARY_DIR}/core/inc/rocr_build_flags.h"
+)
 
 # Keep COMGR out of rocrtst link/package dependencies. These optional build
 # runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
