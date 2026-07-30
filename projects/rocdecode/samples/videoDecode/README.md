@@ -24,6 +24,12 @@ make -j
 
 **Windows:**
 
+```bat
+mkdir video_decode_sample && cd video_decode_sample
+cmake .. -DROCM_PATH=<path-to-TheRock-build> -DFFMPEG_ROOT=<path-to-ffmpeg>
+cmake --build . --config Release
+```
+
 > [!NOTE]
 > Before running, add the rocDecode and FFmpeg DLL directories to your PATH:
 > ```bat

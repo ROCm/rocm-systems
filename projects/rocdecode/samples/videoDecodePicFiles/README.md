@@ -18,6 +18,12 @@ make -j
 
 **Windows:**
 
+```bat
+mkdir video_decode_pic_files && cd video_decode_pic_files
+cmake .. -DROCM_PATH=<path-to-TheRock-build>
+cmake --build . --config Release
+```
+
 > [!NOTE]
 > Before running, add the rocDecode DLL directory to your PATH:
 > ```bat
