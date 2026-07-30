@@ -80,12 +80,27 @@ COLOR_NEUTRAL = "#9aa5b1"
 COLOR_STRIPE = "#f2f2f2"
 
 
+# Internal-linkage kernels (anonymous-namespace / local template instantiations,
+# e.g. static `ipc_fadd<T>` helpers) get a compiler-generated ".intern.<hash>"
+# suffix appended to their mangled name for disambiguation. That hash is not
+# stable across separate compilations of the same source, so matching on the
+# raw mangled name treats the *same* kernel as removed-in-baseline +
+# added-in-branch whenever it recompiles with a different hash -- which was
+# silently excluding most kernels from the diff (and could hide a real
+# regression in one of them). Strip the suffix before using it as the match key.
+_INTERN_SUFFIX_RE = re.compile(r"\.intern\.[0-9a-f]+$")
+
+
+def match_key_name(mangled_name):
+    return _INTERN_SUFFIX_RE.sub("", mangled_name)
+
+
 def load(path: Path):
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
     by_key = {}
     for r in rows:
-        key = (r["arch"], r["build_config"], r["mangled_name"])
+        key = (r["arch"], r["build_config"], match_key_name(r["mangled_name"]))
         by_key[key] = r
     return by_key
 
