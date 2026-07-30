@@ -145,7 +145,15 @@ def main():
         key = (args.arch, args.build_config, r["source_file"], r["line"], r["mangled_name"])
         existing[key] = r
 
-    rows = sorted(existing.values(), key=lambda r: (r["arch"], r["build_config"], r["source_file"], int(r["line"])))
+    # Sort by demangled_name (not line number) within each source file so that
+    # renaming/retyping kernels (e.g. AMOStandardTest<int> -> AMOStandardTest_int<...>)
+    # doesn't reshuffle row order -- related kernels stay adjacent alphabetically,
+    # so two CSVs from before/after a rename can be opened side-by-side and scrolled
+    # in tandem without any cross-CSV matching logic.
+    rows = sorted(
+        existing.values(),
+        key=lambda r: (r["arch"], r["build_config"], r["source_file"], r["demangled_name"]),
+    )
     with open(args.out, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS)
         writer.writeheader()
