@@ -14,14 +14,6 @@ serves as a valuable tool for leveraging the full potential of AMD hardware in
 your projects.
 
 ```{note}
-``hipcc`` and other compilers will not automatically link in the ``libamd_smi``
-dynamic library. To compile code that uses the AMD SMI library API, ensure the
-``libamd_smi.so`` can be located by setting the ``LD_LIBRARY_PATH`` environment
-variable to the directory containing ``librocm_smi64.so`` (usually
-``/opt/rocm/lib``) or by passing the ``-lamd_smi`` flag to the compiler.
-```
-
-```{note}
 The following environment variables can be set to control internal cache
 durations:
 
@@ -37,6 +29,23 @@ These can be set in the shell before running your application:
 
 ```{seealso}
 Refer to the [C/C++ library API reference](../reference/amdsmi-cpp-api/index.md).
+```
+
+## Prerequisites
+
+Before getting started, make sure your environment satisfies the following
+prerequisites. See the [requirements](#install_reqs) section for more
+information.
+
+Ensure `amdgpu` drivers are installed properly for initialization. CPU APIs
+require the `amd_hsmp` kernel module. See {ref}`install_amdgpu_driver`.
+
+```{note}
+``hipcc`` and other compilers will not automatically link in the ``libamd_smi``
+dynamic library. To compile code that uses the AMD SMI library API, ensure the
+``libamd_smi.so`` can be located by setting the ``LD_LIBRARY_PATH`` environment
+variable to the directory containing ``librocm_smi64.so`` (usually
+``/opt/rocm/lib``) or by passing the ``-lamd_smi`` flag to the compiler.
 ```
 
 (device_socket_handle)=
