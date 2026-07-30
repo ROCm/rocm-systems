@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Render a per-column colormap heatmap of *.resources.json fields to a PDF and CSV."""
+"""Render a per-column colormap heatmap of *.resources.json fields.
+
+By default writes three outputs next to --output: a PDF heatmap, a CSV, and an
+interactive sortable/filterable HTML page. Use --no-pdf / --no-csv / --no-html
+to skip any of them.
+"""
 
 from __future__ import annotations
 
@@ -296,13 +301,22 @@ def _export_html(
         vals = [d.get(k) for d in dlist]
         col_is_num.append(all(v is None or _is_num(v) for v in vals))
 
-    # Header cells: click to sort. data-type drives numeric vs. text compare.
-    header_cells = ['<th class="filecol" data-type="text">file</th>']
+    # Header cells: click the label to sort; each header also carries a regex
+    # filter input. data-type drives numeric vs. text compare; data-col-idx is
+    # the cell index within a row (file is 0).
+    def _th(cell_idx: int, label: str, dtype: str, extra_cls: str = "") -> str:
+        cls = f' class="{extra_cls}"' if extra_cls else ""
+        return (
+            f'<th{cls} data-type="{dtype}">'
+            f'<span class="label">{_html_escape(label)}</span>'
+            f'<input class="colfilter" data-col-idx="{cell_idx}" type="text" '
+            f'placeholder="regex" spellcheck="false" autocomplete="off"></th>'
+        )
+
+    header_cells = [_th(0, "file", "text", "filecol")]
     for j, k in enumerate(keys):
         dtype = "num" if col_is_num[j] else "text"
-        header_cells.append(
-            f'<th data-type="{dtype}">{_html_escape(k)}</th>'
-        )
+        header_cells.append(_th(j + 1, k, dtype))
 
     body_rows: list[str] = []
     for i in range(n_r):
@@ -380,7 +394,13 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     padding: 5px 9px; border: 1px solid #cfcfcf; border-radius: 6px;
     font-size: 13px; min-width: 240px;
   }}
+  .controls button {{
+    font-size: 12px; padding: 5px 10px; border: 1px solid #cfcfcf;
+    border-radius: 6px; background: #f4f4f4; cursor: pointer;
+  }}
+  .controls button:hover {{ background: #e9e9e9; }}
   .controls .hint {{ font-size: 12px; color: #777; }}
+  .controls .hint b {{ color: #333; }}
   .coltoggles {{
     display: flex; gap: 4px 12px; align-items: center; flex-wrap: wrap;
     margin-top: 8px; font-size: 12px; color: #333;
@@ -408,10 +428,20 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     cursor: pointer; user-select: none; text-align: right; font-weight: 600;
     border-right: 1px solid #444; padding-right: 18px;
   }}
-  thead th:hover {{ background: #3d3d3d; }}
-  thead th {{ position: sticky; }}
-  thead th.sorted-asc::after {{ content: " \\25B2"; position: absolute; right: 5px; }}
-  thead th.sorted-desc::after {{ content: " \\25BC"; position: absolute; right: 5px; }}
+  thead th {{ position: sticky; vertical-align: top; }}
+  thead th .label {{ display: block; cursor: pointer; padding-right: 12px; }}
+  thead th:hover .label {{ color: #dcdcdc; }}
+  thead th.sorted-asc .label::after {{ content: " \\25B2"; position: absolute; right: 5px; }}
+  thead th.sorted-desc .label::after {{ content: " \\25BC"; position: absolute; right: 5px; }}
+  thead th .colfilter {{
+    width: 100%; min-width: 42px; margin-top: 4px; box-sizing: border-box;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px; padding: 1px 3px; border: 1px solid #555; border-radius: 3px;
+    background: #fff; color: #111; font-weight: 400; cursor: text;
+  }}
+  thead th .colfilter::placeholder {{ color: #9a9a9a; }}
+  thead th.invalid .colfilter {{ border-color: #e0685f; background: #ffecec; }}
+  thead th.active-filter .colfilter {{ border-color: #4a90d9; background: #eaf3fc; }}
   .filecol {{
     text-align: left; position: sticky; left: 0; z-index: 10;
     max-width: 360px; overflow: hidden; text-overflow: ellipsis;
@@ -426,8 +456,12 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 <header>
   <h1>{title}</h1>
   <div class="controls">
-    <input id="filter" type="search" placeholder="Filter rows (matches file name)…">
-    <span class="hint">{n_rows} rows × {n_cols} fields · click a column header to sort</span>
+    <input id="filter" type="search" placeholder="Filter rows (file name substring)…">
+    <button type="button" id="filter-clear">clear filters</button>
+    <span class="hint">
+      <b id="rowcount">{n_rows}</b> / {n_rows} rows shown × {n_cols} fields ·
+      click a header to sort · type a regex under any column to filter
+    </span>
   </div>
   <div class="coltoggles" id="coltoggles">
     <span class="ttl">Columns:</span>
@@ -489,15 +523,68 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     }});
   }}
 
-  headers.forEach((h, idx) => h.addEventListener("click", () => sortBy(idx)));
+  // Sort only when the label is clicked, so typing in the filter input is safe.
+  headers.forEach((h, idx) => {{
+    const label = h.querySelector(".label");
+    (label || h).addEventListener("click", () => sortBy(idx));
+  }});
 
   const filter = document.getElementById("filter");
-  filter.addEventListener("input", () => {{
-    const q = filter.value.trim().toLowerCase();
-    for (const row of tbody.rows) {{
-      const name = row.cells[0].textContent.toLowerCase();
-      row.classList.toggle("hidden", q !== "" && !name.includes(q));
+  const rowcount = document.getElementById("rowcount");
+  const colFilters = Array.from(document.querySelectorAll(".colfilter"));
+
+  // Compile each non-empty column regex once; flag invalid patterns in red.
+  let regexes = [];
+  function rebuildRegexes() {{
+    regexes = [];
+    for (const inp of colFilters) {{
+      const th = inp.closest("th");
+      const pat = inp.value;
+      th.classList.toggle("active-filter", pat !== "");
+      if (pat === "") {{ th.classList.remove("invalid"); continue; }}
+      try {{
+        const re = new RegExp(pat);
+        regexes.push({{ idx: +inp.getAttribute("data-col-idx"), re }});
+        th.classList.remove("invalid");
+      }} catch (e) {{
+        th.classList.add("invalid");
+      }}
     }}
+  }}
+
+  function applyRowFilters() {{
+    const q = filter.value.trim().toLowerCase();
+    let shown = 0;
+    for (const row of tbody.rows) {{
+      let vis = true;
+      if (q !== "" && !row.cells[0].textContent.toLowerCase().includes(q)) {{
+        vis = false;
+      }}
+      if (vis) {{
+        for (const f of regexes) {{
+          const cell = row.cells[f.idx];
+          const v = cell.getAttribute("data-sort");
+          const s = v !== null ? v : cell.textContent;
+          if (!f.re.test(s)) {{ vis = false; break; }}
+        }}
+      }}
+      row.classList.toggle("hidden", !vis);
+      if (vis) shown++;
+    }}
+    rowcount.textContent = shown;
+  }}
+
+  filter.addEventListener("input", applyRowFilters);
+  for (const inp of colFilters) {{
+    // Keep clicks inside the input from triggering a column sort.
+    inp.addEventListener("click", e => e.stopPropagation());
+    inp.addEventListener("input", () => {{ rebuildRegexes(); applyRowFilters(); }});
+  }}
+  document.getElementById("filter-clear").addEventListener("click", () => {{
+    filter.value = "";
+    for (const inp of colFilters) inp.value = "";
+    rebuildRegexes();
+    applyRowFilters();
   }});
 
   // Per-column show/hide via a single injected stylesheet (fast for big tables).
@@ -696,7 +783,8 @@ def main() -> None:
         "/__/hipify/gensrc/specialized"
     )
     ap = argparse.ArgumentParser(
-        description="Build PDF heatmap of JSON resource fields (rows=files, cols=fields).",
+        description="Build a heatmap of JSON resource fields (rows=files, cols=fields). "
+        "Writes PDF, CSV, and interactive HTML by default.",
     )
     ap.add_argument(
         "json_dir",
@@ -726,17 +814,20 @@ def main() -> None:
     ap.add_argument(
         "--html",
         type=Path,
-        nargs="?",
-        const=True,
         default=None,
         metavar="PATH",
-        help="Write an interactive, sortable HTML heatmap. With no value, uses the "
-        "same basename as --output with .html.",
+        help="Output HTML path for the interactive, sortable heatmap "
+        "(default: same basename as --output with .html).",
+    )
+    ap.add_argument(
+        "--no-html",
+        action="store_true",
+        help="Do not write the interactive HTML file.",
     )
     ap.add_argument(
         "--no-pdf",
         action="store_true",
-        help="Skip PDF rendering (useful with --html for a fast HTML-only run).",
+        help="Skip PDF rendering (useful for a fast HTML/CSV-only run).",
     )
     ap.add_argument(
         "--no-parse-filename",
@@ -793,10 +884,8 @@ def main() -> None:
         _export_csv(csv_path, names, keys, dlist)
 
     html_path: Path | None = None
-    if args.html is not None:
-        html_path = (
-            out.with_suffix(".html") if args.html is True else Path(args.html)
-        )
+    if not args.no_html:
+        html_path = args.html if args.html is not None else out.with_suffix(".html")
         _export_html(html_path, names, keys, arr, dlist, cell_text)
 
     if args.no_pdf:
