@@ -1,0 +1,223 @@
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
+#ifndef _NCCL_GIN_DEVICE_COMMON_H_
+#define _NCCL_GIN_DEVICE_COMMON_H_
+
+#include <stdint.h>
+#include "../net_device.h"
+#include "../utility.h"
+#include "gin_device_host_common.h"
+
+#if CUDA_VERSION >= 12080 && __CUDA_ARCH__ >= 900
+#define NCCL_GIN_HAS_FENCE_ACQUIRE_RELEASE_PTX 1
+#endif
+
+#ifndef NCCL_GIN_PROXY_ENABLE
+#define NCCL_GIN_PROXY_ENABLE 1
+#endif
+
+#ifndef NCCL_GIN_GDAKI_ENABLE
+#if defined(__HIP_PLATFORM_AMD__)
+#define NCCL_GIN_GDAKI_ENABLE 0
+#elif CUDA_VERSION >= 12020 && __CUDA_ARCH__ >= 700
+#define NCCL_GIN_GDAKI_ENABLE 1
+#else
+#define NCCL_GIN_GDAKI_ENABLE 0
+#endif
+#endif
+
+// rocshmem-gda uses QueuePair methods from librocshmem.a device bitcode.
+// Only enable in TUs that link librocshmem.a (ENABLE_ROCSHMEM), not in
+// librccl.so (ENABLE_ROCSHMEM_GIN), to avoid duplicate device state.
+#ifndef NCCL_GIN_ROCSHMEM_GDA_ENABLE
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM)
+#define NCCL_GIN_ROCSHMEM_GDA_ENABLE 1
+#else
+#define NCCL_GIN_ROCSHMEM_GDA_ENABLE 0
+#endif
+#endif
+
+#ifndef NCCL_GIN_ANVIL_SDMA_ENABLE
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM)
+#define NCCL_GIN_ANVIL_SDMA_ENABLE 1
+#warning "ANVIL_ENABLED=1"
+#else
+#define NCCL_GIN_ANVIL_SDMA_ENABLE 0
+#endif
+#endif
+
+enum ncclGinOptFlags {
+  ncclGinOptFlagsDefault = 0,
+  ncclGinOptFlagsMaySkipCreditCheck = (1 << 0),
+  ncclGinOptFlagsAggregateRequests = (1 << 1),
+};
+
+#define NCCL_GIN_BACKEND_MASK_ALL \
+  (((NCCL_GIN_PROXY_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_PROXY | \
+   ((NCCL_GIN_GDAKI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GDAKI | \
+   ((NCCL_GIN_ROCSHMEM_GDA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA | \
+   ((NCCL_GIN_ANVIL_SDMA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+
+// Resource sharing mode for a given ncclGin/ncclGin_C *instance*.
+// This mode is selected at construction time and is carried by the ncclGin
+// object, then copied into ncclGinCtx for each call. It is not stored as
+// persistent per-context state in the communicator (i.e., different ncclGin
+// instantiations that target the same contextIndex may use different modes).
+enum ncclGinResourceSharingMode : uint8_t {
+  NCCL_GIN_RESOURCE_SHARING_GPU = 0,
+  NCCL_GIN_RESOURCE_SHARING_CTA = 1,
+};
+
+struct ncclGinCtx {
+  unsigned backendMask;
+  ncclNetDeviceType backend;
+  int rank;
+  int nRanks;
+  void* handle;
+  int contextId;
+  uint8_t resourceSharingMode;
+};
+
+template <unsigned backendMask>
+struct ncclGinCtx_M : ncclGinCtx {};
+
+struct ncclGinDescriptorSmem {
+  alignas(16) char space[64];
+};
+
+enum ncclGinSignalType {
+  NCCL_GIN_SIGNAL_TYPE_NONE,
+  NCCL_GIN_SIGNAL_TYPE_VA,
+  NCCL_GIN_SIGNAL_TYPE_INDEXED,
+};
+
+struct ncclGinSignalDescriptor {
+  ncclGinSignalType type;
+  union {
+    struct {
+      ncclGinWindow_t signalWindow;
+      size_t signalOffset;
+      ncclWindow_t ncclWindow;
+    } vaSignal;
+    struct {
+      ncclGinSignal_t signalId;
+    } indexedSignal;
+  };
+};
+
+#if NCCL_CHECK_CUDACC
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_Wait {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t& outRequest, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, cuda::memory_order ord, uint32_t* abortFlag);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_FlushAsync {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, uint32_t peer, ncclGinRequest_t* outRequest, uint32_t optFlags);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_Get {
+  template <typename Coop>
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop coop, int peer, ncclGinWindow_t remoteWin, size_t remoteOff,
+                                      ncclGinWindow_t localWin, size_t localOff, size_t bytes, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, uint32_t optFlags = ncclGinOptFlagsDefault);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_Put {
+  template <typename Coop>
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop coop, int peer, bool hasWins, ncclGinWindow_t dstWin,
+                                      size_t dstOff, ncclGinWindow_t srcWin, size_t srcOff, size_t bytes,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
+                                      bool hasCounter, ncclGinCounter_t counterId, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, cuda::thread_scope required,
+                                      cuda::thread_scope given, uint32_t optFlags = ncclGinOptFlagsDefault);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_PutValue {
+  template <typename Coop, typename T>
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop coop, int peer, ncclGinWindow_t dstWin, size_t dstOff, T srcData,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
+                                      bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
+                                      cuda::thread_scope required, cuda::thread_scope given,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_GetSignalPtr {
+  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx, int peer, ncclGinSignal_t signalId);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_GetCounterPtr {
+  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx, int peer, ncclGinCounter_t counterId);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_ResetSignal {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinSignalDescriptor signal);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_ResetCounter {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinCounter_t counterId);
+};
+
+template <ncclNetDeviceType backend>
+struct ncclGinApi_Flush {
+  template <typename Coop>
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, cuda::memory_order ord, uint32_t* abortFlag);
+};
+#endif
+
+#if NCCL_CHECK_CUDACC
+template <template <ncclNetDeviceType> typename ApiFn, typename... Arg>
+NCCL_DEVICE_INLINE static decltype(auto) ncclGinCallImpl(unsigned beMask, ncclGinCtx ctx, Arg&&... arg) {
+  bool singleton = (beMask & (beMask - 1)) == 0;  // Only one bit set
+  switch (singleton ? __popc(beMask - 1) : (int)ctx.backend) {
+#if NCCL_GIN_PROXY_ENABLE
+  case (int)NCCL_NET_DEVICE_GIN_PROXY:
+    if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_PROXY))) __builtin_unreachable();
+    return ApiFn<NCCL_NET_DEVICE_GIN_PROXY>::call(ctx, static_cast<Arg&&>(arg)...);
+#endif
+#if NCCL_GIN_GDAKI_ENABLE
+  case (int)NCCL_NET_DEVICE_GIN_GDAKI:
+    if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_GDAKI))) __builtin_unreachable();
+    return ApiFn<NCCL_NET_DEVICE_GIN_GDAKI>::call(ctx, static_cast<Arg&&>(arg)...);
+#endif
+#if NCCL_GIN_ROCSHMEM_GDA_ENABLE
+  case (int)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA:
+    if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA))) __builtin_unreachable();
+    return ApiFn<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(ctx, static_cast<Arg&&>(arg)...);
+#endif
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
+  case (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA:
+    if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA))) __builtin_unreachable();
+    return ApiFn<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ctx, static_cast<Arg&&>(arg)...);
+#endif
+  default:
+    __builtin_unreachable();
+  }
+}
+
+template <template <ncclNetDeviceType> typename ApiFn, typename... Arg>
+NCCL_DEVICE_INLINE static decltype(auto) ncclGinCall(ncclGinCtx ctx, Arg&&... arg) {
+  return ncclGinCallImpl<ApiFn>(ctx.backendMask, ctx, static_cast<Arg&&>(arg)...);
+}
+
+template <template <ncclNetDeviceType> typename ApiFn, unsigned beMask, typename... Arg>
+NCCL_DEVICE_INLINE static decltype(auto) ncclGinCall(ncclGinCtx_M<beMask> ctx, Arg&&... arg) {
+  return ncclGinCallImpl<ApiFn>(beMask, ctx, static_cast<Arg&&>(arg)...);
+}
+#endif
+
+#endif

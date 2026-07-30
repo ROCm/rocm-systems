@@ -1,9 +1,10 @@
 /*************************************************************************
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
- * Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_TUNER_H_
 #define NCCL_TUNER_H_
@@ -11,16 +12,17 @@
 #include "nccl.h"
 #include "nccl_common.h"
 
+#include "tuner/tuner_v6.h"
 #include "tuner/tuner_v5.h"
 #include "tuner/tuner_v4.h"
 #include "tuner/tuner_v3.h"
 #include "tuner/tuner_v2.h"
 
-typedef ncclTuner_v5_t ncclTuner_t;
+typedef ncclTuner_v6_t ncclTuner_t;
 typedef ncclTunerConstants_v5_t ncclTunerConstants_t;
-typedef ncclNvlDomainInfo_v5_t ncclNvlDomainInfo_t;
+typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 
-#define NCCL_TUNER_PLUGIN_SYMBOL "ncclTunerPlugin_v5"
+#define NCCL_TUNER_PLUGIN_SYMBOL "ncclTunerPlugin_v6"
 
 #define NCCL_ALGO_UNDEF -1
 #define NCCL_ALGO_TREE 0

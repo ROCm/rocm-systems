@@ -156,6 +156,18 @@ void MPITransport::submitRequestsToMPI() {
               next_element.PE,
               reinterpret_cast<int64_t>(next_element.ol2.pWrk));
       break;
+    case RO_NET_TEAM_REDUCE_SCATTER:
+      team_reduce_scatter(next_element.dst, next_element.src,
+                          next_element.ol1.size,
+                          next_element.ro_net_win_id, queue_idx,
+                          (MPI_Comm)next_element.team_comm,
+                          static_cast<ROCSHMEM_OP>(next_element.op),
+                          static_cast<ro_net_types>(next_element.datatype),
+                          next_element.status, true);
+      LOG_TRACE("proxy::mpi Submitted TEAM_REDUCE_SCATTER dst %p src %p nreduce %lu team %zd",
+              next_element.dst, next_element.src, next_element.ol1.size,
+              (intptr_t)next_element.team_comm);
+      break;
     case RO_NET_TEAM_REDUCE:
       team_reduction(next_element.dst, next_element.src, next_element.ol1.size,
                      next_element.ro_net_win_id, queue_idx,
@@ -226,7 +238,7 @@ void MPITransport::submitRequestsToMPI() {
   }
 }
 
-void MPITransport::initTransport(int num_queues, BackendProxyT *proxy) {
+void MPITransport::initTransport(int num_queues, BackendProxy *proxy) {
   waiting_quiet.resize(num_queues, std::vector<volatile char *>());
   outstanding.resize(num_queues, 0);
   transport_up = false;
@@ -254,14 +266,14 @@ void MPITransport::createNewTeam(ROBackend *backend, [[maybe_unused]] Team *pare
                                    const TeamInfo& team_info_wrt_parent,
                                    const TeamInfo& team_info_wrt_world,
                                    int num_pes, int my_pe_in_new_team,
-                                   MPI_Comm team_comm,
+                                   MPI_Comm new_team_comm,
                                    rocshmem_team_t *new_team) {
   ROTeam *new_team_obj{nullptr};
 
   CHECK_HIP(hipMalloc(&new_team_obj, sizeof(ROTeam)));
 
   new (new_team_obj) ROTeam(backend, team_info_wrt_parent, team_info_wrt_world,
-                            num_pes, my_pe_in_new_team, team_comm);
+                            num_pes, my_pe_in_new_team, new_team_comm);
 
   *new_team = get_external_team(new_team_obj);
 }
@@ -360,6 +372,24 @@ void MPITransport::team_reduction(void *dst, void *src, int size, [[maybe_unused
   outstanding[contextId]++;
 }
 
+void MPITransport::team_reduce_scatter(void *dst, void *src, int nreduce,
+                                       [[maybe_unused]] int win_id,
+                                       int contextId, MPI_Comm team,
+                                       ROCSHMEM_OP op, ro_net_types type,
+                                       volatile char *status, bool blocking) {
+  MPI_Request request{};
+
+  MPI_Op mpi_op{get_mpi_op(op)};
+  MPI_Datatype mpi_type{convertType(type)};
+  MPI_Comm comm{team};
+
+  NET_CHECK(mpilib_ftable_.Ireduce_scatter_block(
+      src, dst, nreduce, mpi_type, mpi_op, comm, &request));
+
+  requests.push_back({request, {status, contextId, blocking}});
+  outstanding[contextId]++;
+}
+
 void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
                                   int contextId, MPI_Comm team, int root,
                                   ro_net_types type, volatile char *status,
@@ -385,14 +415,12 @@ void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
   MPI_Datatype mpi_type{convertType(type)};
   MPI_Request req;
 
-  if (rank != root){
-    NET_CHECK(mpilib_ftable_.Rget(reinterpret_cast<char *>(dst), size, mpi_type, world_ranks[root],
-                       bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char *>(src)),
-                       size, mpi_type, bp->heap_window_info[win_id]->get_win(), &req));
+  NET_CHECK(mpilib_ftable_.Rget(reinterpret_cast<char *>(dst), size, mpi_type, world_ranks[root],
+                      bp->heap_window_info[win_id]->get_offset(reinterpret_cast<char *>(src)),
+                      size, mpi_type, bp->heap_window_info[win_id]->get_win(), &req));
 
-      requests.push_back({req, {nullptr, contextId, false}});
-      outstanding[contextId]++;
-  }
+  requests.push_back({req, {nullptr, contextId, false}});
+  outstanding[contextId]++;
 
   NET_CHECK(mpilib_ftable_.Win_flush_all(bp->heap_window_info[win_id]->get_win()));
   barrier(contextId, nullptr, false, comm, false);

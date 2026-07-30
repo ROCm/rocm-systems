@@ -13,6 +13,7 @@ and multiple .db files; multi-file databases are merged via SQLite ATTACH.
 """
 
 import sqlite3
+import warnings
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -33,6 +34,11 @@ def execute_statement(conn, statement, params=()):
     if params:
         return raw.execute(statement, params)
     return raw.execute(statement)
+
+
+def _quote_sqlite_identifier(name: str) -> str:
+    """Return a safely quoted SQLite identifier."""
+    return '"' + str(name).replace('"', '""') + '"'
 
 
 class PerfxpertConnection:
@@ -376,11 +382,13 @@ def merge_sqlite_dbs(
 
     conn = sqlite3.connect(str(output_path))
     try:
+        skipped_tables: list[tuple[str, str]] = []
         for idx, src in enumerate(db_paths[1:], start=1):
             alias = f"src{idx}"
-            conn.execute(f"ATTACH DATABASE ? AS {alias}", (str(src),))
+            quoted_alias = _quote_sqlite_identifier(alias)
+            conn.execute(f"ATTACH DATABASE ? AS {quoted_alias}", (str(src),))
             cursor = conn.execute(
-                f"SELECT type, name FROM {alias}.sqlite_master "
+                f"SELECT type, name FROM {quoted_alias}.sqlite_master "
                 f"WHERE type = 'table'"
             )
             tables = [
@@ -389,21 +397,24 @@ def merge_sqlite_dbs(
                 if not row[1].startswith("sqlite_")
             ]
             for table in tables:
+                quoted_table = _quote_sqlite_identifier(table)
                 try:
                     # Check for primary key collisions before inserting
                     pk_cols = [
                         row[1] for row in conn.execute(
-                            f"PRAGMA table_info({table})"
+                            f"PRAGMA table_info({quoted_table})"
                         ).fetchall()
                         if row[5] > 0  # row[5] is the 'pk' column
                     ]
                     if pk_cols:
                         pk_join = " AND ".join(
-                            f"src.{c} = dst.{c}" for c in pk_cols
+                            f"src.{_quote_sqlite_identifier(c)} = "
+                            f"dst.{_quote_sqlite_identifier(c)}"
+                            for c in pk_cols
                         )
                         collision = conn.execute(
-                            f"SELECT COUNT(*) FROM {alias}.{table} src "
-                            f"INNER JOIN main.{table} dst ON {pk_join}"
+                            f"SELECT COUNT(*) FROM {quoted_alias}.{quoted_table} src "
+                            f"INNER JOIN main.{quoted_table} dst ON {pk_join}"
                         ).fetchone()
                         if collision and collision[0] > 0:
                             raise ValueError(
@@ -415,13 +426,20 @@ def merge_sqlite_dbs(
                             )
                     # No collision (or no PK) — safe to insert
                     conn.execute(
-                        f"INSERT INTO main.{table} "
-                        f"SELECT * FROM {alias}.{table}"
+                        f"INSERT INTO main.{quoted_table} "
+                        f"SELECT * FROM {quoted_alias}.{quoted_table}"
                     )
-                except sqlite3.OperationalError:
-                    pass  # table may have different schema in this shard
+                except sqlite3.OperationalError as exc:
+                    skipped_tables.append((table, str(exc)))
             conn.commit()
-            conn.execute(f"DETACH DATABASE {alias}")
+            conn.execute(f"DETACH DATABASE {quoted_alias}")
+        if skipped_tables:
+            warnings.warn(
+                "Skipped tables during SQLite merge: "
+                + "; ".join(f"{table}: {reason}" for table, reason in skipped_tables),
+                RuntimeWarning,
+                stacklevel=2,
+            )
     finally:
         conn.close()
 

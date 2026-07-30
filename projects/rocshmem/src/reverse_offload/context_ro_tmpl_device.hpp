@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_REVERSE_OFFLOAD_RO_NET_GPU_TEMPLATES_HPP_
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "constmem.hpp"
 #include "commands_types.hpp"
 #include "context_ro_device.hpp"
 #include "queue_proxy.hpp"
@@ -112,7 +113,7 @@ struct GetROType<long double> {
  *****************************************************************************/
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int ROContext::reduce(rocshmem_team_t team, T *dest,
+__device__ int ROContext::reduce_wg(rocshmem_team_t team, T *dest,
                                  const T *source, int nreduce) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
@@ -128,6 +129,15 @@ __device__ int ROContext::reduce(rocshmem_team_t team, T *dest,
 
   __syncthreads();
   return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int ROContext::reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                      [[maybe_unused]] T *dest,
+                                      [[maybe_unused]] const T *source,
+                                      [[maybe_unused]] int nreduce) {
+  LOGD_WARN("reduce_wave is not available on reverse offload backend");
+  return ROCSHMEM_ERROR;
 }
 
 template <typename T>
@@ -147,10 +157,10 @@ __device__ void ROContext::put_nbi(T *dest, const T *source, size_t nelems,
 template <typename T>
 __device__ void ROContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                     reinterpret_cast<void *>(&value), sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset,
+                     reinterpret_cast<void *>(&value), sizeof(T), local_pe);
   } else {
     build_queue_element(RO_NET_P, dest, &value, sizeof(T), pe, 0, 0, 0, nullptr,
                         nullptr, NULL, ro_net_win_id,
@@ -161,11 +171,11 @@ __device__ void ROContext::p(T *dest, T value, int pe) {
 template <typename T>
 __device__ T ROContext::g(const T *source, int pe) {
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
     long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
     T dest;
-    ipcImpl_.ipcCopy(&dest, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(&dest, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T), local_pe);
     return dest;
   } else {
     auto dest{get_g_ret_buf()};
@@ -307,8 +317,37 @@ __device__ void ROContext::amo_xor(void *dst, T value, int pe) {
   [[maybe_unused]] T ret{amo_fetch_xor(dst, value, pe)};
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__device__ int ROContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                            const T *source, int nreduce) {
+  if (!is_thread_zero_in_block()) {
+    __syncthreads();
+    return ROCSHMEM_SUCCESS;
+  }
+
+  ROTeam *team_obj{reinterpret_cast<ROTeam *>(team)};
+
+  build_queue_element(RO_NET_TEAM_REDUCE_SCATTER, dest, const_cast<T *>(source),
+                      nreduce, 0, 0, 0, 0, nullptr, nullptr,
+                      (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle,
+                      true, get_status_flag(), is_default_ctx, Op,
+                      GetROType<T>::Type);
+
+  __syncthreads();
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int ROContext::reduce_scatter_wave([[maybe_unused]] rocshmem_team_t team,
+                                              [[maybe_unused]] T *dest,
+                                              [[maybe_unused]] const T *source,
+                                              [[maybe_unused]] int nreduce) {
+  LOGD_WARN("reduce_scatter_wave is not available on reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
 template <typename T>
-__device__ void ROContext::broadcast(rocshmem_team_t team, T *dest,
+__device__ void ROContext::broadcast_wg(rocshmem_team_t team, T *dest,
                                      const T *source, int nelems, int pe_root) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
@@ -327,7 +366,17 @@ __device__ void ROContext::broadcast(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void ROContext::alltoall(rocshmem_team_t team, T *dest,
+__device__ int ROContext::broadcast_wave([[maybe_unused]] rocshmem_team_t team,
+                                        [[maybe_unused]] T *dest, 
+                                        [[maybe_unused]] const T* source, 
+                                        [[maybe_unused]] int nelems,
+                                        [[maybe_unused]] int PE_root) {
+  LOGD_WARN("Broadcast Wave API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+template <typename T>
+__device__ void ROContext::alltoall_wg(rocshmem_team_t team, T *dest,
                                     const T *source, int nelems) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
@@ -346,6 +395,16 @@ __device__ void ROContext::alltoall(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
+__device__ int ROContext::alltoall_wave([[maybe_unused]] rocshmem_team_t team, 
+                                            [[maybe_unused]] T* dest, 
+                                            [[maybe_unused]] const T* source, 
+                                            [[maybe_unused]] int nelems) {
+  LOGD_WARN("Alltoall_wave not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+
+template <typename T>
 __device__ void ROContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
                                      [[maybe_unused]] T *dest, [[maybe_unused]] const size_t dest_nelems[],
                                      [[maybe_unused]] const size_t dest_displs[],
@@ -355,7 +414,7 @@ __device__ void ROContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void ROContext::fcollect(rocshmem_team_t team, T *dest,
+__device__ void ROContext::fcollect_wg(rocshmem_team_t team, T *dest,
                                     const T *source, int nelems) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
@@ -451,6 +510,264 @@ __device__ void ROContext::get_nbi_wave(T *dest, const T *source, size_t nelems,
 RO_CONTEXT_PUT_SIGNAL_DEF()
 RO_CONTEXT_PUT_SIGNAL_DEF(_wg)
 RO_CONTEXT_PUT_SIGNAL_DEF(_wave)
+
+/******************************************************************************
+ **************** TILE API STUB IMPLEMENTATIONS (NOT IMPLEMENTED) *************
+ *****************************************************************************/
+
+// RMA PUT operations - Type-erased interface
+__device__ inline int ROContext::tile_put([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                   [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                   [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                   [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                   [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_put_wave([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                        [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                        [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                        [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                        [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_put_wg([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                      [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                      [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                      [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                      [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+// RMA GET operations - Type-erased interface
+__device__ inline int ROContext::tile_get([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                   [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                   [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                   [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                   [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_get_wave([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                        [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                        [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                        [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                        [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_get_wg([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                      [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                      [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                      [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                      [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+// Allgather operations - Type-erased interface
+__device__ inline int ROContext::tile_allgather([[maybe_unused]] rocshmem_team_t team,
+                                         [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                         [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                         [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                         [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                         [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_allgather_wave([[maybe_unused]] rocshmem_team_t team,
+                                              [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                              [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                              [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                              [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                              [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_allgather_wg([[maybe_unused]] rocshmem_team_t team,
+                                            [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                            [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                            [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                            [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                            [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+// Broadcast operations - Type-erased interface
+__device__ inline int ROContext::tile_broadcast([[maybe_unused]] rocshmem_team_t team,
+                                         [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                         [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                         [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                         [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                         [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_broadcast_wave([[maybe_unused]] rocshmem_team_t team,
+                                              [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                              [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                              [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                              [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                              [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_broadcast_wg([[maybe_unused]] rocshmem_team_t team,
+                                            [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                            [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                            [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                            [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                            [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+// SUM Reduction operations - Type-erased interface
+__device__ inline int ROContext::tile_sum_reduce([[maybe_unused]] rocshmem_team_t team,
+                                          [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                          [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                          [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                          [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                          [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_sum_reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                               [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                               [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                               [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                               [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                               [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_sum_reduce_wg([[maybe_unused]] rocshmem_team_t team,
+                                             [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                             [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                             [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                             [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                             [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+// MAX Reduction operations - Type-erased interface
+__device__ inline int ROContext::tile_max_reduce([[maybe_unused]] rocshmem_team_t team,
+                                                  [[maybe_unused]] void* dst_data,
+                                                  [[maybe_unused]] const void* src_data,
+                                                  [[maybe_unused]] const size_t* dst_strides,
+                                                  [[maybe_unused]] const size_t* src_strides,
+                                                  [[maybe_unused]] const size_t* start_coord,
+                                                  [[maybe_unused]] const size_t* boundary,
+                                                  [[maybe_unused]] int ndim,
+                                                  [[maybe_unused]] size_t element_size,
+                                                  [[maybe_unused]] int root,
+                                                  [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_max_reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                                       [[maybe_unused]] void* dst_data,
+                                                       [[maybe_unused]] const void* src_data,
+                                                       [[maybe_unused]] const size_t* dst_strides,
+                                                       [[maybe_unused]] const size_t* src_strides,
+                                                       [[maybe_unused]] const size_t* start_coord,
+                                                       [[maybe_unused]] const size_t* boundary,
+                                                       [[maybe_unused]] int ndim,
+                                                       [[maybe_unused]] size_t element_size,
+                                                       [[maybe_unused]] int root,
+                                                       [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_max_reduce_wg([[maybe_unused]] rocshmem_team_t team,
+                                                     [[maybe_unused]] void* dst_data,
+                                                     [[maybe_unused]] const void* src_data,
+                                                     [[maybe_unused]] const size_t* dst_strides,
+                                                     [[maybe_unused]] const size_t* src_strides,
+                                                     [[maybe_unused]] const size_t* start_coord,
+                                                     [[maybe_unused]] const size_t* boundary,
+                                                     [[maybe_unused]] int ndim,
+                                                     [[maybe_unused]] size_t element_size,
+                                                     [[maybe_unused]] int root,
+                                                     [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+// MIN Reduction operations - Type-erased interface
+__device__ inline int ROContext::tile_min_reduce([[maybe_unused]] rocshmem_team_t team,
+                                                  [[maybe_unused]] void* dst_data,
+                                                  [[maybe_unused]] const void* src_data,
+                                                  [[maybe_unused]] const size_t* dst_strides,
+                                                  [[maybe_unused]] const size_t* src_strides,
+                                                  [[maybe_unused]] const size_t* start_coord,
+                                                  [[maybe_unused]] const size_t* boundary,
+                                                  [[maybe_unused]] int ndim,
+                                                  [[maybe_unused]] size_t element_size,
+                                                  [[maybe_unused]] int root,
+                                                  [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_min_reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                                       [[maybe_unused]] void* dst_data,
+                                                       [[maybe_unused]] const void* src_data,
+                                                       [[maybe_unused]] const size_t* dst_strides,
+                                                       [[maybe_unused]] const size_t* src_strides,
+                                                       [[maybe_unused]] const size_t* start_coord,
+                                                       [[maybe_unused]] const size_t* boundary,
+                                                       [[maybe_unused]] int ndim,
+                                                       [[maybe_unused]] size_t element_size,
+                                                       [[maybe_unused]] int root,
+                                                       [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+__device__ inline int ROContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_team_t team,
+                                                     [[maybe_unused]] void* dst_data,
+                                                     [[maybe_unused]] const void* src_data,
+                                                     [[maybe_unused]] const size_t* dst_strides,
+                                                     [[maybe_unused]] const size_t* src_strides,
+                                                     [[maybe_unused]] const size_t* start_coord,
+                                                     [[maybe_unused]] const size_t* boundary,
+                                                     [[maybe_unused]] int ndim,
+                                                     [[maybe_unused]] size_t element_size,
+                                                     [[maybe_unused]] int root,
+                                                     [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
+// Rooted SUM Reduction operations
+// Rooted MAX Reduction operations
+// Rooted MIN Reduction operations
+
+template <typename T>
+__device__ int ROContext::fcollect_wave([[maybe_unused]] rocshmem_team_t team,
+                                        [[maybe_unused]] T *dest,
+                                        [[maybe_unused]] const T *source,
+                                        [[maybe_unused]] int nelems) {
+  LOGD_WARN("fcollect_wave is not available on reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
 
 }  // namespace rocshmem
 

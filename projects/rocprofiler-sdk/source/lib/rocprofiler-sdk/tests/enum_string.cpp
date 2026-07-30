@@ -115,6 +115,10 @@ TEST(enum_string, fwd_h)
     TEST_STR(ROCPROFILER_BUFFER_TRACING_ROCDECODE_API);
     TEST_STR(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE);
 
+    // rocprofiler_hip_stream_operation_t
+    TEST_STR(ROCPROFILER_HIP_STREAM_NONE);
+    TEST_STR(ROCPROFILER_HIP_STREAM_DESTROY);
+
     // rocprofiler_code_object_operation_t
     TEST_STR(ROCPROFILER_CODE_OBJECT_NONE);
     TEST_STR(ROCPROFILER_CODE_OBJECT_LOAD);
@@ -235,6 +239,9 @@ TEST(enum_string, hsa_api_id)
 #    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x04
     TEST_API_ID_STR(ROCPROFILER_HSA_AMD_EXT_API_ID, hsa_amd_enable_logging);
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+    TEST_API_ID_STR(ROCPROFILER_HSA_AMD_EXT_API_ID, hsa_amd_queue_create);
+#    endif
 #endif
 
     TEST_API_ID_STR(ROCPROFILER_HSA_FINALIZE_EXT_API_ID, hsa_ext_program_create);
@@ -312,6 +319,13 @@ TEST(enum_string, rocjpeg_api_id)
     TEST_API_ID_STR(ROCPROFILER_ROCJPEG_API_ID, rocJpegGetErrorName);
 }
 
+TEST(enum_string, hipfile_api_id)
+{
+    TEST_API_ID_STR(ROCPROFILER_HIPFILE_API_ID, hipFileHandleRegister);
+    TEST_API_ID_STR(ROCPROFILER_HIPFILE_API_ID, hipFileRead);
+    TEST_API_ID_STR(ROCPROFILER_HIPFILE_API_ID, hipFileSetParameterString);
+}
+
 TEST(enum_string, runtime_evaluation)
 {
     // String representation of all enum values should have a prefix ROCPROFILER
@@ -379,7 +393,7 @@ ROCPROFILER_ENUM_LABEL(TEST_ENUM_VALUE_V3);
 }  // namespace sdk
 }  // namespace rocprofiler
 
-TEST(enum_string, unsuported)
+TEST(enum_string, unsupported)
 {
     using namespace rocprofiler::sdk;
     using namespace enum_string_test;

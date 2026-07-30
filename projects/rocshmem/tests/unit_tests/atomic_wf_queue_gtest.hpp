@@ -153,8 +153,8 @@ class AtomicWFQueueTestFixture : public ::testing::Test {
 
   protected:
 
-    AtomicWFQueueProxy<HIPAllocator, int> awf_queue_proxy{};
-    AtomicWFQueue<int, HIPAllocator>* awf_queue{};
+    AtomicWFQueueProxy<int> awf_queue_proxy{};
+    AtomicWFQueue<int>* awf_queue{};
 
     /**
      * @brief An allocator to create objects in device memory.

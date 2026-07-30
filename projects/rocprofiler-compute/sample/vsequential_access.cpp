@@ -23,8 +23,6 @@ __global__ void sequentialAccessKernel(int *d_data, int N)
 
 int main()
 {
-    hipError_t hip_status;
-
     const int N = 1 << 20; // 1M elements
     size_t size = N * sizeof(int);
     // Allocate host memory
@@ -42,9 +40,13 @@ int main()
     dim3 blockSize(64);
     dim3 gridSize((N + blockSize.x - 1) / blockSize.x);
 
-    // Launch kernel
-    hipLaunchKernelGGL(sequentialAccessKernel, gridSize, blockSize, 0, 0, d_data, N);
-    hip_status = hipDeviceSynchronize();
+    // Repeat the launch so the profile is robust.
+    const int kIters = 30;
+    for (int i = 0; i < kIters; ++i)
+    {
+        hipLaunchKernelGGL(sequentialAccessKernel, gridSize, blockSize, 0, 0, d_data, N);
+    }
+    HIP_ASSERT(hipDeviceSynchronize());
 
     // Copy back to host
     HIP_ASSERT(hipMemcpy(h_data, d_data, size, hipMemcpyDeviceToHost));

@@ -29,12 +29,14 @@
 #    include <hsa_ext_finalize.h>
 #    include <hsa_ven_amd_aqlprofile.h>
 #    include <hsa_ven_amd_loader.h>
+#    include <hsa_api_trace.h>
 #else
 #    include <hsa/hsa.h>
 #    include <hsa/hsa_ext_amd.h>
 #    include <hsa/hsa_ext_finalize.h>
 #    include <hsa/hsa_ven_amd_aqlprofile.h>
 #    include <hsa/hsa_ven_amd_loader.h>
+#    include <hsa/hsa_api_trace.h>
 #endif
 
 #endif  // SRC_HSA_INCLUDES_H_

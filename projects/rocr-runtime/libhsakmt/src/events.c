@@ -34,38 +34,30 @@
 #include "hsakmt/hsakmtmodel.h"
 #include <assert.h>
 
-
 struct hsa_kfd_event_context
 {
 	HSAuint64 *events_page;
 };
 
-struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx)
+int hsakmt_kfdcontext_init_event_context(HsaKFDContext *ctx)
 {
-	assert(ctx);
-	if (!ctx) {
-		pr_err("Expected a non-null ptr for HsaKFDContext");
-		return NULL;
-	}
+	CHECK_CTX(ctx, -1);
 
 	if (ctx->event_context)
-		return ctx->event_context;
+		return 0;
 
 	ctx->event_context = calloc(1, sizeof(struct hsa_kfd_event_context));
 	if (!ctx->event_context) {
 		pr_err("Alloc memory failed for struct hsa_kfd_event_context size %zu\n",
 				 sizeof(struct hsa_kfd_event_context));
-		return NULL;
+		return -1;
 	}
-	return ctx->event_context;
+	return 0;
 }
 
 void hsakmt_clear_events_page(HsaKFDContext *ctx)
 {
-	struct hsa_kfd_event_context *event_ctx = hsakmt_kfdcontext_get_event_context(ctx);
-	if (event_ctx) {
-		event_ctx->events_page = NULL;
-	}
+	ctx->event_context->events_page = NULL;
 }
 
 static bool IsSystemEventType(HSA_EVENTTYPE type)
@@ -104,7 +96,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEventCtx(HsaKFDContext *ctx,
 
 	/* dGPU code */
 	pthread_mutex_lock(&hsakmt_mutex);
-	event_ctx = hsakmt_kfdcontext_get_event_context(ctx);
+	event_ctx = ctx->event_context;
 	events_page = event_ctx->events_page;
 
 	if (hsakmt_is_dgpu && !events_page) {
@@ -115,10 +107,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEventCtx(HsaKFDContext *ctx,
 			pthread_mutex_unlock(&hsakmt_mutex);
 			return HSAKMT_STATUS_ERROR;
 		}
-		if (hsakmt_use_model)
-			model_set_event_page(events_page, KFD_SIGNAL_EVENT_LIMIT);
-		else
+		if (!hsakmt_use_model)
 			hsakmt_fmm_get_handle(ctx, events_page, (uint64_t *)&args.event_page_offset, NULL);
+		// Note: In model mode, FFM handles event management entirely - no event page needed
 	}
 
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_CREATE_EVENT, &args) != 0) {
@@ -195,6 +186,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyEventCtx(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_ERROR;
 
 	free(Event);
+
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -281,6 +273,7 @@ static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, 
 	uint32_t node_id = 0;
 	HSAuint32 s_attr;
 	HSAuint32 i;
+	HSAKMT_STATUS ret;
 	HSA_SVM_ATTRIBUTE attrs[] = {
 					{HSA_SVM_ATTR_PREFERRED_LOC, 0},
 					{HSA_SVM_ATTR_PREFETCH_LOC, 0},
@@ -292,7 +285,12 @@ static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, 
 	CHECK_KFD_MINOR_VERSION(5);
 
 	s_attr = sizeof(attrs);
-	args = alloca(sizeof(*args) + s_attr);
+
+	/* s_attr is a compile-time constant (32 bytes); no overflow possible */
+	args = malloc(sizeof(*args) + s_attr);
+	if (!args)
+		return HSAKMT_STATUS_NO_MEMORY;
+
 	args->start_addr = address;
 	args->size = PAGE_SIZE;
 	args->op = KFD_IOCTL_SVM_OP_GET_ATTR;
@@ -300,7 +298,8 @@ static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, 
 	memcpy(args->attrs, attrs, s_attr);
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
 		pr_debug("op get range attrs failed %s\n", strerror(errno));
-		return HSAKMT_STATUS_ERROR;
+		ret = HSAKMT_STATUS_ERROR;
+		goto out;
 	}
 
 	pr_err("GPU address 0x%lx, is Unified memory\n", address);
@@ -345,11 +344,16 @@ static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, 
 			break;
 		default:
 			pr_debug("get invalid attr type 0x%x\n", args->attrs[i].type);
-			return HSAKMT_STATUS_ERROR;
+			ret = HSAKMT_STATUS_ERROR;
+			goto out;
 		}
 	}
 
-	return HSAKMT_STATUS_SUCCESS;
+	ret = HSAKMT_STATUS_SUCCESS;
+
+out:
+	free(args);
+	return ret;
 }
 //Analysis memory exception data, print debug messages
 static void analysis_memory_exception(HsaKFDContext *ctx,

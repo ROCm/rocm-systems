@@ -10,7 +10,11 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.roctx, pytest.mark.ci_enable]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.roctx,
+    pytest.mark.rocm,
+]
 
 # =============================================================================
 # ROCTx fixtures
@@ -21,8 +25,9 @@ pytestmark = [pytest.mark.gpu, pytest.mark.roctx, pytest.mark.ci_enable]
 def roctx_env() -> dict[str, str]:
     """Environment variables for rocTX tests."""
     return {
-        "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,marker_api,kernel_dispatch",
+        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,mem_usage,gfx_clock,mem_clock",
+        "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "1000",
     }
 
 
@@ -45,61 +50,54 @@ def roctx_rules(validation_rules_dir: Path) -> list[Path]:
 class TestROCTx(RocprofsysTest):
     """Tests for rocTX marker API."""
 
-    def roctx_legacy_labels(self) -> list[str]:
+    def roctx_expected_labels(self) -> list[str]:
+        # The validate-perfetto-proto.py script aggregates (name, depth) pairs from
+        # the Perfetto slice table in dict-insertion order. Ex:
+        #   roctxRangeStart_GPU_Compute  d=2 (main, first call) then d=0 (worker)
+        #   roctxRangePush_HIP_Kernel    d=3 (main)             then d=1 (worker)
         return [
             "roctxMark_GPU_workload",
             "roctxRangePush_run_profiling",
-            "roctxRangeStart_GPU_Compute",
-            "roctxRangeStart_GPU_Compute",
-            "roctxRangePush_HIP_Kernel",
-            "roctxRangePush_HIP_Kernel",
-            "roctxGetThreadId",
-            "roctxMark_RoctxProfilerPause_End",
+            "roctxRangeStart_GPU_Compute",  # d=2: main thread (inside run_profiling)
+            "roctxRangeStart_GPU_Compute",  # d=0: worker thread (top-level)
+            "roctxRangePush_HIP_Kernel",  # d=3: main thread
+            "roctxRangePush_HIP_Kernel",  # d=1: worker thread
             "roctxMark_Thread_Start",
-            "roctxMark_End",
+            "roctxMark_Thread_End",
+            "roctxGetThreadId",
             "roctxMark_Finished_GPU",
         ]
 
-    def roctx_legacy_count(self) -> list[int]:
-        return [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    def roctx_expected_count(self) -> list[int]:
+        return [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 
-    def roctx_legacy_depth(self) -> list[int]:
-        return [1, 1, 2, 0, 3, 1, 2, 2, 0, 0, 1]
+    def roctx_expected_depth(self) -> list[int]:
+        return [1, 1, 2, 0, 3, 1, 0, 0, 2, 1]
 
-    def roctx_cached_labels(self) -> list[str]:
-        return [
-            "roctxMark_GPU_workload",
-            "roctxRangePush_HIP_Kernel",
-            "roctxRangeStart_GPU_Compute",
-            "roctxGetThreadId",
-            "roctxMark_RoctxProfilerPause_End",
-            "roctxMark_Thread_Start",
-            "roctxMark_End",
-            "roctxRangePush_run_profiling",
-            "roctxMark_Finished_GPU",
-        ]
+    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
+    RUNTIME_INSTRUMENT_ARGS = ["-v", "2"]
 
-    def roctx_cached_count(self) -> list[int]:
-        return [1, 2, 2, 1, 1, 1, 1, 1, 1]
-
-    def roctx_cached_depth(self) -> list[int]:
-        return [1, 1, 1, 1, 1, 2, 1, 1, 1]
-
-    REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-
-    @pytest.mark.parametrize("mode", ["baseline", "binary_rewrite", "sys_run"])
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            pytest.param("baseline", marks=pytest.mark.timeout(120)),
+            pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
+            pytest.param("sys_run", marks=pytest.mark.timeout(120)),
+            pytest.param("runtime_instrument", marks=pytest.mark.timeout(300)),
+        ],
+    )
     def test(self, mode, roctx_env):
         result = self.run_test(
             mode,
             "roctx",
             env=roctx_env,
-            rewrite_args=self.REWRITE_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
 
-    @pytest.mark.ci_disable("assert_rocpd")
+    @pytest.mark.timeout(120)
     @pytest.mark.rocpd("roctx_env")
     def test_sampling(
         self,
@@ -108,17 +106,12 @@ class TestROCTx(RocprofsysTest):
     ):
         env = roctx_env.copy()
         categories = ["rocm_marker_api"]
-        if env["ROCPROFSYS_TRACE_LEGACY"] == "ON":
-            labels = self.roctx_legacy_labels()
-            counts = self.roctx_legacy_count()
-            depths = self.roctx_legacy_depth()
-        else:
-            labels = self.roctx_cached_labels()
-            counts = self.roctx_cached_count()
-            depths = self.roctx_cached_depth()
+        labels = self.roctx_expected_labels()
+        counts = self.roctx_expected_count()
+        depths = self.roctx_expected_depth()
 
         result = self.run_test(
-            "sampling", target="roctx", env=env, check_target_arch=True, timeout=120
+            "sampling", target="roctx", env=env, check_target_arch=True
         )
 
         self.assert_regex(result)

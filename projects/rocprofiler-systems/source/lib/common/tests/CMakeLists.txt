@@ -4,11 +4,13 @@
 add_library(
     lib-common-tests
     OBJECT
+    test_delimit.cpp
     test_discover_llvm_libdir.cpp
     test_environment.cpp
-    test_output.cpp
+    test_join.cpp
     test_path.cpp
     test_remove_env.cpp
+    test_to_bool.cpp
     test_update_env.cpp
 )
 

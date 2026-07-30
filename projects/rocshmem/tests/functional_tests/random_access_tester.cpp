@@ -143,8 +143,8 @@ RandomAccessTester::RandomAccessTester(TesterArguments args) : Tester(args) {
     abort();
   }
 
-  s_buf = (int *)rocshmem_malloc(max_size * wg_size * space);
-  r_buf = (int *)rocshmem_malloc(max_size * wg_size * space);
+  s_buf = (int *) alloc_test_buffer(max_size * wg_size * space, args.local_buf_type);
+  r_buf = (int *) alloc_test_buffer(max_size * wg_size * space);
   h_buf = (int *)malloc(max_size * wg_size * space);
   h_dev_buf = (int *)malloc(max_size * wg_size * space);
   CHECK_HIP(hipMalloc((void **)&_threads_bins, sizeof(uint32_t) * _num_waves * _num_bins));
@@ -156,8 +156,8 @@ RandomAccessTester::RandomAccessTester(TesterArguments args) : Tester(args) {
 }
 
 RandomAccessTester::~RandomAccessTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
+  free_test_buffer(s_buf, args.local_buf_type);
+  free_test_buffer(r_buf);
   free(h_buf);
   free(h_dev_buf);
   CHECK_HIP(hipFree(_threads_bins));

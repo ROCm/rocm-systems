@@ -89,6 +89,7 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_BasicFunctional) {
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamDestroy(stream));
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
@@ -131,9 +132,9 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_capturehipMemset3DAsync) {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   int row, col, dep;
-  row = GENERATE(3, 4, 100);
-  col = GENERATE(3, 4, 100);
-  dep = GENERATE(3, 4, 100);
+  row = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  col = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  dep = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
   hipStream_t stream;
 
   A_h = reinterpret_cast<char*>(malloc(sizeof(char) * row * col * dep));

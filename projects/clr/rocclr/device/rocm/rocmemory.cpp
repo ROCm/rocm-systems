@@ -22,7 +22,27 @@
 #include "platform/interop_gl.hpp"
 #include "platform/external_memory.hpp"
 
+#ifdef _WIN32
+#include "device/rocm/rocd3d10interop.hpp"
+#include "device/rocm/rocd3d11interop.hpp"
+#include "platform/interop_d3d10.hpp"
+#include "platform/interop_d3d11.hpp"
+#endif
+
 namespace amd::roc {
+
+// RAII guard to ensure owning agent is set on successful buffer creation
+class OwningAgentGuard {
+  Buffer* buffer_;
+  bool* success_;
+public:
+  OwningAgentGuard(Buffer* buf, bool* success) : buffer_(buf), success_(success) {}
+  ~OwningAgentGuard() {
+    if (success_ && *success_ && buffer_->getDeviceMemory() != nullptr) {
+      buffer_->computeAndSetOwningAgent();
+    }
+  }
+};
 
 // ======================================= roc::Memory ============================================
 Memory::Memory(const roc::Device& dev, amd::Memory& owner)
@@ -32,7 +52,8 @@ Memory::Memory(const roc::Device& dev, amd::Memory& owner)
       kind_(MEMORY_KIND_NORMAL),
       amdImageDesc_(nullptr),
       persistent_host_ptr_(nullptr),
-      pinnedMemory_(nullptr) {}
+      pinnedMemory_(nullptr),
+      owningAgentHandle_(0) {}
 
 Memory::Memory(const roc::Device& dev, size_t size)
     : device::Memory(size),
@@ -41,7 +62,8 @@ Memory::Memory(const roc::Device& dev, size_t size)
       kind_(MEMORY_KIND_NORMAL),
       amdImageDesc_(nullptr),
       persistent_host_ptr_(nullptr),
-      pinnedMemory_(nullptr) {}
+      pinnedMemory_(nullptr),
+      owningAgentHandle_(0) {}
 
 Memory::~Memory() {
   // Destory pinned memory
@@ -188,22 +210,24 @@ void Memory::cpuUnmap(device::VirtualDevice& vDev) {
 }
 
 // ================================================================================================
-hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t flags) {
+hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t flags,
+                                      size_t size_hint) {
   hsa_agent_t agent = dev().getBackendDevice();
-  size_t size;
+  size_t size = 0;
   size_t metadata_size = 0;
-  void* metadata;
+  void* metadata = nullptr;
   auto fd = fdn;
-  hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, flags, &size, &interop_deviceMemory_,
+  hsa_status_t status = Hsa::interop_map_buffer_with_size(1, &agent, fd, flags, size_hint, &size,
+                                                          &interop_deviceMemory_,
 #if IS_WINDOWS
-                                                nullptr, nullptr  // Cannot get metadata and metadata_size in Windows
+                                                          nullptr, nullptr
 #else
-                                                &metadata_size, (const void**)&metadata
+                                                          &metadata_size, (const void**)&metadata
 #endif
   );
-  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
-          size);
-  deviceMemory_ = static_cast<char*>(interop_deviceMemory_);  // + out.buf_offset;
+  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "fd %zu, Map Interop memory %p, size 0x%zx, status = 0x%xh",
+          size_t(fd), interop_deviceMemory_, size, status);
+  deviceMemory_ = static_cast<char*>(interop_deviceMemory_);
   if (status != HSA_STATUS_SUCCESS) return status;
   // if map_buffer wrote a legitimate SRD, copy it to amdImageDesc_
   // Note: Check if amdImageDesc_ is valid, because VA library maps linear planes of YUV image
@@ -229,36 +253,72 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   static_assert(alignof(hsa_amd_image_descriptor_t) == alignof(uint32_t),
                 "Unexpected alignment for hsa_amd_image_descriptor_t");
-  amdImageDesc_ = reinterpret_cast<hsa_amd_image_descriptor_t*>(
-      new uint32_t[MaxMetadataSizeDwords + HeaderSizeDwords]());
+  const bool isImage = (owner()->asImage() != nullptr);
 
-  if (amdImageDesc_ == nullptr) {
-    return false;
+  if (isImage) {
+    amdImageDesc_ = reinterpret_cast<hsa_amd_image_descriptor_t*>(
+        new uint32_t[MaxMetadataSizeDwords + HeaderSizeDwords]());
+
+    if (amdImageDesc_ == nullptr) {
+      return false;
+    }
+
+    hsa_agent_t agent = dev().getBackendDevice();
+    uint32_t id;
+    Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
+
+    static constexpr uint32_t DeviceIdVendorShift = 16u;
+
+    amdImageDesc_->version = 1;
+    amdImageDesc_->deviceID = (AmdVendor << DeviceIdVendorShift) | id;
   }
-
-  hsa_agent_t agent = dev().getBackendDevice();
-  uint32_t id;
-  Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
-
-  static constexpr uint32_t DeviceIdVendorShift = 16u;
-
-  amdImageDesc_->version = 1;
-  amdImageDesc_->deviceID = (AmdVendor << DeviceIdVendorShift) | id;
 
 #if IS_WINDOWS
-  hsa_handle_t handle, resHandle;
-  int offset;
+  hsa_handle_t handle = 0, resHandle = 0;
+  int offset = 0;
+  hsa_interop_map_flag_t mapFlags = HSA_INTEROP_MAP_FLAG_KMT_HANDLE;
 
-  if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &resHandle, &offset, amdImageDesc_->data,
-                         MaxMetadataSizeDwords * sizeof(uint32_t))) {
+  // Check if this is D3D interop (vs GL interop)
+  amd::InteropObject* interopObj = owner()->getInteropObj();
+  // SRD and size are only needed for images; pass nullptr for plain buffers.
+  void* srdPtr = isImage ? amdImageDesc_->data : nullptr;
+  UINT srdSize = isImage ? MaxMetadataSizeDwords * sizeof(uint32_t) : 0;
+  size_t sizeHint = 0;
+  if (interopObj->asD3D11Object()) {
+    // D3D11 interop
+    D3D11Object* d3d11Obj = interopObj->asD3D11Object();
+    if (!D3D11Interop::Export(this, d3d11Obj, &handle, &offset,
+                              srdPtr, isImage ? &srdSize : nullptr, &mapFlags, &sizeHint)) {
+      LogError("D3D11Interop::Export failed for buffer");
+      return false;
+    }
+  } else if (interopObj->asD3D10Object()) {
+    // D3D10 interop
+    D3D10Object* d3d10Obj = interopObj->asD3D10Object();
+    if (!D3D10Interop::Export(this, d3d10Obj, &handle, &offset,
+                              srdPtr, isImage ? &srdSize : nullptr, &mapFlags)) {
+      LogError("D3D10Interop::Export failed for buffer");
+      return false;
+    }
+  } else if (interopObj->asGLObject()) {
+    // GL interop
+    if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &resHandle, &offset,
+                           srdPtr, srdSize)) {
+      return false;
+    }
+  } else {
+    LogError("Unknown interop object type");
     return false;
   }
-
-  if (interopMapBuffer(handle, HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != HSA_STATUS_SUCCESS) return false;
+  auto mapStatus = interopMapBuffer(handle, mapFlags, sizeHint);
+  if (mapStatus != HSA_STATUS_SUCCESS) return false;
 
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
-  if(!GlInterop::Detach(owner(), resHandle)) {
-    LogError("GlInterop::Detach(handle %p) failed", resHandle);
+
+  if (interopObj->asGLObject()) {
+    if(!GlInterop::Detach(owner(), resHandle)) {
+      LogError("GlInterop::Detach failed");
+    }
   }
   return true;
 #else
@@ -280,8 +340,8 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   in.target = targetType;
   in.obj = owner()->getInteropObj()->asGLObject()->getGLName();
   in.miplevel = miplevel;
-  in.out_driver_data_size = MaxMetadataSizeBytes;
-  in.out_driver_data = &amdImageDesc_->data[0];
+  in.out_driver_data_size = isImage ? MaxMetadataSizeBytes : 0;
+  in.out_driver_data = isImage ? &amdImageDesc_->data[0] : nullptr;
 
   const auto& glenv = owner()->getContext().glenv();
   if (glenv->isEGL()) {
@@ -306,7 +366,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 void Memory::destroyInteropBuffer() {
   assert(kind_ == MEMORY_KIND_INTEROP && "Memory must be interop type.");
   Hsa::interop_unmap_buffer(interop_deviceMemory_);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Unmap GL memory %p", deviceMemory_);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Unmap interop memory %p", deviceMemory_);
   deviceMemory_ = nullptr;
 }
 
@@ -664,6 +724,10 @@ void Buffer::destroy() {
     if (memFlags & ROCCLR_MEM_PHYMEM) {
       // If this is physical memory, dont call hsa free function, since device mem was never created
       dev().deviceVmemRelease(owner()->getUserData().hsa_handle);
+      // Free what we counted on alloc. Imported memory was never counted.
+      if (!(memFlags & ROCCLR_MEM_INTERPROCESS)) {
+        const_cast<Device&>(dev()).updateFreeMemory(size(), true);
+      }
       return;
     }
 
@@ -700,7 +764,9 @@ void Buffer::destroy() {
       }
     }
 
-    if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain)) {
+    // Not counted on alloc (e.g. arena and VA ranges), so don't add it back on free.
+    if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain) &&
+        (kind_ != MEMORY_KIND_ARENA) && !(memFlags & CL_MEM_VA_RANGE_AMD)) {
       const_cast<Device&>(dev()).updateFreeMemory(size(), true);
     }
 
@@ -748,18 +814,21 @@ void Buffer::destroy() {
 
 // ================================================================================================
 bool Buffer::create(bool alloc_local) {
+  bool success = false;
+  OwningAgentGuard guard(this, &success);
+
   if (owner() == nullptr) {
     if (alloc_local) {
       deviceMemory_ = dev().deviceLocalAlloc(size());
       if (deviceMemory_ != nullptr) {
         flags_ |= HostMemoryDirectAccess;
-        return true;
+        return (success = true);
       }
     } else {
       deviceMemory_ = dev().hostAlloc(size(), 1, Device::MemorySegment::kNoAtomics);
       if (deviceMemory_ != nullptr) {
         flags_ |= HostMemoryDirectAccess;
-        return true;
+        return (success = true);
       }
     }
     return false;
@@ -789,11 +858,22 @@ bool Buffer::create(bool alloc_local) {
     if (memFlags & ROCCLR_MEM_INTERPROCESS) {
       // if interprocess flag is set, then the memory is importable.
       if (!dev().ImportShareableHSAHandle(owner()->getSvmPtr(),
-                                          &owner()->getUserData().hsa_handle)) {
+                                          &owner()->getUserData().hsa_handle,
+                                          owner()->getUserData().hsa_handle_type)) {
         LogPrintfError("Importing Shareable Memory failed with os_handle: 0x%x",
                        owner()->getSvmPtr());
         return false;
       }
+    } else if (memFlags & ROCCLR_MEM_HOST_NUMA) {
+      // Host-resident NUMA VMM: decode the packed node selector. Stored value is
+      // (node + 1); 0 means "resolve current node" (HostNumaCurrent) -> pass -1.
+      const uint64_t stored =
+          (memFlags & ROCCLR_MEM_HOST_NUMA_NODE_MASK) >> ROCCLR_MEM_HOST_NUMA_NODE_SHIFT;
+      const int numaNode = (stored == 0) ? -1 : static_cast<int>(stored - 1);
+      owner()->getUserData().hsa_handle = dev().hostVmemAlloc(owner()->getSize(),
+                                          memFlags & ROCCLR_MEM_HSA_UNCACHED
+                                          ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0,
+                                          numaNode);
     } else {
       owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(owner()->getSize(),
                                           memFlags & ROCCLR_MEM_HSA_UNCACHED
@@ -807,7 +887,12 @@ bool Buffer::create(bool alloc_local) {
 
     owner()->setSvmPtr(reinterpret_cast<void*>(owner()->getUserData().hsa_handle));
 
-    return true;
+    // Real device memory, so count it. Imported memory isn't ours, so skip it.
+    if (!(memFlags & ROCCLR_MEM_INTERPROCESS)) {
+      const_cast<Device&>(dev()).updateFreeMemory(size(), false);
+    }
+
+    return (success = true);
   }
 
   if ((owner()->parent() == nullptr) && (owner()->getSvmPtr() != nullptr)) {
@@ -818,6 +903,13 @@ bool Buffer::create(bool alloc_local) {
 
     if (isFineGrain && !(memFlags & CL_MEM_VA_RANGE_AMD)) {
       // Use CPU direct access for the fine grain buffer
+      flags_ |= HostMemoryDirectAccess;
+    }
+
+    // FFM/DTIF fast-copy: when enabled, host can directly access plain device
+    // allocations so hipMemcpy can short-circuit to a host memcpy in CLR
+    // (skipping the rocclr-emitted blit/init kernel).
+    if (HSA_ENABLE_DTIF_FAST_COPY) {
       flags_ |= HostMemoryDirectAccess;
     }
 
@@ -898,22 +990,29 @@ bool Buffer::create(bool alloc_local) {
       }
     }
 
+    // VA ranges only reserve addresses, not real memory, so don't count them.
     if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain) &&
-        (kind_ != MEMORY_KIND_ARENA)) {
+        (kind_ != MEMORY_KIND_ARENA) && !(memFlags & CL_MEM_VA_RANGE_AMD)) {
       const_cast<Device&>(dev()).updateFreeMemory(size(), false);
     }
 
-    return deviceMemory_ != nullptr;
+    return (success = (deviceMemory_ != nullptr));
   }
 
   // Interop buffer
   if (owner()->isInterop()) {
     amd::InteropObject* interop = owner()->getInteropObj();
     auto ext_memory = interop->asExternalMemory();
-    amd::GLObject* glObject = interop->asGLObject();
     if (ext_memory != nullptr) {
-      return interopMapBuffer(ext_memory->Handle()) == HSA_STATUS_SUCCESS;
-    } else if (glObject != nullptr) {
+      // Win32-KMT handles need ROCR's KMT branch in libhsakmt; the default
+      // (no flag) takes the NT path and fails with STATUS_INVALID_HANDLE.
+      hsa_interop_map_flag_t map_flags = HSA_INTEROP_MAP_FLAG_NONE;
+      if (ext_memory->Type() == amd::ExternalMemory::HandleType::OpaqueWin32Kmt ||
+          ext_memory->Type() == amd::ExternalMemory::HandleType::D3D11ResourceKmt) {
+        map_flags = HSA_INTEROP_MAP_FLAG_KMT_HANDLE;
+      }
+      return interopMapBuffer(ext_memory->Handle(), map_flags) == HSA_STATUS_SUCCESS;
+    } else {
       return createInteropBuffer(GL_ARRAY_BUFFER, 0);
     }
   }
@@ -941,7 +1040,7 @@ bool Buffer::create(bool alloc_local) {
       owner()->setHostMem(nullptr);
     }
 
-    return true;
+    return (success = true);
   }
 
 #ifdef WITH_AMDGPU_PRO
@@ -952,7 +1051,7 @@ bool Buffer::create(bool alloc_local) {
       return false;
     }
     persistent_host_ptr_ = host_ptr;
-    return true;
+    return (success = true);
   }
 #endif
 
@@ -1003,10 +1102,11 @@ bool Buffer::create(bool alloc_local) {
       // Release host memory, since runtime copied data
       owner()->setHostMem(nullptr);
       bufferView->release();
-      return ret;
+
+      return (success = ret);
     }
 
-    return deviceMemory_ != nullptr;
+    return (success = (deviceMemory_ != nullptr));
   }
   assert(owner()->getHostMem() != nullptr || (owner()->getContext().devices().size() == 1));
 
@@ -1019,7 +1119,7 @@ bool Buffer::create(bool alloc_local) {
       Hsa::memory_register(deviceMemory_, size());
     }
 
-    return deviceMemory_ != nullptr;
+    return (success = (deviceMemory_ != nullptr));
   }
 
   // Just one device and allocation must be done in the backend
@@ -1041,7 +1141,74 @@ bool Buffer::create(bool alloc_local) {
     deviceMemory_ = owner()->getHostMem();
   }
 
-  return deviceMemory_ != nullptr;
+  return (success = (deviceMemory_ != nullptr));
+}
+
+// Recompute the owning agent from a live pointer_info query. Used once the virtual
+// address is actually backed (post hsa_amd_vmem_map), which is the only point where the
+// true owner of VMM-mapped / imported memory can be resolved.
+void Memory::refreshOwningAgentFromPointerInfo() {
+  if (deviceMemory_ == nullptr) {
+    return;
+  }
+
+  hsa_amd_pointer_info_t info = {};
+  info.size = sizeof(info);
+  hsa_status_t err = hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &info, nullptr,
+                                          nullptr, nullptr);
+
+  // info.agentOwner is the agent that actually owns the backing pages (a peer device for
+  // imported memory). Fall back to this device's backend if the query can't resolve it.
+  hsa_agent_t agent =
+      (err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0) ? info.agentOwner
+                                                                 : dev().getBackendDevice();
+  setOwningAgent(agent);
+}
+
+// Helper function to compute and cache the owning agent
+void Buffer::computeAndSetOwningAgent() {
+  hsa_agent_t agent;
+
+  // Sub-buffers must inherit agent from parent, not recompute it
+  if (owner() != nullptr && owner()->parent() != nullptr) {
+    const Memory* parentMemory = static_cast<const Memory*>(
+        owner()->parent()->getDeviceMemory(dev_));
+    if (parentMemory != nullptr) {
+      agent = parentMemory->getOwningAgent();
+      setOwningAgent(agent);
+      return;
+    }
+    // Fallback if parent not available (shouldn't happen)
+    LogWarning("Sub-buffer parent not available for agent inheritance");
+  }
+
+  // Check if this is IPC shared memory that needs pointer_info query
+  if (owner() != nullptr && (owner()->ipcShared() || owner()->vmmImported())) {
+    hsa_amd_pointer_info_t info = {};
+    info.size = sizeof(info);
+    hsa_status_t err = hsa_amd_pointer_info(
+        reinterpret_cast<address>(deviceMemory_), &info, nullptr, nullptr, nullptr);
+
+    // info.agentOwner is the agent that actually owns the backing pages (a peer device for
+    // IPC/imported memory). Note ROCr does not always tag IPC-opened memory with
+    // HSA_EXT_POINTER_TYPE_IPC, so key off a valid agentOwner rather than the pointer type.
+    agent = (err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0) ? info.agentOwner
+                                                                       : dev().getBackendDevice();
+  } else if (kind_ == MEMORY_KIND_ARENA || kind_ == MEMORY_KIND_HOST) {
+    // Arena and host memory use CPU agent
+    agent = dev().getCpuAgent();
+  } else if (kind_ == MEMORY_KIND_INTEROP) {
+    // Interop memory uses backend device
+    agent = dev().getBackendDevice();
+  } else if (flags_ & HostMemoryDirectAccess) {
+    // Host-accessible memory uses CPU agent
+    agent = dev().getCpuAgent();
+  } else {
+    // Normal device memory uses backend device agent
+    agent = dev().getBackendDevice();
+  }
+
+  setOwningAgent(agent);
 }
 
 // ================================================================================================
@@ -1239,39 +1406,61 @@ void Image::populateImageDescriptor() {
 }
 
 bool Image::createInteropImage() {
-  auto obj = owner()->getInteropObj()->asGLObject();
-  assert(obj->getCLGLObjectType() != CL_GL_OBJECT_BUFFER &&
-         "Non-image OpenGL object used with interop image API.");
+  // Handle GL interop images
+  auto glObj = owner()->getInteropObj()->asGLObject();
+  if (glObj) {
+    assert(glObj->getCLGLObjectType() != CL_GL_OBJECT_BUFFER &&
+           "Non-image OpenGL object used with interop image API.");
 
-  GLenum glTarget = obj->getGLTarget();
-  if (glTarget == GL_TEXTURE_CUBE_MAP) {
-    glTarget = obj->getCubemapFace();
+    GLenum glTarget = glObj->getGLTarget();
+    if (glTarget == GL_TEXTURE_CUBE_MAP) {
+      glTarget = glObj->getCubemapFace();
+    }
+
+    if (!createInteropBuffer(glTarget, glObj->getGLMipLevel())) {
+      assert(false && "Failed to map GL image buffer.");
+      return false;
+    }
   }
-
-  if (!createInteropBuffer(glTarget, obj->getGLMipLevel())) {
-    assert(false && "Failed to map image buffer.");
+#ifdef _WIN32
+  // Handle D3D interop images (D3D11/D3D10 supported)
+  else if (owner()->getInteropObj()->asD3D11Object() || owner()->getInteropObj()->asD3D10Object()) {
+    // For D3D, we use targetType=0 and miplevel from D3D object
+    // The createInteropBuffer will detect D3D object type and handle appropriately
+    if (!createInteropBuffer(0, 0)) {
+      assert(false && "Failed to map D3D image buffer.");
+      return false;
+    }
+  }
+#endif
+  else {
+    LogError("Interop image is neither GL nor D3D object");
     return false;
   }
 
   originalDeviceMemory_ = deviceMemory_;
 
-  if (obj->getGLTarget() == GL_TEXTURE_BUFFER) {
+  // Handle GL-specific texture buffer case
+  if (glObj && glObj->getGLTarget() == GL_TEXTURE_BUFFER) {
     hsa_status_t err = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_,
                                          originalDeviceMemory_, permission_, &hsaImageObject_);
     return (err == HSA_STATUS_SUCCESS);
   }
 
+  // For D3D and other GL textures, use metadata descriptor
   image_metadata desc;
   if (!desc.create(amdImageDesc_)) {
     return false;
   }
 
-  if (!desc.setMipLevel(obj->getGLMipLevel())) {
+  // Set mip level if GL object
+  if (glObj && !desc.setMipLevel(glObj->getGLMipLevel())) {
     return false;
   }
 
-  if (obj->getGLTarget() == GL_TEXTURE_CUBE_MAP) {
-    desc.setFace(obj->getCubemapFace(), dev().isa().versionMajor());
+  // Set cubemap face if GL cubemap
+  if (glObj && glObj->getGLTarget() == GL_TEXTURE_CUBE_MAP) {
+    desc.setFace(glObj->getCubemapFace(), dev().isa().versionMajor());
   }
 
   hsa_status_t err =
@@ -1310,6 +1499,8 @@ bool Image::create(bool alloc_local) {
     deviceMemory_ = orgImage->deviceMemory_;
     hsaImageObject_ = orgImage->hsaImageObject_;
     ownsHsaImageObject_ = false;
+    // Inherit agent from original image
+    setOwningAgent(orgImage->getOwningAgent());
     return true;
   }
 
@@ -1358,6 +1549,13 @@ bool Image::create(bool alloc_local) {
   if (status != HSA_STATUS_SUCCESS) {
     LogPrintfError("[OCL] Fail to allocate image memory, failed with hsa_status: %d \n", status);
     return false;
+  }
+
+  // Set the owning agent after successful creation
+  if (kind_ == MEMORY_KIND_HOST) {
+    setOwningAgent(dev().getCpuAgent());
+  } else {
+    setOwningAgent(dev().getBackendDevice());
   }
 
   return true;
@@ -1446,36 +1644,33 @@ bool Image::createView(const Memory& parent) {
         }
       }
     }
-  } else if (kind_ == MEMORY_KIND_INTEROP) {
-    amdImageDesc_ = static_cast<Image*>(parent.owner()->getDeviceMemory(dev()))->amdImageDesc_;
-    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
-                               deviceMemory_, permission_, &hsaImageObject_);
-  } else {
-    if (ancestor->asImage()->getMipLevels() > 1 && imageDescriptor_.mipmap_levels == 1) {
-      // This is on leveled image of mipmap image ancestor
+  } else if (ancestor->asImage()->getMipLevels() > 1 && imageDescriptor_.mipmap_levels == 1) {
+      // This is on leveled image of mipmap image, including leveled view of interop mipmap.
       amd::Memory* parentOwner = parent.owner();
       auto* ancestor_image = static_cast<Image*>(ancestor->getDeviceMemory(dev()));
       if (ancestor == parentOwner) {
         // This is leveled image
-        status = Hsa::image_get_mipmap_level(dev().getBackendDevice(),
-                                           &ancestor_image->hsaImageObject_,
-                                           owner()->asImage()->getBaseMipLevel(),
-                                           nullptr, &hsaImageObject_);
+        status = Hsa::image_get_mipmap_level(
+            dev().getBackendDevice(), &ancestor_image->hsaImageObject_,
+            owner()->asImage()->getBaseMipLevel(), nullptr, &hsaImageObject_);
       } else if (ancestor == parentOwner->parent()) {
         // This is format changed view on leveled image
-        status = Hsa::image_get_mipmap_level(dev().getBackendDevice(),
-                                           &ancestor_image->hsaImageObject_,
-                                           parentOwner->asImage()->getBaseMipLevel(),
-                                           &imageDescriptor_, &hsaImageObject_);
+        status = Hsa::image_get_mipmap_level(
+            dev().getBackendDevice(), &ancestor_image->hsaImageObject_,
+            parentOwner->asImage()->getBaseMipLevel(), &imageDescriptor_, &hsaImageObject_);
       } else {
         // This is an impossible view on leveled image
         status = HSA_STATUS_ERROR_INVALID_REGION;
       }
-    } else {
-      // This is a view on regular image or mipmap image.
-      status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
+  } else if (kind_ == MEMORY_KIND_INTEROP) {
+    // This is a view on interop regular image or mipmap image.
+    amdImageDesc_ = static_cast<Image*>(parent.owner()->getDeviceMemory(dev()))->amdImageDesc_;
+    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
+                               deviceMemory_, permission_, &hsaImageObject_);
+  } else {
+    // This is a view on regular image or mipmap image.
+    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
                                  permission_, &hsaImageObject_);
-    }
   }
 
   if (status != HSA_STATUS_SUCCESS) {
@@ -1491,6 +1686,9 @@ bool Image::createView(const Memory& parent) {
   } else {
     owner()->setHostMem(nullptr);
   }
+
+  // Image view inherits agent from parent
+  setOwningAgent(parent.getOwningAgent());
 
   return true;
 }

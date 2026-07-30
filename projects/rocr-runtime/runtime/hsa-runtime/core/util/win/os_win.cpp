@@ -54,7 +54,6 @@
 #include <emmintrin.h>
 #include <pmmintrin.h>
 #include <xmmintrin.h>
-#include <shared_mutex>
 
 #undef Yield
 #undef CreateMutex
@@ -76,8 +75,19 @@ static_assert(sizeof(EventHandle) == sizeof(::HANDLE),
               "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
+  // Pin the library to prevent unloading, equivalent to RTLD_NODELETE on Linux.
+  // This prevents crashes when the library has circular dependencies back to ROCR.
   HMODULE ret = LoadLibrary(filename.c_str());
-  return *(LibHandle*)&ret;
+  if (ret != NULL) {
+    // Pin by address rather than filename to avoid path resolution issues.
+    HMODULE pinned;
+    if (!GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+            reinterpret_cast<LPCSTR>(ret), &pinned)) {
+      debug_print("LoadLib(%s) pinning failed: error %lu\n", filename.c_str(), GetLastError());
+    }
+  }
+  return reinterpret_cast<LibHandle>(ret);
 }
 
 void* GetExportAddress(LibHandle lib, std::string export_name) {
@@ -95,6 +105,29 @@ std::vector<LibHandle> GetLoadedLibs() {
 std::string GetLibraryName(LibHandle lib) {
   assert(!"Not implemented.");
   return std::string{};
+}
+
+std::string GetAdjacentLibraryPath(const void* address, const std::string& filename) {
+  HMODULE module = nullptr;
+  if (!GetModuleHandleExA(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          reinterpret_cast<LPCSTR>(address), &module)) {
+    return {};
+  }
+
+  std::string path(MAX_PATH, '\0');
+  for (;;) {
+    DWORD length = GetModuleFileNameA(module, path.data(), static_cast<DWORD>(path.size()));
+    if (length == 0) return {};
+    if (length < path.size()) {
+      path.resize(length);
+      const auto slash = path.find_last_of("\\/");
+      return slash == std::string::npos ? std::string{}
+                                        : path.substr(0, slash + 1) + filename;
+    }
+    if (path.size() >= 32768) return {};
+    path.resize(path.size() * 2);
+  }
 }
 
 Semaphore CreateSemaphore() {
@@ -260,40 +293,6 @@ uint64_t AccurateClockFrequency() {
   return ret;
 }
 
-SharedMutex CreateSharedMutex() {
-  return reinterpret_cast<SharedMutex>(new std::shared_mutex());
-}
-
-bool TryAcquireSharedMutex(SharedMutex lock) {
-  return reinterpret_cast<std::shared_mutex*>(lock)->try_lock();
-}
-
-bool AcquireSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->lock();
-  return true;
-}
-
-void ReleaseSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->unlock();
-}
-
-bool TrySharedAcquireSharedMutex(SharedMutex lock) {
-  return reinterpret_cast<std::shared_mutex*>(lock)->try_lock_shared();
-}
-
-bool SharedAcquireSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->lock_shared();
-  return true;
-}
-
-void SharedReleaseSharedMutex(SharedMutex lock) {
-  reinterpret_cast<std::shared_mutex*>(lock)->unlock_shared();
-}
-
-void DestroySharedMutex(SharedMutex lock) {
-  delete reinterpret_cast<std::shared_mutex*>(lock);
-}
-
 uint64_t ReadSystemClock() {
   assert(false && "Not implemented.");
   abort();
@@ -301,9 +300,9 @@ uint64_t ReadSystemClock() {
 }
 
 uint64_t SystemClockFrequency() {
-  LARGE_INTEGER frequency;
-  QueryPerformanceFrequency(&frequency);
-  return frequency.QuadPart;
+  // Return 1 GHz to match libhsakmt's SystemClockCounter (nanoseconds via
+  // os::TimeNanos()) and Linux (CLOCK_BOOTTIME, 1ns resolution).
+  return 1000000000;
 }
 
 bool ParseCpuID(cpuid_t* cpuinfo) {
@@ -470,6 +469,17 @@ bool MapMemory(void* addr, size_t size, MemProt perms, int fd [[maybe_unused]],
   return VirtualProtect(addr, size, memProtToOsProt(perms), &OldProtect) != 0;
 }
 
+hsa_status_t DmaBufClose(int* dmabuf) {
+  if (dmabuf) *dmabuf = -1;
+  return HSA_STATUS_SUCCESS;
+}
+
+int DmaBufDup(int dmabuf) {
+  /* DMA-BUF is not supported on Windows; preserve pre-dup behavior by returning the caller fd. */
+  if (dmabuf < 0) return -1;
+  return dmabuf;
+}
+
 bool ProtectMemory(void* va, size_t size, MemProt perms) {
   if (perms == MEM_PROT_NONE) {
     return UncommitMemory(va, size);
@@ -495,6 +505,8 @@ int Ctz(uint64_t i) {
     return sizeof(i) * 8;
   }
 }
+
+int Popcount(uint32_t i) { return __popcnt(i); }
 
 char* DlError() { return nullptr; }
 

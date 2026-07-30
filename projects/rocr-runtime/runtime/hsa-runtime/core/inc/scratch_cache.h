@@ -267,7 +267,7 @@ class ScratchCache {
 
   bool use_reserved(ScratchInfo& info) {
     if (!reserved_.second.isFree() || info.main_size > reserved_.first) {
-      debug_print("reserved node is already in use or too small (requested:%ld reserved:%ld)\n",
+      debug_print("reserved node is already in use or too small (requested:%zd reserved:%zd)\n",
                   info.main_size, reserved_.first);
       return false;
     }

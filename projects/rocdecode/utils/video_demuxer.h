@@ -31,25 +31,33 @@ extern "C" {
     #endif
 }
 
+#include <cstdint>
 #include <cstring>
 #include <ctime>
 #include <time.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <thread>
+#include <sstream>
+#include <iomanip>
 #include "rocdecode/rocdecode.h"
 
 // Minimal critical logging for video_demuxer.h.
 // Matches the format produced by the full logger in src/commons.h:
-//   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y] func(): message
+//   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y hashid:0xZZZZZ] func(): message
 #define DemuxCriticalLog(msg) \
     do { \
         struct timespec _ts_; \
         clock_gettime(CLOCK_MONOTONIC, &_ts_); \
         uint64_t _us_ = static_cast<uint64_t>(_ts_.tv_sec) * 1000000ULL + _ts_.tv_nsec / 1000ULL; \
         const char *_f_ = strrchr(__FILE__, '/'); \
+        pid_t _tid_ = static_cast<pid_t>(syscall(SYS_gettid)); \
+        std::ostringstream _htid_oss_; \
+        _htid_oss_ << "0x" << std::hex << std::setw(5) << std::setfill('0') \
+                  << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); \
         std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
                   << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
-                  << getpid() << " tid:" << syscall(SYS_gettid) << "] " \
+                  << getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
                   << __func__ << "(): " << (msg) << std::endl; \
     } while (0)
 
@@ -217,15 +225,22 @@ class VideoDemuxer {
                 if (is_mpeg4_ && (frame_count_ == 0)) {
                     int ext_data_size = av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata_size;
                     if (ext_data_size > 0) {
-                        data_with_header_ = (uint8_t *)av_malloc(ext_data_size + packet_->size - 3 * sizeof(uint8_t));
+                        if (packet_->size < 3 ||
+                            (size_t)ext_data_size > SIZE_MAX - (size_t)(packet_->size - 3)) {
+                            DemuxCriticalLog("malformed first MPEG-4 packet!");
+                            return false;
+                        }
+                        size_t payload = (size_t)packet_->size - 3;
+                        size_t total = (size_t)ext_data_size + payload;
+                        data_with_header_ = (uint8_t *)av_malloc(total);
                         if (!data_with_header_) {
                             DemuxCriticalLog("av_malloc failed!");
                             return false;
                         }
                         memcpy(data_with_header_, av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata, ext_data_size);
-                        memcpy(data_with_header_ + ext_data_size, packet_->data + 3, packet_->size - 3 * sizeof(uint8_t));
+                        memcpy(data_with_header_ + ext_data_size, packet_->data + 3, payload);
                         *video = data_with_header_;
-                        *video_size = ext_data_size + packet_->size - 3 * sizeof(uint8_t);
+                        *video_size = total;
                     }
                 } else {
                     *video = packet_->data;

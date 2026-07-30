@@ -5,7 +5,6 @@
 #include "core/trace_cache/cacheable.hpp"
 
 #include <cstdint>
-#include <stdint.h>
 #include <string>
 #include <unistd.h>
 #include <utility>
@@ -16,7 +15,7 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-enum class type_identifier_t : uint32_t
+enum class type_identifier_t : std::uint32_t
 {
     in_time_sample          = 0x0000,
     pmc_event_with_sample   = 0x0001,
@@ -30,6 +29,7 @@ enum class type_identifier_t : uint32_t
     scratch_memory          = 0x0009,
     ainic_pmc_sample        = 0x000A,
     kfd_sample              = 0x000B,
+    gpu_perf_counter_sample = 0x000C,
     fragmented_space        = 0xFFFF
 };
 
@@ -39,16 +39,16 @@ struct kernel_dispatch_sample : cacheable_t
         type_identifier_t::kernel_dispatch;
 
     kernel_dispatch_sample() = default;
-    kernel_dispatch_sample(uint64_t _start_timestamp, uint64_t _end_timestamp,
-                           uint64_t _thread_id, uint64_t _agent_id_handle,
-                           uint64_t _kernel_id, uint64_t _dispatch_id,
-                           uint64_t _queue_id_handle, uint64_t _correlation_id_internal,
-                           uint64_t _correlation_id_ancestor,
-                           uint32_t _private_segment_size, uint32_t _group_segment_size,
-                           uint32_t _workgroup_size_x, uint32_t _workgroup_size_y,
-                           uint32_t _workgroup_size_z, uint32_t _grid_size_x,
-                           uint32_t _grid_size_y, uint32_t _grid_size_z,
-                           size_t _stream_handle)
+    kernel_dispatch_sample(
+        std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
+        std::uint64_t _thread_id, std::uint64_t _agent_id_handle,
+        std::uint64_t _kernel_id, std::uint64_t _dispatch_id,
+        std::uint64_t _queue_id_handle, std::uint64_t _correlation_id_internal,
+        std::uint64_t _correlation_id_ancestor, std::uint32_t _private_segment_size,
+        std::uint32_t _group_segment_size, std::uint32_t _workgroup_size_x,
+        std::uint32_t _workgroup_size_y, std::uint32_t _workgroup_size_z,
+        std::uint32_t _grid_size_x, std::uint32_t _grid_size_y,
+        std::uint32_t _grid_size_z, size_t _stream_handle)
     : start_timestamp(_start_timestamp)
     , end_timestamp(_end_timestamp)
     , thread_id(_thread_id)
@@ -69,29 +69,29 @@ struct kernel_dispatch_sample : cacheable_t
     , stream_handle(_stream_handle)
     {}
 
-    uint64_t start_timestamp;
-    uint64_t end_timestamp;
-    uint64_t thread_id;
-    uint64_t agent_id_handle;
-    uint64_t kernel_id;
-    uint64_t dispatch_id;
-    uint64_t queue_id_handle;
-    uint64_t correlation_id_internal;
-    uint64_t correlation_id_ancestor;
-    uint32_t private_segment_size;
-    uint32_t group_segment_size;
-    uint32_t workgroup_size_x;
-    uint32_t workgroup_size_y;
-    uint32_t workgroup_size_z;
-    uint32_t grid_size_x;
-    uint32_t grid_size_y;
-    uint32_t grid_size_z;
-    size_t   stream_handle;
+    std::uint64_t start_timestamp;
+    std::uint64_t end_timestamp;
+    std::uint64_t thread_id;
+    std::uint64_t agent_id_handle;
+    std::uint64_t kernel_id;
+    std::uint64_t dispatch_id;
+    std::uint64_t queue_id_handle;
+    std::uint64_t correlation_id_internal;
+    std::uint64_t correlation_id_ancestor;
+    std::uint32_t private_segment_size;
+    std::uint32_t group_segment_size;
+    std::uint32_t workgroup_size_x;
+    std::uint32_t workgroup_size_y;
+    std::uint32_t workgroup_size_z;
+    std::uint32_t grid_size_x;
+    std::uint32_t grid_size_y;
+    std::uint32_t grid_size_z;
+    size_t        stream_handle;
 };
 
 template <>
 inline void
-serialize(uint8_t* buffer, const kernel_dispatch_sample& item)
+serialize(std::uint8_t* buffer, const kernel_dispatch_sample& item)
 {
     utility::store_value(
         buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
@@ -99,15 +99,15 @@ serialize(uint8_t* buffer, const kernel_dispatch_sample& item)
         item.correlation_id_internal, item.correlation_id_ancestor,
         item.private_segment_size, item.group_segment_size, item.workgroup_size_x,
         item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x, item.grid_size_y,
-        item.grid_size_z, static_cast<uint64_t>(item.stream_handle));
+        item.grid_size_z, static_cast<std::uint64_t>(item.stream_handle));
 }
 
 template <>
 inline kernel_dispatch_sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     kernel_dispatch_sample item;
-    uint64_t               stream_handle;
+    std::uint64_t          stream_handle;
     utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
                          item.agent_id_handle, item.kernel_id, item.dispatch_id,
                          item.queue_id_handle, item.correlation_id_internal,
@@ -129,7 +129,7 @@ get_size(const kernel_dispatch_sample& item)
         item.correlation_id_internal, item.correlation_id_ancestor,
         item.private_segment_size, item.group_segment_size, item.workgroup_size_x,
         item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x, item.grid_size_y,
-        item.grid_size_z, static_cast<uint64_t>(item.stream_handle));
+        item.grid_size_z, static_cast<std::uint64_t>(item.stream_handle));
 }
 
 struct scratch_memory_sample : cacheable_t
@@ -138,12 +138,13 @@ struct scratch_memory_sample : cacheable_t
         type_identifier_t::scratch_memory;
 
     scratch_memory_sample() = default;
-    scratch_memory_sample(uint64_t _start_timestamp, uint64_t _end_timestamp,
-                          uint64_t _thread_id, uint64_t _agent_id_handle,
-                          uint64_t _queue_id_handle, int32_t _kind, int32_t _operation,
-                          int32_t _flags, uint64_t _allocation_size,
-                          uint64_t _correlation_id_internal,
-                          uint64_t _correlation_id_ancestor, size_t _stream_handle)
+    scratch_memory_sample(std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
+                          std::uint64_t _thread_id, std::uint64_t _agent_id_handle,
+                          std::uint64_t _queue_id_handle, std::int32_t _kind,
+                          std::int32_t _operation, std::int32_t _flags,
+                          std::uint64_t _allocation_size,
+                          std::uint64_t _correlation_id_internal,
+                          std::uint64_t _correlation_id_ancestor, size_t _stream_handle)
     : start_timestamp(_start_timestamp)
     , end_timestamp(_end_timestamp)
     , thread_id(_thread_id)
@@ -158,37 +159,37 @@ struct scratch_memory_sample : cacheable_t
     , stream_handle(_stream_handle)
     {}
 
-    uint64_t start_timestamp;
-    uint64_t end_timestamp;
-    uint64_t thread_id;
-    uint64_t agent_id_handle;
-    uint64_t queue_id_handle;
-    int32_t  kind;
-    int32_t  operation;
-    int32_t  flags;
-    uint64_t allocation_size;
-    uint64_t correlation_id_internal;
-    uint64_t correlation_id_ancestor;
-    size_t   stream_handle;
+    std::uint64_t start_timestamp;
+    std::uint64_t end_timestamp;
+    std::uint64_t thread_id;
+    std::uint64_t agent_id_handle;
+    std::uint64_t queue_id_handle;
+    std::int32_t  kind;
+    std::int32_t  operation;
+    std::int32_t  flags;
+    std::uint64_t allocation_size;
+    std::uint64_t correlation_id_internal;
+    std::uint64_t correlation_id_ancestor;
+    size_t        stream_handle;
 };
 
 template <>
 inline void
-serialize(uint8_t* buffer, const scratch_memory_sample& item)
+serialize(std::uint8_t* buffer, const scratch_memory_sample& item)
 {
     utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
                          item.agent_id_handle, item.queue_id_handle, item.kind,
                          item.operation, item.flags, item.allocation_size,
                          item.correlation_id_internal, item.correlation_id_ancestor,
-                         static_cast<uint64_t>(item.stream_handle));
+                         static_cast<std::uint64_t>(item.stream_handle));
 }
 
 template <>
 inline scratch_memory_sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     scratch_memory_sample item;
-    uint64_t              stream_handle;
+    std::uint64_t         stream_handle;
     utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
                          item.agent_id_handle, item.queue_id_handle, item.kind,
                          item.operation, item.flags, item.allocation_size,
@@ -206,7 +207,7 @@ get_size(const scratch_memory_sample& item)
                              item.agent_id_handle, item.queue_id_handle, item.kind,
                              item.operation, item.flags, item.allocation_size,
                              item.correlation_id_internal, item.correlation_id_ancestor,
-                             static_cast<uint64_t>(item.stream_handle));
+                             static_cast<std::uint64_t>(item.stream_handle));
 }
 
 struct memory_copy_sample : cacheable_t
@@ -214,12 +215,14 @@ struct memory_copy_sample : cacheable_t
     static constexpr type_identifier_t type_identifier = type_identifier_t::memory_copy;
 
     memory_copy_sample() = default;
-    memory_copy_sample(uint64_t _start_timestamp, uint64_t _end_timestamp,
-                       uint64_t _thread_id, uint64_t _dst_agent_id_handle,
-                       uint64_t _src_agent_id_handle, int32_t _kind, int32_t _operation,
-                       uint64_t _bytes, uint64_t _correlation_id_internal,
-                       uint64_t _correlation_id_ancestor, uint64_t _dst_address_value,
-                       uint64_t _src_address_value, size_t _stream_handle)
+    memory_copy_sample(std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
+                       std::uint64_t _thread_id, std::uint64_t _dst_agent_id_handle,
+                       std::uint64_t _src_agent_id_handle, std::int32_t _kind,
+                       std::int32_t _operation, std::uint64_t _bytes,
+                       std::uint64_t _correlation_id_internal,
+                       std::uint64_t _correlation_id_ancestor,
+                       std::uint64_t _dst_address_value, std::uint64_t _src_address_value,
+                       size_t _stream_handle)
     : start_timestamp(_start_timestamp)
     , end_timestamp(_end_timestamp)
     , thread_id(_thread_id)
@@ -235,39 +238,39 @@ struct memory_copy_sample : cacheable_t
     , stream_handle(_stream_handle)
     {}
 
-    uint64_t start_timestamp;
-    uint64_t end_timestamp;
-    uint64_t thread_id;
-    uint64_t dst_agent_id_handle;
-    uint64_t src_agent_id_handle;
-    int32_t  kind;
-    int32_t  operation;
-    uint64_t bytes;
-    uint64_t correlation_id_internal;
-    uint64_t correlation_id_ancestor;
-    uint64_t dst_address_value;
-    uint64_t src_address_value;
-    size_t   stream_handle;
+    std::uint64_t start_timestamp;
+    std::uint64_t end_timestamp;
+    std::uint64_t thread_id;
+    std::uint64_t dst_agent_id_handle;
+    std::uint64_t src_agent_id_handle;
+    std::int32_t  kind;
+    std::int32_t  operation;
+    std::uint64_t bytes;
+    std::uint64_t correlation_id_internal;
+    std::uint64_t correlation_id_ancestor;
+    std::uint64_t dst_address_value;
+    std::uint64_t src_address_value;
+    size_t        stream_handle;
 };
 
 template <>
 inline void
-serialize(uint8_t* buffer, const memory_copy_sample& item)
+serialize(std::uint8_t* buffer, const memory_copy_sample& item)
 {
     utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
                          item.dst_agent_id_handle, item.src_agent_id_handle, item.kind,
                          item.operation, item.bytes, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.dst_address_value,
                          item.src_address_value,
-                         static_cast<uint64_t>(item.stream_handle));
+                         static_cast<std::uint64_t>(item.stream_handle));
 }
 
 template <>
 inline memory_copy_sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     memory_copy_sample item;
-    uint64_t           stream_handle;
+    std::uint64_t      stream_handle;
     utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
                          item.dst_agent_id_handle, item.src_agent_id_handle, item.kind,
                          item.operation, item.bytes, item.correlation_id_internal,
@@ -286,7 +289,7 @@ get_size(const memory_copy_sample& item)
                              item.kind, item.operation, item.bytes,
                              item.correlation_id_internal, item.correlation_id_ancestor,
                              item.dst_address_value, item.src_address_value,
-                             static_cast<uint64_t>(item.stream_handle));
+                             static_cast<std::uint64_t>(item.stream_handle));
 }
 
 struct memory_allocate_sample : cacheable_t
@@ -294,12 +297,13 @@ struct memory_allocate_sample : cacheable_t
     static constexpr type_identifier_t type_identifier = type_identifier_t::memory_alloc;
 
     memory_allocate_sample() = default;
-    memory_allocate_sample(uint64_t _start_timestamp, uint64_t _end_timestamp,
-                           uint64_t _thread_id, uint64_t _agent_id_handle, int32_t _kind,
-                           int32_t _operation, uint64_t _allocation_size,
-                           uint64_t _correlation_id_internal,
-                           uint64_t _correlation_id_ancestor, uint64_t _address_value,
-                           size_t _stream_handle)
+    memory_allocate_sample(std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
+                           std::uint64_t _thread_id, std::uint64_t _agent_id_handle,
+                           std::int32_t _kind, std::int32_t _operation,
+                           std::uint64_t _allocation_size,
+                           std::uint64_t _correlation_id_internal,
+                           std::uint64_t _correlation_id_ancestor,
+                           std::uint64_t _address_value, size_t _stream_handle)
     : start_timestamp(_start_timestamp)
     , end_timestamp(_end_timestamp)
     , thread_id(_thread_id)
@@ -313,36 +317,36 @@ struct memory_allocate_sample : cacheable_t
     , stream_handle(_stream_handle)
     {}
 
-    uint64_t start_timestamp;
-    uint64_t end_timestamp;
-    uint64_t thread_id;
-    uint64_t agent_id_handle;
-    int32_t  kind;
-    int32_t  operation;
-    uint64_t allocation_size;
-    uint64_t correlation_id_internal;
-    uint64_t correlation_id_ancestor;
-    uint64_t address_value;
-    size_t   stream_handle;
+    std::uint64_t start_timestamp;
+    std::uint64_t end_timestamp;
+    std::uint64_t thread_id;
+    std::uint64_t agent_id_handle;
+    std::int32_t  kind;
+    std::int32_t  operation;
+    std::uint64_t allocation_size;
+    std::uint64_t correlation_id_internal;
+    std::uint64_t correlation_id_ancestor;
+    std::uint64_t address_value;
+    size_t        stream_handle;
 };
 
 template <>
 inline void
-serialize(uint8_t* buffer, const memory_allocate_sample& item)
+serialize(std::uint8_t* buffer, const memory_allocate_sample& item)
 {
     utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
                          item.agent_id_handle, item.kind, item.operation,
                          item.allocation_size, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.address_value,
-                         static_cast<uint64_t>(item.stream_handle));
+                         static_cast<std::uint64_t>(item.stream_handle));
 }
 
 template <>
 inline memory_allocate_sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     memory_allocate_sample item;
-    uint64_t               stream_handle;
+    std::uint64_t          stream_handle;
     utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
                          item.agent_id_handle, item.kind, item.operation,
                          item.allocation_size, item.correlation_id_internal,
@@ -359,7 +363,7 @@ get_size(const memory_allocate_sample& item)
                              item.agent_id_handle, item.kind, item.operation,
                              item.allocation_size, item.correlation_id_internal,
                              item.correlation_id_ancestor, item.address_value,
-                             static_cast<uint64_t>(item.stream_handle));
+                             static_cast<std::uint64_t>(item.stream_handle));
 }
 
 struct region_sample : cacheable_t
@@ -367,10 +371,11 @@ struct region_sample : cacheable_t
     static constexpr type_identifier_t type_identifier = type_identifier_t::region;
 
     region_sample() = default;
-    region_sample(uint64_t _thread_id, std::string _name,
-                  uint64_t _correlation_id_internal, uint64_t _correlation_id_ancestor,
-                  uint64_t _start_timestamp, uint64_t _end_timestamp,
-                  std::string _call_stack, std::string _args_str, std::string _category)
+    region_sample(std::uint64_t _thread_id, std::string _name,
+                  std::uint64_t _correlation_id_internal,
+                  std::uint64_t _correlation_id_ancestor, std::uint64_t _start_timestamp,
+                  std::uint64_t _end_timestamp, std::string _call_stack,
+                  std::string _args_str, std::string _category)
     : thread_id(_thread_id)
     , name(std::move(_name))
     , correlation_id_internal(_correlation_id_internal)
@@ -382,20 +387,20 @@ struct region_sample : cacheable_t
     , category(std::move(_category))
     {}
 
-    uint64_t    thread_id;
-    std::string name;
-    uint64_t    correlation_id_internal;
-    uint64_t    correlation_id_ancestor;
-    uint64_t    start_timestamp;
-    uint64_t    end_timestamp;
-    std::string call_stack;
-    std::string args_str;
-    std::string category;
+    std::uint64_t thread_id;
+    std::string   name;
+    std::uint64_t correlation_id_internal;
+    std::uint64_t correlation_id_ancestor;
+    std::uint64_t start_timestamp;
+    std::uint64_t end_timestamp;
+    std::string   call_stack;
+    std::string   args_str;
+    std::string   category;
 };
 
 template <>
 inline void
-serialize(uint8_t* buffer, const region_sample& item)
+serialize(std::uint8_t* buffer, const region_sample& item)
 {
     utility::store_value(
         buffer, item.thread_id, std::string_view(item.name), item.correlation_id_internal,
@@ -406,7 +411,7 @@ serialize(uint8_t* buffer, const region_sample& item)
 
 template <>
 inline region_sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     region_sample    item;
     std::string_view name_view, call_stack_view, args_str_view, category_view;
@@ -466,25 +471,26 @@ struct in_time_sample : cacheable_t
 
 template <>
 inline void
-serialize(uint8_t* buffer, const in_time_sample& item)
+serialize(std::uint8_t* buffer, const in_time_sample& item)
 {
     utility::store_value(
         buffer, item.category_enum_id, std::string_view(item.track_name),
-        static_cast<uint64_t>(item.timestamp_ns), std::string_view(item.event_metadata),
-        static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
-        static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
-        std::string_view(item.line_info));
+        static_cast<std::uint64_t>(item.timestamp_ns),
+        std::string_view(item.event_metadata), static_cast<std::uint64_t>(item.stack_id),
+        static_cast<std::uint64_t>(item.parent_stack_id),
+        static_cast<std::uint64_t>(item.correlation_id),
+        std::string_view(item.call_stack), std::string_view(item.line_info));
 }
 
 template <>
 inline in_time_sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     in_time_sample   item;
     size_t           category_enum_id;
     std::string_view track_name_view, event_metadata_view, call_stack_view,
         line_info_view;
-    uint64_t timestamp_ns, stack_id, parent_stack_id, correlation_id;
+    std::uint64_t timestamp_ns, stack_id, parent_stack_id, correlation_id;
     utility::parse_value(buffer, category_enum_id, track_name_view, timestamp_ns,
                          event_metadata_view, stack_id, parent_stack_id, correlation_id,
                          call_stack_view, line_info_view);
@@ -506,10 +512,11 @@ get_size(const in_time_sample& item)
 {
     return utility::get_size(
         item.category_enum_id, std::string_view(item.track_name),
-        static_cast<uint64_t>(item.timestamp_ns), std::string_view(item.event_metadata),
-        static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
-        static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
-        std::string_view(item.line_info));
+        static_cast<std::uint64_t>(item.timestamp_ns),
+        std::string_view(item.event_metadata), static_cast<std::uint64_t>(item.stack_id),
+        static_cast<std::uint64_t>(item.parent_stack_id),
+        static_cast<std::uint64_t>(item.correlation_id),
+        std::string_view(item.call_stack), std::string_view(item.line_info));
 }
 
 struct pmc_event_with_sample : in_time_sample
@@ -522,9 +529,9 @@ struct pmc_event_with_sample : in_time_sample
                           size_t _timestamp_ns, std::string _event_metadata,
                           size_t _stack_id, size_t _parent_stack_id,
                           size_t _correlation_id, std::string _call_stack,
-                          std::string _line_info, uint32_t _device_id,
-                          uint8_t _device_type, std::string _pmc_info_name, double _value,
-                          std::optional<int64_t> _system_tid)
+                          std::string _line_info, std::uint32_t _device_id,
+                          std::uint8_t _device_type, std::string _pmc_info_name,
+                          double _value, std::optional<std::int64_t> _system_tid)
     : in_time_sample(_category_enum_id, std::move(_track_name), _timestamp_ns,
                      std::move(_event_metadata), _stack_id, _parent_stack_id,
                      _correlation_id, std::move(_call_stack), std::move(_line_info))
@@ -535,35 +542,37 @@ struct pmc_event_with_sample : in_time_sample
     , system_tid(_system_tid)
     {}
 
-    uint32_t               device_id;
-    uint8_t                device_type;
-    std::string            pmc_info_name;
-    double                 value;
-    std::optional<int64_t> system_tid;
+    std::uint32_t               device_id;
+    std::uint8_t                device_type;
+    std::string                 pmc_info_name;
+    double                      value;
+    std::optional<std::int64_t> system_tid;
 };
 
 template <>
 inline void
-serialize(uint8_t* buffer, const pmc_event_with_sample& item)
+serialize(std::uint8_t* buffer, const pmc_event_with_sample& item)
 {
     utility::store_value(
         buffer, item.category_enum_id, std::string_view(item.track_name),
-        static_cast<uint64_t>(item.timestamp_ns), std::string_view(item.event_metadata),
-        static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
-        static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
-        std::string_view(item.line_info), item.device_id, item.device_type,
-        std::string_view(item.pmc_info_name), item.value, item.system_tid);
+        static_cast<std::uint64_t>(item.timestamp_ns),
+        std::string_view(item.event_metadata), static_cast<std::uint64_t>(item.stack_id),
+        static_cast<std::uint64_t>(item.parent_stack_id),
+        static_cast<std::uint64_t>(item.correlation_id),
+        std::string_view(item.call_stack), std::string_view(item.line_info),
+        item.device_id, item.device_type, std::string_view(item.pmc_info_name),
+        item.value, item.system_tid);
 }
 
 template <>
 inline pmc_event_with_sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     pmc_event_with_sample item;
     size_t                category_enum_id;
     std::string_view      track_name_view, event_metadata_view, call_stack_view,
         line_info_view, pmc_info_name_view;
-    uint64_t timestamp_ns, stack_id, parent_stack_id, correlation_id;
+    std::uint64_t timestamp_ns, stack_id, parent_stack_id, correlation_id;
     utility::parse_value(buffer, category_enum_id, track_name_view, timestamp_ns,
                          event_metadata_view, stack_id, parent_stack_id, correlation_id,
                          call_stack_view, line_info_view, item.device_id,
@@ -588,11 +597,13 @@ get_size(const pmc_event_with_sample& item)
 {
     return utility::get_size(
         item.category_enum_id, std::string_view(item.track_name),
-        static_cast<uint64_t>(item.timestamp_ns), std::string_view(item.event_metadata),
-        static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
-        static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
-        std::string_view(item.line_info), item.device_id, item.device_type,
-        std::string_view(item.pmc_info_name), item.value, item.system_tid);
+        static_cast<std::uint64_t>(item.timestamp_ns),
+        std::string_view(item.event_metadata), static_cast<std::uint64_t>(item.stack_id),
+        static_cast<std::uint64_t>(item.parent_stack_id),
+        static_cast<std::uint64_t>(item.correlation_id),
+        std::string_view(item.call_stack), std::string_view(item.line_info),
+        item.device_id, item.device_type, std::string_view(item.pmc_info_name),
+        item.value, item.system_tid);
 }
 
 struct backtrace_region_sample : cacheable_t
@@ -601,11 +612,11 @@ struct backtrace_region_sample : cacheable_t
         type_identifier_t::backtrace_region_sample;
 
     backtrace_region_sample() = default;
-    backtrace_region_sample(uint32_t _type, uint64_t _thread_id, std::string _track_name,
-                            std::string _name, uint64_t _start_timestamp,
-                            uint64_t _end_timestamp, std::string _category,
-                            std::string _call_stack, std::string _line_info,
-                            std::string _extdata)
+    backtrace_region_sample(std::uint32_t _type, std::uint64_t _thread_id,
+                            std::string _track_name, std::string _name,
+                            std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
+                            std::string _category, std::string _call_stack,
+                            std::string _line_info, std::string _extdata)
     : type(_type)
     , thread_id(_thread_id)
     , track_name(std::move(_track_name))
@@ -618,21 +629,21 @@ struct backtrace_region_sample : cacheable_t
     , extdata(std::move(_extdata))
     {}
 
-    uint32_t    type;
-    uint64_t    thread_id;
-    std::string track_name;
-    std::string name;
-    uint64_t    start_timestamp;
-    uint64_t    end_timestamp;
-    std::string category;
-    std::string call_stack;
-    std::string line_info;
-    std::string extdata;
+    std::uint32_t type;
+    std::uint64_t thread_id;
+    std::string   track_name;
+    std::string   name;
+    std::uint64_t start_timestamp;
+    std::uint64_t end_timestamp;
+    std::string   category;
+    std::string   call_stack;
+    std::string   line_info;
+    std::string   extdata;
 };
 
 template <>
 inline void
-serialize(uint8_t* buffer, const backtrace_region_sample& item)
+serialize(std::uint8_t* buffer, const backtrace_region_sample& item)
 {
     utility::store_value(
         buffer, item.type, item.thread_id, std::string_view(item.track_name),
@@ -643,7 +654,7 @@ serialize(uint8_t* buffer, const backtrace_region_sample& item)
 
 template <>
 inline backtrace_region_sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     backtrace_region_sample item;
     std::string_view        track_name_view, name_view, category_view, call_stack_view,
@@ -676,11 +687,12 @@ struct kfd_sample : cacheable_t
     static constexpr type_identifier_t type_identifier = type_identifier_t::kfd_sample;
 
     kfd_sample() = default;
-    kfd_sample(uint64_t _thread_id, std::string _name, uint64_t _start_timestamp,
-               uint64_t _end_timestamp, std::string _args_str, std::string _category,
-               std::string _track_name, std::string _event_metadata, uint32_t _device_id,
-               uint8_t _device_type, std::string _pmc_info_name, double _value,
-               std::optional<int64_t> _system_tid)
+    kfd_sample(std::uint64_t _thread_id, std::string _name,
+               std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
+               std::string _args_str, std::string _category, std::string _track_name,
+               std::string _event_metadata, std::uint32_t _device_id,
+               std::uint8_t _device_type, std::string _pmc_info_name, double _value,
+               std::optional<std::int64_t> _system_tid)
     : thread_id(_thread_id)
     , name(std::move(_name))
     , start_timestamp(_start_timestamp)
@@ -696,24 +708,24 @@ struct kfd_sample : cacheable_t
     , system_tid(_system_tid)
     {}
 
-    uint64_t               thread_id;
-    std::string            name;
-    uint64_t               start_timestamp;
-    uint64_t               end_timestamp;
-    std::string            args_str;
-    std::string            category;
-    std::string            track_name;
-    std::string            event_metadata;
-    uint32_t               device_id;
-    uint8_t                device_type;
-    std::string            pmc_info_name;
-    double                 value;
-    std::optional<int64_t> system_tid;
+    std::uint64_t               thread_id;
+    std::string                 name;
+    std::uint64_t               start_timestamp;
+    std::uint64_t               end_timestamp;
+    std::string                 args_str;
+    std::string                 category;
+    std::string                 track_name;
+    std::string                 event_metadata;
+    std::uint32_t               device_id;
+    std::uint8_t                device_type;
+    std::string                 pmc_info_name;
+    double                      value;
+    std::optional<std::int64_t> system_tid;
 };
 
 template <>
 inline void
-serialize(uint8_t* buffer, const kfd_sample& item)
+serialize(std::uint8_t* buffer, const kfd_sample& item)
 {
     utility::store_value(
         buffer, item.thread_id, std::string_view(item.name), item.start_timestamp,
@@ -725,7 +737,7 @@ serialize(uint8_t* buffer, const kfd_sample& item)
 
 template <>
 inline kfd_sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     kfd_sample       item;
     std::string_view name_view, args_str_view, category_view, track_name_view,

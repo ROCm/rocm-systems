@@ -42,7 +42,7 @@ cmake --build <build_dir> --target thread-limit
 **Arguments:**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | 1 | Fibonacci number to compute | 35 |
 | 2 | Concurrency (threads per batch) | hardware_concurrency() |
 | 3 | Total number of threads to launch | 2 * MAX_THREADS (8000) |
@@ -56,7 +56,7 @@ rocprof-sys-run -- ./thread-limit 30 4 500
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace showing thread lifecycle |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable statistical sampling of thread stacks |

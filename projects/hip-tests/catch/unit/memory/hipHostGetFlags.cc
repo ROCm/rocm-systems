@@ -85,8 +85,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
 
   // Skip test if device does not support the property canMapHostMemory
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
   } else {
     // Allocate using the generated flags combos
     INFO("Flag passed when allocating: 0x" << std::hex << FlagComp << "\n");
@@ -117,8 +116,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
   } else {
     // Make sure we allocate before trying to get the flags
     std::thread malloc_thread(
@@ -146,8 +144,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
 
   // Skip test if device does not support the property canMapHostMemory
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
   } else {
     SECTION("Invalid flag ptr being passed to hipHostGetFlags") {
       // Use default flag

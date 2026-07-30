@@ -35,8 +35,8 @@ def validate_all_agents_are_sampled(
     input_kernel_trace_csv: pd.DataFrame,
     input_agent_info_csv: pd.DataFrame,
 ):
-    transpose_kernel_source_line_start = 137
-    transpose_kernel_source_line_end = 145
+    transpose_kernel_source_line_start = 181
+    transpose_kernel_source_line_end = 189
 
     gfx9_gfx12_agents_df = input_agent_info_csv[
         input_agent_info_csv["Name"].apply(
@@ -78,7 +78,7 @@ def validate_all_agents_are_sampled(
     # extract decoded samples that are mapped to the transpose.cpp file
     transpose_samples_df = samples_df[
         samples_df["Instruction_Comment"].apply(
-            lambda comment: "transpose-all-agents.cpp" in comment
+            lambda comment: "transpose.cpp" in comment
         )
     ].copy()
     # determine the line number for each sample

@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.time_window, pytest.mark.ci_enable]
+pytestmark = [pytest.mark.time_window]
 
 # ============================================================================
 # Time Window Fixtures
@@ -30,11 +30,18 @@ def time_window_env() -> dict[str, str]:
 # ============================================================================
 
 
+@pytest.mark.parametrize(
+    "mode",
+    [
+        pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
+        "runtime_instrument",
+    ],
+)
+@pytest.mark.class_name("trace-time-window")
 class TestTraceTimeWindow(RocprofsysTest):
-    REWRITE_ARGS = ["-e", "-v", "2", "--caller-include", "inner", "-i", "4096"]
-    RUNTIME_ARGS = ["-e", "-v", "1", "--caller-include", "inner", "-i", "4096"]
+    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--caller-include", "inner", "-i", "4096"]
+    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "1", "--caller-include", "inner", "-i", "4096"]
 
-    @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
     def test(self, mode, time_window_env):
 
         env = time_window_env.copy()
@@ -43,10 +50,8 @@ class TestTraceTimeWindow(RocprofsysTest):
             mode,
             "trace-time-window",
             env=env,
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
-            rewrite_timeout=120,
-            runtime_timeout=300,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
         self.assert_regex(result)
 
@@ -72,7 +77,6 @@ class TestTraceTimeWindow(RocprofsysTest):
             fail_regex=["outer_d"],  # time window should exclude this
         )
 
-    @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
     def test_delay(self, mode, time_window_env):
         env = time_window_env.copy()
         env.update(
@@ -82,10 +86,8 @@ class TestTraceTimeWindow(RocprofsysTest):
             mode,
             "trace-time-window",
             env=env,
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
-            rewrite_timeout=120,
-            runtime_timeout=300,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
         self.assert_regex(result)
         self.assert_timemory(

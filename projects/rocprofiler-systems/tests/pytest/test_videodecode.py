@@ -13,7 +13,7 @@ pytestmark = [
     pytest.mark.gpu,
     pytest.mark.decode,
     pytest.mark.videodecode,
-    pytest.mark.ci_enable,
+    pytest.mark.rocm,
 ]
 
 from pathlib import Path
@@ -28,7 +28,7 @@ def video_decode_env() -> dict[str, str]:
     """Environment variables for video decode tests."""
     return {
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api",
-        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,vcn_activity,vcn_busy,mem_usage",
+        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,vcn_activity,mem_usage,gfx_clock,mem_clock",
         "ROCPROFSYS_SAMPLING_CPUS": "none",
     }
 
@@ -51,6 +51,22 @@ def get_run_args(rocprof_config) -> list[str]:
     return ["-i", str(rocprof_config.rocprofsys_examples_dir / "videos"), "-t", "1"]
 
 
+@pytest.fixture
+def require_video_data(rocprof_config) -> None:
+    """Skip the test at runtime when the sample video data is not available.
+
+    The videodecode example is always built when rocDecode is present, but the
+    H26x sample videos are only shipped by test builds of ROCm. When they are
+    missing there is nothing to decode, so skip instead of failing.
+    """
+    videos_dir = rocprof_config.rocprofsys_examples_dir / "videos"
+    if not (videos_dir.is_dir() and any(videos_dir.iterdir())):
+        pytest.skip(
+            f"No rocDecode sample videos found in {videos_dir}; "
+            "possibly built against a non-test build which doesn't have those files."
+        )
+
+
 # =============================================================================
 # Video decode tests
 # =============================================================================
@@ -63,14 +79,23 @@ def get_run_args(rocprof_config) -> list[str]:
         "sys_run",
     ],
 )
+@pytest.mark.class_name("video-decode")
 class TestVideoDecode(RocprofsysTest):
-    def test(self, mode, video_decode_env, gpu_info, video_decode_rules, get_run_args):
+    @pytest.mark.timeout(120)
+    def test(
+        self,
+        mode,
+        video_decode_env,
+        gpu_info,
+        video_decode_rules,
+        get_run_args,
+        require_video_data,
+    ):
         result = self.run_test(
             mode,
             "videodecode",
             env=video_decode_env,
             run_args=get_run_args,
-            timeout=120,
         )
         self.assert_regex(result)
 

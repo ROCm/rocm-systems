@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <cinttypes>
 #include <sys/types.h>
 #if defined(__linux__)
 #include <sys/mman.h>
@@ -536,6 +537,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
 #if defined(__linux__)
   if (is_ipc_sysmemfd(GraphicsResourceHandle)) {
     GraphicsResourceInfo->NodeId = dxg_runtime->default_node;
+
+    struct stat st;
+    if (fstat(static_cast<int>(GraphicsResourceHandle), &st) == 0)
+      GraphicsResourceInfo->SizeInBytes = st.st_size;
+
     pr_info("skip register sysmemfd. It would be released in next step\n");
     return HSAKMT_STATUS_SUCCESS;
   }
@@ -550,14 +556,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
     RegisterFlags.ui32.requiresVAddr = 1;
   }
 
-  pr_debug("number of nodes %lu\n", NumberOfNodes);
+  pr_debug("number of nodes %" PRIu64 "\n", NumberOfNodes);
   wsl::thunk::GpuMemoryHandle mem_handle;
 
   ret = import_dmabuf_fd(GraphicsResourceHandle, NodeArray[0], RegisterFlags.ui32.requiresVAddr,
-                         false, &mem_handle, RegisterFlags.ui32.kmtHandle);
+                         false, &mem_handle, RegisterFlags.ui32.kmtHandle,
+                         GraphicsResourceInfo->SizeHintInBytes);
   if (ret != HSAKMT_STATUS_SUCCESS) {
     pr_err("hsaKmtRegisterGraphicsHandleToNodesExt: import_dmabuf_fd failed, "
-           "GraphicsResourceHandle: %lu, NodeId: %u\n",
+           "GraphicsResourceHandle: %" PRIu64 ", NodeId: %u\n",
            GraphicsResourceHandle, NodeArray[0]);
     return ret;
   }
@@ -609,7 +616,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
 
 
 HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va, bool is_ipc_memfd,
-                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle) {
+                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle,
+                               uint64_t size_hint) {
   CHECK_DXG_OPEN();
 
   *GpuMemHandle = nullptr;
@@ -619,6 +627,7 @@ HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va
   create_info.dmabuf_fd = DMABufFd;
   create_info.flags.alloc_va = alloc_va;
   create_info.flags.kmt_handle_importer = is_kmt_handle ? 1 : 0;
+  create_info.size = size_hint;
 
 #if defined(__linux__)
   if (is_ipc_memfd) {
@@ -641,7 +650,7 @@ HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     auto it = allocation_map_->find((void*)gpu_va);
     if (it == allocation_map_->end()) {
-      pr_err("where's the conflict buffer? va %#lx\n", create_info.va_hint);
+      pr_err("where's the conflict buffer? va %#" PRIx64 "\n", create_info.va_hint);
       return HSAKMT_STATUS_ERROR;
     }
     wsl::thunk::GpuMemory *conflict_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
@@ -800,15 +809,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
 
   HSAuint64 NumberOfNodes = 1;
   HSAuint32 NodeArray[] = {dxg_runtime->default_node};
-  HsaMemMapFlags MemMapFlags;
-  MemMapFlags.Value = 0;
+  HsaMemFlags MemFlags;
+  MemFlags.Value = 0;
+  MemFlags.ui32.CoarseGrain = 1;
 
   return hsaKmtMapMemoryToGPUNodes(MemoryAddress, MemorySizeInBytes, AlternateVAGPU,
-    MemMapFlags, NumberOfNodes, NodeArray);
+    MemFlags, NumberOfNodes, NodeArray);
 }
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
     void *MemoryAddress, HSAuint64 MemorySizeInBytes, HSAuint64 *AlternateVAGPU,
-    HsaMemMapFlags MemMapFlags, HSAuint64 NumberOfNodes, HSAuint32 *NodeArray) {
+    HsaMemFlags MemFlags, HSAuint64 NumberOfNodes, HSAuint32 *NodeArray) {
   CHECK_DXG_OPEN();
 
   if (!MemoryAddress || !AlternateVAGPU) {
@@ -890,7 +901,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
   create_info.domain = Wkmi::kUserMemory;
   create_info.size = aligned_size;
   create_info.user_ptr = aligned_ptr;
-
+  // create_info.mem_flags = 0 means coarse grain by default
+  if (!MemFlags.ui32.CoarseGrain) {
+    create_info.mem_flags = Wkmi::kFineGrain;
+  }
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
   if (code == ErrorCode::Success) {
     addr = gpu_mem->GpuAddress();
@@ -1092,10 +1106,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtReturnAsanHeaderPage(void *addr) {
 }
 
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_desc,
+HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_desc,
     					HsaHandleImportResult* import_res, HsaHandleImportFlags* flags)
 {
-	CHECK_DXG_OPEN();
+  CHECK_DXG_OPEN();
+#ifdef WIN32
   if (import_desc->mem != nullptr) {
     void *memaddr = import_desc->mem;
     auto phys_mem = GetGpuMemoryFromAddress(memaddr);
@@ -1108,44 +1123,90 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
       }
       import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(
                                phys_mem->GetGpuMemoryHandle());
+      import_res->alloc_size = phys_mem->Size();
       return HSAKMT_STATUS_SUCCESS;
     }
   }
+#endif
 
   if (import_desc->type != HSA_EXTERNAL_HANDLE_DMA_BUF) {
     assert(!"not supported\n");
     return HSAKMT_STATUS_NOT_SUPPORTED;
   }
 
-  if (static_cast<int>(import_desc->fd) == -1) {
+  if (static_cast<int>(import_desc->dmabuf_fd) == -1) {
     import_res->buf_handle = 0;
     return HSAKMT_STATUS_ERROR;
   }
 
   wsl::thunk::GpuMemoryHandle mem_handle;
   wsl::thunk::WDDMDevice *pDevice = reinterpret_cast<wsl::thunk::WDDMDevice *>(import_desc->device_handle);
-  bool is_ipc_memfd = is_ipc_sysmemfd(import_desc->fd);
+  bool is_ipc_memfd = is_ipc_sysmemfd(import_desc->dmabuf_fd);
   bool alloc_va = is_ipc_memfd;
 
   // kmt handle importer is false for dma_buf_fd
-  HSAKMT_STATUS ret = import_dmabuf_fd(import_desc->fd, pDevice->NodeId(), alloc_va, is_ipc_memfd,
+  HSAKMT_STATUS ret = import_dmabuf_fd(import_desc->dmabuf_fd, pDevice->NodeId(), alloc_va, is_ipc_memfd,
                                        &mem_handle, false);
   if (ret == HSAKMT_STATUS_SUCCESS) {
     //use GpuMemory object handle as drm buf handle
     import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(mem_handle);
+    import_res->alloc_size =
+        wsl::thunk::GpuMemory::Convert(mem_handle)->Size();
     return HSAKMT_STATUS_SUCCESS;
   }
   return HSAKMT_STATUS_ERROR;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
+                                          HsaMemoryExportResult* res,
+                                          HsaHandleExportFlags* flags)
+{
+  (void)flags;
+  CHECK_DXG_OPEN();
+  if (!desc || !res || desc->device_handle == NULL)
+    return HSAKMT_STATUS_INVALID_HANDLE;
+
+  if (desc->type != HSA_EXTERNAL_HANDLE_DMA_BUF)
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+
+  wsl::thunk::GpuMemory* gpu_mem = wsl::thunk::GpuMemory::Convert(
+      reinterpret_cast<wsl::thunk::GpuMemoryHandle>(desc->buf_handle));
+  if (!gpu_mem)
+    return HSAKMT_STATUS_INVALID_HANDLE;
+
+  if (!gpu_mem->IsPhysicalCreated()) {
+    auto code = gpu_mem->CreatePhysicalMemory();
+    if (code != ErrorCode::Success)
+      return HSAKMT_STATUS_OUT_OF_RESOURCES;
+  }
+
+  int dmabuf_fd = -1;
+  auto code = gpu_mem->ExportPhysicalHandle(&dmabuf_fd);
+  if (code != ErrorCode::Success)
+    return HSAKMT_STATUS_ERROR;
+
+  res->dmabuf_fd = dmabuf_fd;
+  return HSAKMT_STATUS_SUCCESS;
+}
+
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
               HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
-              HsaMemoryMapFlags flags)
+              HsaMemoryMapFlags flags, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
+  (void)NodeId;
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
   assert(gpu_mem != nullptr);
+
+  if (gpu_mem->GpuAddress() == addr) {
+    pr_info("bo is mapped already\n");
+    return HSAKMT_STATUS_SUCCESS;
+  } else if (gpu_mem->GpuAddress()) {
+    pr_err("amdgpu_bo_va_op: GPU memory already mapped at %p, but requested to map at %p\n",
+           reinterpret_cast<void*>(gpu_mem->GpuAddress()), reinterpret_cast<void*>(addr));
+    return HSAKMT_STATUS_ERROR;
+  }
 
   auto code = gpu_mem->MapGpuVirtualAddress(static_cast<gpusize>(addr), size, offset);
   if (code != ErrorCode::Success)
@@ -1165,9 +1226,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
-              HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+              HSAuint64 offset, HSAuint64 size, HSAuint64 addr, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
+  (void)NodeId;
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
   assert(gpu_mem != nullptr);
 
@@ -1186,10 +1248,25 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
 {
 	CHECK_DXG_OPEN();
-  wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
-  if (!gpu_mem) {
-    return HSAKMT_STATUS_INVALID_HANDLE;
-  }
+	// On DXG, handle cleanup is managed through the DXG memory management path.
+	// Validate the handle and return success.
+	wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
+	if (!gpu_mem) {
+		return HSAKMT_STATUS_INVALID_HANDLE;
+	}
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFreePreserveMetadata(HsaMemoryObjectHandle Handle)
+{
+	CHECK_DXG_OPEN();
+	// On DXG, this behaves the same as hsaKmtMemHandleFree since the DXG
+	// implementation doesn't manage metadata separately. Used by IPC exporter
+	// path (IPCCreate) to release handle references without affecting metadata.
+	wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
+	if (!gpu_mem) {
+		return HSAKMT_STATUS_INVALID_HANDLE;
+	}
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -1206,11 +1283,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandle,
-              HsaMemoryObjectHandle MemoryHandle, HSAint32* fd, HSAuint64* cpu_addr)
+              HsaMemoryObjectHandle MemoryHandle, HSAuint64* cpu_addr)
 {
 	CHECK_DXG_OPEN();
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(MemoryHandle);
   assert(gpu_mem != nullptr);
-  cpu_addr =  static_cast<HSAuint64*>(gpu_mem->CpuAddress());
+  *cpu_addr = reinterpret_cast<HSAuint64>(gpu_mem->CpuAddress());
   return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHandle, HSAint32* fd) 
+{
+  return HSAKMT_STATUS_NOT_SUPPORTED;
 }

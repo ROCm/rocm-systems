@@ -34,6 +34,13 @@ class Monitor {
   //! Release the lock and wake a single waiting thread if any.
   void unlock() { mutex_.unlock(); }
 
+  // GCC 12+ emits a false -Wstringop-overflow when it inlines atomic ops on
+  // class members through multiple call frames and loses size provenance.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
+
   /*! \brief Give up the lock and go to sleep.
    *
    *  Calling wait() causes the current thread to go to sleep until
@@ -135,6 +142,10 @@ class Monitor {
       cv_.notify_all();
     }
   }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
  private:
   std::mutex mutex_;

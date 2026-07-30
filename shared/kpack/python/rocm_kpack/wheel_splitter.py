@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import time
 import zipfile
 from collections import defaultdict
@@ -342,6 +343,12 @@ def generate_device_metadata(
         f"Requires-Dist: {host_identity.name} == {host_identity.version}",
     ]
     for dep in device_requires_dist:
+        if "@GFXARCH@" in dep and bundle.level != rocm_bootstrap.PackagingLevel.TARGET:
+            # `@GFXARCH@` deps name per-target packages (e.g.
+            # rocm-sdk-device-<target>) which are only published for
+            # PackagingLevel.TARGET bundles. Family/sub-family device wheels
+            # are co-installed with a target wheel that carries those deps.
+            continue
         expanded = dep.replace("@GFXARCH@", bundle_key)
         lines.append(f"Requires-Dist: {expanded}")
     return "\n".join(lines) + "\n"
@@ -398,6 +405,32 @@ def zip_wheel(source_dir: Path, output_path: Path) -> None:
             if file_path.is_file():
                 arcname = file_path.relative_to(source_dir).as_posix()
                 zf.write(file_path, arcname)
+
+
+def _extract_wheel_preserving_permissions(
+    wheel_path: Path, destination_dir: Path
+) -> None:
+    """Extract a wheel while restoring Unix mode bits from zip metadata.
+
+    Python's zipfile extraction intentionally does not apply the Unix mode bits
+    stored in ZipInfo.external_attr. Wheels can contain executables, so restore
+    those bits before later copy/repack steps preserve the extracted tree.
+    """
+    deferred_directory_modes: list[tuple[Path, int]] = []
+    with zipfile.ZipFile(wheel_path, "r") as zf:
+        for member in zf.infolist():
+            extracted_path = Path(zf.extract(member, destination_dir))
+            mode = stat.S_IMODE(member.external_attr >> 16)
+            if mode == 0:
+                continue
+            if member.is_dir():
+                deferred_directory_modes.append((extracted_path, mode))
+            else:
+                extracted_path.chmod(mode)
+
+    for directory_path, mode in deferred_directory_modes:
+        if directory_path.exists():
+            directory_path.chmod(mode)
 
 
 def _extract_single_binary(
@@ -626,7 +659,9 @@ class WheelSplitter:
         self.compression = compression
         self.compression_level = compression_level
         self.verbose = verbose
-        self.jobs = max(1, jobs)
+        # Windows ProcessPoolExecutor caps at 61 (WaitForMultipleObjects limit).
+        max_jobs = 61 if os.name == "nt" else jobs
+        self.jobs = max(1, min(jobs, max_jobs))
         self.generate_variant_wheel = generate_variant_wheel
         self.variant_label = variant_label
 
@@ -677,8 +712,7 @@ class WheelSplitter:
             temp_dir.mkdir()
             if self.verbose:
                 print(f"Extracting {input_path} to {temp_dir}")
-            with zipfile.ZipFile(input_path, "r") as zf:
-                zf.extractall(temp_dir)
+            _extract_wheel_preserving_permissions(input_path, temp_dir)
             return temp_dir, True
         else:
             raise InvalidWheelError(
@@ -869,7 +903,7 @@ class WheelSplitter:
         Inserts into the existing METADATA header section:
           - Requires-Dist: rocm-bootstrap
           - Per-target Provides-Extra + Requires-Dist (extras-based)
-          - Provides-Extra: all (with all device wheels)
+          - Provides-Extra: device-all (with all device wheels)
           - If include_variant_markers: also adds variant_properties markers
         """
         metadata_path = host_staging / identity.dist_info_name / "METADATA"
@@ -889,11 +923,15 @@ class WheelSplitter:
             if bundle.level == rocm_bootstrap.PackagingLevel.TARGET:
                 target_keys.append(key)
 
-        # For each target, compute packaging chain and generate extras
+        # For each target, compute packaging chain and generate extras.
+        # Per-target extras are prefixed with "device-" to mirror the
+        # convention used by rocm-sdk-core (rocm[device-gfx1201], ...) so
+        # one find-links URL exposes a uniform install command across the
+        # SDK + PyTorch stack.
         all_device_dist_names: set[str] = set()
-        for target_name in target_keys:
-            chain = rocm_bootstrap.packaging_chain(target_name)
-            lines.append(f"Provides-Extra: {target_name}")
+        for amdgpu_target in target_keys:
+            chain = rocm_bootstrap.packaging_chain(amdgpu_target)
+            lines.append(f"Provides-Extra: device-{amdgpu_target}")
 
             for chain_bundle in chain:
                 if chain_bundle.key not in bundle_keys:
@@ -907,15 +945,15 @@ class WheelSplitter:
                 # update the regex there too.
                 lines.append(
                     f"Requires-Dist: {dist_name} == {version}; "
-                    f'extra == "{target_name}"'
+                    f'extra == "device-{amdgpu_target}"'
                 )
                 if include_variant_markers:
                     lines.append(
                         f"Requires-Dist: {dist_name} == {version}; "
-                        f'"amd :: gfx_arch :: {target_name}" in variant_properties'
+                        f'"amd :: gfx_arch :: {amdgpu_target}" in variant_properties'
                     )
 
-        # Also add non-target bundle keys (family, sub-family) to the "all" set
+        # Also add non-target bundle keys (family, sub-family) to the "device-all" set
         for key in sorted(bundle_keys):
             bundle = rocm_bootstrap.lookup_bundle(key)
             if bundle.level != rocm_bootstrap.PackagingLevel.TARGET:
@@ -924,10 +962,14 @@ class WheelSplitter:
                 )
                 all_device_dist_names.add(dist_name)
 
-        # "all" extra: includes every device wheel
-        lines.append("Provides-Extra: all")
+        # "device-all" extra: includes every device wheel. The prefix
+        # matches the per-target extras above so every kpack-emitted extra
+        # starts with "device-".
+        lines.append("Provides-Extra: device-all")
         for dist_name in sorted(all_device_dist_names):
-            lines.append(f"Requires-Dist: {dist_name} == {version}; " f'extra == "all"')
+            lines.append(
+                f"Requires-Dist: {dist_name} == {version}; " f'extra == "device-all"'
+            )
 
         # Insert new headers before the body (after the last header line).
         # METADATA uses RFC 822 format: headers, blank line, body.
@@ -946,7 +988,7 @@ class WheelSplitter:
         metadata_path.write_text(new_content, encoding="utf-8")
 
         if self.verbose:
-            n_extras = len(target_keys) + 1  # +1 for "all"
+            n_extras = len(target_keys) + 1  # +1 for "device-all"
             n_device = len(all_device_dist_names)
             label = "variant" if include_variant_markers else "classic"
             print(
@@ -1047,20 +1089,25 @@ class WheelSplitter:
             # add the variant_properties version
             if not line.startswith("Requires-Dist:") or "extra ==" not in line:
                 continue
-            if 'extra == "all"' in line:
+            # The "device-all" extra aggregates every device wheel and
+            # must not get a variant marker — variants are per-target.
+            if 'extra == "device-all"' in line:
                 continue
             # Extract the dist requirement and target name.
             # This regex must match the format generated by _rewrite_host_metadata():
             #   f"Requires-Dist: {dist_name} == {version}; "
-            #   f'extra == "{target_name}"'
+            #   f'extra == "device-{amdgpu_target}"'
             # If that format changes, this regex must be updated to match.
-            match = re.match(r'(Requires-Dist: .+ == .+); extra == "(\w+)"', line)
+            # The captured extra is the user-facing "device-<arch>" form;
+            # strip the "device-" prefix to recover the bare gfx target
+            # used in the variant_properties marker.
+            match = re.match(r'(Requires-Dist: .+ == .+); extra == "([\w-]+)"', line)
             if match:
                 req_part = match.group(1)
-                target_name = match.group(2)
+                amdgpu_target = match.group(2).removeprefix("device-")
                 new_lines.append(
                     f"{req_part}; "
-                    f'"amd :: gfx_arch :: {target_name}" in variant_properties'
+                    f'"amd :: gfx_arch :: {amdgpu_target}" in variant_properties'
                 )
 
         metadata_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")

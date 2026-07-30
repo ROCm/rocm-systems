@@ -45,7 +45,7 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
 }
 
  rocDecStatus RocDecoder::InitializeDecoder() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     if (decoder_create_info_.num_decode_surfaces < 1) {
         CriticalLog(g_rocdec_logger, "Invalid number of decode surfaces.");
@@ -67,7 +67,7 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
  }
 
 rocDecStatus RocDecoder::DecodeFrame(RocdecPicParams *pic_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(pic_params));
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     rocdec_status = va_video_decoder_.SubmitDecode(pic_params);
     if (rocdec_status != ROCDEC_SUCCESS) {
@@ -78,7 +78,7 @@ rocDecStatus RocDecoder::DecodeFrame(RocdecPicParams *pic_params) {
 }
 
 rocDecStatus RocDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx) + ", " + RocDecFmtPtr(decode_status));
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     rocdec_status = va_video_decoder_.GetDecodeStatus(pic_idx, decode_status);
     if (rocdec_status != ROCDEC_SUCCESS) {
@@ -89,7 +89,7 @@ rocDecStatus RocDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode
 }
 
 rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(reconfig_params));
     if (reconfig_params == nullptr || reconfig_params->width == 0 || reconfig_params->height == 0 ||
         reconfig_params->num_decode_surfaces < 1 || reconfig_params->bit_depth_minus_8 > 2) {
         FunctionExitLog(g_rocdec_logger);
@@ -118,7 +118,8 @@ rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconf
 }
 
 rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32_t horizontal_pitch[3], RocdecProcParams *vid_postproc_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx) + ", " + RocDecFmtPtr(dev_mem_ptr) + ", " +
+                             RocDecFmtPtr(horizontal_pitch) + ", " + RocDecFmtPtr(vid_postproc_params));
     if (pic_idx >= hip_interop_.size() || dev_mem_ptr == nullptr || vid_postproc_params == nullptr) {
         CriticalLog(g_rocdec_logger, "Invalid parameters.");
         FunctionExitLog(g_rocdec_logger);
@@ -147,6 +148,12 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
             return rocdec_status;
         }
 
+        if (va_drm_prime_surface_desc.num_layers == 0 || va_drm_prime_surface_desc.num_layers > 3) {
+            ErrorLog(g_rocdec_logger, "VA-API returned an unsupported value for num_layers. num_layers = " + ROCDEC_TOSTR(va_drm_prime_surface_desc.num_layers));
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
         external_mem_handle_desc.type = hipExternalMemoryHandleTypeOpaqueFd;
         external_mem_handle_desc.handle.fd = va_drm_prime_surface_desc.objects[0].fd;
         external_mem_handle_desc.size = va_drm_prime_surface_desc.objects[0].size;
@@ -159,13 +166,10 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         hip_interop_[pic_idx].width = va_drm_prime_surface_desc.width;
         hip_interop_[pic_idx].height = va_drm_prime_surface_desc.height;
 
-        hip_interop_[pic_idx].offset[0] = va_drm_prime_surface_desc.layers[0].offset[0];
-        hip_interop_[pic_idx].offset[1] = va_drm_prime_surface_desc.layers[1].offset[0];
-        hip_interop_[pic_idx].offset[2] = va_drm_prime_surface_desc.layers[2].offset[0];
-
-        hip_interop_[pic_idx].pitch[0] = va_drm_prime_surface_desc.layers[0].pitch[0];
-        hip_interop_[pic_idx].pitch[1] = va_drm_prime_surface_desc.layers[1].pitch[0];
-        hip_interop_[pic_idx].pitch[2] = va_drm_prime_surface_desc.layers[2].pitch[0];
+        for (int i = 0; i < va_drm_prime_surface_desc.num_layers; i++) {
+            hip_interop_[pic_idx].offset[i] = va_drm_prime_surface_desc.layers[i].offset[0];
+            hip_interop_[pic_idx].pitch[i] = va_drm_prime_surface_desc.layers[i].pitch[0];
+        }
 
         hip_interop_[pic_idx].num_layers = va_drm_prime_surface_desc.num_layers;
 
@@ -183,7 +187,7 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
 }
 
 rocDecStatus RocDecoder::FreeVideoFrame(int pic_idx) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
     if (pic_idx >= hip_interop_.size()) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;

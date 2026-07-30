@@ -1,10 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "lib/aqlprofile/pm4/trace_config.h"
+
 #include <gtest/gtest.h>
+
 #include <cstdint>
 #include <vector>
-#include "../trace_config.h"
 
 namespace pm4_builder
 {
@@ -89,7 +91,7 @@ public:
     uint64_t PopCount(uint64_t se_mask) const
     {
         uint64_t num_enabled = 0;
-        while(se_mask)
+        while(se_mask != 0u)
         {
             num_enabled += se_mask & 1;
             se_mask >>= 1;
@@ -126,7 +128,7 @@ protected:
     std::vector<uint8_t> control_buffer;
 };
 
-TEST_F(SqttBuilderTest, DISABLED_BufferStepCalculation)
+TEST_F(SqttBuilderTest, BufferStepCalculation)
 {
     GpuSqttBuilder<TestBuilder, TestPrimitives> builder(&agent_info);
 

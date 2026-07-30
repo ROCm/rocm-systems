@@ -20,8 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/aql_profile.hpp"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
+
+#include "lib/aqlprofile/core/counter_dimensions.hpp"
+
+#include "lib/aqlprofile/core/logger.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/spm_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
+
+#include "lib/aqlprofile/core/commandbuffermgr.hpp"
+#include "lib/aqlprofile/core/memorymanager.hpp"
 
 #include <array>
 #include <cstddef>
@@ -31,25 +43,15 @@
 #include <string>
 #include <vector>
 
-#include "core/counter_dimensions.hpp"
-
-#include "core/logger.h"
-#include "core/pm4_factory.h"
-#include "pm4/cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/spm_builder.h"
-#include "pm4/sqtt_builder.h"
-
-#include "core/commandbuffermgr.hpp"
-#include "memorymanager.hpp"
 #define ERR_CHECK(cond, err, msg)                                                                  \
+    do                                                                                             \
     {                                                                                              \
         if(cond)                                                                                   \
         {                                                                                          \
-            ERR_LOGGING << msg;                                                                    \
+            ERR_LOGGING("{}", msg);                                                                \
             return err;                                                                            \
         }                                                                                          \
-    }
+    } while(0)
 
 #define HSA_TRY_WRAP                                                                               \
     try                                                                                            \
@@ -58,16 +60,12 @@
     }                                                                                              \
     catch(std::exception & e) { return HSA_STATUS_ERROR; }
 
-std::vector<std::string>                EventDimension::dimension_list;
-std::unordered_map<std::string, size_t> EventDimension::dimension_table;
-
 namespace aql_profile_v2
 {
 // Command buffer partitioning manager
 // Supports Pre/Post commands partitioning
 // and prefix control partition
 
-using aql_profile::event_exception;
 using aql_profile::event_t;
 using ::aql_profile::Pm4Factory;
 
@@ -82,10 +80,20 @@ HandleSQFlagsBlock(Pm4Factory* pm4_factory, const aqlprofile_pmc_event_t& event)
     return visible_id;
 }
 
+uint32_t
+HandleSQGFlagsBlock(Pm4Factory* pm4_factory, const aqlprofile_pmc_event_t& event)
+{
+    auto visible_id = event.event_id;
+    if(event.flags.sq_flags.accum == AQLPROFILE_ACCUMULATION_HI_RES)
+        visible_id = pm4_factory->GetSQGAccumID();
+    return visible_id;
+}
+
 counter_des_t
 GetCounter(Pm4Factory*                                    pm4_factory,
            EventRequest&                                  event,
-           std::map<block_des_t, uint32_t, lt_block_des>& index_map)
+           std::map<block_des_t, uint32_t, lt_block_des>& index_map,
+           int                                            num_sp_events)
 {
     const GpuBlockInfo* block_info = pm4_factory->GetBlockInfo(event.block_name);
     const block_des_t   block_des  = {block_info->id, event.block_index};
@@ -99,20 +107,32 @@ GetCounter(Pm4Factory*                                    pm4_factory,
         return {visible_id, reg_index, block_des, block_info};
     }
 
-    if(reg_index >= block_info->counter_count)
-        throw std::string("Event is out of block counter registers number limit");
-
     if(event.flags.raw)
     {
         if(event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ)
         {
             visible_id = HandleSQFlagsBlock(pm4_factory, event);
         }
+        else if(event.block_name == static_cast<int>(AQLPROFILE_BLOCK_NAME_SQG))
+        {
+            visible_id = HandleSQGFlagsBlock(pm4_factory, event);
+        }
         else
         {
             throw HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
     }
+
+    if(event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ)
+    {
+        if(reg_index < num_sp_events)
+            reg_index = 2 * reg_index + 1;
+        else
+            reg_index += num_sp_events;
+    }
+
+    if(reg_index >= block_info->counter_count)
+        throw std::runtime_error("Event is out of block counter registers number limit");
 
     ret.first->second++;
     return {visible_id, reg_index, block_des, block_info};
@@ -124,14 +144,18 @@ CountersVec(std::vector<EventRequest>& events, Pm4Factory* pm4_factory)
     pm4_builder::counters_vector                  vec;
     std::map<block_des_t, uint32_t, lt_block_des> index_map;
 
+    int num_sp_events = 0;
     for(auto& event : events)
-        vec.push_back(GetCounter(pm4_factory, event, index_map));
+        num_sp_events += int(event.block_name) == AQLPROFILE_BLOCK_NAME_SP;
+
+    for(auto& event : events)
+        vec.push_back(GetCounter(pm4_factory, event, index_map, num_sp_events));
 
     if(pm4_factory->IsGFX10() && (vec.get_attr() & CounterBlockGRBMAttr) == 0)
     {
         EventRequest grbm_event{0};
         grbm_event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM;
-        vec.push_back(GetCounter(pm4_factory, grbm_event, index_map));
+        vec.push_back(GetCounter(pm4_factory, grbm_event, index_map, 0));
     }
     return vec;
 }
@@ -149,7 +173,8 @@ _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
 
     aql_profile::Pm4Factory* pm4_factory =
         aql_profile::Pm4Factory::Create(memorymgr->AgentHandle());
-    const uint32_t xcc_num = pm4_factory->GetXccNumber();
+    const uint32_t xcc_num     = pm4_factory->GetXccNumber();
+    const uint32_t xcc_per_aid = pm4_factory->GetXccPerAid();
 
     uint64_t* samples             = reinterpret_cast<uint64_t*>(memorymgr->GetOutputBuf());
     uint64_t* buffer_end_location = samples + memorymgr->GetOutputBufSize() / sizeof(uint64_t);
@@ -161,7 +186,8 @@ _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
         {
             if(samples >= buffer_end_location) return HSA_STATUS_ERROR;
 
-            if(!(pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockUmcAttr)) continue;
+            if((pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockUmcAttr) == 0u)
+                continue;
 
 #if DEBUG_TRACE == 2
             printf("DATA: sample index(%u) id(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
@@ -186,12 +212,15 @@ _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
         {
             if(samples >= buffer_end_location) return HSA_STATUS_ERROR;
 
-            if(pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockUmcAttr) continue;
+            if((pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockUmcAttr) != 0u)
+                continue;
+            if((pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockGrbmaAttr) != 0u)
+                continue;
 
             // non-MI300A-AID counter event.
             uint32_t block_samples_count       = pm4_factory->GetNumEvents(event.block_name);
             const EventAttribDimension& attrib = EventAttribDimension::get(agent, event.block_name);
-            if(!attrib.get_num()) return HSA_STATUS_ERROR;
+            if(attrib.get_num() == 0u) return HSA_STATUS_ERROR;
             size_t xcc_sample_count = attrib.get_num_instances() * block_samples_count;
             for(uint32_t blk = 0; blk < block_samples_count; ++blk)
             {
@@ -211,6 +240,50 @@ _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
                 if(!event.bInternal)
                 {
                     hsa_status_t status = callback(event, xcc_sample_id, *samples, userdata);
+                    if(status == HSA_STATUS_INFO_BREAK)
+                        return HSA_STATUS_SUCCESS;
+                    else if(status != HSA_STATUS_SUCCESS)
+                        return status;
+                }
+
+                samples++;
+            }
+        }
+
+    // AIGC blocks
+    for(uint32_t xcc_index = 0, aid_index = 0; xcc_index < xcc_num;
+        xcc_index += xcc_per_aid, aid_index++)
+        for(auto& event : events)
+        {
+            // Skip non-AIGC blocks
+            if(!(pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockGrbmaAttr))
+                continue;
+
+            if(samples >= buffer_end_location) return HSA_STATUS_ERROR;
+
+            // AIGC counter event.
+            uint32_t block_samples_count       = pm4_factory->GetNumEvents(event.block_name);
+            const EventAttribDimension& attrib = EventAttribDimension::get(agent, event.block_name);
+            if(!attrib.get_num()) return HSA_STATUS_ERROR;
+            size_t aid_sample_count = attrib.get_num_instances() * block_samples_count;
+            for(uint32_t blk = 0; blk < block_samples_count; ++blk)
+            {
+#if DEBUG_TRACE == 2
+                printf("DATA: xcc(%u) blk(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
+                       xcc_index,
+                       blk,
+                       event.block_name,
+                       event.block_index,
+                       event.event_id,
+                       *samples);
+#endif
+                size_t aid_sample_id =
+                    aid_sample_count * aid_index +
+                    static_cast<size_t>(event.block_index) * block_samples_count + blk;
+
+                if(!event.bInternal)
+                {
+                    hsa_status_t status = callback(event, aid_sample_id, *samples, userdata);
                     if(status == HSA_STATUS_INFO_BREAK)
                         return HSA_STATUS_SUCCESS;
                     else if(status != HSA_STATUS_SUCCESS)
@@ -321,11 +394,11 @@ aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 handle,
             handle, packets, profile, alloc_cb, dealloc_cb, memcpy_cb, userdata);
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t error: {}", static_cast<int>(err));
         return err;
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     } catch(...)
     {
@@ -358,11 +431,11 @@ aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
         return aql_profile_v2::_internal_aqlprofile_pmc_iterate_data(handle, callback, userdata);
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     } catch(...)
     {
@@ -376,16 +449,16 @@ aqlprofile_iterate_event_ids(aqlprofile_eventname_callback_t callback, void* use
     try
     {
         EventDimension::init();
-        for(auto& [name, id] : EventDimension::dimension_table)
+        for(const auto& [name, id] : EventDimension::get_dimension_table())
         {
-            if(auto ret = callback(id, name.c_str(), user_data); ret != HSA_STATUS_SUCCESS)
+            if(auto ret = callback(id, name.data(), user_data); ret != HSA_STATUS_SUCCESS)
             {
                 return ret;
             }
         }
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -405,10 +478,10 @@ aqlprofile_iterate_event_coord(aqlprofile_agent_handle_t        agent,
     {
         const EventAttribDimension& attrib = EventAttribDimension::get(agent, event.block_name);
 
-        if(!attrib.get_num()) return HSA_STATUS_ERROR;
+        if(attrib.get_num() == 0u) return HSA_STATUS_ERROR;
 
         std::array<uint8_t, 32> coord;
-        assert(attrib.get_num() < coord.size());
+        ROCP_FATAL_IF(attrib.get_num() >= coord.size()) << "attrib num exceeds coordinates size";
         attrib.get_coordinates(coord.data(), counter_id);
 
         for(size_t i = 0; i < attrib.get_num(); i++)
@@ -418,7 +491,7 @@ aqlprofile_iterate_event_coord(aqlprofile_agent_handle_t        agent,
         }
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -441,7 +514,7 @@ aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
 {
     try
     {
-        if(agent_info == NULL) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        if(agent_info == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
         switch(version)
         {
@@ -466,12 +539,18 @@ aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
                     static_cast<const aqlprofile_agent_info_v1_t*>(agent_info));
             }
             break;
+            case AQLPROFILE_AGENT_VERSION_V2:
+            {
+                *agent_id = aql_profile::RegisterAgent(
+                    static_cast<const aqlprofile_agent_info_v2_t*>(agent_info));
+            }
+            break;
             case AQLPROFILE_AGENT_VERSION_NONE:
             case AQLPROFILE_AGENT_VERSION_LAST: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -493,10 +572,10 @@ aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t     agent,
     try
     {
         aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(agent);
-        if(pm4_factory->GetBlockInfo(event) != NULL) *result = true;
+        if(pm4_factory->GetBlockInfo(event) != nullptr) *result = true;
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -528,8 +607,8 @@ aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
                 if(!info) return HSA_STATUS_ERROR;
 
                 const auto& attrib = EventAttribDimension::get(
-                    profile->agent, (hsa_ven_amd_aqlprofile_block_name_t) block);
-                if(!attrib.get_num()) return HSA_STATUS_ERROR;
+                    profile->agent, static_cast<hsa_ven_amd_aqlprofile_block_name_t>(block));
+                if(attrib.get_num() == 0u) return HSA_STATUS_ERROR;
 
                 query->id             = block;
                 query->instance_count = attrib.get_num_instances();
@@ -546,7 +625,7 @@ aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
 
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {

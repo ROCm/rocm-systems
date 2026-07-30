@@ -45,6 +45,7 @@
 #include <assert.h>
 
 #include <algorithm>
+#include <cinttypes>
 #include <climits>
 
 #include "core/inc/runtime.h"
@@ -265,8 +266,9 @@ hsa_status_t ImageManagerGfx11::PopulateImageSrd(Image& image,
 
   ImageProperty image_prop = ImageLut().MapFormat(image.desc.format, image.desc.geometry);
   if ((image_prop.cap == HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED) ||
-     (image_prop.element_size == 0))
+     (image_prop.element_size == 0)) {
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
+  }
 
   const Swizzle swizzle = ImageLut().MapSwizzle(image.desc.format.channel_order);
 
@@ -283,6 +285,25 @@ hsa_status_t ImageManagerGfx11::PopulateImageSrd(Image& image,
   image.srd[5] = desc->word5.u32All;
   image.srd[6] = desc->word6.u32All;
   image.srd[7] = desc->word7.u32All;
+
+  if (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2D ||
+      image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DA) {
+    SQ_IMG_RSRC_WORD1 w1;
+    SQ_IMG_RSRC_WORD2 w2;
+    w1.u32All = image.srd[1];
+    w2.u32All = image.srd[2];
+    uint32_t srd_width  = (w2.f.WIDTH_HI << 2) | w1.f.WIDTH;
+    uint32_t srd_height = w2.f.HEIGHT;
+    uint32_t img_width  = static_cast<uint32_t>(image.desc.width) - 1;
+    uint32_t img_height = static_cast<uint32_t>(image.desc.height ? image.desc.height : 1) - 1;
+    if (img_width < srd_width || img_height < srd_height) {
+      w1.f.WIDTH    = img_width & 0x3u;
+      w2.f.WIDTH_HI = img_width >> 2;
+      w2.f.HEIGHT   = img_height;
+      image.srd[1]  = w1.u32All;
+      image.srd[2]  = w2.u32All;
+    }
+  }
 
   if (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
     SQ_BUF_RSRC_WORD0 word0;
@@ -1087,7 +1108,7 @@ void ImageManagerGfx11::printSRDDetailed(const uint32_t* srd) const {
   
   // Calculate full address (GFX11 uses 40-bit shifted by 8)
   uint64_t base_addr = ((uint64_t)word1.f.BASE_ADDRESS_HI << 32) | ((uint64_t)word0.f.BASE_ADDRESS << 8);
-  printf("        → Full Base Address    = 0x%016lx\n", base_addr);
+  printf("        → Full Base Address    = 0x%016" PRIx64 "\n", base_addr);
   
   // WORD 2: WIDTH_HI, HEIGHT
   SQ_IMG_RSRC_WORD2 word2;

@@ -89,7 +89,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
     HIP_CHECK(hipModuleLoadData(&module, code.data()));
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -121,7 +121,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }
 
@@ -179,7 +179,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -211,7 +211,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }
 
@@ -266,7 +266,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -298,7 +298,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }
 
@@ -351,7 +351,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
     HIP_CHECK(hipModuleLoadData(&module, code.data()));
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -377,7 +377,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }
 
@@ -432,7 +432,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -458,7 +458,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }
 
@@ -513,7 +513,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -539,6 +539,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }

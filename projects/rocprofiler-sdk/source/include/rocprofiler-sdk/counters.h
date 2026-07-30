@@ -127,6 +127,8 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_counter_info_v1_t
     const rocprofiler_counter_record_dimension_info_t**          dimensions;
     uint64_t                                                     dimensions_instances_count;
     const rocprofiler_counter_record_dimension_instance_info_t** dimensions_instances;
+    uint8_t spm_support;          ///< If this counter supports SPM
+    uint8_t reserved_padding[7];  //< unused or reserved for future use
 
     /// @var dimensions_count
     /// @brief Number of dimensions for the counter
@@ -193,7 +195,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
  *        counters variable is owned by rocprofiler and should not be free'd.
  *
  * @param [in] agent_id Agent ID of the current callback
- * @param [in] counters An array of counters that are avialable on the agent
+ * @param [in] counters An array of counters that are available on the agent
  *      ::rocprofiler_iterate_agent_supported_counters was called on.
  * @param [in] num_counters Number of counters contained in counters
  * @param [in] user_data User data supplied by

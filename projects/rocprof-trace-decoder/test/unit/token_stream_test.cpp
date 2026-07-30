@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include <gtest/gtest.h>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -30,6 +31,8 @@
 #include "gfx11/gfx11token.h"
 #include "gfx12/gfx12parser.h"
 #include "gfx12/gfx12token.h"
+#include "mi400/mi400token.h"
+#include "quick_scan_export.hpp"
 
 // Helper class to build token streams bit by bit
 class TokenStreamBuilder
@@ -406,6 +409,93 @@ TEST(Gfx12TokenStreamTest, DecodesSingleValuInst)
     valu_inst_type valu{.raw = token.contents};
     EXPECT_EQ(valu.wid, 11);
 }
+
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+TEST(Gfx12QuickScanTest, CapturesRareTokenByteOffset)
+{
+    if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
+
+    TokenStreamBuilder builder;
+    header_type header{};
+    header.header = 0b0010001;
+    header.version = 4;
+    for (size_t i = 0; i < 4; ++i) builder.writeBits(header.raw, 64);
+
+    builder.writeBits(0, 4);
+    builder.writeBits(0, 4);
+
+    gfx10::reg_init_type reg{};
+    reg.header = 0b1110001;
+    builder.writeBits(reg.raw, 64);
+    builder.finalize();
+
+    std::array<quick_scan::QuickToken, 4> out{};
+    const size_t n = quick_scan::scan_gfx12(builder.data(), builder.size(), out.data(), out.size());
+
+    ASSERT_EQ(n, 1);
+    EXPECT_EQ(out[0].type, RdnaType::REG_INIT);
+    EXPECT_EQ(out[0].offset, 33);
+}
+
+TEST(MI400QuickScanTest, CapturesRareTokenByteOffset)
+{
+    if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
+
+    gfx10::reg_init_type reg{};
+    reg.header = 0b1110001;
+
+    std::array<uint8_t, 9> buffer{};
+    std::memcpy(buffer.data() + 1, &reg.raw, sizeof(reg.raw));
+
+    std::array<quick_scan::QuickToken, 4> out{};
+    const size_t n = quick_scan::scan_mi400(buffer.data(), buffer.size(), out.data(), out.size());
+
+    ASSERT_EQ(n, 1);
+    EXPECT_EQ(out[0].type, RdnaType::REG_INIT);
+    EXPECT_EQ(out[0].offset, 1);
+}
+
+static void expectBuildStandalonePrependsHeader(uint64_t header)
+{
+    if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
+
+    std::array<uint8_t, 24> data{};
+    std::memcpy(data.data(), &header, sizeof(header));
+
+    rocprof_trace_decoder_handle_t handle{};
+    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+
+    std::array<uint8_t, 512> out{};
+    uint64_t out_size = out.size();
+    const auto status = rocprof_trace_decoder_build_standalone(
+        handle, 0, data.data(), data.size(), 8, data.size(), out.data(), &out_size
+    );
+
+    EXPECT_EQ(status, ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+    ASSERT_GE(out_size, sizeof(header));
+    EXPECT_EQ(std::memcmp(out.data(), &header, sizeof(header)), 0);
+    ASSERT_GE(out_size, sizeof(header) + (data.size() - 8));
+    EXPECT_EQ(std::memcmp(out.data() + out_size - (data.size() - 8), data.data() + 8, data.size() - 8), 0);
+
+    EXPECT_EQ(rocprof_trace_decoder_destroy_handle(handle), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+}
+
+TEST(Gfx12BuildStandaloneTest, PrependsInputHeader)
+{
+    header_type header{};
+    header.header = 0b0010001;
+    header.version = 4;
+    expectBuildStandalonePrependsHeader(header.raw);
+}
+
+TEST(MI400BuildStandaloneTest, PrependsInputHeader)
+{
+    mi400::header_type header{};
+    header.header = 0b0010001;
+    header.version = 5;
+    expectBuildStandalonePrependsHeader(header.raw);
+}
+#endif
 
 TEST(Gfx12TokenStreamTest, DecodesWaveStartGfx12)
 {

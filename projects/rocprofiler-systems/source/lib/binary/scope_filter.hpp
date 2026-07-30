@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/defines.hpp"
+#include "common/defines.h"
 
 #include <cstdint>
 #include <string>
@@ -14,13 +14,13 @@ namespace binary
 {
 struct scope_filter
 {
-    enum filter_mode : uint8_t
+    enum filter_mode : std::uint8_t
     {
         FILTER_INCLUDE = 0,
         FILTER_EXCLUDE
     };
 
-    enum filter_scope : uint8_t
+    enum filter_scope : std::uint8_t
     {
         UNIVERSAL_FILTER = (1 << 0),
         BINARY_FILTER    = (1 << 1),

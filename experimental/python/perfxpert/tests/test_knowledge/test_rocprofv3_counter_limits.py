@@ -40,3 +40,14 @@ def test_error_code_38_documented():
     data = load_yaml("rocprofv3_counter_limits")
     assert "38" in data["error_codes"]
     assert "message" in data["error_codes"]["38"]
+
+
+def test_fetch_write_combined_rule_documents_tcc_capacity():
+    data = load_yaml("rocprofv3_counter_limits")
+    combined = next(
+        rule
+        for rule in data["isolation_rules"]
+        if rule["counters"] == ["FETCH_SIZE", "WRITE_SIZE"]
+    )
+    assert "5 derived hardware counter slots" in combined["reason"]
+    assert "limit 4" in combined["reason"]

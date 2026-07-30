@@ -307,6 +307,9 @@ public:
   is_address_class_supported (const address_class_t &address_class) const
     = 0;
 
+  virtual std::vector<agent_t::aperture_t>
+  get_apertures (const os_agent_info_t &os) const = 0;
+
   /* Return the watchpoints for which an exception was generated in the given
      stopped wave.  */
   virtual std::vector<os_watch_id_t>
@@ -367,9 +370,9 @@ public:
 
   virtual std::pair<amd_dbgapi_wave_state_t, amd_dbgapi_wave_stop_reasons_t>
   wave_get_state (wave_t &wave) const = 0;
-  virtual void wave_set_state (wave_t &wave,
-                               amd_dbgapi_wave_state_t state) const
-    = 0;
+  virtual void wave_set_state (wave_t &wave, amd_dbgapi_wave_state_t state,
+                               amd_dbgapi_exceptions_t reasons
+                               = AMD_DBGAPI_EXCEPTION_NONE) const = 0;
 
   virtual bool wave_get_halt (const wave_t &wave) const = 0;
   virtual void wave_set_halt (wave_t &wave, bool halt) const = 0;

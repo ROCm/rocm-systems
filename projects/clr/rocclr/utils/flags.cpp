@@ -144,10 +144,19 @@ bool Flag::init() {
         outFile = fopen(("clr_logs_" + pid + ".txt").c_str(), "a");
       }
     }
-    // Enable async logging if configured
-    if (!flagIsDefault(AMD_LOG_ASYNC) && AMD_LOG_ASYNC) {
+    // Enable async logging: honor explicit AMD_LOG_ASYNC, otherwise auto-enable
+    // only when logging to a file (AMD_LOG_LEVEL_FILE is set).
+    bool useAsync = !flagIsDefault(AMD_LOG_ASYNC) ? AMD_LOG_ASYNC
+                                                  : !flagIsDefault(AMD_LOG_LEVEL_FILE);
+    if (useAsync) {
       EnableAsyncLogging(true);
     }
+  }
+
+  // If the user did not explicitly set HSA_ENABLE_DTIF_FAST_COPY, default it ON
+  // whenever HSA_MODEL_TOPOLOGY is set (FFM model mode), mirroring the ROCr-side default.
+  if (flagIsDefault(HSA_ENABLE_DTIF_FAST_COPY) && vars.find("HSA_MODEL_TOPOLOGY") != vars.cend()) {
+    HSA_ENABLE_DTIF_FAST_COPY = true;
   }
 
   return true;

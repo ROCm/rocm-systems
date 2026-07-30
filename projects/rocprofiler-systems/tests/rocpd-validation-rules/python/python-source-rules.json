@@ -40,9 +40,9 @@
                 },
                 {
                     "comparison": "equals",
-                    "description": "Verify that 'fib' has a total of 3 calls.",
-                    "error_message": "'fib' does not have 24 total calls, as expected.",
-                    "expected_result": 24,
+                    "description": "Verify that 'fib' has a total of 45 calls.",
+                    "error_message": "'fib' does not have 45 total calls, as expected (5 iterations of run(5) descending through fib gives 3+6+12+18+6 = 45 frames).",
+                    "expected_result": 45,
                     "query": "SELECT total_calls FROM top WHERE name = 'fib';"
                 },
                 {
@@ -94,9 +94,9 @@
                 },
                 {
                     "comparison": "equals",
-                    "description": "Verify that 'fib' has a total of 24 calls.",
-                    "error_message": "'fib' does not have 24 total calls, as expected.",
-                    "expected_result": 24,
+                    "description": "Verify that 'fib' has a total of 45 calls.",
+                    "error_message": "'fib' does not have 45 total calls, as expected (5 iterations of run(5) descending through fib gives 3+6+12+18+6 = 45 frames).",
+                    "expected_result": 45,
                     "query": "SELECT COUNT(*) FROM regions WHERE name = 'fib';"
                 }
             ]

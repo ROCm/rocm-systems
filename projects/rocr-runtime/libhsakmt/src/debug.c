@@ -24,6 +24,7 @@
  */
 
 #include "libhsakmt.h"
+#include "fmm.h"
 #include "hsakmt/linux/kfd_ioctl.h"
 #include <errno.h>
 #include <stdio.h>
@@ -31,6 +32,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
+#include <xf86drm.h>
+
+/* Forward declarations for internal Ctx functions */
+static HSAKMT_STATUS hsaKmtGetCoreRuntimeInfoCtx(HsaKFDContext *ctx,
+						  struct kfd_runtime_info *runtime_info);
+static HSAKMT_STATUS hsaKmtGetCoreDeviceInfoCtx(HsaKFDContext *ctx,
+						 HSAuint32 gpu_id,
+						 struct kfd_dbg_device_info_entry *device_info);
 
 /*
  * hsa_kfd_debug_context
@@ -44,34 +53,30 @@ struct hsa_kfd_debug_context {
 
 	/* Runtime debug capabilities mask */
 	uint32_t runtime_capabilities_mask;
+
+	struct kfd_runtime_info core_runtime_info;
 };
 
-struct hsa_kfd_debug_context *hsakmt_kfdcontext_get_debug_context(HsaKFDContext *ctx)
+int hsakmt_kfdcontext_init_debug_context(HsaKFDContext *ctx)
 {
-	assert(ctx);
-	if (!ctx) {
-		pr_err("Expected a non-null ptr for HsaKFDContext");
-		return NULL;
-	}
+	CHECK_CTX(ctx, -1);
 
 	if (ctx->debug_context)
-		return ctx->debug_context;
+		return 0;
 
 	ctx->debug_context = calloc(1, sizeof(struct hsa_kfd_debug_context));
 	if (!ctx->debug_context) {
 		pr_err("Alloc memory failed for struct hsa_kfd_debug_context size %zu\n",
 				 sizeof(struct hsa_kfd_debug_context));
-		return NULL;
+		return -1;
 	}
-	return ctx->debug_context;
+	return 0;
 }
 
 HSAKMT_STATUS hsakmt_init_device_debugging_memory(HsaKFDContext *ctx, unsigned int NumNodes)
 {
 	unsigned int i;
-	struct hsa_kfd_debug_context *debug_ctx = hsakmt_kfdcontext_get_debug_context(ctx);
-	if (!debug_ctx)
-		return HSAKMT_STATUS_NO_MEMORY;
+	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
 
 	debug_ctx->is_device_debugged = malloc(NumNodes * sizeof(bool));
 	if (!debug_ctx->is_device_debugged)
@@ -85,9 +90,7 @@ HSAKMT_STATUS hsakmt_init_device_debugging_memory(HsaKFDContext *ctx, unsigned i
 
 void hsakmt_destroy_device_debugging_memory(HsaKFDContext *ctx)
 {
-	struct hsa_kfd_debug_context *debug_ctx = hsakmt_kfdcontext_get_debug_context(ctx);
-	if (!debug_ctx)
-		return;
+	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
 
 	if (debug_ctx->is_device_debugged) {
 		free(debug_ctx->is_device_debugged);
@@ -97,8 +100,8 @@ void hsakmt_destroy_device_debugging_memory(HsaKFDContext *ctx)
 
 bool hsakmt_debug_get_reg_status(HsaKFDContext *ctx, uint32_t node_id)
 {
-	struct hsa_kfd_debug_context *debug_ctx = hsakmt_kfdcontext_get_debug_context(ctx);
-	if (!debug_ctx || !debug_ctx->is_device_debugged)
+	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
+	if (!debug_ctx->is_device_debugged)
 		return false;
 
 	return debug_ctx->is_device_debugged[node_id];
@@ -111,7 +114,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgRegister(HSAuint32 NodeId)
 
 	CHECK_KFD_OPEN();
 	struct hsa_kfd_debug_context *debug_ctx =
-				hsakmt_kfdcontext_get_debug_context(&hsakmt_primary_kfd_ctx);
+				hsakmt_primary_kfd_ctx.debug_context;
 	if (!debug_ctx->is_device_debugged)
 		return HSAKMT_STATUS_NO_MEMORY;
 
@@ -140,7 +143,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgUnregister(HSAuint32 NodeId)
 
 	CHECK_KFD_OPEN();
 	struct hsa_kfd_debug_context *debug_ctx =
-				hsakmt_kfdcontext_get_debug_context(&hsakmt_primary_kfd_ctx);
+				hsakmt_primary_kfd_ctx.debug_context;
 	if (!debug_ctx->is_device_debugged)
 		return HSAKMT_STATUS_NO_MEMORY;
 
@@ -356,7 +359,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnableCtx(HsaKFDContext *ctx,
 					    void *rDebug,
 					    bool setupTtmp)
 {
-	struct hsa_kfd_debug_context *debug_ctx = hsakmt_kfdcontext_get_debug_context(ctx);
+	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
 
 	struct kfd_ioctl_runtime_enable_args args = {0};
 	HSAKMT_STATUS result = hsaKmtCheckRuntimeDebugSupportCtx(ctx);
@@ -370,13 +373,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnableCtx(HsaKFDContext *ctx,
 
 	long err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_RUNTIME_ENABLE, &args);
 
+	debug_ctx->core_runtime_info.r_debug = args.r_debug;
+	debug_ctx->core_runtime_info.ttmp_setup =
+		(args.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1 : 0;
+
 	if (err) {
-		if (errno == EBUSY)
+		if (errno == EBUSY) {
+			debug_ctx->core_runtime_info.runtime_state = DEBUG_RUNTIME_STATE_ENABLED_BUSY;
 			return HSAKMT_STATUS_UNAVAILABLE;
-		else
+		} else {
 			return HSAKMT_STATUS_ERROR;
+		}
 	}
-	debug_ctx->runtime_capabilities_mask= args.capabilities_mask;
+
+	debug_ctx->runtime_capabilities_mask = args.capabilities_mask;
+	debug_ctx->core_runtime_info.runtime_state = DEBUG_RUNTIME_STATE_ENABLED;
 
 	return HSAKMT_STATUS_SUCCESS;
 }
@@ -401,9 +412,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeDisableCtx(HsaKFDContext *ctx)
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetRuntimeCapabilitiesCtx(HsaKFDContext *ctx,
 						  HSAuint32 *caps_mask)
 {
-	struct hsa_kfd_debug_context *debug_ctx = hsakmt_kfdcontext_get_debug_context(ctx);
+	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
 
 	*caps_mask = debug_ctx->runtime_capabilities_mask;
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+static HSAKMT_STATUS hsaKmtGetCoreRuntimeInfoCtx(HsaKFDContext *ctx,
+						  struct kfd_runtime_info *runtime_info)
+{
+	if (!runtime_info || !ctx->debug_context)
+		return HSAKMT_STATUS_ERROR;
+
+	*runtime_info = ctx->debug_context->core_runtime_info;
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -639,6 +660,114 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeDisable(void)
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetRuntimeCapabilities(HSAuint32 *caps_mask)
 {
 	return hsaKmtGetRuntimeCapabilitiesCtx(&hsakmt_primary_kfd_ctx, caps_mask);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetCoreRuntimeInfo(struct kfd_runtime_info *runtime_info)
+{
+	return hsaKmtGetCoreRuntimeInfoCtx(&hsakmt_primary_kfd_ctx, runtime_info);
+}
+
+static HSAKMT_STATUS hsaKmtGetCoreDeviceInfoCtx(HsaKFDContext *ctx,
+						 HSAuint32 gpu_id,
+						 struct kfd_dbg_device_info_entry *device_info)
+{
+	HSAKMT_STATUS ret;
+	uint32_t node_id;
+	HsaNodeProperties props;
+
+	if (!device_info)
+		return HSAKMT_STATUS_ERROR;
+
+	/* Convert gpu_id to node_id */
+	ret = hsakmt_gpuid_to_nodeid(ctx, gpu_id, &node_id);
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+
+	/* Get node properties */
+	ret = hsakmt_topology_get_node_props(ctx, node_id, &props);
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+
+	/* Zero out the structure first */
+	memset(device_info, 0, sizeof(*device_info));
+
+	/* Populate easy fields from node properties */
+	device_info->gpu_id = gpu_id;
+	device_info->location_id = props.LocationId;
+	device_info->vendor_id = props.VendorId;
+	device_info->device_id = props.DeviceId;
+
+	/* gfx_target_version from EngineId - decimal encoding for KFD 1.18 compatibility */
+	device_info->gfx_target_version = (props.EngineId.ui32.Major * 10000
+	                                        + props.EngineId.ui32.Minor * 100
+	                                        + props.EngineId.ui32.Stepping);
+
+	/* fw_version from EngineId */
+	device_info->fw_version = props.EngineId.ui32.uCode;
+
+	/* SIMD/compute topology */
+	device_info->simd_count = props.NumFComputeCores;
+	device_info->max_waves_per_simd = props.MaxWavesPerSIMD;
+	device_info->array_count = (props.NumArrays * props.NumShaderBanks) / props.NumXcc;
+	device_info->simd_arrays_per_engine = props.NumArrays;
+	device_info->num_xcc = props.NumXcc;
+
+	/* Capabilities */
+	device_info->capability = props.Capability.Value;
+	device_info->debug_prop = props.DebugProperties.Value;
+
+	/* Get aperture base/limits from FMM */
+	HSAuint64 base, limit;
+
+	/* LDS aperture */
+	ret = hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_LDS, gpu_id,
+	                                              &base, &limit);
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+	device_info->lds_base = base;
+	device_info->lds_limit = limit;
+
+	/* Scratch aperture */
+	ret = hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_SCRATCH, gpu_id,
+	                                              &base, &limit);
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+	device_info->scratch_base = base;
+	device_info->scratch_limit = limit;
+
+	/* GPUVM aperture */
+	ret = hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_GPUVM, gpu_id,
+	                                              &base, &limit);
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+	device_info->gpuvm_base = base;
+	device_info->gpuvm_limit = limit;
+
+	/* Get PCI subsystem info from libdrm */
+	if (props.DrmRenderMinor >= 0) {
+		int drm_fd = drmOpenRender(props.DrmRenderMinor);
+		if (drm_fd >= 0) {
+			drmDevicePtr drm_device = NULL;
+			/* Use DRM_DEVICE_GET_PCI_REVISION flag to get revision_id */
+			if (drmGetDevice2(drm_fd, DRM_DEVICE_GET_PCI_REVISION, &drm_device) == 0) {
+				if (drm_device->bustype == DRM_BUS_PCI && drm_device->deviceinfo.pci) {
+					device_info->revision_id = drm_device->deviceinfo.pci->revision_id;
+					device_info->subsystem_vendor_id = drm_device->deviceinfo.pci->subvendor_id;
+					device_info->subsystem_device_id = drm_device->deviceinfo.pci->subdevice_id;
+				}
+				drmFreeDevice(&drm_device);
+			}
+			drmClose(drm_fd);
+		}
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetCoreDeviceInfo(HSAuint32 gpu_id,
+						 struct kfd_dbg_device_info_entry *device_info)
+{
+	return hsaKmtGetCoreDeviceInfoCtx(&hsakmt_primary_kfd_ctx, gpu_id, device_info);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtDbgEnable(void **runtime_info,

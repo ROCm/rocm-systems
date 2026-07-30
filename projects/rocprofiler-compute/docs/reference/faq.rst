@@ -22,17 +22,6 @@ Workaround:
    $ pip3 uninstall astunparse
    $ pip3 astunparse
 
-tabulate doesn't print properly
-===============================
-
-To get around this issue, set the following environment variables to update your
-locale settings.
-
-.. code-block:: shell
-
-   $ export LC_ALL=C.UTF-8
-   $ export LANG=C.UTF-8
-
 Why does VALU utilization exceed the theoretical peak?
 ======================================================
 

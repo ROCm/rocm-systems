@@ -42,9 +42,9 @@ parser.add_argument('--videodecode_exe',   type=str, default='',
 parser.add_argument('--gpu_device_id',      type=int, default=0,
                     help='The GPU device ID that will be used to run the test on it - optional (default:0 [range:0 - N-1] N = total number of available GPUs on a machine)')
 parser.add_argument('--files_directory',    type=str, default='',
-                    help='The path to a dirctory containing one or more supported files for decoding (e.g., mp4, mov, etc.) and their corresponding reference MD5 digests - required')
+                    help='The path to a directory containing one or more supported files for decoding (e.g., mp4, mov, etc.) and their corresponding reference MD5 digests - required')
 parser.add_argument('--results_directory',    type=str, default='',
-                    help='The path to a dirctory to store results - optional')
+                    help='The path to a directory to store results - optional')
 parser.add_argument('--use_ffmpeg_demuxer',   type=int, default=1,
                     help='Indicator to use FFMPEG demuxer - optional (default:1). If set to 0, built-in bitstream reader is used.')
 

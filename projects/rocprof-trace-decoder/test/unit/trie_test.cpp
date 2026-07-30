@@ -160,3 +160,98 @@ TEST_F(TrieTest, BranchDetectionInVariousContexts)
     EXPECT_EQ(Trie::inst_type("s_cbranch_vccnz label", 11), InstCategory::BRANCH);
     EXPECT_EQ(Trie::inst_type("s_cbranch_cdbgsys", 12), InstCategory::BRANCH);
 }
+
+//=============================================================================
+// New MI400/GFX12+ instruction categories
+//=============================================================================
+
+TEST_F(TrieTest, WaitTensorReturnsIMMED) { EXPECT_EQ(Trie::inst_type("s_wait_tensor", 12), InstCategory::IMMED); }
+
+TEST_F(TrieTest, WaitAsyncReturnsIMMED) { EXPECT_EQ(Trie::inst_type("s_wait_async", 12), InstCategory::IMMED); }
+
+TEST_F(TrieTest, WaitXcntReturnsIMMED) { EXPECT_EQ(Trie::inst_type("s_wait_xcnt 0", 12), InstCategory::IMMED); }
+
+TEST_F(TrieTest, ClusterInstructionsReturnVMEM)
+{
+    EXPECT_EQ(Trie::inst_type("cluster_load_dword v0, v[1:2]", 12), InstCategory::VMEM);
+    EXPECT_EQ(Trie::inst_type("cluster_store_dword v0, v[1:2]", 12), InstCategory::VMEM);
+}
+
+TEST_F(TrieTest, TensorInstructionsReturnVMEM)
+{
+    EXPECT_EQ(Trie::inst_type("tensor_load v0, v[1:2]", 12), InstCategory::VMEM);
+    EXPECT_EQ(Trie::inst_type("tensor_store v0, v[1:2]", 12), InstCategory::VMEM);
+}
+
+TEST_F(TrieTest, DdsInstructionsReturnVMEM)
+{
+    EXPECT_EQ(Trie::inst_type("dds_read_b32 v0, v1", 12), InstCategory::VMEM);
+}
+
+TEST_F(TrieTest, LdsUnderscoreInstructionsReturnLDS)
+{
+    EXPECT_EQ(Trie::inst_type("lds_load_dword v0, v1", 12), InstCategory::LDS);
+}
+
+TEST_F(TrieTest, SetprioIncReturnsSALU)
+{
+    EXPECT_EQ(Trie::inst_type("s_setprio 0", 12), InstCategory::IMMED);
+    EXPECT_EQ(Trie::inst_type("s_setprio_inc 1", 12), InstCategory::SALU);
+}
+
+TEST_F(TrieTest, CvtInstructionReturnsSALU)
+{
+    EXPECT_EQ(Trie::inst_type("s_cvt_f32_u32 s0, s1", 12), InstCategory::SALU);
+}
+
+TEST_F(TrieTest, BufferPrefetchInstructionsReturnSKIP)
+{
+    EXPECT_EQ(Trie::inst_type("buffer_nop", 12), InstCategory::SKIP);
+}
+
+TEST_F(TrieTest, SMonitorReturnsIMMED) { EXPECT_EQ(Trie::inst_type("s_monitor", 12), InstCategory::IMMED); }
+
+TEST_F(TrieTest, SVersionReturnsIMMED) { EXPECT_EQ(Trie::inst_type("s_version 0", 12), InstCategory::IMMED); }
+
+TEST_F(TrieTest, SSetInstReturnsIMMED) { EXPECT_EQ(Trie::inst_type("s_set_inst 0", 12), InstCategory::IMMED); }
+
+TEST_F(TrieTest, SInstPrefetchReturnsIMMED)
+{
+    EXPECT_EQ(Trie::inst_type("s_inst_prefetch 0", 12), InstCategory::IMMED);
+}
+
+TEST_F(TrieTest, SBarrierReturnsIMMED)
+{
+    EXPECT_EQ(Trie::inst_type("s_barrier", 12), InstCategory::IMMED);
+    EXPECT_EQ(Trie::inst_type("s_barrier_wait 0", 12), InstCategory::IMMED);
+}
+
+TEST_F(TrieTest, SCallReturnsSALU) { EXPECT_EQ(Trie::inst_type("s_call_b64 s[0:1], 0x10", 12), InstCategory::SALU); }
+
+TEST_F(TrieTest, SMemrealtimeReturnsSMEM)
+{
+    EXPECT_EQ(Trie::inst_type("s_memrealtime s[0:1]", 10), InstCategory::SMEM);
+}
+
+TEST_F(TrieTest, BufferVariantsReturnVMEM)
+{
+    EXPECT_EQ(Trie::inst_type("buffer_load_dword v0, v1, s[0:3], 0", 10), InstCategory::VMEM);
+    EXPECT_EQ(Trie::inst_type("buffer_store_dword v0, v1, s[0:3], 0", 10), InstCategory::VMEM);
+    EXPECT_EQ(Trie::inst_type("buffer_atomic_add v0, v1, s[0:3], 0", 10), InstCategory::VMEM);
+    EXPECT_EQ(Trie::inst_type("buffer_gl0_inv", 10), InstCategory::VMEM);
+    EXPECT_EQ(Trie::inst_type("buffer_invl2", 10), InstCategory::VMEM);
+    EXPECT_EQ(Trie::inst_type("buffer_wbl2", 10), InstCategory::VMEM);
+    EXPECT_EQ(Trie::inst_type("buffer_preamble_add", 10), InstCategory::VMEM);
+    EXPECT_EQ(Trie::inst_type("buffer_done", 10), InstCategory::VMEM);
+    EXPECT_EQ(Trie::inst_type("tbuffer_load_format_x v0, v1, s[0:3], 0", 10), InstCategory::VMEM);
+}
+
+TEST_F(TrieTest, GetPcAndSwapPcReturnSALU)
+{
+    EXPECT_EQ(Trie::inst_type("s_getpc_b64 s[0:1]", 10), InstCategory::SALU);
+    EXPECT_EQ(Trie::inst_type("s_setpc_b64 s[0:1]", 10), InstCategory::SALU);
+    EXPECT_EQ(Trie::inst_type("s_swappc_b64 s[0:1], s[2:3]", 10), InstCategory::SALU);
+    EXPECT_EQ(Trie::inst_type("s_get_pc_b64 s[0:1]", 12), InstCategory::SALU);
+    EXPECT_EQ(Trie::inst_type("s_set_pc_b64 s[0:1]", 12), InstCategory::SALU);
+    EXPECT_EQ(Trie::inst_type("s_swap_pc_b64 s[0:1], s[2:3]", 12), InstCategory::SALU);
+}

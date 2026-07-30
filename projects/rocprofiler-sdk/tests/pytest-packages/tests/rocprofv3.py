@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@ def test_perfetto_data(
         "memory_allocation",
         "rocdecode_api",
         "rocjpeg_api",
+        "hipfile_api",
         "counter_collection",
         "scratch_memory",
     ),
@@ -49,8 +50,11 @@ def test_perfetto_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
+        "hipfile_api": ("hipfile_api", "hipfile_api"),
         "counter_collection": ("counter_collection", "counter_collection"),
         "scratch_memory": ("scratch_memory", "scratch_memory"),
+        "ompt": ("openmp", "ompt"),
     }
 
     # make sure they specified valid categories
@@ -119,6 +123,9 @@ def test_otf2_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
+        "ompt": ("openmp", "ompt"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
+        "hipfile_api": ("hipfile_api", "hipfile_api"),
     }
 
     # make sure they specified valid categories
@@ -145,6 +152,15 @@ def test_otf2_data(
                 )
 
             _json_data = [itr for itr in _json_data if roctx_mark_filter(itr) is not None]
+
+        # OMPT records can be instantaneous; OTF2 only encodes ranged regions.
+        # Drop instantaneous JSON records before comparing.
+        if json_category == "ompt":
+            _json_data = [
+                itr
+                for itr in _json_data
+                if itr["start_timestamp"] != itr["end_timestamp"]
+            ]
 
         assert len(_otf2_data) == len(
             _json_data
@@ -236,6 +252,7 @@ def test_rocpd_data(
         "memory_allocation": ("memory_allocation", ("MEMORY_ALLOCATION")),
         "rocdecode_api": ("rocdecode_api", ("ROCDECODE_API")),
         "rocjpeg_api": ("rocjpeg_api", ("ROCJPEG_API")),
+        "hipfile_api": ("hipfile_api", ("HIPFILE_API")),
     }
 
     view_mapping = {
@@ -245,9 +262,11 @@ def test_rocpd_data(
         "rccl_api": "regions",
         "rocdecode_api": "regions",
         "rocjpeg_api": "regions",
+        "hipfile_api": "regions",
         "kernel_dispatch": "kernels",
         "memory_copy": "memory_copies",
         "memory_allocation": "memory_allocations",
+        "ompt": "regions_and_samples",
     }
 
     # make sure they specified valid categories
@@ -516,65 +535,6 @@ def test_csv_data(
 
         for a, b in zip(_csv_data_sorted, _js_data_sorted):
             _perform_csv_json_match(a, b, keys_mapping[category], json_data)
-
-
-def test_summary_region_category_filtering(
-    summary_dir, expected_categories=None, allow_none=False
-):
-    """
-    Test that summary output contains ONLY the expected categories.
-
-    Args:
-        summary_dir: Path to directory containing summary CSV files
-        expected_categories: List of category names that should be present (e.g., ['kernel', 'hip'])
-        allow_none: If True, allows no region summaries (for --region-categories NONE test)
-    """
-    import os
-    import glob
-
-    if not os.path.exists(summary_dir):
-        raise FileNotFoundError(f"Summary directory not found: {summary_dir}")
-
-    # Get all CSV files
-    csv_files = glob.glob(os.path.join(summary_dir, "*.csv"))
-    basenames = [os.path.basename(f) for f in csv_files]
-
-    assert len(basenames) > 0, f"No summary files found in {summary_dir}"
-
-    print(f"\nFound {len(basenames)} summary files in {summary_dir}:")
-    for name in sorted(basenames):
-        print(f"  - {name}")
-
-    # For NONE test: ensure no region-based summaries are generated
-    if allow_none:
-        # Region summaries have filenames like "rocm_hip_*.csv", "rocm_hsa_*.csv"
-        region_files = [f for f in basenames if f.lower().startswith("rocm_")]
-        assert len(region_files) == 0, (
-            f"--region-categories NONE should not generate region summaries, "
-            f"but found: {region_files}"
-        )
-
-    # Check that expected categories are present and ONLY those categories exist
-    if expected_categories:
-        # 1. Check all expected categories are present
-        for category in expected_categories:
-            category_lower = category.lower()
-            matching_files = [f for f in basenames if category_lower in f.lower()]
-            assert len(matching_files) > 0, (
-                f"Expected category '{category}' not found. "
-                f"No files matching '{category_lower}' in {basenames}"
-            )
-
-        # 2. Check no unexpected categories exist
-        for filename in basenames:
-            filename_lower = filename.lower()
-            matches_expected = any(
-                cat.lower() in filename_lower for cat in expected_categories
-            )
-            assert matches_expected, (
-                f"Unexpected file '{filename}' found. "
-                f"Does not match any expected category: {expected_categories}"
-            )
 
 
 def test_perfetto_arg_annotations(pftrace_reader):

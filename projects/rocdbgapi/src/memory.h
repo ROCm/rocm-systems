@@ -190,6 +190,7 @@ public:
     global,
     private_swizzled,
     private_unswizzled,
+    global_swizzled,
     agent,
     host
   };
@@ -256,7 +257,7 @@ public:
 
   /* Lower an address in this address space to an address in a base address
      space in the same architecture.  The base address spaces kinds are global,
-     local, private_swizzled, and private_unswizzled.  */
+     local, private_swizzled, private_unswizzled, and global_swizzled.  */
   virtual std::pair<const address_space_t & /* lowered_address_space  */,
                     amd_dbgapi_segment_address_t /* lowered_address  */>
   lower (const agent_t &agent, amd_dbgapi_segment_address_t address) const = 0;
@@ -402,6 +403,56 @@ public:
            amd_dbgapi_segment_address_t from_address) const override;
 };
 
+class global_swizzled_address_space_t : public address_space_t
+{
+private:
+  amd_dbgapi_size_t const m_interleave_size;
+  const private_swizzled_address_space_t &m_private_lane;
+
+public:
+  global_swizzled_address_space_t (
+    amd_dbgapi_address_space_id_t address_space_id,
+    std::string name, amd_dbgapi_size_t interleave_size,
+    amd_dbgapi_size_t va_address_size,
+    const private_swizzled_address_space_t &private_lane)
+    : address_space_t (address_space_id, kind_t::global_swizzled,
+                       std::move (name), std::nullopt,
+                       va_address_size, 0x0000000000000000,
+                       AMD_DBGAPI_ADDRESS_SPACE_ACCESS_ALL),
+      m_interleave_size (interleave_size),
+      m_private_lane (private_lane)
+  {
+  }
+
+  amd_dbgapi_size_t interleave_size () const { return m_interleave_size; }
+
+  const private_swizzled_address_space_t &private_lane () const
+  {
+    return m_private_lane;
+  }
+
+  amd_dbgapi_segment_address_dependency_t address_dependency (
+    amd_dbgapi_segment_address_t /* address  */) const override
+  {
+    return AMD_DBGAPI_SEGMENT_ADDRESS_DEPENDENCE_PROCESS;
+  }
+
+  std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
+  lower (const agent_t &agent,
+         amd_dbgapi_segment_address_t global_swizzled_address) const override;
+
+  std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
+  convert (const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
+           const address_space_t &from_address_space,
+           amd_dbgapi_segment_address_t from_address) const override;
+
+  /* Convert the input GLOBAL_SWIZZLED_ADDR to a global address.
+     Return this global address along with the number of bytes that
+     this conversion is valid for.  */
+  std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
+  to_global (amd_dbgapi_segment_address_t global_swizzled_addr) const;
+};
+
 class generic_address_space_t : public address_space_t
 {
 private:
@@ -410,7 +461,8 @@ private:
      one in the apertures is invalid.  */
   std::optional<amd_dbgapi_segment_address_t>
   generic_address_for_address_space (
-    const agent_t &agent, const address_space_t &segment_address_space,
+    const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
+    const address_space_t &segment_address_space,
     amd_dbgapi_segment_address_t segment_address) const;
 
 public:
@@ -530,28 +582,19 @@ public:
                  void *value) const;
 };
 
-template <typename AddressType> class memory_cache_t
+/* A cache for agent memory.  Writes to cached lines are write-back:
+   data is immediately updated in the cache, and later updated in
+   memory when the cache is flushed.  Accesses to uncached lines are
+   forwarded directly to memory.  */
+
+class memory_cache_t
 {
 public:
-  enum class policy_t
-  {
-    /* If uncached is used, data is immediately written to global memory, and
-       is not written to the cache.  */
-    uncached = 0,
-    /* If write-through is used, data is written both to global memory and to
-       the cache.  */
-    write_through,
-    /* If write-back is used, data is immediately updated in the cache, and
-       later updated in memory when the cache is flushed.  */
-    write_back
-  };
-
   static constexpr size_t cache_line_size = 64;
-  static constexpr policy_t policy = policy_t::write_back;
 
 private:
   using delegate_fn_type
-    = std::function<size_t (AddressType /* address */, void * /* read */,
+    = std::function<size_t (agent_address_t /* address */, void * /* read */,
                             const void * /* write */, size_t /* size */)>;
 
   struct cache_line_t
@@ -560,49 +603,48 @@ private:
     bool m_dirty{ false };
   };
 
-  std::map<AddressType, cache_line_t> m_cache_line_map;
-  delegate_fn_type const m_xfer_global_memory;
+  /* The agent which this cache is for.  */
+  const agent_t &m_agent;
 
-  void fetch_cache_line (cache_line_t &cache_line, AddressType address) const;
-  void commit_cache_line (cache_line_t &cache_line, AddressType address) const;
-  void allocate_0_cache_line (cache_line_t &cache_line) const;
+  std::map<agent_address_t, cache_line_t> m_cache_line_map;
+  delegate_fn_type const m_xfer_agent_memory;
 
-  size_t xfer_global_memory (AddressType address, void *read,
-                             const void *write, size_t size);
+  size_t xfer_agent_memory (agent_address_t address, void *read,
+                            const void *write, size_t size);
 
 public:
-  memory_cache_t (delegate_fn_type xfer_global_memory)
-    : m_xfer_global_memory (std::move (xfer_global_memory))
+  memory_cache_t (const agent_t &agent, delegate_fn_type xfer_agent_memory)
+    : m_agent (agent), m_xfer_agent_memory (std::move (xfer_agent_memory))
   {
   }
   ~memory_cache_t () { dbgapi_assert (m_cache_line_map.empty ()); }
 
-  bool contains_all (AddressType address, amd_dbgapi_size_t size) const;
+  bool contains_all (agent_address_t address, amd_dbgapi_size_t size) const;
 
   /* Create cache lines if not already valid, and immediately fill them in.  */
-  void prefetch (AddressType address, amd_dbgapi_size_t size);
+  void prefetch (agent_address_t address, amd_dbgapi_size_t size);
 
   /* Discard all cache lines in the specified range.  If FORCE_DISCARD
      is true, dirty lines are silently dropped.  Otherwise it is an error to
      discarded dirty cache lines.  */
-  void discard (AddressType address = 0,
+  void discard (agent_address_t address = 0,
                 amd_dbgapi_size_t size = amd_dbgapi_size_t (-1),
                 bool force_discard = false);
 
   /* Write dirty lines back to memory.  */
-  void write_back (AddressType address = 0,
+  void write_back (agent_address_t address = 0,
                    amd_dbgapi_size_t size = amd_dbgapi_size_t (-1));
 
-  [[nodiscard]] size_t read_global_memory (AddressType address, void *buffer,
-                                           size_t size)
+  [[nodiscard]] size_t read_agent_memory (agent_address_t address,
+                                          void *buffer, size_t size)
   {
-    return xfer_global_memory (address, buffer, nullptr, size);
+    return xfer_agent_memory (address, buffer, nullptr, size);
   }
 
-  [[nodiscard]] size_t write_global_memory (AddressType address,
-                                            const void *buffer, size_t size)
+  [[nodiscard]] size_t write_agent_memory (agent_address_t address,
+                                           const void *buffer, size_t size)
   {
-    return xfer_global_memory (address, nullptr, buffer, size);
+    return xfer_agent_memory (address, nullptr, buffer, size);
   }
 };
 

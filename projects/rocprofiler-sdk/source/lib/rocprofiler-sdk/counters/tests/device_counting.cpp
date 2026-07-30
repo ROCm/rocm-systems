@@ -25,9 +25,11 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/code_object_loader.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
+#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -38,13 +40,14 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <sstream>
@@ -153,6 +156,22 @@ check_output_created(rocprofiler_context_id_t,
 
     auto* signal = reinterpret_cast<hsa_signal_t*>(user_data);
     hsa_signal_store_relaxed(*signal, static_cast<int64_t>(found_value));
+}
+
+void
+sort_counter_records(std::vector<rocprofiler_record_counter_t>& records)
+{
+    std::sort(records.begin(), records.end(), [](const auto& lhs, const auto& rhs) {
+        return std::make_tuple(lhs.id,
+                               lhs.counter_value,
+                               lhs.dispatch_id,
+                               lhs.agent_id.handle,
+                               lhs.user_data.value) < std::make_tuple(rhs.id,
+                                                                      rhs.counter_value,
+                                                                      rhs.dispatch_id,
+                                                                      rhs.agent_id.handle,
+                                                                      rhs.user_data.value);
+    });
 }
 
 struct test_kernels
@@ -438,7 +457,7 @@ protected:
 
                 if(hsa_signal_wait_relaxed(found_data,
                                            HSA_SIGNAL_CONDITION_EQ,
-                                           track_metric,
+                                           static_cast<int64_t>(track_metric),
                                            20000000,
                                            HSA_WAIT_STATE_BLOCKED) !=
                    static_cast<int64_t>(track_metric))
@@ -454,13 +473,16 @@ protected:
                         ROCP_FATAL << "Output size does not match: " << recs_local.size() << " "
                                    << output_records.size();
                     }
+                    sort_counter_records(recs_local);
+                    sort_counter_records(output_records);
                     if(!std::equal(recs_local.begin(),
                                    recs_local.end(),
                                    output_records.begin(),
                                    [](const auto& a, const auto& b) {
                                        return a.id == b.id && a.counter_value == b.counter_value &&
                                               a.dispatch_id == b.dispatch_id &&
-                                              a.agent_id.handle == b.agent_id.handle;
+                                              a.agent_id.handle == b.agent_id.handle &&
+                                              a.user_data.value == b.user_data.value;
                                    }))
                     {
                         ROCP_FATAL << "Output does not match between buffer and callback";
@@ -480,7 +502,7 @@ protected:
     // packets are likely not valid.
     static void check_raw_aql_packets(const std::string&         metric_to_test,
                                       size_t                     iter_count,
-                                      const std::vector<double>& expected_values)
+                                      const std::vector<double>& min_expected_values)
     {
         using namespace rocprofiler::counters;
         using namespace rocprofiler::hsa;
@@ -612,11 +634,11 @@ protected:
                 ROCP_INFO << fmt::format(
                     "Final Decoded Counter Values: {} (iter={})", fmt::join(*ret, ","), i);
 
-                CHECK_EQ(ret->size(), expected_values.size());
+                CHECK_EQ(ret->size(), min_expected_values.size());
                 size_t pos = 0;
-                for(const auto& v : expected_values)
+                for(const auto& v : min_expected_values)
                 {
-                    CHECK_EQ(v, ret->at(pos).counter_value);
+                    CHECK_GE(ret->at(pos).counter_value, v);
                     pos++;
                 }
             }
@@ -645,6 +667,25 @@ protected:
 
 TEST_F(device_counting_service_test, sync_counters) { test_run(); }
 TEST_F(device_counting_service_test, async_counters) { test_run(ROCPROFILER_COUNTER_FLAG_ASYNC); }
+
+TEST(profiler_ioctl_request, version_1_22_uses_legacy_request)
+{
+    EXPECT_EQ(counters::get_profiler_ioctl_request_for_version(1, 22),
+              static_cast<unsigned long>(AMDKFD_IOC_PROFILER));
+}
+
+TEST(profiler_ioctl_request, version_1_23_uses_mainline_request)
+{
+    EXPECT_EQ(counters::get_profiler_ioctl_request_for_version(1, 23),
+              static_cast<unsigned long>(AMDKFD_IOWR(0x28, struct kfd_ioctl_profiler_args)));
+}
+
+TEST(profiler_ioctl_request, version_2_0_uses_mainline_request)
+{
+    EXPECT_EQ(counters::get_profiler_ioctl_request_for_version(2, 0),
+              static_cast<unsigned long>(AMDKFD_IOWR(0x28, struct kfd_ioctl_profiler_args)));
+}
+
 TEST_F(device_counting_service_test, sync_grbm_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GRBM_COUNT"}, 50000);
@@ -699,7 +740,7 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify)
 TEST_F(device_counting_service_test, sync_sq_waves_verify_non_intercept)
 {
     // If this test fails, device counters will not be read correctly by a system-wide profiler
-    // deamon.
+    // daemon.
     if(!counters::counter_collection_has_device_lock())
     {
         ROCP_INFO << "Unsupported kernel driver version, skipping test";

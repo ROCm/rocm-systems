@@ -31,14 +31,17 @@
 #if defined(USE_GDA)
 #include "gda/context_gda_device.hpp"
 #include "gda/context_gda_host.hpp"
+#include "gda/context_gda_tmpl_device.hpp"
 #endif
 #if defined(USE_RO)
 #include "reverse_offload/context_ro_device.hpp"
 #include "reverse_offload/context_ro_host.hpp"
+#include "reverse_offload/context_ro_tmpl_device.hpp"
 #endif
 #if defined(USE_IPC)
 #include "ipc/context_ipc_device.hpp"
 #include "ipc/context_ipc_host.hpp"
+#include "ipc/context_ipc_tmpl_device.hpp"
 #endif
 
 #endif  // LIBRARY_SRC_CONTEXT_INCL_HPP_

@@ -143,7 +143,7 @@ TEST_CASE(Unit_AtomicAdd_NonCoherent) {
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
     if (prop.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       SECTION("with -mno-unsafe-atomics flag") {
         SECTION("float") { runAtomicAddNonCoherentNoUnsafeFlagTest<float>(); }
@@ -161,6 +161,6 @@ TEST_CASE(Unit_AtomicAdd_NonCoherent) {
       }
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }

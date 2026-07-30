@@ -22,7 +22,7 @@
 
 #ifndef _GFX11_FACTORY_H_
 #define _GFX11_FACTORY_H_
-#include "core/pm4_factory.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 namespace aql_profile
 {

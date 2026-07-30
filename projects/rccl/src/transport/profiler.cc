@@ -1,14 +1,16 @@
 /*************************************************************************
- * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 #include "transport.h"
 #include "proxy.h"
 #include "profiler.h"
 #include "device.h"
 
-static ncclResult_t profilerProxyConnect(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
+static ncclResult_t profilerProxyConnect(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState,
+                                         void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   connection->proxyAppendPtr = &connection->proxyAppend;
   connection->shared = 0;
   return ncclSuccess;
@@ -33,11 +35,12 @@ static ncclResult_t profilerProxyProgress(struct ncclProxyState* proxyState, str
     int stopping = proxyState->progressState.stop;
     for (int s = 0; s < args->nsubs; s++) {
       struct ncclProxySubArgs* sub = args->subs + s;
-      struct ncclDevProfiler* workStarted = (struct ncclDevProfiler *)sub->sendbuff;
-      struct ncclDevProfiler* workCompleted = (struct ncclDevProfiler *)sub->recvbuff;
+      struct ncclDevProfiler* workStarted = (struct ncclDevProfiler*)sub->sendbuff;
+      struct ncclDevProfiler* workCompleted = (struct ncclDevProfiler*)sub->recvbuff;
       if (sub->posted < sub->nsteps) {
-        if (sub->base <= workStarted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].counter) {
-          ncclProfilerStartKernelChEvent(args, s, workStarted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].timestamp);
+        if (sub->base <= workStarted[sub->channelId].data[sub->base % MAX_PROFILER_EVENTS_PER_CHANNEL].counter) {
+          ncclProfilerStartKernelChEvent(
+            args, s, workStarted[sub->channelId].data[sub->base % MAX_PROFILER_EVENTS_PER_CHANNEL].timestamp);
           sub->posted = sub->nsteps;
           continue; // allow events on every channel to start
         }
@@ -50,8 +53,9 @@ static ncclResult_t profilerProxyProgress(struct ncclProxyState* proxyState, str
         continue;
       }
       if (sub->transmitted < sub->nsteps) {
-        if (sub->base <= workCompleted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].counter) {
-          ncclProfilerStopKernelChEvent(args, s, workCompleted[sub->channelId].data[sub->base%MAX_PROFILER_EVENTS_PER_CHANNEL].timestamp);
+        if (sub->base <= workCompleted[sub->channelId].data[sub->base % MAX_PROFILER_EVENTS_PER_CHANNEL].counter) {
+          ncclProfilerStopKernelChEvent(
+            args, s, workCompleted[sub->channelId].data[sub->base % MAX_PROFILER_EVENTS_PER_CHANNEL].timestamp);
           sub->transmitted = sub->nsteps;
           args->done++;
         } else if (stopping) {
@@ -67,9 +71,8 @@ static ncclResult_t profilerProxyProgress(struct ncclProxyState* proxyState, str
   return ncclSuccess;
 }
 
-struct ncclTransport profilerTransport = {
-  "Prof",
-  NULL,
-  { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
-  { NULL, NULL, NULL, NULL, NULL, profilerProxyConnect, NULL, profilerProxyProgress, NULL, NULL }
-};
+struct ncclTransport profilerTransport = {"Prof",
+                                          NULL,
+                                          {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL},
+                                          {NULL, NULL, NULL, NULL, NULL, profilerProxyConnect, NULL,
+                                           profilerProxyProgress, NULL, NULL}};

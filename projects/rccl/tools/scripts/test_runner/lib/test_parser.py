@@ -7,6 +7,7 @@ Test Parser Module
 Handles command-line argument parsing and test output parsing
 """
 
+import os
 import re
 import argparse
 
@@ -23,8 +24,17 @@ Examples:
   # Run all tests from config
   %(prog)s -c test_config.json
 
-  # Run specific test
-  %(prog)s -c test_config.json --test-name NET_AllTests_2Nodes_ETH
+  # Run a specific individual test by exact name
+  %(prog)s -c test_config.json --test-name CE_AllGather_2Ranks
+
+  # Run multiple individual tests (colon-separated)
+  %(prog)s -c test_config.json --test-name CE_AllGather_2Ranks:CE_AlltoAll_2Ranks
+
+  # Run all suites whose name contains 'CE Tests'
+  %(prog)s -c test_config.json --suite-name "CE Tests"
+
+  # Run two specific suites by substring (colon-separated)
+  %(prog)s -c test_config.json --suite-name "CE Tests - 2-Rank:CE Tests - 4-Rank"
 
   # Run with verbose output
   %(prog)s -c test_config.json -v
@@ -64,7 +74,12 @@ Examples:
         self.parser.add_argument(
             '--test-name',
             type=str,
-            help="Run only specific test by name"
+            help="Run only tests matching any glob pattern; ':' = OR, '*' = wildcard, '-' prefix = exclude, case-sensitive (e.g. 'P2P_*' = all P2P tests; '*:-SHM*' = all except SHM)"
+        )
+        self.parser.add_argument(
+            '--suite-name',
+            type=str,
+            help="gtest-style glob filter on suite names: ':' = OR, '*' = wildcard, '-' prefix = exclude, case-sensitive (e.g. 'CE*' runs all CE suites; '*:-NET*' runs all except NET)"
         )
         self.parser.add_argument(
             '--no-build',
@@ -114,10 +129,67 @@ Examples:
             help="Select system-specific MPI args profile from config (e.g. 'ainic', 'thor2')"
         )
         self.parser.add_argument(
+            '--mpi-args',
+            type=str,
+            default='',
+            help="Extra mpirun arguments appended after the config's base/suite/test mpi_args "
+                 "(MPI tests only). Also accepts the RCCL_TEST_MPI_ARGS environment variable; "
+                 "the CLI flag and env var are both appended (CLI first)."
+        )
+        self.parser.add_argument(
             '--mpich',
             action='store_true',
             default=False,
             help="Use MPICH syntax (-env) instead of OpenMPI (-x) for passing env vars to mpirun"
+        )
+        self.parser.add_argument(
+            '--emit-results',
+            action='store_true',
+            default=False,
+            help="Emit structured, machine-readable results (JSON/JSONL + a .tar.gz "
+                 "snapshot) for the results dashboard. Enables per-test log "
+                 "capture so perf (busbw/algbw) numbers can be parsed."
+        )
+        self.parser.add_argument(
+            '--results-dir',
+            type=str,
+            default='',
+            help="Directory for emitted results + tarballs (default: <workspace>/results). "
+                 "The hourly dashboard scrape pulls <results-dir>/latest.tar.gz."
+        )
+        self.parser.add_argument(
+            '--run-label',
+            type=str,
+            default='',
+            help="Optional label/tag stored with the emitted run (e.g. 'nightly', a PR number)."
+        )
+        self.parser.add_argument(
+            '--tag',
+            action='append',
+            default=[],
+            metavar='TAG',
+            help="Tag to attach to the emitted run for filtering in the dashboard "
+                 "(repeatable, e.g. --tag nightly --tag mi300x). Merged with --tags."
+        )
+        self.parser.add_argument(
+            '--tags',
+            type=str,
+            default='',
+            help="Comma-separated tags to attach to the emitted run (merged with --tag)."
+        )
+        self.parser.add_argument(
+            '--db-push',
+            action='store_true',
+            default=False,
+            help="Also push results to PostgreSQL (DSN from RCCL_RESULTS_DSN). Best "
+                 "effort: on failure/timeout the run continues and the local tarball "
+                 "remains the source of truth. Implies --emit-results."
+        )
+        self.parser.add_argument(
+            '--db-timeout',
+            type=int,
+            default=10,
+            help="PostgreSQL connect + statement timeout in seconds for --db-push (default: 10)."
         )
 
     def parse_arguments(self):
@@ -140,7 +212,8 @@ Examples:
             print(f"Config file:       {args.config}")
             print(f"Verbose mode:      {args.verbose}")
             print(f"Output dir:        {args.output if args.output else 'auto-generated'}")
-            print(f"Test name filter:  {args.test_name if args.test_name else 'all tests'}")
+            print(f"Test name filter:  {args.test_name if args.test_name else 'all (glob)'}")
+            print(f"Suite name filter: {args.suite_name if args.suite_name else 'all suites'}")
             print(f"No build:          {args.no_build}")
             print(f"Skip tests:        {args.skip_tests}")
             print(f"Coverage report:   {args.coverage_report}")
@@ -150,6 +223,10 @@ Examples:
             print(f"Skip MPI check:    {args.skip_mpi_check}")
             print(f"Stop on rerun fail: {args.stop_on_rerun_failure}")
             print(f"System profile:    {args.system if args.system else 'none (use default MPI args)'}")
+            _cli_mpi = getattr(args, 'mpi_args', '') or ''
+            _env_mpi = os.environ.get('RCCL_TEST_MPI_ARGS', '')
+            _extra_mpi = ' '.join(p for p in (_cli_mpi, _env_mpi) if p)
+            print(f"Extra MPI args:    {_extra_mpi if _extra_mpi else 'none'}")
             print(f"MPI implementation: {'mpich' if args.mpich else 'openmpi (default)'}")
             print("="*80)
             print()

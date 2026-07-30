@@ -28,18 +28,19 @@
 #include "device_proxy.hpp"
 #include "ro_net_team.hpp"
 #include "mpi_instance.hpp"
+#include "memory/hip_allocator.hpp"
 
 namespace rocshmem {
 
-template <typename ALLOCATOR>
 class ROTeamProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, ROTeam>;
+  using ProxyT = DeviceProxy<HIPAllocator, ROTeam>;
 
  public:
   /*
    * Placement new the memory which is allocated by proxy_
    */
   ROTeamProxy(Backend* backend, MPI_Comm comm, int pe, int npes,
+              [[maybe_unused]] const HIPAllocator& alloc = HIPAllocator(),
               size_t num_elems = 1)
     : proxy_{num_elems} {
 
@@ -86,8 +87,6 @@ class ROTeamProxy {
    */
   ProxyT proxy_{};
 };
-
-using ROTeamProxyT = ROTeamProxy<HIPAllocator>;
 
 }  // namespace rocshmem
 

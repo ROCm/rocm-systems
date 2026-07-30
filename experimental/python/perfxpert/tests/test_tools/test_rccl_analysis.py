@@ -43,7 +43,7 @@ def test_analyze_collectives_computes_busbw_allreduce():
     # busBW = 1048576 * 1.5 / 1e-3 / 1e9 = 1.572864 GB/s
     expected = 1048576 * 1.5 / 1e-3 / 1e9
     assert abs(first["effective_bw_gbps"] - expected) < 0.01
-    assert first["peak_bw_gbps"] == 340.0   # from interconnect_specs (MI300X)
+    assert first["peak_bw_gbps"] == 340.0   # achievable RCCL baseline for MI300X
     # 4 collectives, dominant AllReduce.
     assert r["summary"]["dominant_op"] == "AllReduce"
     assert r["summary"]["op_count"] == 4
@@ -81,6 +81,23 @@ def test_interconnect_lookup_peaks_returns_dict_per_arch():
         entry = interconnect.lookup_peaks(gfx)
         missing = required - set(entry)
         assert not missing, f"{gfx} missing fields: {missing}"
+
+
+def test_interconnect_lookup_peaks_uses_public_amd_link_specs():
+    mi250x = interconnect.lookup_peaks("gfx90a")
+    assert mi250x["xgmi_links"] == 8
+    assert mi250x["xgmi_per_link_gbps"] == pytest.approx(100.0)
+    assert mi250x["xgmi_peak_gbps"] == pytest.approx(800.0)
+
+    mi300x = interconnect.lookup_peaks("gfx942")
+    assert mi300x["xgmi_links"] == 8
+    assert mi300x["xgmi_per_link_gbps"] == pytest.approx(128.0)
+    assert mi300x["xgmi_peak_gbps"] == pytest.approx(1024.0)
+
+    mi350x = interconnect.lookup_peaks("gfx950")
+    assert mi350x["xgmi_links"] == 7
+    assert mi350x["xgmi_per_link_gbps"] == pytest.approx(153.0)
+    assert mi350x["xgmi_peak_gbps"] == pytest.approx(1071.0)
 
 
 def test_interconnect_lookup_peaks_unknown_raises():

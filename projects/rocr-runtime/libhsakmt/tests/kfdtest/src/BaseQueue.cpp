@@ -130,13 +130,26 @@ HSAKMT_STATUS BaseQueue::Destroy() {
 }
 
 void BaseQueue::PlaceAndSubmitPacket(const BasePacket &packet) {
-    PlacePacket(packet);
+    /*
+     * Do not ring the doorbell if PlacePacket failed. ASSERT_* inside
+     * PlacePacket is fatal only to PlacePacket if we propergate it here
+     */
+    ASSERT_NO_FATAL_FAILURE(PlacePacket(packet));
     SubmitPacket();
 }
 
 void BaseQueue::Wait4PacketConsumption(HsaEvent *event, unsigned int timeOut) {
     ASSERT_TRUE(!event) << "Not supported!" << std::endl;
-    ASSERT_TRUE(WaitOnValue(m_Resources.Queue_read_ptr, RptrWhenConsumed(), timeOut));
+
+    const unsigned int expectedRptr = RptrWhenConsumed();
+    ASSERT_TRUE(WaitOnValue(m_Resources.Queue_read_ptr, expectedRptr, timeOut))
+        << "Timed out waiting for queue consumption"
+        << " queueId="       << m_Resources.QueueId
+        << " expectedRptr="  << expectedRptr
+        << " actualRptr="    << m_Resources.Queue_read_ptr
+        << " wptr="          << Wptr()
+        << " pendingWptr="   << m_pendingWptr
+        << " pendingWptr64=" << m_pendingWptr64;
 }
 
 bool BaseQueue::AllPacketsSubmitted() {
@@ -144,6 +157,7 @@ bool BaseQueue::AllPacketsSubmitted() {
 }
 
 void BaseQueue::PlacePacket(const BasePacket &packet) {
+    ASSERT_NOTNULL(m_QueueBuf);
     ASSERT_EQ(packet.PacketType(), PacketTypeSupported())
         << "Cannot add a packet since packet type doesn't match queue";
 
@@ -161,7 +175,15 @@ void BaseQueue::PlacePacket(const BasePacket &packet) {
     }
 
     unsigned int dwordsAvailable = (readPtr - 1 - writePtr + queueSizeInDWord) % queueSizeInDWord;
-    ASSERT_GE(dwordsAvailable, dwordsRequired) << "Cannot add a packet, buffer overrun";
+    ASSERT_GE(dwordsAvailable, dwordsRequired)
+        << "Cannot add a packet, buffer overrun"
+        << " queueId="       << m_Resources.QueueId
+        << " readPtr="       << readPtr
+        << " writePtr="      << writePtr
+        << " pendingWptr="   << m_pendingWptr
+        << " pendingWptr64=" << m_pendingWptr64
+        << " packetDwords="  << packetSizeInDwords
+        << " queueDwords="   << queueSizeInDWord;
 
     ASSERT_GE(queueSizeInDWord, packetSizeInDwords) << "Cannot add a packet, packet size too large";
 

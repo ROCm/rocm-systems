@@ -137,6 +137,12 @@ protected:
     int first_field_pic_idx_;
     int first_field_dec_buf_idx_;
 
+    // Byte offset (within the current packet) of the first slice of the picture currently
+    // being accumulated. A single demuxer packet may contain more than one coded picture
+    // (e.g. a complementary field pair), so slice data offsets and the picture bitstream
+    // span are computed relative to this.
+    uint32_t pic_data_start_offset_;
+
     // DPB
     AvcPicture curr_pic_;
     DecodedPictureBuffer dpb_buffer_;
@@ -163,6 +169,20 @@ protected:
      */
     ParserResult ParsePictureData(const uint8_t *p_stream, uint32_t pic_data_size);
 
+    /*! \brief Function to run the decode/marking/DPB-insertion cycle for the picture currently
+     *  accumulated in slice_info_list_. Called once per coded picture, which may be one of several
+     *  contained in a single demuxer packet.
+     * \return <tt>ParserResult</tt>
+     */
+    ParserResult DecodeCurrentPicture();
+
+    /*! \brief Determine whether a slice starts a new primary coded picture (H.264 clause 7.4.1.2.4)
+     *  by comparing it against the first slice of the picture currently being accumulated.
+     * \return true if the incoming slice begins a new coded picture
+     */
+    bool IsNewPicture(const AvcSliceHeader *prev_slice_header, const AvcNalUnitHeader *prev_nal_header,
+                      const AvcSliceHeader *curr_slice_header, const AvcNalUnitHeader *curr_nal_header);
+
     /*! \brief Function to parse the NAL unit header
      * \param [in] header_byte The AVC NAL unit header byte
      * \return <tt>AvcNalUnitHeader</tt> Parsed nal header
@@ -186,7 +206,7 @@ protected:
     /*! \brief Function to parse slice header
      * \param p_stream The pointer to the input bit stream
      * \param [in] stream_size_in_byte The byte size of the stream
-     * \param [out] p_slice_header The pointer to the slice header strucutre
+     * \param [out] p_slice_header The pointer to the slice header structure
      * \return <tt>ParserResult</tt>
      */
     ParserResult ParseSliceHeader(uint8_t *p_stream, size_t stream_size_in_byte, AvcSliceHeader *p_slice_header);
@@ -230,8 +250,8 @@ protected:
      */
    ParserResult DecodeFrameNumGaps();
 
-    /*! \brief Function to set up the reference picutre lists for each slice. 8.2.4.
-     * \param [in] p_slice_info Poiner to slice info struct
+    /*! \brief Function to set up the reference picture lists for each slice. 8.2.4.
+     * \param [in] p_slice_info Pointer to slice info struct
      * \return <tt>ParserResult</tt>
      */
     ParserResult SetupReflist(AvcSliceInfo *p_slice_info);

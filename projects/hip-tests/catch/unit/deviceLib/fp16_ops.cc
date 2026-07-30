@@ -56,7 +56,7 @@ void fp16_arith_cpu(const std::vector<float>& a, const std::vector<float>& b,
 
 HIP_TEST_CASE(Unit_fp16_arith) {
   constexpr size_t num_of_ops = 18;
-  constexpr size_t iters = 100;
+  const size_t iters = isQuickLevel() ? 10 : 100;
   Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f, /*seed*/ 0x1234);
   constexpr float input2 = 1.1f;
   for (size_t iter = 0; iter < iters; iter++) {
@@ -136,7 +136,7 @@ void fp162_arith_cpu(std::vector<float2>& a, std::vector<float2>& b, std::vector
 
 HIP_TEST_CASE(Unit_fp162_arith) {
   constexpr size_t num_of_ops = 18;
-  constexpr size_t iters = 100;
+  const size_t iters = isQuickLevel() ? 10 : 100;
   Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f, /* seed */ 0x1234);
   for (size_t iter = 0; iter < iters; iter++) {
     auto input1 = input1_gen.get();

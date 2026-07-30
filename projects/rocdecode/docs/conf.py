@@ -44,6 +44,9 @@ copyright = "Copyright (c) 2024 - 2026 Advanced Micro Devices, Inc. All rights r
 version = version_number
 release = version_number
 
+setting_all_article_info = True
+all_article_info_os = ["linux"]
+
 external_toc_path = "./sphinx/_toc.yml"
 
 docs_core = ROCmDocs(left_nav_title)

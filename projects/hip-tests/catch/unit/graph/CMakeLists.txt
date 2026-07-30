@@ -46,6 +46,7 @@ set(TEST_SRC
   hipGraphEventWaitNodeSetEvent.cc
   hipGraphMemsetNodeGetParams.cc
   hipGraphMemsetNodeSetParams.cc
+  hipGraphMemsetNodeFlatAlloc.cc
   hipGraphExecMemcpyNodeSetParamsFromSymbol_old.cc
   hipGraphExecMemcpyNodeSetParamsFromSymbol.cc
   hipGraphEventRecordNodeGetEvent.cc
@@ -63,8 +64,10 @@ set(TEST_SRC
   hipGraphExecBatchMemOpNodeSetParams.cc
   hipGraphAddBatchMemOpNode.cc
   hipGraphBatchMemOpNodeSetParams.cc
+  hipGraphBatchMemOpNodeCapture.cc
   hipDrvGraphExecMemcpyNodeSetParams.cc
-  hipDrvGraphAddMemFreeNode.cc)
+  hipDrvGraphAddMemFreeNode.cc
+  hipGraphAddNodeConcurrent.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
@@ -131,12 +134,12 @@ set(TEST_SRC
   hipGraphKernelNodeCopyAttributes.cc
   hipGraphCycle.cc
   hipGraphPerf.cc
-  hipGraphProfilingTimestamps.cc
   hipGraphKernelNodeGetAttribute.cc
   hipGraphKernelNodeSetAttribute.cc
   hipGraphMemAllocNodeGetParams.cc
   hipGraphAddMemAllocNode.cc
   hipGraphAddMemFreeNode.cc
+  hipGraphAllocNodeMemReuse.cc
   hipDrvGraphMemcpyNodeGetParams.cc
   hipDrvGraphMemcpyNodeSetParams.cc
   hipDeviceSetGraphMemAttribute.cc
@@ -155,35 +158,45 @@ if(HIP_PLATFORM MATCHES "amd")
     hipDrvGraphAddMemcpyNode.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
-  add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
-  --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
-  -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
-  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  add_custom_target(hipMatMul COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
+    --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    COMMENT "Compiling add_Kernel.code")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
     --cuda-device-only
     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
-    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/graph/hipMatMul.code
+    -o ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/
     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  add_dependencies(build_tests hipMatMul)
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
+    COMMENT "Compiling hipMatMul.code")
+  add_custom_target(hipMatMul DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)
   set_property(GLOBAL APPEND PROPERTY
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)
   if(UNIX)
-    set(TEST_SRC hipSimpleGraphWithKernel.cc)
+    set(TEST_KERNEL_ARG_PREFETCH_SRC hipSimpleGraphWithKernel.cc)
     hip_add_exe_to_target(NAME GraphsKernelArgPrefetchTest
                           TEST_SRC ${TEST_KERNEL_ARG_PREFETCH_SRC}
                           TEST_TARGET_NAME build_tests)
     set_target_properties(GraphsKernelArgPrefetchTest PROPERTIES COMPILE_FLAGS "-DKERNEL_ARG_PREFETCH -mllvm -amdgpu-kernarg-preload-count=16")
   endif()
 else()
-  add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER}
-  --fatbin ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
-  -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
-  -I${HIP_INCLUDE_DIR}
-  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER}
+    --fatbin ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    -o ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code
+    -I${HIP_INCLUDE_DIR}
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+    COMMENT "Compiling add_Kernel.code")
 endif()
+add_custom_target(add_Kernel DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
 
 set_property(GLOBAL APPEND PROPERTY
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
@@ -193,4 +206,15 @@ hip_add_exe_to_target(NAME GraphsTest2
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-add_dependencies(build_tests add_Kernel.code)
+# Wire kernel artifacts to the consuming test exes so `make GraphsTest1` /
+# `make GraphsTest2` builds all their dependencies. The kernels are loaded at
+# runtime by tests in either binary, so wire to both.
+add_dependencies(GraphsTest1 add_Kernel)
+add_dependencies(GraphsTest2 add_Kernel)
+if(HIP_PLATFORM MATCHES "amd")
+  add_dependencies(GraphsTest1 hipMatMul)
+  add_dependencies(GraphsTest2 hipMatMul)
+  if(UNIX)
+    add_dependencies(GraphsKernelArgPrefetchTest add_Kernel)
+  endif()
+endif()

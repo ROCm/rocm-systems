@@ -4,7 +4,6 @@
 #pragma once
 
 #include "common/defines.h"
-#include "defines.hpp"
 
 #include <cstdint>
 #include <string>

@@ -58,7 +58,6 @@ rocprofiler_add_interface_library(rocprofiler-sdk-dl
                                   "Build flags for dynamic linking library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-rt "Build flags for runtime library"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-sdk-atomic "atomic library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-gtest "Google Test library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-abseil "Abseil logging library"
                                   INTERNAL)
@@ -81,7 +80,8 @@ rocprofiler_add_interface_library(rocprofiler-sdk-hip "HIP library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-hsa-runtime "HSA runtime library"
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-amd-comgr "AMD comgr library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-sdk-hsa-aql "AQL library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-aqlprofile-external
+                                  "(External) AQL library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-hsakmt
                                   "HSAKMT library for AMD KFD support" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-drm "drm (amdgpu) library" INTERNAL)
@@ -109,4 +109,10 @@ rocprofiler_add_nolink_interface_library(
     "ROCDECODE headers without linking to ROCDECODE library" IMPORTED)
 rocprofiler_add_nolink_interface_library(
     rocprofiler-sdk-rocjpeg-nolink "ROCJPEG headers without linking to ROCJPEG library"
+    IMPORTED)
+rocprofiler_add_nolink_interface_library(
+    rocprofiler-sdk-rocshmem-nolink
+    "ROCSHMEM headers without linking to ROCSHMEM library" IMPORTED)
+rocprofiler_add_nolink_interface_library(
+    rocprofiler-sdk-hipfile-nolink "hipFILE headers without linking to hipFILE library"
     IMPORTED)

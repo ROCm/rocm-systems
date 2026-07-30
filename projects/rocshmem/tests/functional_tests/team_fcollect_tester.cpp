@@ -33,8 +33,8 @@ __device__ void wg_team_fcollect([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_un
 #define TEAM_FCOLLECT_DEF_GEN(T, TNAME)                                        \
   template <>                                                                  \
   __device__ void wg_team_fcollect<T>(rocshmem_ctx_t ctx, rocshmem_team_t team,\
-                                      T * dest, const T *source, int nelem) {  \
-    rocshmem_ctx_##TNAME##_fcollect_wg(ctx, team, dest, source, nelem);        \
+                                      T * dest, const T *source, int nelems) { \
+    rocshmem_ctx_##TNAME##_fcollect_wg(ctx, team, dest, source, nelems);       \
   }
 
 TEAM_FCOLLECT_DEF_GEN(float, float)
@@ -79,7 +79,7 @@ __global__ void TeamFcollectTest(int loop, int skip, long long int *start_time,
     wg_team_fcollect<T1>(ctx, teams[wg_id],
                          dest_buf,          // T* dest
                          source_buf,        // const T* source
-                         num_elems);        // int nelement
+                         num_elems);        // int nelems
   }
 
   __syncthreads();
@@ -104,16 +104,8 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
   int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs ;
   int buff_size = total_elems * sizeof(T1);
 
-  source_buf = (T1 *)rocshmem_malloc(buff_size);
-  dest_buf = (T1 *)rocshmem_malloc(buff_size * n_pes);
-
-  if (source_buf == nullptr || dest_buf == nullptr) {
-    std::cout << "Error allocating memory from symmetric heap" << std::endl;
-    std::cout << "source: " << source_buf
-              << ", dest: " << dest_buf
-              << std::endl;
-    rocshmem_global_exit(1);
-  }
+  source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
+  dest_buf = (T1 *)alloc_test_buffer(buff_size * n_pes);
 
   if constexpr (std::is_same<T1, char>::value ||
                 std::is_same<T1, signed char>::value ||
@@ -144,8 +136,8 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
 
 template <typename T1>
 TeamFcollectTester<T1>::~TeamFcollectTester() {
-  rocshmem_free(source_buf);
-  rocshmem_free(dest_buf);
+  free_test_buffer(source_buf, args.local_buf_type);
+  free_test_buffer(dest_buf);
   CHECK_HIP(hipFree(team_fcollect_world_dup));
 }
 

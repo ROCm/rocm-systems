@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 
 namespace rocprofsys
@@ -17,8 +17,6 @@ struct fork_gotcha : comp::base<fork_gotcha, void>
     static constexpr size_t gotcha_capacity = 1;
 
     using gotcha_data_t = comp::gotcha_data;
-
-    ROCPROFSYS_DEFAULT_OBJECT(fork_gotcha)
 
     // string id for component
     static std::string label() { return "fork_gotcha"; }

@@ -28,7 +28,7 @@ function(ais_add_libraries)
     add_library(${arg_NAME} ${arg_SRCS})
 
     # Set C++ standard
-    target_compile_features(${arg_NAME} PUBLIC cxx_std_17)
+    target_compile_features(${arg_NAME} PUBLIC cxx_std_${AIS_CXX_STANDARD})
     set_target_properties(${arg_NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
     # Set position-independent code
@@ -42,11 +42,11 @@ function(ais_add_libraries)
 
     # Add dependencies on external libraries
     foreach(lib IN LISTS arg_LIBS)
-        find_library(LIBRARY_PATH NAMES ${lib})
-        if(NOT LIBRARY_PATH)
+        find_library(${arg_NAME}_${lib}_LIBRARY NAMES ${lib})
+        if(NOT ${arg_NAME}_${lib}_LIBRARY)
             message(FATAL_ERROR "lib${lib} not found")
         endif()
-        target_link_libraries(${arg_NAME} PRIVATE ${LIBRARY_PATH})
+        target_link_libraries(${arg_NAME} PRIVATE ${${arg_NAME}_${lib}_LIBRARY})
     endforeach()
 
     if(BUILD_TESTING)

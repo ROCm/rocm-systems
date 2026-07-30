@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/mpi.hpp"
 #include "core/timemory.hpp"
 
@@ -20,8 +20,6 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
 {
     using comm_t        = rocprofsys::mpi::comm_t;
     using gotcha_data_t = comp::gotcha_data;
-
-    ROCPROFSYS_DEFAULT_OBJECT(mpi_gotcha)
 
     // string id for component
     static std::string label() { return "mpi_gotcha"; }

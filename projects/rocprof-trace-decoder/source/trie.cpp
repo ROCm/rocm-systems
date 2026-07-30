@@ -22,9 +22,18 @@
 
 #include "trie.h"
 
-Trie Trie::root_trie;
+#include <cstddef>
+#include <new>
 
-static const std::unordered_map<std::string, InstCategory> type_dict = {
+namespace
+{
+struct TrieEntry
+{
+    std::string_view instruction;
+    InstCategory type;
+};
+
+constexpr TrieEntry type_dict[] = {
     {"s_waitcnt",        InstCategory::IMMED},
     {"s_wait_idle",      InstCategory::IMMED},
     {"s_wait_dep",       InstCategory::SKIP },
@@ -37,11 +46,15 @@ static const std::unordered_map<std::string, InstCategory> type_dict = {
     {"s_wait_samplecnt", InstCategory::IMMED},
     {"s_wait_event",     InstCategory::IMMED},
     {"s_wait_alu",       InstCategory::SKIP },
+    {"s_wait_xcnt",      InstCategory::IMMED},
+    {"s_wait_tensor",    InstCategory::IMMED},
+    {"s_wait_async",     InstCategory::IMMED},
     {"s_nop",            InstCategory::IMMED},
     {"s_sleep",          InstCategory::IMMED},
     {"s_wakeup",         InstCategory::IMMED},
     {"s_sendmsg",        InstCategory::IMMED},
-    {"s_setprio",        InstCategory::IMMED},
+    {"s_setprio ",       InstCategory::IMMED},
+    {"s_setprio_inc",    InstCategory::SALU },
     {"s_set_inst",       InstCategory::IMMED},
     {"s_inst_prefetch",  InstCategory::IMMED},
     {"s_setkill",        InstCategory::IMMED},
@@ -71,14 +84,26 @@ static const std::unordered_map<std::string, InstCategory> type_dict = {
     {"s_setreg",         InstCategory::SALU },
     {"s_memrealtime",    InstCategory::SMEM },
 
-    {"buffer_",          InstCategory::VMEM },
+    {"buffer_l",         InstCategory::VMEM },
+    {"buffer_s",         InstCategory::VMEM },
+    {"buffer_a",         InstCategory::VMEM },
+    {"buffer_g",         InstCategory::VMEM },
+    {"buffer_i",         InstCategory::VMEM },
+    {"buffer_w",         InstCategory::VMEM },
+    {"buffer_p",         InstCategory::VMEM },
+    {"buffer_d",         InstCategory::VMEM },
+    {"buffer_nop",       InstCategory::SKIP },
     {"tbuffer_",         InstCategory::VMEM },
 
     {"flat_",            InstCategory::FLAT },
     {"global_",          InstCategory::VMEM },
     {"scratch_",         InstCategory::VMEM },
+    {"cluster_",         InstCategory::VMEM },
+    {"tensor_",          InstCategory::VMEM },
 
     {"ds_",              InstCategory::LDS  },
+    {"lds_",             InstCategory::LDS  },
+    {"dds_",             InstCategory::VMEM },
     {"s_add",            InstCategory::SALU },
     {"s_sub",            InstCategory::SALU },
     {"s_and",            InstCategory::SALU },
@@ -92,7 +117,9 @@ static const std::unordered_map<std::string, InstCategory> type_dict = {
     {"s_cls",            InstCategory::SALU },
     {"s_cmp",            InstCategory::SALU },
     {"s_bit",            InstCategory::SALU },
+    {"s_set_vgpr",       InstCategory::SKIP },
     {"s_mov",            InstCategory::SALU },
+    {"s_monitor",        InstCategory::IMMED},
     {"s_mul",            InstCategory::SALU },
     {"s_ash",            InstCategory::SALU },
     {"s_bf",             InstCategory::SALU },
@@ -118,6 +145,9 @@ static const std::unordered_map<std::string, InstCategory> type_dict = {
     {"s_getpc",          InstCategory::SALU },
     {"s_setpc",          InstCategory::SALU },
     {"s_swappc",         InstCategory::SALU },
+    {"s_get_pc",         InstCategory::SALU },
+    {"s_set_pc",         InstCategory::SALU },
+    {"s_swap_pc",        InstCategory::SALU },
 
     {"image_bvh",        InstCategory::BVH  },
     {"image_l",          InstCategory::VMEM },
@@ -126,25 +156,22 @@ static const std::unordered_map<std::string, InstCategory> type_dict = {
     {"image_m",          InstCategory::VMEM },
     {"image_g",          InstCategory::VMEM },
 };
+} // namespace
 
-InstCategory Trie::type_from_trie(const std::string_view inst)
+Trie::Trie()
+{
+    for (const auto& entry : type_dict) add_type(entry.instruction, entry.type);
+}
+
+InstCategory Trie::type_from_trie(const std::string_view inst) const
 {
     if (inst.find("v_") == 0) return InstCategory::VALU;
 
-    if (!bInit)
-    {
-        bInit = true;
-        for (auto& p : type_dict) add_type(p.first, p.second);
-    }
-
-    Trie* trie = this;
+    const Node* trie = &root;
     for (char c : inst)
     {
-        if (trie->paths.find(c) != trie->paths.end())
-        {
-            assert(trie != nullptr);
-            trie = trie->paths[c];
-        }
+        auto it = trie->paths.find(c);
+        if (it != trie->paths.end()) trie = it->second.get();
         if (trie->type != InstCategory::LAST) return trie->type;
     }
 
@@ -153,28 +180,21 @@ InstCategory Trie::type_from_trie(const std::string_view inst)
     return InstCategory::DONT_KNOW;
 }
 
-void Trie::add_type(const std::string& inst_header, InstCategory type)
+void Trie::add_type(std::string_view inst_header, InstCategory type)
 {
-    Trie* trie = this;
+    Node* trie = &root;
     for (char c : inst_header)
     {
-        assert(trie != nullptr);
-        if (trie->paths.find(c) == trie->paths.end())
-        {
-            Trie* new_trie = new Trie();
-            trie->paths[c] = new_trie;
-            trie = new_trie;
-        }
-        else { trie = trie->paths[c]; }
+        auto [it, inserted] = trie->paths.try_emplace(c);
+        if (inserted) it->second = std::make_unique<Node>();
+        trie = it->second.get();
     }
     trie->type = type;
 }
 
-Trie::~Trie()
+Trie& get_instruction_trie()
 {
-    for (auto& p : paths)
-    {
-        if (p.second != nullptr) delete p.second;
-        p.second = nullptr;
-    }
+    alignas(Trie) static std::byte storage[sizeof(Trie)];
+    static Trie* trie = ::new (static_cast<void*>(storage)) Trie{};
+    return *trie;
 }

@@ -16,6 +16,7 @@ The rocSHMEM public repository is located within the ROCm Systems Super Repo at 
   .. grid-item-card:: Install
 
       * :doc:`Install rocSHMEM <./install>`
+      * :doc:`Build from source <./build>`
 
   .. grid-item-card:: How to
 

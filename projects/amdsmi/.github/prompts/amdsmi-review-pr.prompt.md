@@ -10,7 +10,7 @@ Review a GitHub pull request using the AMD-SMI Review Agent.
 ## Arguments
 
 - `$ARGUMENTS` contains: `<PR_NUMBER> [review-type ...]`
-- First argument: PR number (required). Construct the full URL as `https://github.com/ROCm/rocm-systems/pull/<PR_NUMBER>`
+- First argument: PR number (required)
 - Remaining: optional review types: `style`, `tests`, `docs`, `architecture`, `security`, `performance`, `build`, `skeptic`
 - Special modifier: `fast` — skips the rebuttal round (comprehensive mode only)
 - Special modifier: `no-build` — skips the build & install step
@@ -19,20 +19,48 @@ Review a GitHub pull request using the AMD-SMI Review Agent.
 
 ## Process
 
-### 1. Construct PR URL
+### 1. Fetch PR Information
 
-Set `PR_URL=https://github.com/ROCm/rocm-systems/pull/<PR_NUMBER>` from the first argument.
-
-### 2. Fetch PR Information
+Use the PR number directly — `gh` resolves the repo from the local git remote:
 
 ```bash
-gh pr view $PR_URL --json number,title,author,body,files,additions,deletions,state,baseRefName,headRefName,comments,reviews
+gh pr view <PR_NUMBER> --json number,title,author,body,files,additions,deletions,state,baseRefName,headRefName,comments,reviews
 ```
+
+Extract the `headRefName` (the PR branch name) — it is needed for the worktree step.
+
+### 2. Set Up Worktree
+
+Use the `amdsmi-using-git-worktrees` skill to check out the PR branch in an isolated worktree so the main checkout is not disturbed.
+
+```bash
+PR_NUM=<PR_NUMBER>
+BRANCH=<headRefName from step 1>
+
+MAIN_CHECKOUT=$(git rev-parse --show-toplevel)
+WORKTREE_PARENT=$(dirname "$MAIN_CHECKOUT")
+WORKTREE="${WORKTREE_PARENT}/rocm-systems-pr${PR_NUM}"
+
+# Reuse existing worktree if already present
+if [[ -d "$WORKTREE" ]]; then
+  cd "${WORKTREE}/projects/amdsmi"
+  git checkout "$BRANCH" 2>/dev/null && git pull origin "$BRANCH" --ff-only 2>/dev/null
+else
+  cd "$MAIN_CHECKOUT"
+  git fetch origin "${BRANCH}:${BRANCH}" 2>/dev/null || git fetch origin "pull/${PR_NUM}/head:${BRANCH}"
+  git worktree add "${WORKTREE}" "${BRANCH}"
+  cd "${WORKTREE}/projects/amdsmi"
+fi
+```
+
+If `git worktree add` fails (e.g. permissions), fall back to in-place work and note the fallback.
+
+All subsequent steps (diff, build, file reads by subagents) operate from within this worktree.
 
 ### 3. Fetch the Diff
 
 ```bash
-gh pr diff $PR_URL
+gh pr diff <PR_NUMBER>
 ```
 
 ### 4. Gather CI Evidence
@@ -41,15 +69,15 @@ Check for linked CI runs and fetch step-level data:
 
 ```bash
 # Get CI check runs for the PR
-gh pr checks $PR_URL
+gh pr checks <PR_NUMBER>
 
 # For each failed or interesting run, get details
 gh run view <RUN_ID> --json jobs
 ```
 
-Find a recent baseline run on `main` for comparison:
+Find a recent baseline run on `develop` for comparison:
 ```bash
-gh run list --branch main --workflow <WORKFLOW> --limit 1 --json databaseId,conclusion
+gh run list --branch develop --workflow <WORKFLOW> --limit 1 --json databaseId,conclusion
 ```
 
 Compare step timings and status between PR run and baseline. Pass this evidence to the test and performance subagents.
@@ -70,6 +98,7 @@ Invoke the **AMD-SMI Review Agent** with:
 - The review type(s) from `$ARGUMENTS` (or "comprehensive" if none)
 - CI evidence (test results, step timings, baseline comparison)
 - Unresolved comments
+- The worktree path so subagents read files from the correct checkout
 - If `inherit` was specified, tell the agent to have subagents inherit the orchestrator's model (ignore their frontmatter `model` field)
 
 The agent will dispatch to the appropriate subagent(s) and produce a formatted review.
@@ -81,6 +110,7 @@ By default, comprehensive reviews include a rebuttal round (Round 2) with the sk
 - Summarize the overall assessment
 - List any blocking issues found
 - If saving requested, use: `reviews/pr_{NUMBER}[_{TYPE}].md`
+- The worktree at `rocm-systems-pr<PR_NUMBER>` persists for post-review investigation; cleanup follows the `amdsmi-restructure-commits` skill
 
 ## Examples
 

@@ -9,6 +9,7 @@
 #include <hip/amd_detail/hip_storage.h>
 
 #include "hip_internal.hpp"
+#include "hip_executionctx.hpp"
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
 
@@ -98,10 +99,10 @@ void Device::RemoveMemoryPool(MemoryPool* pool) {
 }
 
 // ================================================================================================
-bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
+bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, bool skip_event) {
   std::scoped_lock lock(lock_);
   for (auto* pool : mem_pools_) {
-    if (pool->FreeMemory(memory, stream, event)) {
+    if (pool->FreeMemory(memory, stream, event, skip_event)) {
       return true;
     }
   }
@@ -134,6 +135,8 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 
 // ================================================================================================
 void Device::Reset() {
+  // Free any deferred IPC-event signals before tearing the device down.
+  DrainDeferredIpcSignals();
   {
     std::scoped_lock lock(lock_);
     auto pools_to_delete = std::exchange(mem_pools_, {});
@@ -282,6 +285,57 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   }
   // Release freed memory for all memory pools on the device
   ReleaseFreedMemory();
+  // All of this device's work has been waited on, so the deferred IPC signals' barriers are
+  // complete; freeing them here won't block.
+  DrainDeferredIpcSignals();
+}
+
+// ================================================================================================
+void Device::CleanupDeferredIpcSignal(const DeferredIpcSignal& item) {
+  if (item.signal != nullptr) {
+    // Only armed signals (event != null) have an in-flight barrier to wait on; waiting on a
+    // never-recorded signal (still at its initial value) would hang forever.
+    if (item.event != nullptr) {
+      item.signal->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
+    }
+    delete item.signal;
+  }
+  if (item.event != nullptr) {
+    item.event->release();
+  }
+}
+
+// ================================================================================================
+void Device::EnqueueDeferredIpcSignal(amd::device::Signal* signal, amd::Event* event) {
+  std::vector<DeferredIpcSignal> overflow;
+  {
+    std::scoped_lock lock(deferredIpcLock_);
+    // The queue is bounded by kDeferredIpcDrainThreshold; reserve up front (the buffer is
+    // moved out on each drain/overflow swap, so reserve again whenever it is empty) to avoid
+    // repeated reallocations as events are destroyed between drains.
+    if (deferredIpcSignals_.empty()) {
+      deferredIpcSignals_.reserve(kDeferredIpcDrainThreshold);
+    }
+    deferredIpcSignals_.push_back({signal, event});
+    if (deferredIpcSignals_.size() >= kDeferredIpcDrainThreshold) {
+      overflow.swap(deferredIpcSignals_);  // bounded: drain inline on overflow
+    }
+  }
+  for (const auto& item : overflow) {
+    CleanupDeferredIpcSignal(item);
+  }
+}
+
+// ================================================================================================
+void Device::DrainDeferredIpcSignals() {
+  std::vector<DeferredIpcSignal> pending;
+  {
+    std::scoped_lock lock(deferredIpcLock_);
+    pending.swap(deferredIpcSignals_);
+  }
+  for (const auto& item : pending) {
+    CleanupDeferredIpcSignal(item);
+  }
 }
 
 // ================================================================================================
@@ -333,7 +387,22 @@ bool Device::GetActiveStatus() {
 }
 
 // ================================================================================================
+void Device::registerResource(uint32_t resId, uint32_t familyId, uint32_t startCU) {
+  std::lock_guard<std::mutex> lk(resourceFamilyMapLock_);
+  resourceFamilyMap_[resId] = {familyId, startCU};
+}
+
+const ResourceMeta* Device::lookupResource(uint32_t resId) {
+  std::lock_guard<std::mutex> lk(resourceFamilyMapLock_);
+  auto it = resourceFamilyMap_.find(resId);
+  return (it != resourceFamilyMap_.end()) ? &it->second : nullptr;
+}
+
 Device::~Device() {
+  // Free any IPC signals still queued for deferred cleanup (e.g. events destroyed without a
+  // subsequent device sync) so they don't leak when the device goes away.
+  DrainDeferredIpcSignals();
+
   if ((IS_LINUX || !DEBUG_HIP_MEM_POOL_VMHEAP) && (default_mem_pool_ != nullptr)) {
     default_mem_pool_->release();
   }
@@ -348,6 +417,9 @@ Device::~Device() {
   if (default_managed_mem_pool_ != nullptr) {
     default_managed_mem_pool_->release();
   }
+
+  delete primaryExecCtx_;
+  primaryExecCtx_ = nullptr;
 
   if (null_stream_ != nullptr) {
     hip::Stream::Destroy(null_stream_);
@@ -501,8 +573,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  constexpr auto kUint16Max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
-  hipDeviceProp_tR0600 deviceProps = {};
+  hipDeviceProp_tR0600 deviceProps = {0};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
@@ -517,9 +588,9 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.maxThreadsDim[0] = info.maxWorkItemSizes_[0];
   deviceProps.maxThreadsDim[1] = info.maxWorkItemSizes_[1];
   deviceProps.maxThreadsDim[2] = info.maxWorkItemSizes_[2];
-  deviceProps.maxGridSize[0] = kInt32Max;
-  deviceProps.maxGridSize[1] = kUint16Max;
-  deviceProps.maxGridSize[2] = kUint16Max;
+  deviceProps.maxGridSize[0] = std::min(static_cast<uint64_t>(info.maxGridDim_[0]), kInt32Max);
+  deviceProps.maxGridSize[1] = std::min(static_cast<uint64_t>(info.maxGridDim_[1]), kInt32Max);
+  deviceProps.maxGridSize[2] = std::min(static_cast<uint64_t>(info.maxGridDim_[2]), kInt32Max);
   deviceProps.clockRate = info.maxEngineClockFrequency_ * 1000;
   deviceProps.memoryClockRate = info.maxMemoryClockFrequency_ * 1000;
   deviceProps.memoryBusWidth = info.vramBusBitWidth_;
@@ -663,7 +734,9 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   // access policy
   deviceProps.accessPolicyMaxWindowSize = 0;
   // cluster launch
-  deviceProps.clusterLaunch = info.clusterMaxSize_ > 0;
+  // A cluster of size 1 is a regular single-block launch (legal on all GPUs); clusterLaunch
+  // advertises multi-block cluster support, which only devices reporting a max size > 1 have.
+  deviceProps.clusterLaunch = info.clusterMaxSize_ > 1;
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
@@ -706,8 +779,7 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  constexpr auto kUint16Max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
-  hipDeviceProp_tR0000 deviceProps = {};
+  hipDeviceProp_tR0000 deviceProps = {0};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
@@ -720,9 +792,9 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   deviceProps.maxThreadsDim[0] = info.maxWorkItemSizes_[0];
   deviceProps.maxThreadsDim[1] = info.maxWorkItemSizes_[1];
   deviceProps.maxThreadsDim[2] = info.maxWorkItemSizes_[2];
-  deviceProps.maxGridSize[0] = kInt32Max;
-  deviceProps.maxGridSize[1] = kUint16Max;
-  deviceProps.maxGridSize[2] = kUint16Max;
+  deviceProps.maxGridSize[0] = std::min(static_cast<uint64_t>(info.maxGridDim_[0]), kInt32Max);
+  deviceProps.maxGridSize[1] = std::min(static_cast<uint64_t>(info.maxGridDim_[1]), kInt32Max);
+  deviceProps.maxGridSize[2] = std::min(static_cast<uint64_t>(info.maxGridDim_[2]), kInt32Max);
   deviceProps.clockRate = info.maxEngineClockFrequency_ * 1000;
   deviceProps.memoryClockRate = info.maxMemoryClockFrequency_ * 1000;
   deviceProps.memoryBusWidth = info.vramBusBitWidth_;

@@ -85,7 +85,7 @@ parser.add_argument('--videodecode_exe',   type=str, default='',
 parser.add_argument('--gpu_device_id',      type=int, default=0,
                     help='The GPU device ID that will be used to run the test on it - optional (default:0 [range:0 - N-1] N = total number of available GPUs on a machine)')
 parser.add_argument('--files_directory',    type=str, default='',
-                    help='The path to a dirctory containing one or more supported files for decoding (e.g., mp4, mov, etc.) - required')
+                    help='The path to a directory containing one or more supported files for decoding (e.g., mp4, mov, etc.) - required')
 parser.add_argument('--sample_mode',          type=int, default=0,
                     help='The sample to run - optional (default:0 [range:0-1] 0: videoDecode, 1: videoDecodePerf)')
 parser.add_argument('--num_threads',          type=int, default=1,
@@ -93,7 +93,7 @@ parser.add_argument('--num_threads',          type=int, default=1,
 parser.add_argument('--max_num_decoded_frames',          type=int, default=0,
                     help='The max number of decoded frames. Useful for partial decoding of a long stream. - optional (default:0, meaning no limit)')
 parser.add_argument('--results_directory',    type=str, default='',
-                    help='The path to a dirctory to store results - optional')
+                    help='The path to a directory to store results - optional')
 parser.add_argument('--check_decode_status',          type=int, default=0,
                     help='Report the number of streams that have completed decoding without abortion. For decoder stability check. - optional (default:0, meaning normal performance report)')
 parser.add_argument('--use_ffmpeg_demuxer',   type=int, default=1,
@@ -137,7 +137,10 @@ if resultsDir == '':
     elif sampleMode == 1:
         resultsPath = scriptPath+'/rocDecode_videoDecodePerf_results'
 else:
-    resultsPath = resultsDir+'/rocDecode_videoDecode_results'
+    if sampleMode == 0:
+        resultsPath = resultsDir+'/rocDecode_videoDecode_results'
+    elif sampleMode == 1:
+        resultsPath = resultsDir+'/rocDecode_videoDecodePerf_results'
 
 run_rocDecode_app = os.path.abspath(rocDecode_exe)
 os.system('(mkdir -p ' +  resultsPath + ')')
@@ -197,7 +200,7 @@ if sampleMode == 0:
                             /^$/{next}
                             /info: Total pictures decoded: / {totalFrames=$5; next}
                             /info: avg decoding time per picture: /{timePerFrame=$7; next}
-                            /info: avg decode FPS: / { printf("%s, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }' rocDecode_videoDecode_results/rocDecode_output.log >> rocDecode_videoDecode_results/rocDecode_test_results.csv'''
+                            /info: avg decode FPS: / { printf("%s, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }' ''' + resultsPath + '''/rocDecode_output.log >> ''' + resultsPath + '''/rocDecode_test_results.csv'''
         os.system(runAwk_csv)
 elif sampleMode == 1:
     for current_file in iter_files(filesDirPath):
@@ -233,8 +236,7 @@ elif sampleMode == 1:
                             /^$/{next}
                             /info: Total pictures decoded: / {totalFrames=$5; next}
                             /info: avg decoding time per picture: /{timePerFrame=$7; next}
-                            /info: avg decode FPS: / { printf("%s, %d, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, numThreads, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }' rocDecode_videoDecodePerf_results/rocDecode_output.log >> rocDecode_videoDecodePerf_results/rocDecode_test_results.csv'''
-        sys.stdout = orig_stdout
+                            /info: avg decode FPS: / { printf("%s, %d, %s, %s, %d, %s, %s, %d, %f, %f\n", filename, numThreads, codec, videoSize, bitDepth, frameRate, bitRate, totalFrames, timePerFrame, $5) }' ''' + resultsPath + '''/rocDecode_output.log >> ''' + resultsPath + '''/rocDecode_test_results.csv'''
         os.system(runAwk_csv)
 
 # get data

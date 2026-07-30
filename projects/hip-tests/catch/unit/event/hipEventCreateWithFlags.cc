@@ -10,8 +10,8 @@
 #include <stdlib.h>
 
 constexpr size_t buffer_size = (1024 * 1024);
-constexpr int test_iteration_hstvismem = 5;
-constexpr int test_iteration_noncohmem = 10;
+static int test_iteration_hstvismem() { return isQuickLevel() ? 3 : 5; }
+static int test_iteration_noncohmem() { return isQuickLevel() ? 5 : 10; }
 constexpr int block_size = 512;
 
 // Atomic store required as events are created with special flag hipEventDisableSystemFence [Ref : SWDEV-523177]
@@ -98,8 +98,7 @@ static void testMemCoherency(eSyncToTest test, eMemoryToTest mem, uint32_t flags
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   // If the GPU is not large bar then exit the test
   if (prop.isLargeBar != 1) {
-    HipTest::HIP_SKIP_TEST("large BAR (resizable BAR) is not supported on this device.");
-    return;
+    HIP_SKIP_TEST("large BAR (resizable BAR) is not supported on this device.");
   }
   constexpr auto blocksPerCU = 6;
   unsigned grid_size = HipTest::setNumBlocks(blocksPerCU, block_size, buffer_size);
@@ -113,13 +112,13 @@ static void testMemCoherency(eSyncToTest test, eMemoryToTest mem, uint32_t flags
   int total_iter = 0;
   if (mem == eMemoryToTest::eHostVisibleMemory) {
     HIP_CHECK(hipMalloc(&buf_d, buffer_size * sizeof(int)));
-    total_iter = test_iteration_hstvismem;
+    total_iter = test_iteration_hstvismem();
   } else if (mem == eMemoryToTest::eNonCoherentHostMemory) {
     HIP_CHECK(hipHostMalloc(&buf_d, buffer_size * sizeof(int), hipHostMallocNonCoherent));
-    total_iter = test_iteration_noncohmem;
+    total_iter = test_iteration_noncohmem();
   } else if (mem == eMemoryToTest::eCoherentHostMemory) {
     HIP_CHECK(hipHostMalloc(&buf_d, buffer_size * sizeof(int), hipHostMallocCoherent));
-    total_iter = test_iteration_noncohmem;
+    total_iter = test_iteration_noncohmem();
   }
   for (int iter = 0; iter < total_iter; iter++) {
     // Inititalize the buffer with random data

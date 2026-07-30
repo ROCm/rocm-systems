@@ -1,22 +1,29 @@
 # --------------------------------------------------------------------------------
 #
-# This yaml file tracks MI gpu spec in a tree structure.
+# This yaml file tracks GPU spec in a tree structure.
 #
-# *It is important to note that this file only tracks the common specs for MI GPU series.*
+# *It is important to note that this file only tracks the common specs for GPU series.*
 # *For example, the CU #s are based on information retrieved from other tools.*
-# **
 #
-# MI GPUs
-#   |-- series: the specific MI series; mi50, mi100, mi200, mi300
+#
+# GPUs
+#   |-- series: the specific series; mi50, mi100, mi200, mi300
 #       |-- architecture: currently, only mi300 gpus hold different architectures
 #           |-- perfmon_config, copy from ROCm/aqlprofile from gfxip/gfx9/gfx9_block_info.h
 #           |-- gpu model
 #           |-- chip_ids: chip id is specific to the environment the gpu is being used on
 #               | -- physical
 #               | -- virtual # The pattern is physical + 16
-#           |-- partition_mode
-#               | -- compute partition mode
-#               | -- memory partition mode
+#           |-- partition_mode:
+#               | -- compute partition mode:
+#                   | -- num_xcds # Number of XCDs per partition
+#               | -- memory partition mode:
+#                   | -- npsX: # NUMA partition per socket
+#                       | -- Xpx # Number of HBM stack partitions
+#           |-- design:
+#               | -- physical_aid # Number of physical AIDs (CDNA)
+#               | -- logical_partitions_per_die # Logical AID partitions per physical AID (CDNA)
+#               | -- memory_levels # Cache and memory levels supported by the arch
 #
 # --------------------------------------------------------------------------------
 
@@ -56,12 +63,18 @@ mi_gpu_spec:
           GDS: 4
         models:
           - gpu_model: mi210
+            design:
+              memory_levels: ["LDS", "L1", "L2", "HBM"]
             chip_ids:
               physical: 29711
           - gpu_model: mi250
+            design:
+              memory_levels: ["LDS", "L1", "L2", "HBM"]
             chip_ids:
               physical: 29708
           - gpu_model: mi250x
+            design:
+              memory_levels: ["LDS", "L1", "L2", "HBM"]
             chip_ids:
               physical: 29704
 
@@ -93,6 +106,10 @@ mi_gpu_spec:
                 nps1:
                   spx: 1
                   tpx: 3
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: null
               virtual: null
@@ -128,6 +145,10 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: null
               virtual: null
@@ -159,6 +180,10 @@ mi_gpu_spec:
                   spx: 1
                   tpx: 3
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29856
               virtual: 29876
@@ -181,6 +206,10 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29857
               virtual: 29877
@@ -203,6 +232,10 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29865
               virtual: 29885
@@ -221,6 +254,10 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29858
               virtual: 29878
@@ -239,6 +276,10 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29864
               virtual: 29884
@@ -261,6 +302,10 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 4
+              logical_partitions_per_die: 1
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 29861
               virtual: 29881
@@ -299,9 +344,15 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              # MI350 series has 2 physical AIDs that are subdivided into 2 independent logical partitions
+              physical_aid: 2
+              logical_partitions_per_die: 2
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 30112
               virtual: 30128
+
           - gpu_model: mi355
             partition_mode:
               compute_partition_mode:
@@ -320,9 +371,14 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 2
+              logical_partitions_per_die: 2
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 30115
               virtual: 30131
+
           - gpu_model: mi358
             partition_mode:
               compute_partition_mode:
@@ -339,9 +395,14 @@ mi_gpu_spec:
                   spx: 1
                   qpx: 4
                   cpx: 8
+            design:
+              physical_aid: 2
+              logical_partitions_per_die: 2
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 30114
               virtual: 30130
+
           - gpu_model: mi350p
             partition_mode:
               compute_partition_mode:
@@ -354,29 +415,97 @@ mi_gpu_spec:
                   spx: 1
                   dpx: 2
                   cpx: 4
+            design:
+              # Half config- 2 AIDs but AID1 is dummy
+              physical_aid: 1
+              logical_partitions_per_die: 2
+              memory_levels: ["LDS", "L1", "L2", "MALL", "HBM"]
             chip_ids:
               physical: 30120
               virtual: 30136
 
   #########################################################
-  #Note: in the future, we might set a seperate file for NAVI
-  - gpu_series: navi3
+  # RDNA 3.5 family (gfx115x)
+  - gpu_series: rdna3.5
+    # gfx115x parts use unified memory (no separate MCDs like a dGPU)
     gpu_archs:
+      - gpu_arch: gfx1150
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          GRBM: 2
+          CPC: 2
+          GCEA: 2
+          TCP: 4
+          SPI: 6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
+        models:
+          - gpu_model: rdna35_point_1
+            design:
+              memory_levels: ["LDS", "L0", "L1", "L2"]
+            chip_ids:
+              physical: 5390
+
       - gpu_arch: gfx1151
         perfmon_config:
-            SQ: 8
-            TA: 2
-            GRBM: 2
-            CPC:  2
-            GCEA: 2
-            TCP:  4
-            SPI:  6
-            GL1A: 4
-            GL1C: 4
-            GL2A: 4
-            GL2C: 4
+          SQ: 8
+          TA: 2
+          GRBM: 2
+          CPC: 2
+          GCEA: 2
+          TCP: 4
+          SPI: 6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
         models:
-          - gpu_model: strix_halo
+          - gpu_model: rdna35_halo
+            design:
+              memory_levels: ["LDS", "L0", "L1", "L2", "MALL"]
             chip_ids:
-              physical: 5510
+              physical: 5510 # 0x1586
+
+      - gpu_arch: gfx1152
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          GRBM: 2
+          CPC: 2
+          GCEA: 2
+          TCP: 4
+          SPI: 6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
+        models:
+          - gpu_model: rdna35_point_2
+            design:
+              memory_levels: ["LDS", "L0", "L1", "L2"]
+            chip_ids:
+              physical: 4372
+
+      - gpu_arch: gfx1153
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          GRBM: 2
+          CPC: 2
+          GCEA: 2
+          TCP: 4
+          SPI: 6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
+        models:
+          - gpu_model: rdna35_gorgon_point
+            design:
+              memory_levels: ["LDS", "L0", "L1", "L2"]
+            chip_ids:
+              physical: 6402
   #########################################################

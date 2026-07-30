@@ -92,7 +92,7 @@ public:
   /// @param[in] size Requested deallocation size in bytes.
   virtual void CodeObjectFree(void *ptr, size_t size) = 0;
 
-  /// @brief Invoked when AMD HSA Finalizer and Program needs to reprot message or error
+  /// @brief Invoked when AMD HSA Finalizer and Program needs to report message or error
   ///
   /// @param[in] str Message to report.
   virtual void ReportMessage(const std::string& str) = 0;

@@ -3,15 +3,15 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-import getpass
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 from typing import Optional
 import re
-import subprocess
 
+from .cache import persistent_cache, persistent_cached_property, resolve_username
 from .capabilities import SystemCapabilities
 
 
@@ -37,13 +37,12 @@ class RocprofsysConfig:
         - rocprofsys_tests_dir: Path to rocprofsys tests directory
         - test_output_dir: Path to test output directory
         - rocpd_validation_rules: Path to rocprofiler-systems rocpd validation rules directory
-        - mpiexec: Path to MPI launcher executable
-        - julia: Path to Julia executable
         - rocm_version: Tuple of (major, minor, patch) of the installed ROCm version
         - is_installed: Whether this is an installed configuration
-        - python_versions: List of python versions available
-        - python_executables: List of python executables available
-        - python_module_path: Path to the python module directory
+        - rocprofsys_python: Path to rocprof-sys-python executable
+        - rocprofsys_site_packages: Path to rocprofsys site-packages directory
+        - _python_versions_hint: List of python versions available (hint for pytest_generate_tests)
+        - _python_root_dirs_hint: List of python root directories available (hint for pytest_generate_tests)
         - Capabilities: SystemCapabilities instance
     """
 
@@ -53,20 +52,19 @@ class RocprofsysConfig:
     rocprofsys_sample: Path
     rocprofsys_causal: Path
     rocprofsys_avail: Path
-    rocm_path: Path
+    rocm_path: Optional[Path]
     rocprofsys_lib_dir: Path
     rocprofsys_bin_dir: Path
     rocprofsys_examples_dir: Path
     rocprofsys_tests_dir: Path
     rocpd_validation_rules: Path
     test_output_dir: Path
-    mpiexec: Optional[Path] = None
-    julia: Optional[Path] = None
+    rocprofsys_python: Optional[Path] = None
+    rocprofsys_site_packages: Optional[Path] = None
     is_installed: bool = False
     rocm_version: Optional[tuple[int, int, int]] = None
-    python_versions: Optional[list[str]] = None
-    python_executables: Optional[list[str]] = None
-    python_module_path: Optional[Path] = None
+    _python_versions_hint: Optional[list[str]] = field(default=None, repr=False)
+    _python_root_dirs_hint: Optional[list[Path]] = field(default=None, repr=False)
     _capabilities: Optional[SystemCapabilities] = field(
         default=None, init=False, repr=False
     )
@@ -78,7 +76,8 @@ class RocprofsysConfig:
             self._capabilities = SystemCapabilities.from_config(self)
         return self._capabilities
 
-    def get_llvm_lib_paths(self) -> list[Path]:
+    @persistent_cached_property
+    def llvm_lib_paths(self) -> list[Path]:
         """Get list of found ROCm LLVM lib paths.
 
         Returns:
@@ -91,6 +90,36 @@ class RocprofsysConfig:
                 self.rocm_path / "llvm" / "lib",
                 self.rocm_path / "lib" / "llvm" / "lib",
             ]
+            # Determine the per-target runtime subdir used when
+            # LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON
+            clang_candidates = [
+                self.rocm_path / "bin" / "amdclang",
+                self.rocm_path / "llvm" / "bin" / "amdclang",
+                self.rocm_path / "lib" / "llvm" / "bin" / "amdclang",
+            ]
+            clang_path = next((c for c in clang_candidates if c.exists()), None)
+            if clang_path is None:
+                which_clang = shutil.which("amdclang")
+                if which_clang:
+                    clang_path = Path(which_clang)
+            if clang_path is not None:
+                try:
+                    host_triple = subprocess.run(
+                        [str(clang_path), "--print-target-triple"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=True,
+                    ).stdout.strip()
+                except (subprocess.SubprocessError, OSError) as exc:
+                    raise RuntimeError(
+                        f"'{clang_path} --print-target-triple' failed; "
+                        "this suggests a broken toolchain."
+                    ) from exc
+                if host_triple:
+                    candidates.append(
+                        self.rocm_path / "lib" / "llvm" / "lib" / host_triple
+                    )
             for candidate in candidates:
                 if candidate.exists():
                     found_paths.append(candidate)
@@ -115,29 +144,46 @@ class RocprofsysConfig:
             paths.append(existing)
 
         # Add ROCm LLVM lib as fallback
-        for llvm_path in self.get_llvm_lib_paths():
+        for llvm_path in self.llvm_lib_paths:
             paths.append(str(llvm_path))
 
         return ":".join(paths)
 
-    def get_target_executable(
-        self, name: str, python_version: Optional[str] = None
-    ) -> Path:
+    def get_preload_path(self) -> Optional[str]:
+        """Get LD_PRELOAD for sanitizer builds, or None when not applicable.
+
+        When $ASAN_LIBRARY is set (exported by the sanitizer CI) it is prepended
+        to the shell's LD_PRELOAD so the asan runtime stays first in the link
+        order once rocprof-sys-run appends librocprof-sys-dl.so.
+
+        Returns:
+            LD_PRELOAD string, or None when not building with the sanitizer.
+        """
+        asan_library = os.environ.get("ASAN_LIBRARY")
+        if not asan_library:
+            return None
+        existing = os.environ.get("LD_PRELOAD", "")
+        return f"{asan_library}:{existing}" if existing else asan_library
+
+    def get_target_executable(self, name: str) -> Path:
         """Get path to a test target executable.
 
-        When is_installed is True, searches in the following order:
-        1. rocprofsys_build_dir/name (build directory layout)
-        2. rocprofsys_examples_dir/name/name (build directory layout)
-        3. PATH lookup
+        The executable is always resolved from the build/install tree; the
+        system PATH is never consulted, so the suite cannot silently pick up an
+        unrelated copy (e.g. one under /opt/rocm/bin).
 
-        When is_installed is False, searches in the following order:
+        When is_installed is True, searches in the following order:
         1. rocprofsys_examples_dir/name
         2. rocprofsys_bin_dir/name
-        3. PATH lookup
+
+        When is_installed is False, searches in the following order:
+        1. rocprofsys_examples_dir/examples/python/name (python scripts)
+        2. rocprofsys_examples_dir/name
+        3. rocprofsys_examples_dir/examples/code-coverage/name (code-coverage.py only)
+        4. rocprofsys_bin_dir/name
 
         Args:
             name: Name of the target executable
-            python_version: Optional Python version string
 
         Returns:
             Path to the executable
@@ -157,16 +203,10 @@ class RocprofsysConfig:
             if exe.exists() and exe.is_file():
                 return exe
 
-            # PATH lookup via shutil.which
-            exe = shutil.which(name)
-            if exe:
-                return Path(exe)
-
             raise FileNotFoundError(
                 f"Target executable '{name}' not found. Searched in:\n"
                 f"  - {self.rocprofsys_examples_dir}/{name}\n"
                 f"  - {self.rocprofsys_bin_dir}/{name}\n"
-                f"  - PATH"
             )
 
         else:
@@ -186,141 +226,26 @@ class RocprofsysConfig:
                 if exe.exists() and exe.is_file():
                     return exe
 
-            exe = self.rocprofsys_examples_dir / "examples" / name / name
-            if exe.exists() and exe.is_file():
-                return exe
-
-            # rccl tests lie in their own directory
-            exe = self.rocprofsys_examples_dir / "examples" / "rccl" / name
-            if exe.exists() and exe.is_file():
-                return exe
-
             # binary directory
             exe = self.rocprofsys_bin_dir / name
             if exe.exists() and exe.is_file():
                 return exe
-
-            # PATH lookup via shutil.which
-            exe = shutil.which(name)
-            if exe:
-                return Path(exe)
 
             raise FileNotFoundError(
                 f"Target executable '{name}' not found. Searched in:\n"
                 f"  - {self.rocprofsys_examples_dir}/examples/python/{name}\n"
                 f"  - {self.rocprofsys_examples_dir}/{name}\n"
                 f"  - {self.rocprofsys_examples_dir}/examples/code-coverage/{name}\n"
-                f"  - {self.rocprofsys_examples_dir}/examples/rccl/{name}\n"
-                f"  - {self.rocprofsys_examples_dir}/examples/{name}/{name}\n"
                 f"  - {self.rocprofsys_bin_dir}/{name}\n"
-                f"  - PATH"
-            )
-
-    def get_fundamental_environment(self) -> dict[str, str]:
-        """Get fundamental environment variables inherited from parent process."""
-        return {
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", ""),
-            "USER": os.environ.get("USER", ""),
-            "SHELL": os.environ.get("SHELL", ""),
-            "TERM": os.environ.get("TERM", ""),
-            "LANG": os.environ.get("LANG", ""),
-        }
-
-    def get_base_environment(self) -> dict[str, str]:
-        """Get base environment variables for test execution."""
-        return {
-            "ROCPROFSYS_CI": "ON",
-            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
-            "ROCPROFSYS_CONFIG_FILE": "",
-            "ROCPROFSYS_TRACE": "ON",
-            "ROCPROFSYS_PROFILE": "ON",
-            "ROCPROFSYS_USE_SAMPLING": "ON",
-            "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
-            "ROCPROFSYS_TIME_OUTPUT": "OFF",
-            "ROCPROFSYS_FILE_OUTPUT": "ON",
-            "ROCPROFSYS_USE_PID": "OFF",
-            "ROCPROFSYS_LOG_LEVEL": "trace",
-            "ROCPROFSYS_SAMPLING_FREQ": "300",
-            "ROCPROFSYS_SAMPLING_DELAY": "0.05",
-            "ROCPROFSYS_SAMPLING_GPUS": "all",
-            "OMP_PROC_BIND": "spread",
-            "OMP_PLACES": "threads",
-            "OMP_NUM_THREADS": "2",
-            "LD_LIBRARY_PATH": self.get_library_path(),
-        }
-
-    def get_base_binary_environment(self) -> dict[str, str]:
-        """Get base environment variables for rocprof-sys binary test execution."""
-        return {
-            "ROCPROFSYS_CI": "ON",
-            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
-            "ROCPROFSYS_TRACE": "ON",
-            "ROCPROFSYS_PROFILE": "ON",
-            "ROCPROFSYS_USE_SAMPLING": "ON",
-            "ROCPROFSYS_TIME_OUTPUT": "OFF",
-            "ROCPROFSYS_USE_PID": "OFF",
-            "LD_LIBRARY_PATH": self.get_library_path(),
-            "ROCPROFSYS_CONFIG_FILE": "",
-        }
-
-    def get_base_python_environment(self) -> dict[str, str]:
-        return {
-            "ROCPROFSYS_CI": "ON",
-            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
-            "ROCPROFSYS_TRACE": "ON",
-            "ROCPROFSYS_PROFILE": "ON",
-            "ROCPROFSYS_USE_SAMPLING": "OFF",
-            "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
-            "ROCPROFSYS_TIME_OUTPUT": "OFF",
-            "ROCPROFSYS_TREE_OUTPUT": "OFF",
-            "ROCPROFSYS_USE_PID": "OFF",
-            "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
-            "PYTHONPATH": str(self.python_module_path or ""),
-            "ROCPROFSYS_CONFIG_FILE": "",
-        }
-
-    def get_base_causal_environment(self) -> dict[str, str]:
-        return {
-            "ROCPROFSYS_CI": "ON",
-            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
-            "ROCPROFSYS_USE_PID": "OFF",
-            "ROCPROFSYS_THREAD_POOL_SIZE": "0",
-            "ROCPROFSYS_VERBOSE": "1",
-            "ROCPROFSYS_LOG_LEVEL": "info",
-            "ROCPROFSYS_DL_VERBOSE": "0",
-            "ROCPROFSYS_DEBUG_SETTINGS": "0",
-            "LD_LIBRARY_PATH": self.get_library_path(),
-            "ROCPROFSYS_CONFIG_FILE": "",
-        }
-
-    def get_python_executable(self, version: str) -> Path:
-        """Get the python executable for a given version.
-
-        Args:
-            version: Python version string
-
-        Returns:
-            Path to the Python script for that version
-
-        Raises:
-            FileNotFoundError: If the version is not found or no Python executables configured
-        """
-        if not self.python_versions or not self.python_executables:
-            raise FileNotFoundError("No Python versions/executables configured")
-
-        try:
-            idx = self.python_versions.index(version)
-            return self.python_executables[idx]
-        except ValueError:
-            available = ", ".join(self.python_versions)
-            raise FileNotFoundError(
-                f"Python version '{version}' not found. Available: {available}"
             )
 
 
-def _find_rocm_path() -> Optional[Path]:
-    """Find ROCm installation path."""
+def _find_rocm_path(optional: bool = False) -> Optional[Path]:
+    """Find ROCm installation path.
+
+    Args:
+        optional: If True, return None instead of raising when ROCm is not found.
+    """
     for candidate in [
         os.environ.get("ROCM_PATH"),
         "/opt/rocm",
@@ -328,17 +253,21 @@ def _find_rocm_path() -> Optional[Path]:
     ]:
         if candidate and Path(candidate).exists():
             return Path(candidate).resolve()
-    return None
+    if optional:
+        return None
+    raise FileNotFoundError(
+        "Could not find ROCm installation. Set ROCM_PATH environment variable."
+    )
 
 
-def _get_rocm_version() -> Optional[tuple[int, int, int]]:
+def _get_rocm_version(rocm_optional: bool = False) -> Optional[tuple[int, int, int]]:
     """Get the installed ROCm version as a tuple (major, minor, patch).
 
     Returns:
         Tuple of (major, minor, patch) or None if ROCm not found or version undetectable.
     """
-    rocm_path = _find_rocm_path()
-    if not rocm_path:
+    rocm_path = _find_rocm_path(optional=rocm_optional)
+    if rocm_path is None:
         return None
 
     # Check .info/version file
@@ -359,131 +288,27 @@ def _get_rocm_version() -> Optional[tuple[int, int, int]]:
     return None
 
 
-def _find_mpiexec() -> Optional[Path]:
-    """Find MPI launcher executable."""
-    for candidate in ["mpiexec", "mpirun"]:
-        path = shutil.which(candidate)
-        if path:
-            return Path(path)
-    return None
-
-
-def _find_julia() -> Optional[Path]:
-    """Find Julia executable."""
-    path = shutil.which("julia")
-    return Path(path) if path else None
-
-
 def _find_executable(name: str, search_paths: list[Path]) -> Optional[Path]:
-    """Find an executable in search paths or via PATH."""
+    """Find a rocprof-sys executable within the given search paths.
+
+    Only the explicit search paths are consulted -- these are the build/install
+    ``bin`` directory, which already honors the ROCPROFSYS_BUILD_DIR and
+    ROCPROFSYS_INSTALL_DIR overrides. PATH is intentionally NOT searched: the
+    suite must exercise the rocprof-sys binaries from the build/install under
+    test, never an unrelated copy that happens to be on PATH (e.g.
+    ``/opt/rocm/bin``), which would silently test the wrong build.
+    """
     for search_dir in search_paths:
         exe = search_dir / name
         if exe.exists() and exe.is_file():
             return exe.resolve()
 
-    # Fallback to PATH
-    path_exe = shutil.which(name)
-    if path_exe:
-        return Path(path_exe)
-
     return None
 
 
-def _get_python_version(executable: Path) -> Optional[str]:
-    """Get Major and Minor Python version from an executable"""
-    try:
-        result = subprocess.run(
-            [str(executable), "--version"], capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0:
-            output = result.stdout.strip() or result.stderr.strip()
-            match = re.match(r"Python (\d+\.\d+)", output)
-            if match:
-                return match.group(1)
-    except (subprocess.SubprocessError, OSError):
-        pass
-    return None
-
-
-def _find_python_executables(
-    python_versions: Optional[list[str]] = None,
-    python_root_dirs: Optional[list[Path]] = None,
-) -> tuple[Optional[list[str]], Optional[list[Path]]]:
-    """Find python executables.
-
-    Returns two lists: (versions, executables) with matching indices.
-
-    Args:
-        python_versions: List of python versions to search for
-        python_root_dirs: List of python root directories to search for
-
-    Returns:
-        Tuple of (versions_list, executables_list)
-
-    Raises:
-        ValueError: If only one of python_versions or python_root_dirs is provided or if the lengths do not match
-    """
-    found_versions: list[str] = []
-    found_executables: list[Path] = []
-
-    if python_versions and python_root_dirs:
-        if len(python_versions) != len(python_root_dirs):
-            raise ValueError(
-                f"python_versions ({len(python_versions)}) and python_root_dirs ({len(python_root_dirs)}) "
-                "must have the same length"
-            )
-
-        for version, root_dir in zip(python_versions, python_root_dirs):
-            for name in [f"python{version}", "python3", "python"]:
-                candidate = root_dir / "bin" / name
-                if not candidate.exists():
-                    candidate = root_dir / name
-                if candidate.exists() and candidate.is_file():
-                    detected_version = _get_python_version(candidate)
-                    if detected_version and detected_version.startswith(version):
-                        found_versions.append(detected_version)
-                        found_executables.append(candidate)
-                        break
-    elif python_versions or python_root_dirs:
-        raise ValueError(
-            "Both python_versions and python_root_dirs must be provided together, or neither"
-        )
-    else:  # Auto-detect
-        import sys
-
-        current_exe = Path(sys.executable)
-        version = _get_python_version(current_exe)
-        if version:
-            found_versions.append(version)
-            found_executables.append(current_exe)
-        else:
-            # Fall back to finding python3 in PATH
-            executable = shutil.which("python3")
-            if executable:
-                exe_path = Path(executable)
-                version = _get_python_version(exe_path)
-                if version:
-                    found_versions.append(version)
-                    found_executables.append(exe_path)
-
-    return (found_versions or None, found_executables or None)
-
-
-def _get_python_module_path(
-    rocprofsys_build_dir: Path, python_versions: Optional[list[str]] = None
-) -> Optional[Path]:
-    """Find the python module path for a given list of python versions."""
-    if not python_versions:
-        return None
-    if len(python_versions) > 1:
-        return rocprofsys_build_dir / "lib" / "python" / "site-packages"
-    else:
-        return (
-            rocprofsys_build_dir / "lib" / f"python{python_versions[0]}" / "site-packages"
-        )
-
-
-def _find_rocprofsys_executables(search_paths: list[Path]) -> dict[str, Optional[Path]]:
+def _find_rocprofsys_core_executables(
+    search_paths: list[Path],
+) -> dict[str, Optional[Path]]:
     """Return a dictionary of rocprofiler-systems executables and their paths.
 
     Throws a FileNotFoundError if any of the executables are not found.
@@ -505,25 +330,73 @@ def _find_rocprofsys_executables(search_paths: list[Path]) -> dict[str, Optional
     missing = [name for name, path in required_executables.items() if path is None]
     if missing:
         raise FileNotFoundError(
-            f"Required executables not found: {', '.join(missing)}. "
-            f"Searched in: {search_paths}"
+            f"Required rocprof-sys executables not found: {', '.join(missing)}. "
+            f"Searched in: {search_paths}. Build the project first, or point the "
+            f"suite at the correct location with ROCPROFSYS_BUILD_DIR (build tree) "
+            f"or ROCPROFSYS_INSTALL_DIR (install prefix)."
         )
 
     return required_executables
 
 
+def _find_rocprofsys_python(
+    search_paths: list[Path], rocprofsys_build_dir: Path
+) -> tuple[Optional[Path], Optional[Path]]:
+    """Return the Python executable and rocprofsys site-package path.
+
+    Both must be found, otherwise (None, None) is returned.
+    """
+    rocprof_python = _find_executable("rocprof-sys-python", search_paths)
+    if not rocprof_python:
+        return None, None
+
+    # It is either in the agnostic path or in the versioned path
+    agnostic_path = rocprofsys_build_dir / "lib" / "python" / "site-packages"
+    if (agnostic_path / "rocprofsys").is_dir():
+        return rocprof_python, agnostic_path
+
+    # Only one versioned path will exist
+    # Otherwise, it will be in the agnostic path
+    for child in (rocprofsys_build_dir / "lib").iterdir():
+        if child.is_dir() and re.match(r"python\d+\.\d+", child.name):
+            site_packages = child / "site-packages"
+            if (site_packages / "rocprofsys").is_dir():
+                return rocprof_python, site_packages
+
+    return None, None
+
+
+def _merge_python_root_dirs(
+    explicit_dirs: Optional[list[Path]],
+) -> Optional[list[Path]]:
+    """Merge explicit --python-root-dirs with ROCPROFSYS_PYTHON_HINTS env var.
+
+    ROCPROFSYS_PYTHON_HINTS entries may point to bin/ directories or their parents;
+    both are normalized to the parent directory for pythonX.Y lookup.
+    """
+    result: list[Path] = list(explicit_dirs or [])
+    env_hints = os.environ.get("ROCPROFSYS_PYTHON_HINTS", "")
+    if env_hints:
+        for hint in env_hints.split(";"):
+            hint = hint.strip()
+            if hint:
+                hint_path = Path(hint)
+                parent = hint_path.parent if hint_path.name == "bin" else hint_path
+                if parent not in result:
+                    result.append(parent)
+    return result or None
+
+
+@persistent_cache("config.discover_install_config")
 def discover_install_config(
-    install_dir: Optional[Path] = None,
-    output_dir: Optional[Path] = None,
     python_versions: Optional[list[str]] = None,
     python_root_dirs: Optional[list[Path]] = None,
+    rocm_optional: bool = False,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems installation configuration.
 
-    Creates configuration for testing against installed binaries.
-
-    Args:
-        install_dir: Installation prefix (e.g., /opt/rocm or /usr/local)
+    Creates configuration for testing against installed binaries. The install
+    prefix is resolved from ROCPROFSYS_INSTALL_DIR or common locations.
 
     Returns:
         RocprofsysConfig configured for installed binaries
@@ -532,28 +405,27 @@ def discover_install_config(
         FileNotFoundError: If build/installation dirs and executables are not found
     """
 
-    if install_dir is None:
-        env_install = os.environ.get("ROCPROFSYS_INSTALL_DIR")
-        if env_install:
-            install_dir = Path(env_install).resolve()
-        else:
-            for candidate in [
-                _find_rocm_path(),
-                Path("/usr/local"),
-                Path("/usr"),
-                Path(
-                    "/opt/rocprofiler-systems"
-                ),  # Standard install location from README.md
-            ]:
-                if (
-                    candidate
-                    and (candidate / "share" / "rocprofiler-systems" / "tests").is_dir()
-                    and (
-                        candidate / "share" / "rocprofiler-systems" / "examples"
-                    ).is_dir()
-                ):
-                    install_dir = candidate
-                    break
+    install_dir: Optional[Path] = None
+    env_install = os.environ.get("ROCPROFSYS_INSTALL_DIR")
+    if env_install:
+        install_dir = Path(env_install).resolve()
+    else:
+        _rocm_candidate = _find_rocm_path(optional=True)
+        _install_candidates = [
+            Path("/usr/local"),
+            Path("/usr"),
+            Path("/opt/rocprofiler-systems"),  # Standard install location from README.md
+        ]
+        if _rocm_candidate is not None:
+            _install_candidates.insert(0, _rocm_candidate)
+        for candidate in _install_candidates:
+            if (
+                candidate
+                and (candidate / "share" / "rocprofiler-systems" / "tests").is_dir()
+                and (candidate / "share" / "rocprofiler-systems" / "examples").is_dir()
+            ):
+                install_dir = candidate
+                break
 
     if install_dir is None:
         raise FileNotFoundError(
@@ -578,26 +450,16 @@ def discover_install_config(
     rocpd_validation_rules = tests_dir / "rocpd-validation-rules"
 
     # Create a temporary directory for test outputs
-    try:
-        username = getpass.getuser()
-    except Exception:
-        username = str(os.getuid())
-
-    if output_dir is None:
-        output_dir = Path(tempfile.gettempdir()) / username / "rocprof-sys-pytest-output"
-    else:
-        output_dir = Path(output_dir)
-
+    username = resolve_username()
+    output_dir = Path(tempfile.gettempdir()) / username / "rocprof-sys-pytest-output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rocm_path = _find_rocm_path()
-    mpiexec = _find_mpiexec()
+    rocm_path = _find_rocm_path(optional=rocm_optional)
 
     search_paths = [bin_dir]
-    sys_execs = _find_rocprofsys_executables(search_paths)
-
-    found_python_versions, found_python_executables = _find_python_executables(
-        python_versions, python_root_dirs
+    sys_execs = _find_rocprofsys_core_executables(search_paths)
+    rocprofsys_python, rocprofsys_site_packages = _find_rocprofsys_python(
+        search_paths, install_dir
     )
 
     return RocprofsysConfig(
@@ -614,32 +476,26 @@ def discover_install_config(
         rocprofsys_tests_dir=tests_dir,
         rocpd_validation_rules=rocpd_validation_rules,
         test_output_dir=output_dir,
-        mpiexec=mpiexec,
-        julia=_find_julia(),
-        rocm_version=_get_rocm_version(),
+        rocm_version=_get_rocm_version(rocm_optional=rocm_optional),
         is_installed=True,
-        python_versions=found_python_versions,
-        python_executables=found_python_executables,
-        python_module_path=_get_python_module_path(install_dir, found_python_versions),
+        rocprofsys_python=rocprofsys_python,
+        rocprofsys_site_packages=rocprofsys_site_packages,
+        _python_versions_hint=python_versions,
+        _python_root_dirs_hint=_merge_python_root_dirs(python_root_dirs),
     )
 
 
+@persistent_cache("config.discover_build_config")
 def discover_build_config(
-    build_dir: Optional[Path] = None,
-    output_dir: Optional[Path] = None,
     python_versions: Optional[list[str]] = None,
     python_root_dirs: Optional[list[Path]] = None,
+    rocm_optional: bool = False,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems build configuration.
 
-    Attempts to find the build directory and source directory automatically
-    if not provided, checking common locations and environment variables.
-
-    If no build directory is found but an installation is available,
-    falls back to discover_install_config().
-
-    Args:
-        build_dir: Explicit build directory path
+    Finds the build directory automatically (from ROCPROFSYS_BUILD_DIR or by
+    walking up from this file). If no build directory is found but an
+    installation is available, falls back to discover_install_config().
 
     Returns:
         RocprofsysConfig with discovered paths
@@ -650,50 +506,52 @@ def discover_build_config(
 
     # Explicit install directory check
     if os.environ.get("ROCPROFSYS_INSTALL_DIR"):
-        return discover_install_config(output_dir=output_dir)
+        return discover_install_config(
+            python_versions=python_versions,
+            python_root_dirs=python_root_dirs,
+            rocm_optional=rocm_optional,
+        )
 
     # When running from pyz package (extracted to /tmp), fall back to install config
     # The pyz extracts to paths like /tmp/rocprofsys-tests-*/tests/rocprofsys/config.py
     current_file = Path(__file__).resolve()
     if str(current_file).startswith(tempfile.gettempdir()):
-        return discover_install_config()
+        return discover_install_config(
+            python_versions=python_versions,
+            python_root_dirs=python_root_dirs,
+            rocm_optional=rocm_optional,
+        )
 
     # All files should be in the build directory
-    if build_dir is None:
-        env_build = os.environ.get("ROCPROFSYS_BUILD_DIR")
-        if env_build:
-            build_dir = Path(env_build).resolve()
-        else:
-            build_dir = Path(__file__).resolve().parent.parent.parent.parent.parent.parent
+    env_build = os.environ.get("ROCPROFSYS_BUILD_DIR")
+    if env_build:
+        build_dir = Path(env_build).resolve()
+    else:
+        build_dir = Path(__file__).resolve().parent.parent.parent.parent.parent.parent
 
-    if build_dir is None or not build_dir.exists():
+    if not build_dir.exists():
         raise FileNotFoundError(
             "Could not find build directory or installation. Set one of:\n"
             "  - ROCPROFSYS_BUILD_DIR: Path to build directory\n"
             "  - ROCPROFSYS_INSTALL_DIR: Path to installation prefix"
         )
 
-    rocm_path = _find_rocm_path()
-    mpiexec = _find_mpiexec()
+    rocm_path = _find_rocm_path(optional=rocm_optional)
 
     bin_dir = build_dir / "bin"
     lib_dir = build_dir / "lib"
 
     search_paths = [bin_dir]
-    sys_execs = _find_rocprofsys_executables(search_paths)
+    sys_execs = _find_rocprofsys_core_executables(search_paths)
+    rocprofsys_python, rocprofsys_site_packages = _find_rocprofsys_python(
+        search_paths, build_dir
+    )
 
     share_path = build_dir / "share" / "rocprofiler-systems"
 
-    if output_dir is None:
-        output_dir = build_dir / "rocprof-sys-pytest-output"
-    else:
-        output_dir = Path(output_dir)
+    output_dir = build_dir / "rocprof-sys-pytest-output"
 
     tests_dir = share_path / "tests"
-
-    found_python_versions, found_python_executables = _find_python_executables(
-        python_versions, python_root_dirs
-    )
 
     return RocprofsysConfig(
         rocprofsys_build_dir=build_dir,
@@ -709,11 +567,10 @@ def discover_build_config(
         rocprofsys_tests_dir=tests_dir,
         rocpd_validation_rules=tests_dir / "rocpd-validation-rules",
         test_output_dir=output_dir,
-        mpiexec=mpiexec,
-        julia=_find_julia(),
-        rocm_version=_get_rocm_version(),
+        rocm_version=_get_rocm_version(rocm_optional=rocm_optional),
         is_installed=False,
-        python_versions=found_python_versions,
-        python_executables=found_python_executables,
-        python_module_path=_get_python_module_path(build_dir, found_python_versions),
+        rocprofsys_python=rocprofsys_python,
+        rocprofsys_site_packages=rocprofsys_site_packages,
+        _python_versions_hint=python_versions,
+        _python_root_dirs_hint=_merge_python_root_dirs(python_root_dirs),
     )

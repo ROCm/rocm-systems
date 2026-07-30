@@ -30,9 +30,6 @@
 #include "hsakmt/linux/kfd_ioctl.h"
 #endif
 
-// Forward declaration for HsaKFDContext to avoid dependency issues
-typedef struct _HsaKFDContext HsaKFDContext;
-
 #include "hsakmt/hsakmt.h"
 #include <libdrm/amdgpu.h>
 
@@ -50,7 +47,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint
 HSAKMT_STATUS HSAKMTAPI vhsaKmtFreeMemory(void* MemoryAddress, HSAuint64 SizeInBytes);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
                                                    HSAuint64* AlternateVAGPU,
-                                                   HsaMemMapFlags MemMapFlags,
+                                                   HsaMemFlags MemFlags,
                                                    HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtUnmapMemoryToGPU(void* MemoryAddress);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtAvailableMemory(HSAuint32 Node, HSAuint64* AvailableBytes);

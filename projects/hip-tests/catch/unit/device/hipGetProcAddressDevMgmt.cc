@@ -393,8 +393,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_PeerDeviceAccessAPIs) {
     int canAccessPeer_ptr = 0, canAccessPeer = 0, devCount = 0;
     HIP_CHECK(hipGetDeviceCount(&devCount));
     if (devCount < 2) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     }
     // hipDeviceCanAccessPeer API
     int devId{};
@@ -418,8 +417,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_PeerDeviceAccessAPIs) {
         HIP_CHECK(hipSetDevice(dev));
         HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, dev, peerDev));
         if (canAccessPeer == 0) {
-          HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
-          return;
+          HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
         }
         HIP_CHECK(hipDeviceEnablePeerAccess(peerDev, 0));
         HIP_CHECK_ERROR(dyn_hipDeviceEnablePeerAccess_ptr(peerDev, 0),
@@ -430,15 +428,13 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_PeerDeviceAccessAPIs) {
     }
   }
 }
-bool CheckMemPoolSupport(const int device) {
+void CheckMemPoolSupport(const int device) {
   int mem_pool_support = 0;
   HIP_CHECK(
       hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, device));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return false;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
-  return true;
 }
 
 HIP_TEST_CASE(Unit_hipGetProcAddress_SetGetMemPoolAPIs) {
@@ -458,23 +454,16 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_SetGetMemPoolAPIs) {
   int devCount = 0;
   HIP_CHECK(hipGetDeviceCount(&devCount));
   if (devCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   // hipDeviceSetMemPool API
   hipMemPool_t getMemPool = nullptr, getMemPool_ptr = nullptr;
   HIP_CHECK(hipSetDevice(0));
-  if (!CheckMemPoolSupport(0)) {
-    return;
-  } else {
-    CreateMemPool(0, getMemPool);
-  }
+  CheckMemPoolSupport(0);
+  CreateMemPool(0, getMemPool);
   HIP_CHECK(hipSetDevice(1));
-  if (!CheckMemPoolSupport(1)) {
-    return;
-  } else {
-    CreateMemPool(1, getMemPool_ptr);
-  }
+  CheckMemPoolSupport(1);
+  CreateMemPool(1, getMemPool_ptr);
   HIP_CHECK(hipDeviceSetMemPool(0, getMemPool));
   HIP_CHECK(dyn_hipDeviceSetMemPool_ptr(1, getMemPool_ptr));
   REQUIRE(getMemPool != nullptr);

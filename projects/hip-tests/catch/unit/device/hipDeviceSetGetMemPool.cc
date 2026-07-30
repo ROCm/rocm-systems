@@ -18,15 +18,13 @@
  * The memory pool must be local to the specified device.
  */
 
-static inline bool CheckMemPoolSupport(const int device) {
+static inline void CheckMemPoolSupport(const int device) {
   int mem_pool_support = 0;
   HIP_CHECK(
       hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, device));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return false;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
-  return true;
 }
 
 static inline hipMemPool_t CreateMemPool(const int device) {
@@ -59,9 +57,7 @@ static inline hipMemPool_t CreateMemPool(const int device) {
 HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Positive_Basic) {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
-  if (!CheckMemPoolSupport(device)) {
-    return;
-  }
+  CheckMemPoolSupport(device);
 
   hipMemPool_t mem_pool = CreateMemPool(device);
   HIP_CHECK(hipDeviceSetMemPool(device, mem_pool));
@@ -132,9 +128,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Negative_Parameters) {
 HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Default) {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
-  if (!CheckMemPoolSupport(device)) {
-    return;
-  }
+  CheckMemPoolSupport(device);
 
   hipMemPool_t default_mem_pool;
   HIP_CHECK(hipDeviceGetDefaultMemPool(&default_mem_pool, device));
@@ -160,9 +154,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Default) {
 HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Basic) {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
-  if (!CheckMemPoolSupport(device)) {
-    return;
-  }
+  CheckMemPoolSupport(device);
 
   hipMemPool_t mem_pool = CreateMemPool(device);
   HIP_CHECK(hipDeviceSetMemPool(device, mem_pool));
@@ -206,9 +198,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Threaded) {
     hipMemPool_t mem_pool_;
   };
 
-  if (!CheckMemPoolSupport(0)) {
-    return;
-  }
+  CheckMemPoolSupport(0);
 
   HipDeviceGetMemPoolTest test;
   test.run();

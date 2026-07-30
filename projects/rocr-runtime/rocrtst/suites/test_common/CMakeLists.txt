@@ -27,7 +27,7 @@
 #   4) Run "make"
 #
 
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.12.0)
 
 # Set Name for Samples Project
 #
@@ -133,6 +133,72 @@ endif()
 # Required Defines first:
 find_package(hsa-runtime64 REQUIRED)
 find_package(amd_smi REQUIRED)
+
+# Find yaml-cpp library with proper target handling
+set(HAVE_YAML_CPP FALSE)
+set(YAML_CPP_TARGET "")
+
+# Try TheRock's yaml-cpp first (if building with TheRock)
+find_package(therock-yaml-cpp QUIET CONFIG)
+if(therock-yaml-cpp_FOUND)
+  if(TARGET therock-yaml-cpp::therock-yaml-cpp)
+    set(YAML_CPP_TARGET therock-yaml-cpp::therock-yaml-cpp)
+    set(HAVE_YAML_CPP TRUE)
+    message(STATUS "Found yaml-cpp via TheRock: therock-yaml-cpp::therock-yaml-cpp")
+  elseif(TARGET therock-yaml-cpp)
+    set(YAML_CPP_TARGET therock-yaml-cpp)
+    set(HAVE_YAML_CPP TRUE)
+    message(STATUS "Found yaml-cpp via TheRock: therock-yaml-cpp")
+  endif()
+endif()
+
+# If not found via TheRock, try regular yaml-cpp
+if(NOT HAVE_YAML_CPP)
+  find_package(yaml-cpp QUIET CONFIG)
+  if(yaml-cpp_FOUND)
+    # Check for modern target name
+    if(TARGET yaml-cpp::yaml-cpp)
+      set(YAML_CPP_TARGET yaml-cpp::yaml-cpp)
+      set(HAVE_YAML_CPP TRUE)
+      message(STATUS "Found yaml-cpp via CMake package: yaml-cpp::yaml-cpp")
+    elseif(TARGET yaml-cpp)
+      set(YAML_CPP_TARGET yaml-cpp)
+      set(HAVE_YAML_CPP TRUE)
+      message(STATUS "Found yaml-cpp via CMake package: yaml-cpp")
+    endif()
+  endif()
+endif()
+
+# Fallback to pkg-config if CMake package not found
+if(NOT HAVE_YAML_CPP AND PKG_CONFIG_FOUND)
+  pkg_check_modules(YAML_CPP_PC yaml-cpp)
+  if(YAML_CPP_PC_FOUND)
+    # Try to find the actual library file for SHARED IMPORTED target
+    find_library(YAML_CPP_LIBRARY_FILE
+      NAMES yaml-cpp
+      HINTS ${YAML_CPP_PC_LIBRARY_DIRS}
+      NO_DEFAULT_PATH
+    )
+
+    if(YAML_CPP_LIBRARY_FILE)
+      # Create SHARED IMPORTED target for proper RPATH handling
+      add_library(yaml-cpp_imported SHARED IMPORTED)
+      set_target_properties(yaml-cpp_imported PROPERTIES
+        IMPORTED_LOCATION "${YAML_CPP_LIBRARY_FILE}"
+        INTERFACE_INCLUDE_DIRECTORIES "${YAML_CPP_PC_INCLUDE_DIRS}"
+      )
+      set(YAML_CPP_TARGET yaml-cpp_imported)
+      set(HAVE_YAML_CPP TRUE)
+      message(STATUS "Found yaml-cpp via pkg-config (SHARED): ${YAML_CPP_LIBRARY_FILE}")
+      message(STATUS "  Include dirs: ${YAML_CPP_PC_INCLUDE_DIRS}")
+      message(STATUS "  Library dirs: ${YAML_CPP_PC_LIBRARY_DIRS}")
+    endif()
+  endif()
+endif()
+
+if(NOT HAVE_YAML_CPP)
+  message(FATAL_ERROR "yaml-cpp library not found. Install libyaml-cpp-dev (Debian/Ubuntu) or yaml-cpp-devel (RHEL/CentOS)")
+endif()
 
 set (ONLY64STR "64")
 
@@ -270,6 +336,12 @@ if(NOT DEFINED TARGET_DEVICES OR TARGET_DEVICES STREQUAL "")
   endif()
 endif()
 
+# Strip feature suffixes (e.g., ":xnack+", ":sramecc+") from TARGET_DEVICES.
+# rocrtst compiles kernels with bare -mcpu (producing xnack=any code objects)
+# and LocateKernelFile() searches by bare HSA_AGENT_INFO_NAME.
+list(TRANSFORM TARGET_DEVICES REPLACE ":.*$" "")
+list(REMOVE_DUPLICATES TARGET_DEVICES)
+
 # Build type configuration
 string(TOLOWER "${ROCRTST_BLD_TYPE}" tmp)
 if("${tmp}" STREQUAL release)
@@ -401,12 +473,10 @@ function(build_kernel S_NAME TARG_DEV)
   set(KERNEL_DIR ${PROJECT_BINARY_DIR}/${TARG_DEV})
   set(SNAME_KERNEL "${S_NAME}_kernels.hsaco")
 
-  set(TARG_NAME "${S_NAME}_hsaco.${TARG_DEV}")
   set(HSACO_TARG_LIST ${HSACO_TARG_LIST} "${KERNEL_DIR}/${SNAME_KERNEL}" PARENT_SCOPE)
   string(SUBSTRING ${TARG_DEV} 3 -1 gfxNum)
-  string(REGEX REPLACE ":.*$" "" gfxNum "${gfxNum}")  # strip xnack+/xnack- and other suffixes
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
-   "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
+    "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
   add_custom_command(OUTPUT "${KERNEL_DIR}/${SNAME_KERNEL}" COMMAND ${CLANG} ${CLANG_ARG_LIST} DEPENDS ${CL_FILE_LIST} ${CLANG} COMMENT "BUILDING ${KERNEL_DIR}/${SNAME_KERNEL}" VERBATIM)
 endfunction(build_kernel)
 
@@ -422,11 +492,10 @@ function(build_kernel_kernarg_preload S_NAME TARG_DEV)
   set(KERNEL_DIR ${PROJECT_BINARY_DIR}/${TARG_DEV})
   set(SNAME_KERNEL "${S_NAME}_kernels_argpreload.hsaco")
 
-  set(TARG_NAME "${S_NAME}_hsaco.${TARG_DEV}")
   set(HSACO_TARG_LIST ${HSACO_TARG_LIST} "${KERNEL_DIR}/${SNAME_KERNEL}" PARENT_SCOPE)
   string(SUBSTRING ${TARG_DEV} 3 -1 gfxNum)
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
-  "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 -mllvm -amdgpu-kernarg-preload-count=16 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
+    "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 -mllvm -amdgpu-kernarg-preload-count=16 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
   add_custom_command(OUTPUT "${KERNEL_DIR}/${SNAME_KERNEL}" COMMAND ${CLANG} ${CLANG_ARG_LIST} DEPENDS ${CL_FILE_LIST} ${CLANG} COMMENT "BUILDING ${KERNEL_DIR}/${SNAME_KERNEL}" VERBATIM)
 endfunction(build_kernel_kernarg_preload)
 
@@ -700,13 +769,144 @@ endif()
 target_compile_definitions(${ROCRTST} PRIVATE HAVE_HWLOC=$<BOOL:${HAVE_HWLOC}>)
 
 # Link libraries - CMake will automatically handle RPATH for imported targets
-target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt)
+target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} ${YAML_CPP_TARGET} c stdc++ dl pthread rt)
 if(HAVE_NUMA)
   target_link_libraries(${ROCRTST} ${NUMA_TARGET})
 endif()
 if(HAVE_HWLOC)
   target_link_libraries(${ROCRTST} ${HWLOC_TARGET})
 endif()
+
+enable_testing()
+
+get_filename_component(HSA_RUNTIME_ROOT "${ROCRTST_ROOT}/../runtime/hsa-runtime" ABSOLUTE)
+set(HOTSWAP_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/hotswap")
+
+# Keep COMGR out of rocrtst link/package dependencies. These optional build
+# runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
+set(HOTSWAP_BUILD_RPATH "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(HOTSWAP_COMGR_WITHOUT_OPTIONS "")
+  set(HOTSWAP_SYMBOL_TOOL "${CMAKE_NM}")
+  if(NOT HOTSWAP_SYMBOL_TOOL)
+    find_program(HOTSWAP_SYMBOL_TOOL NAMES llvm-nm nm HINTS ${LLVM_TOOLS_BINARY_DIR})
+  endif()
+
+  foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
+    foreach(_libdir IN ITEMS lib lib64 tools/comgr/lib)
+      foreach(_comgr_name IN ITEMS libamd_comgr.so.3 libamd_comgr.so)
+        set(_comgr_library "${_prefix}/${_libdir}/${_comgr_name}")
+        if(HOTSWAP_SYMBOL_TOOL AND EXISTS "${_comgr_library}")
+          execute_process(
+            COMMAND "${HOTSWAP_SYMBOL_TOOL}" -D "${_comgr_library}"
+            RESULT_VARIABLE _comgr_symbol_result
+            OUTPUT_VARIABLE _comgr_symbols
+            ERROR_QUIET)
+          if(_comgr_symbol_result EQUAL 0 AND
+             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite_with_options")
+            list(APPEND HOTSWAP_BUILD_RPATH "${_prefix}/${_libdir}")
+            break()
+          elseif(_comgr_symbol_result EQUAL 0 AND
+                 _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite")
+            list(APPEND HOTSWAP_COMGR_WITHOUT_OPTIONS "${_comgr_library}")
+          endif()
+        endif()
+      endforeach()
+    endforeach()
+  endforeach()
+  list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
+  list(REMOVE_DUPLICATES HOTSWAP_COMGR_WITHOUT_OPTIONS)
+  if(NOT HOTSWAP_BUILD_RPATH AND HOTSWAP_COMGR_WITHOUT_OPTIONS)
+    message(WARNING
+      "Found COMGR without amd_comgr_hotswap_rewrite_with_options: "
+      "${HOTSWAP_COMGR_WITHOUT_OPTIONS}. hotswap_rewrite requires a "
+      "ROCm/llvm-project#3008-capable COMGR for local test RPATH setup.")
+  endif()
+endif()
+
+set(HOTSWAP_GFX1250_ASM "${HOTSWAP_TEST_ROOT}/fixtures/gfx1250_min.s")
+set(HOTSWAP_GFX1250_HSACO "${PROJECT_BINARY_DIR}/gfx1250_min.hsaco")
+set(HOTSWAP_GFX1250_HSACO_HDR "${PROJECT_BINARY_DIR}/gfx1250_min_hsaco.h")
+set(HOTSWAP_GENERATE_HSACO_HDR
+    "${HOTSWAP_TEST_ROOT}/fixtures/generate_hsaco_header.cmake")
+
+add_custom_command(
+  OUTPUT "${HOTSWAP_GFX1250_HSACO}"
+  COMMAND ${CLANG}
+          -x assembler
+          -target amdgcn-amd-amdhsa
+          -mcpu=gfx1250
+          -o "${HOTSWAP_GFX1250_HSACO}"
+          "${HOTSWAP_GFX1250_ASM}"
+  DEPENDS "${HOTSWAP_GFX1250_ASM}" ${CLANG}
+  COMMENT "BUILDING ${HOTSWAP_GFX1250_HSACO}"
+  VERBATIM)
+
+add_custom_command(
+  OUTPUT "${HOTSWAP_GFX1250_HSACO_HDR}"
+  COMMAND ${CMAKE_COMMAND}
+          -DINPUT=${HOTSWAP_GFX1250_HSACO}
+          -DOUTPUT=${HOTSWAP_GFX1250_HSACO_HDR}
+          -P "${HOTSWAP_GENERATE_HSACO_HDR}"
+  DEPENDS "${HOTSWAP_GFX1250_HSACO}" "${HOTSWAP_GENERATE_HSACO_HDR}"
+  COMMENT "GENERATING ${HOTSWAP_GFX1250_HSACO_HDR}"
+  VERBATIM)
+
+add_custom_target(hotswap_gfx1250_fixture DEPENDS "${HOTSWAP_GFX1250_HSACO_HDR}")
+
+add_executable(hotswap_gfx_query
+  ${HOTSWAP_TEST_ROOT}/hotswap_gfx_query_test.cc
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp)
+target_include_directories(hotswap_gfx_query PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${ROCRTST_ROOT}/gtest/include)
+target_link_libraries(hotswap_gfx_query ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME hotswap_gfx_query COMMAND hotswap_gfx_query)
+set_tests_properties(hotswap_gfx_query PROPERTIES
+  LABELS "quick;standard;pr;pre-commit;hotswap"
+  TIMEOUT 60)
+
+add_executable(hotswap_rewrite
+  ${HOTSWAP_TEST_ROOT}/hotswap_rewrite_test.cc
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap.cpp
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp
+  "${HOTSWAP_GFX1250_HSACO_HDR}")
+add_dependencies(hotswap_rewrite hotswap_gfx1250_fixture)
+target_include_directories(hotswap_rewrite PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${PROJECT_BINARY_DIR}
+  ${ROCRTST_ROOT}/gtest/include)
+target_compile_definitions(hotswap_rewrite PRIVATE ROCR_HOTSWAP_TESTING)
+target_link_libraries(hotswap_rewrite ${GOOGLE_TEST_FRWK_NAME} ${CMAKE_DL_LIBS} pthread)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set_target_properties(hotswap_rewrite PROPERTIES
+    LINK_FLAGS "-Wl,--enable-new-dtags"
+    INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../lib64")
+  if(HOTSWAP_BUILD_RPATH)
+    set_property(TARGET hotswap_rewrite PROPERTY
+      BUILD_RPATH "${HOTSWAP_BUILD_RPATH}")
+  endif()
+endif()
+add_test(NAME hotswap_rewrite COMMAND hotswap_rewrite)
+set_tests_properties(hotswap_rewrite PROPERTIES
+  LABELS "quick;standard;pr;pre-commit;hotswap"
+  TIMEOUT 120)
+
+# GPU-free InterceptQueue retry/overflow slot-accounting logic unit tests. These exercise
+# the pure header logic in hsa-runtime's core/inc/intercept_queue_logic.h + GoogleTest, so
+# they need no GPU or hsa-runtime library. ${GOOGLE_TEST_FRWK_NAME} (google-test-frwk64) is a
+# single static lib that compiles src/gtest_main.cpp (see rocrtst/gtest/CMakeLists.txt).
+set(INTERCEPT_QUEUE_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/intercept_queue")
+add_executable(intercept_queue_logic_test
+  ${INTERCEPT_QUEUE_TEST_ROOT}/intercept_queue_logic_test.cc)
+target_include_directories(intercept_queue_logic_test PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${ROCRTST_ROOT}/gtest/include)
+target_link_libraries(intercept_queue_logic_test ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME intercept_queue_logic_test COMMAND intercept_queue_logic_test)
+set_tests_properties(intercept_queue_logic_test PROPERTIES
+  LABELS "quick;standard;pr;pre-commit"
+  TIMEOUT 60)
 
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
@@ -727,6 +927,90 @@ install(TARGETS ${ROCRTST}
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)
 
+install(TARGETS hotswap_gfx_query hotswap_rewrite intercept_queue_logic_test
+        RUNTIME DESTINATION bin)
+
+# Install platform configuration file
+install(FILES ${ROCRTST_ROOT}/config/platform_config.yaml
+        DESTINATION share/rocrtst)
+
 install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib DESTINATION lib/rocrtst )
+
+# ROCm Systems root (for shared/ctest and other shared resources)
+if(NOT ROCM_SYSTEMS_ROOT)
+    get_filename_component(
+        ROCM_SYSTEMS_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.."
+        ABSOLUTE
+    )
+endif()
+
+set(TEST_CATEGORIES_CMAKE "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
+set(TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+
+if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
+    include("${TEST_CATEGORIES_CMAKE}")
+    include(GNUInstallDirs)
+    enable_testing()
+
+    # Install-time CTestTestfile referencing the binary by relative path
+    # (parser writes `add_test(name "../<target>" ...)` so this file must
+    # live one directory below where the rocrtst64 binary is installed).
+    set(INSTALL_TEST_FILE
+        "${PROJECT_BINARY_DIR}/install_CTestTestfile.cmake"
+    )
+    file(
+        WRITE
+        "${INSTALL_TEST_FILE}"
+        [=[
+# Generated by rocrtst for install-time ctest.
+# Tests are defined with relative paths to work in the installed location.
+]=]
+    )
+
+    message(STATUS "Applying test categories for rocrtst64")
+    apply_test_category_labels(
+      rocrtst64
+      "${TEST_CATEGORIES_YAML}"
+      "${PROJECT_BINARY_DIR}"
+      "${INSTALL_TEST_FILE}"
+    )
+
+    file(
+        APPEND
+        "${INSTALL_TEST_FILE}"
+        "\n"
+        "add_test(hotswap_gfx_query \"../hotswap_gfx_query\")\n"
+        "set_tests_properties(hotswap_gfx_query PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 60)\n\n"
+        "add_test(hotswap_rewrite \"../hotswap_rewrite\")\n"
+        "set_tests_properties(hotswap_rewrite PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 120)\n\n"
+        "add_test(intercept_queue_logic_test \"../intercept_queue_logic_test\")\n"
+        "set_tests_properties(intercept_queue_logic_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
+    )
+
+    install(
+        FILES "${INSTALL_TEST_FILE}"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/rocrtst"
+        COMPONENT tests
+        RENAME "CTestTestfile.cmake"
+    )
+else()
+    if(NOT EXISTS "${TEST_CATEGORIES_CMAKE}")
+        message(
+            STATUS
+            "Shared CTest categories not found at "
+            "${TEST_CATEGORIES_CMAKE} - "
+            "skipping test categorization for rocrtst64"
+        )
+    endif()
+    if(NOT EXISTS "${TEST_CATEGORIES_YAML}")
+        message(
+            STATUS
+            "Test categories YAML not found at "
+            "${TEST_CATEGORIES_YAML} - "
+            "skipping test categorization for rocrtst64"
+        )
+    endif()
+endif()
 
 include ( CPack )

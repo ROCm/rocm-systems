@@ -27,8 +27,8 @@ namespace rocprofsys::pmc
  *
  * Example usage:
  * @code
- *     auto gpu_dev = std::make_shared<gpu::device<Driver>>(...);
- *     auto nic_dev = std::make_shared<nic::device<Driver>>(...);
+ *     auto gpu_dev = std::make_shared<gpu::device<Backend>>(...);
+ *     auto nic_dev = std::make_shared<nic::device<Backend>>(...);
  *
  *     std::vector<device_slice> devices;
  *     devices.emplace_back(gpu_dev, device_type::GPU);
@@ -39,8 +39,8 @@ namespace rocprofsys::pmc
  *     }
  *
  *     // Type recovery when needed
- *     if (auto gpu = devices[0].as<gpu::device<Driver>>()) {
- *         auto metrics = gpu->get_gpu_metrics(enabled, timestamp);
+ *     if (auto gpu = devices[0].as<gpu::device<Backend>>()) {
+ *         auto metrics = gpu->get_metrics(enabled, timestamp);
  *     }
  * @endcode
  */

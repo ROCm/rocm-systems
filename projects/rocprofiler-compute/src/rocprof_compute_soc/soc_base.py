@@ -5,9 +5,7 @@ from __future__ import annotations
 
 import argparse
 import functools
-import math
 import os
-import re
 import shutil
 import sys
 from abc import abstractmethod
@@ -16,7 +14,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
+from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
+from utils import amdsmi_interface
 from utils.logger import (
     console_debug,
     console_error,
@@ -27,18 +26,22 @@ from utils.logger import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 from utils.utils_common import (
-    BUILD_IN_VARS,
+    INVALID_BLOCK_HINT,
     METRIC_ID_RE,
-    SUPPORTED_DENOM,
     add_counter_extra_config_input_yaml,
+    canonical_config_arch,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
-    get_panel_alias,
+    get_arch_alias_to_panel_id,
     is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
     resolve_rocm_library_path,
     validate_roofline_csv,
+)
+from utils.utils_counter_defs import (
+    counter_to_block,
+    extract_counters_and_variables,
 )
 from vendored import yaml
 
@@ -158,7 +161,7 @@ class OmniSoC_Base:
         return self.__compatible_profilers
 
     def populate_mspec(self) -> None:
-        from utils.specs import search, total_sqc
+        from utils.specs import search_pattern, total_sqc
 
         if (
             not hasattr(self._mspec, "rocminfo_lines")
@@ -171,47 +174,58 @@ class OmniSoC_Base:
         self._mspec.gpu_l2 = ""
 
         for linetext in self._mspec.rocminfo_lines:
-            key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.gpu_l1 = key
                 continue
 
-            key = search(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.gpu_l2 = key
                 continue
 
-            key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
+            key = search_pattern(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
             if key is not None:
                 self._mspec.max_sclk = key
                 continue
 
-            key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.cu_per_gpu = key
                 continue
 
-            key = search(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.simd_per_cu = key
                 continue
 
-            key = search(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.se_per_gpu = key
                 continue
 
-            key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(
+                r"^\s*Shader Arrs. per Eng.:\s+ ([a-zA-Z0-9]+)\s*", linetext
+            )
+            if key is not None:
+                self._mspec.sa_per_se = key
+                continue
+
+            key = search_pattern(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.wave_size = key
                 continue
 
-            key = search(r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(
+                r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext
+            )
             if key is not None:
                 self._mspec.workgroup_max_size = key
                 continue
 
-            key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(
+                r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext
+            )
             if key is not None:
                 self._mspec.max_waves_per_cu = key
                 break
@@ -223,8 +237,8 @@ class OmniSoC_Base:
                 )
             )
 
-        with amdsmi_ctx():
-            self._mspec.max_mclk = str(get_mem_max_clock())
+        with amdsmi_interface.amdsmi_ctx():
+            self._mspec.max_mclk = str(amdsmi_interface.get_mem_max_clock())
 
         # These are just max values now, because the parsing was broken and this was
         # inconsistent with how we use the clocks elsewhere (all max, all the time)
@@ -241,24 +255,16 @@ class OmniSoC_Base:
         if not self._mspec.gpu_model:
             self._mspec.gpu_model = self.detect_gpu_model(self._mspec.gpu_arch)
 
-        self._mspec.num_xcd = str(
-            mi_gpu_specs.get_num_xcds(
-                self._mspec.gpu_arch,
-                self._mspec.gpu_model,
-                self._mspec.compute_partition,
-            )
-        )
-
     @demarcate
     def detect_gpu_model(self, gpu_arch: str) -> Optional[str]:
         """
         Detects the GPU model using various identifiers from 'amd-smi static'.
         Falls back through multiple methods if the primary method fails.
         """
-        with amdsmi_ctx():
+        with amdsmi_interface.amdsmi_ctx():
             gpu_model = "N/A"
             for model in mi_gpu_specs.get_all_gpu_models():
-                for amdsmi_gpu_model in get_gpu_model():
+                for amdsmi_gpu_model in amdsmi_interface.get_gpu_model():
                     if model.lower() in amdsmi_gpu_model.lower():
                         gpu_model = model
                         break
@@ -296,9 +302,9 @@ class OmniSoC_Base:
             pass
         else:
             alias = block_id
-            panel_alias_dict = get_panel_alias()
+            panel_alias_dict = get_arch_alias_to_panel_id(self._mspec.gpu_arch)
             if alias not in panel_alias_dict:
-                raise KeyError(f"Unknown panel alias: {alias!r}")
+                console_error(f"Invalid --block value {alias!r}.{INVALID_BLOCK_HINT}")
             block_id = str(panel_alias_dict[alias])
             console_log(f"alias: {alias}, block id: {block_id}")
 
@@ -310,7 +316,7 @@ class OmniSoC_Base:
             )
             return
 
-        with open(config_filename_dict[file_id]) as stream:
+        with open(config_filename_dict[file_id], encoding="utf-8") as stream:
             file_config = yaml.safe_load(stream)
         if panel_id is None:
             texts.append(yaml.dump(file_config, sort_keys=False))
@@ -360,7 +366,7 @@ class OmniSoC_Base:
         output_files: list[CounterFile],
         file_count: int,
     ) -> tuple[set[str], list[CounterFile], int]:
-        """Greedy heuristic: place each metric’s counters into the first feasible
+        """Greedy heuristic: place each metric's counters into the first feasible
         pmc_perf bucket, else open a new one. Overflow stays for first-fit.
 
         Accepts:
@@ -397,7 +403,7 @@ class OmniSoC_Base:
             metric_name,
             metric_yaml,
         ) in self._iter_arch_analysis_yaml_metrics():
-            hw = self.parse_counters(metric_yaml)
+            hw, _ = extract_counters_and_variables(metric_yaml, self._mspec.gpu_series)
             hw = self._expand_tcc_template_counters(hw)
             counters = frozenset(hw & remaining)
             if not counters:
@@ -418,7 +424,7 @@ class OmniSoC_Base:
                 continue
             placed = False
             for bucket_idx, bucket in enumerate(files):
-                if "LEVEL" in bucket.file_name_txt:
+                if bucket.name.endswith("_ACCUM"):
                     continue
                 trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
                 if trial is not None:
@@ -430,7 +436,7 @@ class OmniSoC_Base:
                 continue
             new_bucket = CounterFile(str(file_count), cfg)
             trial = _trial_counter_file_with_extra(new_bucket, cfg, need_sorted)
-            if trial is not None and _flat_counters_in_perfmon_file(trial):
+            if trial is not None and flat_counters_in_perfmon_file(trial):
                 files.append(trial)
                 file_count += 1
                 remaining -= set(need_sorted)
@@ -452,7 +458,8 @@ class OmniSoC_Base:
         args = self.get_args()
 
         # File id dict
-        config_root_dir = f"{args.config_dir}/{self.__arch}"
+        config_arch = canonical_config_arch(self.__arch) or self.__arch
+        config_root_dir = f"{args.config_dir}/{config_arch}"
         config_filename_dict = {
             filename.name.split("_")[0]: str(filename)
             for filename in Path(config_root_dir).glob("*.yaml")
@@ -485,7 +492,7 @@ class OmniSoC_Base:
                 if file_id in exclude_file_ids:
                     continue
 
-                with open(filename) as stream:
+                with open(filename, encoding="utf-8") as stream:
                     texts.append(stream.read())
 
         for block_id in filter_blocks:
@@ -493,7 +500,9 @@ class OmniSoC_Base:
                 block_id, config_filename_dict, config_root_dir, texts
             )
 
-        counters = self.parse_counters("\n".join(texts))
+        counters, _ = extract_counters_and_variables(
+            "\n".join(texts), self._mspec.gpu_series
+        )
         counters = self._expand_tcc_template_counters(counters)
 
         return counters, filter_blocks
@@ -504,7 +513,8 @@ class OmniSoC_Base:
         counters, matching perfmon allocation.
         """
         out = set(counters)
-        num_xcd = int(self._mspec.num_xcd)
+        # num_xcd is absent on single-die gfx115x; default to 1.
+        num_xcd = int(getattr(self._mspec, "num_xcd", 1) or 1)
         l2_banks = int(self._mspec.l2_banks)
         for counter_name in counters.copy():
             if counter_name.startswith("TCC") and counter_name.endswith("["):
@@ -525,9 +535,6 @@ class OmniSoC_Base:
             )
             return filter_blocks
 
-        # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
-        counters = counters - {"SQ_ACCUM_PREV_HIRES"}
-
         # Coalesce and writeback workload specific perfmon
         self.perfmon_coalesce(counters)
 
@@ -540,23 +547,22 @@ class OmniSoC_Base:
 
         Returns (output_files, file_count, accu_file_count).
 
-        LEVEL counters get dedicated files first. If the arch has priority
-        metrics in profiling_counter_grouping_policy.yaml, a metric-aware
-        greedy pass runs before the final per-counter first-fit.
+        Accumulator counters (ending with _ACCUM) get dedicated files first.
+        If the arch has priority metrics in profiling_counter_grouping_policy.yaml,
+        a metric-aware greedy pass runs before the final per-counter first-fit.
         """
         output_files: list[CounterFile] = []
         accu_file_count = 0
         work = sorted(list(counters))
         for counter in work.copy():
-            if (
-                "LEVEL" in counter
-                and not counter.endswith("_sum")
-                and not is_tcc_channel_counter(counter)
-            ):
+            if counter.endswith("_ACCUM") and not is_tcc_channel_counter(counter):
                 work.remove(counter)
                 output_files.append(CounterFile(counter, self.__perfmon_config))
                 output_files[-1].add(counter)
-                output_files[-1].add(f"{counter}_ACCUM")
+                # Paired level-event slot: hardware programs the level counter
+                # alongside its accumulator, so hold one extra slot in the
+                # same block.
+                output_files[-1].reserve(counter, 1)
                 accu_file_count += 1
 
         file_count = 0
@@ -608,7 +614,7 @@ class OmniSoC_Base:
         arch = self.__arch
         if not arch:
             return
-        config_root = Path(args.config_dir) / arch
+        config_root = Path(args.config_dir) / (canonical_config_arch(arch) or arch)
         if not config_root.is_dir():
             return
         exclude: set[str] = set()
@@ -651,58 +657,6 @@ class OmniSoC_Base:
                         continue
                     yield stem_id, panel_id, idx, metric_name, metric_text
 
-    @demarcate
-    def parse_counters(self, config_text: str) -> set[str]:
-        """
-        Create a set of all hardware counters mentioned in the given config file
-        content string.
-        """
-        hw_counter_matches, variable_matches = self.parse_counters_text(config_text)
-
-        # get hw counters and variables for all supported denominators
-        for formula in SUPPORTED_DENOM.values():
-            hw_counter_matches_denom, variable_matches_denom = self.parse_counters_text(
-                formula
-            )
-            hw_counter_matches.update(hw_counter_matches_denom)
-            variable_matches.update(variable_matches_denom)
-
-        # get hw counters corresponding to variables recursively
-        while variable_matches:
-            subvariable_matches: set[str] = set()
-            for var in variable_matches:
-                if var in BUILD_IN_VARS:
-                    (
-                        hw_counter_matches_vars,
-                        variable_matches_vars,
-                    ) = self.parse_counters_text(BUILD_IN_VARS[var])
-                    hw_counter_matches.update(hw_counter_matches_vars)
-                    subvariable_matches.update(variable_matches_vars)
-            # process new found variables
-            variable_matches = subvariable_matches - variable_matches
-
-        return hw_counter_matches
-
-    def parse_counters_text(self, text: str) -> tuple[set[str], set[str]]:
-        """Parse out hardware counters and variables from given text"""
-        # hw counter name should start with ip block name
-        # hw counter name should have all capital letters or digits
-        # and should not end with underscore
-        # he counter name can either optionally end with '[' or '_sum'
-        _blk = (
-            r"(?:SQ|SQC|SP|TA|TD|TCP|TCC|GL1A|GL1C|GL2A|GL2C|"
-            r"CPC|CPF|SPI|GCEA|GRBM)"
-        )
-        _sfx = r"_[0-9A-Z_]*[0-9A-Z](?:\[|_sum|_avr|_max|_min)*"
-        hw_counter_regex = _blk + _sfx
-        # only capture the variable name after $ using capturing group
-        variable_regex = r"\$([0-9A-Za-z_]*[0-9A-Za-z])"
-        hw_counter_matches = set(re.findall(hw_counter_regex, text))
-        variable_matches = set(re.findall(variable_regex, text))
-        # variable matches cannot be counters
-        hw_counter_matches = hw_counter_matches - variable_matches
-        return hw_counter_matches, variable_matches
-
     def get_rocprof_supported_counters(self) -> set[str]:
         args = self.get_args()
         rocprof_counters: set[str] = set()
@@ -714,6 +668,7 @@ class OmniSoC_Base:
             / "rocprof_compute_soc"
             / "profile_configs"
             / "sdk_config.yaml",
+            encoding="utf-8",
         ) as filename:
             sdk_config = yaml.safe_load(filename)
         os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
@@ -782,7 +737,7 @@ class OmniSoC_Base:
         Sort and bucket all related performance counters to minimize required
         application passes
         """
-        workload_perfmon_dir = Path(self.get_args().path) / "perfmon"
+        workload_perfmon_dir = Path(self.get_args().output_directory) / "perfmon"
         workload_perfmon_dir.mkdir(parents=True, exist_ok=True)
 
         rocprof_counters = self.get_rocprof_supported_counters()
@@ -810,110 +765,52 @@ class OmniSoC_Base:
 
         console_debug(f"Collecting following counters: {', '.join(counters)} ")
 
-        output_files, file_count, accu_file_count = (
-            self._allocate_perfmon_counter_files(counters)
-        )
+        output_files, file_count, _ = self._allocate_perfmon_counter_files(counters)
 
         console_debug("profiling", f"perfmon_coalesce file_count {file_count}")
 
-        # TODO: rewrite the above logic for spatial_multiplexing later
-        if self.get_args().spatial_multiplexing:
-            # TODO: more error checking
-            if len(self.get_args().spatial_multiplexing) != 3:
-                console_error(
-                    "profiling",
-                    "multiplexing need provide node_idx node_count and gpu_count",
-                )
+        # Output to files
+        for f in output_files:
+            pmc_filename = workload_perfmon_dir / f"pmc_perf_{f.name}.yaml"
+            counter_def_filename = workload_perfmon_dir / f"counter_def_{f.name}.yaml"
 
-            node_idx, node_count, gpu_count = map(
-                int, self.get_args().spatial_multiplexing
-            )
+            pmc = []
+            counter_def: dict[str, Any] = {}
 
-            old_group_num = file_count + accu_file_count
-            new_bucket_count = node_count * gpu_count
-            groups_per_bucket = math.ceil(
-                old_group_num / new_bucket_count
-            )  # It equals to file num per node
-            max_groups_per_node = groups_per_bucket * gpu_count
+            for ctr in [
+                ctr for block_name in f.blocks for ctr in f.blocks[block_name].elements
+            ]:
+                pmc.append(ctr)
+                # Add TCC channel counters definitions
+                if is_tcc_channel_counter(ctr):
+                    counter_name = ctr.split("[")[0]
+                    idx = int(ctr.split("[")[1].split("]")[0])
+                    xcd_idx = idx // int(self._mspec.l2_banks)
+                    channel_idx = idx % int(self._mspec.l2_banks)
+                    expression = (
+                        f"select({counter_name},"
+                        f"[DIMENSION_XCC=[{xcd_idx}], "
+                        f"DIMENSION_INSTANCE=[{channel_idx}]])"
+                    )
+                    description = (
+                        f"{counter_name} on {xcd_idx}th XCC and {channel_idx}th channel"
+                    )
+                    counter_def = add_counter_extra_config_input_yaml(
+                        counter_def,
+                        ctr,
+                        description,
+                        expression,
+                        [self.__arch],
+                    )
 
-            group_start = node_idx * max_groups_per_node
-            group_end = min((node_idx + 1) * max_groups_per_node, old_group_num)
+            # Write counters to file
+            with open(pmc_filename, "w", encoding="utf-8") as fd:
+                fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
 
-            console_debug(
-                "profiling",
-                f"spatial_multiplexing node_idx {node_idx}, node_count {node_count}, "
-                f"gpu_count: {gpu_count},\n"
-                f"old_group_num {old_group_num}, new_bucket_count {new_bucket_count}, "
-                f"groups_per_bucket {groups_per_bucket},\n"
-                f"max_groups_per_node {max_groups_per_node}, "
-                f"group_start {group_start}, group_end {group_end}",
-            )
-
-            for f_idx in range(groups_per_bucket):
-                file_name = (
-                    Path(workload_perfmon_dir)
-                    / f"pmc_perf_node_{node_idx}_{f_idx}.yaml"
-                )
-
-                pmc = []
-                for g_idx in range(
-                    group_start + f_idx * gpu_count,
-                    min(group_end, group_start + (f_idx + 1) * gpu_count),
-                ):
-                    gpu_idx = g_idx % gpu_count
-                    for block_name in output_files[g_idx].blocks.keys():
-                        for ctr in output_files[g_idx].blocks[block_name].elements:
-                            pmc.append(f"{ctr}:device={gpu_idx}")
-
-                # Write counters to file
-                with open(file_name, "w") as fd:
-                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
-        else:
-            # Output to files
-            for f in output_files:
-                pmc_filename = workload_perfmon_dir / f.pmc_filename
-                counter_def_filename = workload_perfmon_dir / f.counter_def_filename
-
-                pmc = []
-                counter_def: dict[str, Any] = {}
-
-                for ctr in [
-                    ctr
-                    for block_name in f.blocks
-                    for ctr in f.blocks[block_name].elements
-                ]:
-                    pmc.append(ctr)
-                    # Add TCC channel counters definitions
-                    if is_tcc_channel_counter(ctr):
-                        counter_name = ctr.split("[")[0]
-                        idx = int(ctr.split("[")[1].split("]")[0])
-                        xcd_idx = idx // int(self._mspec.l2_banks)
-                        channel_idx = idx % int(self._mspec.l2_banks)
-                        expression = (
-                            f"select({counter_name},"
-                            f"[DIMENSION_XCC=[{xcd_idx}], "
-                            f"DIMENSION_INSTANCE=[{channel_idx}]])"
-                        )
-                        description = (
-                            f"{counter_name} on {xcd_idx}th XCC and "
-                            f"{channel_idx}th channel"
-                        )
-                        counter_def = add_counter_extra_config_input_yaml(
-                            counter_def,
-                            ctr,
-                            description,
-                            expression,
-                            [self.__arch],
-                        )
-
-                # Write counters to file
-                with open(pmc_filename, "w") as fd:
-                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
-
-                # Write counter definitions to file
-                if counter_def:
-                    with open(counter_def_filename, "w") as fp:
-                        fp.write(yaml.dump(counter_def, sort_keys=False))
+            # Write counter definitions to file
+            if counter_def:
+                with open(counter_def_filename, "w", encoding="utf-8") as fp:
+                    fp.write(yaml.dump(counter_def, sort_keys=False))
 
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
@@ -933,8 +830,7 @@ class OmniSoC_Base:
         # If --filter-blocks is provided, roofline block (block 4) should be mentioned
         if (
             self.get_args().no_roof
-            or self.__arch == "gfx908"
-            or self.__arch == "gfx1151"
+            or self.__arch not in BENCHMARKING_SUPPORTED
             or (
                 self.get_args().filter_blocks
                 and "4" not in self.get_args().filter_blocks
@@ -943,17 +839,16 @@ class OmniSoC_Base:
         ):
             console_log("roofline", "Skipping roofline")
         else:
-            # Dynamic import to isolate hip dependency during profile time only
-            from roofline.run_benchmark import load_bench
-
+            roofline_csv = Path(self.get_args().output_directory) / "roofline.csv"
             console_log(
-                "roofline", f"Checking for roofline.csv in {self.get_args().path}"
+                "roofline",
+                f"Checking for roofline.csv in {self.get_args().output_directory}",
             )
-            if not (Path(self.get_args().path) / "roofline.csv").is_file():
+            if not roofline_csv.is_file():
                 try:
-                    bench = load_bench([self.get_args().device])
-                    result = bench.run_on_devices([self.get_args().device])
-                    bench.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                    run_roofline_benchmark(
+                        self.get_args().device, roofline_csv, self._mspec.cache_sizes
+                    )
                 except Exception as e:
                     console_error(
                         "roofline",
@@ -962,7 +857,9 @@ class OmniSoC_Base:
                     )
                     return
 
-            is_valid, error_msg = validate_roofline_csv(self.get_args().path)
+            is_valid, error_msg = validate_roofline_csv(
+                self.get_args().output_directory
+            )
             if not is_valid:
                 console_error(
                     "roofline",
@@ -973,9 +870,11 @@ class OmniSoC_Base:
 
             console_log(
                 "roofline",
-                f"Roofline data saved to {self.get_args().path}/roofline.csv\n"
-                f"  Run 'rocprof-compute analyze -p {self.get_args().path}' "
-                f"for charts",
+                "Roofline data saved to "
+                f"{self.get_args().output_directory}/roofline.csv\n"
+                "  Run 'rocprof-compute analyze -p "
+                f"{self.get_args().output_directory}' "
+                "for charts",
             )
 
 
@@ -998,28 +897,27 @@ class LimitedSet:
             return True
         return False
 
+    def reserve(self, n: int) -> bool:
+        if self.avail < n:
+            return False
+        self.avail -= n
+        return True
+
 
 # Represents a file that lists PMC counters. Number of counters for each
 # block limited according to perfmon config.
 class CounterFile:
     def __init__(self, name: str, perfmon_config: dict[str, int]) -> None:
-        self.file_name_txt: str = f"pmc_perf_{name}.txt"
-        self.pmc_filename: str = f"pmc_perf_{name}.yaml"
-        self.counter_def_filename: str = f"counter_def_{name}.yaml"
+        self.name: str = name
         self.blocks: dict[str, LimitedSet] = {
             block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
         }
 
     def add(self, counter: str) -> bool:
-        block = counter.split("_")[0]
+        return self.blocks[counter_to_block(counter)].add(counter)
 
-        # SQ and SQC belong to the same IP block
-        if block == "SQC":
-            block = "SQ"
-        if block == "SP":
-            block = "SQ"
-
-        return self.blocks[block].add(counter)
+    def reserve(self, counter: str, n: int) -> bool:
+        return self.blocks[counter_to_block(counter)].reserve(n)
 
 
 def _trial_counter_file_with_extra(
@@ -1028,11 +926,10 @@ def _trial_counter_file_with_extra(
     extra_counters_sorted: list[str],
 ) -> CounterFile | None:
     """Clone basis, try appending extras; None if any won't fit."""
-    original_name = basis.file_name_txt.removeprefix("pmc_perf_").removesuffix(".txt")
-    trial = CounterFile(original_name, perfmon_config)
-    for ctr in _flat_counters_in_perfmon_file(basis):
+    trial = CounterFile(basis.name, perfmon_config)
+    for ctr in flat_counters_in_perfmon_file(basis):
         if not trial.add(ctr):
-            msg = f"clone replay failed for {ctr!r} in {basis.file_name_txt}"
+            msg = f"clone replay failed for {ctr!r} in bucket {basis.name!r}"
             raise RuntimeError(msg)
     for ctr in extra_counters_sorted:
         if not trial.add(ctr):
@@ -1046,13 +943,13 @@ def _rebuild_tcc_channel_file_map(
     """Map TCC counter base name to the bucket that holds its channel instances."""
     result: dict[str, CounterFile] = {}
     for bucket in output_files:
-        for ctr in _flat_counters_in_perfmon_file(bucket):
+        for ctr in flat_counters_in_perfmon_file(bucket):
             if is_tcc_channel_counter(ctr):
                 result[ctr.split("[")[0]] = bucket
     return result
 
 
-def _flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
+def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
     """Ordered list of PMC counter names assigned to one perfmon bucket file."""
     return [
         ctr

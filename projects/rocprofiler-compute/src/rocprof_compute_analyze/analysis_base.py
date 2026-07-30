@@ -16,6 +16,7 @@ import pandas as pd
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -23,12 +24,14 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
-    merge_counters_spatial_multiplex,
 )
 from utils.utils_common import (
+    PC_SAMPLING_BLOCK_IDS,
+    canonical_config_arch,
     get_uuid,
     is_only_pc_sampling,
     load_panel_configs,
@@ -70,46 +73,6 @@ def test_df_column_equality(df: pd.DataFrame) -> bool:
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()
 
 
-def detect_missing_counters(
-    df: pd.DataFrame,
-    workload_dir: Path,
-    join_type: str,
-) -> None:
-    """Detect missing counter values in joined dataframe.
-
-    Args:
-        df: Joined dataframe to check
-        workload_dir: Path to workload directory
-        join_type: Type of join performed ('kernel' or 'grid')
-    """
-    group_labels = ["Kernel_Name"]
-    if join_type == "grid":
-        group_labels.append("Grid_Size")
-
-    # Old workloads have *.txt, new workloads have pmc_perf_*.yaml
-    num_files = len(list(workload_dir.glob("perfmon/*.txt"))) + len(
-        list(workload_dir.glob("perfmon/pmc_perf_*.yaml"))
-    )
-    kernels_with_missing_counters = []
-    for _, groups in df.groupby(group_labels):
-        if groups["Dispatch_ID"].nunique() < num_files:
-            kernel_name = groups.iloc[0]["Kernel_Name"]
-            kernels_with_missing_counters.append(kernel_name)
-
-    if kernels_with_missing_counters:
-        kernels_with_missing_counters = list(set(kernels_with_missing_counters))
-        console_warning(
-            "join_prof",
-            (
-                f"Insufficient number of kernel calls for kernels: "
-                f"{', '.join(kernels_with_missing_counters)} "
-                f"to collect all counters using iteration multiplexing. "
-                f"Please use kernel filtering and exclude the above kernels "
-                f"or turn off iteration multiplexing."
-            ),
-        )
-
-
 class OmniAnalyze_Base:
     def __init__(
         self, args: argparse.Namespace, supported_archs: dict[str, str]
@@ -127,10 +90,52 @@ class OmniAnalyze_Base:
     def get_profiling_config(self) -> dict[str, Any]:
         return self._profiling_config
 
+    def pc_sampling_collected(self) -> bool:
+        """True when PC sampling is among the collected blocks."""
+        config = getattr(self, "_profiling_config", {})
+        return any(
+            block in PC_SAMPLING_BLOCK_IDS for block in config.get("filter_blocks", [])
+        )
+
     def pc_sampling_only(self) -> bool:
-        """True when profiling collected only PC sampling (block 21)."""
+        """True when every collected block is PC sampling."""
         config = getattr(self, "_profiling_config", {})
         return is_only_pc_sampling(config.get("filter_blocks", []))
+
+    def load_pc_sampling_tool_data(
+        self, workload_path: str
+    ) -> Optional[dict[str, Any]]:
+        """Return parsed PC sampling tool data, or None when not collected."""
+        if not self.pc_sampling_collected():
+            return None
+        return file_io.load_pc_sampling_results(str(workload_path))
+
+    def build_pc_sampling_only_workload(
+        self,
+        workload: schema.Workload,
+        dir_path: str,
+        args: argparse.Namespace,
+        tool_data: Optional[dict[str, Any]],
+    ) -> None:
+        """Build dispatch scaffolding and tables for a run without counters."""
+        workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(tool_data)
+        workload.raw_pmc = workload.raw_pmc.rename(
+            columns={"Dispatch_Id": "Dispatch_ID"}
+        )
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+            df_in=workload.raw_pmc,
+            raw_data_dir=str(dir_path),
+            filter_gpu_ids=workload.filter_gpu_ids,
+            filter_dispatch_ids=workload.filter_dispatch_ids,
+            time_unit=args.time_unit,
+            kernel_verbose=args.kernel_verbose,
+        )
+        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+        parser.load_non_mertrics_table(
+            workload, dir_path, args, pc_sampling_tool_data=tool_data
+        )
+        parser.nullify_unevaluated_metric_values(workload)
 
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs
@@ -139,14 +144,10 @@ class OmniAnalyze_Base:
         return self.__socs
 
     @demarcate
-    def spatial_multiplex_merge_counters(self, df: pd.DataFrame) -> pd.DataFrame:
-        return merge_counters_spatial_multiplex(df)
-
-    @demarcate
     def iteration_multiplex_impute_counters(
-        self, df: pd.DataFrame, policy: str
+        self, df: pd.DataFrame, policy: str, workload_dir: Path
     ) -> pd.DataFrame:
-        return impute_counters_iteration_multiplex(df, policy)
+        return impute_counters_iteration_multiplex(df, policy, workload_dir)
 
     @demarcate
     def generate_configs(
@@ -156,6 +157,7 @@ class OmniAnalyze_Base:
         list_stats: bool,
         filter_metrics: Optional[list[str]],
         sys_info: pd.Series,
+        profiling_config: dict[str, Any],
     ) -> dict[str, schema.ArchConfig]:
         single_panel_config = file_io.is_single_panel_config(
             config_dir, self.__supported_archs
@@ -165,8 +167,11 @@ class OmniAnalyze_Base:
         if list_stats:
             ac.panel_configs = TOP_STATS_BUILD_IN_CONFIG
         else:
+            config_arch = canonical_config_arch(arch) or arch
             arch_panel_config = [
-                config_dir if single_panel_config else str(f"{config_dir}/{arch}")
+                config_dir
+                if single_panel_config
+                else str(Path(config_dir) / config_arch)
             ]
             # Use restructured perf metrics in TUI analyze mode
             if self.get_args().tui and arch in ["gfx942", "gfx950"]:
@@ -180,9 +185,12 @@ class OmniAnalyze_Base:
                 )
             ac.panel_configs = load_panel_configs(arch_panel_config)
 
-        # TODO: filter_metrics should/might be one per arch
         parser.build_dfs(
-            arch_configs=ac, filter_metrics=filter_metrics, sys_info=sys_info
+            arch_configs=ac,
+            filter_metrics=filter_metrics,
+            sys_info=sys_info,
+            profiling_config=profiling_config,
+            arch=arch,
         )
         self._arch_configs[arch] = ac
         return self._arch_configs
@@ -190,15 +198,13 @@ class OmniAnalyze_Base:
     @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
         args = self.get_args()
-        profiling_config = self.get_profiling_config()
         target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
-            parser.build_metric_value_string(
+            build_metric_value_string(
                 arch_config.dfs,
                 arch_config.dfs_type,
                 target_filter,
-                profiling_config,
             )
         # Error checking for multiple runs and multiple kernel filters
         if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):
@@ -216,18 +222,11 @@ class OmniAnalyze_Base:
     ) -> OrderedDict[str, schema.Workload]:
         args = self.get_args()
 
-        def get_sysinfo_path(data_path: str) -> Optional[str]:
-            return (
-                data_path
-                if args.nodes is None and not args.spatial_multiplexing
-                else file_io.find_1st_sub_dir(data_path)
-            )
-
         # load required configs
         for path_info in args.path:
-            sysinfo_path = get_sysinfo_path(path_info[0])
+            sysinfo_path = path_info[0]
             if sysinfo_path:
-                sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+                sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
                 arch = sys_info.iloc[0]["gpu_arch"]
                 self.generate_configs(
                     arch,
@@ -235,19 +234,16 @@ class OmniAnalyze_Base:
                     args.list_stats,
                     args.filter_metrics,
                     sys_info.iloc[0],
+                    getattr(self, "_profiling_config", {}),
                 )
 
         self.load_options(normalization_filter)
 
         for path_info in args.path:
-            # FIXME:
-            #    For regular single node case, load sysinfo.csv directly
-            #    For multi-node, either the default "all", or specified some,
-            #    pick up the one in the 1st sub_dir. We could fix it properly later.
             w = schema.Workload()
-            sysinfo_path = get_sysinfo_path(path_info[0])
+            sysinfo_path = path_info[0]
             if sysinfo_path:
-                w.sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+                w.sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
                 if not getattr(args, "no_roof", False):
                     # Validate roofline CSV before loading
 
@@ -326,77 +322,29 @@ class OmniAnalyze_Base:
         )
         profiling_config = self.get_profiling_config()
 
-        needs_torch_trace = getattr(
-            args, "torch_operator", None
-        ) is not None or getattr(args, "list_torch_operators", False)
-        if needs_torch_trace and not profiling_config.get("torch_trace", False):
-            console_error(
-                "torch trace",
-                'Workload was not profiled with "--torch-trace". '
-                "Cannot use --torch-operator or --list-torch-operators.",
-            )
+        # --ml-api-trace enables every backend.
+        ml_api_trace = profiling_config.get("ml_api_trace", False)
+        for backend in KNOWN_ML_API_BACKENDS:
+            needs_trace = getattr(
+                args, f"{backend}_operator", None
+            ) is not None or getattr(args, f"list_{backend}_operators", False)
+            if needs_trace and not (
+                profiling_config.get(f"{backend}_trace", False) or ml_api_trace
+            ):
+                console_error(
+                    "ml api trace",
+                    f'Workload was not profiled with "--{backend}-trace" or '
+                    '"--ml-api-trace". '
+                    f"Cannot use --{backend}-operator or "
+                    f"--list-{backend}-operators.",
+                )
 
         for dir_info in args.path:
             if not any([
-                args.nodes,
-                args.list_nodes,
-                args.spatial_multiplexing,
                 profiling_config.get("iteration_multiplexing"),
                 self.pc_sampling_only(),
             ]):
                 is_workload_empty(dir_info[0])
-
-        # FIXME:
-        #   The proper location of this func should be in pre_processing().
-        #   However, because of reading soc depends on sys spec, and sys
-        #   spec depends on sys_info. And we read sys_info too early so we
-        # . can not do it now. There should be a way to make it simpler.
-        if args.list_nodes:
-            # NB:
-            #   There are 2 ways to do it: one is doing like the below, checking
-            #   sub dirs only as we assume the profiling stage generate sub dirs
-            #   with node name. The 2nd way would be checkign host name in each
-            #   sub dir and very those.
-            nodes = [
-                subdir.name
-                for subdir in Path(args.path[0][0]).iterdir()
-                if subdir.is_dir()
-            ]
-            print("Node list:", "  ".join(nodes))
-            sys.exit(0)
-
-        # Validate --nodes option against workload structure
-        if args.nodes is not None:
-            for dir_info in args.path:
-                workload_path = dir_info[0]
-                valid_nodes = file_io.get_valid_nodes(workload_path)
-
-                if not valid_nodes:
-                    # Single-node workload: sysinfo.csv is in root, not in
-                    # subdirectories
-                    console_error(
-                        "analysis",
-                        f"The workload at '{workload_path}' is single-node "
-                        "(sysinfo.csv is in the root directory).\n"
-                        "The --nodes option is only supported for multi-node "
-                        "workloads where each node subdirectory contains its "
-                        "own sysinfo.csv.\n"
-                        "Remove the --nodes option to analyze this "
-                        "single-node workload.",
-                    )
-
-                # If specific nodes are provided (not empty list), validate them
-                if args.nodes:
-                    invalid_nodes = [n for n in args.nodes if n not in valid_nodes]
-                    if invalid_nodes:
-                        console_error(
-                            "analysis",
-                            f"Invalid node(s): {', '.join(invalid_nodes)}\n"
-                            f"Valid nodes for '{workload_path}': "
-                            f"{', '.join(valid_nodes)}\n"
-                            "Each valid node must be a subdirectory "
-                            "containing sysinfo.csv.",
-                        )
 
         # Ensure analysis output does not overwrite existing files
         if args.output_name:
@@ -445,7 +393,6 @@ class OmniAnalyze_Base:
         # Load profiling config from THIS workload directory (not args)
         profiling_config = file_io.load_profiling_config(str(workload_dir))
         format_rocprof = profiling_config.get("format_rocprof_output", "rocpd")
-        iteration_multiplexing = profiling_config.get("iteration_multiplexing", None)
         join_type = profiling_config.get("join_type", "grid")
         kokkos_trace = profiling_config.get("kokkos_trace", False)
 
@@ -459,10 +406,10 @@ class OmniAnalyze_Base:
                 "will be removed in a future release."
             )
 
-            with open(output_file, "w", newline="") as outfile:
+            with open(output_file, "w", newline="", encoding="utf-8") as outfile:
                 writer = None
                 for file in result_files:
-                    with open(file, newline="") as infile:
+                    with open(file, newline="", encoding="utf-8") as infile:
                         reader = csv.reader(infile)
                         header = next(reader)
                         # Write header only once
@@ -474,16 +421,12 @@ class OmniAnalyze_Base:
 
             console_debug(f"Created file: {output_file}")
 
-            if iteration_multiplexing is not None:
-                df = pd.read_csv(output_file)
-                detect_missing_counters(df, workload_dir, join_type)
-
             return None
 
         # Collect files to process - normalize to Path objects
         files: list[Path] = []
 
-        csv_patterns = ["pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
+        csv_patterns = ["results_pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
         files = [
             file for pattern in csv_patterns for file in workload_dir.glob(pattern)
         ]
@@ -500,6 +443,19 @@ class OmniAnalyze_Base:
             if current_df.empty:
                 console_warning("join_prof", f"Empty dataframe from {file}")
                 continue
+
+            # rocprof writes the accumulator column as SQ_ACCUM_PREV_HIRES
+            # regardless of which *_ACCUM counter was requested. Recover the
+            # requested name from the file stem so downstream YAML formulas
+            # can reference it directly. Done before the merge so per-bucket
+            # values do not collide and get pandas-suffixed.
+            if (
+                file.name.startswith("results_pmc_perf_")
+                and file.stem.endswith("_ACCUM")
+                and "SQ_ACCUM_PREV_HIRES" in current_df.columns
+            ):
+                target = file.stem[len("results_pmc_perf_") :]
+                current_df = current_df.rename(columns={"SQ_ACCUM_PREV_HIRES": target})
 
             if join_type == "kernel":
                 key = current_df.groupby("Kernel_Name").cumcount()
@@ -585,6 +541,7 @@ class OmniAnalyze_Base:
             "Accum_VGPR_",
             "SGPR_",
             "Dispatch_ID_",
+            "Kernel_ID_",
             "Queue_ID",
             "Queue_Index",
             "PID",
@@ -652,59 +609,31 @@ class OmniAnalyze_Base:
         if "key" in df.columns:
             df = df.drop(columns=["key"])
 
-        console_debug("join_prof", "Checking for missing counter values...")
-
-        if iteration_multiplexing is not None:
-            detect_missing_counters(df, workload_dir, join_type)
-
         # save to file
         df.to_csv(output_file, index=False)
         return None
 
     def join_workload_csvs(self, workload_dir: Path) -> None:
-        """Join CSV files for a workload directory.
-
-        Handles multi-node and spatial multiplexing.
-
-        This method checks if the workload uses multi-node or spatial multiplexing,
-        and joins CSV files accordingly:
-        - Multi-node/spatial: Joins CSV files in each subdirectory (0/, 1/, 2/, etc.)
-        - Regular single-node: Joins CSV files in the workload directory directly
+        """Join results_*.csv source files into pmc_perf.csv if needed.
 
         Args:
             workload_dir: Path to the workload directory
         """
-        args = self.get_args()
+        pmc_perf = workload_dir / "pmc_perf.csv"
+        results_files = list(workload_dir.glob("results_*.csv"))
 
-        # Helper to process and join CSV files in a single directory
-        def process_and_join_directory(directory: Path) -> None:
-            pmc_perf = directory / "pmc_perf.csv"
-            pmc_perf_files = list(directory.glob("pmc_perf_*.csv"))
-            results_files = list(directory.glob("results_*.csv"))
-
-            if pmc_perf.exists():
-                console_debug(f"Using existing {pmc_perf}")
-            elif pmc_perf_files or results_files:
-                files_desc = "pmc_perf_*.csv" if pmc_perf_files else "results_*.csv"
-                console_log(f"Joining {files_desc} for {directory}...")
-                self.join_prof(directory, out=str(pmc_perf))
-                console_log(f"Created {pmc_perf}")
-            else:
-                console_error(
-                    f"No profiling data found in {directory}.\n"
-                    f"Expected: pmc_perf.csv or pmc_perf_*.csv or results_*.csv\n"
-                    f"Please run 'rocprof-compute profile' first."
-                )
-
-        # Handle multi-node and spatial multiplexing cases
-        if args.nodes is not None or args.spatial_multiplexing:
-            # Multi-node or spatial case: CSV files are in subdirectories
-            for subdir in workload_dir.iterdir():
-                if subdir.is_dir():
-                    process_and_join_directory(subdir)
+        if pmc_perf.exists():
+            console_debug(f"Using existing {pmc_perf}")
+        elif results_files:
+            console_log(f"Joining results_*.csv for {workload_dir}...")
+            self.join_prof(workload_dir, out=str(pmc_perf))
+            console_log(f"Created {pmc_perf}")
         else:
-            # Regular single-node case: CSV files are in workload_dir directly
-            process_and_join_directory(workload_dir)
+            console_error(
+                f"No profiling data found in {workload_dir}.\n"
+                f"Expected: pmc_perf.csv or results_*.csv\n"
+                f"Please run 'rocprof-compute profile' first."
+            )
 
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
@@ -720,7 +649,7 @@ class OmniAnalyze_Base:
         if args.output_format == "txt":
             output_filename = args.output_name or f"rocprof_compute_{get_uuid()}"
             output_filename += ".txt"
-            self._output = open(output_filename, "w+")
+            self._output = open(output_filename, "w+", encoding="utf-8")
             console_warning("analysis", f"Created file: {output_filename}")
         elif args.output_format == "stdout":
             self._output = sys.stdout
@@ -733,7 +662,6 @@ class OmniAnalyze_Base:
             (args.gpu_kernel, "filter_kernel_ids"),
             (args.gpu_id, "filter_gpu_ids"),
             (args.gpu_dispatch_id, "filter_dispatch_ids"),
-            (args.nodes, "filter_nodes"),
         ]
 
         for filter_list, attr_name in filter_configs:
@@ -749,7 +677,7 @@ class OmniAnalyze_Base:
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
         if not self.pc_sampling_only():
-            # Join pmc_perf_*.csv or results_*.csv files if needed
+            # Join results_*.csv source files into pmc_perf.csv if needed
             for path_info in args.path:
                 workload_dir = Path(path_info[0])
                 self.join_workload_csvs(workload_dir)

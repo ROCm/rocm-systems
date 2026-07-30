@@ -22,6 +22,10 @@ THE SOFTWARE.
 
 #include "vaapi_videodecoder.h"
 
+#include <algorithm>
+#include <cctype>
+#include <stdlib.h>
+
 VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) : decoder_create_info_{decoder_create_info},
     output_surface_format_override_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_ {VAProfileNone},
     va_context_id_{0}, va_surface_ids_{{}}, supports_modifiers_{false}, pic_params_buf_id_{0}, iq_matrix_buf_id_{0}, num_slices_{0},
@@ -118,7 +122,7 @@ void VaapiVideoDecoder::CheckOutputFormat() {
 }
 
 rocDecStatus VaapiVideoDecoder::InitializeDecoder() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
 
     // Check if the output surface format is set by the user or native.
@@ -167,7 +171,7 @@ rocDecStatus VaapiVideoDecoder::InitializeDecoder() {
 }
 
 rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(pPicParams));
     void *pic_params_ptr, *iq_matrix_ptr, *slice_params_ptr;
     uint32_t pic_params_size, iq_matrix_size, slice_params_size;
     bool scaling_list_enabled = false;
@@ -360,7 +364,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
 }
 
 rocDecStatus VaapiVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus *decode_status) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx) + ", " + RocDecFmtPtr(decode_status));
     VASurfaceStatus va_surface_status;
     if (pic_idx >= va_surface_ids_.size() || decode_status == nullptr) {
         FunctionExitLog(g_rocdec_logger);
@@ -382,7 +386,7 @@ rocDecStatus VaapiVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus 
 }
 
 rocDecStatus VaapiVideoDecoder::ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
     if (pic_idx >= va_surface_ids_.size()) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -398,7 +402,7 @@ rocDecStatus VaapiVideoDecoder::ExportSurface(int pic_idx, VADRMPRIMESurfaceDesc
 }
 
 rocDecStatus VaapiVideoDecoder::SyncSurface(int pic_idx) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
     if (pic_idx >= va_surface_ids_.size()) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -409,7 +413,7 @@ rocDecStatus VaapiVideoDecoder::SyncSurface(int pic_idx) {
 }
 
 rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(reconfig_params));
     if (reconfig_params == nullptr) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -472,7 +476,8 @@ rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo 
 }
 
 bool VaapiVideoDecoder::IsCodecConfigSupported(int device_id, rocDecVideoCodec codec_type, rocDecVideoChromaFormat chroma_format, uint32_t bit_depth_minus8, rocDecVideoSurfaceFormat output_format) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(device_id) + ", " + ROCDEC_TOSTR(codec_type) + ", " +
+                             ROCDEC_TOSTR(chroma_format) + ", " + ROCDEC_TOSTR(bit_depth_minus8) + ", " + ROCDEC_TOSTR(output_format));
     RocdecDecodeCaps decode_caps;
     decode_caps.device_id = device_id;
     decode_caps.codec_type = codec_type;
@@ -484,7 +489,7 @@ bool VaapiVideoDecoder::IsCodecConfigSupported(int device_id, rocDecVideoCodec c
 }
 
 rocDecStatus VaapiVideoDecoder::CreateDecoderConfig() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     switch (decoder_create_info_.codec_type) {
         case rocDecVideoCodec_HEVC:
             if (decoder_create_info_.bit_depth_minus_8 == 0) {
@@ -536,7 +541,7 @@ rocDecStatus VaapiVideoDecoder::CreateDecoderConfig() {
 }
 
 rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     if (decoder_create_info_.num_decode_surfaces < 1) {
         CriticalLog(g_rocdec_logger, "Invalid number of decode surfaces.");
         FunctionExitLog(g_rocdec_logger);
@@ -575,11 +580,31 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
             }
         }
             break;
-        case rocDecVideoChromaFormat_422:
-            surface_format = VA_RT_FORMAT_YUV422;
+        case rocDecVideoChromaFormat_422: {
+            if (decoder_create_info_.bit_depth_minus_8 == 2) {
+                surface_format = VA_RT_FORMAT_YUV422_10;
+                surf_attrib.value.value.i = VA_FOURCC_Y210;
+            } else if (decoder_create_info_.bit_depth_minus_8 == 4) {
+                surface_format = VA_RT_FORMAT_YUV422_12;
+                surf_attrib.value.value.i = VA_FOURCC_Y212;
+            } else {
+                surface_format = VA_RT_FORMAT_YUV422;
+                surf_attrib.value.value.i = VA_FOURCC_422H;
+            }
+        }
             break;
-        case rocDecVideoChromaFormat_444:
-            surface_format = VA_RT_FORMAT_YUV444;
+        case rocDecVideoChromaFormat_444: {
+            if (decoder_create_info_.bit_depth_minus_8 == 2) {
+                surface_format = VA_RT_FORMAT_YUV444_10;
+                surf_attrib.value.value.i = VA_FOURCC_Y410;
+            } else if (decoder_create_info_.bit_depth_minus_8 == 4) {
+                surface_format = VA_RT_FORMAT_YUV444_12;
+                surf_attrib.value.value.i = VA_FOURCC_Y412;
+            } else {
+                surface_format = VA_RT_FORMAT_YUV444;
+                surf_attrib.value.value.i = VA_FOURCC_444P;
+            }
+        }
             break;
         default:
             CriticalLog(g_rocdec_logger, "The surface type is not supported");
@@ -605,7 +630,7 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
 }
 
 rocDecStatus VaapiVideoDecoder::CreateContext() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     CHECK_VAAPI(vaCreateContext(va_display_, va_config_id_, decoder_create_info_.width, decoder_create_info_.height,
         VA_PROGRESSIVE, va_surface_ids_.data(), va_surface_ids_.size(), &va_context_id_));
     FunctionExitLog(g_rocdec_logger);
@@ -613,7 +638,7 @@ rocDecStatus VaapiVideoDecoder::CreateContext() {
 }
 
 rocDecStatus VaapiVideoDecoder::DestroyDataBuffers() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     if (pic_params_buf_id_) {
         CHECK_VAAPI(vaDestroyBuffer(va_display_, pic_params_buf_id_));
         pic_params_buf_id_ = 0;
@@ -654,7 +679,7 @@ VaContext::~VaContext() {
 };
 
 rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(device_id) + ", " + RocDecFmtPtr(va_ctx_id));
     std::lock_guard<std::mutex> lock(mutex);
     bool found_existing = false;
     uint32_t va_ctx_idx = 0;
@@ -668,9 +693,24 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
     }
     std::string gpu_uuid(hip_dev_prop.uuid.bytes, sizeof(hip_dev_prop.uuid.bytes));
 
+    // Match by PCI BDF (consistent between HIP and sysfs), with unique_id as fallback.
+    char pci_bus_id_buf[64] = {0};
+    std::string gpu_pci_bdf;
+    if (hipDeviceGetPCIBusId(pci_bus_id_buf, sizeof(pci_bus_id_buf), device_id) == hipSuccess) {
+        gpu_pci_bdf = pci_bus_id_buf;
+        std::transform(gpu_pci_bdf.begin(), gpu_pci_bdf.end(), gpu_pci_bdf.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        // Drop the PCI function suffix so partition children match their base BDF.
+        size_t dot_pos = gpu_pci_bdf.find_last_of('.');
+        if (dot_pos != std::string::npos) {
+            gpu_pci_bdf = gpu_pci_bdf.substr(0, dot_pos);
+        }
+    }
+
     if (!va_contexts_.empty()) {
         for (va_ctx_idx = 0; va_ctx_idx < va_contexts_.size(); va_ctx_idx++) {
-            if (gpu_uuid.compare(va_contexts_[va_ctx_idx].gpu_uuid) == 0) {
+            if ((!gpu_pci_bdf.empty() && gpu_pci_bdf == va_contexts_[va_ctx_idx].gpu_pci_bdf) ||
+                gpu_uuid.compare(va_contexts_[va_ctx_idx].gpu_uuid) == 0) {
                 found_existing = true;
                 break;
             }
@@ -686,6 +726,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
 
         va_contexts_[va_ctx_idx].device_id = device_id;
         va_contexts_[va_ctx_idx].gpu_uuid.assign(gpu_uuid);
+        va_contexts_[va_ctx_idx].gpu_pci_bdf = gpu_pci_bdf;
         va_contexts_[va_ctx_idx].hip_dev_prop = hip_dev_prop;
         va_contexts_[va_ctx_idx].drm_fd = -1;
         va_contexts_[va_ctx_idx].va_display = 0;
@@ -697,12 +738,69 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         GetVisibleDevices(visible_devices);
 
         int offset = 0;
-        ComputePartition current_compute_partition = (gpu_uuids_to_compute_partition_map_.find(gpu_uuid) != gpu_uuids_to_compute_partition_map_.end()) ? gpu_uuids_to_compute_partition_map_[gpu_uuid] : kSpx;
+        ComputePartition current_compute_partition = kSpx;
+        {
+            auto bdf_it = gpu_pci_bdf_to_compute_partition_map_.find(gpu_pci_bdf);
+            if (bdf_it != gpu_pci_bdf_to_compute_partition_map_.end()) {
+                current_compute_partition = bdf_it->second;
+            } else {
+                auto uuid_it = gpu_uuids_to_compute_partition_map_.find(gpu_uuid);
+                if (uuid_it != gpu_uuids_to_compute_partition_map_.end()) {
+                    current_compute_partition = uuid_it->second;
+                }
+            }
+        }
         GetDrmNodeOffset(va_contexts_[va_ctx_idx].hip_dev_prop.name, va_contexts_[va_ctx_idx].device_id, visible_devices, current_compute_partition, offset);
 
-        std::string drm_node = "/dev/dri/renderD";
-        int render_node_id = (gpu_uuids_to_render_nodes_map_.find(gpu_uuid) != gpu_uuids_to_render_nodes_map_.end()) ? gpu_uuids_to_render_nodes_map_[gpu_uuid] : 128;
-        drm_node += std::to_string(render_node_id + offset);
+        int render_node_id = -1;
+        {
+            auto bdf_it = gpu_pci_bdf_to_render_nodes_map_.find(gpu_pci_bdf);
+            if (bdf_it != gpu_pci_bdf_to_render_nodes_map_.end()) {
+                render_node_id = bdf_it->second;
+            } else {
+                auto uuid_it = gpu_uuids_to_render_nodes_map_.find(gpu_uuid);
+                if (uuid_it != gpu_uuids_to_render_nodes_map_.end()) {
+                    render_node_id = uuid_it->second;
+                }
+            }
+        }
+
+        std::string drm_node;
+        if (render_node_id >= 0) {
+            drm_node = "/dev/dri/renderD" + std::to_string(render_node_id + offset);
+        } else {
+            drm_node = GetFirstAvailableDrmNode();
+            if (drm_node.empty()) {
+                drm_node = "/dev/dri/renderD128";
+            }
+        }
+
+        if (g_rocdec_logger.GetLogLevel() >= kRocDecLogInfo) {
+            InfoLog(g_rocdec_logger, "gpu_uuids_to_render_nodes_map_:");
+            for (const auto& entry : gpu_uuids_to_render_nodes_map_) {
+                InfoLog(g_rocdec_logger, "  " + entry.first + " -> renderD" + std::to_string(entry.second));
+            }
+            InfoLog(g_rocdec_logger, "gpu_pci_bdf_to_render_nodes_map_:");
+            for (const auto& entry : gpu_pci_bdf_to_render_nodes_map_) {
+                InfoLog(g_rocdec_logger, "  " + entry.first + " -> renderD" + std::to_string(entry.second));
+            }
+
+            auto partition_name = [](ComputePartition p) -> const char* {
+                switch (p) {
+                    case kSpx: return "SPX";
+                    case kDpx: return "DPX";
+                    case kTpx: return "TPX";
+                    case kQpx: return "QPX";
+                    case kCpx: return "CPX";
+                    default:   return "unknown";
+                }
+            };
+            InfoLog(g_rocdec_logger, "Selected GPU UUID: " + gpu_uuid);
+            InfoLog(g_rocdec_logger, "Selected GPU BDF: " + gpu_pci_bdf);
+            InfoLog(g_rocdec_logger, "Selected compute partition: " + std::string(partition_name(current_compute_partition)));
+            InfoLog(g_rocdec_logger, "Selected DRM node: " + drm_node);
+        }
+
         rocdec_status = InitVAAPI(va_ctx_idx, drm_node);
         if (rocdec_status != ROCDEC_SUCCESS) {
             CriticalLog(g_rocdec_logger, "Failed to initialize the VAAPI.");
@@ -734,7 +832,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
 }
 
 rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_id) + ", " + RocDecFmtPtr(va_display));
     if (va_ctx_id >= va_contexts_.size()) {
         CriticalLog(g_rocdec_logger, "Invalid VA context Id.");
         *va_display = 0;
@@ -747,9 +845,27 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_NOT_INITIALIZED;
         }
-        vaSetInfoCallback(new_va_display, NULL, NULL);
+        std::string va_driver_path;
+        vaSetInfoCallback(new_va_display, [](void* user_context, const char* message) {
+            std::string msg(message);
+            if (msg.find("Trying to open") != std::string::npos) {
+                *static_cast<std::string*>(user_context) = msg;
+            }
+        }, &va_driver_path);
         int major_version = 0, minor_version = 0;
-        CHECK_VAAPI(vaInitialize(new_va_display, &major_version, &minor_version));
+        VAStatus va_status = vaInitialize(new_va_display, &major_version, &minor_version);
+        vaSetInfoCallback(new_va_display, nullptr, nullptr);
+        if (va_status != VA_STATUS_SUCCESS) {
+            CriticalLog(g_rocdec_logger, std::string("vaInitialize failed: ") + vaErrorStr(va_status));
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
+        InfoLog(g_rocdec_logger, "VA-API version " + std::to_string(major_version) + "." + std::to_string(minor_version));
+        const char* vendor_str = vaQueryVendorString(new_va_display);
+        InfoLog(g_rocdec_logger, "VA-API vendor: " + std::string(vendor_str ? vendor_str : "<unknown>"));
+        if (!va_driver_path.empty()) {
+            InfoLog(g_rocdec_logger, va_driver_path);
+        }
         *va_display = new_va_display;
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_SUCCESS;
@@ -757,7 +873,7 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
 }
 
 rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(dec_cap));
     if (dec_cap == nullptr) {
         CriticalLog(g_rocdec_logger, "Null decode capability struct pointer.");
         FunctionExitLog(g_rocdec_logger);
@@ -851,6 +967,8 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
                         va_contexts_[va_ctx_id].output_format_mask |= 1 << rocDecVideoSurfaceFormat_NV12;
                         break;
                     case VA_FOURCC_P016:
+                    case VA_FOURCC_P012:
+                    case VA_FOURCC_P010:
                         va_contexts_[va_ctx_id].output_format_mask |= 1 << rocDecVideoSurfaceFormat_P016;
                         break;
                     default:
@@ -961,7 +1079,7 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
 }
 
 rocDecStatus VaContext::InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(device_id));
     CHECK_HIP(hipGetDeviceCount(&num_devices_));
     if (num_devices_ < 1) {
         CriticalLog(g_rocdec_logger, "Didn't find any GPU.");
@@ -980,10 +1098,11 @@ rocDecStatus VaContext::InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop) {
 }
 
 rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_idx) + ", " + drm_node);
+    InfoLog(g_rocdec_logger, "Opening DRM node: " + drm_node);
     va_contexts_[va_ctx_idx].drm_fd = open(drm_node.c_str(), O_RDWR);
     if (va_contexts_[va_ctx_idx].drm_fd < 0) {
-        CriticalLog(g_rocdec_logger, "Failed to open drm node." + drm_node);
+        CriticalLog(g_rocdec_logger, "Failed to open drm node: " + drm_node);
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_INITIALIZED;
     }
@@ -993,15 +1112,33 @@ rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_INITIALIZED;
     }
-    vaSetInfoCallback(va_contexts_[va_ctx_idx].va_display, NULL, NULL);
+    std::string va_driver_path;
+    vaSetInfoCallback(va_contexts_[va_ctx_idx].va_display, [](void* user_context, const char* message) {
+        std::string msg(message);
+        if (msg.find("Trying to open") != std::string::npos) {
+            *static_cast<std::string*>(user_context) = msg;
+        }
+    }, &va_driver_path);
     int major_version = 0, minor_version = 0;
-    CHECK_VAAPI(vaInitialize(va_contexts_[va_ctx_idx].va_display, &major_version, &minor_version));
+    VAStatus va_status = vaInitialize(va_contexts_[va_ctx_idx].va_display, &major_version, &minor_version);
+    vaSetInfoCallback(va_contexts_[va_ctx_idx].va_display, nullptr, nullptr);
+    if (va_status != VA_STATUS_SUCCESS) {
+        CriticalLog(g_rocdec_logger, std::string("vaInitialize failed: ") + vaErrorStr(va_status));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+    InfoLog(g_rocdec_logger, "VA-API version " + std::to_string(major_version) + "." + std::to_string(minor_version));
+    const char* vendor_str = vaQueryVendorString(va_contexts_[va_ctx_idx].va_display);
+    InfoLog(g_rocdec_logger, "VA-API vendor: " + std::string(vendor_str ? vendor_str : "<unknown>"));
+    if (!va_driver_path.empty()) {
+        InfoLog(g_rocdec_logger, va_driver_path);
+    }
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
 
 void VaContext::GetVisibleDevices(std::vector<int>& visible_devices_vetor) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     // First, check if the ROCR_VISIBLE_DEVICES environment variable is present
     char *visible_devices = std::getenv("ROCR_VISIBLE_DEVICES");
     // If ROCR_VISIBLE_DEVICES is not present, check if HIP_VISIBLE_DEVICES is present
@@ -1051,11 +1188,19 @@ void VaContext::GetDrmNodeOffset(std::string device_name, uint8_t device_id, std
             // Instead, use the device name to identify MI300A etc.
             std::string mi300a = "MI300A";
             size_t found_mi300a = device_name.find(mi300a);
+            std::string mi308 = "MI308";
+            size_t found_mi308 = device_name.find(mi308);
             if (found_mi300a != std::string::npos) {
                 if (device_id < visible_devices.size()) {
                     offset = (visible_devices[device_id] % 6);
                 } else {
                     offset = (device_id % 6);
+                }
+            } else if (found_mi308 != std::string::npos) {
+                if (device_id < visible_devices.size()) {
+                    offset = (visible_devices[device_id] % 4);
+                } else {
+                    offset = (device_id % 4);
                 }
             } else {
                 if (device_id < visible_devices.size()) {
@@ -1092,6 +1237,10 @@ void VaContext::GetGpuUuids() {
                 std::string sys_device_path = "/sys/class/drm/" + filename + "/device";
                 struct stat info;
                 if (stat(sys_device_path.c_str(), &info) == 0) {
+                    std::string bus_id = GetRenderNodeBusId(filename);
+                    if (!bus_id.empty()) {
+                        gpu_pci_bdf_to_render_nodes_map_[bus_id] = render_id;
+                    }
                     std::string unique_id_path = sys_device_path + "/unique_id";
                     std::ifstream unique_id_file(unique_id_path);
                     std::string unique_id;
@@ -1122,6 +1271,9 @@ void VaContext::GetGpuUuids() {
                                 }
                                 // Map the unique GPU UUID to the compute partition
                                 gpu_uuids_to_compute_partition_map_[unique_id] = current_compute_partition;
+                                if (!bus_id.empty()) {
+                                    gpu_pci_bdf_to_compute_partition_map_[bus_id] = current_compute_partition;
+                                }
                             }
                         }
                         partition_file.close();
@@ -1131,4 +1283,53 @@ void VaContext::GetGpuUuids() {
         }
         closedir(dir);
     }
+}
+
+std::string VaContext::GetRenderNodeBusId(const std::string& render_node_name) {
+    std::string device_link = "/sys/class/drm/" + render_node_name + "/device";
+    char* resolved = realpath(device_link.c_str(), nullptr);
+    if (resolved == nullptr) {
+        return "";
+    }
+    std::string path(resolved);
+    free(resolved);
+    size_t pos = path.find_last_of('/');
+    std::string bus_id = (pos == std::string::npos) ? path : path.substr(pos + 1);
+    if (bus_id.find(':') == std::string::npos || bus_id.find('.') == std::string::npos) {
+        return "";
+    }
+    std::transform(bus_id.begin(), bus_id.end(), bus_id.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    size_t dot_pos = bus_id.find_last_of('.');
+    if (dot_pos != std::string::npos) {
+        bus_id = bus_id.substr(0, dot_pos);
+    }
+    return bus_id;
+}
+
+std::string VaContext::GetFirstAvailableDrmNode() {
+    std::string dri_path = "/dev/dri";
+    DIR* dir = opendir(dri_path.c_str());
+    if (!dir) {
+        return "";
+    }
+    int min_render_id = -1;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string filename = entry->d_name;
+        if (filename.find("renderD") == 0 && filename.size() > 7) {
+            try {
+                int render_id = std::stoi(filename.substr(7));
+                if (min_render_id < 0 || render_id < min_render_id) {
+                    min_render_id = render_id;
+                }
+            } catch (...) {
+            }
+        }
+    }
+    closedir(dir);
+    if (min_render_id < 0) {
+        return "";
+    }
+    return "/dev/dri/renderD" + std::to_string(min_render_id);
 }

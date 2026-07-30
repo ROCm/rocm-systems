@@ -35,8 +35,7 @@
 HIP_TEMPLATE_TEST_CASE(Unit_texCubemapGrad_Positive_ReadModeElementType, char, unsigned char,
                    short, unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
-  HipTest::HIP_SKIP_TEST("texCubemap isn't supported.");
-  return;
+  HIP_SKIP_TEST("texCubemap isn't supported.");
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(2, 2, 6);
   params.num_subdivisions = 4;
@@ -117,8 +116,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_texCubemapGrad_Positive_ReadModeElementType, char, u
 HIP_TEMPLATE_TEST_CASE(Unit_texCubemapGrad_Positive_ReadModeNormalizedFloat, char, unsigned char,
                    short, unsigned short) {
   CHECK_IMAGE_SUPPORT;
-  HipTest::HIP_SKIP_TEST("texCubemap isn't supported.");
-  return;
+  HIP_SKIP_TEST("texCubemap isn't supported.");
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(2, 2, 6);
   params.num_subdivisions = 4;

@@ -125,18 +125,18 @@ These must be bind-mounted into the container at run time.
 
 .. code-block:: bash
 
-   -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so \
-   -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so
+   -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so:ro \
+   -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so:ro
 
 **AMD Pensando Pollara (ionic):**
 
 .. code-block:: bash
 
-   -v /sys/class/infiniband:/sys/class/infiniband \
-   -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1 \
-   -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so \
-   -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so \
-   -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver
+   -v /sys/class/infiniband:/sys/class/infiniband:ro \
+   -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1:ro \
+   -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so:ro \
+   -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:ro \
+   -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver:ro
 
 Launching persistent multi-node containers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

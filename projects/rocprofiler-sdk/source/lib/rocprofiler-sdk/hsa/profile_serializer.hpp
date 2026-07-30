@@ -29,6 +29,8 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
+#include <atomic>
+#include <cstdint>
 #include <deque>
 #include <unordered_map>
 
@@ -82,13 +84,26 @@ public:
 
     void destroy_queue(hsa_queue_t* id, const Queue& queue);
 
-    static void add_queue(hsa_queue_t** hsa_queues, const Queue& queue);
+    void add_queue(hsa_queue_t** hsa_queues, const Queue& queue);
 
 private:
-    const Queue*                   _dispatch_queue{nullptr};
-    std::deque<const Queue*>       _dispatch_ready;
-    std::atomic<Status>            _serializer_status{Status::DISABLED};
-    std::deque<barrier_with_state> _barrier;
+    // Per-queue in-order serialized dispatch/completion ids. hsa_barrier uses them to tell when a
+    // transition packet handed to a queue has executed (completed >= dispatched-at-enqueue).
+    // Relaxed atomics: ordering/visibility comes from the serializer lock; dispatch only takes a
+    // shared lock, so the values must be atomic and the map structure must stay stable. Entries are
+    // created in add_queue under the write lock and only ever incremented (never inserted) on the
+    // shared dispatch path.
+    struct serial_counts
+    {
+        std::atomic<uint64_t> dispatched{0};
+        std::atomic<uint64_t> completed{0};
+    };
+
+    const Queue*                                       _dispatch_queue{nullptr};
+    std::deque<const Queue*>                           _dispatch_ready;
+    std::atomic<Status>                                _serializer_status{Status::DISABLED};
+    std::deque<barrier_with_state>                     _barrier;
+    mutable std::unordered_map<int64_t, serial_counts> _serial;
 };
 
 }  // namespace hsa

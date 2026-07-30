@@ -150,16 +150,53 @@ static __global__ void verify_results_kernel(uint64_t *dest, [[maybe_unused]] si
 FloodTester::FloodTester(TesterArguments args) : Tester(args) {
   int num_pes {rocshmem_n_pes()};
   int my_pe {rocshmem_my_pe()};
-  s_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size);
+  size_t buf_size = sizeof(uint64_t) * args.num_wgs * args.wg_size;
+  uint64_t *local = (uint64_t*)alloc_test_buffer(buf_size * num_pes, args.local_buf_type);
+  uint64_t *remote = (uint64_t*)alloc_test_buffer(buf_size * num_pes);
+
+  switch (_type) {
+    case FloodPutTestType:
+    case FloodPutNBITestType:
+    case FloodPTestType:
+      s_buf = local;
+      r_buf = remote;
+      break;
+    case FloodGetTestType:
+    case FloodGetNBITestType:
+    case FloodGTestType:
+    default:
+      s_buf = remote;
+      r_buf = local;
+      break;
+  }
+
   for(unsigned int wg = 0; wg < args.num_wgs; wg++) for(unsigned int th = 0; th < static_cast<unsigned int>(args.wg_size); th++) {
     s_buf[wg * args.wg_size + th] = (((uint64_t)my_pe)<<44) + (wg<<12) + th; // set value for verification
   }
-  r_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size * num_pes);
 }
 
 FloodTester::~FloodTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
+  uint64_t *local = nullptr;
+  uint64_t *remote = nullptr;
+
+  switch (_type) {
+    case FloodPutTestType:
+    case FloodPutNBITestType:
+    case FloodPTestType:
+      local = s_buf;
+      remote = r_buf;
+      break;
+    case FloodGetTestType:
+    case FloodGetNBITestType:
+    case FloodGTestType:
+    default:
+      local = r_buf;
+      remote = s_buf;
+      break;
+  }
+
+  free_test_buffer(local, args.local_buf_type);
+  free_test_buffer(remote);
 }
 
 void FloodTester::resetBuffers([[maybe_unused]] size_t size) {

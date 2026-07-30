@@ -4,6 +4,7 @@ import pytest
 
 from perfxpert.providers._sanitization import (
     redact_paths,
+    sanitize_messages,
 )
 
 
@@ -38,3 +39,20 @@ def test_redact_paths_multiple():
     assert "/opt/rocm/lib" not in out
     assert "/tmp/output.db" not in out
     assert out.count("[REDACTED]") >= 2
+
+
+def test_sanitize_messages_recurses_nested_content():
+    messages = [
+        {
+            "role": "user",
+            "content": {
+                "db": "/tmp/private/trace.db",
+                "notes": ["../../secret/file.hip"],
+            },
+        }
+    ]
+    out = sanitize_messages(messages)
+    assert "/tmp/private/trace.db" not in str(out)
+    assert "../../secret/file.hip" not in str(out)
+    assert "[REDACTED]" in str(out)
+    assert "[REDACTED_PATH]" in str(out)

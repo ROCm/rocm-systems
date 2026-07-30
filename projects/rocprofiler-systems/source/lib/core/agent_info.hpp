@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <rocprofiler-sdk/agent.h>
 
@@ -140,7 +141,7 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
 #endif
 
     data["mem_banks"] = nlohmann::json::array();
-    for(uint32_t i = 0; i < agent_data.mem_banks_count; ++i)
+    for(std::uint32_t i = 0; i < agent_data.mem_banks_count; ++i)
     {
         nlohmann::json bank;
         bank["heap_type"]             = agent_data.mem_banks[i].heap_type;
@@ -153,7 +154,7 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
     }
 
     data["caches"] = nlohmann::json::array();
-    for(uint32_t i = 0; i < agent_data.caches_count; ++i)
+    for(std::uint32_t i = 0; i < agent_data.caches_count; ++i)
     {
         nlohmann::json cache;
         cache["processor_id_low"]    = agent_data.caches[i].processor_id_low;
@@ -171,7 +172,7 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
     }
 
     data["io_links"] = nlohmann::json::array();
-    for(uint32_t i = 0; i < agent_data.io_links_count; ++i)
+    for(std::uint32_t i = 0; i < agent_data.io_links_count; ++i)
     {
         nlohmann::json link;
         link["type"]          = agent_data.io_links[i].type;

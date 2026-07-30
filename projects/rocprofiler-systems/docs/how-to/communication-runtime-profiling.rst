@@ -1,12 +1,12 @@
 .. meta::
    :description: ROCm Systems Profiler communication runtime profiling documentation
-   :keywords: rocprof-sys, rocprofiler-systems, ROCm, MPI, RCCL, UCX, SHMEM, OpenSHMEM, communication, profiler, tracking, distributed, AMD
+   :keywords: rocprof-sys, rocprofiler-systems, ROCm, MPI, RCCL, UCX, SHMEM, OpenSHMEM, rocSHMEM, communication, profiler, tracking, distributed, AMD
 
 ****************************************************
 Communication runtime profiling
 ****************************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ profiles several widely used communication runtimes and libraries, including MPI, RCCL, UCX, and OpenSHMEM (SHMEM).
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ profiles several widely used communication runtimes and libraries, including MPI, RCCL, rocSHMEM, UCX, and OpenSHMEM (SHMEM).
 
 These runtimes operate at different layers of the communication stack—from high-level programming models to low-level transport mechanisms. ROCm Systems Profiler provides coordinated tracing across these layers to enable end-to-end analysis of communication behavior, overheads, and performance bottlenecks.
 
@@ -23,6 +23,8 @@ The supported communication runtimes span multiple layers of the parallel comput
 
 * **RCCL (ROCm Communication Collectives Library)**: AMD's GPU-aware collective communication library, optimized for multi-GPU communication within and across nodes. RCCL is designed to work seamlessly with ROCm and provides highly optimized implementations of collective operations like AllReduce, AllGather, and Broadcast.
 
+* **rocSHMEM**: AMD's GPU-native PGAS (Partitioned Global Address Space) library for HPC workloads. rocSHMEM exposes one-sided host-stream APIs (put, get, barrier, collective operations) that are dispatched directly from the host using HIP streams, enabling tight integration with GPU compute kernels.
+
 **Low-Level Communication Frameworks**
 
 * **UCX (Unified Communication X)**: A high-performance communication framework that provides low-level abstractions for RDMA, shared memory, and other transport mechanisms. UCX is often used as a backend for higher-level libraries like MPI and RCCL, providing efficient point-to-point communication, RMA (Remote Memory Access) operations, and active messages.
@@ -36,7 +38,8 @@ The supported communication runtimes span multiple layers of the parallel comput
    * **MPI** (``ROCPROFSYS_USE_MPIP``): Enabled by default (``ON``). When using binary instrumentation, ROCm Systems Profiler automatically detects MPI symbols in the target application and enables MPI support.
    * **UCX** (``ROCPROFSYS_USE_UCX``): Disabled by default (``OFF``). Must be explicitly enabled to trace UCX operations. This is a runtime user-configurable option.
    * **RCCL** (``ROCPROFSYS_USE_RCCLP``): Disabled by default (``OFF``). Must be explicitly enabled to trace RCCL operations.
-   * **SHMEM** (``ROCPROFSYS_USE_SHMEM``): Disabled by default (``OFF``). Must be explicitly enabled to trace OpenSHMEM operations.
+   * **rocSHMEM** (``ROCPROFSYS_ROCM_DOMAINS=rocshmem_api``): Disabled by default. Must be included to trace rocSHMEM host-stream API calls. Requires rocprofiler-sdk ≥ 1.3.4 and rocSHMEM ≥ 3.6.0.
+   * **OpenSHMEM** (``ROCPROFSYS_USE_OPENSHMEM``): Disabled by default (``OFF``). Must be explicitly enabled to trace OpenSHMEM (CPU-based PGAS standard) operations. This flag is unrelated to rocSHMEM; use ``ROCPROFSYS_ROCM_DOMAINS=rocshmem_api`` to enable rocSHMEM API tracing.
 
    These settings can be controlled at runtime using their respective environment variables to enable or disable tracing as needed.
 
@@ -86,7 +89,7 @@ MPI Profiling Output
 
 When MPI profiling is enabled, ROCm Systems Profiler generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, profiling data is output in a SQLite3 database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize MPI operations in a timeline view showing communication patterns, operation durations, and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format`` (for example, ``--output-format rocpd``), profiling data is output in a SQLite3 database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize MPI operations in a timeline view showing communication patterns, operation durations, and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize MPI operations on a timeline, showing communication patterns, operation durations, and concurrency
 * **Timemory profiles**: Statistical summaries of MPI function call counts, total time, and performance metrics
 * **Communication data**: Track message sizes, communication volumes, and data movement patterns for point-to-point and collective operations
@@ -104,14 +107,19 @@ ROCm Systems Profiler provides automatic output labeling based on MPI rank IDs:
 * When full MPI support is enabled (``ROCPROFSYS_USE_MPI=ON``), output files are labeled with the ``MPI_COMM_WORLD`` rank ID
 * The ``ROCPROFSYS_USE_PID`` setting controls whether process IDs or MPI rank IDs are used for output labeling
 
-For detailed information on building rocprofiler-systems with MPI support, see the :doc:`installation guide <../install/install>`.
+For detailed information on building ROCm Systems Profiler with MPI support, see the :doc:`installation guide <../install/install>`.
 
 Selective rank profiling
 -------------------------
 
-When running large-scale MPI jobs, collecting profiling data from all ranks is not always desired.
+When running large-scale MPI jobs, you might not always want to collect profiling data and console output from all MPI ranks.
+ROCm Systems Profiler provides two independent rank-filtering options:
+
+- ``--rank-filter-output``: Only the specified MPI ranks produce profile and trace output files. Other ranks run normally but don't generate output files. The corresponding configuration setting is ``ROCPROFSYS_RANK_FILTER_OUTPUT``.
+- ``--rank-filter-logs``: Only the listed MPI ranks emit console output. Other ranks run normally but don't generate console output. The corresponding configuration setting is ``ROCPROFSYS_RANK_FILTER_LOGS``.
+
 The ``--rank-filter-output`` option allows you to specify which MPI ranks should provide profile and trace output files.
-Below are examples using ``rocprof-sys-sample`` to profile an appliction using a variety of rank selection syntaxes.
+Below are some examples using ``rocprof-sys-sample`` to profile an application using a variety of rank selection syntaxes.
 
 .. code-block:: bash
 
@@ -124,36 +132,79 @@ Below are examples using ``rocprof-sys-sample`` to profile an appliction using a
     # Profile ranks 0, 4, 8, and 12
     mpirun -n 16 rocprof-sys-sample --rank-filter-output 0,4,8,12 -- <application_path>
 
-Supported rank specification syntax:
+Use the ``--rank-filter-logs`` option to specify which MPI ranks emit console output:
 
-- **Individual ranks**: Comma-separated integers (e.g., ``0,1,2,8``)
-- **Ranges**: Hyphen-separated start and end values (e.g., ``0-7`` for ranks 0 through 7)
-- **Combined**: Mix of individual ranks and ranges (e.g., ``0-3,8,10-15``)
+.. code-block:: bash
 
-Supported rank identification variables:
+    # Show console output from ranks 0-3 and rank 8
+    mpirun -n 16 rocprof-sys-sample --rank-filter-logs 0-3,8 -- <application_path>
 
-- **MPI_RANK**
-- **MPI_LOCALRANKID**
-- **MPI_RANKID**
-- **MV2_COMM_WORLD_RANK**
-- **OMPI_COMM_WORLD_RANK**
+You can also combine the two filters. For example, to write profile data only for rank 0 while keeping console logs visible from ranks 0-3, use:
 
-If rank detection fails, data is collected from all ranks.
+.. code-block:: bash
+
+    mpirun -n 16 rocprof-sys-sample --rank-filter-output 0 --rank-filter-logs 0-3 -- <application_path>
+
+For both the filters, you can specify ranks using any of these formats:
+
+- **Individual ranks**: List specific ranks separated by commas, such as ``0,1,2,8``
+- **Ranges**: Use hyphens to specify consecutive ranks, such as ``0-7`` for ranks 0 through 7
+- **Combined**: Mix individual ranks and ranges, such as ``0-3,8,10-15``
+- **All ranks**: Leave the value empty to include all ranks (default behavior)
+
+If the total number of MPI ranks (world size) can be determined from the launcher environment
+(``OMPI_COMM_WORLD_SIZE``, ``MV2_COMM_WORLD_SIZE``, ``PMI_SIZE``, ``SLURM_NTASKS``, or ``SLURM_NPROCS``),
+any filter value outside the valid range ``[0, world_size - 1]`` triggers a warning and is ignored.
+If every value in the filter is out of range, filtering is disabled and the output is produced for all ranks.
+
+However, if the world size cannot be determined, no such validation is performed and specifying correct
+rank values is the user's responsibility.
+
+.. code-block:: bash
+
+    # Rank 100 is out of range for a 16-rank job: it is reported and ignored,
+    # so only rank 1 produces output
+    mpirun -n 16 rocprof-sys-sample --rank-filter-output "1,100" -- <application_path>
+
+ROCm Systems Profiler automatically detects each process's MPI rank by checking these _`rank identification` environment variables:
+
+- ``MPI_RANKID``
+- ``PMI_RANK``
+- ``MV2_COMM_WORLD_RANK``
+- ``OMPI_COMM_WORLD_RANK``
+- ``SLURM_PROCID``
+
+These environment variables are checked in the listed order top-to-bottom, and the first one that is set to a non-negative integer is used as the rank. The profiler uses the detected rank number to determine whether that process should produce output files or console logs based on your filter settings. If rank detection fails using these standard variables, both filters are disabled and all ranks produce the output.
+
+Similarly, if the detected rank itself is out of the range ``[0, world_size - 1]``, the filtering is disabled for that rank and all ranks produce the output.
+
+.. note::
+
+   For maximum console output suppression, use the ``ROCPROFSYS_RANK_FILTER_LOGS`` configuration setting instead of the ``--rank-filter-logs`` CLI option. The command-line option may show more log messages during startup. Also note that errors and critical messages are emitted for all ranks regardless of rank-based filtering option.
+
+   .. code-block:: bash
+
+       # Show console output only from rank 0
+       export ROCPROFSYS_RANK_FILTER_LOGS=0
+       mpirun -n 16 rocprof-sys-sample -- <application_path>
 
 Custom MPI environment variables
 ----------------------------------
 
-For mixed environments or non-standard MPI configurations, you can specify custom environment variables for rank detection.
-When using custom environment variables, both ``--rank-filter-output`` and ``--rank-filter-id`` must be specified.
-The ``--rank-filter-id`` will take precedence over automatic detection.
+For mixed environments or non-standard MPI configurations, you can specify custom environment variables for rank detection using ``--rank-filter-id`` CLI option or the corresponding ``ROCPROFSYS_RANK_FILTER_ID`` configuration setting.
+When using custom environment variables, ``--rank-filter-id`` must be specified together with at least one of the filter:  ``--rank-filter-output`` or ``--rank-filter-logs``.
+The ``--rank-filter-id`` will take precedence over automatic detection for both filters.
 Below is an example using the ``MY_CUSTOM_RANK`` environment variable with ``rocprof-sys-sample`` to profile ranks 0-3 and 8:
 
 .. code-block:: bash
 
-    # Use custom environment variables for rank detection
+    # Use custom environment variable MY_CUSTOM_RANK for rank detection (file output filter)
     mpirun -n 16 rocprof-sys-sample --rank-filter-output 0-3,8 --rank-filter-id MY_CUSTOM_RANK -- <application_path>
 
-If rank detection using the custom variable fails, the above-listed supported variables are used instead.
+    # Use custom environment variable MY_CUSTOM_RANK for rank detection (console log filter)
+    mpirun -n 16 rocprof-sys-sample --rank-filter-logs 0-3,8 --rank-filter-id MY_CUSTOM_RANK -- <application_path>
+
+If rank detection using the custom variable fails, the above-listed `rank identification`_ environment variables are used instead.
 
 Profiling RCCL
 ==============
@@ -188,14 +239,9 @@ RCCL Profiling Output
 
 When RCCL profiling is enabled, rocprofiler-systems generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, RCCL profiling
-  data is output in a SQLite3 database format with per-GPU device attribution for
-  multi-GPU systems. See :ref:`rocprof_sys_rocpd_output` for details on this output
-  format. You can visualize RCCL operations in a timeline view showing communication
-  patterns, operation durations, and concurrency using `ROCm Optiq
-  <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
-* **Perfetto traces**: Visualize RCCL operations on a timeline, showing communication patterns, operation durations, and concurrency
-* **Communication data**: Track send/receive volumes separately for each GPU in multi-GPU configurations
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format`` (for example, ``--output-format rocpd``), RCCL profiling data is output in a SQLite3 database format with per-GPU device attribution for multi-GPU systems. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize RCCL operations in a timeline view showing communication patterns, operation durations, and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+* **Perfetto traces**: Visualize RCCL operations on a timeline, showing communication patterns, operation durations, and concurrency.
+* **Communication data**: Track send/receive volumes separately for each GPU in multi-GPU configurations.
 
 The image below shows an example of a Perfetto trace with RCCL communication data and API tracing enabled:
 
@@ -310,10 +356,11 @@ UCX Profiling Output
 
 When UCX profiling is enabled, rocprofiler-systems generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, profiling data is output in a SQLite3 database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize MPI operations in a timeline view showing communication patterns, operation durations, and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
-* **Perfetto traces**: Visualize UCX operations on a timeline, showing communication patterns, operation durations, and concurrency
-* **Timemory profiles**: Statistical summaries of UCX function call counts, total time, and performance metrics
-* **Communication data**: Track message sizes, communication volumes, and data movement patterns
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format`` (for example, ``--output-format rocpd``), profiling data is output in a SQLite3 database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize MPI operations in a timeline view showing communication patterns, operation durations, and
+concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+* **Perfetto traces**: Visualize UCX operations on a timeline, showing communication patterns, operation durations, and concurrency.
+* **Timemory profiles**: Statistical summaries of UCX function call counts, total time, and performance metrics.
+* **Communication data**: Track message sizes, communication volumes, and data movement patterns.
 
 The image below shows an example of a Perfetto trace with UCX communication data and API tracing enabled:
 
@@ -336,7 +383,7 @@ OpenSHMEM provides a PGAS-style API for one-sided RMA, atomics, collectives, and
 
 .. important::
 
-   Like UCX and RCCL, SHMEM profiling is **disabled by default** and must be explicitly enabled using ``ROCPROFSYS_USE_SHMEM=ON``.
+   Like UCX and RCCL, SHMEM profiling is **disabled by default** and must be explicitly enabled using ``ROCPROFSYS_USE_OPENSHMEM=ON``.
 
 Configuration
 -------------
@@ -345,12 +392,12 @@ Enable SHMEM tracing and profiling at runtime:
 
 .. code-block:: shell
 
-   export ROCPROFSYS_USE_SHMEM=ON
+   export ROCPROFSYS_USE_OPENSHMEM=ON
    export ROCPROFSYS_TRACE=ON
    export ROCPROFSYS_PROFILE=ON
 
    # To disable SHMEM profiling (default):
-   export ROCPROFSYS_USE_SHMEM=OFF
+   export ROCPROFSYS_USE_OPENSHMEM=OFF
 
 Permit and reject lists
 -----------------------
@@ -377,7 +424,7 @@ SHMEM profiling output
 
 When SHMEM profiling is enabled, rocprofiler-systems generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, SHMEM data is written to the SQLite3 rocpd database. You can visualize SHMEM operations in `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+* **ROCm Profiling Data (rocpd)**: When ``rocpd`` is included in ``--output-format`` (for example, ``--output-format rocpd``), SHMEM data is written to the SQLite3 rocpd database. You can visualize SHMEM operations in `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize SHMEM API on a timeline (e.g., ``shmem_putmem``, ``shmem_barrier_all``).
 * **Timemory profiles**: Call counts and timing for traced SHMEM APIs.
 * **Communication data**: Message sizes and PE information for RMA and collective operations.
@@ -391,13 +438,100 @@ Run with your OpenSHMEM launcher (e.g., ``oshrun``) and ``rocprof-sys-sample`` o
 
    oshrun -n 4 rocprof-sys-sample -- ./my_shmem_app
 
+.. note::
+
+   PRRTE-based ``oshrun`` (Open MPI 5.0 and later) strips the first literal ``--``
+   from the program's argument list before passing it to the target application. This
+   breaks commands like ``rocprof-sys-run -- <binary>`` because ``rocprof-sys-run``
+   never receives the ``--`` separator and misinterprets its arguments. Older ORTE-based
+   ``oshrun`` (4.x and earlier) preserves ``--`` and is not affected.
+
+   As a workaround, pass ``-- --`` (two separate ``--`` delimiters) so that ``oshrun``
+   consumes the first one and the second reaches ``rocprof-sys-sample`` or
+   ``rocprof-sys-run`` as expected:
+
+   .. code-block:: shell
+
+      oshrun -n 4 rocprof-sys-sample -- -- ./my_shmem_app
+
+
+Profiling rocSHMEM
+==================
+
+rocSHMEM is AMD's GPU-native PGAS library for HPC applications. When rocSHMEM API
+tracing is enabled, rocprofiler-systems records API names, timing, and call metadata
+for rocSHMEM host-stream operations.
+
+When enabled, rocprofiler-systems captures all nine rocSHMEM host-stream APIs:
+
+* ``barrier_all_on_stream``
+* ``quiet_on_stream``
+* ``sync_all_on_stream``
+* ``putmem_on_stream``
+* ``getmem_on_stream``
+* ``putmem_signal_on_stream``
+* ``broadcastmem_on_stream``
+* ``alltoallmem_on_stream``
+* ``signal_wait_until_on_stream``
+
+.. important::
+
+   rocSHMEM tracing is **disabled by default** and must be explicitly enabled by including
+   ``rocshmem_api`` in ``ROCPROFSYS_ROCM_DOMAINS``. It requires rocprofiler-sdk ≥ 1.3.4
+   and rocSHMEM ≥ 3.6.0.
+
+   rocSHMEM is an HPC library designed for AMD Instinct (CDNA) GPUs. It is not supported on consumer RDNA GPUs.
+
+Configuration
+-------------
+
+Enable rocSHMEM API tracing at runtime:
+
+.. code-block:: shell
+
+   export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocshmem_api
+   export ROCPROFSYS_TRACE=ON
+   export ROCPROFSYS_PROFILE=ON
+
+To trace only rocSHMEM API calls without other ROCm domains:
+
+.. code-block:: shell
+
+   export ROCPROFSYS_ROCM_DOMAINS=rocshmem_api
+   export ROCPROFSYS_TRACE=ON
+   export ROCPROFSYS_PROFILE=ON
+
+rocSHMEM profiling output
+--------------------------
+
+When rocSHMEM API tracing is enabled, rocprofiler-systems generates:
+
+* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, rocSHMEM API call records are written to the SQLite3 rocpd database under the ``rocm_rocshmem_api`` category, including API name, timestamps, and captured arguments.
+* **Perfetto traces**: rocSHMEM API calls appear on dedicated tracks under the ``rocm_rocshmem_api`` category, showing call durations and overlap with HIP kernels and memory copies.
+* **Timemory profiles**: Call counts and timing summaries for each traced rocSHMEM API.
+
+In the Perfetto trace, you can observe:
+
+* rocSHMEM host-stream API calls on dedicated ``rocm_rocshmem_api`` tracks
+* Overlap and sequencing between rocSHMEM communication and HIP kernel execution
+* HIP stream synchronization points introduced by ``barrier_all_on_stream`` and ``quiet_on_stream``
+
+Usage with rocSHMEM applications
+---------------------------------
+
+rocSHMEM applications are launched using MPI (``mpiexec``/``mpirun``). Use ``rocprof-sys-sample`` as the profiling wrapper:
+
+.. code-block:: shell
+
+   mpirun -n 4 rocprof-sys-sample -- ./my_rocshmem_app
+
 
 Multi-Layer Communication Analysis
 ===================================
 
 One of the key strengths of ROCm Systems Profiler is the ability to profile multiple communication layers simultaneously, providing a comprehensive view of the communication stack.
 
-Since MPI profiling is enabled by default while UCX, RCCL, and SHMEM require explicit enablement, profiling applications that use multiple layers requires enabling the specific layers you want to trace:
+Since MPI profiling is enabled by default while UCX, RCCL, SHMEM, and rocSHMEM require explicit enablement, profiling applications that use multiple layers requires enabling the specific layers you want to trace:
 
 .. code-block:: shell
 
@@ -405,7 +539,9 @@ Since MPI profiling is enabled by default while UCX, RCCL, and SHMEM require exp
    # Explicitly enable UCX, RCCL, and/or SHMEM profiling
    export ROCPROFSYS_USE_UCX=ON
    export ROCPROFSYS_USE_RCCLP=ON
-   export ROCPROFSYS_USE_SHMEM=ON
+   export ROCPROFSYS_USE_OPENSHMEM=ON
+   # For rocSHMEM (GPU PGAS), add rocshmem_api to ROCM_DOMAINS
+   export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocshmem_api
    export ROCPROFSYS_TRACE=ON
    export ROCPROFSYS_PROFILE=ON
 
@@ -417,7 +553,9 @@ For complete control over all communication layers:
    export ROCPROFSYS_USE_MPIP=ON
    export ROCPROFSYS_USE_RCCLP=ON
    export ROCPROFSYS_USE_UCX=ON
-   export ROCPROFSYS_USE_SHMEM=ON
+   export ROCPROFSYS_USE_OPENSHMEM=ON
+   # For rocSHMEM (GPU PGAS), add rocshmem_api to ROCM_DOMAINS
+   export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocshmem_api
    export ROCPROFSYS_TRACE=ON
    export ROCPROFSYS_PROFILE=ON
 
@@ -435,14 +573,14 @@ When profiling communication-intensive applications, consider the following reco
 
 **Start with High-Level Profiling**
 
-* Begin by enabling only MPI or RCCL profiling to understand the overall communication patterns
-* Use flat profiles to identify high-overhead communication operations
-* Look for functions with high call counts or large cumulative times
+* Begin by enabling only MPI or RCCL profiling to understand the overall communication patterns.
+* Use flat profiles to identify high-overhead communication operations.
+* Look for functions with high call counts or large cumulative times.
 
 **Add Lower-Level Details**
 
-* Enable UCX profiling (``ROCPROFSYS_USE_UCX=ON``) to understand transport-layer behavior and RDMA utilization
-* Use hierarchical profiles to correlate high-level operations with low-level primitives
+* Enable UCX profiling (``ROCPROFSYS_USE_UCX=ON``) to understand transport-layer behavior and RDMA utilization.
+* Use hierarchical profiles to correlate high-level operations with low-level primitives.
 
 **Minimize Overhead**
 
@@ -473,14 +611,14 @@ Here is a complete configuration example for comprehensive communication profili
    ROCPROFSYS_USE_MPIP                = ON
    ROCPROFSYS_USE_RCCLP               = ON
    ROCPROFSYS_USE_UCX                 = ON
-   ROCPROFSYS_USE_SHMEM               = ON
+   ROCPROFSYS_USE_OPENSHMEM           = ON
 
    # Enable tracing and profiling
    ROCPROFSYS_TRACE                   = ON
    ROCPROFSYS_PROFILE                 = ON
 
-   # GPU profiling
-   ROCPROFSYS_ROCM_DOMAINS            = hip_runtime_api,kernel_dispatch,memory_copy
+   # GPU profiling (add rocshmem_api for rocSHMEM GPU PGAS tracing)
+   ROCPROFSYS_ROCM_DOMAINS            = hip_runtime_api,kernel_dispatch,memory_copy,rocshmem_api
 
    # Sampling configuration
    ROCPROFSYS_USE_SAMPLING            = ON

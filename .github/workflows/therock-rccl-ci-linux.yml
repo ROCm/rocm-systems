@@ -7,8 +7,27 @@ on:
         type: string
       artifact_group:
         type: string
+      event_name:
+        type: string
+        default: ''
+      package_version:
+        type: string
+        default: ""
       cmake_options:
         type: string
+      artifact_run_id:
+        type: string
+        default: ''
+      test_scope:
+        description: 'Test scope: smoke (22 curated tests) or all'
+        type: string
+        default: 'smoke'
+      notify_email:
+        type: string
+        default: ''
+      notify_webhook:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -16,16 +35,17 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build Linux Packages
-    runs-on: azure-linux-scale-rocm
+    # Skipped when artifact_run_id is provided (reuse mode). Downstream jobs
+    # use `!cancelled()` in their `if:` so they still run when this is skipped.
+    if: ${{ inputs.artifact_run_id == '' }}
+    runs-on: aws-linux-scale-rocm-prod
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:0e2c1b31f7e1661a3895508962f6c4e740a2dfd4575b9bfac87d538e3af20079 # 2026-03-02T08:49:42.738Z
-      options: -v /runner/config:/home/awsconfig/
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2 # 2026-04-16
     env:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
-      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
       CACHE_DIR: ${{ github.workspace }}/.container-cache
       # The ccache.conf will be written by setup_ccache.py before this gets used.
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
@@ -38,7 +58,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 702d15844f84a3a8401a24185bd4131008f0e640 # 2026-04-16 commit
+          ref: 2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
 
       - name: Install python deps
         run: |
@@ -73,7 +93,7 @@ jobs:
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-          package_version: ADHOCBUILD
+          package_version: ${{ inputs.package_version }}
           extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
@@ -82,8 +102,8 @@ jobs:
       - name: Build therock-dist
         run: cmake --build TheRock/build
 
-      - name: Build therock-archives
-        run: cmake --build TheRock/build --target therock-archives
+      - name: Build therock-artifacts
+        run: cmake --build TheRock/build --target therock-artifacts
 
       - name: Report
         #if: ${{ !cancelled() }}
@@ -91,9 +111,6 @@ jobs:
           echo "Full SDK du:"
           echo "------------"
           du -h -d 1 TheRock/build/dist/rocm
-          echo "Artifact Archives:"
-          echo "------------------"
-          ls -lh TheRock/build/artifacts/*.tar.xz
           echo "Artifacts:"
           echo "----------"
           du -h -d 1 TheRock/build/artifacts
@@ -109,6 +126,13 @@ jobs:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
 
+      - name: Push artifacts
+        run: |
+          python3 TheRock/build_tools/artifact_manager.py push \
+            --run-id ${{ github.run_id }} \
+            --build-dir TheRock/build \
+            --stage all
+
       - name: Post Build Upload
         if: always()
         run: |
@@ -120,7 +144,8 @@ jobs:
 
   therock-test-linux-multi-node:
     name: "Test multi-node"
-    if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
+    # TODO: Re-enable gfx94X-dcgpu and gfx950-dcgpu multi-node tests once the clusters are stable again.
+    if: false
     permissions:
       contents: read
       id-token: write
@@ -129,17 +154,57 @@ jobs:
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
-      test_runs_on: linux-vultr-mi325-scale-runner # Disabling gfx950 runner till lab move completes
-      artifact_run_id: ${{ github.run_id }}
+      test_runs_on: ruby-linux-slurm-scale-runner
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
 
   therock-test-linux-single-node:
     name: "Test single-node"
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: linux-gfx942-8gpu-ossci-rocm
-      artifact_run_id: ${{ github.run_id }}
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+
+  therock-test-pytorch-distributed:
+    name: "Test PyTorch distributed (scheduled)"
+    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-pytorch-distributed.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: linux-gfx942-8gpu-ossci-rocm
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      test_scope: ${{ inputs.test_scope }}
+      notify_email: ${{ inputs.notify_email }}
+      notify_webhook: ${{ inputs.notify_webhook }}
+
+  therock-test-jax-collective:
+    name: "Test JAX collective (scheduled)"
+    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-jax-collective.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: linux-gfx942-8gpu-ossci-rocm
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      notify_email: ${{ inputs.notify_email }}
+      notify_webhook: ${{ inputs.notify_webhook }}
+
+  therock-test-rocprof:
+    name: "Test rocprofv3 smoke"
+    if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-rocprof.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: linux-gfx942-8gpu-ossci-rocm
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      notify_email: ${{ inputs.notify_email }}
+      notify_webhook: ${{ inputs.notify_webhook }}

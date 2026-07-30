@@ -33,7 +33,7 @@
 #include <iomanip>
 #include <cassert>
 
-#include "ip_discovery.h"
+#include "lib/aqlprofile/core/ip_discovery.h"
 
 #define PCI_BUS_NUM(x)  (((x) >> 8) & 0xff)
 #define PCI_SLOT(devfn) (((devfn) >> 3) & 0x1f)

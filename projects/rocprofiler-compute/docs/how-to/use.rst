@@ -39,12 +39,6 @@ the gpu model. Use ``--output-directory`` to override the output location.
 
 .. note::
 
-   ``--path`` and ``--subpath`` are deprecated for profile mode and will be
-   removed in a future release. Use ``--output-directory`` with parameterized
-   placeholders instead.
-
-.. note::
-
    To collect all requested profile information, ROCm Compute Profiler might replay kernels
    multiple times.
 
@@ -148,7 +142,7 @@ Analyze mode
    generated metrics. It generates metrics from the entirety of your profiled
    application or a subset identified through the ROCm Compute Profiler CLI analysis filters.
 
-   To generate a lightweight GUI interface, you can add the ``--gui`` flag to your
+   To generate a lightweight GUI interface, you can add the ``--experimental --gui`` flags to your
    analysis command.
 
    .. code-block:: shell
@@ -157,11 +151,11 @@ Analyze mode
 
    Analyze mode now supports a lightweight Text-based User Interface (TUI) that
    provides an interactive terminal experience for enhanced usability. To enable TUI mode,
-   use the ``--tui`` flag when running the analyze command:
+   use the ``--experimental --tui`` flags when running the analyze command:
 
    .. code-block:: shell
 
-      $ rocprof-compute analyze --tui
+      $ rocprof-compute analyze --experimental --tui
 
 See :doc:`analyze/mode` to learn about these modes in depth and to get started
 with analysis using ROCm Compute Profiler.
@@ -218,7 +212,7 @@ The following table lists ROCm Compute Profiler's basic operations, their
 
    * - :doc:`Launch standalone GUI from CLI </how-to/analyze/standalone-gui>`
      - ``analyze``
-     - ``--path``, ``--gui``
+     - ``--path``, ``--experimental``, ``--gui``
 
    * - :doc:`Interact with profiling results from CLI </how-to/analyze/cli>`
      - ``analyze``

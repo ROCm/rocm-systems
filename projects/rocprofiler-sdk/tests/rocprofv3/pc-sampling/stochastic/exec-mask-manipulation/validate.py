@@ -62,7 +62,12 @@ def test_validate_pc_sampling_exec_mask_manipulation_json(
 # ======================== Validating fields specific for stochastic sampling
 
 
-def test_validate_pc_sampling_stochastic_specific_csv(input_csv: pd.DataFrame):
+def test_validate_pc_sampling_stochastic_specific_csv(
+    input_csv: pd.DataFrame, input_agent_info_csv: pd.DataFrame
+):
+    if tmp_disable_for_gfx12(input_agent_info_csv):
+        pytest.skip("Stochastic sampling specific checks are not implemented for GFX12")
+
     from rocprofiler_sdk.pc_sampling.stochastic.csv.gfx9 import (
         validate_stochastic_samples_csv,
     )
@@ -70,12 +75,25 @@ def test_validate_pc_sampling_stochastic_specific_csv(input_csv: pd.DataFrame):
     validate_stochastic_samples_csv(input_csv)
 
 
-def test_validate_pc_sampling_stochastic_specific_json(input_json):
+def test_validate_pc_sampling_stochastic_specific_json(
+    input_json, input_agent_info_csv: pd.DataFrame
+):
+    if tmp_disable_for_gfx12(input_agent_info_csv):
+        pytest.skip("Stochastic sampling specific checks are not implemented for GFX12")
+
     from rocprofiler_sdk.pc_sampling.stochastic.json.gfx9 import (
         validate_stochastic_samples_json,
     )
 
     validate_stochastic_samples_json(input_json["rocprofiler-sdk-tool"])
+
+
+def tmp_disable_for_gfx12(input_agent_info_csv: pd.DataFrame):
+    """
+    If any of the agents are from GFX12 family, we temporarily disable
+    stochastic sampling specific checks, because they're not fully implemented.
+    """
+    return input_agent_info_csv["Name"].str.contains("gfx12").any()
 
 
 if __name__ == "__main__":

@@ -1,3 +1,10 @@
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -6,23 +13,16 @@
 #ifdef NCCL_BUILD_RDMA_CORE
 /* RDMA-core linking mode. Symbols are pointers to linked IB Verbs */
 
-#define ASSIGN_SYM(container, symbol, name) container->name= &symbol;
+#define ASSIGN_SYM(container, symbol, name) container->name = &symbol;
 
 // Passthrough function for ibv_reg_mr macro in verbs.h
-struct ibv_mr* ibv_internal_reg_mr(
-      struct ibv_pd* pd,
-      void* addr,
-      size_t length,
-      int access) {
-    return ibv_reg_mr(pd, addr, length, access);
-  }
+struct ibv_mr* ibv_internal_reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access) {
+  return ibv_reg_mr(pd, addr, length, access);
+}
 
 // Passthrough function for ibv_internal_query_port macro in verbs.h
-int ibv_internal_query_port(
-      struct ibv_context* context,
-      uint8_t port_num,
-      struct ibv_port_attr* port_attr) {
-    return ibv_query_port(context, port_num, port_attr);
+int ibv_internal_query_port(struct ibv_context* context, uint8_t port_num, struct ibv_port_attr* port_attr) {
+  return ibv_query_port(context, port_num, port_attr);
 }
 
 ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
@@ -50,7 +50,7 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   ASSIGN_SYM(ibvSymbols, ibv_destroy_qp, ibv_internal_destroy_qp);
   ASSIGN_SYM(ibvSymbols, ibv_fork_init, ibv_internal_fork_init);
   ASSIGN_SYM(ibvSymbols, ibv_event_type_str, ibv_internal_event_type_str);
-  
+
   ASSIGN_SYM(ibvSymbols, ibv_query_ece, ibv_internal_query_ece);
   ASSIGN_SYM(ibvSymbols, ibv_set_ece, ibv_internal_set_ece);
 
@@ -68,35 +68,40 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
 
 // IBVERBS Library versioning
 #define IBVERBS_VERSION "IBVERBS_1.1"
+#define NCCL_IBVERBS_LIBS 3
 
 ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   static void* ibvhandle = NULL;
   void* tmp;
   void** cast;
+  const char* envIbVerbsLib = ncclGetEnv("NCCL_IBVERBS_LIB");
+  const char* ibVerbsLib[NCCL_IBVERBS_LIBS] = {envIbVerbsLib, "libibverbs.so", "libibverbs.so.1"};
+  if (envIbVerbsLib) INFO(NCCL_ENV | NCCL_INIT, "NCCL_IBVERBS_LIB set by environment to %s", envIbVerbsLib);
 
-  ibvhandle=dlopen("libibverbs.so", RTLD_NOW);
-  if (!ibvhandle) {
-    ibvhandle=dlopen("libibverbs.so.1", RTLD_NOW);
-    if (!ibvhandle) {
-      INFO(NCCL_INIT, "Failed to open libibverbs.so[.1]");
-      goto teardown;
-    }
+  for (int i = 0; i < NCCL_IBVERBS_LIBS; i++) {
+    if (ibVerbsLib[i] == nullptr) continue;
+    ibvhandle = dlopen(ibVerbsLib[i], RTLD_NOW);
+    if (ibvhandle) break;
+    INFO(NCCL_INIT, "Could not open %s", ibVerbsLib[i]);
   }
+  if (ibvhandle == nullptr) goto teardown;
 
-#define LOAD_SYM(handle, symbol, funcptr) do {           \
-    cast = (void**)&funcptr;                             \
-    tmp = dlvsym(handle, symbol, IBVERBS_VERSION);       \
-    if (tmp == NULL) {                                   \
-      WARN("dlvsym failed on %s - %s version %s", symbol, dlerror(), IBVERBS_VERSION);  \
-      goto teardown;                                     \
-    }                                                    \
-    *cast = tmp;                                         \
+#define LOAD_SYM(handle, symbol, funcptr) \
+  do { \
+    cast = (void**)&funcptr; \
+    tmp = dlvsym(handle, symbol, IBVERBS_VERSION); \
+    if (tmp == NULL) { \
+      WARN("dlvsym failed on %s - %s version %s", symbol, dlerror(), IBVERBS_VERSION); \
+      goto teardown; \
+    } \
+    *cast = tmp; \
   } while (0)
 
 // Attempt to load a specific symbol version - fail silently
-#define LOAD_SYM_VERSION(handle, symbol, funcptr, version) do {  \
-    cast = (void**)&funcptr;                                     \
-    *cast = dlvsym(handle, symbol, version);                     \
+#define LOAD_SYM_VERSION(handle, symbol, funcptr, version) \
+  do { \
+    cast = (void**)&funcptr; \
+    *cast = dlvsym(handle, symbol, version); \
   } while (0)
 
   LOAD_SYM(ibvhandle, "ibv_get_device_list", ibvSymbols->ibv_internal_get_device_list);
@@ -127,7 +132,7 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   LOAD_SYM(ibvhandle, "ibv_event_type_str", ibvSymbols->ibv_internal_event_type_str);
 
   LOAD_SYM_VERSION(ibvhandle, "ibv_query_ece", ibvSymbols->ibv_internal_query_ece, "IBVERBS_1.10");
-  LOAD_SYM_VERSION(ibvhandle, "ibv_set_ece",   ibvSymbols->ibv_internal_set_ece, "IBVERBS_1.10");
+  LOAD_SYM_VERSION(ibvhandle, "ibv_set_ece", ibvSymbols->ibv_internal_set_ece, "IBVERBS_1.10");
 
   return ncclSuccess;
 

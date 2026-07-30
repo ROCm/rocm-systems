@@ -251,3 +251,11 @@ install(
     DESTINATION tests/rocm-debug-agent
     COMPONENT tests
 )
+
+# Also install the CI wrapper script to invoke rocr-debug-agent tests.
+# This is used in the context of TheRock CI.
+install(
+    PROGRAMS ../.github/scripts/test_rocr-debug-agent.py
+    DESTINATION tests/rocm-debug-agent
+    COMPONENT tests
+)

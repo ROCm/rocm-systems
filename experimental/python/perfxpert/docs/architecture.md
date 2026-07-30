@@ -14,14 +14,37 @@ All four resolve into the same session/runtime layer in
 
 ## Agents (spec §2)
 
-```
-Root (intent router)
- ├─ Analysis  (classifies bottleneck, gathers metrics)
- ├─ Recommendation (hands off to specialists)
- │   ├─ compute_specialist
- │   ├─ memory_specialist
- │   └─ latency_specialist
- └─ Correctness (enforces 5 gates on proposed changes)
+```mermaid
+flowchart TD
+  classDef brain fill:#fff8c7,stroke:#9a6b00,color:#3d2b00,stroke-width:2px
+  classDef specialist fill:#eaf8ef,stroke:#227343,color:#143b26,stroke-width:1px
+
+  subgraph brainSection["🧠 PerfXpert agent brain"]
+    root["Root<br/>intent router"]
+    analysis["Analysis<br/>classifies bottlenecks + gathers metrics"]
+    recommendation["Recommendation<br/>hands off to specialists"]
+    correctness["Correctness<br/>summarizes gate verdicts"]
+  end
+
+  compute["compute_specialist"]
+  memory["memory_specialist"]
+  latency["latency_specialist"]
+  diff["diff_specialist"]
+
+  root --> analysis
+  root --> recommendation
+  root --> correctness
+  analysis --> compute
+  analysis --> memory
+  analysis --> latency
+  analysis --> diff
+  recommendation --> compute
+  recommendation --> memory
+  recommendation --> latency
+  recommendation --> diff
+
+  class root,analysis,recommendation,correctness brain
+  class compute,memory,latency,diff specialist
 ```
 
 8 agents total. Each has ≤ 400 lines of fence + ≤ 5 tools + ≤ 10 input / ≤ 5 output fields. Narrow scope is CI-enforced.
@@ -141,8 +164,6 @@ no longer present:
 
 - `interactive.py`, `llm_conversation.py` — bespoke LLM-session state machine (removed in Phase 7.1), superseded by OpenAI Agents SDK sessions.
 - `perfxpert/ai_analysis/` module — removed in Phase 7.1 and superseded by `perfxpert/agents/`.
-- `PERFXPERT_LEGACY` env var — no longer recognized (removed in Phase 7.1).
-- `PERFXPERT_USE_AGENTS` env var — no longer recognized (removed in Phase 7.1).
 
 Consult the git history or [CHANGELOG.md](../CHANGELOG.md) for the
 old code.

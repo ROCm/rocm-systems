@@ -30,9 +30,9 @@
 #include <utility>
 #include <vector>
 
-#include "pm4/cmd_config.h"
-#include "pm4/cmd_builder.h"
-#include "src/core/include/spm_common.hpp"
+#include "lib/aqlprofile/pm4/cmd_config.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/core/spm_common.hpp"
 
 namespace pm4_builder
 {
@@ -361,7 +361,7 @@ public:
                 is_spm_inited = true;
                 if(block_info->attr & CounterBlockSpmGlobalAttr)
                 {
-                    // for each instance of a global block we progam its delay
+                    // for each instance of a global block we program its delay
                     for(size_t j = 0; j < block_info->instance_count; ++j)
                     {
                         builder.BuildWriteUConfigRegPacket(

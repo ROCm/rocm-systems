@@ -1,0 +1,15 @@
+[package]
+name = "mirage_dashboard"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[features]
+# Build and embed the React/Vite single-page app. This is the only
+# thing that requires the Node.js/npm toolchain. With the feature off
+# the crate compiles to an empty library and `build.rs` does nothing,
+# so a plain `cargo build` never touches Node. Enabled transitively by
+# `mirage_daemon/webui` (and hence the root `mirage` `webui` feature).
+webui = []
+
+[dependencies]

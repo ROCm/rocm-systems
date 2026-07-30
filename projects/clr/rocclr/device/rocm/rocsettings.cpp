@@ -44,7 +44,7 @@ Settings::Settings() {
 
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
   pinnedMinXferSize_ =
-      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 1 * Mi : GPU_PINNED_MIN_XFER_SIZE * Mi;
+      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 64 * Ki : GPU_PINNED_MIN_XFER_SIZE * Mi;
 
   sdmaCopyThreshold_ = GPU_FORCE_BLIT_COPY_SIZE * Ki;
 
@@ -73,6 +73,7 @@ Settings::Settings() {
   barrier_value_packet_ = false;
   ext_dispatch_packet_ = false;
   kernel_arg_impl_ = KernelArgImpl::HostKernelArgs;
+  aql_device_ring_buf_ = false;
   gwsInitSupported_ = true;
   limit_blit_wg_ = 16;
 
@@ -87,7 +88,7 @@ Settings::Settings() {
 
 // ================================================================================================
 bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
-                      bool isXgmi, bool hasValidHDPFlush) {
+                      bool isXgmi) {
   uint32_t gfxipMajor = isa.versionMajor();
   uint32_t gfxipMinor = isa.versionMinor();
   uint32_t gfxStepping = isa.versionStepping();
@@ -145,11 +146,12 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
 
-  if (gfxipMajor == 9 && gfxipMinor >= 4) {
+  if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
+      (gfxipMajor == 12 && gfxipMinor >= 5)) {
     sdma_swap_supported_ = true;
   }
 
-  setKernelArgImpl(isa, isXgmi, hasValidHDPFlush);
+  setKernelArgImpl(isa, isXgmi);
 
   if (gfxipMajor >= 10) {
      enableWave32Mode_ = true;
@@ -159,7 +161,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
      } else {
         enableWgpMode_ = GPU_ENABLE_WGP_MODE;
      }
-     if (gfxipMinor == 1) {
+     if (gfxipMajor == 10 && gfxipMinor == 1) {
        // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
        // TODO: This should be updated when ROCr support custom pitch
        imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
@@ -184,11 +186,25 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if (gfxipMajor == 12 && gfxipMinor >= 5) {
     ext_dispatch_packet_ = true;
     groupMemCarveout_ = true;
-    groupMemPref_.totalSharedBanks = 7;
-    groupMemPref_.preferLDSBanks = 5;
-    groupMemPref_.preferCacheLDSBanks = 2;
-    groupMemPref_.preferEqualLDSBanks = 3;
   }
+
+  // SDMA indirect copy uses the gfx1250 wait/signal-indirect SDMA
+  // packet that dereferences a pointer-to-pointer slot before issuing the
+  // copy.
+  if (gfxipMajor == 12 && gfxipMinor == 5) {
+    sdma_indirect_supported_ = true;
+  }
+
+#if defined(_WIN32)
+  if (gfxipMajor >= 11) {
+    // Due to driver limitation,
+    // D3D10/11 sharing extensions are only supported on GFX11 or later,
+    // and D3D9 sharing extension is not supported on any hardware as it is deprecated.
+    enableExtension(ClKhrD3d10Sharing);
+    enableExtension(ClKhrD3d11Sharing);
+    enableExtension(ClAmdPlanarYuv);
+  }
+#endif
 
   // Override current device settings
   override();
@@ -234,7 +250,7 @@ void Settings::override() {
 }
 
 // ================================================================================================
-void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidHDPFlush) {
+void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
   const uint32_t gfxipMajor = isa.versionMajor();
   const uint32_t gfxipMinor = isa.versionMinor();
   const uint32_t gfxStepping = isa.versionStepping();
@@ -242,33 +258,22 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   const bool isGfx94x = gfxipMajor == 9 && gfxipMinor >= 4 &&
                         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2);
   const bool isGfx90a = (gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10);
-  const bool isPreGfx908 =
-      (gfxipMajor < 9) || ((gfxipMajor == 9) && (gfxipMinor == 0) && (gfxStepping < 8));
-  const bool isGfx101x = (gfxipMajor == 10) && ((gfxipMinor == 0) || (gfxipMinor == 1));
-  const bool isGfx125x =
-      (gfxipMajor == 12) && ((gfxipMinor >= 5));
+  const bool isGfx125x = (gfxipMajor == 12) && ((gfxipMinor >= 5));
 
   auto kernelArgImpl = KernelArgImpl::HostKernelArgs;
-
-  hasValidHDPFlush &= DEBUG_CLR_KERNARG_HDP_FLUSH_WA;
 
   if (isXgmi) {
     // The XGMI-connected path does not require the manual memory ordering
     // workarounds that the PCIe connected path requires
     kernelArgImpl = KernelArgImpl::DeviceKernelArgs;
-  } else if (hasValidHDPFlush) {
-    // If the HDP flush register is valid implement the HDP flush to MMIO
-    // workaround.
-    if (!(isPreGfx908 || isGfx101x)) {
-      kernelArgImpl = KernelArgImpl::DeviceKernelArgsHDP;
-    }
   } else if (isGfx94x || isGfx90a || isGfx125x) {
     // Implement the kernel argument readback workaround
     // (write all args -> sfence -> write last byte -> mfence -> read last byte)
     kernelArgImpl = KernelArgImpl::DeviceKernelArgsReadback;
   }
 
-  // Enable device kernel args for gfx94x for now
+  // Enable device kernel args by default on gfx94x/gfx125x. Device-memory AQL
+  // ring buffers are controlled separately via DEBUG_CLR_AQL_DEV_QUEUE below.
   if (isGfx94x || isGfx125x) {
     kernel_arg_impl_ = kernelArgImpl;
     kernel_arg_opt_ = true;
@@ -277,5 +282,7 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
     kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
   }
+
+  aql_device_ring_buf_ = (DEBUG_CLR_AQL_DEV_QUEUE > 0);
 }
 }  // namespace amd::roc

@@ -106,6 +106,16 @@ def test_check_binary_missing_returns_false(monkeypatch):
     assert "install" in detail.lower() or "not found" in detail.lower()
 
 
+def test_require_tool_accepts_explicit_binary_path_for_registered_dep(tmp_path):
+    fake_cxx = tmp_path / "amdclang++"
+    fake_cxx.write_text("#!/bin/sh\n")
+    fake_cxx.chmod(0o755)
+
+    detail = require_tool("amdclang++", executable=str(fake_cxx))
+
+    assert str(fake_cxx) in detail
+
+
 def test_check_pylib_present_returns_true():
     # mcp is a required runtime dep and should be importable
     ok, detail = check_tool_available("mcp")

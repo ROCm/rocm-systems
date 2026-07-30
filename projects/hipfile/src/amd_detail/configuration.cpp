@@ -6,8 +6,8 @@
 #include "configuration.h"
 #include "environment.h"
 #include "hip.h"
-#include "static.h"
 
+#include <cstdio>
 #include <optional>
 
 using namespace hipFile;
@@ -15,9 +15,9 @@ using namespace hipFile;
 bool
 Configuration::fastpath() const noexcept
 {
-    HIPFILE_STATIC bool fastpath_env{!Environment::force_compat_mode().value_or(false)};
-    HIPFILE_STATIC bool readExists{!!getHipAmdFileReadPtr()};
-    HIPFILE_STATIC bool writeExists{!!getHipAmdFileWritePtr()};
+    static bool fastpath_env{!Environment::force_compat_mode().value_or(false)};
+    static bool readExists{!!getHipAmdFileReadPtr()};
+    static bool writeExists{!!getHipAmdFileWritePtr()};
     return readExists && writeExists && m_fastpath_override.value_or(fastpath_env);
 }
 
@@ -30,7 +30,18 @@ Configuration::fastpath(bool enabled) noexcept
 bool
 Configuration::fallback() const noexcept
 {
-    HIPFILE_STATIC bool fallback_env{Environment::allow_compat_mode().value_or(true)};
+    static bool fallback_env{[] {
+        bool force_compat = Environment::force_compat_mode().value_or(false);
+        bool allow_compat = Environment::allow_compat_mode().value_or(true);
+        if (force_compat && !allow_compat) {
+            // TODO: replace with logging
+            fprintf(stderr, "hipFile: HIPFILE_FORCE_COMPAT_MODE=true and HIPFILE_ALLOW_COMPAT_MODE=false "
+                            "would disable all I/O backends; enabling the fallback path to avoid "
+                            "failing all I/O.\n");
+            return true;
+        }
+        return allow_compat;
+    }()};
     return m_fallback_override.value_or(fallback_env);
 }
 
@@ -43,13 +54,13 @@ Configuration::fallback(bool enabled) noexcept
 unsigned int
 Configuration::statsLevel() const noexcept
 {
-    HIPFILE_STATIC unsigned int stats_level_env{Environment::stats_level().value_or(1)};
+    static unsigned int stats_level_env{Environment::stats_level().value_or(1)};
     return stats_level_env;
 }
 
 bool
 Configuration::unsupportedFileSystems() const noexcept
 {
-    HIPFILE_STATIC bool unsupported_file_systems_env{Environment::unsupported_file_systems().value_or(false)};
+    static bool unsupported_file_systems_env{Environment::unsupported_file_systems().value_or(false)};
     return unsupported_file_systems_env;
 }

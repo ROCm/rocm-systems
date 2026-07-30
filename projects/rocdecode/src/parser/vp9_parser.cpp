@@ -44,7 +44,7 @@ Vp9VideoParser::~Vp9VideoParser() {
 }
 
 rocDecStatus Vp9VideoParser::Initialize(RocdecParserParams *p_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_params));
     rocDecStatus ret;
     if ((ret = RocVideoParser::Initialize(p_params)) != ROCDEC_SUCCESS) {
         FunctionExitLog(g_rocdec_logger);
@@ -60,13 +60,13 @@ rocDecStatus Vp9VideoParser::Initialize(RocdecParserParams *p_params) {
 }
 
 rocDecStatus Vp9VideoParser::UnInitialize() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus Vp9VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_data));
     if (p_data->payload && p_data->payload_size) {
         DebugLog(g_rocdec_logger, ROCDEC_STR("Parsing picture ") + ROCDEC_TOSTR(pic_count_) + ROCDEC_STR(" with payload size ") + ROCDEC_TOSTR(p_data->payload_size) + ROCDEC_STR(" bytes ..."));
         curr_pts_ = p_data->pts;
@@ -91,7 +91,7 @@ rocDecStatus Vp9VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 }
 
 ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t pic_data_size) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_stream) + ", " + ROCDEC_TOSTR(pic_data_size));
     ParserResult ret = PARSER_OK;
 
     CheckSuperframe(p_stream, pic_data_size);
@@ -207,7 +207,7 @@ void Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_dat
 }
 
 ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_header) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(p_uncomp_header));
     video_format_params_.codec = rocDecVideoCodec_VP9;
     video_format_params_.frame_rate.numerator = frame_rate_.numerator;
     video_format_params_.frame_rate.denominator = frame_rate_.denominator;
@@ -236,7 +236,7 @@ ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_h
     video_format_params_.display_area.bottom = p_uncomp_header->frame_size.frame_height;
     video_format_params_.bitrate = 0;
 
-    // Dispaly aspect ratio
+    // Display aspect ratio
     int disp_width = (video_format_params_.display_area.right - video_format_params_.display_area.left);
     int disp_height = (video_format_params_.display_area.bottom - video_format_params_.display_area.top);
     int gcd = std::__gcd(disp_width, disp_height); // greatest common divisor
@@ -261,7 +261,7 @@ ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_h
 }
 
 ParserResult Vp9VideoParser::SendPicForDecode() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     Vp9UncompressedHeader *p_uncomp_header = &uncompressed_header_;
     dec_pic_params_ = {0};
 
@@ -582,7 +582,7 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
     p_uncomp_header->header_size_in_bytes = Parser::ReadBits(p_stream, offset, 16);
 
     // Arbitrary size change is only supported on key frames. For other frame types, particularly inter-coded frames, only size down is
-    // supported where the existing surface can be re-used.
+    // supported where the existing surface can be reused.
     if (pic_width_ != p_uncomp_header->frame_size.frame_width || pic_height_ != p_uncomp_header->frame_size.frame_height) {
         pic_width_ = p_uncomp_header->frame_size.frame_width;
         pic_height_ = p_uncomp_header->frame_size.frame_height;

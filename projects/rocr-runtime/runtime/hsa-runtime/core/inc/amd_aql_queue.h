@@ -80,6 +80,30 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Destroy ref counted queue
   void Destroy() override;
 
+  /// @brief Invoke the per-queue error callback if one is registered
+  /// and it is not the default handler.
+  void InvokeErrorCallback(hsa_status_t error) {
+    if (errors_callback_ != nullptr &&
+        errors_callback_ != core::Queue::DefaultErrorHandler) {
+      errors_callback_(error, public_handle(), errors_data_);
+    }
+  }
+
+  /// @brief Mark this queue as having experienced a VM fault.
+  /// Called by the per-queue ExceptionHandler thread on memory-fault exceptions.
+  void MarkVMFaulted() { vm_faulted_.store(true, std::memory_order_release); }
+
+  /// @brief Check whether this queue has been marked as VM-faulted.
+  bool IsVMFaulted() const { return vm_faulted_.load(std::memory_order_acquire); }
+
+  /// @brief Store the fault address and reason bitmask on this queue.
+  /// Called by VMFaultHandler after it identifies which queues faulted,
+  /// so that hsa_amd_queue_get_info() can report the details.
+  void SetVMFaultDetails(uint64_t address, uint32_t reason) {
+    vm_fault_address_ = address;
+    vm_fault_reason_ = reason;
+  }
+
   /// @brief Atomically reads the Read index of with Acquire semantics
   ///
   /// @return uint64_t Value of read index
@@ -232,6 +256,15 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Get HSA queue ID for core dump filtering
   HSA_QUEUEID aql_queue_id() const { return queue_id_; }
 
+  /// @brief Halt the queue without destroying it or fencing memory.
+  void Suspend();
+
+  /// @brief Resume the queue.
+  void Resume();
+
+  /// @brief Check if the queue is currently suspended.
+  bool IsSuspended() const { return suspended_; }
+
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
@@ -267,12 +300,6 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   void FreeMainScratchSpace();
   void FreeAltScratchSpace();
-
-  /// @brief Halt the queue without destroying it or fencing memory.
-  void Suspend();
-
-  /// @brief Resume the queue.
-  void Resume();
 
   /// @brief Handle insufficient scratch
   void HandleInsufficientScratch(hsa_signal_value_t& error_code, hsa_signal_value_t& waitVal,
@@ -335,6 +362,12 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // Exception notification signal
   Signal* exception_signal_;
 
+  // Per-queue VM fault state, set by ExceptionHandler and stamped
+  // with address/reason by VMFaultHandler.
+  std::atomic<bool> vm_faulted_{false};
+  uint64_t          vm_fault_address_{0};
+  uint32_t          vm_fault_reason_{0};
+
   // CU mask lock
   std::mutex mask_lock_;
 
@@ -366,8 +399,8 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
     uint8_t minor_;
   };
 
-  struct metadata_prefetch_pkt_version dispatch_version_;
-  struct metadata_prefetch_pkt_version barrier_version_;
+  metadata_prefetch_pkt_version dispatch_version_;
+  metadata_prefetch_pkt_version barrier_version_;
 
   // Shared event used for queue errors
   static __forceinline HsaEvent*& queue_event() {

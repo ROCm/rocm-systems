@@ -1,0 +1,119 @@
+name: profiler-hub Coverage
+run-name: profiler-hub-coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-coverage.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+  pull_request:
+    paths:
+      - '.github/workflows/profiler-hub-coverage.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CC: gcc
+      CXX: g++
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            profilers/profiler-hub
+            .github/workflows
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            gcc g++ \
+            lcov gcovr \
+            libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
+            libgtest-dev libgmock-dev libbenchmark-dev
+
+      - name: Configure
+        working-directory: profilers/profiler-hub
+        run: |
+          cmake --version
+          gcovr --version | head -1
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPROFILER_HUB_ENABLE_COVERAGE=ON \
+            -DPROFILER_HUB_BUILD_TESTS=ON \
+            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF
+
+      - name: Build
+        working-directory: profilers/profiler-hub
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Generate Cobertura coverage report
+        working-directory: profilers/profiler-hub
+        run: |
+          set -o pipefail
+          cmake --build build --target coverage-xml 2>&1 | tee coverage.log
+          test -f build/coverage/coverage.xml
+
+      - name: Summarize coverage
+        working-directory: profilers/profiler-hub
+        run: |
+          LINES=$(grep -oE 'lines: [0-9.]+%' coverage.log | tail -1 || echo "lines: n/a")
+          FUNCS=$(grep -oE 'functions: [0-9.]+%' coverage.log | tail -1 || echo "functions: n/a")
+          BRANCHES=$(grep -oE 'branches: [0-9.]+%' coverage.log | tail -1 || echo "branches: n/a")
+          {
+            echo "## Coverage summary"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| ${LINES%:*} | ${LINES#*: } |"
+            echo "| ${FUNCS%:*} | ${FUNCS#*: } |"
+            echo "| ${BRANCHES%:*} | ${BRANCHES#*: } |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "${LINES} | ${FUNCS} | ${BRANCHES}"
+
+      - name: Enforce line coverage threshold
+        working-directory: profilers/profiler-hub
+        env:
+          COVERAGE_LINES_THRESHOLD: '80'
+        run: |
+          set -euo pipefail
+          LINES_PCT=$(grep -oE 'lines: [0-9.]+%' coverage.log \
+                        | tail -1 \
+                        | grep -oE '[0-9.]+')
+          if [ -z "${LINES_PCT}" ]; then
+            echo "ERROR: could not parse line coverage from coverage.log" >&2
+            exit 1
+          fi
+          echo "Line coverage: ${LINES_PCT}% (threshold: ${COVERAGE_LINES_THRESHOLD}%)"
+          awk -v cov="${LINES_PCT}" -v thr="${COVERAGE_LINES_THRESHOLD}" \
+            'BEGIN { exit (cov + 0 >= thr + 0) ? 0 : 1 }' \
+            || { echo "FAIL: line coverage ${LINES_PCT}% below threshold ${COVERAGE_LINES_THRESHOLD}%" >&2; exit 1; }
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-xml
+          path: profilers/profiler-hub/build/coverage/coverage.xml
+          if-no-files-found: warn

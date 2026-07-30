@@ -18,10 +18,10 @@ wave_occupancy_pct:
   medium: 0.50     # 50-75% acceptable
   low: 0.25        # < 25% very poor; VGPRs/LDS likely too high
   unit: fraction
-  description: "Avg waves per CU normalized to theoretical max (128 on CDNA3)"
+  description: "Avg waves per CU normalized to theoretical max (32 on MI300X/CDNA3)"
 
 avg_waves_per_cu:
-  high: 24         # ~75% of 32 max-per-EU on CDNA3
+  high: 24         # ~75% of 32 max waves/CU on MI300X/CDNA3
   medium: 16       # 50%
   low: 8           # 25% — latency-bound signature
   unit: waves

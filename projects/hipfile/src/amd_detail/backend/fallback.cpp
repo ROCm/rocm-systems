@@ -42,8 +42,8 @@ using std::unique_ptr;
 static const size_t DefaultChunkSize = 16 * 1024 * 1024;
 
 int
-Fallback::score(std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size, hoff_t file_offset,
-                hoff_t buffer_offset) const
+Fallback::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,
+                hoff_t file_offset, hoff_t buffer_offset) const
 {
     (void)buffer_offset;
     (void)file;
@@ -72,10 +72,11 @@ ssize_t
 Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                    hoff_t file_offset, hoff_t buffer_offset, size_t chunk_size)
 {
-    StatsIoTracker ioTracker{type, StatsBackend::Fallback};
     if (!Context<Configuration>::get()->fallback()) {
         throw BackendDisabled();
     }
+
+    StatsIoTracker ioTracker{type, StatsBackend::Fallback, file, buffer, size, file_offset, buffer_offset};
 
     size = min(size, hipFile::getMaxRwCount());
 
@@ -122,6 +123,11 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
             if (e.code().value() == EINTR) {
                 continue;
             }
+            Context<StatsCollection>::get()->error(type, StatsBackend::Fallback, size);
+            throw;
+        }
+        catch (...) {
+            Context<StatsCollection>::get()->error(type, StatsBackend::Fallback, size);
             throw;
         }
 
@@ -235,8 +241,9 @@ async_io_bind_params(void *userargs)
 void
 async_io_cleanup(void *userargs)
 {
-    auto     op                = static_cast<AsyncOpFallback *>(userargs);
-    ssize_t *bytes_transferred = op->bytes_transferred;
+    auto     op                         = static_cast<AsyncOpFallback *>(userargs);
+    ssize_t *bytes_transferred          = op->bytes_transferred;
+    ssize_t  bytes_transferred_internal = op->bytes_transferred_internal;
     try {
         Context<AsyncMonitor>::get()->completeOp(op);
     }
@@ -244,7 +251,7 @@ async_io_cleanup(void *userargs)
         *bytes_transferred = -hipFileInternalError;
         return;
     }
-    *bytes_transferred = op->bytes_transferred_internal;
+    *bytes_transferred = bytes_transferred_internal;
 }
 
 void

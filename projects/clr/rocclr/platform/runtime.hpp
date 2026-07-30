@@ -47,7 +47,7 @@ class Runtime : AllStatic {
 
 /*@}*/
 
-class RuntimeTearDown : public HeapObject {
+class RuntimeTearDown {
  public:
   using TearDownCallback = std::function<void()>;
 

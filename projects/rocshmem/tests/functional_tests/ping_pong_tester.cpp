@@ -70,11 +70,11 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 PingPongTester::PingPongTester(TesterArguments args) : Tester(args) {
-  r_buf = (int *)rocshmem_malloc(sizeof(int) * args.num_wgs);
+  r_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs);
   rtt_factor = 2;
 }
 
-PingPongTester::~PingPongTester() { rocshmem_free(r_buf); }
+PingPongTester::~PingPongTester() { free_test_buffer(r_buf); }
 
 void PingPongTester::resetBuffers([[maybe_unused]] size_t size) {
   memset(r_buf, 0, sizeof(int) * args.num_wgs);

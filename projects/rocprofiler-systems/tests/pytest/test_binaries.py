@@ -10,9 +10,19 @@ import json
 import re
 import pytest
 import os
+import shutil
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.rocprof_binary, pytest.mark.ci_enable]
+pytestmark = [pytest.mark.rocprof_binary]
+
+
+def get_sleep_cmd() -> str:
+    """Return the path to sleep, or skip the test if it isn't on PATH."""
+    sleep_cmd = shutil.which("sleep")
+    if not sleep_cmd:
+        pytest.skip("sleep command not found")
+    return sleep_cmd
+
 
 # ============================================================================
 # Avail format consistency data
@@ -27,9 +37,11 @@ EXCLUDED_FROM_JSON_SCHEMA: frozenset[str] = frozenset(
         "ROCPROFSYS_CI",
         "ROCPROFSYS_CONFIG_FILE",
         "ROCPROFSYS_ENABLED",
+        "ROCPROFSYS_LOG_LEVEL",
         "ROCPROFSYS_OUTPUT_PREFIX",
         "ROCPROFSYS_SUPPRESS_CONFIG",
         "ROCPROFSYS_SUPPRESS_PARSING",
+        "ROCPROFSYS_TMPDIR",
     }
 )
 
@@ -61,6 +73,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_USE_AMD_SMI": "domains.gpu.enabled",
     "ROCPROFSYS_AMD_SMI_METRICS": "domains.gpu.metrics",
     "ROCPROFSYS_USE_AINIC": "domains.gpu.ainic",
+    "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING": "domains.gpu.unified_memory_profiling",
     "ROCPROFSYS_USE_PROCESS_SAMPLING": "domains.gpu.process_sampling",
     "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "domains.gpu.process_sampling_freq",
     "ROCPROFSYS_PROCESS_SAMPLING_DURATION": "domains.gpu.process_sampling_duration",
@@ -74,10 +87,11 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_USE_OMPT": "domains.parallel.runtimes.openmp",
     "ROCPROFSYS_USE_KOKKOSP": "domains.parallel.runtimes.kokkos",
     "ROCPROFSYS_USE_RCCLP": "domains.parallel.runtimes.rccl",
-    "ROCPROFSYS_USE_SHMEM": "domains.parallel.runtimes.shmem",
+    "ROCPROFSYS_USE_OPENSHMEM": "domains.parallel.runtimes.shmem",
     "ROCPROFSYS_USE_UCX": "domains.parallel.runtimes.ucx",
     # --- Output ---
     "ROCPROFSYS_OUTPUT_PATH": "output.path",
+    "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH": "output.unified_memory_output_path",
     "ROCPROFSYS_TIME_OUTPUT": "output.time_output",
     "ROCPROFSYS_FILE_OUTPUT": "output.file_output",
     "ROCPROFSYS_USE_ROCPD": "output.rocpd_output",
@@ -86,6 +100,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_ROCM_EVENTS": "hardware_counters.rocm_events",
     "ROCPROFSYS_PAPI_EVENTS": "hardware_counters.papi_events",
     "ROCPROFSYS_PAPI_MULTIPLEXING": "hardware_counters.papi_multiplexing",
+    "ROCPROFSYS_GPU_PERF_COUNTERS": "hardware_counters.gpu_perf_counters",
     # --- Causal ---
     "ROCPROFSYS_USE_CAUSAL": "causal.enabled",
     "ROCPROFSYS_CAUSAL_MODE": "causal.mode",
@@ -167,11 +182,13 @@ def get_ls_command() -> tuple[str, list[str]]:
 
 
 @pytest.mark.instrument
+@pytest.mark.class_name("rocprofiler-systems-instrument")
 class TestRocprofilerSystemsInstrument(RocprofsysTest):
     """Tests for rocprof-sys-instrument binary."""
 
     target = "rocprof-sys-instrument"
 
+    @pytest.mark.timeout(45)
     def test_help(self):
         pass_regex = [
             r"\[rocprof-sys-instrument\] Usage:[\s\S]*"
@@ -188,11 +205,11 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--help"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(240)
     def test_simulate_ls(self):
         ls_name, ls_args = get_ls_command()
 
@@ -230,7 +247,6 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=test_args,
-            timeout=240,
             fail_on_not_found=True,
         )
 
@@ -240,6 +256,7 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         ]
         self.assert_file_exists(expected_files_paths)
 
+    @pytest.mark.timeout(120)
     def test_simulate_lib(self, rocprof_config):
         user_lib = rocprof_config.rocprofsys_lib_dir / "librocprof-sys-user.so"
         if not user_lib.exists():
@@ -254,11 +271,11 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--print-available", "functions", "-v", "2", "--", str(user_lib)],
-            timeout=120,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(120)
     def test_simulate_lib_basename(self, rocprof_config, test_output_dir):
         """Test instrument with library basename.
 
@@ -291,12 +308,12 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
                 "--",
                 lib_basename,
             ],
-            timeout=120,
             working_directory=tmp_dir,
             fail_on_not_found=True,
         )
         self.assert_regex(result)
 
+    @pytest.mark.timeout(120)
     def test_write_log(self):
         """Test instrument writing to log file."""
         ls_name, ls_args = get_ls_command()
@@ -317,11 +334,56 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
                 ls_name,
                 *ls_args,
             ],
-            timeout=120,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
         self.assert_file_exists(result.output_dir / "instrumentation" / "user.log")
+
+    @pytest.mark.timeout(60)
+    def test_exe_only(self):
+        """Test --exe-only excludes shared libraries from instrumentation."""
+        ls_name, ls_args = get_ls_command()
+
+        pass_regex = [r"\[filter\] skipping shared lib '.*' \(--exe-only\)"]
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "--simulate",
+                "--exe-only",
+                "--",
+                ls_name,
+                *ls_args,
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
+    @pytest.mark.timeout(60)
+    def test_max_library_functions(self):
+        """Test --max-library-functions skips shared libs exceeding the threshold."""
+        ls_name, ls_args = get_ls_command()
+
+        pass_regex = [
+            r"\[filter\] skipping shared lib '.*' "
+            r"\(\d+ functions > --max-library-functions=10\)"
+        ]
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "--simulate",
+                "--max-library-functions",
+                "10",
+                "--",
+                ls_name,
+                *ls_args,
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
 
 
 # ============================================================================
@@ -330,11 +392,13 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
 
 @pytest.mark.avail
+@pytest.mark.class_name("rocprofiler-systems-avail")
 class TestRocprofilerSystemsAvail(RocprofsysTest):
     """Tests for rocprof-sys-avail binary."""
 
     target = "rocprof-sys-avail"
 
+    @pytest.mark.timeout(45)
     def test_help(self):
         pass_regex = [
             r"\[rocprof-sys-avail\] Usage:[\s\S]*"
@@ -350,21 +414,21 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--help"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(45)
     def test_all(self):
         result = self.run_test(
             "baseline",
             target=self.target,
             run_args=["--all"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result)
 
+    @pytest.mark.timeout(45)
     def test_all_expand_keys(self):
         fail_regex = [r"%[a-zA-Z_]%"]
 
@@ -372,11 +436,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--all", "--expand-keys"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, fail_regex=fail_regex)
 
+    @pytest.mark.timeout(45)
     def test_all_only_available_alphabetical(self, test_output_dir):
         log_file = (
             test_output_dir / "rocprof-sys-avail-all-only-available-alphabetical.log"
@@ -393,12 +457,12 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
                 "--output",
                 str(log_file),
             ],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result)
         self.assert_file_exists(log_file)
 
+    @pytest.mark.timeout(45)
     def test_all_csv(self):
         pass_regex = [
             r"COMPONENT#AVAILABLE#VALUE_TYPE#STRING_IDS#FILENAME#DESCRIPTION#CATEGORY#[\s\S]*"
@@ -410,11 +474,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--all", "--csv", "--csv-separator", "#"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(45)
     def test_filter_wall_clock_available(self):
         pass_regex = [
             r"\|[-]+\|[\s\S]*"
@@ -428,11 +492,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["-r", "wall_clock", "-C", "--available"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(45)
     def test_category_filter_rocprofiler_systems(self):
         pass_regex = [r"ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"]
         fail_regex = [
@@ -443,11 +507,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--categories", "settings::rocprofsys", "--brief"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex, fail_regex=fail_regex)
 
+    @pytest.mark.timeout(45)
     def test_category_filter_timemory(self):
         pass_regex = [
             r"ROCPROFSYS_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
@@ -458,15 +522,14 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--categories", "settings::timemory", "--brief", "--advanced"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex, fail_regex=fail_regex)
 
+    @pytest.mark.timeout(45)
     def test_regex_negation(self):
         pass_regex = [
             r"ENVIRONMENT VARIABLE,[\s\S]*"
-            r"ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK,[\s\S]*"
             r"ROCPROFSYS_THREAD_POOL_SIZE,[\s\S]*"
             r"ROCPROFSYS_USE_PID,"
         ]
@@ -489,11 +552,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
                 "--brief",
                 "--advanced",
             ],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex, fail_regex=fail_regex)
 
+    @pytest.mark.timeout(45)
     def test_write_config(self, test_output_dir):
         config_base = test_output_dir / "rocprof-sys-test"
 
@@ -523,7 +586,6 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
                 "-c",
                 "rocprofsys",
             ],
-            timeout=45,
             fail_on_not_found=True,
         )
 
@@ -536,6 +598,7 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             config_files, subtest_name="Config file existence validation"
         )
 
+    @pytest.mark.timeout(45)
     def test_write_config_tweak(self, test_output_dir):
         config_base = test_output_dir / "rocprof-sys-tweak"
 
@@ -569,7 +632,6 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
                 "xml",
                 "--force",
             ],
-            timeout=45,
             fail_on_not_found=True,
             env=env_overrides,
         )
@@ -582,6 +644,7 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             config_files, subtest_name="Config file existence validation"
         )
 
+    @pytest.mark.timeout(45)
     def test_format_consistency(self, test_output_dir):
         """Validate that JSON and TXT config formats cover the same env vars.
 
@@ -603,7 +666,6 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
                 "json",
                 "--force",
             ],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result)
@@ -638,6 +700,7 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
                 f"schema coverage:\n" + "\n".join(f"  {m}" for m in missing)
             )
 
+    @pytest.mark.timeout(45)
     def test_list_keys(self):
         pass_regex = [r"Output Keys:[\s\S]*%argv%[\s\S]*%argv_hash%"]
 
@@ -645,11 +708,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--list-keys", "--expand-keys"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(45)
     def test_list_keys_markdown(self):
         pass_regex = [r"`%argv%`[\s\S]*`%argv_hash%`"]
 
@@ -657,11 +720,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--list-keys", "--expand-keys", "--markdown"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(45)
     def test_list_categories(self):
         pass_regex = [r" component::[\s\S]* hw_counters::[\s\S]* settings::"]
 
@@ -669,11 +732,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--list-categories"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(45)
     def test_core_categories(self):
         pass_regex = [
             r"ROCPROFSYS_CONFIG_FILE[\s\S]*ROCPROFSYS_ENABLED[\s\S]*"
@@ -684,11 +747,55 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["-c", "core"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(45)
+    def test_list_domains(self):
+        """Test that list-domains command works."""
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--list-domains"],
+        )
+        self.assert_regex(
+            result,
+            pass_regex=["Available ROCm domains with operations:", "scratch_memory"],
+        )
+
+    @pytest.mark.timeout(45)
+    @pytest.mark.parametrize(
+        "run_args, pass_regex",
+        [
+            pytest.param(
+                ["--list-operations"],
+                ["Error: '--list-operations' requires a domain name."],
+                id="no-domain",
+            ),
+            pytest.param(
+                ["--list-operations", "scratch_memory"],
+                ["SCRATCH_MEMORY_ALLOC"],
+                id="found",
+            ),
+            pytest.param(
+                ["--list-operations", "megaman"],
+                ["Error: Domain 'megaman' not found."],
+                id="error",
+            ),
+        ],
+    )
+    def test_list_operations(self, run_args, pass_regex):
+        """Test that list-operations command works."""
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=run_args,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
+    @pytest.mark.timeout(45)
     def test_settings_no_gpu(self):
         """Test that settings query works without GPU initialization.
 
@@ -702,11 +809,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--settings", "--brief"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(45)
     def test_components_no_gpu(self):
         """Test that component query works without GPU initialization.
 
@@ -719,11 +826,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--components", "--brief"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(45)
     def test_settings_description_no_gpu(self):
         """Test that settings with descriptions works without GPU initialization.
 
@@ -736,11 +843,11 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--settings", "--description", "--brief"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.timeout(45)
     @pytest.mark.gpu
     def test_settings_rocm_available(self, rocprof_config):
         """Test that ROCm-specific settings are present.
@@ -759,7 +866,6 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--settings", "--brief"],
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
@@ -770,7 +876,123 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
 # ============================================================================
 
 
+def kitchen_sink_args(
+    *,
+    empty_cfg,
+    output_dir,
+    output_subdir: str,
+    trace_file: str,
+    tmpdir,
+    sleep_cmd: str,
+    run_only: bool = False,
+) -> list[str]:
+    """Shared arg list for the run/sample kitchen-sink tests.
+
+    Most flags are the same for both launchers. Pass run_only=True for the
+    rocprof-sys-run extras (-S and --fork). Callers just change the output
+    subdir and trace-file name.
+    """
+    args = [
+        "--monochrome",
+        "--debug=false",
+        "-v",
+        "1",
+        "-c",
+        str(empty_cfg),
+        "-o",
+        str(output_dir),
+        output_subdir,
+        "-TPHD",
+    ]
+    if run_only:
+        args += ["-S", "cputime", "realtime"]
+    args += [
+        "--trace-wait=1.0e-12",
+        "--trace-duration=5.0",
+        "--wait=1.0",
+        "--duration=3.0",
+        f"--trace-file={trace_file}",
+        "--trace-buffer-size=100",
+        "--trace-fill-policy=ring_buffer",
+        "--profile-format",
+        "console",
+        "json",
+        "text",
+        "--process-freq",
+        "1000",
+        "--process-wait",
+        "0.0",
+        "--process-duration",
+        "10",
+        "--cpus",
+        "0-4",
+        "--gpus",
+        "0",
+        "-f",
+        "1000",
+        "--sampling-wait",
+        "1.0",
+        "--sampling-duration",
+        "10",
+        "-t",
+        "0-3",
+        "--sample-cputime",
+        "1000",
+        "1.0",
+        "0-3",
+        "--sample-realtime",
+        "10",
+        "0.5",
+        "0-3",
+        "-I",
+        "all",
+        "-E",
+        "mutex-locks",
+        "rw-locks",
+        "spin-locks",
+        "-C",
+        "perf::INSTRUCTIONS",
+        "-G",
+        "GRBM_COUNT",
+        "--inlines",
+        "--hsa-interrupt",
+        "0",
+        "--use-causal=false",
+        "--use-kokkosp",
+        "--tmpdir",
+        str(tmpdir),
+        "--timemory-components",
+        "wall_clock",
+        "cpu_clock",
+        "peak_rss",
+        "page_rss",
+        "--ci",
+        "--num-threads-hint=4",
+        "--sampling-allocator-size=32",
+        "--dl-verbose=3",
+        "--perfetto-annotations=off",
+        "--perfetto-backend",
+        "inprocess",
+        "--kokkosp-kernel-logger",
+        "--kokkosp-name-length-max=1024",
+        '--kokkosp-prefix="[kokkos]"',
+        "--merge-perfetto-files",
+        "--use-pid",
+        "false",
+        "--time-output",
+        "off",
+        "--thread-pool-size",
+        "0",
+    ]
+    if run_only:
+        args += ["--fork"]
+    args += ["--", sleep_cmd, "5"]
+    return args
+
+
 @pytest.mark.sys_run
+@pytest.mark.timeout(45)
+@pytest.mark.class_name("rocprofiler-systems-run")
 class TestRocprofilerSystemsRun(RocprofsysTest):
     """Tests for rocprof-sys-run binary."""
 
@@ -782,7 +1004,6 @@ class TestRocprofilerSystemsRun(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["--help"],
-            timeout=45,
             fail_on_not_found=True,
         )
 
@@ -790,14 +1011,8 @@ class TestRocprofilerSystemsRun(RocprofsysTest):
 
     def test_args(self, test_output_dir):
         """Test rocprof-sys-run with comprehensive arguments."""
-        import shutil
+        sleep_cmd = get_sleep_cmd()
 
-        # Check if sleep command exists
-        sleep_cmd = shutil.which("sleep")
-        if not sleep_cmd:
-            pytest.skip("sleep command not found")
-
-        # Create empty config file
         config_dir = test_output_dir / "config"
         config_dir.mkdir(parents=True, exist_ok=True)
         empty_cfg = config_dir / "empty.cfg"
@@ -807,104 +1022,114 @@ class TestRocprofilerSystemsRun(RocprofsysTest):
         tmpdir = tmpdir.resolve()
         tmpdir.mkdir(parents=True, exist_ok=True)
 
-        args = [
-            "--monochrome",
-            "--debug=false",
-            "-v",
-            "1",
-            "-c",
-            str(empty_cfg),
-            "-o",
-            str(test_output_dir),
-            "run-args-output/",
-            "-TPHD",
-            "-S",
-            "cputime",
-            "realtime",
-            "--trace-wait=1.0e-12",
-            "--trace-duration=5.0",
-            "--wait=1.0",
-            "--duration=3.0",
-            "--trace-file=perfetto-run-args-trace.proto",
-            "--trace-buffer-size=100",
-            "--trace-fill-policy=ring_buffer",
-            "--profile-format",
-            "console",
-            "json",
-            "text",
-            "--process-freq",
-            "1000",
-            "--process-wait",
-            "0.0",
-            "--process-duration",
-            "10",
-            "--cpus",
-            "0-4",
-            "--gpus",
-            "0",
-            "-f",
-            "1000",
-            "--sampling-wait",
-            "1.0",
-            "--sampling-duration",
-            "10",
-            "-t",
-            "0-3",
-            "--sample-cputime",
-            "1000",
-            "1.0",
-            "0-3",
-            "--sample-realtime",
-            "10",
-            "0.5",
-            "0-3",
-            "-I",
-            "all",
-            "-E",
-            "mutex-locks",
-            "rw-locks",
-            "spin-locks",
-            "-C",
-            "perf::INSTRUCTIONS",
-            "--inlines",
-            "--hsa-interrupt",
-            "0",
-            "--use-causal=false",
-            "--use-kokkosp",
-            "--num-threads-hint=4",
-            "--sampling-allocator-size=32",
-            "--ci",
-            "--dl-verbose=3",
-            "--perfetto-annotations=off",
-            "--kokkosp-kernel-logger",
-            "--kokkosp-name-length-max=1024",
-            '--kokkosp-prefix="[kokkos]"',
-            "--tmpdir",
-            str(tmpdir),
-            "--perfetto-backend",
-            "inprocess",
-            "--use-pid",
-            "false",
-            "--time-output",
-            "off",
-            "--thread-pool-size",
-            "0",
-            "--timemory-components",
-            "wall_clock",
-            "cpu_clock",
-            "peak_rss",
-            "page_rss",
-            "--fork",
-            "--",
-            sleep_cmd,
-            "5",
-        ]
+        args = kitchen_sink_args(
+            empty_cfg=empty_cfg,
+            output_dir=test_output_dir,
+            output_subdir="run-args-output/",
+            trace_file="perfetto-run-args-trace.proto",
+            tmpdir=tmpdir,
+            sleep_cmd=sleep_cmd,
+            run_only=True,
+        )
 
         result = self.run_test(
             "baseline",
             target=self.target,
             run_args=args,
-            timeout=45,
             fail_on_not_found=True,
         )
         self.assert_regex(result)
+
+
+@pytest.mark.sampling
+@pytest.mark.timeout(45)
+@pytest.mark.class_name("rocprofiler-systems-sample")
+class TestRocprofilerSystemsSample(RocprofsysTest):
+    """Tests for rocprof-sys-sample binary."""
+
+    target = "rocprof-sys-sample"
+
+    def test_args(self, test_output_dir):
+        """Kitchen-sink: many combined rocprof-sys-sample flags in one command.
+        This test validates the comprehensive set of rocprof-sys-sample flags and their combinations.
+        """
+        sleep_cmd = get_sleep_cmd()
+
+        config_dir = test_output_dir / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        empty_cfg = config_dir / "empty.cfg"
+        empty_cfg.write_text("#\n# empty config file\n#\n")
+
+        tmpdir = (test_output_dir / "tmpdir").resolve()
+        tmpdir.mkdir(parents=True, exist_ok=True)
+
+        args = kitchen_sink_args(
+            empty_cfg=empty_cfg,
+            output_dir=test_output_dir,
+            output_subdir="sample-args-output/",
+            trace_file="perfetto-sample-args-trace.proto",
+            tmpdir=tmpdir,
+            sleep_cmd=sleep_cmd,
+        )
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=args,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            fail_regex=[r"Unrecognized command line option"],
+        )
+
+    def test_args_rejects_s_flag(self):
+        """Negative: a run-only flag (-S) is rejected by the sample parser.
+
+        Documents the intentional exclusion from the kitchen-sink and proves the
+        parser does not silently accept rocprof-sys-run-only options.
+        """
+        sleep_cmd = get_sleep_cmd()
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["-S", "cputime", "realtime", "--", sleep_cmd, "1"],
+            fail_on_pass=True,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[r"Unrecognized command line option"],
+            use_abort_fail_regex=False,  # negative test intentionally exits non-zero
+        )
+
+    def test_args_stops_at_separator(self):
+        """The ``--`` separator must split tool options from the program to run.
+
+        ``-E`` takes a list of values, so the parser keeps reading words until it
+        hits something that isn't a value. We put ``-E`` right before ``--`` to
+        make sure the parser stops at ``--`` instead of greedily swallowing it.
+        If it worked correctly, everything after ``--`` is treated as the program
+        to launch (``sleep 1``) and the run succeeds with no parser error.
+        """
+        sleep_cmd = get_sleep_cmd()
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "-E",
+                "mutex-locks",
+                "rw-locks",
+                "spin-locks",
+                "--",
+                sleep_cmd,
+                "1",
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            fail_regex=[r"Unrecognized command line option"],
+        )

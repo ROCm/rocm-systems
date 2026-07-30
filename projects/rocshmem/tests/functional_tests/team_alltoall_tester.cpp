@@ -25,7 +25,7 @@
 /* Declare the template with a generic implementation */
 template <typename T>
 __device__ void wg_team_alltoall([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t team,
-                                 [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelem) {
+                                 [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelems) {
   return;
 }
 
@@ -33,8 +33,8 @@ __device__ void wg_team_alltoall([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_un
 #define TEAM_ALLTOALL_DEF_GEN(T, TNAME)                                        \
   template <>                                                                  \
   __device__ void wg_team_alltoall<T>(rocshmem_ctx_t ctx, rocshmem_team_t team,\
-                                 T * dest, const T *source, int nelem) {       \
-    rocshmem_ctx_##TNAME##_alltoall_wg(ctx, team, dest, source, nelem);        \
+                                 T * dest, const T *source, int nelems) {      \
+    rocshmem_ctx_##TNAME##_alltoall_wg(ctx, team, dest, source, nelems);       \
   }
 
 TEAM_ALLTOALL_DEF_GEN(float, float)
@@ -80,7 +80,7 @@ __global__ void TeamAlltoallTest(int loop, int skip, long long int *start_time,
     wg_team_alltoall<T1>(ctx, teams[wg_id],
                     dest_buf,               // T* dest
                     source_buf,             // const T* source
-                    num_elems);             // int nelement
+                    num_elems);             // int nelems
   }
 
   __syncthreads();
@@ -110,16 +110,8 @@ TeamAlltoallTester<T1>::TeamAlltoallTester(TesterArguments args)
   size_t total_elems = num_elems_wg * args.num_wgs;
   size_t buff_size = total_elems * sizeof(T1);
 
-  source_buf = (T1 *)rocshmem_malloc(buff_size);
-  dest_buf = (T1 *)rocshmem_malloc(buff_size);
-
-  if (source_buf == nullptr || dest_buf == nullptr) {
-    std::cout << "Error allocating memory from symmetric heap" << std::endl;
-    std::cout << "source: " << source_buf
-              << ", dest: " << dest_buf
-              << std::endl;
-    rocshmem_global_exit(1);
-  }
+  source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
+  dest_buf = (T1 *)alloc_test_buffer(buff_size);
 
   char* value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
@@ -132,8 +124,8 @@ TeamAlltoallTester<T1>::TeamAlltoallTester(TesterArguments args)
 
 template <typename T1>
 TeamAlltoallTester<T1>::~TeamAlltoallTester() {
-  rocshmem_free(source_buf);
-  rocshmem_free(dest_buf);
+  free_test_buffer(source_buf, args.local_buf_type);
+  free_test_buffer(dest_buf);
   CHECK_HIP(hipFree(team_alltoall_world_dup));
 }
 

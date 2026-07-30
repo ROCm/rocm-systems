@@ -1,338 +1,76 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <gtest/gtest.h>
+#include "lib/aqlprofile/core/last_error.hpp"
+#include "lib/aqlprofile/core/logger.hpp"
+
 #include <gmock/gmock.h>
-#include <fstream>
-#include <filesystem>
+#include <gtest/gtest.h>
+
+#include <cstring>
+#include <string>
+#include <string_view>
 #include <thread>
-#include <chrono>
-#include <sstream>
-#include <cctype>
-#include <cstdlib>
-#ifdef _WIN32
-#    include <stdlib.h>  // _putenv_s, _unsetenv via _putenv_s
-#else
-#    include <unistd.h>
-#endif
-
-#include "../logger.h"
-
-#ifdef _WIN32
-static inline int
-setenv(const char* name, const char* value, int overwrite)
-{
-    (void) overwrite;  // POSIX setenv uses overwrite; this shim always overwrites
-    return static_cast<int>(_putenv_s(name, value));
-}
-static inline int
-unsetenv(const char* name)
-{
-    return static_cast<int>(_putenv_s(name, ""));
-}
-#endif
-
-// Define static members for Logger class
-namespace aql_profile
-{
-Logger::mutex_t Logger::mutex_;
-Logger*         Logger::instance_ = nullptr;
-}  // namespace aql_profile
 
 namespace aql_profile
 {
-class LoggerTest : public ::testing::Test
+TEST(ErrorApiTest, SetAndGetLastError)
 {
-protected:
-    void SetUp() override
-    {
-        // Clean up any existing instance
-        Logger::Destroy();
-
-        // Remove any existing log file
-        if(std::filesystem::exists(log_file_path_))
-        {
-            std::filesystem::remove(log_file_path_);
-        }
-
-        // Clear environment variable
-        unsetenv("HSA_VEN_AMD_AQLPROFILE_LOG");
-    }
-
-    void TearDown() override
-    {
-        // Clean up after each test
-        Logger::Destroy();
-        unsetenv("HSA_VEN_AMD_AQLPROFILE_LOG");
-
-        // Remove test log file
-        if(std::filesystem::exists(log_file_path_))
-        {
-            std::filesystem::remove(log_file_path_);
-        }
-    }
-
-    const std::string log_file_path_ =
-        (std::filesystem::temp_directory_path() / "aql_profile_log.txt").string();
-
-    // Helper function to read log file content
-    std::string ReadLogFile()
-    {
-        std::ifstream file(log_file_path_);
-        if(!file.is_open()) return "";
-
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        return buffer.str();
-    }
-
-    // Helper function to enable file logging
-    void EnableFileLogging() { setenv("HSA_VEN_AMD_AQLPROFILE_LOG", "1", 1); }
-};
-
-// Test singleton pattern
-TEST_F(LoggerTest, SingletonPattern)
-{
-    Logger& logger1 = Logger::Instance();
-    Logger& logger2 = Logger::Instance();
-
-    // Should be the same instance
-    EXPECT_EQ(&logger1, &logger2);
+    set_last_error("hello world");
+    EXPECT_STREQ(get_last_error(), "hello world");
 }
 
-// Test basic logging without file output
-TEST_F(LoggerTest, BasicLoggingWithoutFile)
+TEST(ErrorApiTest, TruncatesLongMessage)
 {
-    Logger& logger = Logger::Instance();
-
-    // Should not crash when logging without file
-    logger << "Test message";
-
-    // Verify log file doesn't exist
-    EXPECT_FALSE(std::filesystem::exists(log_file_path_));
+    std::string long_msg(2048, 'A');
+    set_last_error(long_msg);
+    EXPECT_LT(std::strlen(get_last_error()), long_msg.size());
+    EXPECT_GT(std::strlen(get_last_error()), 0u);
 }
 
-// Test basic logging with file output
-TEST_F(LoggerTest, BasicLoggingWithFile)
+TEST(ErrorApiTest, SetLastErrorOverwrites)
 {
-    EnableFileLogging();
+    set_last_error("first message");
+    EXPECT_STREQ(get_last_error(), "first message");
 
-    Logger& logger = Logger::Instance();
-    logger << "Test message";
-
-    // Give some time for file operations
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    // Verify log file exists and contains content
-    EXPECT_TRUE(std::filesystem::exists(log_file_path_));
-
-    std::string content = ReadLogFile();
-    EXPECT_FALSE(content.empty());
-    EXPECT_THAT(content, testing::HasSubstr("Test message"));
-    EXPECT_THAT(content, testing::HasSubstr("pid"));
-    EXPECT_THAT(content, testing::HasSubstr("tid"));
+    set_last_error("second message");
+    EXPECT_STREQ(get_last_error(), "second message");
 }
 
-// Test streaming operations
-TEST_F(LoggerTest, StreamingOperations)
+TEST(ErrorApiTest, EmptyMessage)
 {
-    EnableFileLogging();
-
-    Logger& logger = Logger::Instance();
-    logger << "Number: " << 42 << " String: "
-           << "test"
-           << " Float: " << 3.14;
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    std::string content = ReadLogFile();
-    EXPECT_THAT(content, testing::HasSubstr("Number: 42"));
-    EXPECT_THAT(content, testing::HasSubstr("String: test"));
-    EXPECT_THAT(content, testing::HasSubstr("Float: 3.14"));
+    set_last_error("something");
+    set_last_error("");
+    EXPECT_STREQ(get_last_error(), "");
 }
 
-// Test endl manipulator
-TEST_F(LoggerTest, EndlManipulator)
+TEST(ErrorApiTest, ThreadLocal)
 {
-    EnableFileLogging();
+    set_last_error("main_thread");
 
-    Logger& logger = Logger::Instance();
-    logger << "First line" << Logger::endl << "Second line";
+    std::string child_msg;
+    std::thread t([&]() {
+        set_last_error("child_thread");
+        child_msg = std::string(get_last_error());
+    });
+    t.join();
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    std::string content = ReadLogFile();
-    EXPECT_THAT(content, testing::HasSubstr("First line"));
-    EXPECT_THAT(content, testing::HasSubstr("Second line"));
-
-    // Should have multiple log entries with timestamps
-    size_t pid_count = 0;
-    size_t pos       = 0;
-    while((pos = content.find("pid", pos)) != std::string::npos)
-    {
-        pid_count++;
-        pos += 3;
-    }
-    EXPECT_GE(pid_count, 2);  // At least 2 log entries
+    EXPECT_STREQ(get_last_error(), "main_thread");
+    EXPECT_EQ(child_msg, "child_thread");
 }
 
-// Test concurrent logging from multiple threads
-TEST_F(LoggerTest, ConcurrentLogging)
+TEST(ErrorApiTest, ErrLoggingMacro)
 {
-    EnableFileLogging();
+    ERR_LOGGING("test error {}", 42);
 
-    const int num_threads         = 4;
-    const int messages_per_thread = 10;
-
-    std::vector<std::thread> threads;
-
-    for(int i = 0; i < num_threads; ++i)
-    {
-        threads.emplace_back([i, messages_per_thread]() {
-            Logger& logger = Logger::Instance();
-            for(int j = 0; j < messages_per_thread; ++j)
-            {
-                logger << "Thread " << i << " Message " << j;
-            }
-        });
-    }
-
-    // Wait for all threads to complete
-    for(auto& thread : threads)
-    {
-        thread.join();
-    }
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-    // Verify log file contains messages from all threads
-    std::string content = ReadLogFile();
-    EXPECT_FALSE(content.empty());
-
-    // Count messages from each thread
-    for(int i = 0; i < num_threads; ++i)
-    {
-        std::string thread_pattern = "Thread " + std::to_string(i);
-        EXPECT_THAT(content, testing::HasSubstr(thread_pattern));
-    }
+    auto msg = std::string(get_last_error());
+    EXPECT_THAT(msg, testing::HasSubstr("test error 42"));
 }
 
-// Test logging with special characters
-TEST_F(LoggerTest, SpecialCharacters)
+TEST(ErrorApiTest, ErrLoggingPlainString)
 {
-    EnableFileLogging();
-
-    Logger&     logger      = Logger::Instance();
-    std::string special_msg = "Special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?";
-    logger << special_msg;
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    std::string content = ReadLogFile();
-    EXPECT_THAT(content, testing::HasSubstr(special_msg));
-}
-
-// Test large message logging
-TEST_F(LoggerTest, LargeMessage)
-{
-    EnableFileLogging();
-
-    Logger&     logger = Logger::Instance();
-    std::string large_msg(1000, 'A');  // 1000 character message
-    logger << large_msg;
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    std::string content = ReadLogFile();
-    EXPECT_THAT(content, testing::HasSubstr(large_msg));
-}
-
-// Test timestamp format in logs
-TEST_F(LoggerTest, TimestampFormat)
-{
-    EnableFileLogging();
-
-    Logger& logger = Logger::Instance();
-    logger << "Timestamp test";
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    std::string content = ReadLogFile();
-
-    // Check for timestamp pattern (YYYY-MM-DD HH:MM:SS) — use HasSubstr to stay portable
-    EXPECT_THAT(content, testing::HasSubstr("-"));  // date separator
-    EXPECT_THAT(content, testing::HasSubstr(":"));  // time separator
-    EXPECT_THAT(content, testing::HasSubstr("Timestamp test"));
-}
-
-// Test PID and TID in logs
-TEST_F(LoggerTest, PidTidInLogs)
-{
-    EnableFileLogging();
-
-    Logger& logger = Logger::Instance();
-    logger << "PID/TID test";
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    std::string content = ReadLogFile();
-
-    // Check for PID and TID patterns
-    EXPECT_THAT(content, testing::HasSubstr("pid"));
-    EXPECT_THAT(content, testing::HasSubstr("tid"));
-
-    // Verify they contain numbers (use HasSubstr for portability — GTest's simple
-    // regex engine on Windows does not support [0-9]+ quantifier syntax)
-    size_t pid_pos = content.find("pid");
-    ASSERT_NE(pid_pos, std::string::npos);
-    // Scan forward from "pid" to the first digit to avoid out-of-bounds and format assumptions
-    size_t pid_digit_pos = pid_pos + 3;
-    while(pid_digit_pos < content.size() &&
-          !std::isdigit(static_cast<unsigned char>(content[pid_digit_pos])))
-    {
-        ++pid_digit_pos;
-    }
-    ASSERT_LT(pid_digit_pos, content.size());
-    EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(content[pid_digit_pos])));
-
-    size_t tid_pos = content.find("tid");
-    ASSERT_NE(tid_pos, std::string::npos);
-    // Scan forward from "tid" to the first digit to avoid out-of-bounds and format assumptions
-    size_t tid_digit_pos = tid_pos + 3;
-    while(tid_digit_pos < content.size() &&
-          !std::isdigit(static_cast<unsigned char>(content[tid_digit_pos])))
-    {
-        ++tid_digit_pos;
-    }
-    ASSERT_LT(tid_digit_pos, content.size());
-    EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(content[tid_digit_pos])));
-}
-
-// Test empty message handling
-TEST_F(LoggerTest, EmptyMessage)
-{
-    Logger& logger = Logger::Instance();
-
-    Logger::begm();
-    Logger::endl();
-
-    const std::string& msg = Logger::LastMessage();
-    EXPECT_EQ(msg, "");
-}
-
-// Test multiple consecutive endl calls
-TEST_F(LoggerTest, MultipleEndl)
-{
-    EnableFileLogging();
-
-    Logger& logger = Logger::Instance();
-    logger << "Test" << Logger::endl << Logger::endl << "After multiple endl";
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    std::string content = ReadLogFile();
-    EXPECT_THAT(content, testing::HasSubstr("Test"));
-    EXPECT_THAT(content, testing::HasSubstr("After multiple endl"));
+    ERR_LOGGING("simple error message");
+    EXPECT_STREQ(get_last_error(), "simple error message");
 }
 
 }  // namespace aql_profile

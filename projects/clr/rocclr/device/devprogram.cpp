@@ -11,6 +11,7 @@
 #include "platform/ndrange.hpp"
 #include "devprogram.hpp"
 #include "devkernel.hpp"
+#include "hotswap.hpp"
 #include "utils/macros.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
@@ -295,12 +296,10 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
   //  Create the output data set
   amd_comgr_action_info_t action{};
   amd_comgr_data_set_t output{};
-  amd_comgr_data_set_t dataSetPCH{};
   amd_comgr_data_set_t input = compileInputs;
 
   bool hasAction = false;
   bool hasOutput = false;
-  bool hasDataSetPCH = false;
 
   amd_comgr_status_t status = createAction(langver, options, &action, &hasAction);
 
@@ -308,18 +307,12 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
     status = amd::Comgr::create_data_set(&output);
   }
 
-  //  Adding Precompiled Headers
   if (status == AMD_COMGR_STATUS_SUCCESS) {
     hasOutput = true;
-    status = amd::Comgr::create_data_set(&dataSetPCH);
   }
 
   // Preprocess the source
-  // FIXME: This must happen before the precompiled headers are added, as they
-  // do not embed the source text of the header, and so reference paths in the
-  // filesystem which do not exist at runtime.
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    hasDataSetPCH = true;
 
     if (amdOptions->isDumpFlagSet(amd::option::DUMP_I)) {
       amd_comgr_data_set_t dataSetPreprocessor;
@@ -346,18 +339,7 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
     }
   }
 
-  if (!isHIP()) {
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      status = amd::Comgr::do_action(AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS, action, input,
-                                     dataSetPCH);
-      extractBuildLog(dataSetPCH);
-    }
-
-    // Set input for the next stage
-    input = dataSetPCH;
-  }
-
-  //  Compiling the source codes with precompiled headers or directly compileInputs
+  //  Compiling the source codes
   if (status == AMD_COMGR_STATUS_SUCCESS) {
     if (link_dev_libs) {
       status = amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, action,
@@ -379,10 +361,6 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
 
   if (hasAction) {
     amd::Comgr::destroy_action_info(action);
-  }
-
-  if (hasDataSetPCH) {
-    amd::Comgr::destroy_data_set(dataSetPCH);
   }
 
   if (hasOutput) {
@@ -1435,6 +1413,19 @@ std::vector<std::string> Program::ProcessOptions(amd::option::Options* options) 
       optionsVec.push_back("-Xclang");
       optionsVec.push_back(clext.str());
     }
+
+    // ROCM-24914 - Convert incompatible pointer types error to warning for some Adobe apps.
+    // This change was made upstream but the kernels used by these apps are still affected.
+    // Refer: https://github.com/llvm/llvm-project/pull/157364
+    std::string appName = {};
+    std::string appPathAndName = {};
+    amd::Os::getAppPathAndFileName(appName, appPathAndName);
+    if ((appName == "Indigo Benchmark.exe") ||
+        (appName == "Adobe Premiere Pro.exe") ||
+        (appName == "AfterFX.exe")) {
+      optionsVec.push_back("-Xclang");
+      optionsVec.push_back("-Wno-error=incompatible-pointer-types");
+    }
   }
 
   return optionsVec;
@@ -1790,9 +1781,19 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
     }
 
     if (!amd::Isa::isCompatible(*binaryIsa, device().isa())) {
-      buildLog_ += "Error: The program ISA " + std::string(binaryIsaName.data());
-      buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
-      return false;
+      // HotSwap: let a supported foreign source ISA past the gate; loader transpiles downstream.
+      const std::string binaryIsaNameStr(binaryIsaName.data());
+      const bool hotswap_ok =
+          amd::hotswap::Enabled() &&
+          amd::hotswap::IsSupportedPair(binaryIsa->processorName(),
+                                        device().isa().processorName());
+      if (!hotswap_ok) {
+        buildLog_ += "Error: The program ISA " + binaryIsaNameStr;
+        buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
+        return false;
+      }
+      buildLog_ += "HotSwap: allowing foreign program ISA " + binaryIsaNameStr +
+                   " for transpilation to " + device().isa().isaName() + "\n";
     }
   }
 

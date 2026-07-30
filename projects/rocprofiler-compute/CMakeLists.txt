@@ -57,6 +57,10 @@ set(EXECUTABLE_NAME "rocprof-compute")
 include(ExternalProject)
 include(GNUInstallDirs)
 include(utils.cmake)
+# Must run before asan_build_dependencies.cmake, whose pthread guard reads the
+# ENABLE_SANITIZER that this module resolves.
+include(cmake/sanitizers.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/asan_build_dependencies.cmake)
 
 set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides")
 set(BUILD_DEBIAN_PKGING_FLAG
@@ -113,6 +117,7 @@ set(PYTHON_TEST_COMMAND
     CACHE STRING
     "Python command for running tests (portable)"
 )
+enable_sanitizer_python_launcher(PYTHON_TEST_COMMAND)
 message(STATUS "Python test command: ${PYTHON_TEST_COMMAND}")
 
 # ----------------------
@@ -149,6 +154,7 @@ endif()
 
 # Setup testing collateral
 
+option(INSTALL_TESTS "Build test suite" OFF)
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
 set(CMAKE_HIP_FLAGS_RELEASE "-O2")
 if(${ENABLE_TESTS})
@@ -252,6 +258,13 @@ option(
     "Skip building native counter collection tool library (for runtime compilation)"
     OFF
 )
+
+# -------------------
+# Setup tool library
+# -------------------
+if(NOT SKIP_NATIVE_TOOL_BUILD)
+    add_subdirectory(src/lib)
+endif()
 
 # ---------------------------
 # Profile mode import guard
@@ -412,6 +425,30 @@ add_test(
         tests/test_metric_validation.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_native_tool_finder
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_native_tool_finder.xml ${COV_OPTION}
+        tests/test_native_tool_finder.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_torch_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m torch_trace
+        --junitxml=tests/test_profile_torch_trace.xml ${COV_OPTION}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_triton_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m triton_trace
+        --junitxml=tests/test_profile_triton_trace.xml ${COV_OPTION}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -426,6 +463,8 @@ set_tests_properties(
     test_profile_iteration_multiplexing_1
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
+    test_profile_torch_trace
+    test_profile_triton_trace
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
@@ -485,6 +524,14 @@ add_test(
         tests/test_gpu_specs.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_mi_gpu_spec
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_mi_gpu_spec.xml ${COV_OPTION} tests/test_mi_gpu_spec.py
+        ${WORKING_DIR_OPTION}
+)
+
 # ---------------------------
 # Utils tests
 # ---------------------------
@@ -497,21 +544,37 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# RDNA3.5 memory chart CLI (Rich) — no GPU required
+# Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
 add_test(
-    NAME test_mem_chart_gfx11
+    NAME test_mem_chart
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_mem_chart_gfx11.xml ${COV_OPTION}
-        tests/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_mem_chart.xml ${COV_OPTION} tests/test_mem_chart.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_roofline_calc_ai_analyze
+    NAME test_roofline_calc
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_roofline_calc_ai_analyze.xml ${COV_OPTION}
-        tests/test_roofline_calc_ai_analyze.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_roofline_calc.xml ${COV_OPTION} tests/test_roofline_calc.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_roofline_analyze
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_roofline_analyze.xml ${COV_OPTION}
+        tests/test_roofline_analyze.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_roofline_main
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_roofline_main.xml ${COV_OPTION} tests/test_roofline_main.py
+        ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -538,16 +601,60 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_analysis_orm
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_analysis_orm.xml ${COV_OPTION} tests/test_analysis_orm.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_code_object_analysis
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_code_object_analysis.xml ${COV_OPTION}
+        tests/test_code_object_analysis.py ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
-# Autogenerated configuration tests
+# Metrics unit tests
 # -----------------------------------
 
 add_test(
-    NAME test_autogen_config
+    NAME test_metric_utils
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_autogen_config.xml ${COV_OPTION}
-        tests/test_autogen_config.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_metric_utils.xml ${COV_OPTION} tests/test_metric_utils.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_parser
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_parser.xml ${COV_OPTION} tests/test_parser.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_metrics_common
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_metrics_common.xml ${COV_OPTION}
+        tests/test_metrics_common.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# CLI options unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_argparser
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_argparser.xml ${COV_OPTION} tests/test_argparser.py
+        ${WORKING_DIR_OPTION}
 )
 
 # ---------------------------
@@ -588,16 +695,49 @@ add_test(
         tests/test_tui_components.py ${WORKING_DIR_OPTION}
 )
 
+# Build the roctx_recordfn pybind11 extension and its gtest.
+if(ENABLE_TESTS)
+    add_subdirectory(src/lib/roctx_recordfn)
+endif()
 # -----------------------------------
 # Torch trace tests
 # -----------------------------------
 
 add_test(
-    NAME test_torch_trace
+    NAME test_torch_trace_analysis
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace.xml ${COV_OPTION} tests/test_torch_trace.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_torch_trace_analysis.xml ${COV_OPTION}
+        tests/test_torch_trace_analysis.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_torch_trace_coverage
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_trace_coverage.xml ${COV_OPTION}
+        tests/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
+)
+
+set_tests_properties(
+    test_torch_trace_coverage
+    PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
+)
+
+add_test(
+    NAME test_torch_cpp_loader
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_cpp_loader.xml ${COV_OPTION}
+        tests/test_torch_cpp_loader.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_inject_roctx_package
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_inject_roctx_package.xml ${COV_OPTION}
+        tests/test_inject_roctx_package.py ${WORKING_DIR_OPTION}
 )
 
 # ---------------------------------------
@@ -625,6 +765,18 @@ add_test(
 )
 
 # -----------------------------------
+# PC sampling profiler unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_pc_sampling_profile
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_pc_sampling_profile.xml ${COV_OPTION}
+        tests/test_pc_sampling_profile.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # SoC base counter allocation tests
 # -----------------------------------
 
@@ -635,6 +787,50 @@ add_test(
         --junitxml=tests/test_soc_base.xml ${COV_OPTION} tests/test_soc_base.py
         ${WORKING_DIR_OPTION}
 )
+
+# -----------------------------------
+# TTY table rendering unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_tty
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_tty.xml ${COV_OPTION} tests/test_tty.py
+        ${WORKING_DIR_OPTION}
+)
+
+if(TARGET test-rocprofiler-compute-tool)
+    if(TEST_FROM_INSTALL)
+        set(_tool_test_cmd tests/test-rocprofiler-compute-tool)
+    else()
+        set(_tool_test_cmd $<TARGET_FILE:test-rocprofiler-compute-tool>)
+    endif()
+    add_test(NAME test-rocprofiler-compute-tool COMMAND ${_tool_test_cmd})
+    sanitizer_runtime_env(_san_env OFF)
+    if(_san_env)
+        set_tests_properties(
+            test-rocprofiler-compute-tool
+            PROPERTIES ENVIRONMENT "${_san_env}"
+        )
+    endif()
+endif()
+
+if(TARGET test-pc-sampling-collector)
+    if(TEST_FROM_INSTALL)
+        set(_pcs_test_cmd tests/test-pc-sampling-collector)
+    else()
+        set(_pcs_test_cmd $<TARGET_FILE:test-pc-sampling-collector>)
+    endif()
+    add_test(NAME test-pc-sampling-collector COMMAND ${_pcs_test_cmd})
+    sanitizer_runtime_env(_san_env OFF)
+    if(_san_env)
+        set_tests_properties(
+            test-pc-sampling-collector
+            PROPERTIES ENVIRONMENT "${_san_env}"
+        )
+    endif()
+endif()
 
 # -----------------------------------
 # Generate coverage tests
@@ -655,16 +851,44 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
+        test_metric_utils
+        test_parser
+        test_argparser
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
+        test_mi_gpu_spec
         test_utils
-        test_mem_chart_gfx11
-        test_roofline_calc_ai_analyze
+        test_mem_chart
+        test_roofline_calc
+        test_roofline_analyze
+        test_roofline_main
         test_data_imputation
-        test_autogen_config
         test_tui_components
-        test_torch_trace
+        test_torch_trace_analysis
+        test_torch_trace_coverage
+        test_profile_torch_trace
+        test_profile_triton_trace
+        test_torch_cpp_loader
+        test_inject_roctx_package
+        test_analysis_db
+        test_analysis_orm
+        test_code_object_analysis
+        test_pc_sampling_analysis
+        test_pc_sampling_profile
+        test_metrics_common
+        test_metric_validation
+        test_native_tool_finder
+        test_profiler_base
+        test_soc_base
+        test_tty
+        test_utils_profile_csv
+        test_import_guard
+        test_profile_iteration_multiplexing_1
+        test_profile_iteration_multiplexing_2
+        test_profile_iteration_multiplexing_stochastic
+        test_profile_live_attach_detach
+        test_profile_multi_rank
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
@@ -701,13 +925,6 @@ if(COMMAND apply_ctest_category_labels)
     endif()
 else()
     message(STATUS "Test categorization not available (TestCategories.cmake not found)")
-endif()
-
-# -------------------
-# Setup tool library
-# -------------------
-if(NOT SKIP_NATIVE_TOOL_BUILD)
-    add_subdirectory(src/lib)
 endif()
 
 # ---------
@@ -748,6 +965,17 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
+# Install the roctx_recordfn sources so the runtime loader can build the
+# extension against the user's PyTorch environment on first use.
+install(
+    DIRECTORY src/lib/roctx_recordfn
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
+    COMPONENT main
+    PATTERN "_build" EXCLUDE
+    PATTERN "build" EXCLUDE
+    PATTERN "tests" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/roofline
 install(
     DIRECTORY src/roofline
@@ -769,16 +997,16 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
-# src/rocprof_compute_tui
+# src/pc_sampling
 install(
-    DIRECTORY src/rocprof_compute_tui
+    DIRECTORY src/pc_sampling
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
-# tools/config_management
+# src/rocprof_compute_tui
 install(
-    DIRECTORY tools/config_management
+    DIRECTORY src/rocprof_compute_tui
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
@@ -855,23 +1083,27 @@ if(NOT SKIP_NATIVE_TOOL_BUILD)
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
     )
 else()
-    # Install source files for runtime compilation
+    # Install source files for runtime compilation. roctx_recordfn/ is
+    # installed by a dedicated rule above and excluded here.
     install(
-        FILES src/lib/rocprofiler_compute_tool.cpp src/lib/helper.cpp src/lib/helper.hpp
+        DIRECTORY src/lib/
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
         COMPONENT main
+        PATTERN "_build" EXCLUDE
+        PATTERN "tests" EXCLUDE
+        PATTERN "roctx_recordfn" EXCLUDE
     )
 endif()
 
-# top-level symlink for bin/rocprof-compute
+# top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/${EXECUTABLE_NAME}.in
+    ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    @ONLY
+)
 install(
-    CODE
-        "execute_process(
-    COMMAND bash -c \"set -e
-    cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
-    mkdir -p ${CMAKE_INSTALL_BINDIR}
-    ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
-    \")"
+    PROGRAMS ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT main
 )
 
@@ -882,7 +1114,6 @@ install(
 )
 
 # TEST collateral
-option(INSTALL_TESTS "Build test suite" OFF)
 if(INSTALL_TESTS)
     install(
         DIRECTORY tests
@@ -891,6 +1122,11 @@ if(INSTALL_TESTS)
         FILES_MATCHING
         PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE
+    )
+    install(
+        PROGRAMS therock_test_runner.py
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT tests
     )
     install(
         DIRECTORY tests/workloads

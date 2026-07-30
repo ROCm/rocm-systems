@@ -3,6 +3,7 @@
 
 #pragma once
 #include "core/trace_cache/cache_type_traits.hpp"
+#include <cstdint>
 
 #include <functional>
 #include <map>
@@ -24,7 +25,7 @@ public:
 
     type_registry() { (register_type<SupportedTypes>(), ...); }
 
-    std::optional<variant_t> get_type(TypeIdentifierEnum id, uint8_t*& data)
+    std::optional<variant_t> get_type(TypeIdentifierEnum id, std::uint8_t*& data)
     {
         auto it = deserializers.find(id);
         if(it != deserializers.end())
@@ -35,16 +36,13 @@ public:
     }
 
 private:
-    std::map<TypeIdentifierEnum, std::function<variant_t(uint8_t*&)>> deserializers;
+    std::map<TypeIdentifierEnum, std::function<variant_t(std::uint8_t*&)>> deserializers;
 
     template <typename T>
+        requires type_traits::cacheable<T, TypeIdentifierEnum>
     inline void register_type()
     {
-        static_assert(type_traits::has_type_identifier<T, TypeIdentifierEnum>::value,
-                      "Type must have type_identifier");
-        static_assert(type_traits::has_deserialize<T>::value,
-                      "Type must have deserialize function");
-        deserializers[T::type_identifier] = [](uint8_t*& data) -> variant_t {
+        deserializers[T::type_identifier] = [](std::uint8_t*& data) -> variant_t {
             return deserialize<T>(data);
         };
     }

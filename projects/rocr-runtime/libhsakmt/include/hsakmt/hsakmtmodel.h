@@ -26,11 +26,60 @@
 #ifndef _HSAKMTMODEL_H_
 #define _HSAKMTMODEL_H_
 #include <stdbool.h>
+#include <stdint.h>
+#include <amdgpu.h>
+
 extern bool hsakmt_use_model;
 extern char *hsakmt_model_topology;
+
+/**
+ * Model-mode environment variables (developer/emulation use only):
+ *   HSA_MODEL_TOPOLOGY - Enables model mode when set.
+ *   HSA_MODEL_LIB      - Path to the FFM model shared library, resolved as:
+ *                          - A relative name or path is always anchored under
+ *                            the ROCm install lib directory configured at
+ *                            build time (HSAKMT_INSTALL_LIBDIR), e.g.
+ *                            "libfoo.so" -> "<HSAKMT_INSTALL_LIBDIR>/libfoo.so".
+ *                            It is NOT resolved via the dynamic loader search
+ *                            path (LD_LIBRARY_PATH), so a bare soname is taken
+ *                            relative to the install dir, not searched.
+ *                          - An absolute path under HSAKMT_INSTALL_LIBDIR is
+ *                            used as-is.
+ *                          - Any other absolute path is honored only in normal
+ *                            (unprivileged) processes. Under elevated
+ *                            privileges (AT_SECURE, e.g. setuid/setgid or file
+ *                            capabilities) it is rejected, preventing arbitrary
+ *                            dlopen() across a privilege boundary.
+ *                        Paths containing ".." components are always rejected.
+ */
 void model_init_env_vars(void);
 void model_init(void);
-void model_set_mmio_page(void *ptr);
-void model_set_event_page(void *ptr, unsigned event_limit);
 int model_kfd_ioctl(unsigned long request, void *arg);
+
+/* DRM/amdgpu wrappers — route to model in model mode, real libdrm otherwise. */
+
+/* BO operations */
+int hsakmt_amdgpu_bo_import(amdgpu_device_handle dev, enum amdgpu_bo_handle_type type,
+			     uint32_t shared_handle, struct amdgpu_bo_import_result *output);
+int hsakmt_amdgpu_bo_query_info(amdgpu_bo_handle buf_handle, struct amdgpu_bo_info *info);
+int hsakmt_amdgpu_bo_set_metadata(amdgpu_bo_handle buf_handle, struct amdgpu_bo_metadata *info);
+int hsakmt_amdgpu_bo_va_op(amdgpu_bo_handle bo, uint64_t offset, uint64_t size,
+			    uint64_t addr, uint64_t flags, uint32_t ops);
+int hsakmt_amdgpu_bo_free(amdgpu_bo_handle buf_handle);
+int hsakmt_amdgpu_bo_cpu_map(amdgpu_bo_handle buf_handle, void **cpu);
+int hsakmt_amdgpu_bo_export(amdgpu_bo_handle buf_handle,
+			     enum amdgpu_bo_handle_type type, uint32_t *shared_handle);
+int hsakmt_drm_command_write_read(int fd, unsigned long drmCommandIndex,
+				   void *data, unsigned size);
+
+/* Device-level operations */
+int hsakmt_drm_open_render(int minor);
+void hsakmt_drm_close(int fd);
+int hsakmt_amdgpu_device_initialize(int fd, uint32_t *major_version, uint32_t *minor_version,
+				     amdgpu_device_handle *device_handle);
+int hsakmt_amdgpu_device_deinitialize(amdgpu_device_handle device_handle);
+int hsakmt_amdgpu_device_get_fd(amdgpu_device_handle dev);
+const char *hsakmt_amdgpu_get_marketing_name(amdgpu_device_handle dev);
+int hsakmt_amdgpu_query_gpu_info(amdgpu_device_handle dev, struct amdgpu_gpu_info *info);
+
 #endif /* _HSAKMTMODEL_H_ */

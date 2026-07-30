@@ -3,6 +3,7 @@
 
 #include "core/trace_cache/type_registry.hpp"
 #include "mocked_types.hpp"
+#include <cstdint>
 
 #include <gtest/gtest.h>
 
@@ -16,9 +17,9 @@ protected:
 
 TEST_F(type_registry_test, test_get_type_sample_1)
 {
-    test_sample_1        test_value{ 42, "hello" };
-    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<uint8_t> buffer(buffer_size);
+    test_sample_1             test_value{ 42, "hello" };
+    size_t                    buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<std::uint8_t> buffer(buffer_size);
     rocprofsys::trace_cache::serialize(buffer.data(), test_value);
 
     auto* buffer_data = buffer.data();
@@ -35,9 +36,9 @@ TEST_F(type_registry_test, test_get_type_sample_1)
 
 TEST_F(type_registry_test, test_get_type_sample_2)
 {
-    test_sample_2        test_value{ 3.14, 123 };
-    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<uint8_t> buffer(buffer_size);
+    test_sample_2             test_value{ 3.14, 123 };
+    size_t                    buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<std::uint8_t> buffer(buffer_size);
     rocprofsys::trace_cache::serialize(buffer.data(), test_value);
 
     auto* buffer_data = buffer.data();
@@ -54,8 +55,8 @@ TEST_F(type_registry_test, test_get_type_sample_2)
 
 TEST_F(type_registry_test, test_get_type_unknown_id)
 {
-    uint8_t  dummy_data = 0;
-    uint8_t* data       = &dummy_data;
+    std::uint8_t  dummy_data = 0;
+    std::uint8_t* data       = &dummy_data;
 
     auto result = type_registry.get_type(test_type_identifier_t::fragmented_space, data);
 
@@ -80,8 +81,8 @@ TEST_F(type_registry_test, test_multiple_calls_same_type)
     size_t buffer_size1 = rocprofsys::trace_cache::get_size(test_value1);
     size_t buffer_size2 = rocprofsys::trace_cache::get_size(test_value2);
 
-    std::vector<uint8_t> buffer1(buffer_size1);
-    std::vector<uint8_t> buffer2(buffer_size2);
+    std::vector<std::uint8_t> buffer1(buffer_size1);
+    std::vector<std::uint8_t> buffer2(buffer_size2);
 
     rocprofsys::trace_cache::serialize(buffer1.data(), test_value1);
     rocprofsys::trace_cache::serialize(buffer2.data(), test_value2);
@@ -116,9 +117,9 @@ protected:
 
 TEST_F(type_registry_optional_test, test_get_type_sample_5_with_value)
 {
-    test_sample_5        test_value{ std::optional<uint32_t>{ 42 } };
-    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<uint8_t> buffer(buffer_size);
+    test_sample_5             test_value{ std::optional<std::uint32_t>{ 42 } };
+    size_t                    buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<std::uint8_t> buffer(buffer_size);
     rocprofsys::trace_cache::serialize(buffer.data(), test_value);
 
     auto* buffer_data = buffer.data();
@@ -135,9 +136,9 @@ TEST_F(type_registry_optional_test, test_get_type_sample_5_with_value)
 
 TEST_F(type_registry_optional_test, test_get_type_sample_5_nullopt)
 {
-    test_sample_5        test_value{ std::nullopt };
-    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
-    std::vector<uint8_t> buffer(buffer_size);
+    test_sample_5             test_value{ std::nullopt };
+    size_t                    buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<std::uint8_t> buffer(buffer_size);
     rocprofsys::trace_cache::serialize(buffer.data(), test_value);
 
     auto* buffer_data = buffer.data();

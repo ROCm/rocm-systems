@@ -5,7 +5,6 @@
 
 #include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/exception.hpp"
 
 #include <timemory/hash/types.hpp>

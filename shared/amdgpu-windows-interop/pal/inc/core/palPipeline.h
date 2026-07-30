@@ -58,6 +58,7 @@ namespace Pal
 {
 struct GpuMemSubAllocInfo;
 enum class PrimitiveTopology : uint8;
+class ICodeObject;
 
 /// PAL's public shader-stage enumeration is defined by the Pipeline ABI.
 using ShaderType = Util::Abi::ApiShaderType;
@@ -237,7 +238,17 @@ union PipelineCreateFlags
 #else
         uint32 reserved971           :  1; ///< Reserved for future use.
 #endif
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
+        uint32 disableCodeObjectReferencing : 1; ///< Indicates that this pipeline will not manage the reference
+                                                 ///  counter for the codeObjects.
+                                                 ///  It's the client's responsibility to ensure the codeObjects stay
+                                                 ///  alive during pipeline creation and execution.
+                                                 ///  This is useful for clients who want to manage the lifetime of the
+                                                 ///  code objects separately from the pipelines.
+        uint32 reserved              : 29; ///< Reserved for future use.
+#else
         uint32 reserved              : 30; ///< Reserved for future use.
+#endif
     };
     uint32 u32All;                         ///< Flags packed as 32-bit uint.
 };
@@ -345,6 +356,12 @@ struct ComputePipelineCreateInfo
 {
     PipelineCreateFlags  flags;                ///< Flags controlling pipeline creation.
 
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
+    ICodeObject*         pCodeObject;          ///< Pointer to Pipeline ELF binary implementing the Pipeline ABI
+                                               ///  interface, obtained via IDevice::LoadCodeObject().
+                                               ///  The Pipeline ELF contains pre-compiled shaders,
+                                               ///  register values, and additional metadata.
+#endif
     const void*          pPipelineBinary;      ///< Pointer to Pipeline ELF binary implementing the Pipeline ABI
                                                ///  interface. The Pipeline ELF contains pre-compiled shaders,
                                                ///  register values, and additional metadata.
@@ -461,13 +478,19 @@ struct GraphicsPipelineCreateInfo
 {
     PipelineCreateFlags flags;                 ///< Flags controlling pipeline creation.
 
+#if PAL_BUILD_CODE_OBJECT_INTERFACE
+    Util::Span<ICodeObject*> codeObjects;      ///< Pointer(s) to Pipeline ELF binary or binaries implementing the
+                                               ///  Pipeline ABI interface, obtained via IDevice::LoadCodeObject().
+                                               ///  The Pipeline ELF contains pre-compiled shaders,
+                                               ///  register values, and additional metadata.
+#endif
     const void*         pPipelineBinary;       ///< Pointer to Pipeline ELF binary implementing the Pipeline ABI
                                                ///  interface. The Pipeline ELF contains pre-compiled shaders,
                                                ///  register values, and additional metadata.
     size_t              pipelineBinarySize;    ///< Size of Pipeline ELF binary in bytes.
     GetContentsCallback*   pGetContents;       ///< Callback to get ELF contents; can be nullptr if client never
                                                ///  provides an archive with empty members.
-    const IShaderLibrary** ppShaderLibraries;  ///< An array of graphics @ref IShaderLibrary object. pPipelineBinary
+    const IShaderLibrary** ppShaderLibraries;  ///< An array of graphics @ref IShaderLibrary object. codeObjects
                                                ///  and ppShaderLibraries can't be valid at the same time.
                                                ///  If the client does not know whether the pipeline is complete,
                                                ///  it can add the shader library for a "dummy partial pipeline" to
@@ -774,6 +797,7 @@ public:
         ShaderStats* pShaderStats,
         bool         getDisassemblySize) const = 0;
 
+    /// @deprecated  Please use the equivalent GetShaderCode() provided by the compiler interface instead.
     /// Obtains the compiled shader ISA code for the shader stage specified.
     ///
     /// @param [in]  shaderType The shader stage for which the shader cache entry is requested.

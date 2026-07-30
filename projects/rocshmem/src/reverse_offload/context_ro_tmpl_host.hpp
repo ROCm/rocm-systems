@@ -86,6 +86,20 @@ __host__ T ROHostContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
                                        context_window_info);
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__host__ int ROHostContext::reduce_scatter(rocshmem_team_t team, T *dest,
+                                           const T *source, int nreduce) {
+  return host_interface->reduce_scatter<T, Op>(team, dest, source, nreduce);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__host__ int ROHostContext::reduce_on_stream(rocshmem_team_t team, T *dest,
+                                             const T *source, 
+                                             int nreduce, 
+                                             hipStream_t stream) {
+  return host_interface->reduce_on_stream<T, Op>(team, dest, source, nreduce, stream);
+}
+
 template <typename T>
 __host__ void ROHostContext::broadcast(T *dest, const T *source, int nelems,
                                        int pe_root, int pe_start,

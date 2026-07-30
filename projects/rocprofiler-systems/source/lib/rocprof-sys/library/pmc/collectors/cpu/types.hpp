@@ -31,21 +31,21 @@ union enabled_metrics
 {
     struct
     {
-        uint32_t frequency    : 1;
-        uint32_t load         : 1;
-        uint32_t page_rss     : 1;
-        uint32_t virt_mem     : 1;
-        uint32_t peak_rss     : 1;
-        uint32_t ctx_switches : 1;
-        uint32_t page_faults  : 1;
-        uint32_t user_time    : 1;
-        uint32_t kernel_time  : 1;
+        std::uint32_t frequency    : 1;
+        std::uint32_t load         : 1;
+        std::uint32_t page_rss     : 1;
+        std::uint32_t virt_mem     : 1;
+        std::uint32_t peak_rss     : 1;
+        std::uint32_t ctx_switches : 1;
+        std::uint32_t page_faults  : 1;
+        std::uint32_t user_time    : 1;
+        std::uint32_t kernel_time  : 1;
     } bits;
-    uint32_t value = 0;
+    std::uint32_t value = 0;
 };
 
 /// All 9 CPU metrics enabled (bits 0-8).
-inline constexpr uint32_t ALL_CPU_METRICS = 0x1FF;
+inline constexpr std::uint32_t ALL_CPU_METRICS = 0x1FF;
 
 /**
  * @brief Per-CPU metric snapshot for a single CPU core.
@@ -64,13 +64,13 @@ struct per_cpu_metrics
  */
 struct process_metrics
 {
-    int64_t page_rss         = 0;  // bytes
-    int64_t virt_mem         = 0;  // bytes
-    int64_t peak_rss         = 0;  // bytes
-    int64_t context_switches = 0;  // count (voluntary + involuntary)
-    int64_t page_faults      = 0;  // count (major + minor)
-    int64_t user_mode_time   = 0;  // microseconds
-    int64_t kernel_mode_time = 0;  // microseconds
+    std::int64_t page_rss         = 0;  // bytes
+    std::int64_t virt_mem         = 0;  // bytes
+    std::int64_t peak_rss         = 0;  // bytes
+    std::int64_t context_switches = 0;  // count (voluntary + involuntary)
+    std::int64_t page_faults      = 0;  // count (major + minor)
+    std::int64_t user_mode_time   = 0;  // microseconds
+    std::int64_t kernel_mode_time = 0;  // microseconds
 };
 
 /**

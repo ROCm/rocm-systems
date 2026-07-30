@@ -23,17 +23,17 @@
 #ifndef _GFX10_DEF_H_
 #define _GFX10_DEF_H_
 
-#include "linux/navi10_enum.h"
-#include "util/soc15_common.h"
-#include "util/reg_offsets.h"
-#include "linux/registers/gc/gc_10_3_0_offset.h"
-#include "linux/registers/gc/gc_10_3_0_sh_mask.h"
-#include "linux/registers/athub/athub_1_0_offset.h"
-#include "linux/registers/athub/athub_1_0_sh_mask.h"
-#include "linux/packets/nvd.h"
-#include "gfxip/gfx10/gfx10_block_info.h"
-#include "gfxip/gfx10/gfx10_primitives.h"
-#include "gfxip/gfx10/gfx10_block_table.h"
+#include "lib/aqlprofile/linux/navi10_enum.h"
+#include "lib/aqlprofile/util/soc15_common.h"
+#include "lib/aqlprofile/util/reg_offsets.h"
+#include "lib/aqlprofile/linux/registers/gc/gc_10_3_0_offset.h"
+#include "lib/aqlprofile/linux/registers/gc/gc_10_3_0_sh_mask.h"
+#include "lib/aqlprofile/linux/registers/athub/athub_1_0_offset.h"
+#include "lib/aqlprofile/linux/registers/athub/athub_1_0_sh_mask.h"
+#include "lib/aqlprofile/linux/packets/nvd.h"
+#include "lib/aqlprofile/gfxip/gfx10/gfx10_block_info.h"
+#include "lib/aqlprofile/gfxip/gfx10/gfx10_primitives.h"
+#include "lib/aqlprofile/gfxip/gfx10/gfx10_block_table.h"
 
 using namespace gfxip::gfx10;
 #endif  // _GFX10_DEF_H_

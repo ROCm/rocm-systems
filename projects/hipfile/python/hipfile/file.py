@@ -1,34 +1,89 @@
-# pylint: disable=C0114,C0115,C0116
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
+"""GPU-accelerated file I/O through hipFile."""
+
+from __future__ import annotations
+
 import os
 import stat
 from sys import stderr
+from typing import TYPE_CHECKING
 
 from hipfile._hipfile import (  # pylint: disable=E0401,E0611
+    AsyncIOHandle,
     hipFileHandleRegister,
     hipFileHandleDeregister,
     hipFileRead,
+    hipFileReadAsync,
+    hipFileStreamDeregister,
+    hipFileStreamRegister,
     hipFileWrite,
+    hipFileWriteAsync,
+    supports_async as _supports_async,
 )
 from hipfile.enums import FileHandleType
 from hipfile.error import HipFileException
 
+if TYPE_CHECKING:
+    from types import TracebackType
+
+    from hipfile.buffer import Buffer
+
 
 class FileHandle:
-    DEFAULT_MODE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+    """Manage a file descriptor registered with the hipFile driver.
+
+    Wraps ``os.open``/``os.close`` together with hipFile handle
+    registration so that GPU-accelerated reads and writes can be
+    performed through a single object.
+
+    Supports the context-manager protocol for automatic
+    ``open``/``close``::
+
+        with FileHandle(path, os.O_RDONLY | os.O_DIRECT) as fh:
+            fh.read(buf, size, 0, 0)
+    """
+
+    DEFAULT_MODE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH  # 0o644
 
     def __init__(
-        self, path, flags, mode=DEFAULT_MODE, handle_type=FileHandleType.OPAQUE_FD
-    ):
-        self._fd = None
+        self,
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = DEFAULT_MODE,
+        handle_type: FileHandleType = FileHandleType.OPAQUE_FD,
+    ) -> None:
+        """Initialize a ``FileHandle``.
+
+        The file is **not** opened until ``open`` is called (or the
+        context manager is entered).
+
+        Parameters
+        ----------
+        path : str or os.PathLike[str]
+            Filesystem path to open.
+        flags : int
+            Flags passed to ``os.open`` (e.g. ``os.O_RDONLY | os.O_DIRECT``).
+        mode : int, optional
+            Permission bits used when creating a file.  Defaults to
+            ``0o644``.
+        handle_type : FileHandleType, optional
+            Type of handle to register.  Defaults to
+            ``FileHandleType.OPAQUE_FD``.
+        """
+        self._fd: int | None = None
         self._flags = flags
-        self._handle = None
-        self._handle_type = None
+        self._handle: int | None = None
+        self._handle_type: FileHandleType | None = None
         self._mode = mode
         self._path = path
 
         self.handle_type = handle_type
 
-    def __del__(self):
+    def __del__(self) -> None:
+        """Close on garbage collection if still open."""
         try:
             self.close()
         except Exception:  # pylint: disable=W0718  # Suppress exceptions in a dtor
@@ -37,27 +92,48 @@ class FileHandle:
                 file=stderr,
             )
 
-    def __enter__(self):
+    def __enter__(self) -> FileHandle:
+        """Open the file and return *self*."""
         self.open()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the file."""
         self.close()
 
     @property
-    def flags(self):
+    def flags(self) -> int:
+        """Flags passed to ``os.open``."""
         return self._flags
 
     @property
-    def handle(self):
+    def handle(self) -> int | None:
+        """Opaque hipFile handle, or ``None`` if not open."""
         return self._handle
 
     @property
-    def handle_type(self):
+    def handle_type(self) -> FileHandleType | None:
+        """Handle type used for registration."""
         return self._handle_type
 
     @handle_type.setter
-    def handle_type(self, _handle_type):
+    def handle_type(self, _handle_type: FileHandleType) -> None:
+        """Set the handle type.
+
+        Raises
+        ------
+        RuntimeError
+            If the file handle is already open.
+        ValueError
+            If *_handle_type* is not a ``FileHandleType`` member.
+        NotImplementedError
+            If *_handle_type* is ``OPAQUE_WIN32``.
+        """
         if self._handle is not None:
             raise RuntimeError("Cannot modify handle_type while FileHandle is open")
         if _handle_type not in FileHandleType:
@@ -69,14 +145,25 @@ class FileHandle:
         self._handle_type = _handle_type
 
     @property
-    def mode(self):
+    def mode(self) -> int:
+        """File creation permission bits."""
         return self._mode
 
     @property
-    def path(self):
+    def path(self) -> str | os.PathLike[str]:
+        """Filesystem path."""
         return self._path
 
-    def open(self):
+    def open(self) -> None:
+        """Open the file and register it with the hipFile driver.
+
+        Raises
+        ------
+        RuntimeError
+            If the file handle is already open.
+        HipFileException
+            If hipFile handle registration fails.
+        """
         if self._handle is not None:
             raise RuntimeError("The FileHandle is already open.")
         self._fd = os.open(self._path, self._flags, self._mode)
@@ -87,7 +174,11 @@ class FileHandle:
             raise HipFileException(err[0], err[1])
         self._handle = handle
 
-    def close(self):
+    def close(self) -> None:
+        """Deregister the hipFile handle and close the file descriptor.
+
+        Safe to call multiple times; subsequent calls are no-ops.
+        """
         if self._handle is not None:
             hipFileHandleDeregister(self._handle)
             self._handle = None
@@ -95,7 +186,36 @@ class FileHandle:
             os.close(self._fd)
             self._fd = None
 
-    def read(self, buffer, size, file_offset, buffer_offset):
+    def read(
+        self, buffer: Buffer, size: int, file_offset: int, buffer_offset: int
+    ) -> int:
+        """Read from the file into a GPU buffer.
+
+        Parameters
+        ----------
+        buffer : Buffer
+            GPU buffer to read into.
+        size : int
+            Number of bytes to read.
+        file_offset : int
+            Byte offset within the file to start reading from.
+        buffer_offset : int
+            Byte offset within the GPU buffer to read into.
+
+        Returns
+        -------
+        int
+            Number of bytes actually read.
+
+        Raises
+        ------
+        RuntimeError
+            If the file handle is not open.
+        OSError
+            On a system-level I/O error (wraps ``errno``).
+        HipFileException
+            On a hipFile or HIP driver error.
+        """
         if self._handle is None:
             raise RuntimeError("The FileHandle is not open.")
         bytes_read, extra_err = hipFileRead(
@@ -111,7 +231,36 @@ class FileHandle:
             raise HipFileException(-bytes_read, extra_err)
         return bytes_read
 
-    def write(self, buffer, size, file_offset, buffer_offset):
+    def write(
+        self, buffer: Buffer, size: int, file_offset: int, buffer_offset: int
+    ) -> int:
+        """Write from a GPU buffer into the file.
+
+        Parameters
+        ----------
+        buffer : Buffer
+            GPU buffer to write from.
+        size : int
+            Number of bytes to write.
+        file_offset : int
+            Byte offset within the file to start writing to.
+        buffer_offset : int
+            Byte offset within the GPU buffer to write from.
+
+        Returns
+        -------
+        int
+            Number of bytes actually written.
+
+        Raises
+        ------
+        RuntimeError
+            If the file handle is not open.
+        OSError
+            On a system-level I/O error (wraps ``errno``).
+        HipFileException
+            On a hipFile or HIP driver error.
+        """
         if self._handle is None:
             raise RuntimeError("The FileHandle is not open.")
         bytes_written, extra_err = hipFileWrite(
@@ -126,3 +275,156 @@ class FileHandle:
             # Otherwise, extra_err is 0.
             raise HipFileException(-bytes_written, extra_err)
         return bytes_written
+
+    def read_async(
+        self,
+        buffer: Buffer,
+        size: int,
+        file_offset: int,
+        buffer_offset: int,
+        stream: int,
+    ) -> AsyncIOHandle:
+        """Submit an asynchronous read into a GPU buffer on *stream*.
+
+        The read is queued on the CUDA/HIP stream and this returns
+        immediately. The returned :class:`AsyncIOHandle` owns the in/out
+        slots the driver fills in when the I/O completes; the caller MUST
+        keep it alive until the stream has been synchronised (e.g. a
+        recorded ``Event`` the consumer waits on), then read
+        ``handle.bytes_done``.
+
+        The stream must have been registered first (see :class:`Stream`).
+
+        Parameters
+        ----------
+        buffer : Buffer
+            GPU buffer to read into.
+        size : int
+            Number of bytes to read.
+        file_offset : int
+            Byte offset within the file to start reading from.
+        buffer_offset : int
+            Byte offset within the GPU buffer to read into.
+        stream : int
+            Opaque CUDA/HIP stream handle (e.g.
+            ``torch.cuda.Stream.cuda_stream``).
+
+        Returns
+        -------
+        AsyncIOHandle
+            Keep alive past stream sync; then read ``bytes_done``.
+
+        Raises
+        ------
+        RuntimeError
+            If the file handle is not open.
+        OSError
+            On a system-level I/O error (wraps ``errno``).
+        HipFileException
+            On a hipFile or HIP driver error at submit time.
+        """
+        if self._handle is None:
+            raise RuntimeError("The FileHandle is not open.")
+        io = AsyncIOHandle(size, file_offset, buffer_offset)
+        err, extra_err = hipFileReadAsync(self._handle, buffer.ptr, io, stream)
+        if err == -1:
+            # POSIX/C error: extra_err is errno (matches read()).
+            raise OSError(extra_err, os.strerror(extra_err))
+        if err != 0:
+            # err is hipFileOpError_t; extra_err is hipError_t when err ==
+            # hipFileHipDriverError.
+            raise HipFileException(err, extra_err)
+        return io
+
+    def write_async(
+        self,
+        buffer: Buffer,
+        size: int,
+        file_offset: int,
+        buffer_offset: int,
+        stream: int,
+    ) -> AsyncIOHandle:
+        """Submit an asynchronous write from a GPU buffer on *stream*.
+
+        See :meth:`read_async` for argument lifetime and return
+        semantics.
+        """
+        if self._handle is None:
+            raise RuntimeError("The FileHandle is not open.")
+        io = AsyncIOHandle(size, file_offset, buffer_offset)
+        err, extra_err = hipFileWriteAsync(self._handle, buffer.ptr, io, stream)
+        if err == -1:
+            # POSIX/C error: extra_err is errno (matches write()).
+            raise OSError(extra_err, os.strerror(extra_err))
+        if err != 0:
+            raise HipFileException(err, extra_err)
+        return io
+
+
+class Stream:
+    """Register a CUDA/HIP stream with hipFile for asynchronous I/O.
+
+    A stream must be registered before any ``read_async`` / ``write_async``
+    targets it, and deregistered at shutdown. Supports the context-manager
+    protocol::
+
+        with Stream(torch_stream.cuda_stream) as st:
+            handle = fh.read_async(buf, size, 0, 0, st.handle)
+            event.record(torch_stream)
+            consumer_stream.wait_event(event)
+            # keep `handle` alive until the consumer has waited, then
+            # handle.bytes_done is valid.
+    """
+
+    def __init__(self, stream: int, flags: int = 0) -> None:
+        """Wrap an opaque CUDA/HIP stream handle (not yet registered)."""
+        self._stream = int(stream)
+        self._flags = int(flags)
+        self._registered = False
+
+    @property
+    def handle(self) -> int:
+        """The opaque stream handle."""
+        return self._stream
+
+    @property
+    def registered(self) -> bool:
+        """Whether the stream is currently registered."""
+        return self._registered
+
+    def register(self) -> None:
+        """Register the stream. Idempotent."""
+        if self._registered:
+            return
+        err, extra = hipFileStreamRegister(self._stream, self._flags)
+        if err != 0:
+            raise HipFileException(err, extra)
+        self._registered = True
+
+    def deregister(self) -> None:
+        """Deregister the stream. Idempotent."""
+        if not self._registered:
+            return
+        err, extra = hipFileStreamDeregister(self._stream)
+        if err != 0:
+            raise HipFileException(err, extra)
+        self._registered = False
+
+    def __enter__(self) -> Stream:
+        self.register()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.deregister()
+
+
+def supports_async() -> bool:
+    """Return ``True`` if the loaded hipFile library implements the
+    asynchronous stream I/O API, ``False`` if it is synchronous-only
+    (callers should then fall back to ``read`` / ``write``)."""
+    return bool(_supports_async())

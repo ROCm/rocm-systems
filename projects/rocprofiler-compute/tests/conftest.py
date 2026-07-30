@@ -1,7 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import builtins
+import importlib.util
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -9,12 +12,11 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import patch
 
+import common
 import pytest
+from common import ROOT
 
-ROOT = os.path.dirname(os.path.dirname(__file__))
-SRC = os.path.join(ROOT, "src")
-if SRC not in sys.path:
-    sys.path.insert(0, SRC)
+from utils.analysis_orm import Database
 
 # Determine script path
 rocprof_compute_script_path = Path(ROOT) / "src/rocprof-compute"
@@ -27,21 +29,13 @@ rocprof_compute_script_path = str(rocprof_compute_script_path)
 
 class ProfileModeImportGuard:
     """
-    Import guard using sys.meta_path to enforce stdlib-only imports in profile mode.
+    Import guard enforcing stdlib-only imports in profile mode.
 
-    Python Version Compatibility:
-        - Python 3.10+: Full enforcement (uses sys.stdlib_module_names)
-        - Python 3.8-3.9: No-op mode (enforcement disabled, warning issued)
-
-    Usage:
-        with ProfileModeImportGuard():
-            # Python 3.10+: Import checking active, non-stdlib imports raise ImportError
-            # Python 3.8-3.9: No-op, all imports allowed (with warning)
-
-    Context Manager Protocol:
-        __enter__: Registers guard with Python's import system (sys.meta_path)
-        __exit__: Unregisters guard after code execution completes
+    Full enforcement on Python 3.10+ (uses sys.stdlib_module_names); no-op with
+    a warning on 3.8-3.9.
     """
+
+    _real_import = None
 
     # Project modules that are allowed (non-stdlib)
     ALLOWED_PROJECT_MODULES = frozenset([
@@ -50,6 +44,7 @@ class ProfileModeImportGuard:
         "rocprof_compute_analyze",
         "rocprof_compute_soc",
         "rocprof_compute_tui",
+        "pc_sampling",
         "utils",
         "vendored",
         "roofline",
@@ -63,19 +58,16 @@ class ProfileModeImportGuard:
         "amdsmi",  # AMD System Management Interface
         "hip",  # HIP runtime Python bindings
         "rocprofv3",  # rocprofv3 python modules such as avail
-        "rocprofv3_avail_module",  # Alternative avail module for backward compatibility
+        "rocprofv3_avail_module",  # Alternative avail module for
+        # backward compatibility
     ])
 
     def __enter__(self):
-        """
-        Register import guard with Python's import system.
-
-        Called automatically when entering 'with' block.
-        Adds this object to sys.meta_path so Python calls our find_spec()
-        for every import during the with block.
-        """
+        """Install both import hooks (Python 3.10+ only)."""
         if sys.version_info >= (3, 10):
             sys.meta_path.insert(0, self)
+            self._real_import = builtins.__import__
+            builtins.__import__ = self._guarded_import
         else:
             print(
                 "\n" + "=" * 70 + "\n"
@@ -87,37 +79,45 @@ class ProfileModeImportGuard:
         return self
 
     def __exit__(self, _exc_type, _exc_val, _exc_tb):
-        """
-        Unregister import guard from Python's import system.
+        """Restore builtins.__import__ and remove the meta_path finder."""
+        if sys.version_info >= (3, 10):
+            if self._real_import is not None:
+                builtins.__import__ = self._real_import
+                self._real_import = None
+            if self in sys.meta_path:
+                sys.meta_path.remove(self)
 
-        Called automatically when exiting 'with' block.
-        Removes this object from sys.meta_path, disabling import checking.
-        """
-        if sys.version_info >= (3, 10) and self in sys.meta_path:
-            sys.meta_path.remove(self)
+    def _guarded_import(self, name, *args, **kwargs):
+        """Hook 1: builtins.__import__ wrapper; catches cached imports."""
+        # Relative imports (level > 0) resolve within their already-checked
+        # parent; hook 2 catches the resolved submodule, so only check absolute.
+        level = args[3] if len(args) > 3 else kwargs.get("level", 0)
+        if level == 0:
+            self._raise_if_forbidden(name)
+        return self._real_import(name, *args, **kwargs)
 
     def find_spec(self, fullname, path, target=None):
-        """
-        PEP 451 import hook - called automatically by Python during imports.
+        """Hook 2: meta_path finder; catches dynamic uncached imports."""
+        self._raise_if_forbidden(fullname)
+        return None
 
-        Python's import system calls this method for every import statement.
-        We check if the module is allowed, and raise ImportError if not.
-        """
+    def _raise_if_forbidden(self, fullname):
+        """Raise ImportError if the top-level package is not allowed."""
         top_level = fullname.split(".")[0]
 
         # Check stdlib
         if top_level in sys.stdlib_module_names:
-            return None
+            return
 
         # Check ROCm modules
         if top_level in self.ALLOWED_ROCM_MODULES:
-            return None
+            return
 
         # Check project modules (validate origin to prevent third-party modules
         # with same name, e.g., "utils" from site-packages)
         if top_level in self.ALLOWED_PROJECT_MODULES:
             if self._is_from_project(top_level):
-                return None
+                return
 
         # Forbidden module
         raise ImportError(
@@ -180,15 +180,57 @@ def pytest_addoption(parser):
         help="Path to the rocprofiler-sdk tool",
     )
 
+    parser.addoption(
+        "--coverage-seed",
+        type=int,
+        default=random.randrange(2**32),
+        help="RNG seed for test_torch_trace_coverage sampling.",
+    )
+    parser.addoption(
+        "--coverage-n",
+        type=int,
+        default=100,
+        help="Random ATen sample budget (default 100).",
+    )
+
+
+def require_torch(*, gpu: bool = False) -> None:
+    """Skip when PyTorch (or, with gpu=True, GPU) is unavailable."""
+    if importlib.util.find_spec("torch") is None:
+        pytest.skip("PyTorch is not installed")
+    try:
+        import torch
+    except Exception as e:
+        pytest.skip(f"PyTorch import failed: {type(e).__name__}: {e}")
+    if gpu and not torch.cuda.is_available():
+        pytest.skip("torch.cuda.is_available() is False")
+
+
+def require_triton(*, gpu: bool = False) -> None:
+    """Skip when Triton, or the PyTorch/GPU stack it requires, is unavailable."""
+    require_torch(gpu=gpu)
+    if importlib.util.find_spec("triton") is None:
+        pytest.skip("Triton is not installed")
+    try:
+        import triton  # noqa: F401
+    except Exception as e:
+        pytest.skip(f"Triton import failed: {type(e).__name__}: {e}")
+
+
+@pytest.fixture
+def db_session():
+    """An initialized in-memory analysis database, torn down after the test."""
+    Database.init(":memory:")
+    yield Database.get_session()
+    Database._session.close()
+    Database._engine.dispose()
+    Database._session = None
+    Database._engine = None
+
 
 @pytest.fixture(autouse=True)
 def skip_monkeypatch_with_binary(request):
-    """Auto-skip tests using monkeypatch when --call-binary is used.
-
-    Tests that use monkeypatch to patch Python functions/classes/modules
-    cannot work with --call-binary mode because the binary runs in a separate
-    process where Python patches don't apply.
-    """
+    """Skip monkeypatch tests under --call-binary (patches don't cross processes)."""
     if (
         request.config.getoption("--call-binary")
         and "monkeypatch" in request.fixturenames
@@ -216,6 +258,8 @@ def binary_handler_profile_rocprof_compute(request):
         num_ranks: Number of MPI ranks (1 = no MPI, >1 = use mpirun).
         capture_output: If True, capture stdout/stderr and return
             (returncode, stdout, stderr) tuple instead of just returncode.
+        stream: If True, echo child output line by line as it is produced
+            (requires capture_output).
 
     Returns:
         If capture_output is False: returncode (int)
@@ -234,6 +278,7 @@ def binary_handler_profile_rocprof_compute(request):
         workload_dir_type="output_directory",
         num_ranks=1,
         capture_output=False,
+        stream=False,
     ):
         # Skip test if multiple ranks are requested but mpirun is not available
         if num_ranks > 1 and shutil.which("mpirun") is None:
@@ -286,16 +331,9 @@ def binary_handler_profile_rocprof_compute(request):
                     command_rocprof_compute, num_ranks
                 )
 
-            process = subprocess.run(
-                command_rocprof_compute,
-                text=True,
-                capture_output=True,
+            process = common.run_subprocess(
+                command_rocprof_compute, capture_output=True, stream=stream
             )
-            # Print output so capsys can capture it
-            if process.stdout:
-                print(process.stdout, end="")
-            if process.stderr:
-                print(process.stderr, end="", file=sys.stderr)
             # verify run status
             if check_success:
                 assert process.returncode == 0
@@ -354,10 +392,10 @@ def binary_handler_profile_rocprof_compute(request):
                 if num_ranks == 1:
                     command_rocprof_compute[0] = rocprof_compute_script_path
 
-                process = subprocess.run(
+                process = common.run_subprocess(
                     command_rocprof_compute,
-                    text=True,
                     capture_output=capture_output,
+                    stream=stream,
                 )
 
                 # Verify run status

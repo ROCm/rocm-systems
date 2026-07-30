@@ -1,0 +1,63 @@
+digraph writer_context {
+    rankdir=LR;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=10, style=filled];
+    edge [fontname="Helvetica", fontsize=9];
+
+    label="Writer Context: Dependency Injection";
+    labelloc=t;
+    fontsize=14;
+
+    subgraph cluster_context {
+        label="writer_context";
+        style=filled;
+        color="#d5e8d5";
+        fillcolor="#f0fff0";
+
+        ctx [label="writer_context", shape=box, fillcolor="#c0e0c0"];
+    }
+
+    subgraph cluster_deps {
+        label="Shared Dependencies";
+        style=filled;
+        color="#dce8f5";
+        fillcolor="#f0f6ff";
+
+        backend [label="sqlite_backend\n(database operations)", shape=box, fillcolor="#c8ddf0"];
+        registry [label="entity_registry\n(tracks registered entities)", shape=box, fillcolor="#c8ddf0"];
+        key_providers [label="primary_key_providers\n(autoincrementer per table)", shape=box, fillcolor="#c8ddf0"];
+        validator [label="insert_validator\n(foreign key checks)", shape=box, fillcolor="#c8ddf0"];
+        uuid [label="uuid\n(session identifier)", shape=box, fillcolor="#c8ddf0"];
+    }
+
+    subgraph cluster_writers {
+        label="Schema Writers (consumers)";
+        style=filled;
+        color="#f5e0c0";
+        fillcolor="#fff8f0";
+
+        info_w [label="info_registration_writer", shape=box, fillcolor="#f0dcc0"];
+        region_w [label="region_writer", shape=box, fillcolor="#f0dcc0"];
+        kd_w [label="kernel_dispatch_writer", shape=box, fillcolor="#f0dcc0"];
+        mc_w [label="memory_copy_writer", shape=box, fillcolor="#f0dcc0"];
+        ma_w [label="memory_alloc_writer", shape=box, fillcolor="#f0dcc0"];
+        pmc_w [label="pmc_event_writer", shape=box, fillcolor="#f0dcc0"];
+        common [label="common_insert_operations", shape=box, fillcolor="#f0dcc0"];
+    }
+
+    ctx -> backend;
+    ctx -> registry;
+    ctx -> key_providers;
+    ctx -> validator;
+    ctx -> uuid;
+
+    validator -> registry [label="  queries  ", style=dashed, color=gray50];
+
+    info_w -> ctx [label="  shared_ptr  ", color="#a06020", fontcolor="#a06020"];
+    region_w -> ctx [color="#a06020"];
+    kd_w -> ctx [color="#a06020"];
+    mc_w -> ctx [color="#a06020"];
+    ma_w -> ctx [color="#a06020"];
+    pmc_w -> ctx [color="#a06020"];
+    common -> ctx [color="#a06020"];
+}

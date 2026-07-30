@@ -8,27 +8,133 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **API:**
 
-- Late-start profiling support: Automatic profiling activation when rocprofiler-sdk loads after runtime initialization
-  - `rocprofiler_force_configure()` now automatically detects and profiles runtimes that initialized before SDK load
-  - Integrates with rocprofiler-register to retrieve already-registered API tables
-  - Supports all runtime types (HSA, HIP, ROCTX, RCCL, ROCDecode, ROCJpeg, etc.) automatically
-  - No explicit late-start API calls required - works transparently
+  - Streaming Performance Monitor (SPM) counter collection support (beta):
+    - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
+    - GPU-timestamped counter values alongside kernel dispatch information.
+  - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
+
+**rocprofv3 (CLI):**
+
+  - SPM counter collection support in `rocprofv3` (beta):
+    - `--spm <counter>` flag to specify counters for SPM collection.
+    - `--spm-sample-interval` and `--spm-sample-interval-unit` parameters to configure sampling rate.
+    - `--spm-beta-enabled` flag to opt in to the beta SPM feature.
+    - `--spm-config` option in `rocprofv3-avail` to list available SPM configurations.
+  - JSON and rocpd output format support for SPM.
+  - OpenMP (OMPT) tracing via the new `--ompt-trace` flag:
+    - Accepts a bare boolean or category list (`all, thread, parallel, task, sync, mutex, target, device, error`); also folded into `--sys-trace`/`--runtime-trace`.
+    - rocpd-only trace: records go to the rocpd database (auto-added when another format is requested) and export via `rocpd convert`.
 
 **Documentation:**
 
-- Added "Using Late-Loading" how-to guide with code examples
-- Documented late-loading workflow and integration with rocprofiler-register
+  - SPM API reference guide (`api-reference/spm.rst`).
+  - SPM usage guide for `rocprofv3` (`how-to/using-spm.rst`).
+  - `--spm-config` documentation to `rocprofv3-avail` usage guide.
+
+### Changed
+- Bump rocpd schema to version 3.0.1 which supports NIC agent types.
+- Bump rocpd schema to version 3.0.2 for HIP graph per-node attribution (`graph_exec_id`/`graph_node_id` columns on `rocpd_kernel_dispatch`/`rocpd_memory_copy` and the new `rocpd_graph_launch` table). The pre-graph-attribution 3.0.1 schema is now frozen under `versions/3.0.1/` per the rocpd schema versioning scheme.
+- Bump rocpd schema to version 3.0.3 for SPM support. The pre-spm-support 3.0.2 schema is now frozen under `versions/3.0.2/` per the rocpd schema versioning scheme.
+
+### Removed
+
+
+## ROCprofiler-SDK 1.3.5
+
+### Added
+- HipFile API tracing support
+
+
+## ROCprofiler-SDK 1.3.0 for ROCm release 7.2.4
+
+### Optimized
+
+- Reduced ROCprofiler-sdk profiling overhead: Improved profiling stability for vLLM workloads traced with PyTorch torch.profiler using the rocprofiler-sdk backend.
+
+
+## ROCprofiler-SDK 1.3.0 for ROCm release 7.13
+
+### Added
+
+**API:**
+
+- Late-start profiling support: Added automatic late‑start profiling support, enabling profiling when `rocprofiler-sdk` is loaded after HSA/HIP runtimes have already initialized.
+  - `rocprofiler_force_configure()` now automatically detects and profiles runtimes initialized before the SDK loads.
+  - Integrates with `rocprofiler-register` to retrieve the registered API tables.
+  - Supports all runtime types (HSA, HIP, ROCTX, RCCL, ROCDecode, ROCJpeg, and more) automatically.
+  - No explicit late-start API calls required; works transparently.
+
+- KFD (Kernel Fusion Driver) event tracing support:
+  - Buffer service configurations for each KFD buffer tracing type.
+  - New type `tool_buffer_tracing_kfd_record_t` using `std::variant` to wrap 8 different KFD buffer tracing types.
+  - Each KFD event generates `rocpd_info_pmc`, `rocpd_event`, `rocpd_region`, and `rocpd_pmc_event` rows
+  - Fixed handling for special SVM location in KFD prefetch location reporting
+  - Fixed parsing for queue restore events to handle both correct format (character '0') and broken driver format (NULL character '\0')
+
+- Per-graph-node attribution for HIP graph operations:
+  - New callback tracing kind `ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH` fires for `hipGraphInstantiate*`, `hipGraphExecDestroy`, and `hipGraphLaunch{,_spt}` lifecycle events. Payload carries a process-monotonic `graph_exec_id` and the raw `hipGraphExec_t` handle. Mirrors the `HIP_STREAM` design.
+  - New buffer tracing kind `ROCPROFILER_BUFFER_TRACING_HIP_GRAPH` emits a summary record per successful `hipGraphLaunch` invocation with `graph_exec_id`, `kernel_dispatch_count`, agent, and launch timestamps.
+  - Tools can associate kernel dispatches and memory copies with their producing graph node by maintaining a per-thread attribution stack (push on EXEC_LAUNCH ENTER, pop on EXIT) and capturing the top of stack into the external correlation id at request time. See the doc comment on `rocprofiler_callback_tracing_hip_graph_data_t` for the recipe.
+  - Attribution accuracy across launches requires segmented scheduling (default), `AMD_DIRECT_DISPATCH=1`, and single-threaded launching of one `hipGraphExec_t`.
+
+**rocprofv3 (CLI):**
+
+- Multi-pass counter collection support: Support for multiple `--pmc` flags to define separate counter groups for different profiling passes.
+  - Ability to combine command-line `--pmc` flags with input file counter groups.
+  - Each pass generates output in a separate `pass_n` subdirectory.
+  - Example: `rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT -- <app>` creates two profiling passes.
+
+- KFD (Kernel Fusion Driver) event tracing support:
+  - KFD record dumping to `rocpd` with support for 8 main KFD event types.
+  - Support for `rocpd` to Perfetto conversion for KFD events.
+  - `--kfd-trace` flag to enable KFD event tracing.
+
+- ROCTx Support for ATT: Added ROCtx support to device thread trace when using `--att --selected-regions`.
+  - Allows `roctxProfilerPause` and `roctxProfilerResume` to explicitly control when ATT data collection starts and stops.
+  - Enables more precise, region-focused ATT tracing with reduced overhead and noise.
+  - Supports multiple resume/pause cycles, each producing separate trace output files.
+  - Incompatible with `--att-consecutive-kernels`.
+
+- PC Sampling Support for Dynamic Attach: Added PC Sampling support for Dynamic Attach feature, allowing users to attach to a running application and collect PC samples without restarting the workload.
+  - Enables profiling long-running or production-style jobs at the point of interest.
+  - Results integrate with the existing PC sampling analysis flow.
+
+- HIP graph attribution fields and trace:
+  - Kernel and memory-copy records gain `graph_exec_id` and `graph_node_id` fields in JSON and rocpd output. rocpd conversion exposes these fields in CSV, OTF2, and Perfetto output.
+  - New `--hip-graph-trace` CLI flag emits per-launch summary records (one row per successful `hipGraphLaunch`) in JSON and rocpd output, including `graph_exec_id` and `kernel_dispatch_count`. Automatically enabled by `--hip-trace` / `--hip-runtime-trace` since HIP graphs are part of the HIP runtime.
+- rocSHMEM API tracing support:
+  - `--rocshmem-trace` flag to enable tracing of rocSHMEM host-stream APIs.
+  - Included in the `--sys-trace` and `--runtime-trace` aggregate tracing options.
+  - Emitted directly to the JSON and rocpd (default, `.db`) output formats; CSV, Perfetto (`.pftrace`), and OTF2 output are produced from the rocpd database via `rocpd convert`.
+
+**Documentation:**
+
+- Added marker-controlled thread tracing section to the thread trace how-to guide.
+- Added cross-reference from ROCTx documentation to ATT with `selected-regions`.
+- Added HIP graph attribution section to the rocprofv3 how-to guide covering the new output columns, the `--hip-graph-trace` flag, the determinism contract, and v1 limitations.
 
 ### Changed
 
 **Implementation:**
 
-- **Late-start architecture redesign**: Removed direct runtime symbol access in favor of proper rocprofiler-register integration
-  - Removed ~600 lines of dlopen/dlsym bypass logic
-  - Replaced with ~80 lines calling `rocprofiler_register_invoke_all_registrations()`
-  - Late-start now works by requesting rocprofiler-register to re-propagate stored API tables
-  - Extensible design: automatically supports new runtimes without SDK code changes
-  - Proper separation of concerns: rocprofiler-register manages table storage, SDK manages table wrapping
+- Late-start architecture redesign: Removed direct runtime symbol access in favor of proper rocprofiler-register integration.
+  - Replaced ~600 lines of `dlopen`/`dlsym` bypass logic with ~80 lines by using `rocprofiler_register_invoke_all_registrations()`.
+  - Late-start now works by requesting `rocprofiler-register` to repropagate stored API tables.
+  - Extensible design. Automatically supports new runtimes without SDK code changes.
+  - Provides a proper separation of concerns. `rocprofiler-register` manages the table storage while SDK manages the table wrapping.
+- Counter dimension encoding changed from fixed-width to variable-width allocation per dimension type.
+- Dimension selection and reduction logic now uses explicit dimension masks and single-index selection.
+- HSA queue interception extended to handle AMD extended kernel dispatch packets.
+
+### Removed
+
+- Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.
+
+
+### Resolved issues
+
+- Fixed rocpd OTF2 output to add `ACCELERATOR_DEVICE` as system tree node domain for AMD devices.
+- Fixed `rocprofv3` input file parsing where comment lines containing `pmc:` were incorrectly processed as valid counter collection directives, causing unintended profiling passes.
 
 **Internal APIs (non-public):**
 
@@ -297,34 +403,3 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Addressed OpenMP Tools task scheduling null pointer exception.
 - Fixed stream ID errors arising during process attachment.
 - Fixed issues arising during dynamic code object loading.
-
-## ROCprofiler-SDK 1.2.0 for ROCm release 7.3
-
-### Added
-
-- Multi-pass counter collection support in `rocprofv3`:
-  - Support for multiple `--pmc` flags to define separate counter groups for different profiling passes
-  - Ability to combine command-line `--pmc` flags with input file counter groups
-  - Each pass generates output in a separate `pass_n` subdirectory
-  - Example: `rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT -- <app>` creates two profiling passes
-- KFD (Kernel Fusion Driver) event tracing support:
-  - Buffer service configurations for each KFD buffer tracing type
-  - New type `tool_buffer_tracing_kfd_record_t` using `std::variant` to wrap 8 different KFD buffer tracing types
-  - KFD record dumping to rocpd with support for 8 main KFD event types
-  - Each KFD event generates `rocpd_info_pmc`, `rocpd_event`, `rocpd_region`, and `rocpd_pmc_event` rows
-  - Support for rocpd to perfetto conversion for KFD events
-  - `rocprofv3` `--kfd-trace` flag to enable KFD event tracing
-  - Fixed handling for special SVM location in KFD prefetch location reporting
-  - Fixed parsing for queue restore events to handle both correct format (character '0') and broken driver format (NULL character '\0')
-
-### Changed
-
-- Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
-- Fixed rocpd OTF2 output to add ACCELERATOR_DEVICE as system tree node domain for AMD devices.
-
-### Resolved issues
-
-- Fixed `rocprofv3` input file parsing where comment lines containing `pmc:` were incorrectly processed as valid counter collection directives, causing unintended profiling passes.
-
-### Removed
-- Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.

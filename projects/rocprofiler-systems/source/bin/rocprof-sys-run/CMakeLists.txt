@@ -10,8 +10,7 @@
 add_executable(
     rocprofiler-systems-run
     ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-run.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-run.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/impl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../common/tool_runner.cpp
 )
 
 target_compile_definitions(rocprofiler-systems-run PRIVATE TIMEMORY_CMAKE=1)

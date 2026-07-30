@@ -99,29 +99,7 @@ bool testCodeObjFile(const char* codeObjFile) {
   return btestPassed;
 }
 
-#ifdef __linux__
-// Check if environment variable $ROCM_PATH is defined
-bool isRocmPathSet() {
-  FILE* fpipe;
-  char const* command = "echo $ROCM_PATH";
-  fpipe = popen(command, "r");
 
-  if (fpipe == nullptr) {
-    INFO("Unable to create command\n");
-    return false;
-  }
-  char command_op[COMMAND_LEN];
-  if (fgets(command_op, COMMAND_LEN, fpipe)) {
-    size_t len = strlen(command_op);
-    if (len > 1) {  // This is because fgets always adds newline character
-      pclose(fpipe);
-      return true;
-    }
-  }
-  pclose(fpipe);
-  return false;
-}
-#endif
 
 bool testMultiTargArchCodeObj() {
   bool btestPassed = true;
@@ -146,19 +124,16 @@ bool testMultiTargArchCodeObj() {
     return true;
   }
   // Generate the command to generate multi architecture code object file
-  const char* hipcc_path = nullptr;
-  if (isRocmPathSet()) {
-    hipcc_path = "$ROCM_PATH/bin/hipcc";
-  } else {
-    hipcc_path = "/opt/rocm/bin/hipcc";
-  }
-  /* Putting these command parameters into a variable to shorten the string
-    literal length in order to avoid multiline string literal cpplint warning
-  */
+  // Use hipcc path derived from hip-config.cmake via compile definition
+#ifdef HIP_HIPCC_EXECUTABLE
+  const char* hipcc_cmd = HIP_HIPCC_EXECUTABLE;
+#else
+  const char* hipcc_cmd = "hipcc";
+#endif
   const char* genco_option = "--offload-arch";
   const char* input_codeobj = "/tmp/vcpy_kernel.cpp";
-  const char* rocm_enumerator = "${ROCM_PATH}/bin/rocm_agent_enumerator";
-  snprintf(command, COMMAND_LEN, rocm_enumerator, hipcc_path, genco_option, props.gcnArchName,
+  snprintf(command, COMMAND_LEN, "%s %s=%s %s -o %s --genco",
+           hipcc_cmd, genco_option, props.gcnArchName,
            input_codeobj, CODE_OBJ_MULTIARCH);
 
   system((const char*)command);

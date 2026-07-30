@@ -44,6 +44,10 @@ TEST(Alloc, ncclIbMallocDebugZeroSize)
     EXPECT_EQ(ptr, nullptr);
 }
 
+#if ROCM_VERSION < 71200
+// These tests exercise the unsupported-fallback path of ncclCuMemHostAlloc/Free
+// that returns ncclInternalError. On ROCm 7.12+ the real implementation is
+// compiled in, so the fallback no longer exists and these tests are not applicable.
 TEST(Alloc, ncclCuMemHostAlloc)
 {
     RUN_ISOLATED_TEST(
@@ -71,6 +75,7 @@ TEST(Alloc, ncclCuMemHostFree)
         }
     );
 }
+#endif // ROCM_VERSION < 71200
 
 #if ROCM_VERSION < 70000
 // This test is only valid for ROCm versions < 7.0.0
@@ -85,7 +90,7 @@ TEST(Alloc, ncclCuMemAlloc)
             void*                      handle = reinterpret_cast<void*>(0x5678);
             size_t                     size   = 1024;
             hipMemAllocationHandleType type   = hipMemHandleTypeNone;
-            ncclResult_t               result = ncclCuMemAlloc(&ptr, &handle, type, size);
+            ncclResult_t               result = ncclCuMemAlloc(&ptr, &handle, type, size, /*manager=*/nullptr);
             EXPECT_EQ(result, ncclInternalError);
         }
     );
@@ -98,7 +103,7 @@ TEST(Alloc, ncclCuMemFree)
         []()
         {
             void*        dummyPtr = reinterpret_cast<void*>(0xdeadbeef);
-            ncclResult_t result   = ncclCuMemFree(dummyPtr);
+            ncclResult_t result   = ncclCuMemFree(dummyPtr, /*manager=*/nullptr);
             EXPECT_EQ(result, ncclInternalError);
         }
     );
@@ -127,7 +132,7 @@ TEST(Alloc, ncclCuMemFreeAddr)
         []()
         {
             void*        testPtr = reinterpret_cast<void*>(0xbeefcafe);
-            ncclResult_t result  = ncclCuMemFreeAddr(testPtr);
+            ncclResult_t result  = ncclCuMemFreeAddr(testPtr, /*manager=*/nullptr);
             ASSERT_EQ(result, ncclInternalError);
         }
     );

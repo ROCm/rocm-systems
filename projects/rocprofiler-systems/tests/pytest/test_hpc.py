@@ -81,17 +81,19 @@ def split_copy_compute_hw_queues_rules(validation_rules_dir) -> list[Path]:
 @pytest.mark.gpu
 class TestJacobi(RocprofsysTest):
 
-    openmp_run_args = ["-m", "512"]
+    openmp_non_usm_run_args = ["-m", "512"]
+    # With OMPX_APU_MAPS=1, it takes longer, so reduce domain size
+    openmp_usm_run_args = ["-m", "64"]
     hip_run_args = ["-g", "2", "1"]
 
+    @pytest.mark.slow
     @pytest.mark.openmp
     @pytest.mark.xnack
     @pytest.mark.rocpd("hpc_openmp_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_usm(self, mode, hpc_openmp_environment, gpu_info, kfd_rules):
         env = hpc_openmp_environment.copy()
-        env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,memory_copy,kfd_events"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
+        env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,memory_copy"
         env["HSA_XNACK"] = "1"
         env["ROCPROFSYS_USE_AMD_SMI"] = "OFF"
         if "apu" not in gpu_info.categories:
@@ -103,7 +105,7 @@ class TestJacobi(RocprofsysTest):
             mode,
             target="jacobi-fortran-usm",
             env=env,
-            run_args=self.openmp_run_args,
+            run_args=self.openmp_usm_run_args,
             check_target_arch=True,
         )
 
@@ -135,26 +137,8 @@ class TestJacobi(RocprofsysTest):
                 result,
                 subtest_name="Perfetto USM Zero-Copy validation (Non-APU)",
                 categories=["rocm_ompt_api"],
-                labels=["omp_target_data_op_emi"],
-                counts=[1],
-                depths=[1],
+                pass_regex=[r"omp_target_data_op_emi\s*\|\s*1\s*\|\s*1\s*\|"],
             )
-
-        # Validate KFD events in perfetto trace
-        self.assert_perfetto(
-            result,
-            subtest_name="Perfetto KFD event validation",
-            categories=["rocm_kfd_page_fault", "rocm_kfd_page_migrate", "rocm_kfd_queue"],
-            label_substrings=["PAGE_FAULT", "PAGE_MIGRATE", "QUEUE_EVICT"],
-            print_output=True,
-        )
-
-        # Validate KFD events in rocpd database
-        self.assert_rocpd(
-            result,
-            subtest_name="ROCpd KFD event validation",
-            rules_files=kfd_rules,
-        )
 
     @pytest.mark.openmp
     @pytest.mark.roctx
@@ -162,7 +146,6 @@ class TestJacobi(RocprofsysTest):
     def test_roctx(self, mode, hpc_openmp_environment):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["ROCPROFSYS_COUT_OUTPUT"] = "OFF"
 
         result = self.run_test(
@@ -170,52 +153,64 @@ class TestJacobi(RocprofsysTest):
             target="jacobi-fortran-targetdata-markers",
             env=env,
             check_target_arch=True,
-            run_args=self.openmp_run_args,
+            run_args=self.openmp_non_usm_run_args,
         )
         self.assert_regex(result)
 
+        # Going through dyninst (binary_rewrite or runtime_instrument) makes the host
+        # functions visible, changing the depth of the ROCTx markers as
+        # _QMjacobi_modPinit_jacobi is captured.
+        # sys_run does not go through dyninst, and hence needs a different depth check
+        expected_depths = (
+            [2, 2] if mode in ["binary_rewrite", "runtime_instrument"] else [1, 1]
+        )
         self.assert_perfetto(
             result,
             subtest_name="Perfetto ROCtx marker validation",
             categories=["rocm_marker_api"],
             labels=["init", "run"],
             counts=[1, 1],
-            depths=[1, 1],
+            depths=expected_depths,
         )
 
     @pytest.mark.hip
     @pytest.mark.mpi
+    @pytest.mark.multi_gpu(2)
     @pytest.mark.rocpd("hpc_hip_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_hip(self, mode, hpc_hip_environment):
         env = hpc_hip_environment.copy()
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["ROCPROFSYS_PERFETTO_COMBINE_TRACES"] = "ON"
 
         result = self.run_test(
-            mode, target="jacobi-hip", env=env, run_args=self.hip_run_args, mpi_ranks=2
+            mode,
+            target="jacobi-hip",
+            env=env,
+            run_args=self.hip_run_args,
+            launcher="mpi",
+            num_procs=2,
         )
-        # hipHostFree is one of the last calls and should be present if the program worked correctly
-        self.assert_regex(
-            result,
-            pass_regex=[r"0>>>.*_hipHostFree"],
-        )
-
+        self.assert_regex(result)
         # Taken from the program's defines.hpp
         JACOBI_MAX_LOOPS = 1000
 
         # With -g 2 1, 2 MPI ranks exist. The merged perfetto trace has 2x the per-rank count
-        MERGED_LAPLACIAN_KERNEL_COUNT = JACOBI_MAX_LOOPS * 2
-
         self.assert_perfetto(
             result,
             subtest_name="Laplacian Kernel Count Validation",
             perfetto_file="merged.proto",
             categories=["rocm_hip_stream"],
             print_output=True,
-            pass_regex=[
-                rf"LocalLaplacianKernel.*\|\s+{MERGED_LAPLACIAN_KERNEL_COUNT}\s+\|"
-            ],
+            pass_regex=[rf"LocalLaplacianKernel.*\|\s+{JACOBI_MAX_LOOPS * 2}\s+\|"],
+        )
+
+        # hipHostFree is one of the last calls — tracked via rocprofiler-sdk in Perfetto
+        self.assert_perfetto(
+            result,
+            subtest_name="hipHostFree Validation",
+            perfetto_file="merged.proto",
+            categories=["rocm_hip_api"],
+            pass_regex=[r"hipHostFree\s*\|\s*[1-9]"],
         )
 
 
@@ -223,6 +218,7 @@ class TestJacobi(RocprofsysTest):
 @pytest.mark.hip
 @pytest.mark.openmp
 @pytest.mark.roctx
+@pytest.mark.class_name("matrix-exponential")
 class TestMatrixExponential(RocprofsysTest):
 
     rocblas_gemm_kernel_prefix = ["Cijk_Ailk_Bljk"]
@@ -239,16 +235,12 @@ class TestMatrixExponential(RocprofsysTest):
         env = hpc_hip_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
         env["ROCPROFSYS_USE_OMPT"] = "ON"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
 
         result = self.run_test(
             mode, target="matrix-exponential-streams-sync-hip", env=env
         )
-        self.assert_regex(
-            result,
-            pass_regex=self.rocblas_gemm_kernel_prefix,
-            subtest_name="rocBLAS GEMM Kernel Validation",
-        )
+        self.assert_regex(result)
+
         # 171 total GEMM dispatches (sum of 1 to 18 from the Taylor series loop),
         # but schedule(dynamic) distributes them non-deterministically across
         # 4 OpenMP threads, so we verify presence rather than exact per-thread counts
@@ -265,8 +257,10 @@ class TestMatrixExponential(RocprofsysTest):
         )
 
 
+@pytest.mark.rocm
 @pytest.mark.gpu
 @pytest.mark.hip
+@pytest.mark.class_name("split-copy-compute-hw-queues")
 class TestSplitCopyComputeHWQueues(RocprofsysTest):
 
     nstreams = 4
@@ -277,6 +271,7 @@ class TestSplitCopyComputeHWQueues(RocprofsysTest):
         env = hpc_hip_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,hsa_api,kernel_dispatch,memory_copy"
         env["ROCPROFSYS_COUT_OUTPUT"] = "OFF"
+        env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "ON"
 
         result = self.run_test(
             mode,

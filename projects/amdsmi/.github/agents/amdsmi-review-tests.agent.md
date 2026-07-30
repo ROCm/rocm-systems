@@ -10,23 +10,33 @@ user-invocable: false
 
 You review test coverage, quality, and patterns for the amd-smi project.
 
+**PR bot gate:** the *Systems PR Bot* blocks any PR that changes source
+(`.c/.cc/.cpp/.h/.hpp/.py/.go/.rs`; full list in `tools/systems_pr_bot/policy.yml`)
+without adding a `test_*` / `*_test.*` file in the same PR (it adds the
+"Not ready to Review" label). Treat a code change with no accompanying test as
+❌ BLOCKING, not just a coverage gap. Doc/config-only changes (no source extension
+touched) are exempt and auto-pass.
+
 **Load `amdsmi-python-style-guide` skill when reviewing Python test files.**
+**Load `amdsmi-test-runner` skill for test execution commands and expected outputs.**
+**Load `amdsmi-packaging-test` skill when reviewing packaging, install scripts, or wheel build changes.**
 
 ## Test Validation
 
-**C++ (amdsmitst):** For C/C++ changes, build and run GTest:
+**C++ (amdsmitst):** The build subagent builds and installs first. To run GTest:
 ```bash
-cd build && make -j$(nproc) amdsmitst
-cd tests && source ../../tests/amd_smi_test/amdsmitst.exclude
-./amdsmitst --gtest_filter="-$(echo ${BLACKLIST_ALL_ASICS})"
+cd build/tests
+source ../../tests/amd_smi_test/amdsmitst.exclude
+source ../../tests/amd_smi_test/detect_asic_filter.sh
+./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}"
 ```
-Parse output: any `[  FAILED  ]` → ❌ BLOCKING. Build failure → ⚠️ IMPORTANT.
+Parse output: any `[  FAILED  ]` → ❌ BLOCKING.
 
 **Python:** See `amdsmi-python-style-guide` skill for Python testing rules. Tests must work with both system-installed and pip-installed amdsmi. CLI tests in `amdsmi_cli/`.
 
 ## Project Layout
 
-C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/` | CMake → root + `cmake_modules/` | Go → `goamdsmi_shim/` | Rust → `rust-interface/`
+Project structure and test directories are stored in repo memories.
 
 ## Your Job
 
@@ -45,7 +55,7 @@ C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/`
 If the orchestrator provides CI run data, use it to:
 - Identify **test failures** in the PR's CI run — these are ❌ BLOCKING
 - Spot **flaky tests** (passed on retry, or failed inconsistently)
-- Compare test step results against a baseline `main` run
+- Compare test step results against a baseline `develop` run
 - Note any **new test steps** added or **existing steps removed**
 - Flag tests that passed but took significantly longer than baseline (>2x)
 

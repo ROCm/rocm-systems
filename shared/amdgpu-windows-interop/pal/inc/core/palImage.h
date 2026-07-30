@@ -118,6 +118,7 @@ enum class MetadataTcCompatMode : uint16
     Count,
 };
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 992
 /// Image shared metadata support level
 enum class MetadataSharingLevel : uint32
 {
@@ -125,6 +126,7 @@ enum class MetadataSharingLevel : uint32
     ReadOnly    = 1,    ///< The metadata are expected to have read-only usage after the ownership is transitioned.
     FullOptimal = 2,    ///< The metadata can remain as-is if possible at ownership transition time.
 };
+#endif
 
 /// Specifies the type of PRT map image being created.
 enum class PrtMapType : uint32
@@ -896,17 +898,10 @@ public:
     virtual uint64 GetOptimalSharingId() const = 0;
 #endif
 
-    /// Sets level of optimal sharing by opening APIs using this optimal sharable image and pass this information to the
-    /// creator. This function is supposed to be called by openers only. The call by creator is ignored.
-    ///
-    /// @param  [in]    level        Level to be set to specified client API.
-    virtual void SetOptimalSharingLevel(
-        MetadataSharingLevel level) = 0;
-
-    /// Returns support level set by all possible opening APIs.
-    ///
-    /// @returns A summarized supporting level.
-    virtual MetadataSharingLevel GetOptimalSharingLevel() const = 0;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 992
+    virtual void SetOptimalSharingLevel(MetadataSharingLevel level) {}
+    virtual MetadataSharingLevel GetOptimalSharingLevel() const { return MetadataSharingLevel::FullOptimal; }
+#endif
 
     /// Gives the client access to the resource ID used for internal Pal events.
     /// EX: Resource Create, Resource Bind, Resource Destroy.

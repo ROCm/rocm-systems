@@ -40,7 +40,7 @@ cmake --build <build_dir> --target mpi-example
 **Targets:**
 
 | Target | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `mpi-example` | C++ benchmark (send/recv + all2all with communicator ops) |
 | `mpi-allgather` | C allgather example |
 | `mpi-allreduce` | C allreduce example |
@@ -64,7 +64,7 @@ mpirun -np 4 ./mpi-scatter-gather
 **Arguments (mpi-example):**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | 1 | Number of iterations | 1 |
 
 ## Profiling with rocprofiler-systems
@@ -76,7 +76,7 @@ mpirun -np 2 rocprof-sys-run -- ./mpi-example
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_USE_MPIP` | `ON` | Enable MPI profiling interposition |
 | `ROCPROFSYS_USE_MPI` | `ON` | Enable MPI-aware output merging |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |
@@ -84,19 +84,17 @@ mpirun -np 2 rocprof-sys-run -- ./mpi-example
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable sampling |
 
 ```bash
-mpirun -np 2 rocprof-sys-run \
-    -e ROCPROFSYS_USE_MPIP=ON \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./mpi-example
+ROCPROFSYS_USE_MPIP=ON \
+ROCPROFSYS_TRACE=true \
+mpirun -np 2 rocprof-sys-run -- ./mpi-example
 ```
 
 For flat profiling with collapsed processes/threads:
 
 ```bash
-mpirun -np 2 rocprof-sys-run \
-    -e ROCPROFSYS_USE_MPIP=ON \
-    -e ROCPROFSYS_FLAT_PROFILE=ON \
-    -e ROCPROFSYS_COLLAPSE_PROCESSES=ON \
-    -e ROCPROFSYS_COLLAPSE_THREADS=ON \
-    -- ./mpi-example
+ROCPROFSYS_USE_MPIP=ON \
+ROCPROFSYS_FLAT_PROFILE=ON \
+ROCPROFSYS_COLLAPSE_PROCESSES=ON \
+ROCPROFSYS_COLLAPSE_THREADS=ON \
+mpirun -np 2 rocprof-sys-run -- ./mpi-example
 ```

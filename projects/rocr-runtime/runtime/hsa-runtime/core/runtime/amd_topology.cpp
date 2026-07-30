@@ -85,7 +85,7 @@ namespace {
 const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #if _WIN32
                  1
-#elif __linux__
+#elif defined(__linux__) || defined(__FreeBSD__)
                  static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
 #endif
                  >
@@ -311,6 +311,7 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
       // Obtain properties of the node
       hsa_status_t ret = gpu_driver->GetNodeProperties(node_prop, gpu_list[idx]);
       assert(ret == HSA_STATUS_SUCCESS && "Error in getting Node Properties");
+      (void)ret;
 
       // disable interrupt signal for DTIF platform
       if (core::Runtime::runtime_singleton_->flag().enable_dtif())

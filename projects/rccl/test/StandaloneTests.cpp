@@ -9,6 +9,7 @@
 
 #include "TestBed.hpp"
 #include "StandaloneUtils.hpp"
+#include "common/ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting
 {
@@ -17,44 +18,47 @@ namespace RcclUnitTesting
    * ******************************************************************************************/
   TEST(Standalone, SplitComms_RankCheck)
   {
-    // Check for multi-gpu
-    int numDevices;
-    HIPCALL(hipGetDeviceCount(&numDevices));
-    if (numDevices < 2) {
-      GTEST_SKIP() << "This test requires at least 2 devices.";
-    }
+    RUN_ISOLATED_TEST("SplitComms_RankCheck", []()
+    {
+      // Check for multi-gpu
+      int numDevices;
+      HIPCALL(hipGetDeviceCount(&numDevices));
+      if (numDevices < 2) {
+        GTEST_SKIP() << "This test requires at least 2 devices.";
+      }
 
-    // Initialize the original comms
-    std::vector<ncclComm_t> comms(numDevices);
-    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+      // Initialize the original comms
+      std::vector<ncclComm_t> comms(numDevices);
+      NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
 
-    // Split into new comms (round-robin)
-    std::vector<ncclComm_t> subComms(numDevices);
-    int numSubComms = 2;
+      // Split into new comms (round-robin)
+      std::vector<ncclComm_t> subComms(numDevices);
+      int numSubComms = 2;
 
-    std::map<int, int> mapCounter;
-    NCCLCHECK(ncclGroupStart());
-    for (int localRank = 0; localRank < numDevices; localRank++) {
-      NCCLCHECK(ncclCommSplit(comms[localRank], localRank % numSubComms, localRank, &subComms[localRank], NULL));
-      mapCounter[localRank % numSubComms]++;
-    }
-    NCCLCHECK(ncclGroupEnd());
+      std::map<int, int> mapCounter;
+      NCCLCHECK(ncclGroupStart());
+      for (int localRank = 0; localRank < numDevices; localRank++) {
+        NCCLCHECK(ncclCommSplit(comms[localRank], localRank % numSubComms, localRank, &subComms[localRank], NULL));
+        mapCounter[localRank % numSubComms]++;
+      }
+      NCCLCHECK(ncclGroupEnd());
 
-    // Check that new comms have correct subranks / ranks
-    for (int i = 0; i < numDevices; i++) {
-      int subCommRank, subCommNRank;
-      NCCLCHECK(ncclCommUserRank(subComms[i], &subCommRank));
-      NCCLCHECK(ncclCommCount(subComms[i], &subCommNRank));
+      // Check that new comms have correct subranks / ranks
+      for (int i = 0; i < numDevices; i++) {
+        int subCommRank, subCommNRank;
+        NCCLCHECK(ncclCommUserRank(subComms[i], &subCommRank));
+        NCCLCHECK(ncclCommCount(subComms[i], &subCommNRank));
 
-      ASSERT_EQ(subCommRank, i / numSubComms);
-      ASSERT_EQ(subCommNRank, mapCounter[i % numSubComms]);
-    }
+        ASSERT_EQ(subCommRank, i / numSubComms);
+        ASSERT_EQ(subCommNRank, mapCounter[i % numSubComms]);
+      }
 
-    // Clean up comms
-    for (auto& subComm : subComms)
-      NCCLCHECK(ncclCommDestroy(subComm));
-    for (auto& comm : comms)
-      NCCLCHECK(ncclCommDestroy(comm));
+      // Clean up comms
+      for (auto& subComm : subComms)
+        NCCLCHECK(ncclCommDestroy(subComm));
+      for (auto& comm : comms)
+        NCCLCHECK(ncclCommDestroy(comm));
+    });
   }
 
   /**
@@ -62,43 +66,46 @@ namespace RcclUnitTesting
    * ******************************************************************************************/
   TEST(Standalone, SplitComms_OneColor)
   {
-    // Check for multi-gpu
-    int numDevices;
-    HIPCALL(hipGetDeviceCount(&numDevices));
-    if (numDevices < 2) {
-      GTEST_SKIP() << "This test requires at least 2 devices.";
-    }
+    RUN_ISOLATED_TEST("SplitComms_OneColor", []()
+    {
+      // Check for multi-gpu
+      int numDevices;
+      HIPCALL(hipGetDeviceCount(&numDevices));
+      if (numDevices < 2) {
+        GTEST_SKIP() << "This test requires at least 2 devices.";
+      }
 
-    // Initialize the original comms
-    std::vector<ncclComm_t> comms(numDevices);
-    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+      // Initialize the original comms
+      std::vector<ncclComm_t> comms(numDevices);
+      NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
 
-    // Split into new comms (all of the same color)
-    std::vector<ncclComm_t> subComms(numDevices);
-    NCCLCHECK(ncclGroupStart());
-    for (int localRank = 0; localRank < numDevices; localRank++)
-      NCCLCHECK(ncclCommSplit(comms[localRank], 0, localRank, &subComms[localRank], NULL));
-    NCCLCHECK(ncclGroupEnd());
+      // Split into new comms (all of the same color)
+      std::vector<ncclComm_t> subComms(numDevices);
+      NCCLCHECK(ncclGroupStart());
+      for (int localRank = 0; localRank < numDevices; localRank++)
+        NCCLCHECK(ncclCommSplit(comms[localRank], 0, localRank, &subComms[localRank], NULL));
+      NCCLCHECK(ncclGroupEnd());
 
-    // Validate results
-    for (int i = 0; i < numDevices; i++) {
-      int originalRank, originalNRank;
-      NCCLCHECK(ncclCommUserRank(comms[i], &originalRank));
-      NCCLCHECK(ncclCommCount(comms[i], &originalNRank));
+      // Validate results
+      for (int i = 0; i < numDevices; i++) {
+        int originalRank, originalNRank;
+        NCCLCHECK(ncclCommUserRank(comms[i], &originalRank));
+        NCCLCHECK(ncclCommCount(comms[i], &originalNRank));
 
-      int subCommRank, subCommNRank;
-      NCCLCHECK(ncclCommUserRank(subComms[i], &subCommRank));
-      NCCLCHECK(ncclCommCount(subComms[i], &subCommNRank));
+        int subCommRank, subCommNRank;
+        NCCLCHECK(ncclCommUserRank(subComms[i], &subCommRank));
+        NCCLCHECK(ncclCommCount(subComms[i], &subCommNRank));
 
-      ASSERT_EQ(originalRank, subCommRank);
-      ASSERT_EQ(originalNRank, subCommNRank);
-    }
+        ASSERT_EQ(originalRank, subCommRank);
+        ASSERT_EQ(originalNRank, subCommNRank);
+      }
 
-    // Clean up comms
-    for (auto& subComm : subComms)
-      NCCLCHECK(ncclCommDestroy(subComm));
-    for (auto& comm : comms)
-      NCCLCHECK(ncclCommDestroy(comm));
+      // Clean up comms
+      for (auto& subComm : subComms)
+        NCCLCHECK(ncclCommDestroy(subComm));
+      for (auto& comm : comms)
+        NCCLCHECK(ncclCommDestroy(comm));
+    });
   }
 
   /**
@@ -106,50 +113,53 @@ namespace RcclUnitTesting
    * ******************************************************************************************/
   TEST(Standalone, SplitComms_Reduce)
   {
-    // Check for multi-gpu
-    int numDevices;
-    HIPCALL(hipGetDeviceCount(&numDevices));
-    if (numDevices < 2) {
-      GTEST_SKIP() << "This test requires at least 2 devices.";
-    }
-
-    // Initialize the original comms
-    std::vector<ncclComm_t> comms(numDevices);
-    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
-
-    // Split into new comms
-    int numReducedRanks = numDevices / 2;
-    std::vector<ncclComm_t> subComms(numDevices);
-    NCCLCHECK(ncclGroupStart());
-    for (int localRank = 0; localRank < numDevices; localRank++)
-      NCCLCHECK(ncclCommSplit(comms[localRank],
-            localRank < numReducedRanks ? 0 : NCCL_SPLIT_NOCOLOR,
-            localRank, &subComms[localRank], NULL));
-    NCCLCHECK(ncclGroupEnd());
-
-    // Validate results
-    for (int i = 0; i < numDevices; i++) {
-      int originalRank, originalNRank;
-      NCCLCHECK(ncclCommUserRank(comms[i], &originalRank));
-      NCCLCHECK(ncclCommCount(comms[i], &originalNRank));
-
-      if (i < numReducedRanks) {
-        int subCommRank, subCommNRank;
-        NCCLCHECK(ncclCommUserRank(subComms[i], &subCommRank));
-        NCCLCHECK(ncclCommCount(subComms[i], &subCommNRank));
-
-        ASSERT_EQ(originalRank, subCommRank);
-        ASSERT_EQ(subCommNRank, numReducedRanks);
-      } else {
-        ASSERT_EQ(subComms[i], nullptr);
+    RUN_ISOLATED_TEST("SplitComms_Reduce", []()
+    {
+      // Check for multi-gpu
+      int numDevices;
+      HIPCALL(hipGetDeviceCount(&numDevices));
+      if (numDevices < 2) {
+        GTEST_SKIP() << "This test requires at least 2 devices.";
       }
-    }
 
-    // Cleanup comms
-    for (auto& subComm : subComms)
-      NCCLCHECK(ncclCommDestroy(subComm));
-    for (auto& comm : comms)
-      NCCLCHECK(ncclCommDestroy(comm));
+      // Initialize the original comms
+      std::vector<ncclComm_t> comms(numDevices);
+      NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+      // Split into new comms
+      int numReducedRanks = numDevices / 2;
+      std::vector<ncclComm_t> subComms(numDevices);
+      NCCLCHECK(ncclGroupStart());
+      for (int localRank = 0; localRank < numDevices; localRank++)
+        NCCLCHECK(ncclCommSplit(comms[localRank],
+              localRank < numReducedRanks ? 0 : NCCL_SPLIT_NOCOLOR,
+              localRank, &subComms[localRank], NULL));
+      NCCLCHECK(ncclGroupEnd());
+
+      // Validate results
+      for (int i = 0; i < numDevices; i++) {
+        int originalRank, originalNRank;
+        NCCLCHECK(ncclCommUserRank(comms[i], &originalRank));
+        NCCLCHECK(ncclCommCount(comms[i], &originalNRank));
+
+        if (i < numReducedRanks) {
+          int subCommRank, subCommNRank;
+          NCCLCHECK(ncclCommUserRank(subComms[i], &subCommRank));
+          NCCLCHECK(ncclCommCount(subComms[i], &subCommNRank));
+
+          ASSERT_EQ(originalRank, subCommRank);
+          ASSERT_EQ(subCommNRank, numReducedRanks);
+        } else {
+          ASSERT_EQ(subComms[i], nullptr);
+        }
+      }
+
+      // Cleanup comms
+      for (auto& subComm : subComms)
+        NCCLCHECK(ncclCommDestroy(subComm));
+      for (auto& comm : comms)
+        NCCLCHECK(ncclCommDestroy(comm));
+    });
   }
 
   /**
@@ -157,110 +167,113 @@ namespace RcclUnitTesting
    * ******************************************************************************************/
   TEST(Standalone, RegressionTiming)
   {
-    // timing
-    using namespace std::chrono;
-    using Clock = std::chrono::high_resolution_clock;
-    int usElapsed, numIterations = 20, numWarmups = 5;
-
-    // Check for 2 GPUs
-    int numGpus;
-    HIPCALL(hipGetDeviceCount(&numGpus));
-    if (numGpus < 2) {
-      GTEST_SKIP() << "This test requires at least 2 devices.";
-    }
-    hipDeviceProp_t devProp;
-    HIPCALL(hipGetDeviceProperties(&devProp, 0));
-    // Initialize RCCL
-    constexpr int numRanks = 2;
-    std::vector<ncclComm_t> comms(numRanks);
-    std::vector<int*> gpuInput(numRanks);
-    std::vector<int*> gpuOutput(numRanks);
-    std::vector<hipStream_t> stream(numRanks);
-
-    char *proto = std::getenv("NCCL_PROTO");
-    const char* protocolList[3] = {"LL", "LL128", "Simple"};
-
-    for (auto p : protocolList)
+    RUN_ISOLATED_TEST("RegressionTiming", []()
     {
-      usElapsed = 0;
-      if(strncmp("gfx12",devProp.gcnArchName,5) == 0) {
-        setenv("NCCL_PROTO", "Simple", 1);
-      } else {
-        setenv("NCCL_PROTO", p, 1);
+      // timing
+      using namespace std::chrono;
+      using Clock = std::chrono::high_resolution_clock;
+      int usElapsed, numIterations = 20, numWarmups = 5;
+
+      // Check for 2 GPUs
+      int numGpus;
+      HIPCALL(hipGetDeviceCount(&numGpus));
+      if (numGpus < 2) {
+        GTEST_SKIP() << "This test requires at least 2 devices.";
       }
+      hipDeviceProp_t devProp;
+      HIPCALL(hipGetDeviceProperties(&devProp, 0));
+      // Initialize RCCL
+      constexpr int numRanks = 2;
+      std::vector<ncclComm_t> comms(numRanks);
+      std::vector<int*> gpuInput(numRanks);
+      std::vector<int*> gpuOutput(numRanks);
+      std::vector<hipStream_t> stream(numRanks);
 
-      NCCLCHECK(ncclCommInitAll(comms.data(), numRanks, nullptr));
+      char *proto = std::getenv("NCCL_PROTO");
+      const char* protocolList[3] = {"LL", "LL128", "Simple"};
 
-      // Prepare CPU data arrays
-      int N = 1250;
-      std::vector<int> cpuInput(N);
-      std::vector<int> cpuExpected(N);
-      for (int i = 0; i < N; i++) {
-        cpuInput[i]    = i;
-        cpuExpected[i] = 2 * i;
-      }
+      for (auto p : protocolList)
+      {
+        usElapsed = 0;
+        if(strncmp("gfx12",devProp.gcnArchName,5) == 0) {
+          setenv("NCCL_PROTO", "Simple", 1);
+        } else {
+          setenv("NCCL_PROTO", p, 1);
+        }
 
-      // Prepare GPU data arrays
-      for (int rank = 0; rank < numRanks; rank++) {
-        HIPCALL(hipSetDevice(rank));
-        HIPCALL(hipStreamCreate(&stream[rank]));
-        HIPCALL(hipMalloc((void**)&gpuInput[rank], N * sizeof(int)));
-        HIPCALL(hipMalloc((void**)&gpuOutput[rank], N * sizeof(int)));
-        HIPCALL(hipMemcpy(gpuInput[rank], cpuInput.data(), N * sizeof(int), hipMemcpyHostToDevice));
-        HIPCALL(hipMemset(gpuOutput[rank], 0, N * sizeof(int)));
-        HIPCALL(hipDeviceSynchronize());
-      }
+        NCCLCHECK(ncclCommInitAll(comms.data(), numRanks, nullptr));
 
-      for (int iter = -numWarmups; iter < numIterations; iter++) {
+        // Prepare CPU data arrays
+        int N = 1250;
+        std::vector<int> cpuInput(N);
+        std::vector<int> cpuExpected(N);
+        for (int i = 0; i < N; i++) {
+          cpuInput[i]    = i;
+          cpuExpected[i] = 2 * i;
+        }
 
+        // Prepare GPU data arrays
         for (int rank = 0; rank < numRanks; rank++) {
           HIPCALL(hipSetDevice(rank));
+          HIPCALL(hipStreamCreate(&stream[rank]));
+          HIPCALL(hipMalloc((void**)&gpuInput[rank], N * sizeof(int)));
+          HIPCALL(hipMalloc((void**)&gpuOutput[rank], N * sizeof(int)));
+          HIPCALL(hipMemcpy(gpuInput[rank], cpuInput.data(), N * sizeof(int), hipMemcpyHostToDevice));
           HIPCALL(hipMemset(gpuOutput[rank], 0, N * sizeof(int)));
           HIPCALL(hipDeviceSynchronize());
         }
 
-        // Initiate the allreduce
-        NCCLCHECK(ncclGroupStart());
-        for (int rank = 0; rank < numRanks; rank++)
-          NCCLCHECK(ncclAllReduce(gpuInput[rank], gpuOutput[rank], N, ncclInt, ncclSum, comms[rank], stream[rank]));
-        ncclResult_t res = ncclGroupEnd();
+        for (int iter = -numWarmups; iter < numIterations; iter++) {
 
-        if (res != ncclSuccess) continue;
+          for (int rank = 0; rank < numRanks; rank++) {
+            HIPCALL(hipSetDevice(rank));
+            HIPCALL(hipMemset(gpuOutput[rank], 0, N * sizeof(int)));
+            HIPCALL(hipDeviceSynchronize());
+          }
 
-        const auto start = Clock::now();
+          // Initiate the allreduce
+          NCCLCHECK(ncclGroupStart());
+          for (int rank = 0; rank < numRanks; rank++)
+            NCCLCHECK(ncclAllReduce(gpuInput[rank], gpuOutput[rank], N, ncclInt, ncclSum, comms[rank], stream[rank]));
+          ncclResult_t res = ncclGroupEnd();
 
-        // Wait for completion
-        for (int rank = 0; rank < numRanks; rank++) {
-          HIPCALL(hipStreamSynchronize(stream[rank]));
+          if (res != ncclSuccess) continue;
+
+          const auto start = Clock::now();
+
+          // Wait for completion
+          for (int rank = 0; rank < numRanks; rank++) {
+            HIPCALL(hipStreamSynchronize(stream[rank]));
+          }
+
+          if (iter >= 0)
+            usElapsed += duration_cast<microseconds>(Clock::now() - start).count();
+
+          // Check results
+          std::vector<int> cpuOutput(N);
+          for (int rank = 0; rank < numRanks; rank++) {
+            HIPCALL(hipMemcpy(cpuOutput.data(), gpuOutput[rank], N * sizeof(int), hipMemcpyDeviceToHost));
+            HIPCALL(hipDeviceSynchronize());
+            for (int i = 0; i < N; i++)
+              ASSERT_EQ(cpuOutput[i], cpuExpected[i]);
+          }
         }
 
-        if (iter >= 0)
-          usElapsed += duration_cast<microseconds>(Clock::now() - start).count();
-
-        // Check results
-        std::vector<int> cpuOutput(N);
-        for (int rank = 0; rank < numRanks; rank++) {
-          HIPCALL(hipMemcpy(cpuOutput.data(), gpuOutput[rank], N * sizeof(int), hipMemcpyDeviceToHost));
-          HIPCALL(hipDeviceSynchronize());
-          for (int i = 0; i < N; i++)
-            ASSERT_EQ(cpuOutput[i], cpuExpected[i]);
+        EXPECT_LT(usElapsed/(double)numIterations, 5000);
+        printf("[ INFO     ] protocol: %s, average runtime: %f microseconds\n", p, usElapsed/(double)numIterations);
+        // Release resources
+        for (int rank = 0; rank < numRanks; rank++){
+          HIPCALL(hipFree(gpuInput[rank]));
+          HIPCALL(hipFree(gpuOutput[rank]));
+          HIPCALL(hipStreamDestroy(stream[rank]));
+          NCCLCHECK(ncclCommDestroy(comms[rank]));
         }
       }
-
-      EXPECT_LT(usElapsed/(double)numIterations, 5000);
-      printf("[ INFO     ] protocol: %s, average runtime: %f microseconds\n", p, usElapsed/(double)numIterations);
-      // Release resources
-      for (int rank = 0; rank < numRanks; rank++){
-        HIPCALL(hipFree(gpuInput[rank]));
-        HIPCALL(hipFree(gpuOutput[rank]));
-        HIPCALL(hipStreamDestroy(stream[rank]));
-        NCCLCHECK(ncclCommDestroy(comms[rank]));
-      }
-    }
-    if (proto)
-      setenv("NCCL_PROTO", proto, 1);
-    else
-      unsetenv("NCCL_PROTO");
+      if (proto)
+        setenv("NCCL_PROTO", proto, 1);
+      else
+        unsetenv("NCCL_PROTO");
+    });
   }
 
   /**
@@ -304,70 +317,76 @@ namespace RcclUnitTesting
    * ******************************************************************************************/
   TEST(Standalone, CommCuDevice_Check)
   {
-    int numDevices;
-    HIPCALL(hipGetDeviceCount(&numDevices));
-    if (numDevices < 1) {
-      GTEST_SKIP() << "No devices available.";
-    }
-
-    // Test single comm initialization
-    ncclComm_t comm;
-    ncclUniqueId id;
-    NCCLCHECK(ncclGetUniqueId(&id));
-    HIPCALL(hipSetDevice(0));
-    NCCLCHECK(ncclCommInitRank(&comm, 1, id, 0));
-
-    // Verify device assignment
-    int device;
-    NCCLCHECK(ncclCommCuDevice(comm, &device));
-    ASSERT_EQ(device, 0);
-    NCCLCHECK(ncclCommDestroy(comm));
-
-    // Test multi-device scenario if available
-    if (numDevices > 1) {
-      std::vector<ncclComm_t> comms(numDevices);
-
-      // Initialize all communicators at once
-      NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
-
-      // Verify device assignments
-      for (int i = 0; i < numDevices; i++) {
-        int assignedDevice;
-        NCCLCHECK(ncclCommCuDevice(comms[i], &assignedDevice));
-        ASSERT_EQ(assignedDevice, i);
+    RUN_ISOLATED_TEST("CommCuDevice_Check", []()
+    {
+      int numDevices;
+      HIPCALL(hipGetDeviceCount(&numDevices));
+      if (numDevices < 1) {
+        GTEST_SKIP() << "No devices available.";
       }
 
-      // Clean up
-      for (int i = 0; i < numDevices; i++) {
-        NCCLCHECK(ncclCommDestroy(comms[i]));
+      // Test single comm initialization
+      ncclComm_t comm;
+      ncclUniqueId id;
+      NCCLCHECK(ncclGetUniqueId(&id));
+      HIPCALL(hipSetDevice(0));
+      NCCLCHECK(ncclCommInitRank(&comm, 1, id, 0));
+
+      // Verify device assignment
+      int device;
+      NCCLCHECK(ncclCommCuDevice(comm, &device));
+      ASSERT_EQ(device, 0);
+      NCCLCHECK(ncclCommDestroy(comm));
+
+      // Test multi-device scenario if available
+      if (numDevices > 1) {
+        std::vector<ncclComm_t> comms(numDevices);
+
+        // Initialize all communicators at once
+        NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+        // Verify device assignments
+        for (int i = 0; i < numDevices; i++) {
+          int assignedDevice;
+          NCCLCHECK(ncclCommCuDevice(comms[i], &assignedDevice));
+          ASSERT_EQ(assignedDevice, i);
+        }
+
+        // Clean up
+        for (int i = 0; i < numDevices; i++) {
+          NCCLCHECK(ncclCommDestroy(comms[i]));
+        }
       }
-    }
+    });
   }
 
   /**
    * \brief verifies that ncclCommUserRank correctly fails when provided with an invalid (null) communicator handle
    * ******************************************************************************************/
   TEST(Standalone, SplitComms_RankCheck_Basic_Failure) {
-    // Check for multi-gpu
-    int numDevices;
-    HIPCALL(hipGetDeviceCount(&numDevices));
-    if (numDevices < 2) {
+    RUN_ISOLATED_TEST("SplitComms_RankCheck_Basic_Failure", []()
+    {
+      // Check for multi-gpu
+      int numDevices;
+      HIPCALL(hipGetDeviceCount(&numDevices));
+      if (numDevices < 2) {
         GTEST_SKIP() << "This test requires at least 2 devices.";
-    }
+      }
 
-    // Initialize the original comms
-    std::vector<ncclComm_t> comms(numDevices);
-    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+      // Initialize the original comms
+      std::vector<ncclComm_t> comms(numDevices);
+      NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
 
-    // Create an invalid comm handle that will cause a failure
-    ncclComm_t invalidComm = nullptr;
+      // Create an invalid comm handle that will cause a failure
+      ncclComm_t invalidComm = nullptr;
 
-    // This NCCL_CHECK will fail because we're trying to query rank from a null communicator
-    int rank;
-    NCCLCHECK(ncclCommUserRank(invalidComm, &rank));
+      // This NCCL_CHECK will fail because we're trying to query rank from a null communicator
+      int rank;
+      NCCLCHECK(ncclCommUserRank(invalidComm, &rank));
 
-    // Clean up comms
-    for (auto& comm : comms)
-      NCCLCHECK(ncclCommDestroy(comm));
+      // Clean up comms
+      for (auto& comm : comms)
+        NCCLCHECK(ncclCommDestroy(comm));
+    });
   }
 }

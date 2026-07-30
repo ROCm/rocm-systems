@@ -32,6 +32,7 @@ def test_known_flags_still_work(tmp_path: Path, monkeypatch):
         "perfxpert.tools.profile_runner.subprocess.run",
         mock.MagicMock(return_value=mock.MagicMock(returncode=0, stdout=b"", stderr=b"")),
     )
+    monkeypatch.setattr("perfxpert.tools.profile_runner.require_tool", mock.MagicMock())
     result = profile_runner.run(
         argv=[
             "rocprofv3", "--sys-trace", "--kernel-trace", "--stats",

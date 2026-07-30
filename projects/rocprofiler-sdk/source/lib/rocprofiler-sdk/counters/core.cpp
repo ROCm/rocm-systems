@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -83,14 +84,14 @@ counter_callback_info::setup_counter_config(std::shared_ptr<counter_config>& pro
             rocprofiler::common::get_val(asts->arch_to_counter_asts, agent_name);
         if(!agent_map)
         {
-            ROCP_ERROR << fmt::format("Coult not build AST for {}", agent_name);
+            ROCP_ERROR << fmt::format("Could not build AST for {}", agent_name);
             return ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED;
         }
 
         const auto* counter_ast = rocprofiler::common::get_val(*agent_map, metric.name());
         if(!counter_ast)
         {
-            ROCP_ERROR << fmt::format("Coult not find AST for {}", metric.name());
+            ROCP_ERROR << fmt::format("Could not find AST for {}", metric.name());
             return ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND;
         }
         config.asts.push_back(*counter_ast);
@@ -160,6 +161,8 @@ start_context(const context::context* ctx)
 
     if(!already_enabled)
     {
+        callback_thread_start();
+
         for(auto& cb : ctx->dispatch_counter_collection->callbacks)
         {
             using external_corr_id_map_t = tracing::external_correlation_id_map_t;
@@ -215,7 +218,28 @@ stop_context(const context::context* ctx)
         enabled = false;
     });
 
-    if(controller) controller->disable_serialization();
+    if(controller)
+    {
+        controller->disable_serialization();
+
+        // In attach mode, remove counter callbacks when stopping the context so
+        // new dispatches during detach drain can pass through without incrementing
+        // _active_kernels. In normal profiling, keep callbacks registered to avoid
+        // dropping counter data for in-flight dispatches.
+        if(registration::is_attached())
+        {
+            for(auto& cb : ctx->dispatch_counter_collection->callbacks)
+            {
+                if(cb->queue_id != rocprofiler::hsa::ClientID{-1})
+                {
+                    controller->remove_callback(cb->queue_id);
+                    cb->queue_id = rocprofiler::hsa::ClientID{-1};
+                }
+            }
+        }
+    }
+
+    callback_thread_stop();
 }
 
 rocprofiler_status_t

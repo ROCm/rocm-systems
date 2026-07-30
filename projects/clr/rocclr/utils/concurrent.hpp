@@ -52,7 +52,7 @@ template <typename T, int N> struct TaggedPointerHelper {
  * FIXME_lmoriche: Implement the new/delete operators for SimplyLinkedNode
  * using thread-local allocation buffers.
  */
-template <typename T, int N = 5> class ConcurrentLinkedQueue : public HeapObject {
+template <typename T, int N = 5> class ConcurrentLinkedQueue {
   //! A simply-linked node
   struct Node {
     typedef details::TaggedPointerHelper<Node, N> TaggedPointerHelper;

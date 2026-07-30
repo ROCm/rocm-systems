@@ -178,24 +178,24 @@ namespace DevDriver
         void KeyAndBeginList(const char* pKey) { Key(pKey); BeginList(); }
 
         // Write a key-value pair where the value will be a map.
-        void KeyAndBeginMap(const char* pKey)  { Key(pKey); BeginMap(); }
+        void KeyAndBeginMap(const char* pKey);
 
         // Write a key-value pair.
-        void KeyAndValue(const char* pKey, const char* pValue)                { Key(pKey); Value(pValue); }
-        void KeyAndValue(const char* pKey, const char* pValue, size_t length) { Key(pKey); Value(pValue, length); }
-        void KeyAndValue(const char* pKey, uint64      value)                 { Key(pKey); Value(value); }
-        void KeyAndValue(const char* pKey, uint32      value)                 { Key(pKey); Value(value); }
-        void KeyAndValue(const char* pKey, int64       value)                 { Key(pKey); Value(value); }
-        void KeyAndValue(const char* pKey, int32       value)                 { Key(pKey); Value(value); }
-        void KeyAndValue(const char* pKey, double      value)                 { Key(pKey); Value(value); }
-        void KeyAndValue(const char* pKey, float       value)                 { Key(pKey); Value(value); }
-        void KeyAndValue(const char* pKey, bool        value)                 { Key(pKey); Value(value); }
+        void KeyAndValue(const char* pKey, const char* pValue);
+        void KeyAndValue(const char* pKey, const char* pValue, size_t length);
+        void KeyAndValue(const char* pKey, uint64      value);
+        void KeyAndValue(const char* pKey, uint32      value);
+        void KeyAndValue(const char* pKey, int64       value);
+        void KeyAndValue(const char* pKey, int32       value);
+        void KeyAndValue(const char* pKey, double      value);
+        void KeyAndValue(const char* pKey, float       value);
+        void KeyAndValue(const char* pKey, bool        value);
 
         template <typename Enum>
         void KeyAndValueEnumOrHex(const char* pKey, Enum value) { Key(pKey); ValueEnumOrHex(value); }
 
         // Write a key-value pair where the value will be a "null" value.
-        void KeyAndValueNull(const char* pKey) { Key(pKey); ValueNull(); }
+        void KeyAndValueNull(const char* pKey);
 
         // Write a key-value pair with a formatted value
         template <typename... Args>
@@ -210,10 +210,7 @@ namespace DevDriver
         URIDataFormat format; // Format of the post data - i.e. how to read it
 
         // Zero initialize the struct.
-        PostDataInfo()
-        {
-            memset(this, 0, sizeof(*this));
-        }
+        PostDataInfo();
     };
 
     // An interface that represents a unique URI request

@@ -184,8 +184,7 @@ if(DEFINED ENV{ROCM_BUILD_ID})
     # ROCM_BUILD_ID is set by the ROCm-CI build environment.
     set(build_info $ENV{ROCM_BUILD_ID})
 else()
-    string(TIMESTAMP NOW "%Y%m%dT%H%M%S")
-    set(build_info developer-build-${NOW})
+    set(build_info developer-build)
 
     if(DEFINED ENV{USER})
         set(build_info ${build_info}-$ENV{USER})

@@ -32,6 +32,7 @@ THE SOFTWARE.
     #include <experimental/filesystem>
     namespace fs = std::experimental::filesystem;
 #endif
+
 #include <hip/hip_runtime.h>
 #include <rocdecode/rocdecode.h>
 #include <rocdecode/rocparser.h>
@@ -68,12 +69,11 @@ __attribute__((visibility("hidden"))) inline void report_error(
     std::exit(EXIT_FAILURE);
 }
 
-//hardcoding for this sample
+// Hard-coded defaults for initial decoder creation. They will be adjusted based on the input stream after reconfiguration.
 #define DEFAULT_WIDTH 2912
 #define DEFAULT_HEIGHT 1888
 
-// helper functions for saving output to file
-
+// helper function for GetChromaHeightFactor based on YUV format
 static inline float GetChromaHeightFactor(rocDecVideoSurfaceFormat surface_format) {
     float factor = 0.5;
     switch (surface_format) {
@@ -96,6 +96,7 @@ static inline float GetChromaHeightFactor(rocDecVideoSurfaceFormat surface_forma
     return factor;
 };
 
+// helper function for CodecTypeToRocDecVideoCodec based on codec_type
 static inline rocDecVideoCodec CodecTypeToRocDecVideoCodec(int codec_type) {
     switch (codec_type) {
         case 0:     return rocDecVideoCodec_HEVC;
@@ -107,6 +108,8 @@ static inline rocDecVideoCodec CodecTypeToRocDecVideoCodec(int codec_type) {
         default:    return rocDecVideoCodec_NumCodecs;
     }
 }
+
+// helper function for GetChromaWidthFactor based on surface_format
 static inline float GetChromaWidthFactor(rocDecVideoSurfaceFormat surface_format) {
     float factor = 0.5;
     switch (surface_format) {
@@ -181,7 +184,7 @@ struct DecoderInfo {
 };
 
 /**
- * @brief Funtion to save internal frame buffer to file for device buffer : chroma format is assumed to be NV12 for internal device memory
+ * @brief Function to save internal frame buffer to file for device buffer : chroma format is assumed to be NV12 for internal device memory
  * 
  * @param p_dec_info 
  * @param surf_mem  device mem pointers of luma and chroma planes
@@ -263,7 +266,7 @@ void save_frame_to_file(DecoderInfo *p_dec_info, void *surf_mem[], uint32_t *pit
 }
 
 /**
- * @brief Funtion to save internal frame buffer to file for host buffer
+ * @brief Function to save internal frame buffer to file for host backend
  * 
  * @param p_dec_info 
  * @param frame_mem 
@@ -351,6 +354,11 @@ void init() {}
 
 void create_decoder(DecoderInfo& dec_info) {
     RocDecoderCreateInfo create_info = {};
+    if (dec_info.dec_device_id < 0 || dec_info.dec_device_id > 255) {
+        std::cerr << "Invalid device id: " << dec_info.dec_device_id << " (expected 0-255)" << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+    create_info.device_id = static_cast<uint8_t>(dec_info.dec_device_id);
     create_info.codec_type = dec_info.rocdec_codec_id;     // user specified codec_type for raw files
     create_info.max_width = DEFAULT_WIDTH;
     create_info.max_height = DEFAULT_HEIGHT;
@@ -598,7 +606,7 @@ void create_parser(DecoderInfo& dec_info) {
     RocdecParserParams params = {};
     params.codec_type = dec_info.rocdec_codec_id;
     params.max_num_decode_surfaces = 6;
-    params.max_display_delay = 1;       // min display delay of 1 is recommented to get optimal performance from hardware decoder
+    params.max_display_delay = 1;       // min display delay of 1 is recommended to get optimal performance from hardware decoder
     params.user_data = &dec_info;
     params.pfn_sequence_callback = handle_video_sequence;
     params.pfn_decode_picture = handle_picture_decode;
@@ -683,15 +691,26 @@ std::string getLastPart(const std::string& str, char delimiter) {
 
 // helper function for sort
 int extractNumber(const std::string& filename) {
+    // Operate on basename only to avoid picking up digits from directory path
+    auto sep = filename.find_last_of("/\\");
+    std::string base = (sep == std::string::npos) ? filename : filename.substr(sep + 1);
+    // Strip extension so digits in ".265" are not picked up.
+    // Only treat a dot as an extension separator if it is not the leading character
+    // (a leading dot marks a hidden file, not an extension).
+    auto dot = base.find_last_of('.');
+    if (dot != std::string::npos && dot != 0) base = base.substr(0, dot);
+    // Find the last contiguous digit sequence in the stem
     std::string numStr;
-    for (char c : filename) {
-        if (std::isdigit(c)) {
-            numStr += c;
+    for (auto it = base.rbegin(); it != base.rend(); ++it) {
+        if (std::isdigit(static_cast<unsigned char>(*it))) {
+            numStr += *it;
         } else if (!numStr.empty()) {
-            break; // Stop at first non-digit after a digit sequence
+            break;
         }
     }
-    return numStr.empty() ? 0 : std::stoi(numStr);
+    if (numStr.empty()) return 0;
+    std::reverse(numStr.begin(), numStr.end());
+    return std::stoi(numStr);
 }
 
 // helper function for sort
@@ -849,6 +868,10 @@ int main(int argc, char** argv) {
     }
     auto input_frames = read_frames(input_file_names);
     std::cout << "Read " << input_file_names.size() << " frames from disk." << std::endl;
+    if (input_frames.empty()) {
+        std::cerr << "Error: No input frames were read!" << std::endl;
+        return EXIT_FAILURE;
+    }
     auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < num_iterations; i++) {
         decode_frames(dec_info, input_frames);

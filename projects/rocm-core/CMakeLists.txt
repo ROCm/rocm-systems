@@ -64,6 +64,9 @@ if( NOT DEFINED BUILD_ID )
   set( BUILD_ID "9999")
 endif()
 
+# cpack interferes with inbox packaging, add an option to disable it but don't disable by default
+option(DISABLE_CPACK "disable most of cpack from running" OFF)
+
 #Add the libpatch version if available
 if( DEFINED VERSION_POINT )
   set( PACKAGE_BUILD_INFO "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}.${VERSION_POINT}.${VERSION_COMMIT_COUNT}-${BUILD_ID}-${VERSION_HASH}" )
@@ -268,10 +271,12 @@ message ( STATUS "Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELE
 set ( CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT" )
 
 # Debian specific packaging configuration
-if(COMP_TYPE)
-  configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
-elseif(STATIC_COMP_TYPE)
-  configure_debian_pkg( ${CORE_TARGET} ${STATIC_COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+if ( NOT DISABLE_CPACK)
+    if(COMP_TYPE)
+    configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+    elseif(STATIC_COMP_TYPE)
+    configure_debian_pkg( ${CORE_TARGET} ${STATIC_COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+    endif()
 endif()
 
 ## RPM package specific variables
@@ -346,4 +351,6 @@ if( BUILD_ENABLE_LINTIAN_OVERRIDES STREQUAL "ON" AND BUILD_DEBIAN_PKGING_FLAG ST
 endif()
 
 ## Include packaging
-include ( CPack )
+if ( NOT DISABLE_CPACK)
+    include ( CPack )
+endif()

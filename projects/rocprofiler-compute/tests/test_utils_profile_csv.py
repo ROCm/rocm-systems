@@ -145,6 +145,31 @@ def test_concat_csv_files(sample_csv_data):
 
 
 # =============================================================================
+# iter_csv_dicts Tests
+# =============================================================================
+
+
+def test_iter_csv_dicts_matches_read_csv_as_dicts(temp_csv_file, sample_csv_data):
+    """iter_csv_dicts streams the same rows read_csv_as_dicts returns."""
+    csv_ops.write_csv_from_dicts(temp_csv_file, sample_csv_data)
+    expected, _ = csv_ops.read_csv_as_dicts(temp_csv_file)
+    assert list(csv_ops.iter_csv_dicts(temp_csv_file)) == expected
+
+
+def test_iter_csv_dicts_empty_body(temp_csv_file):
+    """A CSV with only a header yields zero rows."""
+    Path(temp_csv_file).write_text("a,b,c\n", encoding="utf-8")
+    assert list(csv_ops.iter_csv_dicts(temp_csv_file)) == []
+
+
+def test_iter_csv_dicts_no_header_raises(temp_csv_file):
+    """An empty file (no header) raises ValueError."""
+    Path(temp_csv_file).write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="no header row"):
+        list(csv_ops.iter_csv_dicts(temp_csv_file))
+
+
+# =============================================================================
 # Column Manipulation Tests
 # =============================================================================
 
@@ -311,6 +336,22 @@ def test_groupby_aggregate_invalid_function():
         csv_ops.groupby_aggregate(rows, ["category"], {"value": "invalid"})
 
 
+def test_groupby_aggregate_accepts_generator_input():
+    """groupby_aggregate consumes a streaming row source in one pass."""
+    rows = [
+        {"category": "A", "value": 10},
+        {"category": "B", "value": 15},
+        {"category": "A", "value": 20},
+    ]
+
+    result = csv_ops.groupby_aggregate(
+        (row for row in rows), ["category"], {"value": "sum"}
+    )
+
+    by_category = {r["category"]: r["value"] for r in result}
+    assert by_category == {"A": 30, "B": 15}
+
+
 # =============================================================================
 # Pivot Table Tests
 # =============================================================================
@@ -386,7 +427,7 @@ def test_merge_rows_inner():
         {"id": 2, "value": 20},
     ]
 
-    result = csv_ops.merge_rows(left, right, "id", "id", how="inner")
+    result = list(csv_ops.merge_rows(left, right, "id", "id", how="inner"))
 
     assert len(result) == 2
     assert result[0] == {"id": 1, "name": "A", "value": 10}
@@ -404,7 +445,7 @@ def test_merge_rows_left():
         {"id": 1, "value": 10},
     ]
 
-    result = csv_ops.merge_rows(left, right, "id", "id", how="left")
+    result = list(csv_ops.merge_rows(left, right, "id", "id", how="left"))
 
     assert len(result) == 3
     assert result[0] == {"id": 1, "name": "A", "value": 10}
@@ -423,7 +464,7 @@ def test_merge_rows_cartesian_product():
         {"id": 1, "value": 20},
     ]
 
-    result = csv_ops.merge_rows(left, right, "id", "id", how="inner")
+    result = list(csv_ops.merge_rows(left, right, "id", "id", how="inner"))
 
     assert len(result) == 4  # 2 x 2 = 4
 
@@ -431,7 +472,17 @@ def test_merge_rows_cartesian_product():
 def test_merge_rows_invalid_how():
     """Test merge with invalid join type."""
     with pytest.raises(ValueError, match="Unsupported join type"):
-        csv_ops.merge_rows([], [], "id", "id", how="invalid")
+        list(csv_ops.merge_rows([], [], "id", "id", how="invalid"))
+
+
+def test_merge_rows_accepts_generator_input():
+    """merge_rows streams non-list iterables on the left side."""
+    left = [{"k": "a", "v": "1"}, {"k": "b", "v": "2"}]
+    right = [{"k": "a", "w": "10"}]
+
+    result = list(csv_ops.merge_rows((row for row in left), right, "k", "k"))
+
+    assert result == [{"k": "a", "v": "1", "w": "10"}]
 
 
 # =============================================================================
@@ -514,7 +565,7 @@ def test_merge_rows_none_keys():
         {"id": 1, "value": 20},
     ]
 
-    result = csv_ops.merge_rows(left, right, "id", "id", how="inner")
+    result = list(csv_ops.merge_rows(left, right, "id", "id", how="inner"))
 
     # None matches None in current implementation
     assert len(result) == 2

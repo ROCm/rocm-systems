@@ -70,9 +70,9 @@ def test_uninstall_is_noop(tmp_path: Path) -> None:
 
 
 def test_evaluate_permits_perfxpert_tool_always() -> None:
-    """Any `mcp_perfxpert_*` tool is allowed before intent_classify."""
+    """Any `mcp__perfxpert__*` tool is allowed before intent_classify."""
     r = evaluate_gate_state(
-        "mcp_perfxpert_intent_classify", intent_classify_observed=False
+        "mcp__perfxpert__intent_classify", intent_classify_observed=False
     )
     assert r["allowed"] is True
 

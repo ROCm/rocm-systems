@@ -175,7 +175,7 @@ RCCL ON, PAPI events ON, ROCm domains ON, GPU metrics ON
 --preset=trace-openmp
 ~~~~~~~~~~~~~~~~~~~~~
 
-**Purpose:** OpenMP offload with HSA domains and OMPT
+**Purpose:** OpenMP with kernel dispatches and memory copies (excludes HSA API)
 
 .. code-block:: shell
 

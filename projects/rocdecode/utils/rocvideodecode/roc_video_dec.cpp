@@ -272,8 +272,9 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     decode_caps.codec_type = p_video_format->codec;
     decode_caps.chroma_format = p_video_format->chroma_format;
     decode_caps.bit_depth_minus_8 = p_video_format->bit_depth_luma_minus8;
+    decode_caps.device_id = device_id_;
 
-    rocDecGetDecoderCaps(&decode_caps);
+    ROCDEC_API_CALL(rocDecGetDecoderCaps(&decode_caps));
     if(!decode_caps.is_supported) {
         ROCDEC_THROW("rocDecode:: Codec not supported on this GPU ", ROCDEC_NOT_SUPPORTED);
         return 0;
@@ -312,7 +313,7 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     else if (video_chroma_format_ == rocDecVideoChromaFormat_422)
         video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV422_16Bit : rocDecVideoSurfaceFormat_YUV422;
 
-    // Check if output format supported. If not, check falback options
+    // Check if output format supported. If not, check fallback options
     if (!(decode_caps.output_format_mask & (1 << video_surface_format_))){
         if (decode_caps.output_format_mask & (1 << rocDecVideoSurfaceFormat_NV12))
             video_surface_format_ = rocDecVideoSurfaceFormat_NV12;
@@ -628,7 +629,7 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
     }
 
     if (roc_decoder_ == nullptr) {
-        ROCDEC_THROW("Reconfigurition of the decoder detected but the decoder was not initialized previoulsy!", ROCDEC_NOT_SUPPORTED);
+        ROCDEC_THROW("Reconfiguration of the decoder detected but the decoder was not initialized previously!", ROCDEC_NOT_SUPPORTED);
         return 0;
     }
     if (p_video_format->reconfig_options == ROCDEC_RECONFIG_NEW_SURFACES) {
@@ -783,7 +784,7 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
                 HIP_API_CALL(hipMemcpy2DAsync(p_dec_frame, dst_pitch, p_src_ptr_y, src_pitch[0], dst_pitch, disp_height_, hipMemcpyDeviceToHost, hip_stream_));
 
             // Copy chroma plane ( )
-            // rocDec output gives pointer to luma and chroma pointers seperated for the decoded frame
+            // rocDec output gives pointer to luma and chroma pointers separated for the decoded frame
             uint8_t *p_frame_uv = p_dec_frame + dst_pitch * disp_height_;
             uint8_t *p_src_ptr_uv = (num_chroma_planes_ == 1) ? static_cast<uint8_t *>(src_dev_ptr[1]) + ((disp_rect_.top + crop_rect_.top) >> 1) * src_pitch[1] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_ :
             static_cast<uint8_t *>(src_dev_ptr[1]) + (disp_rect_.top + crop_rect_.top) * src_pitch[1] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
@@ -901,14 +902,14 @@ uint8_t* RocVideoDecoder::GetFrame(int64_t *pts) {
  * 
  * @param pTimestamp - timestamp of the frame to be released (unmapped)
  * @return true      - success
- * @return false     - falied
+ * @return false     - failed
  */
 
 bool RocVideoDecoder::ReleaseFrame(int64_t pTimestamp, bool b_flushing) {
     if (out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED)
         return true;    // nothing to do
     if (out_mem_type_ != OUT_SURFACE_MEM_DEV_INTERNAL) {
-        if (!b_flushing)  // if not flushing the buffers are re-used, so keep them
+        if (!b_flushing)  // if not flushing the buffers are reused, so keep them
             return true;            // nothing to do
         else {
             DecFrameBuffer *fb = &vp_frames_[0];
@@ -939,7 +940,7 @@ bool RocVideoDecoder::ReleaseFrame(int64_t pTimestamp, bool b_flushing) {
  * @brief function to release all internal frames and clear the q (used with reconfigure): Only used with "OUT_SURFACE_MEM_DEV_INTERNAL"
  * 
  * @return true      - success
- * @return false     - falied
+ * @return false     - failed
  */
 bool RocVideoDecoder::ReleaseInternalFrames() {
     if (out_mem_type_ != OUT_SURFACE_MEM_DEV_INTERNAL || out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED)

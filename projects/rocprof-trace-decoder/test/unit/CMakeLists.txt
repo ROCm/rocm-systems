@@ -9,16 +9,105 @@ project(att-decoder-unit-tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Fetch GoogleTest
-include(FetchContent)
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0)
-set(INSTALL_GTEST
-    OFF
-    CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+function(create_system_gtest_targets)
+    find_path(GTEST_INCLUDE_DIR NAMES gtest/gtest.h)
+    find_library(GTEST_LIBRARY NAMES gtest)
+    find_library(GTEST_MAIN_LIBRARY NAMES gtest_main)
+    find_library(GMOCK_LIBRARY NAMES gmock)
+    find_library(GMOCK_MAIN_LIBRARY NAMES gmock_main)
+
+    if(GTEST_INCLUDE_DIR AND GTEST_LIBRARY)
+        if(NOT TARGET GTest::gtest)
+            add_library(GTest::gtest UNKNOWN IMPORTED)
+            set_target_properties(GTest::gtest PROPERTIES IMPORTED_LOCATION "${GTEST_LIBRARY}"
+                                                          INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}")
+        endif()
+
+        if(GTEST_MAIN_LIBRARY AND NOT TARGET GTest::gtest_main)
+            add_library(GTest::gtest_main UNKNOWN IMPORTED)
+            set_target_properties(
+                GTest::gtest_main
+                PROPERTIES IMPORTED_LOCATION "${GTEST_MAIN_LIBRARY}"
+                           INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}"
+                           INTERFACE_LINK_LIBRARIES GTest::gtest)
+        endif()
+    endif()
+
+    if(GTEST_INCLUDE_DIR AND GMOCK_LIBRARY)
+        if(NOT TARGET GTest::gmock)
+            add_library(GTest::gmock UNKNOWN IMPORTED)
+            set_target_properties(
+                GTest::gmock
+                PROPERTIES IMPORTED_LOCATION "${GMOCK_LIBRARY}"
+                           INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}"
+                           INTERFACE_LINK_LIBRARIES GTest::gtest)
+        endif()
+
+        if(GMOCK_MAIN_LIBRARY AND NOT TARGET GTest::gmock_main)
+            add_library(GTest::gmock_main UNKNOWN IMPORTED)
+            set_target_properties(
+                GTest::gmock_main
+                PROPERTIES IMPORTED_LOCATION "${GMOCK_MAIN_LIBRARY}"
+                           INTERFACE_INCLUDE_DIRECTORIES "${GTEST_INCLUDE_DIR}"
+                           INTERFACE_LINK_LIBRARIES GTest::gmock)
+        elseif(
+            TARGET GTest::gmock
+            AND TARGET GTest::gtest_main
+            AND NOT TARGET GTest::gmock_main)
+            add_library(GTest::gmock_main INTERFACE IMPORTED)
+            set_target_properties(GTest::gmock_main PROPERTIES INTERFACE_LINK_LIBRARIES
+                                                               "GTest::gmock;GTest::gtest_main")
+        endif()
+    endif()
+endfunction()
+
+function(create_gtest_aliases)
+    if(TARGET gtest AND NOT TARGET GTest::gtest)
+        add_library(GTest::gtest ALIAS gtest)
+    endif()
+    if(TARGET gtest_main AND NOT TARGET GTest::gtest_main)
+        add_library(GTest::gtest_main ALIAS gtest_main)
+    endif()
+    if(TARGET gmock AND NOT TARGET GTest::gmock)
+        add_library(GTest::gmock ALIAS gmock)
+    endif()
+    if(TARGET gmock_main AND NOT TARGET GTest::gmock_main)
+        add_library(GTest::gmock_main ALIAS gmock_main)
+    endif()
+endfunction()
+
+find_package(GTest QUIET CONFIG)
+if(NOT TARGET GTest::gtest_main OR NOT TARGET GTest::gmock_main)
+    find_package(GTest QUIET MODULE)
+endif()
+if(NOT TARGET GTest::gtest_main OR NOT TARGET GTest::gmock_main)
+    create_system_gtest_targets()
+endif()
+if(NOT TARGET GTest::gtest_main OR NOT TARGET GTest::gmock_main)
+    find_path(
+        GOOGLETEST_SOURCE_DIR
+        NAMES CMakeLists.txt
+        PATHS /usr/src/googletest /usr/local/src/googletest
+        NO_DEFAULT_PATH)
+    if(GOOGLETEST_SOURCE_DIR)
+        set(INSTALL_GTEST
+            OFF
+            CACHE BOOL "" FORCE)
+        add_subdirectory(${GOOGLETEST_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/googletest EXCLUDE_FROM_ALL)
+        create_gtest_aliases()
+    endif()
+endif()
+if(NOT TARGET GTest::gtest_main OR NOT TARGET GTest::gmock_main)
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.14.0)
+    set(INSTALL_GTEST
+        OFF
+        CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+endif()
 
 enable_testing()
 
@@ -38,7 +127,10 @@ set(TEST_FILES
     gfx11_test.cpp
     gfx12_test.cpp
     token_stream_test.cpp
-    sqttparser_test.cpp)
+    quick_scan_api_test.cpp
+    sqttparser_test.cpp
+    mi400_test.cpp
+    funcmap_test.cpp)
 
 # Function to create a test executable with specific sanitizer options Re-list library sources for sanitizer builds
 # (must be recompiled with sanitizer flags)
@@ -46,14 +138,16 @@ file(
     GLOB
     UNIT_TEST_LIB_SOURCES
     ${SRC_DIR}/trie.cpp
-    ${SRC_DIR}/sqttparser.cpp
+    ${SRC_DIR}/rocprof_trace_decoder.cpp
+    ${SRC_DIR}/quick_scan_export.cpp
     ${SRC_DIR}/stitch/stitch.cpp
     ${SRC_DIR}/stitch/pctranslator.cpp
     ${SRC_DIR}/trace_parser.cpp
     ${SRC_DIR}/gfx9/*.cpp
     ${SRC_DIR}/gfx10/*.cpp
     ${SRC_DIR}/gfx11/*.cpp
-    ${SRC_DIR}/gfx12/*.cpp)
+    ${SRC_DIR}/gfx12/*.cpp
+    ${SRC_DIR}/mi400/*.cpp)
 
 function(add_unit_test_executable TARGET_NAME SANITIZER_TYPE)
     if(SANITIZER_TYPE STREQUAL "regular")
@@ -64,6 +158,19 @@ function(add_unit_test_executable TARGET_NAME SANITIZER_TYPE)
     endif()
 
     target_include_directories(${TARGET_NAME} PRIVATE ${SRC_DIR} ${INC_DIR})
+
+    if(NOT SANITIZER_TYPE STREQUAL "regular")
+        if(DISABLE_COMGR)
+            target_compile_definitions(${TARGET_NAME} PRIVATE ROCPROF_TRACE_DECODER_COMGR_DISABLED)
+        else()
+            if(DEFINED ROCM_INCLUDE_DIR)
+                target_include_directories(${TARGET_NAME} PRIVATE ${ROCM_INCLUDE_DIR})
+            endif()
+            if(DEFINED COMGR_LIB)
+                target_link_libraries(${TARGET_NAME} PRIVATE ${COMGR_LIB})
+            endif()
+        endif()
+    endif()
 
     target_link_libraries(${TARGET_NAME} PRIVATE GTest::gtest_main GTest::gmock_main)
 
@@ -81,6 +188,44 @@ add_unit_test_executable(unit_tests "regular")
 add_unit_test_executable(unit_tests_asan "asan")
 add_unit_test_executable(unit_tests_ubsan "ubsan")
 
+add_executable(unit_tests_logging rdna_logging_test.cpp)
+target_include_directories(unit_tests_logging PRIVATE ${SRC_DIR} ${INC_DIR})
+target_link_libraries(unit_tests_logging PRIVATE rocprof-trace-decoder-static GTest::gtest_main GTest::gmock_main)
+
+add_executable(api_lifetime_test api_lifetime_test.cpp)
+target_include_directories(api_lifetime_test PRIVATE ${SRC_DIR} ${INC_DIR})
+target_link_libraries(api_lifetime_test PRIVATE rocprof-trace-decoder-static)
+
+if(BUILD_MARKERS)
+    find_package(LLVM REQUIRED CONFIG)
+
+    set(MARKER_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../markers)
+    set(MARKER_TEST_LIB_SOURCES
+        ${MARKER_SRC_DIR}/SQTTPass.cpp
+        ${MARKER_SRC_DIR}/SQTTMarkers.cpp
+        ${MARKER_SRC_DIR}/SQTTNamedMarkers.cpp
+        ${MARKER_SRC_DIR}/SQTTAutomatic.cpp
+        ${MARKER_SRC_DIR}/SQTTAddressTrace.cpp
+        ${MARKER_SRC_DIR}/SQTTFunctions.cpp
+        ${MARKER_SRC_DIR}/SQTTFuncMap.cpp)
+
+    add_executable(marker_unit_tests markers_test.cpp ${MARKER_TEST_LIB_SOURCES})
+    target_include_directories(marker_unit_tests PRIVATE ${MARKER_SRC_DIR} ${INC_DIR} ${LLVM_INCLUDE_DIRS})
+    target_compile_definitions(marker_unit_tests PRIVATE ${LLVM_DEFINITIONS})
+    target_compile_features(marker_unit_tests PRIVATE cxx_std_17)
+    if(NOT MSVC)
+        set_source_files_properties(${MARKER_TEST_LIB_SOURCES} PROPERTIES COMPILE_OPTIONS "-fno-rtti")
+    endif()
+
+    if(TARGET LLVM)
+        set(MARKER_TEST_LLVM_LIBS LLVM)
+    else()
+        llvm_map_components_to_libnames(MARKER_TEST_LLVM_LIBS Core Support Analysis TransformUtils Passes)
+    endif()
+
+    target_link_libraries(marker_unit_tests PRIVATE GTest::gtest_main ${MARKER_TEST_LLVM_LIBS})
+endif()
+
 include(GoogleTest)
 
 gtest_discover_tests(
@@ -97,3 +242,18 @@ gtest_discover_tests(
     unit_tests_ubsan
     PROPERTIES LABELS "unit-tests;ubsan"
     TEST_PREFIX "ubsan/")
+
+gtest_discover_tests(
+    unit_tests_logging
+    PROPERTIES LABELS "unit-tests;regular;logging" ENVIRONMENT "SQTT_LOGGING=1"
+    TEST_PREFIX "logging/")
+
+add_test(NAME api-lifetime COMMAND api_lifetime_test)
+set_tests_properties(api-lifetime PROPERTIES LABELS "unit-tests;regular;lifetime")
+
+if(BUILD_MARKERS)
+    gtest_discover_tests(
+        marker_unit_tests
+        PROPERTIES LABELS "unit-tests;regular;markers"
+        TEST_PREFIX "markers/")
+endif()

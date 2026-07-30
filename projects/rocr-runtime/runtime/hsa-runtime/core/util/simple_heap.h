@@ -189,8 +189,9 @@ template <typename Allocator> class SimpleHeap {
     // Disallow multiple suballocation from large blocks.
     // Prevents a small allocation from retaining a large block.
     if (bytes > default_block_size()) {
-      bool err = discardBlock(reinterpret_cast<void*>(base));
-      assert(err && "Large block discard failed.");
+      if (!discardBlock(reinterpret_cast<void*>(base))) {
+        assert(false && "Large block discard failed.");
+      }
     }
 
     return reinterpret_cast<void*>(base);
@@ -239,6 +240,7 @@ template <typename Allocator> class SimpleHeap {
     if (fragment == frag_map.end() || isFree(fragment->second)) return false;
 
     bool discard = fragment->second.discard;
+    fragment->second.free = true;
 
     // Merge lower
     if (fragment != frag_map.begin()) {

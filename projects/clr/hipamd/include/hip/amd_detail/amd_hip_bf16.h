@@ -126,6 +126,7 @@
 #define HIPRT_NAN_BF16 __ushort_as_bfloat16((unsigned short)0x7FFFU)
 #define HIPRT_NEG_ZERO_BF16 __ushort_as_bfloat16((unsigned short)0x8000U)
 
+#if defined(__clang__)
 // Since we are using unsigned short to represent data in bfloat16, it can be of different sizes on
 // different machines. These naive checks should prevent some undefined behavior on systems which
 // have different sizes for basic types.
@@ -1288,7 +1289,7 @@ __BF16_HOST_DEVICE_STATIC__ bool __hgeu(const __hip_bfloat16 a, const __hip_bflo
  * \brief Compare two bfloat162 values - not equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hne(const __hip_bfloat16 a, const __hip_bfloat16 b) {
-  return (__bf16)a != (__bf16)b;
+  return ((__bf16)a < (__bf16)b) || ((__bf16)a > (__bf16)b);
 }
 
 /**
@@ -1896,8 +1897,41 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 h2trunc(const __hip_bfloat162 h) {
 }
 
 /**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_MATH
+ * \brief Atomic add bfloat16
+ */
+inline __device__ __hip_bfloat16 atomicAdd(__hip_bfloat16* address, __hip_bfloat16 value) {
+  return static_cast<__hip_bfloat16>(__scoped_atomic_fetch_add(
+      (__bf16*)address, static_cast<__bf16>(value), __ATOMIC_ACQ_REL, __MEMORY_SCOPE_DEVICE));
+}
+
+/**
  * \ingroup HIP_INTRINSIC_BFLOAT162_MATH
  * \brief Atomic add bfloat162
+ */
+__BF16_DEVICE_STATIC__ __hip_bfloat162 atomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
+  typedef __bf16 __bf16_2 __attribute__((ext_vector_type(2)));
+  static_assert(sizeof(__bf16_2) == sizeof(unsigned int));
+
+  union {
+    __bf16_2 vec;
+    unsigned int u32;
+  } expected, desired;
+
+  unsigned int* atomic_ptr = (unsigned int*)address;
+  expected.u32 = __scoped_atomic_load_n(atomic_ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+
+  do {
+    desired.vec = expected.vec + static_cast<__bf16_2>(value);
+  } while (!__scoped_atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0,
+                                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE,
+                                               __MEMORY_SCOPE_DEVICE));
+  return static_cast<__hip_bfloat162>(expected.vec);
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT162_MATH
+ * \brief Unsafe Atomic add bfloat162
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
                                                        __hip_bfloat162 value) {
@@ -1908,7 +1942,8 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
     __hip_bfloat162_raw bf162_raw;
     vec_short2 vs2;
   } u{static_cast<__hip_bfloat162_raw>(value)};
-  u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16))
+    u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
   return static_cast<__hip_bfloat162>(u.bf162_raw);
 #else
   static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
@@ -1951,5 +1986,10 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16* address,
   return __high2bfloat16(out);
 }
 #endif  // defined(__clang__) && defined(__HIP__)
+#elif defined(__GNUC__) || defined(_MSC_VER)
+#if !defined(__HIPCC_RTC__)
+#include "amd_hip_bf16_gcc.h"
+#endif
+#endif
 #pragma pop_macro("MAYBE_UNDEF")
 #endif

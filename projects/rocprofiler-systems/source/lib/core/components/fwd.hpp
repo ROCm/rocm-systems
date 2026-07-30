@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/categories.hpp"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 
 #include <timemory/api.hpp>
 #include <timemory/api/macros.hpp>

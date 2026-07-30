@@ -57,6 +57,9 @@ __host__ GDAHostContext::GDAHostContext(Backend *backend,
   ipcImpl_.ipc_bases = ipc_bases;
   ipcImpl_.shm_size = backend->ipcImpl.shm_size;
   ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;
+  ipcImpl_.ipc_first_pe = backend->ipcImpl.ipc_first_pe;
+  ipcImpl_.ipc_stride = backend->ipcImpl.ipc_stride;
+
 }
 
 __host__ GDAHostContext::~GDAHostContext() {
@@ -109,12 +112,25 @@ __host__ void GDAHostContext::sync_all() {
   host_interface->sync_all(context_window_info);
 }
 
+__host__ void GDAHostContext::sync(rocshmem_team_t team) {
+  host_interface->sync(team, context_window_info);
+}
+
 __host__ void GDAHostContext::barrier_all() {
   host_interface->barrier_all(context_window_info);
 }
 
+__host__ void GDAHostContext::barrier(rocshmem_team_t team) {
+  host_interface->barrier(team, context_window_info);
+}
+
 __host__ void GDAHostContext::barrier_all_on_stream(hipStream_t stream) {
   host_interface->barrier_all_on_stream(stream);
+}
+
+__host__ void GDAHostContext::barrier_on_stream(rocshmem_team_t team,
+                                                hipStream_t stream) {
+  host_interface->barrier_on_stream(team, stream);
 }
 
 __host__ void GDAHostContext::quiet_on_stream(hipStream_t stream) {
@@ -126,12 +142,17 @@ __host__ void GDAHostContext::sync_all_on_stream(hipStream_t stream) {
   host_interface->sync_all_on_stream(stream);
 }
 
+__host__ void GDAHostContext::sync_on_stream(rocshmem_team_t team,
+                                             hipStream_t stream) {
+  host_interface->sync_on_stream(team, stream);
+}
+
 __host__ void GDAHostContext::alltoallmem_on_stream(rocshmem_team_t team,
                                                     void *dest,
                                                     const void *source,
-                                                    size_t size,
+                                                    size_t nelems,
                                                     hipStream_t stream) {
-  host_interface->alltoallmem_on_stream(team, dest, source, size, stream);
+  host_interface->alltoallmem_on_stream(team, dest, source, nelems, stream);
 }
 
 __host__ void GDAHostContext::broadcastmem_on_stream(rocshmem_team_t team,

@@ -13,6 +13,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
@@ -20,7 +21,6 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/sampling/allocator.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/types.hpp>
 
 #include "logger/debug.hpp"
@@ -50,7 +50,7 @@ using category_region_t = tim::lightweight_tuple<category_region<category::pthre
 namespace
 {
 auto* is_shutdown   = new bool{ false };  // intentional data leak
-auto* bundles       = new std::map<int64_t, std::shared_ptr<bundle_t>>{};
+auto* bundles       = new std::map<std::int64_t, std::shared_ptr<bundle_t>>{};
 auto* bundles_mutex = new std::mutex{};
 auto  bundles_dtor  = scope::destructor{ []() {
     pthread_create_gotcha::shutdown();
@@ -62,7 +62,7 @@ auto  bundles_dtor  = scope::destructor{ []() {
 
 template <typename... Args>
 inline void
-start_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
+start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
     LOG_TRACE("Starting bundle '{}' in thread {}...", _bundle.key(), _tid);
@@ -88,7 +88,7 @@ start_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
 
 template <typename... Args>
 inline void
-stop_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
+stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
 
@@ -130,6 +130,23 @@ using native_handle_set_t = std::set<pthread_create_gotcha::native_handle_t>;
 auto native_handles          = native_handle_set_t{};
 auto internal_native_handles = native_handle_set_t{};
 auto native_handles_mutex    = locking::atomic_mutex{};
+
+// Shared across the parent interceptor and the child wrapper so the thread-limit
+// warning is emitted exactly once per process, regardless of which gate trips first.
+std::once_flag thread_limit_warning_flag;
+
+inline void
+warn_thread_limit_once()
+{
+    std::call_once(thread_limit_warning_flag, []() {
+        LOG_WARNING("Maximum allowed thread limit ({}) reached. Further profiling will "
+                    "be disabled "
+                    "to prevent resource exhaustion. Consider increasing the limit at "
+                    "compile time "
+                    "using the ROCPROFSYS_MAX_THREADS CMake option.",
+                    static_cast<size_t>(ROCPROFSYS_MAX_THREADS));
+    });
+}
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
@@ -145,34 +162,33 @@ void*
 pthread_create_gotcha::wrapper::operator()() const
 {
     using thread_bundle_data_t = thread_data<thread_bundle_t>;
-
+    auto _child_internal_tid   = utility::get_thread_index();
+    if(static_cast<size_t>(_child_internal_tid) >= ROCPROFSYS_MAX_THREADS ||
+       thread_info::get_initialized_thread() >= ROCPROFSYS_MAX_THREADS)
+    {
+        warn_thread_limit_once();
+        if(m_config.promise) m_config.promise->set_value();
+        return m_routine(m_arg);
+    }
     if(is_shutdown && *is_shutdown)
     {
         if(m_config.promise) m_config.promise->set_value();
         // execute the original function
         return m_routine(m_arg);
     }
-
     push_thread_state(ThreadState::Internal);
 
-    int64_t     _tid         = -1;
-    void*       _ret         = nullptr;
-    auto        _is_sampling = false;
-    auto        _bundle      = std::shared_ptr<bundle_t>{};
-    auto        _signals     = std::set<int>{};
-    auto        _coverage    = (get_mode() == Mode::Coverage);
-    const auto& _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
-    const auto& _info        = thread_info::init(m_config.offset);
-    auto _sequent_value      = _info->index_data ? _info->index_data->sequent_value : -1;
-    if(static_cast<size_t>(_sequent_value) >= ROCPROFSYS_MAX_THREADS)
+    std::int64_t _tid         = -1;
+    void*        _ret         = nullptr;
+    auto         _is_sampling = false;
+    auto         _bundle      = std::shared_ptr<bundle_t>{};
+    auto         _signals     = std::set<int>{};
+    auto         _coverage    = (get_mode() == Mode::Coverage);
+    const auto&  _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
+    const auto&  _info        = thread_info::init(m_config.offset);
+    if(!_info)
     {
-        static std::once_flag thread_limit_warning_flag;
-        std::call_once(thread_limit_warning_flag, []() {
-            LOG_WARNING(
-                "Maximum allowed thread limit ({}) reached. Further thread creation and "
-                "profiling will be disabled to prevent resource exhaustion.",
-                static_cast<size_t>(ROCPROFSYS_MAX_THREADS));
-        });
+        if(m_config.promise) m_config.promise->set_value();
         return m_routine(m_arg);
     }
     auto _dtor = [&]() {
@@ -478,7 +494,7 @@ pthread_create_gotcha::shutdown()
 }
 
 void
-pthread_create_gotcha::shutdown(int64_t _tid)
+pthread_create_gotcha::shutdown(std::int64_t _tid)
 {
     if(_tid == 0) shutdown();
 
@@ -564,7 +580,13 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         return (*m_wrappee)(thread, attr, func, arg);
     }
 
-    auto        _tid          = utility::get_thread_index();
+    auto _tid = utility::get_thread_index();
+    if(static_cast<size_t>(_tid) >= ROCPROFSYS_MAX_THREADS ||
+       thread_info::get_initialized_thread() >= ROCPROFSYS_MAX_THREADS)
+    {
+        warn_thread_limit_once();
+        return (*m_wrappee)(thread, attr, func, arg);
+    }
     auto        _thr_state    = get_thread_state();
     auto        _glob_state   = get_state();
     auto        _mode         = get_mode();
@@ -574,6 +596,11 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto        _sample_child = sampling_enabled_on_child_threads();
     auto        _active = (_glob_state == ::rocprofsys::State::Active && !_disabled);
     const auto& _info   = thread_info::init(!_active || !_sample_child || _disabled);
+    if(!_info)
+    {
+        // Untracked parent threads cannot safely create wrapped/profiled child threads.
+        return (*m_wrappee)(thread, attr, func, arg);
+    }
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 

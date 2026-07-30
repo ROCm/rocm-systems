@@ -221,6 +221,11 @@ public:
   ErrorCode MapMemoryToVirtualAddress(bool create_phys_mem = true);
   ErrorCode MakeResident();
   ErrorCode Evict();
+
+  // Pin/unpin kSystem allocations into RAM via D3DKMTLock2/Unlock2. Held for
+  // the allocation lifetime to prevent KMD-side eviction/trim of backing pages.
+  ErrorCode LockSystemMemory();
+  ErrorCode UnlockSystemMemory();
   ErrorCode CreatePhysicalMemory();
   ErrorCode FreePhysicalMemory();
 
@@ -258,6 +263,7 @@ private:
   int mem_fd_; // IPC sigal's sys mem fd
 
   bool is_phymem_created = false; // status of physical memory allocation
+  bool is_sysmem_locked_ = false; // kSystem allocation pinned via D3DKMTLock2
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemory);
 };

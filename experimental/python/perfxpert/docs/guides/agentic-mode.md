@@ -129,12 +129,27 @@ Current entries:
 | `anthropic` | Claude API | Production default; requires `ANTHROPIC_API_KEY` |
 | `openai` | OpenAI API | Alternative hosted; requires `OPENAI_API_KEY` |
 | `ollama` | Local Ollama | Fully local; requires a running `ollama serve` |
-| `private` | Any OpenAI-compatible endpoint | Internal deployments; requires `PERFXPERT_LLM_PRIVATE_URL` + `PERFXPERT_LLM_PRIVATE_MODEL` |
+| `private` | Any OpenAI-compatible endpoint | Internal deployments; requires `PERFXPERT_LLM_PRIVATE_URL` + `PERFXPERT_LLM_PRIVATE_MODEL`; CLI preflight also needs `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key` |
 | `opencode` | Bundled opencode CLI | Used by `perfxpert-code`; not callable from inside opencode itself (recursion-guarded) |
 
 `perfxpert doctor` reports which providers are reachable from the
 current shell. See [contributing/providers.md](../contributing/providers.md)
 for how to register a new one.
+
+Private OpenAI-compatible endpoints use JSON for extra headers:
+
+```bash
+# SKIP-SAMPLE — requires a reachable private endpoint
+export PERFXPERT_LLM_PRIVATE_URL="https://llm-api.iexample.com/OpenAI"
+export PERFXPERT_LLM_PRIVATE_MODEL="gpt-5.3-codex"
+export PERFXPERT_LLM_PRIVATE_API_KEY="..."
+export PERFXPERT_LLM_PRIVATE_HEADERS='{
+  "Ocp-Apim-Subscription-Key": ".......",
+  "user": ".....",
+  "api-version": "preview"
+}'
+perfxpert analyze -i trace.db --llm private
+```
 
 ## Fallback chain (`PERFXPERT_LLM_FALLBACK_CHAIN`)
 

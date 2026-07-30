@@ -57,7 +57,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--generated-no-rename-csv-input",
         action="store",
-        help="Path to generted non-kernel rename trace file.",
+        help="Path to generated non-kernel rename trace file.",
     )
 
 

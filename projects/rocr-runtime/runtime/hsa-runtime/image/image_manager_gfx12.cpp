@@ -45,6 +45,7 @@
 #include <assert.h>
 
 #include <algorithm>
+#include <cinttypes>
 #include <climits>
 
 #include "core/inc/runtime.h"
@@ -356,6 +357,25 @@ hsa_status_t ImageManagerGfx12::PopulateImageSrd(Image& image,
         image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1D) {
       reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.TYPE =
           ImageLut().MapGeometry(image.desc.geometry);
+    }
+
+    if (image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2D ||
+        image.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DA) {
+      SQ_IMG_RSRC_WORD1 w1;
+      SQ_IMG_RSRC_WORD2 w2;
+      w1.val = image.srd[1];
+      w2.val = image.srd[2];
+      uint32_t srd_width  = (w2.f.WIDTH_HI << 2) | w1.f.WIDTH;
+      uint32_t srd_height = w2.f.HEIGHT;
+      uint32_t img_width  = static_cast<uint32_t>(image.desc.width) - 1;
+      uint32_t img_height = static_cast<uint32_t>(image.desc.height ? image.desc.height : 1) - 1;
+      if (img_width < srd_width || img_height < srd_height) {
+        w1.f.WIDTH    = img_width & 0x3u;
+        w2.f.WIDTH_HI = img_width >> 2;
+        w2.f.HEIGHT   = img_height;
+        image.srd[1]  = w1.val;
+        image.srd[2]  = w2.val;
+      }
     }
   }
 
@@ -1252,7 +1272,7 @@ void ImageManagerGfx12::printSRDDetailed(const uint32_t* srd) const {
 
   // Calculate full address (GFX12 uses 40-bit shifted by 8)
   uint64_t base_addr = ((uint64_t)word1.f.BASE_ADDRESS_HI << 40) | ((uint64_t)word0.f.BASE_ADDRESS << 8);
-  printf("        → Full Base Address    = 0x%016lx\n", base_addr);
+  printf("        → Full Base Address    = 0x%016" PRIx64 "\n", base_addr);
 
   // WORD 2: SQ_IMG_RSRC_WORD2
   SQ_IMG_RSRC_WORD2 word2;

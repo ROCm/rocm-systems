@@ -93,7 +93,7 @@ def evaluate_gate_state(
     tool_name: str,
     *,
     intent_classify_observed: bool,
-    classify_tool: str = "mcp_perfxpert_intent_classify",
+    classify_tool: str = "mcp__perfxpert__intent_classify",
 ) -> dict[str, Any]:
     """Mirror of the Claude / Gemini evaluators for unit test parity.
 
@@ -101,7 +101,7 @@ def evaluate_gate_state(
     supported MCP interception. Not wired into any live code path
     today; purely documentation-via-test.
     """
-    if tool_name.startswith("mcp_perfxpert_"):
+    if tool_name.startswith("mcp__perfxpert__"):
         return {"allowed": True, "enforced_by": "prompt-layer"}
     if intent_classify_observed:
         return {"allowed": True, "enforced_by": "prompt-layer"}

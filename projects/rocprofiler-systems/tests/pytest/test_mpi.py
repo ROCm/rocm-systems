@@ -7,6 +7,7 @@ MPI tests.
 
 from __future__ import annotations
 import pytest
+from pathlib import Path
 from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.mpi]
@@ -65,6 +66,13 @@ def mpip_all2all_env(mpip_env: dict[str, str]) -> dict[str, str]:
     return env
 
 
+@pytest.fixture
+def mpi_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
+    """Validation rules for MPI ROCpd database checks."""
+    rules_dir = validation_rules_dir / "mpi"
+    return [rules_dir / "validation-rules.json"]
+
+
 # =============================================================================
 # MPI Tests
 # =============================================================================
@@ -75,7 +83,7 @@ class TestMPI(RocprofsysTest):
         "mode", ["baseline", "sampling", "binary_rewrite", "sys_run"]
     )
     def test(self, mode):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -87,8 +95,12 @@ class TestMPI(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [r"perfetto-trace-0\.proto", r"wall_clock-0\.txt"]
-        REWRITE_FAIL_REGEX = [
+        BINARY_REWRITE_PASS_REGEX = [
+            r"perfetto-trace-0\.proto",
+            r"wall_clock-0\.txt",
+            r"Enabling MPI support\.\.\.",
+        ]
+        BINARY_REWRITE_FAIL_REGEX = [
             r"Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)"
         ]
         ENV = {"ROCPROFSYS_VERBOSE": "1"}
@@ -97,19 +109,22 @@ class TestMPI(RocprofsysTest):
             mode,
             "mpi-example",
             env=ENV,
-            rewrite_args=REWRITE_ARGS,
-            mpi_ranks=2,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=REWRITE_PASS_REGEX,
-            rewrite_fail_regex=REWRITE_FAIL_REGEX,
+            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
+            binary_rewrite_fail_regex=BINARY_REWRITE_FAIL_REGEX,
         )
+        if mode != "baseline":
+            self.assert_perfetto(result)
 
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite", "sys_run"])
     def test_perfetto_merge(self, mode):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -119,29 +134,31 @@ class TestMPI(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [r"Successfully executed: .+rocprof-sys-merge-output.sh.*"]
-        REWRITE_FAIL_REGEX = ["Script not found", "Failed to execute"]
+        BINARY_REWRITE_PASS_REGEX = [r"merged\.proto"]
+        BINARY_REWRITE_FAIL_REGEX = ["Script not found", "Failed to execute"]
         ENV = {
             "ROCPROFSYS_VERBOSE": "1",
-            "ROCPROFSYS_TRACE_LEGACY": "ON",
             "ROCPROFSYS_PERFETTO_COMBINE_TRACES": "ON",
         }
         result = self.run_test(
             mode,
             "mpi-example",
             env=ENV,
-            rewrite_args=REWRITE_ARGS,
-            mpi_ranks=2,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=REWRITE_PASS_REGEX,
-            rewrite_fail_regex=REWRITE_FAIL_REGEX,
+            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
+            binary_rewrite_fail_regex=BINARY_REWRITE_FAIL_REGEX,
         )
+        self.assert_perfetto(result, perfetto_file="merged.proto")
 
 
 class TestMPIP(RocprofsysTest):
+    @pytest.mark.rocpd("mpip_env")
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
     @pytest.mark.parametrize(
         "target",
@@ -155,8 +172,8 @@ class TestMPIP(RocprofsysTest):
             "mpi-send-recv",
         ],
     )
-    def test(self, mode, target, mpip_env, mpip_all2all_env):
-        REWRITE_ARGS = [
+    def test(self, mode, target, mpip_env, mpip_all2all_env, mpi_rocpd_rules):
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -172,15 +189,24 @@ class TestMPIP(RocprofsysTest):
             mode,
             target,
             env=mpip_env if target != "mpi-all2all" else mpip_all2all_env,
-            rewrite_args=REWRITE_ARGS,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
             run_args=RUN_ARGS,
-            mpi_ranks=2,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto MPI region validation",
+            categories=["mpi"],
+            label_substrings=["MPI_"],
+        )
+        self.assert_rocpd(result, rules_files=mpi_rocpd_rules)
 
+    @pytest.mark.rocpd("mpip_flat_env")
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite", "sys_run"])
-    def test_flat(self, mode, mpip_flat_env):
-        REWRITE_ARGS = [
+    def test_flat(self, mode, mpip_flat_env, mpi_rocpd_rules):
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -191,7 +217,7 @@ class TestMPIP(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [
+        BINARY_REWRITE_PASS_REGEX = [
             r">>> mpi-example.inst",
             r">>> MPI_Init_thread",
             r">>> pthread_create",
@@ -205,11 +231,19 @@ class TestMPIP(RocprofsysTest):
             mode,
             "mpi-example",
             env=mpip_flat_env,
-            rewrite_args=REWRITE_ARGS,
-            mpi_ranks=2,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=REWRITE_PASS_REGEX,
+            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
         )
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto MPI region validation",
+            categories=["mpi"],
+            label_substrings=["MPI_"],
+        )
+        self.assert_rocpd(result, rules_files=mpi_rocpd_rules)

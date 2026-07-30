@@ -6,7 +6,6 @@
 #include "concepts.hpp"
 
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/utility/delimit.hpp>
 
 #include <algorithm>
 #include <array>
@@ -27,8 +26,8 @@ namespace utility
 inline auto
 get_thread_index()
 {
-    static std::atomic<int64_t> _c{ 0 };
-    static thread_local int64_t _v = _c++;
+    static std::atomic<std::int64_t> _c{ 0 };
+    static thread_local std::int64_t _v = _c++;
     return _v;
 }
 
@@ -101,8 +100,9 @@ struct generate
 
             if constexpr(use_placement_new_when_generating_unique_ptr<value_type>::value)
             {
-                // create a thread-local buffer for placement-new
-                static thread_local auto _buffer = std::array<char, sizeof(value_type)>{};
+                // create a thread-local buffer for placement-new with proper alignment
+                alignas(value_type) static thread_local auto _buffer =
+                    std::array<char, sizeof(value_type)>{};
                 if constexpr(std::is_constructible<value_type, Args...>::value)
                 {
                     return type{ new(_buffer.data())
@@ -141,9 +141,8 @@ struct generate
 
 private:
     template <typename Up>
-    static auto invoke(Up&& _v, int,
-                       std::enable_if_t<std::is_invocable<Up>::value, int> = 0)
-        -> decltype(std::forward<Up>(_v)())
+        requires std::invocable<Up>
+    static auto invoke(Up&& _v, int) -> decltype(std::forward<Up>(_v)())
     {
         return std::forward<Up>(_v)();
     }
@@ -188,12 +187,10 @@ combine(LhsT& _lhs, RhsT&& _rhs)
 
 template <template <typename, typename...> class ContainerT, typename Tp,
           typename... TailT>
+    requires tim::concepts::is_string_type<Tp>::value
 std::string
 get_regex_or(const ContainerT<Tp, TailT...>& _container, const std::string& _fallback)
 {
-    static_assert(tim::concepts::is_string_type<Tp>::value,
-                  "get_regex_or requires a container of string types");
-
     if(_container.empty()) return _fallback;
 
     auto _ss  = std::stringstream{};
@@ -207,13 +204,11 @@ get_regex_or(const ContainerT<Tp, TailT...>& _container, const std::string& _fal
 
 template <template <typename, typename...> class ContainerT, typename Tp,
           typename... TailT, typename PredicateT>
+    requires tim::concepts::is_string_type<Tp>::value
 std::string
 get_regex_or(const ContainerT<Tp, TailT...>& _container, PredicateT&& _predicate,
              const std::string& _fallback)
 {
-    static_assert(tim::concepts::is_string_type<Tp>::value,
-                  "get_regex_or requires a container of string types");
-
     if(_container.empty()) return _fallback;
 
     auto _dest = std::vector<std::string>{};
@@ -235,17 +230,21 @@ convert(std::string_view _inp)
     return _ret;
 }
 
-template <typename Tp = int64_t, typename ContainerT = std::set<Tp>, typename Up = Tp>
+template <typename Tp = std::int64_t, typename ContainerT = std::set<Tp>,
+          typename Up = Tp>
 ContainerT
 parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr);
 
-extern template std::set<int64_t>
-parse_numeric_range<int64_t, std::set<int64_t>>(std::string, const std::string&, long);
-extern template std::vector<int64_t>
-parse_numeric_range<int64_t, std::vector<int64_t>>(std::string, const std::string&, long);
-extern template std::unordered_set<int64_t>
-parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
+extern template std::set<std::int64_t>
+parse_numeric_range<std::int64_t, std::set<std::int64_t>>(std::string, const std::string&,
                                                           long);
+extern template std::vector<std::int64_t>
+parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(std::string,
+                                                             const std::string&, long);
+extern template std::unordered_set<std::int64_t>
+parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
+                                                                    const std::string&,
+                                                                    long);
 
 void
 trim_str(std::string& str);

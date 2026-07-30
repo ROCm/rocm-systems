@@ -3,23 +3,20 @@
 
 #pragma once
 
+#include "common/join.hpp"
+
 #include <timemory/log/color.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/join.hpp>
 
+#include <cstdint>
 #include <iosfwd>
 #include <ostream>
 #include <string>
-#include <tuple>
-
-#if !defined(JOIN)
-#    define JOIN(...) ::timemory::join::join(__VA_ARGS__)
-#endif
 
 struct log_entry;
 
 void
-print_log_entries(std::ostream& = std::cerr, int64_t _count = 10,
+print_log_entries(std::ostream& = std::cerr, std::int64_t _count = 10,
                   const std::function<bool(const log_entry&)>& _cond    = {},
                   const std::function<void()>&                 _prelude = {},
                   const char* _color         = tim::log::color::warning(),
@@ -57,7 +54,7 @@ private:
     std::string           m_message   = {};
     tim::unwind::stack<4> m_backtrace = {};
 
-    friend void print_log_entries(std::ostream&, int64_t,
+    friend void print_log_entries(std::ostream&, std::int64_t,
                                   std::function<bool(const log_entry&)>, const char*,
                                   bool);
 };
@@ -65,9 +62,4 @@ private:
 #define ROCPROFSYS_ADD_LOG_ENTRY(...)                                                    \
     log_entry::add_log_entry(                                                            \
         { log_entry::source_location{ __FUNCTION__, __FILE__, __LINE__ },                \
-          timemory::join::join(' ', __VA_ARGS__) })
-
-#define ROCPROFSYS_ADD_DETAILED_LOG_ENTRY(DELIM, ...)                                    \
-    log_entry::add_log_entry(                                                            \
-        { log_entry::source_location{ __FUNCTION__, __FILE__, __LINE__ },                \
-          timemory::join::join(DELIM, __VA_ARGS__) })
+          ::rocprofsys::join(" ", __VA_ARGS__) })

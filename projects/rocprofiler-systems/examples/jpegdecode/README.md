@@ -46,11 +46,21 @@ cmake --build <build_dir> --target jpegdecode
 **Key parameters:**
 
 | Parameter | Description |
-|-----------|-------------|
+| ----------- | ------------- |
 | `-i` | Input directory containing JPEG files |
 | `-b` | Batch size (images per decode batch) |
 | `-d` | GPU device ID |
 | `-o` | Output directory for decoded images (optional) |
+
+### VA drivers (`LIBVA_DRIVERS_PATH`) — only if decode fails
+
+**rocJPEG** hardware decode may use **libva** under the hood. On a typical desktop, **libva** finds a driver under the distro’s default paths, so you often need **no** extra variables.
+
+Set **`LIBVA_DRIVERS_PATH`** when decode fails or no VA driver is found. For example, when building with TheRock, point libva at the vendored sysdeps directory:
+
+```bash
+export LIBVA_DRIVERS_PATH="${ROCM_PATH}/lib/rocm_sysdeps/lib"
+```
 
 ## Profiling with rocprofiler-systems
 
@@ -61,14 +71,13 @@ rocprof-sys-run -- ./jpegdecode -i /path/to/images/ -b 4
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy` | Trace HIP API and GPU operations |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 
 ```bash
-rocprof-sys-run \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./jpegdecode -i /path/to/images/ -b 4
+ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./jpegdecode -i /path/to/images/ -b 4
 ```

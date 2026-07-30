@@ -58,6 +58,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <semaphore.h>
 #include "core/inc/runtime.h"
@@ -261,13 +262,22 @@ class os_thread {
 static_assert(sizeof(LibHandle) == sizeof(void*), "OS abstraction size mismatch");
 static_assert(sizeof(Semaphore) == sizeof(sem_t*), "OS abstraction size mismatch");
 static_assert(sizeof(Mutex) == sizeof(pthread_mutex_t*), "OS abstraction size mismatch");
-static_assert(sizeof(SharedMutex) == sizeof(pthread_rwlock_t*), "OS abstraction size mismatch");
 static_assert(sizeof(Thread) == sizeof(os_thread*), "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
-  void* ret = dlopen(filename.c_str(), RTLD_LAZY);
+  // RTLD_NODELETE keeps the library mapped even after dlclose.
+  // This prevents crashes when the library has circular dependencies:
+  // if libA loads libB, and libB links against libA, then dlclose(libB)
+  // could unmap libA while libA's code is still executing.
+  // With RTLD_NODELETE, dlclose decrements the refcount but does not
+  // unmap the code pages or run destructors - those happen at process exit.
+  int dlopen_flags = RTLD_LAZY;
+#ifdef RTLD_NODELETE
+  dlopen_flags |= RTLD_NODELETE;
+#endif
+  void* ret = dlopen(filename.c_str(), dlopen_flags);
   if (ret == nullptr) debug_print("LoadLib(%s) failed: %s\n", filename.c_str(), dlerror());
-  return *(LibHandle*)&ret;
+  return ret;
 }
 
 void* GetExportAddress(LibHandle lib, std::string export_name) {
@@ -335,7 +345,8 @@ static int callback(struct dl_phdr_info* info, size_t size, void* data) {
    */
 
   if ((info) && (info->dlpi_name) && (info->dlpi_name[0] != '\0')) {
-    if (std::string(info->dlpi_name).find("vdso.so") != std::string::npos) return 0;
+    std::string_view name(info->dlpi_name);
+    if (name.find("vdso64.so") != std::string_view::npos || name.find("vdso.so") != std::string_view::npos) return 0;
 
     /*
      * Iterate through the program headers of the loaded lib and check for PT_DYNAMIC program
@@ -409,6 +420,15 @@ std::string GetLibraryName(LibHandle lib) {
   if(dlinfo(lib, RTLD_DI_LINKMAP, &map)!=0)
     return "";
   return map->l_name;
+}
+
+std::string GetAdjacentLibraryPath(const void* address, const std::string& filename) {
+  Dl_info info = {};
+  if (dladdr(address, &info) == 0 || info.dli_fname == nullptr) return {};
+
+  const std::string path(info.dli_fname);
+  const auto slash = path.find_last_of('/');
+  return slash == std::string::npos ? std::string{} : path.substr(0, slash + 1) + filename;
 }
 
 Semaphore CreateSemaphore() {
@@ -715,74 +735,6 @@ uint64_t AccurateClockFrequency() {
   return 1000000000ull / uint64_t(time.tv_nsec);
 }
 
-SharedMutex CreateSharedMutex() {
-  pthread_rwlockattr_t attrib;
-  int err = pthread_rwlockattr_init(&attrib);
-  if (err != 0) {
-    fprintf(stderr, "rw lock attribute init failed: %s\n", strerror(err));
-    return nullptr;
-  }
-
-#ifdef HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP
-  err = pthread_rwlockattr_setkind_np(&attrib, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
-  if (err != 0) {
-    fprintf(stderr, "Set rw lock attribute failure: %s\n", strerror(err));
-    return nullptr;
-  }
-#endif
-
-  std::unique_ptr<pthread_rwlock_t> lock(new pthread_rwlock_t);
-  err = pthread_rwlock_init(lock.get(), &attrib);
-  if (err != 0) {
-    fprintf(stderr, "rw lock init failed: %s\n", strerror(err));
-    return nullptr;
-  }
-
-  pthread_rwlockattr_destroy(&attrib);
-  return lock.release();
-}
-
-bool TryAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_trywrlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-bool AcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_wrlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-void ReleaseSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_unlock(*(pthread_rwlock_t**)&lock);
-  if (err != 0) {
-    fprintf(stderr, "SharedMutex unlock failed: %s\n", strerror(err));
-    abort();
-  }
-}
-
-bool TrySharedAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_tryrdlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-bool SharedAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_rdlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-void SharedReleaseSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_unlock(*(pthread_rwlock_t**)&lock);
-  if (err != 0) {
-    fprintf(stderr, "SharedMutex unlock failed: %s\n", strerror(err));
-    abort();
-  }
-}
-
-void DestroySharedMutex(SharedMutex lock) {
-  pthread_rwlock_destroy(*(pthread_rwlock_t**)&lock);
-  delete *(pthread_rwlock_t**)&lock;
-}
-
 static uint64_t sys_clock_period_ = 0;
 
 uint64_t ReadSystemClock() {
@@ -861,11 +813,34 @@ size_t PageSize() {
 bool UnmapMemory(void* va, size_t size) { return ::munmap(va, size) == 0; }
 
 bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) {
+  if (fd < 0)  return false;
+
   void* mapped_ptr = ::mmap(va, size, MemProtToOsProt(perms), 
                             MAP_SHARED | MAP_FIXED, fd, cpu_addr);
   if (mapped_ptr != va)
       return false;
   return true;
+}
+
+hsa_status_t DmaBufClose(int* dmabuf) {
+  if (dmabuf == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (*dmabuf < 0) return HSA_STATUS_SUCCESS;
+  if (::close(*dmabuf) != 0) {
+    *dmabuf = -1;
+    return HSA_STATUS_ERROR_RESOURCE_FREE;
+  }
+  /* Set to -1 even on close failure: the fd is no longer valid regardless of errno. */
+  *dmabuf = -1;
+  return HSA_STATUS_SUCCESS;
+}
+
+int DmaBufDup(int dmabuf) {
+  if (dmabuf < 0) return -1;
+  int dup_fd = ::dup(dmabuf);
+  if (dup_fd < 0) {
+    return -1;
+  }
+  return dup_fd;
 }
 
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
@@ -958,6 +933,8 @@ int Ffs(int i) { return ffs(i); }
 
 int Ctz(uint64_t i) { return __builtin_ctz(i); }
 
+int Popcount(uint32_t i) { return __builtin_popcount(i); }
+
 char* DlError() { return dlerror(); }
 
 static inline int IPCSockToFd(IPCSocket sock) {
@@ -969,7 +946,7 @@ static inline IPCSocket FdToIPCSock(int fd) {
 }
 
 IPCSocket CreateIPCServer(const char* name, int backlog) {
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd == -1) return INVALID_SOCKET_VALUE;
 
   struct sockaddr_un address;
@@ -997,7 +974,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
 
 IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
                              std::chrono::milliseconds retryInterval) {
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd == -1) return INVALID_SOCKET_VALUE;
 
   struct sockaddr_un address;

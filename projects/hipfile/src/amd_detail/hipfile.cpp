@@ -13,21 +13,26 @@
 #include "hipfile.h"
 #include "hipfile-private.h"
 #include "hipfile-warnings.h"
+#include "api_trace/api-trace-internal.h"
 #include "io.h"
 #include "state.h"
+#include "stats.h"
 
+#include <bit>
 #include <cerrno>
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 #include <sys/types.h>
 #include <system_error>
 
-using namespace hipFile;
 using namespace std;
+
+namespace hipFile {
 
 /// Catch C++ exceptions from the hipFile code and convert
 /// them into error values that can be returned from public
@@ -69,14 +74,20 @@ ensureDriverInit()
 hipFileError_t
 hipFileHandleRegister(hipFileHandle_t *fh, hipFileDescr_t *descr)
 try {
+    hipFileInit();
     if (fh == nullptr || descr == nullptr) {
         return {hipFileInvalidValue, hipSuccess};
     }
 
-    switch (descr->type) {
+    // A C caller may pass a type outside the enum's valid range, and an
+    // lvalue-to-rvalue load of such a value as the enum type is undefined
+    // behavior. Reinterpret the bits as the underlying integer type instead.
+    auto type = std::bit_cast<std::underlying_type_t<hipFileFileHandleType_t>>(descr->type);
+    switch (type) {
         case hipFileHandleTypeOpaqueFD: {
             UnregisteredFile uf{descr->handle.fd};
             *fh = Context<DriverState>::get()->registerFile(std::move(uf));
+            Context<StatsCollection>::get()->fileRegistration();
             return {hipFileSuccess, hipSuccess};
         }
         case hipFileHandleTypeOpaqueWin32:
@@ -95,6 +106,7 @@ catch (...) {
 void
 hipFileHandleDeregister(hipFileHandle_t fh)
 try {
+    hipFileInit();
     if (fh == nullptr) {
         return;
     }
@@ -109,7 +121,9 @@ catch (...) {
 hipFileError_t
 hipFileBufRegister(const void *buffer_base, size_t length, int flags)
 try {
+    hipFileInit();
     Context<DriverState>::get()->registerBuffer(buffer_base, length, flags);
+    Context<StatsCollection>::get()->bufferRegistration();
     return {hipFileSuccess, hipSuccess};
 }
 catch (const BufferAlreadyRegistered &) {
@@ -137,6 +151,7 @@ catch (...) {
 hipFileError_t
 hipFileBufDeregister(const void *buffer_base)
 try {
+    hipFileInit();
     Context<DriverState>::get()->deregisterBuffer(buffer_base);
     return {hipFileSuccess, hipSuccess};
 }
@@ -190,7 +205,7 @@ try {
         }
     }
 
-    return backend->io(type, file, buffer, size, file_offset, buffer_offset);
+    return backend->io(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
 }
 catch (const DriverNotInitialized &) {
     return -hipFileDriverNotInitialized;
@@ -220,7 +235,8 @@ catch (...) {
 
 ssize_t
 hipFileRead(hipFileHandle_t fh, void *buffer_base, size_t size, hoff_t file_offset, hoff_t buffer_offset)
-{
+try {
+    hipFileInit();
     auto result =
         hipFileIo(IoType::Read, fh, buffer_base, size, file_offset, buffer_offset, getCachedBackends());
 
@@ -231,11 +247,16 @@ hipFileRead(hipFileHandle_t fh, void *buffer_base, size_t size, hoff_t file_offs
     }
     return result;
 }
+catch (...) {
+    hipFileError_t err = handle_exception();
+    return -err.err;
+}
 
 ssize_t
 hipFileWrite(hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
              hoff_t buffer_offset)
-{
+try {
+    hipFileInit();
     auto result =
         hipFileIo(IoType::Write, fh, buffer_base, size, file_offset, buffer_offset, getCachedBackends());
 
@@ -246,10 +267,15 @@ hipFileWrite(hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t fi
     }
     return result;
 }
+catch (...) {
+    hipFileError_t err = handle_exception();
+    return -err.err;
+}
 
 hipFileError_t
 hipFileDriverOpen()
 try {
+    hipFileInit();
     Context<DriverState>::get()->incrRefCount();
 
     return {hipFileSuccess, hipSuccess};
@@ -261,6 +287,7 @@ catch (...) {
 hipFileError_t
 hipFileDriverClose()
 try {
+    hipFileInit();
     if (Context<DriverState>::get()->getRefCount() > 0) {
         Context<DriverState>::get()->decrRefCount();
         return {hipFileSuccess, hipSuccess};
@@ -276,6 +303,7 @@ catch (...) {
 int64_t
 hipFileUseCount()
 try {
+    hipFileInit();
     return Context<DriverState>::get()->getRefCount();
 }
 catch (...) {
@@ -285,6 +313,7 @@ catch (...) {
 hipFileError_t
 hipFileDriverGetProperties(hipFileDriverProps_t *props)
 try {
+    hipFileInit();
     (void)props;
 
     throw std::runtime_error("Not Implemented");
@@ -296,6 +325,7 @@ catch (...) {
 hipFileError_t
 hipFileDriverSetPollMode(bool poll, size_t poll_threshold_size)
 try {
+    hipFileInit();
     (void)poll;
     (void)poll_threshold_size;
 
@@ -308,6 +338,7 @@ catch (...) {
 hipFileError_t
 hipFileDriverSetMaxDirectIOSize(size_t max_direct_io_size)
 try {
+    hipFileInit();
     (void)max_direct_io_size;
 
     throw std::runtime_error("Not Implemented");
@@ -319,6 +350,7 @@ catch (...) {
 hipFileError_t
 hipFileDriverSetMaxCacheSize(size_t max_cache_size)
 try {
+    hipFileInit();
     (void)max_cache_size;
 
     throw std::runtime_error("Not Implemented");
@@ -330,6 +362,7 @@ catch (...) {
 hipFileError_t
 hipFileDriverSetMaxPinnedMemSize(size_t max_pinned_size)
 try {
+    hipFileInit();
     (void)max_pinned_size;
 
     throw std::runtime_error("Not Implemented");
@@ -341,6 +374,7 @@ catch (...) {
 hipFileError_t
 hipFileBatchIOSetUp(hipFileBatchHandle_t *batch_idp, unsigned max_nr)
 try {
+    hipFileInit();
     if (batch_idp == nullptr) {
         return {hipFileInvalidValue, hipSuccess};
     }
@@ -359,7 +393,12 @@ catch (...) {
 hipFileError_t
 hipFileBatchIOSubmit(hipFileBatchHandle_t batch_idp, unsigned nr, hipFileIOParams_t *iocbp, unsigned flags)
 try {
+    hipFileInit();
     (void)flags; // Unused at this time.
+
+    if (iocbp == nullptr && nr > 0) {
+        return {hipFileInvalidValue, hipSuccess};
+    }
 
     std::shared_ptr<IBatchContext> batch_context = Context<DriverState>::get()->getBatchContext(batch_idp);
     batch_context->submit_operations(iocbp, nr);
@@ -377,6 +416,7 @@ hipFileError_t
 hipFileBatchIOGetStatus(hipFileBatchHandle_t batch_idp, unsigned min_nr, unsigned *nr,
                         hipFileIOEvents_t *iocbp, struct timespec *timeout)
 try {
+    hipFileInit();
     (void)batch_idp;
     (void)min_nr;
     (void)nr;
@@ -392,6 +432,7 @@ catch (...) {
 hipFileError_t
 hipFileBatchIOCancel(hipFileBatchHandle_t batch_idp)
 try {
+    hipFileInit();
     (void)batch_idp;
 
     throw std::runtime_error("Not Implemented");
@@ -403,6 +444,7 @@ catch (...) {
 void
 hipFileBatchIODestroy(hipFileBatchHandle_t batch_idp)
 try {
+    hipFileInit();
     (void)batch_idp;
 
     throw std::runtime_error("Not Implemented");
@@ -448,22 +490,31 @@ catch (...) {
 hipFileError_t
 hipFileReadAsync(hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *file_offset_p,
                  hoff_t *buffer_offset_p, ssize_t *bytes_read_p, hipStream_t stream)
-{
+try {
+    hipFileInit();
     return hipFileIOAsync(IoType::Read, fh, buffer_base, size_p, file_offset_p, buffer_offset_p, bytes_read_p,
                           stream);
+}
+catch (...) {
+    return handle_exception();
 }
 
 hipFileError_t
 hipFileWriteAsync(hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *file_offset_p,
                   hoff_t *buffer_offset_p, ssize_t *bytes_written_p, hipStream_t stream)
-{
+try {
+    hipFileInit();
     return hipFileIOAsync(IoType::Write, fh, buffer_base, size_p, file_offset_p, buffer_offset_p,
                           bytes_written_p, stream);
+}
+catch (...) {
+    return handle_exception();
 }
 
 hipFileError_t
 hipFileStreamRegister(hipStream_t stream, unsigned flags)
 try {
+    hipFileInit();
     Context<DriverState>::get()->registerStream(stream, flags);
     return {hipFileSuccess, hipSuccess};
 }
@@ -477,6 +528,7 @@ catch (...) {
 hipFileError_t
 hipFileStreamDeregister(hipStream_t stream)
 try {
+    hipFileInit();
     Context<DriverState>::get()->deregisterStream(stream);
     return {hipFileSuccess, hipSuccess};
 }
@@ -494,6 +546,7 @@ catch (...) {
 hipFileError_t
 hipFileGetParameterSizeT(hipFileSizeTConfigParameter_t param, size_t *value)
 try {
+    hipFileInit();
     (void)param;
     (void)value;
 
@@ -506,6 +559,7 @@ catch (...) {
 hipFileError_t
 hipFileGetParameterBool(hipFileBoolConfigParameter_t param, bool *value)
 try {
+    hipFileInit();
     (void)param;
     (void)value;
 
@@ -518,6 +572,7 @@ catch (...) {
 hipFileError_t
 hipFileGetParameterString(hipFileStringConfigParameter_t param, char *desc_str, int len)
 try {
+    hipFileInit();
     (void)param;
     (void)desc_str;
     (void)len;
@@ -531,6 +586,7 @@ catch (...) {
 hipFileError_t
 hipFileSetParameterSizeT(hipFileSizeTConfigParameter_t param, size_t value)
 try {
+    hipFileInit();
     (void)param;
     (void)value;
 
@@ -543,6 +599,7 @@ catch (...) {
 hipFileError_t
 hipFileSetParameterBool(hipFileBoolConfigParameter_t param, bool value)
 try {
+    hipFileInit();
     (void)param;
     (void)value;
 
@@ -555,6 +612,7 @@ catch (...) {
 hipFileError_t
 hipFileSetParameterString(hipFileStringConfigParameter_t param, const char *desc_str)
 try {
+    hipFileInit();
     (void)param;
     (void)desc_str;
 
@@ -563,3 +621,5 @@ try {
 catch (...) {
     return handle_exception();
 }
+
+} // namespace

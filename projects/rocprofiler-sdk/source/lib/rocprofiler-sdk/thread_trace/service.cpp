@@ -24,6 +24,8 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 
@@ -88,6 +90,19 @@ build_pack_from_array(parameter_pack&                             pack,
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL:
                 pack.no_detail_simd = param.value != 0;
                 break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS:
+            {
+                // CPU staging buffer count. 0 (default) and 1 = single buffer (sync path).
+                // 2 is reserved/invalid. Values >= 3 select the async producer/consumer
+                // pipeline; the producer reserves one slot and consumers share the rest.
+                // Bounded by the bitmask width in triple_buffer_shared_data_t.
+                uint64_t n = (param.value == 0) ? 1 : param.value;
+                if(n == 2) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+                if(n > rocprofiler::thread_trace::triple_buffer_shared_data_t::MAX_SLOTS)
+                    return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+                pack.num_buffers = n;
+                break;
+            }
             case ROCPROFILER_THREAD_TRACE_PARAMETER_LAST:
                 return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
@@ -135,6 +150,9 @@ rocprofiler_configure_dispatch_thread_trace_service(
         if(status != ROCPROFILER_STATUS_SUCCESS) return status;
     }
 
+    // Multi-buffer mode not supported in dispatch mode
+    if(pack.num_buffers > 1) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
     ctx->dispatch_thread_trace->add_agent(agent_id, pack);
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -172,6 +190,17 @@ rocprofiler_configure_device_thread_trace_service(
 
     // Serialization not supported in device mode
     if(pack.bSerialize) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if(pack.num_buffers > 1)
+    {
+        // For now, only one SE is allowed in multi-buffer mode. Check mask is power of two.
+        if((pack.shader_engine_mask & (pack.shader_engine_mask - 1)) != 0)
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+        // Multi-buffer mode requires specific AQLProfile symbols that may not be available
+        auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
+        if(!aqlprofile_dl || !aqlprofile_dl->valid()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    }
 
     ctx->device_thread_trace->add_agent(agent_id, pack);
     return ROCPROFILER_STATUS_SUCCESS;

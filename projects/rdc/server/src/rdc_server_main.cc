@@ -485,7 +485,7 @@ static const struct option long_options[] = {{"address", required_argument, null
 static const char* short_options = "a:p:uidvh";
 
 static void PrintHelp(void) {
-  std::cout << "Optional rdctst Arguments:\n"
+  std::cout << "Optional rdcd Arguments:\n"
                "--address, -a <IPv4 address> specify address on which to listen; "
                "default is 0.0.0.0\n"
                "--port, -p <port> specify port on which to listen; "

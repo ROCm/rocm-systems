@@ -420,8 +420,7 @@ if(DEFINED ENV{ROCM_BUILD_ID})
   # ROCM_BUILD_ID is set by the ROCm-CI build environment.
   set(build_info $ENV{ROCM_BUILD_ID})
 else()
-  string(TIMESTAMP NOW "%Y%m%dT%H%M%S")
-  set(build_info developer-build-${NOW})
+  set(build_info developer-build)
 
   if(DEFINED ENV{USER})
     set(build_info ${build_info}-$ENV{USER})
@@ -639,7 +638,7 @@ cpack_add_component(
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
   # set input and output files
-  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in)
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/doxygen/cmake_setting/Doxyfile.in)
   set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
 
   # request to configure the file

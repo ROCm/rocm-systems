@@ -29,9 +29,11 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <optional>
 
 #include "pm4/cmd_builder.h"
 #include "def/gfx12_def.h"
+
 namespace pm4_builder {
 
 /// @brief class Gfx12CmdBuilder implements the virtual class CmdBuilder
@@ -44,6 +46,211 @@ class Gfx12CmdBuilder : public CmdBuilder {
     uint32_t header = PACKET3(opcode, count);
     return header;
   }
+
+  static bool GetRemoteModeInfo(ChipletId chiplet_id, bool is_aid_chiplet, uint32_t& remote_mode,
+      uint32_t& die_id) {
+    switch (chiplet_id) {
+      case CHIPLET_MID0:
+        remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__REMOTE_MID);
+        die_id = PACKET3_COPY_DATA__MID_DIE_ID(PACKET3_COPY_DATA__MID_DIE_ID__MID0);
+        break;
+      case CHIPLET_MID1:
+        remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__REMOTE_MID);
+        die_id = PACKET3_COPY_DATA__MID_DIE_ID(PACKET3_COPY_DATA__MID_DIE_ID__MID1);
+        break;
+      case CHIPLET_AID0:
+        remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__REMOTE_OR_LOCAL_AID);
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD0);
+        break;
+      case CHIPLET_AID1:
+        remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__REMOTE_OR_LOCAL_AID);
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD4);
+        break;
+      case CHIPLET_XCD0:
+        if (is_aid_chiplet) {
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__REMOTE_OR_LOCAL_AID);
+        } else {
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
+        }
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD0);
+        break;
+      case CHIPLET_XCD1:
+        if (is_aid_chiplet) {
+          return false;
+        } else {
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
+        }
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD1);
+        break;
+      case CHIPLET_XCD2:
+        if (is_aid_chiplet) {
+          return false;
+        } else {
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
+        }
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD2);
+        break;
+      case CHIPLET_XCD3:
+        if (is_aid_chiplet) {
+          return false;
+        } else {
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
+        }
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD3);
+        break;
+      case CHIPLET_XCD4:
+        if (is_aid_chiplet) {
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__REMOTE_OR_LOCAL_AID);
+        } else {
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
+        }
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD4);
+        break;
+      case CHIPLET_XCD5:
+        if (is_aid_chiplet) {
+          return false;
+        } else {
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
+        }
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD5);
+        break;
+      case CHIPLET_XCD6:
+        if (is_aid_chiplet) {
+          return false ;
+        } else {
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
+        }
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD6);
+        break;
+      case CHIPLET_XCD7:
+        if (is_aid_chiplet) {
+          return false;
+        } else {
+          remote_mode = PACKET3_COPY_DATA__MODE(PACKET3_COPY_DATA__MODE__LOCAL_XCD);
+        }
+        die_id = PACKET3_COPY_DATA__XCD_DIE_ID(PACKET3_COPY_DATA__XCD_DIE_ID__XCD7);
+        break;
+      default:
+        return false;
+        break;
+    }
+    return true;
+  }
+
+  static void BuildWritePConfigRegPacketImpl(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value,
+                                             std::optional<ChipletId> chiplet = std::nullopt,
+                                             std::optional<bool> write_to_aid = std::nullopt) {
+    uint32_t dword2 = 0;
+    uint32_t dword6 = 0;
+
+    uint32_t header = MakePacket3Header(PACKET3_COPY_DATA, 6 * sizeof(uint32_t));
+
+    dword2 |=
+        PACKET3_COPY_DATA__SRC_SEL(PACKET3_COPY_DATA__SRC_SEL__IMMEDIATE_DATA) |
+        PACKET3_COPY_DATA__SRC_TEMPORAL(PACKET3_COPY_DATA__SRC_TEMPORAL__LU) |
+        (IsPrivilegedConfigReg(addr)
+             ? PACKET3_COPY_DATA__DST_SEL(PACKET3_COPY_DATA__DST_SEL__PERFCOUNTERS)
+             : PACKET3_COPY_DATA__DST_SEL(PACKET3_COPY_DATA__DST_SEL__MEM_MAPPED_REGISTER)) |
+        PACKET3_COPY_DATA__DST_TEMPORAL(PACKET3_COPY_DATA__DST_TEMPORAL__LU) |
+        PACKET3_COPY_DATA__WR_CONFIRM(PACKET3_COPY_DATA__WR_CONFIRM__DO_NOT_WAIT_FOR_CONFIRMATION) |
+        PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA);
+
+    uint32_t dword3 = PACKET3_COPY_DATA__IMM_DATA(value);
+    uint32_t dword5 = PACKET3_COPY_DATA__DST_REG_OFFSET_LO(addr);
+
+    if (chiplet.has_value()) {
+      ChipletId chiplet_id = chiplet.value();
+      bool is_aid_chiplet = write_to_aid.value_or(false);
+      uint32_t remote_mode = 0;
+      uint32_t die_id = 0;
+      if (enable_copy_data_remote_mode_) {
+        if (!GetRemoteModeInfo(chiplet_id, is_aid_chiplet, remote_mode, die_id)) {
+          std::cerr << "Invalid chiplet_id and is_aid_chiplet combination: " << static_cast<int>(chiplet_id)
+                    << ", " << is_aid_chiplet << std::endl;
+          std::abort();
+        }
+        dword2 |= remote_mode | die_id |
+          PACKET3_COPY_DATA__SRC_DST_REMOTE_MODE(PACKET3_COPY_DATA__SRC_DST_REMOTE_MODE__DST_IS_REMOTE);
+      } else if (is_aid_chiplet)
+        if (chiplet_id == CHIPLET_XCD0 || chiplet_id == CHIPLET_XCD4) {
+          // bit32: 1 = Remote DIE
+          dword5 |= 0x40000000;
+          // bit34-39: 1 = AID0; 2 = AID1
+          dword6 = chiplet_id == CHIPLET_XCD0 ? 1 : 2;
+        }
+    }
+
+    // build the pm4mec_copy_data command which has 6 Dwords
+    uint32_t pm4mec_copy_data_cmd[6] = {header, dword2, dword3, 0, dword5, dword6};
+
+    // Append the built command into output Command Buffer
+    APPEND_COMMAND_WRAPPER(cmdbuf, pm4mec_copy_data_cmd);
+  }
+
+  static void BuildCopyRegDataPacketImpl(CmdBuffer* cmdbuf, uint32_t src_reg_addr, const void* dst_addr,
+                                         uint32_t size, bool wait, std::optional<ChipletId> chiplet = std::nullopt,
+                                         std::optional<bool> copy_from_aid = std::nullopt) {
+    uint32_t dword2 = 0;
+    uint32_t dword4 = 0;
+
+    // Initialize the command header
+    uint32_t header = MakePacket3Header(PACKET3_COPY_DATA, 6 * sizeof(uint32_t));
+
+    dword2 |=
+        (IsPrivilegedConfigReg(src_reg_addr)
+             ? PACKET3_COPY_DATA__SRC_SEL(PACKET3_COPY_DATA__SRC_SEL__PERFCOUNTERS)
+             : PACKET3_COPY_DATA__SRC_SEL(PACKET3_COPY_DATA__SRC_SEL__MEM_MAPPED_REGISTER)) |
+        PACKET3_COPY_DATA__SRC_TEMPORAL(PACKET3_COPY_DATA__SRC_TEMPORAL__LU) |
+        PACKET3_COPY_DATA__DST_SEL(PACKET3_COPY_DATA__DST_SEL__TC_L2) |
+        PACKET3_COPY_DATA__DST_TEMPORAL(PACKET3_COPY_DATA__DST_TEMPORAL__LU) |
+        (wait ? PACKET3_COPY_DATA__WR_CONFIRM(PACKET3_COPY_DATA__WR_CONFIRM__WAIT_FOR_CONFIRMATION)
+              : PACKET3_COPY_DATA__WR_CONFIRM(
+                    PACKET3_COPY_DATA__WR_CONFIRM__DO_NOT_WAIT_FOR_CONFIRMATION)) |
+        ((size == 0) ? PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA)
+                     : PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__64_BITS_OF_DATA));
+
+    // Specify the source register offset
+    uint32_t dword3 = PACKET3_COPY_DATA__SRC_REG_OFFSET_LO(src_reg_addr);
+
+    uint32_t dword5 = 0;
+    if (size == 0) {
+      dword5 |= PACKET3_COPY_DATA__DST_32B_ADDR_LO((PtrLow32(dst_addr) >> 2));
+    } else {
+      dword5 |= PACKET3_COPY_DATA__DST_64B_ADDR_LO((PtrLow32(dst_addr) >> 3));
+    }
+
+    // Specify the destination memory address
+    uint32_t dword6 = PACKET3_COPY_DATA__DST_ADDR_HI(PtrHigh32(dst_addr));
+
+    if (chiplet.has_value()) {
+      ChipletId chiplet_id = chiplet.value();
+      bool is_aid_chiplet = copy_from_aid.value_or(false);
+      uint32_t remote_mode = 0;
+      uint32_t die_id = 0;
+      if (enable_copy_data_remote_mode_) {
+        if (!GetRemoteModeInfo(chiplet_id, is_aid_chiplet, remote_mode, die_id)) {
+          std::cerr << "Invalid chiplet_id and copy_from_aid combination: " << static_cast<int>(chiplet_id)
+                    << ", " << is_aid_chiplet << std::endl;
+          std::abort();
+        }
+        dword2 |= remote_mode | die_id |
+          PACKET3_COPY_DATA__SRC_DST_REMOTE_MODE(PACKET3_COPY_DATA__SRC_DST_REMOTE_MODE__SRC_IS_REMOTE);
+      } else if (is_aid_chiplet)
+        if (chiplet_id == CHIPLET_XCD0 || chiplet_id == CHIPLET_XCD4) {
+          // bit32: 1 = Remote DIE
+          dword3 |= 0x40000000;
+          // bit34-39: 1 = AID0; 2 = AID1
+          dword4 = chiplet_id == CHIPLET_XCD0 ? 1 : 2;
+        }
+    }
+
+    // build the pm4mec_copy_data command which has 6 Dwords
+    uint32_t pm4mec_copy_data_cmd[6] = {header, dword2, dword3, dword4, dword5, dword6};
+    // Append the built command into output Command Buffer
+    APPEND_COMMAND_WRAPPER(cmdbuf, pm4mec_copy_data_cmd);
+  }
+
+  static const bool enable_copy_data_remote_mode_ = false;
 
  public:
   Gfx12CmdBuilder(const reg_base_offset_table* _table) : CmdBuilder(_table){};
@@ -195,28 +402,17 @@ class Gfx12CmdBuilder : public CmdBuilder {
   }
 
   void BuildWritePConfigRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) {
-    // Initialize the command header
-    uint32_t header = MakePacket3Header(PACKET3_COPY_DATA, 6 * sizeof(uint32_t));
+    return BuildWritePConfigRegPacketImpl(cmdbuf, addr, value, std::nullopt, std::nullopt);
+  }
 
-    uint32_t dword2 =
-        PACKET3_COPY_DATA__SRC_SEL(PACKET3_COPY_DATA__SRC_SEL__IMMEDIATE_DATA) |
-        PACKET3_COPY_DATA__SRC_TEMPORAL(PACKET3_COPY_DATA__SRC_TEMPORAL__LU) |
-        (IsPrivilegedConfigReg(addr)
-             ? PACKET3_COPY_DATA__DST_SEL(PACKET3_COPY_DATA__DST_SEL__PERFCOUNTERS)
-             : PACKET3_COPY_DATA__DST_SEL(PACKET3_COPY_DATA__DST_SEL__MEM_MAPPED_REGISTER)) |
-        PACKET3_COPY_DATA__DST_TEMPORAL(PACKET3_COPY_DATA__DST_TEMPORAL__LU) |
-        PACKET3_COPY_DATA__WR_CONFIRM(PACKET3_COPY_DATA__WR_CONFIRM__DO_NOT_WAIT_FOR_CONFIRMATION) |
-        PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA);
+  void BuildWritePConfigRegPacketToChiplet(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value,
+                                           ChipletId chiplet, bool write_to_aid = true) override {
+    return BuildWritePConfigRegPacketImpl(cmdbuf, addr, value, chiplet, write_to_aid);
+  }
 
-    uint32_t dword3 = PACKET3_COPY_DATA__IMM_DATA(value);
-
-    uint32_t dword5 = PACKET3_COPY_DATA__DST_REG_OFFSET(addr);
-
-    // build the pm4mec_copy_data command which has 6 Dwords
-    uint32_t pm4mec_copy_data_cmd[6] = {header, dword2, dword3, 0, dword5, 0};
-
-    // Append the built command into output Command Buffer
-    APPEND_COMMAND_WRAPPER(cmdbuf, pm4mec_copy_data_cmd);
+  void BuildWritePConfigRegPacketToChiplet(CmdBuffer* cmdbuf, const Register& reg, uint32_t value,
+                                           ChipletId chiplet, bool write_to_aid = true) override {
+    return BuildWritePConfigRegPacketImpl(cmdbuf, get_addr(reg), value, chiplet, write_to_aid);
   }
 
   void BuildWriteConfigRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) {
@@ -225,40 +421,8 @@ class Gfx12CmdBuilder : public CmdBuilder {
   }
 
   void BuildCopyRegDataPacket(CmdBuffer* cmdbuf, uint32_t src_reg_addr, const void* dst_addr,
-                              uint32_t size, bool wait) {
-    // Initialize the command header
-    uint32_t header = MakePacket3Header(PACKET3_COPY_DATA, 6 * sizeof(uint32_t));
-
-    uint32_t dword2 =
-        (IsPrivilegedConfigReg(src_reg_addr)
-             ? PACKET3_COPY_DATA__SRC_SEL(PACKET3_COPY_DATA__SRC_SEL__PERFCOUNTERS)
-             : PACKET3_COPY_DATA__SRC_SEL(PACKET3_COPY_DATA__SRC_SEL__MEM_MAPPED_REGISTER)) |
-        PACKET3_COPY_DATA__SRC_TEMPORAL(PACKET3_COPY_DATA__SRC_TEMPORAL__LU) |
-        PACKET3_COPY_DATA__DST_SEL(PACKET3_COPY_DATA__DST_SEL__TC_L2) |
-        PACKET3_COPY_DATA__DST_TEMPORAL(PACKET3_COPY_DATA__DST_TEMPORAL__LU) |
-        (wait ? PACKET3_COPY_DATA__WR_CONFIRM(PACKET3_COPY_DATA__WR_CONFIRM__WAIT_FOR_CONFIRMATION)
-              : PACKET3_COPY_DATA__WR_CONFIRM(
-                    PACKET3_COPY_DATA__WR_CONFIRM__DO_NOT_WAIT_FOR_CONFIRMATION)) |
-        ((size == 0) ? PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA)
-                     : PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__64_BITS_OF_DATA));
-
-    // Specify the source register offset
-    uint32_t dword3 = PACKET3_COPY_DATA__SRC_REG_OFFSET(src_reg_addr);
-
-    // Specify the destination memory address
-    uint32_t dword6 = PACKET3_COPY_DATA__DST_ADDR_HI(PtrHigh32(dst_addr));
-
-    uint32_t dword5 = 0;
-    if (size == 0) {
-      dword5 |= PACKET3_COPY_DATA__DST_32B_ADDR_LO((PtrLow32(dst_addr) >> 2));
-    } else {
-      dword5 |= PACKET3_COPY_DATA__DST_64B_ADDR_LO((PtrLow32(dst_addr) >> 3));
-    }
-
-    // build the pm4mec_copy_data command which has 6 Dwords
-    uint32_t pm4mec_copy_data_cmd[6] = {header, dword2, dword3, 0, dword5, dword6};
-    // Append the built command into output Command Buffer
-    APPEND_COMMAND_WRAPPER(cmdbuf, pm4mec_copy_data_cmd);
+                              uint32_t size, bool wait) override {
+    BuildCopyRegDataPacketImpl(cmdbuf, src_reg_addr, dst_addr, size, wait, std::nullopt, std::nullopt);
   }
 
   uint32_t BuildCopyCounterDataPacket(CmdBuffer* cmdbuf, uint32_t src_reg_addr_lo,
@@ -273,6 +437,24 @@ class Gfx12CmdBuilder : public CmdBuilder {
     if (dw_mask & 0x2) {
       BuildCopyRegDataPacket(cmdbuf, src_reg_addr_hi, dst_addr + read_counter,
                              PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA, false);
+      ++read_counter;
+    }
+    return read_counter;
+  }
+
+  uint32_t BuildCopyCounterDataPacketFromChiplet(CmdBuffer* cmdbuf, const Register& reg_lo,
+                                                 const Register& reg_hi, const void* dst_addr,
+                                                 uint32_t dw_mask, ChipletId chiplet,
+                                                 bool copy_from_aid = true) override {
+    uint32_t read_counter = 0;
+    if (dw_mask & 0x1) {
+      BuildCopyRegDataPacketImpl(cmdbuf, get_addr(reg_lo), (uint32_t*)dst_addr + read_counter,
+                                PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA, false, chiplet, copy_from_aid);
+      ++read_counter;
+    }
+    if (dw_mask & 0x2) {
+      BuildCopyRegDataPacketImpl(cmdbuf, get_addr(reg_hi), (uint32_t*)dst_addr + read_counter,
+                                PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA, false, chiplet, copy_from_aid);
       ++read_counter;
     }
     return read_counter;
@@ -296,10 +478,10 @@ class Gfx12CmdBuilder : public CmdBuilder {
                     PACKET3_WRITE_DATA__WR_CONFIRM__DO_NOT_WAIT_FOR_WRITE_CONFIRMATION));
 
     // ordinal3
-    uint32_t dword3 = PACKET3_WRITE_DATA__DST_MMREG_ADDR(dst_reg_addr);  // mem-mapped reg
+    uint32_t dword3 = PACKET3_WRITE_DATA__DST_MMREG_ADDR_LO(dst_reg_addr);  // mem-mapped reg
 
     // ordinal4
-    uint32_t dword4 = PACKET3_WRITE_DATA__DST_MEM_ADDR_HI(0);  // mem-mapped reg
+    uint32_t dword4 = PACKET3_WRITE_DATA__DST_MMREG_ADDR_HI(0);  // mem-mapped reg
 
     // build the pm4mec_write_data command which has 4 Dwords
     uint32_t pm4mec_write_data_cmd[4] = {header, dword2, dword3, dword4};
@@ -349,7 +531,18 @@ class Gfx12CmdBuilder : public CmdBuilder {
     APPEND_COMMAND_WRAPPER(cmdbuf, pm4mec_indirect_buffer_cmd);
   }
 
-  void BuildPredExecPacket(CmdBuffer* cmdbuf, uint32_t xcc_id = 0, uint32_t exec_count = 0) {}
+  void BuildPredExecPacket(CmdBuffer* cmdbuf, uint32_t xcc_select = 0, uint32_t exec_count = 0) {
+//#if GFX12_VARIANT >= GFX12_VARIANT_1250
+    uint32_t header = MakePacket3Header(PACKET3_PRED_EXEC, 2 * sizeof(uint32_t));
+    uint32_t virtualxccid_select = 1 << xcc_select;
+    uint32_t dword2 = PACKET3_PRED_EXEC__EXEC_COUNT(exec_count) |
+                      PACKET3_PRED_EXEC__VIRTUALXCCID_SELECT(virtualxccid_select);
+
+    // build the pm4_mec_pred_exec command which has 2 Dwords
+    uint32_t pm4_mec_pred_exec_cmd[2] = {header, dword2};
+    APPEND_COMMAND_WRAPPER(cmdbuf, pm4_mec_pred_exec_cmd);
+//#endif
+  }
 
   void BuildMutexAcquirePacket(CmdBuffer* cmdbuf, size_t addr) override {
     constexpr uint32_t GL2_OP_ATOMIC_CMPSWAP_RTN_32 = 8;

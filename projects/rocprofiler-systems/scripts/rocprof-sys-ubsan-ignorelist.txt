@@ -1,0 +1,13 @@
+# UndefinedBehaviorSanitizer source-level ignorelist for rocprofiler-systems
+# See: https://clang.llvm.org/docs/SanitizerSpecialCaseList.html
+#
+# Format: section header [check_name] followed by src:<glob> entries.
+# Passed via -fsanitize-ignorelist= at compile time.
+# Use this for checks that do NOT support runtime suppression
+# (e.g. nonnull-attribute, alignment); for vptr, prefer rocprof-sys-ubsan.supp.
+
+[nonnull-attribute]
+
+# timemory - performance analysis toolkit
+# join() forwards .data() of a default-constructed std::string_view to strncmp().
+src:*/timemory/utility/join.hpp

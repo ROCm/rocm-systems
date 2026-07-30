@@ -28,13 +28,14 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <regex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include "common.hpp"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 
 enum class InstCategory
 {
@@ -52,32 +53,36 @@ enum class InstCategory
     BARRIER_WAIT_EXCLUDED,
     MFMA_SCALE,
     GFX9_BARRIER,
+    V_MOV_B64,
     LAST
 };
 
 inline bool operator==(const InstCategory& cat, uint64_t value) { return static_cast<uint64_t>(cat) == value; }
 inline bool operator==(uint64_t value, const InstCategory& cat) { return static_cast<uint64_t>(cat) == value; }
 
+class Trie;
+Trie& get_instruction_trie();
+
 class Trie
 {
 public:
-    Trie() = default;
-    ~Trie();
+    Trie();
 
-    InstCategory type_from_trie(const std::string_view inst);
-
-    static Trie root_trie;
+    InstCategory type_from_trie(const std::string_view inst) const;
 
     static InstCategory inst_type(const std::string_view line, int gfxip)
     {
         if (line.find("branch") != std::string::npos) return InstCategory::BRANCH;
 
-        InstCategory type = root_trie.type_from_trie(line);
+        InstCategory type = get_instruction_trie().type_from_trie(line);
 
-        if (gfxip == 9 && type == InstCategory::VALU)
+        if (type == InstCategory::VALU)
         {
             // Check for scale MFMA
-            if (line.find("v_mfma_scale_") != std::string::npos) type = InstCategory::MFMA_SCALE;
+            if (gfxip == 9 && line.find("v_mfma_scale_") == 0)
+                type = InstCategory::MFMA_SCALE;
+            else if (gfxip == 12 && line.find("v_mov_b64") == 0)
+                type = InstCategory::V_MOV_B64;
         }
         else if (gfxip == 9 && type == InstCategory::IMMED)
         {
@@ -92,9 +97,13 @@ public:
     }
 
 private:
-    void add_type(const std::string& inst_header, InstCategory type);
+    struct Node
+    {
+        InstCategory type = InstCategory::LAST;
+        std::unordered_map<char, std::unique_ptr<Node>> paths;
+    };
 
-    bool bInit = false;
-    InstCategory type = InstCategory::LAST;
-    std::unordered_map<char, Trie*> paths; //  Change to smart pointer
+    void add_type(std::string_view inst_header, InstCategory type);
+
+    Node root;
 };

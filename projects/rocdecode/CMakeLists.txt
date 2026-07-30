@@ -47,7 +47,7 @@ if (NOT DEFINED CMAKE_CXX_COMPILER)
 endif()
 
 # rocdecode Version
-set(VERSION "1.8.0")
+set(VERSION "1.9.0")
 
 # Set Project Version and Language
 project(rocdecode VERSION ${VERSION} LANGUAGES CXX)
@@ -113,6 +113,8 @@ set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(Libva QUIET)
 find_package(Libdrm_amdgpu QUIET)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads QUIET)
 
 # Check Libva version compatibility: requires libva >= 1.22
 if(Libva_FOUND)
@@ -133,7 +135,7 @@ if(ROCDECODE_ENABLE_HOST_DECODER)
   find_package(FFmpeg QUIET)
 endif()
 
-if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND)
+if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
 
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
@@ -150,6 +152,9 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND)
   if (rocprofiler-register_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
   endif()
+
+  # Threads library (required for std::thread support)
+  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
 
   # local include files
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode ${CMAKE_CURRENT_SOURCE_DIR}/src/parser ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode/vaapi)
@@ -232,6 +237,7 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND)
   install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
   # install test cmake
   install(FILES test/CMakeLists.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test)
+  install(PROGRAMS test/run_rocdecode.py DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test)
   install(DIRECTORY test/testScripts DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test)
   install(FILES test/rocDecodeNegativeApiTests/CMakeLists.txt test/rocDecodeNegativeApiTests/README.md test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.cpp test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.h test/rocDecodeNegativeApiTests/rocdecodenegativetest.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeNegativeApiTests)
 
@@ -298,5 +304,8 @@ else()
   endif()
   if(NOT Libdrm_amdgpu_FOUND)
     message(FATAL_ERROR "-- ERROR!: libdrm_amdgpu Not Found!")
+  endif()
+  if(NOT Threads_FOUND)
+    message(FATAL_ERROR "-- ERROR!: Threads Not Found!")
   endif()
 endif()

@@ -48,6 +48,7 @@
 #include <chrono>
 #include <string>
 #include <vector>
+#include "inc/hsa.h"
 #include "utils.h"
 
 namespace rocr {
@@ -55,7 +56,6 @@ namespace os {
 typedef void* LibHandle;
 typedef void* Semaphore;
 typedef void* Mutex;
-typedef void* SharedMutex;
 typedef void* Thread;
 typedef void* EventHandle;
 
@@ -79,7 +79,9 @@ static_assert(false, "Operating System not detected!");
 #endif
 
 /// @brief: Loads dynamic library based on file name. Return value will be NULL
-/// if failed.
+/// if failed. Uses platform-specific mechanisms to keep the library mapped
+/// after close (RTLD_NODELETE on Linux, module pinning on Windows) to prevent
+/// crashes when libraries have circular dependencies back to ROCR.
 /// @param: filename(Input), file name of the library.
 /// @return: LibHandle.
 LibHandle LoadLib(std::string filename);
@@ -90,8 +92,10 @@ LibHandle LoadLib(std::string filename);
 /// @return: void*.
 void* GetExportAddress(LibHandle lib, std::string export_name);
 
-/// @brief: Unloads the dynamic library.
-/// @param: lib(Input), library handle which will be unloaded.
+/// @brief: Closes the dynamic library handle. Note: With RTLD_NODELETE on Linux
+/// or module pinning on Windows, this decrements the reference count but may not
+/// actually unmap the library from memory.
+/// @param: lib(Input), library handle to close.
 bool CloseLib(LibHandle lib);
 
 /// @brief: Lists loaded tool libraries that contain
@@ -103,6 +107,12 @@ std::vector<LibHandle> GetLoadedToolsLib();
 /// @param: lib(Input), libray handle
 /// @return: Path name of library
 std::string GetLibraryName(LibHandle lib);
+
+/// @brief: Returns a path in the directory of the library containing an address.
+/// @param: address(Input), address within the library
+/// @param: filename(Input), file name to append to the library directory
+/// @return: Path name adjacent to the library
+std::string GetAdjacentLibraryPath(const void* address, const std::string& filename);
 
 /// @brief: Creates a Semaphore, will return NULL if failed.
 /// @param: void.
@@ -152,48 +162,6 @@ void ReleaseMutex(Mutex lock);
 /// @param: lock(Input), handle to the mutex.
 /// @return: void.
 void DestroyMutex(Mutex lock);
-
-/// @brief: Creates a shared mutex, will return NULL if failed.
-/// @param: void.
-/// @return: SharedMutex.
-SharedMutex CreateSharedMutex();
-
-/// @brief: Tries to acquire the mutex in exclusive mode once, if successed, return true.
-/// @param: lock(Input), handle to the shared mutex.
-/// @return: bool.
-bool TryAcquireSharedMutex(SharedMutex lock);
-
-/// @brief: Aquires the mutex in exclusive mode, if the mutex is locked, it will wait until it is
-/// released. If the mutex is acquired successfully, it will return true.
-/// @param: lock(Input), handle to the mutex.
-/// @return: bool.
-bool AcquireSharedMutex(SharedMutex lock);
-
-/// @brief: Releases the mutex from exclusive mode.
-/// @param: lock(Input), handle to the mutex.
-/// @return: void.
-void ReleaseSharedMutex(SharedMutex lock);
-
-/// @brief: Tries to acquire the mutex in shared mode once, if successed, return true.
-/// @param: lock(Input), handle to the mutex.
-/// @return: bool.
-bool TrySharedAcquireSharedMutex(SharedMutex lock);
-
-/// @brief: Aquires the mutex in shared mode, if the mutex in exclusive mode, it will wait until it
-/// is released. If the mutex is acquired successfully, it will return true.
-/// @param: lock(Input), handle to the mutex.
-/// @return: bool.
-bool SharedAcquireSharedMutex(SharedMutex lock);
-
-/// @brief: Releases the mutex from shared mode.
-/// @param: lock(Input), handle to the mutex.
-/// @return: void.
-void SharedReleaseSharedMutex(SharedMutex lock);
-
-/// @brief: Destroys the mutex.
-/// @param: lock(Input), handle to the mutex.
-/// @return: void.
-void DestroySharedMutex(SharedMutex lock);
 
 /// @brief: Puts current thread to sleep.
 /// @param: delayInMs(Input), time in millisecond for sleeping.
@@ -356,6 +324,12 @@ bool UncommitMemory(void* addr, size_t size);
 bool UnmapMemory(void* addr, size_t size);
 bool MapMemory(void* addr, size_t size, MemProt prot, int fd, uint64_t cpu_addr);
 
+/// Close a dmabuf file descriptor and set *dmabuf to -1.
+hsa_status_t DmaBufClose(int* dmabuf);
+
+/// Duplicate a dmabuf file descriptor. Returns the new fd, or -1 on failure.
+int DmaBufDup(int dmabuf);
+
 bool ProtectMemory(void* va, size_t size, MemProt perms);
 
 uint64_t HostTotalPhysicalMemory();
@@ -365,6 +339,9 @@ int Ffs(int i);
 
 /// Find the count of leading zeros
 int Ctz(uint64_t i);
+
+/// Population count (number of set bits)
+int Popcount(uint32_t i);
 
 /// Shared library or DLL load error
 char* DlError();

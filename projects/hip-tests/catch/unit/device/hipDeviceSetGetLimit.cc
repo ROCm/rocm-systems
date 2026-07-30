@@ -246,10 +246,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_Negative) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   size_t scratchLimitCurrent = 0;
@@ -286,10 +285,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   // Get the current scratch
@@ -365,10 +363,9 @@ __global__ void addOneKernelUseScratch(int* arr) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   hipStream_t stream;
@@ -450,15 +447,13 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_MultiDevice) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
@@ -484,10 +479,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_MultiDevice) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_InThread) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   std::thread threadObj(getMinMaxCurrentAndSetCurrent);
@@ -510,10 +504,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_InThread) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_InChildProcess) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   hip::SpawnProc proc("hipDeviceSetGetScratchExe", true);
@@ -556,10 +549,9 @@ void getScratchCurrent(size_t checkValue) {
  */
 HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads) {
   if (!isSetScratchLimitSupported()) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "Set Scratch Limit Not Supported on Current Device."
         " Only Mi300+ and Linux supports");
-    return;
   }
 
   size_t max = 0, orgCurrent = 0;

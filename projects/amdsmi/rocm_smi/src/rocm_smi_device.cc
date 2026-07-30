@@ -22,7 +22,6 @@
 
 #include "rocm_smi/rocm_smi_device.h"
 
-#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -117,7 +116,6 @@ static const char* kDevNumaNodeFName = "numa_node";
 static const char* kDevGpuMetricsFName = "gpu_metrics";
 
 // GPU Overdrive (gpu_od) paths - used internally via Device helper methods
-static const char* kDevGpuOdPath = "gpu_od";
 static const char* kDevGpuOdFanMinPwmFName = "gpu_od/fan_ctrl/fan_minimum_pwm";
 
 static const char* kDevGpuPartitionMetricsFName = "xcp/xcp_metrics";
@@ -139,6 +137,7 @@ static const char* kDevAvailableMemoryPartitionFName = "available_memory_partiti
 static const char* kDevSupportedXcpConfigsFName = "compute_partition_config/supported_xcp_configs";
 static const char* kDevSupportedNpsConfigsFName = "compute_partition_config/supported_nps_configs";
 static const char* kDevXcpConfigFName = "compute_partition_config/xcp_config";
+static const char* kDevComputePartitionMemAllocModeFName = "compute_partition_mem_alloc_mode";
 
 // XCP config resource files - not every file will exist in all ASICs (ex. Decoders vs Encoders)
 static const char* kDevDecoderInstFName = "compute_partition_config/dec/num_inst";
@@ -351,6 +350,7 @@ static const std::map<DevInfoTypes, const char*> kDevAttribNameMap = {
     {kDevSupportedXcpConfigs, kDevSupportedXcpConfigsFName},
     {kDevSupportedNpsConfigs, kDevSupportedNpsConfigsFName},
     {kDevXcpConfig, kDevXcpConfigFName},
+    {kDevComputePartitionMemAllocMode, kDevComputePartitionMemAllocModeFName},
 
     // XCP config resource files
     {kDevDecoderInst, kDevDecoderInstFName},
@@ -1021,8 +1021,13 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
     case kDevOverDriveLevel:  // integer between 0 and 20
     case kDevPowerODVoltage:
     case kDevPowerProfileMode:
-    case kDevPtlStatus:
       return writeDevInfoStr(type, std::to_string(val));
+      break;
+
+    case kDevPtlStatus:
+      // The sysfs node only accepts "enabled"/"disabled"; writing "1"/"0" is
+      // silently ignored. returnWriteErr=true surfaces errno on a rejected write.
+      return writeDevInfoStr(type, val ? "enabled" : "disabled", true);
       break;
 
     case kDevPerfLevel:  // string: "auto", "low", "high", "manual", ...
@@ -1055,6 +1060,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevComputePartition:
     case kDevMemoryPartition:
     case kDevXcpConfig:
+    case kDevComputePartitionMemAllocMode:
     case kDevSocPstate:
     case kDevXgmiPlpd:
       return writeDevInfoStr(type, val, true);
@@ -1474,6 +1480,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string* val) {
     case kDevSupportedXcpConfigs:
     case kDevSupportedNpsConfigs:
     case kDevXcpConfig:
+    case kDevComputePartitionMemAllocMode:
     case kDevDecoderInst:
     case kDevDecoderShared:
     case kDevEncoderInst:
@@ -1657,147 +1664,6 @@ bool Device::DeviceAPISupported(std::string name, uint64_t variant, uint64_t sub
   return subvariant_match(&(var_it->second), sub_variant);
 }
 
-rsmi_status_t Device::restartAMDGpuDriver(void) {
-  REQUIRE_ROOT_ACCESS
-  std::ostringstream ss;
-  bool restartSuccessful = true;
-  bool success = false;
-  std::string out;
-  bool wasGdmServiceActive = false;
-  bool isRestartInProgress = true;
-  bool isAMDGPUModuleLive = false;
-  bool restartGDM = false;
-  std::string captureRestartErr;
-  // 1 sec = 1000 ms = 1000000 us
-  const int kTimeToWaitForDriverMSec = 1000;
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-
-  // sudo systemctl is-active gdm
-  // we do not care about the success of checking if gdm is active
-  std::tie(success, out) = executeCommand("systemctl is-active gdm 2>/dev/null", true);
-  (out == "active") ? (restartGDM = true) : (restartGDM = false);
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | systemctl is-active gdm: out = " << out
-       << "; success = " << (success ? "True" : "False")
-       << "; restartGDM = " << (restartGDM ? "True" : "False");
-    LOG_INFO(ss);
-  }
-
-  // if gdm is active -> sudo systemctl stop gdm
-  // TODO(AMD_SMI_team): are are there other display manager's we need to take into account?
-  // see https://help.gnome.org/admin/gdm/stable/overview.html.en_GB
-  if (success && (out == "active") && (restartGDM)) {
-    wasGdmServiceActive = true;
-    std::tie(success, out) = executeCommand("systemctl stop gdm& 2>/dev/null", true);
-    if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__ << " | systemctl stop gdm&: out = " << out
-         << "; success = " << (success ? "True" : "False");
-      LOG_INFO(ss);
-    }
-  } else {
-    success = true;  // ignore failures to restart gdm
-  }
-
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | B4 modprobing anything!!! out = " << out
-       << "; success = " << (success ? "True" : "False")
-       << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
-       << "; captureRestartErr = " << captureRestartErr;
-    LOG_INFO(ss);
-  }
-
-  // sudo modprobe -r amdgpu
-  // sudo modprobe amdgpu
-  std::tie(success, out) = executeCommand(
-      "modprobe -r -v amdgpu >/dev/null 2>&1 && modprobe -v amdgpu >/dev/null 2>&1", true);
-  restartSuccessful &= success;
-  captureRestartErr = out;
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | modprobe -r -v amdgpu && modprobe -v amdgpu: out = " << out
-       << "; success = " << (success ? "True" : "False")
-       << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
-       << "; captureRestartErr = " << captureRestartErr;
-    LOG_INFO(ss);
-  }
-
-  // if gdm was active -> sudo systemctl start gdm
-  // We don't care if successful or not, just try to restart as a courtesy
-  if (wasGdmServiceActive && restartGDM) {
-    std::tie(success, out) = executeCommand("systemctl start gdm& 2>/dev/null", true);
-    if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__ << " | systemctl start gdm&: out = " << out
-         << "; success = " << (success ? "True" : "False");
-      LOG_INFO(ss);
-    }
-  }
-
-  // Return early if there was an issue restarting amdgpu
-  if (!restartSuccessful) {
-    if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__
-         << " | [ERROR] Issue found during amdgpu restart: " << captureRestartErr
-         << "; retartSuccessful: " << (restartSuccessful ? "True" : "False");
-      LOG_ERROR(ss);
-    }
-    return RSMI_STATUS_AMDGPU_RESTART_ERR;
-  }
-
-  // wait for amdgpu module to come back up
-  rsmi_status_t status = Device::isRestartInProgress(&isRestartInProgress, &isAMDGPUModuleLive);
-  int maxLoops = 10;  // wait a max of 10 sec
-  while (status != RSMI_STATUS_SUCCESS) {
-    maxLoops -= 1;
-    if (maxLoops == 0) {
-      break;
-    }
-    amd::smi::system_wait(kTimeToWaitForDriverMSec);
-    status = Device::isRestartInProgress(&isRestartInProgress, &isAMDGPUModuleLive);
-  }
-
-  return ((restartSuccessful && (!isRestartInProgress && isAMDGPUModuleLive))
-              ? RSMI_STATUS_SUCCESS
-              : RSMI_STATUS_AMDGPU_RESTART_ERR);
-}
-
-rsmi_status_t Device::isRestartInProgress(bool* isRestartInProgress, bool* isAMDGPUModuleLive) {
-  REQUIRE_ROOT_ACCESS
-  std::ostringstream ss;
-  bool success = false;
-  std::string out;
-  bool deviceRestartInProgress = true;    // Assume in progress, we intend to disprove
-  bool isSystemAMDGPUModuleLive = false;  // Assume AMD GPU module is not live,
-                                          //  we intend to disprove
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-
-  // wait for amdgpu module to come back up
-  std::tie(success, out) = executeCommand("cat /sys/module/amdgpu/initstate", true);
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | success = " << (success ? "True" : "False")
-       << " | out = " << out;
-    LOG_DEBUG(ss);
-  }
-  if ((success == true) && (!out.empty())) {
-    isSystemAMDGPUModuleLive = containsString(out, "live");
-  }
-  if (isSystemAMDGPUModuleLive) {
-    deviceRestartInProgress = false;
-  }
-  *isRestartInProgress = deviceRestartInProgress;
-  *isAMDGPUModuleLive = isSystemAMDGPUModuleLive;
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__
-       << " | *isRestartInProgress = " << (*isRestartInProgress ? "True" : "False")
-       << " | *isAMDGPUModuleLive = " << (*isAMDGPUModuleLive ? "True" : "False")
-       << " | out = " << out;
-    LOG_DEBUG(ss);
-  }
-
-  return ((*isAMDGPUModuleLive && !*isRestartInProgress) ? RSMI_STATUS_SUCCESS
-                                                         : RSMI_STATUS_AMDGPU_RESTART_ERR);
-}
-
 template <typename T>
 rsmi_status_t storeParameter(uint32_t dv_ind);
 
@@ -1919,7 +1785,6 @@ std::string Device::readBootPartitionState<rsmi_memory_partition_type_t>(uint32_
 
 rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
                                                  rsmi_device_identifiers_t* device_identifiers) {
-  bool found_device = false;
   std::ostringstream ss;
   rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
   if (device_identifiers == nullptr) {
@@ -1930,40 +1795,27 @@ rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
   auto devices = smi.devices();
   ss << __PRETTY_FUNCTION__ << " | device_id = " << device_id
      << "; devices.size() = " << devices.size();
-  // std::cout << ss.str() << "\n";
   LOG_DEBUG(ss);
 
-  for (uint32_t i = 0; i < devices.size(); i++) {
-    if (i != device_id) {
-      continue;
-    }
+  if (static_cast<size_t>(device_id) >= devices.size()) {
+    ss << __PRETTY_FUNCTION__ << " | Invalid device_id: " << device_id
+       << "; devices.size(): " << devices.size();
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
-    device_identifiers->card_index = devices[i]->index();
-    device_identifiers->drm_render_minor = devices[i]->drm_render_minor();
-    device_identifiers->bdfid = devices[i]->bdfid();
-    device_identifiers->kfd_gpu_id = devices[i]->kfd_gpu_id();
-    uint32_t temp_partition_id = 0;
-    rsmi_status_t ret = rsmi_dev_partition_id_get(i, &temp_partition_id);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      temp_partition_id = 0;
-    }
-    device_identifiers->partition_id = temp_partition_id;
-    device_identifiers->smi_device_id = i;
-    found_device = true;
-    ss << __PRETTY_FUNCTION__ << " | Found device: "
-       << "card_index = " << device_identifiers->card_index
-       << "; drm_render_minor = " << device_identifiers->drm_render_minor
-       << "; bdfid = " << std::hex << "0x" << device_identifiers->bdfid
-       << "; kfd_gpu_id = " << std::dec << device_identifiers->kfd_gpu_id
-       << "; partition_id = " << device_identifiers->partition_id
-       << "; smi_device_id = " << device_identifiers->smi_device_id;
-    // std::cout << ss.str() << "\n";
-    LOG_DEBUG(ss);
-    break;
+  device_identifiers->card_index = devices[device_id]->index();
+  device_identifiers->drm_render_minor = devices[device_id]->drm_render_minor();
+  device_identifiers->bdfid = devices[device_id]->bdfid();
+  device_identifiers->kfd_gpu_id = devices[device_id]->kfd_gpu_id();
+  uint32_t temp_partition_id = 0;
+  rsmi_status_t partition_id_ret = rsmi_dev_partition_id_get(device_id, &temp_partition_id);
+  if (partition_id_ret != RSMI_STATUS_SUCCESS) {
+    temp_partition_id = 0;
   }
-  if (found_device) {
-    ret = RSMI_STATUS_SUCCESS;
-  }
+  device_identifiers->partition_id = temp_partition_id;
+  device_identifiers->smi_device_id = device_id;
+  ret = RSMI_STATUS_SUCCESS;
   return ret;
 }
 

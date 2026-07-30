@@ -28,6 +28,7 @@
 #include "os_driver.h"
 
 #include <cstddef>
+#include <unordered_set>
 #include <vector>
 
 namespace amd::dbgapi
@@ -47,7 +48,9 @@ public:
   {
     amd_dbgapi_segment_address_t base;
     amd_dbgapi_segment_address_t limit;
-    const address_space_t &address_space;
+    const address_space_t &encoding;
+    const std::unordered_set<amd_dbgapi_address_space_id_t,
+                             hash<amd_dbgapi_address_space_id_t>> from;
   };
 
 private:
@@ -60,7 +63,7 @@ private:
   const architecture_t *const m_architecture;
   process_t &m_process;
 
-  mutable memory_cache_t<agent_address_t> m_memory_cache;
+  mutable memory_cache_t m_memory_cache;
 
 public:
   agent_t (amd_dbgapi_agent_id_t agent_id, process_t &process,
@@ -109,14 +112,14 @@ public:
                                                   void *buffer,
                                                   size_t size) const
   {
-    return m_memory_cache.read_global_memory (address, buffer, size);
+    return m_memory_cache.read_agent_memory (address, buffer, size);
   }
 
   [[nodiscard]] size_t write_agent_memory_partial (agent_address_t address,
                                                    const void *buffer,
                                                    size_t size) const
   {
-    return m_memory_cache.write_global_memory (address, buffer, size);
+    return m_memory_cache.write_agent_memory (address, buffer, size);
   }
 
   template <typename T>

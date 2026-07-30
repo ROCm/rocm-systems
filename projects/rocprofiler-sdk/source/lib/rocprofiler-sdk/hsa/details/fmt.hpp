@@ -83,6 +83,69 @@ struct formatter<hsa_kernel_dispatch_packet_t>
     }
 };
 
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+template <>
+struct formatter<hsa_amd_ext_perf_hint_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(hsa_amd_ext_perf_hint_t const& hint, Ctx& ctx) const
+    {
+        return fmt::format_to(ctx.out(),
+                              "[EXT_PERF_HINT, group_mem_carveout={}, reverse_dispatch_order={}, "
+                              "hint_val={}]",
+                              hint.group_mem_carveout,
+                              hint.reverse_dispatch_order,
+                              hint.hint_val);
+    }
+};
+
+template <>
+struct formatter<hsa_amd_ext_kernel_dispatch_packet_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(hsa_amd_ext_kernel_dispatch_packet_t const& pkt, Ctx& ctx) const
+    {
+        return fmt::format_to(ctx.out(),
+                              "[EXT_KERNEL_DISPATCH, header={}, amd_format={}, setup={}, "
+                              "workgroup_size=[{}, {}, {}], cluster_count=[{}, {}, {}], "
+                              "cluster_size=[{}, {}, {}], perf_hint={}, private_size={}, "
+                              "group_size={}, kernel_object={:x}, kern_arg={}, dep_signal={}, "
+                              "completion_signal={}]",
+                              pkt.header,
+                              pkt.amd_format,
+                              pkt.setup,
+                              pkt.workgroup_size_x,
+                              pkt.workgroup_size_y,
+                              pkt.workgroup_size_z,
+                              pkt.cluster_count_x,
+                              pkt.cluster_count_y,
+                              pkt.cluster_count_z,
+                              pkt.cluster_size_x,
+                              pkt.cluster_size_y,
+                              pkt.cluster_size_z,
+                              pkt.perf_hint,
+                              pkt.private_segment_size,
+                              pkt.group_segment_size,
+                              pkt.kernel_object,
+                              pkt.kernarg_address,
+                              pkt.dep_signal.handle,
+                              pkt.completion_signal.handle);
+    }
+};
+#endif
+
 template <>
 struct formatter<hsa_barrier_and_packet_t>
 {
@@ -157,7 +220,11 @@ struct formatter<rocprofiler::hsa::rocprofiler_packet>
         switch(t)
         {
             case 0:
-                // PM4 packet
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+                // Vendor specific packet - check AMD format
+                if(pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                    return fmt::format_to(ctx.out(), "{}", pkt.ext_kernel_dispatch);
+#endif
                 return fmt::format_to(ctx.out(), "{}", pkt.ext_amd_aql_pm4);
             case 2:
                 // Kernel dispatch
@@ -389,6 +456,41 @@ struct formatter<hsa_amd_memory_copy_op_t>
         ROCP_CI_LOG(INFO) << fmt::format("Unknown hsa_amd_memory_copy_op_type_t {}", value);
         return fmt::format_to(
             ctx.out(), "[MEMORY_COPY_OP type=hsa_amd_memory_copy_op_type_t({})]", value);
+    }
+};
+#endif
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x12
+template <>
+struct formatter<hsa_ext_image_descriptor_v2_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(hsa_ext_image_descriptor_v2_t const& h, FormatContext& ctx) const
+    {
+        static const char* geometry[] = {"HSA_EXT_IMAGE_GEOMETRY_1D",
+                                         "HSA_EXT_IMAGE_GEOMETRY_2D",
+                                         "HSA_EXT_IMAGE_GEOMETRY_3D",
+                                         "HSA_EXT_IMAGE_GEOMETRY_1DA",
+                                         "HSA_EXT_IMAGE_GEOMETRY_2DA",
+                                         "HSA_EXT_IMAGE_GEOMETRY_1DB",
+                                         "HSA_EXT_IMAGE_GEOMETRY_2DDEPTH",
+                                         "HSA_EXT_IMAGE_GEOMETRY_2DADEPTH"};
+        return fmt::format_to(ctx.out(),
+                              "{{format=[channel_order={}, channel_type={}], array_size={}, "
+                              "depth={}, height={}, width={}, mipmap_levels={}, geometry={}}}",
+                              h.format.channel_order,
+                              h.format.channel_type,
+                              h.array_size,
+                              h.depth,
+                              h.height,
+                              h.width,
+                              h.mipmap_levels,
+                              geometry[h.geometry]);
     }
 };
 #endif

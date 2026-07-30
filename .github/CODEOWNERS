@@ -2,6 +2,7 @@
 /.azuredevops/                                                        @ROCm/external-ci
 /.github/                                                             @ROCm/rocm-systems-reviewers
 /.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
+/.github/workflows/rocjitsu-*.yml                                     @ROCm/rocjitsu-core-team
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
@@ -15,11 +16,12 @@
 /projects/rccl-tests/                                                 @ROCm/rccl-reviewers
 /projects/rdc/                                                        @ROCm/rdc-reviewers
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
+/projects/rocm-core/rdhc/                                             @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru @solaiys
 /projects/rocm-smi-lib/                                               @ROCm/smi-reviewers
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
-/projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer # Owners: @ROCm/rocprof-compute-owners, Reviewers: @ROCm/rocprof-compute-reviewer
+/projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
-/projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners 
+/projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd @atgutier
 /projects/roctracer/                                                  @ammarwa @bgopesh
 /projects/rocshmem/                                                   @ROCm/rocshmem-reviewers
@@ -40,14 +42,15 @@
 /projects/rocr-runtime/libhsakmt                                      @kentrussell @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/libhsakmt/tests/kfdtest                        @kentrussell @xiaogang-chen-amd
 /projects/rocr-runtime/libhsakmt/include/impl                         @dayatsin-amd @cfreeamd @gandryey @chrispaquot
-/projects/rocr-runtime/libhsakmt/src/dxg                              @dayatsin-amd @cfreeamd @gandryey @chrispaquot
+/projects/rocr-runtime/libhsakmt/src/dxg                              @dayatsin-amd @cfreeamd @gandryey @chrispaquot @fcui-amd
 /projects/rocr-runtime/rocrtst                                        @shwetagkhatri @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/core/runtime/trap_handler/*.s	@lancesix @dayatsin-amd @cfreeamd @shwetagkhatri
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd @dayatsin-amd @cfreeamd
-/projects/rocr-runtime/runtime/hsa-runtime/core/driver/virtio         @dayatsin-amd @cfreeamd
+/projects/rocr-runtime/runtime/hsa-runtime/core/driver/virtio         @HongleiHuang-amd @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/loader                     @dayatsin-amd @kzhuravl @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/image                      @shwetagkhatri @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/pcs                        @shwetagkhatri @dayatsin-amd @cfreeamd
+/projects/rocr-runtime/runtime/docs/sphinx                            @ROCm/rocm-documentation
 
 # rocprof-trace-decoder code owners
 /projects/rocprof-trace-decoder/                                      @ROCm/rocm-devtools-team
@@ -58,7 +61,14 @@
 
 # Experimental
 /experimental/perf-dkms                                               @bwelton
-/experimental/rocjitsu                                                @atgutier
+
+# Emulation
+/emulation/                                                           @atgutier
+/emulation/mirage/                                                    @amd-arosa @ROCm/rocjitsu-core-team
+/emulation/rocjitsu/                                                  @atgutier @ROCm/rocjitsu-core-team
+
+# Profilers
+/profilers/profiler-hub                                               @ROCm/rocm-profiler-hub
 
 # Documentation-specific ownership by project (last to take precedence)
 
@@ -90,6 +100,7 @@
 /projects/rocminfo/**/*.rst                                           @dayatsin-amd @shwetagkhatri @ROCm/rocm-documentation
 /projects/rocminfo/**/.readthedocs.yaml                               @dayatsin-amd @shwetagkhatri @ROCm/rocm-documentation
 /projects/rocminfo/docs/                                              @dayatsin-amd @shwetagkhatri @ROCm/rocm-documentation
+/projects/rocminfo/docs/sphinx                                        @ROCm/rocm-documentation
 
 /projects/rocprofiler-compute/**/*.md                                 @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
 /projects/rocprofiler-compute/**/*.rst                                @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
@@ -113,5 +124,8 @@
 /projects/rocjpeg/**/*.rst                                            @ROCm/rocjpeg-docs-reviewers
 /projects/rocjpeg/**/.readthedocs.yaml                                @ROCm/rocjpeg-docs-reviewers
 
+/projects/hipfile/**/*.md                                             @ROCm/hipfile-docs-reviewers
+/projects/hipfile/**/*.rst                                            @ROCm/hipfile-docs-reviewers
+/projects/hipfile/**/.readthedocs.yaml                                @ROCm/hipfile-docs-reviewers
 
 /projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation

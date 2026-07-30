@@ -5,9 +5,14 @@ myst:
     "keywords": "system, management, interface, contribute, contributing, ROCm, develop, testing"
 ---
 
-# Building AMD SMI
+# Build AMD SMI from source
 
-This section describes the prerequisites and steps to build AMD SMI from source.
+To build AMD SMI as part of the ROCm Core SDK, see [TheRock build
+instructions](https://github.com/ROCm/TheRock/blob/main/docs/development/README.md).
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build AMD SMI standalone using the following
+instructions.
 
 (build_reqs)=
 ## Required software
@@ -19,13 +24,19 @@ versions are not guaranteed to work.
 * CMake (v3.15.0 or later) -- `python3 -m pip install cmake`
 * g++ (v5.4.0 or later)
 * libdrm-dev (for Ubuntu and Debian)
+* libssl-dev (for Ubuntu and Debian)
 * libdrm-devel (for RPM-based distributions)
+* openssl-devel (for RPM-based distributions)
 
 In order to build the AMD SMI Python package, the following components are
 required:
 
 * Python (3.6.8 or later)
 * virtualenv -- `python3 -m pip install virtualenv`
+
+Users that wish to also build the AMD SMI Rust interface will also need the following components:
+
+* Rust (1.56 or later)
 
 ## Build steps
 
@@ -108,7 +119,7 @@ Once the tests are [built](#build_tests), you can run them by executing the
 ## Build the docs
 
 The [C/C++ API reference](../reference/amdsmi-cpp-api/index.md) is generated
-with [Doxygen 1.9.8](https://www.doxygen.nl/manual/changelog.html#log_1_9_8),
+with [Doxygen 1.15.0](https://www.doxygen.nl/manual/changelog.html#log_1_15_0),
 which must be installed separately and available on your PATH.
 
 1. Create a Python virtual environment and install documentation dependencies.

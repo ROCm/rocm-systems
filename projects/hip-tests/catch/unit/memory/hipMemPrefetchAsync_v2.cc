@@ -58,8 +58,7 @@ static std::vector<int> getSupportedDevices() {
 HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -170,12 +169,10 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
 HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
   }
   if (numa_available() < 0) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -234,6 +231,29 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
   }
 
   SECTION("With Host Numa Current") {
+    // hipMemLocationTypeHostNumaCurrent resolves the target NUMA node from the
+    // calling thread's CPU at the time of the prefetch. To make the placement
+    // deterministic, pin the calling thread to its current CPU so the scheduler
+    // cannot migrate it (and thus change its NUMA node) between the prefetch and
+    // the verification below.
+    #include <sched.h>
+    cpu_set_t originalSet;
+    REQUIRE(sched_getaffinity(0, sizeof(originalSet), &originalSet) == 0);
+    struct AffinityGuard {
+      cpu_set_t set;
+      ~AffinityGuard() { (void)sched_setaffinity(0, sizeof(set), &set); }
+    } affinity_guard{originalSet};
+
+    const int cpu = sched_getcpu();
+    REQUIRE(cpu >= 0);
+    const int cur_node = numa_node_of_cpu(cpu);
+    REQUIRE(cur_node >= 0);
+
+    cpu_set_t cpuSet;
+    CPU_ZERO(&cpuSet);
+    CPU_SET(cpu, &cpuSet);
+    REQUIRE(sched_setaffinity(0, sizeof(cpuSet), &cpuSet) == 0);
+
     hipMemLocation location;
     location.type = hipMemLocationTypeHostNumaCurrent;
 
@@ -254,11 +274,6 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
                        << " Got value = " << memPtr[i]);
       REQUIRE(memPtr[i] == newValue);
     }
-
-    // determine current CPU’s NUMA node
-    int cpu = sched_getcpu();
-    int cur_node = numa_node_of_cpu(cpu);
-    REQUIRE(cur_node >= 0);
 
     // verify that the page is on the current node
     void *page = memPtr;
@@ -293,8 +308,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
 HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Negative) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));

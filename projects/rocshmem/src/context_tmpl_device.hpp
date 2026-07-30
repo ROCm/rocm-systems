@@ -84,17 +84,59 @@ __device__ void Context::to_all(T *dest, const T *source, int nreduce,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
+__device__ int Context::reduce_wg(rocshmem_team_t team, T *dest, const T *source,
                                int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
 
   if (is_thread_zero_in_block()) {
-    ctxStats.incStat(NUM_TO_ALL);
+    ctxStats.incStat(NUM_REDUCE);
   }
 
-  DISPATCH_RET(reduce<PAIR(T, Op)>(team, dest, source, nreduce));
+  DISPATCH_RET(reduce_wg<PAIR(T, Op)>(team, dest, source, nreduce));
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int Context::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                          const T *source, int nreduce) {
+  if (nreduce == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_REDUCE_SCATTER);
+  }
+
+  DISPATCH_RET(reduce_scatter_wg<PAIR(T, Op)>(team, dest, source, nreduce));
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int Context::reduce_wave(rocshmem_team_t team, T *dest,
+                                    const T *source, int nreduce) {
+  if (nreduce == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_REDUCE);
+  }
+
+  DISPATCH_RET(reduce_wave<PAIR(T, Op)>(team, dest, source, nreduce));
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int Context::reduce_scatter_wave(rocshmem_team_t team, T *dest,
+                                            const T *source, int nreduce) {
+  if (nreduce == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_wave()) {
+    ctxStats.incStat(NUM_REDUCE_SCATTER);
+  }
+
+  DISPATCH_RET(reduce_scatter_wave<PAIR(T, Op)>(team, dest, source, nreduce));
 }
 
 template <typename T>
@@ -144,7 +186,7 @@ __device__ void Context::get_nbi(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::alltoall(rocshmem_team_t team, T *dest,
+__device__ void Context::alltoall_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems) {
   if (nelems == 0) {
     return;
@@ -154,7 +196,21 @@ __device__ void Context::alltoall(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_ALLTOALL);
   }
 
-  DISPATCH(alltoall<T>(team, dest, source, nelems));
+  DISPATCH(alltoall_wg<T>(team, dest, source, nelems));
+}
+
+template <typename T>
+__device__ int Context::alltoall_wave(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems) {
+  if (nelems == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_ALLTOALL);
+  }
+
+  DISPATCH_RET(alltoall_wave<T>(team, dest, source, nelems));
 }
 
 template <typename T>
@@ -174,7 +230,7 @@ __device__ void Context::alltoallv(rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void Context::fcollect(rocshmem_team_t team, T *dest,
+__device__ void Context::fcollect_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems) {
   if (nelems == 0) {
     return;
@@ -184,11 +240,25 @@ __device__ void Context::fcollect(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_FCOLLECT);
   }
 
-  DISPATCH(fcollect<T>(team, dest, source, nelems));
+  DISPATCH(fcollect_wg<T>(team, dest, source, nelems));
 }
 
 template <typename T>
-__device__ void Context::broadcast(rocshmem_team_t team, T *dest,
+__device__ int Context::fcollect_wave(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems) {
+  if (nelems == 0) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_FCOLLECT);
+  }
+
+  DISPATCH_RET(fcollect_wave<T>(team, dest, source, nelems));
+}
+
+template <typename T>
+__device__ void Context::broadcast_wg(rocshmem_team_t team, T *dest,
                                    const T *source, int nelems, int pe_root) {
   if (nelems == 0) {
     return;
@@ -198,11 +268,11 @@ __device__ void Context::broadcast(rocshmem_team_t team, T *dest,
     ctxStats.incStat(NUM_BROADCAST);
   }
 
-  DISPATCH(broadcast<T>(team, dest, source, nelems, pe_root));
+  DISPATCH(broadcast_wg<T>(team, dest, source, nelems, pe_root));
 }
 
 template <typename T>
-__device__ void Context::broadcast(T *dest, const T *source, int nelems,
+__device__ void Context::broadcast_wg(T *dest, const T *source, int nelems,
                                    int pe_root, int pe_start, int log_pe_stride,
                                    int pe_size,
                                    long *p_sync) {  // NOLINT(runtime/int)
@@ -214,7 +284,7 @@ __device__ void Context::broadcast(T *dest, const T *source, int nelems,
     ctxStats.incStat(NUM_BROADCAST);
   }
 
-  DISPATCH(broadcast<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride,
+  DISPATCH(broadcast_wg<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride,
                         pe_size, p_sync));
 }
 
@@ -426,35 +496,34 @@ template <typename T>
 __device__ __forceinline__ int Context::test(T *ivars, int cmp,
                                              T val) {
   int ret = 0;
-  volatile T *vol_ivars = reinterpret_cast<T *>(ivars);
   switch (cmp) {
     case ROCSHMEM_CMP_EQ:
-      if (uncached_load(vol_ivars) == val) {
+      if (uncached_load(ivars) == val) {
         ret = 1;
       }
       break;
     case ROCSHMEM_CMP_NE:
-      if (uncached_load(vol_ivars) != val) {
+      if (uncached_load(ivars) != val) {
         ret = 1;
       }
       break;
     case ROCSHMEM_CMP_GT:
-      if (uncached_load(vol_ivars) > val) {
+      if (uncached_load(ivars) > val) {
         ret = 1;
       }
       break;
     case ROCSHMEM_CMP_GE:
-      if (uncached_load(vol_ivars) >= val) {
+      if (uncached_load(ivars) >= val) {
         ret = 1;
       }
       break;
     case ROCSHMEM_CMP_LT:
-      if (uncached_load(vol_ivars) < val) {
+      if (uncached_load(ivars) < val) {
         ret = 1;
       }
       break;
     case ROCSHMEM_CMP_LE:
-      if (uncached_load(vol_ivars) <= val) {
+      if (uncached_load(ivars) <= val) {
         ret = 1;
       }
       break;
@@ -664,6 +733,191 @@ CONTEXT_PUT_SIGNAL_DEF(_wave, _WAVE)
 CONTEXT_PUT_SIGNAL_DEF(_nbi, _NBI)
 CONTEXT_PUT_SIGNAL_DEF(_nbi_wg, _NBI_WG)
 CONTEXT_PUT_SIGNAL_DEF(_nbi_wave, _NBI_WAVE)
+
+/******************************************************************************
+ *************************** TILE API DISPATCHERS *****************************
+ *****************************************************************************/
+
+// RMA PUT operations - Type-erased implementations using DISPATCH_RET
+__device__ inline int Context::tile_put(void* dst_data, const void* src_data,
+                                        const size_t* dst_strides, const size_t* src_strides,
+                                        const size_t* start_coord, const size_t* boundary,
+                                        int ndim, size_t element_size, int pe, uint64_t flags) {
+  DISPATCH_RET(tile_put(dst_data, src_data, dst_strides, src_strides,
+                        start_coord, boundary, ndim, element_size, pe, flags));
+}
+
+__device__ inline int Context::tile_put_wave(void* dst_data, const void* src_data,
+                                             const size_t* dst_strides, const size_t* src_strides,
+                                             const size_t* start_coord, const size_t* boundary,
+                                             int ndim, size_t element_size, int pe, uint64_t flags) {
+  DISPATCH_RET(tile_put_wave(dst_data, src_data, dst_strides, src_strides,
+                             start_coord, boundary, ndim, element_size, pe, flags));
+}
+
+__device__ inline int Context::tile_put_wg(void* dst_data, const void* src_data,
+                                           const size_t* dst_strides, const size_t* src_strides,
+                                           const size_t* start_coord, const size_t* boundary,
+                                           int ndim, size_t element_size, int pe, uint64_t flags) {
+  DISPATCH_RET(tile_put_wg(dst_data, src_data, dst_strides, src_strides,
+                           start_coord, boundary, ndim, element_size, pe, flags));
+}
+
+// RMA GET operations - Type-erased implementations using DISPATCH_RET
+__device__ inline int Context::tile_get(void* dst_data, const void* src_data,
+                                        const size_t* dst_strides, const size_t* src_strides,
+                                        const size_t* start_coord, const size_t* boundary,
+                                        int ndim, size_t element_size, int pe, uint64_t flags) {
+  DISPATCH_RET(tile_get(dst_data, src_data, dst_strides, src_strides,
+                        start_coord, boundary, ndim, element_size, pe, flags));
+}
+
+__device__ inline int Context::tile_get_wave(void* dst_data, const void* src_data,
+                                             const size_t* dst_strides, const size_t* src_strides,
+                                             const size_t* start_coord, const size_t* boundary,
+                                             int ndim, size_t element_size, int pe, uint64_t flags) {
+  DISPATCH_RET(tile_get_wave(dst_data, src_data, dst_strides, src_strides,
+                             start_coord, boundary, ndim, element_size, pe, flags));
+}
+
+__device__ inline int Context::tile_get_wg(void* dst_data, const void* src_data,
+                                           const size_t* dst_strides, const size_t* src_strides,
+                                           const size_t* start_coord, const size_t* boundary,
+                                           int ndim, size_t element_size, int pe, uint64_t flags) {
+  DISPATCH_RET(tile_get_wg(dst_data, src_data, dst_strides, src_strides,
+                           start_coord, boundary, ndim, element_size, pe, flags));
+}
+
+// Allgather operations - Type-erased implementations using DISPATCH_RET
+__device__ inline int Context::tile_allgather(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                              const size_t* dst_strides, const size_t* src_strides,
+                                              const size_t* start_coord, const size_t* boundary,
+                                              int ndim, size_t element_size, uint64_t flags) {
+  DISPATCH_RET(tile_allgather(team, dst_data, src_data, dst_strides, src_strides,
+                              start_coord, boundary, ndim, element_size, flags));
+}
+
+__device__ inline int Context::tile_allgather_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                   const size_t* dst_strides, const size_t* src_strides,
+                                                   const size_t* start_coord, const size_t* boundary,
+                                                   int ndim, size_t element_size, uint64_t flags) {
+  DISPATCH_RET(tile_allgather_wave(team, dst_data, src_data, dst_strides, src_strides,
+                                   start_coord, boundary, ndim, element_size, flags));
+}
+
+__device__ inline int Context::tile_allgather_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                 const size_t* dst_strides, const size_t* src_strides,
+                                                 const size_t* start_coord, const size_t* boundary,
+                                                 int ndim, size_t element_size, uint64_t flags) {
+  DISPATCH_RET(tile_allgather_wg(team, dst_data, src_data, dst_strides, src_strides,
+                                 start_coord, boundary, ndim, element_size, flags));
+}
+
+// Broadcast operations - Type-erased implementations using DISPATCH_RET
+__device__ inline int Context::tile_broadcast(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                              const size_t* dst_strides, const size_t* src_strides,
+                                              const size_t* start_coord, const size_t* boundary,
+                                              int ndim, size_t element_size, int pe_root, uint64_t flags) {
+  DISPATCH_RET(tile_broadcast(team, dst_data, src_data, dst_strides, src_strides,
+                              start_coord, boundary, ndim, element_size, pe_root, flags));
+}
+
+__device__ inline int Context::tile_broadcast_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                   const size_t* dst_strides, const size_t* src_strides,
+                                                   const size_t* start_coord, const size_t* boundary,
+                                                   int ndim, size_t element_size, int pe_root, uint64_t flags) {
+  DISPATCH_RET(tile_broadcast_wave(team, dst_data, src_data, dst_strides, src_strides,
+                                   start_coord, boundary, ndim, element_size, pe_root, flags));
+}
+
+__device__ inline int Context::tile_broadcast_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                 const size_t* dst_strides, const size_t* src_strides,
+                                                 const size_t* start_coord, const size_t* boundary,
+                                                 int ndim, size_t element_size, int pe_root, uint64_t flags) {
+  DISPATCH_RET(tile_broadcast_wg(team, dst_data, src_data, dst_strides, src_strides,
+                                 start_coord, boundary, ndim, element_size, pe_root, flags));
+}
+
+// SUM Reduction operations - Type-erased implementations using DISPATCH_RET
+__device__ inline int Context::tile_sum_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                               const size_t* dst_strides, const size_t* src_strides,
+                                               const size_t* start_coord, const size_t* boundary,
+                                               int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_sum_reduce(team, dst_data, src_data, dst_strides, src_strides,
+                               start_coord, boundary, ndim, element_size, root, flags));
+}
+
+__device__ inline int Context::tile_sum_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                    const size_t* dst_strides, const size_t* src_strides,
+                                                    const size_t* start_coord, const size_t* boundary,
+                                                    int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_sum_reduce_wave(team, dst_data, src_data, dst_strides, src_strides,
+                                    start_coord, boundary, ndim, element_size, root, flags));
+}
+
+__device__ inline int Context::tile_sum_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                  const size_t* dst_strides, const size_t* src_strides,
+                                                  const size_t* start_coord, const size_t* boundary,
+                                                  int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_sum_reduce_wg(team, dst_data, src_data, dst_strides, src_strides,
+                                  start_coord, boundary, ndim, element_size, root, flags));
+}
+
+// MAX Reduction operations - Type-erased implementations using DISPATCH_RET
+__device__ inline int Context::tile_max_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                               const size_t* dst_strides, const size_t* src_strides,
+                                               const size_t* start_coord, const size_t* boundary,
+                                               int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_max_reduce(team, dst_data, src_data, dst_strides, src_strides,
+                               start_coord, boundary, ndim, element_size, root, flags));
+}
+
+__device__ inline int Context::tile_max_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                    const size_t* dst_strides, const size_t* src_strides,
+                                                    const size_t* start_coord, const size_t* boundary,
+                                                    int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_max_reduce_wave(team, dst_data, src_data, dst_strides, src_strides,
+                                    start_coord, boundary, ndim, element_size, root, flags));
+}
+
+__device__ inline int Context::tile_max_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                  const size_t* dst_strides, const size_t* src_strides,
+                                                  const size_t* start_coord, const size_t* boundary,
+                                                  int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_max_reduce_wg(team, dst_data, src_data, dst_strides, src_strides,
+                                  start_coord, boundary, ndim, element_size, root, flags));
+}
+
+// MIN Reduction operations - Type-erased implementations using DISPATCH_RET
+__device__ inline int Context::tile_min_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                               const size_t* dst_strides, const size_t* src_strides,
+                                               const size_t* start_coord, const size_t* boundary,
+                                               int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_min_reduce(team, dst_data, src_data, dst_strides, src_strides,
+                               start_coord, boundary, ndim, element_size, root, flags));
+}
+
+__device__ inline int Context::tile_min_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                    const size_t* dst_strides, const size_t* src_strides,
+                                                    const size_t* start_coord, const size_t* boundary,
+                                                    int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_min_reduce_wave(team, dst_data, src_data, dst_strides, src_strides,
+                                    start_coord, boundary, ndim, element_size, root, flags));
+}
+
+__device__ inline int Context::tile_min_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                  const size_t* dst_strides, const size_t* src_strides,
+                                                  const size_t* start_coord, const size_t* boundary,
+                                                  int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_min_reduce_wg(team, dst_data, src_data, dst_strides, src_strides,
+                                  start_coord, boundary, ndim, element_size, root, flags));
+}
+
+template <typename T>
+__device__ int Context::broadcast_wave(rocshmem_team_t team, 
+                              T *dest, const T *source, int nelems, int PE_root){
+  DISPATCH_RET(broadcast_wave<T>(team, dest, source, nelems, PE_root));
+}
 
 }  // namespace rocshmem
 

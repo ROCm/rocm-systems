@@ -1495,7 +1495,7 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
     sym->GetSection()->getData(sym->SectionOffset(), &kd, sizeof(kd));
 
     uint32_t kernarg_segment_size = kd.kernarg_size; // FIXME: If 0 then the compiler is not specifying the size.
-    uint32_t kernarg_segment_alignment = 16;         // FIXME: Use the minumum HSA required alignment.
+    uint32_t kernarg_segment_alignment = 16;         // FIXME: Use the minimum HSA required alignment.
     uint32_t group_segment_size = kd.group_segment_fixed_size;
     uint32_t private_segment_size = kd.private_segment_fixed_size;
     bool is_dynamic_callstack = AMDHSA_BITS_GET(

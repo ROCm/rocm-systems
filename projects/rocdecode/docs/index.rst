@@ -8,7 +8,7 @@ rocDecode documentation
 
 rocDecode provides APIs, utilities, and samples that you can use to easily access the video decoding
 features of your media engines (VCNs). It also allows interoperability with other compute engines on
-the GPU using Video Acceleration API (VA-API)/HIP. To learn more, see :doc:`what-is-rocDecode`
+the GPU using Video Acceleration API (VA-API)/HIP. 
 
 rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. The rocDecode source code is located at https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode.
 
@@ -17,16 +17,15 @@ rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. 
 
   .. grid-item-card:: Install
 
-    * :doc:`rocDecode prerequisites <./install/rocDecode-prerequisites>`
-    * :doc:`Cloning the rocDecode project <./install/rocDecode-clone-project>`
-    * :doc:`Building and installing rocDecode from source code <./install/rocDecode-build-and-install>`
+    * :doc:`Install rocDecode <./install/rocDecode-install>`
+    * :doc:`Build from source <./install/rocDecode-build-and-install>`
 
 .. grid:: 2
   :gutter: 3
 
   .. grid-item-card:: Conceptual
 
-    * :doc:`Video decoding pipeline <./conceptual/video-decoding-pipeline>`
+    * :doc:`rocDecode decoding pipeline <./conceptual/rocDecode-decoding-pipelines>`
     * :doc:`rocDecode surface memory locations <./conceptual/rocDecode-memory-types>`
 
   .. grid-item-card:: How to

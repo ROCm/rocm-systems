@@ -37,8 +37,11 @@ foreach(file ${CLI_FILES})
     list(APPEND CLI_OUTPUTS ${dst})
 endforeach()
 
+add_subdirectory(subcommands)
+
 # The CLI requires the python amdsmi wrapper to be installed
 add_custom_target(amdsmi_cli ALL DEPENDS python_package ${PY_PACKAGE_DIR}/_version.py ${CLI_OUTPUTS})
+add_dependencies(amdsmi_cli amdsmi_cli_subcommands)
 
 install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR} DESTINATION ${PY_CLI_INSTALL_DIR} COMPONENT dev)
 

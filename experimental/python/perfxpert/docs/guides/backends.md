@@ -56,7 +56,7 @@ fork-only opencode gate hook without any extra backend install.
 | **opencode** (default patched path) | `perfxpert-code` | Any (via opencode provider) | `~/.cache/perfxpert/opencode/opencode.json` | Per-bundle / per-checkout | Patched system prompt + fork patches 0010, 0020 | `perfxpert_*` |
 | **Claude Code** | `perfxpert-code claude` | Anthropic Claude | `./.mcp.json` + `./CLAUDE.local.md` + `./.claude/settings.json` | Project | Native `PreToolUse` hook (event-based lift) | `mcp__perfxpert__*` |
 | **Gemini CLI** | `perfxpert-code gemini` | Google Gemini | `./.gemini/settings.json` + `./.perfxpert/AGENTS.md` | Project | Native `BeforeTool` / `AfterTool` hooks (event-based lift) | `mcp_perfxpert_*` |
-| **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (trust) + `./.codex/config.toml` when trusted or fallback `~/.codex/config.toml` for MCP + `./AGENTS.override.md` | Trust in user config; MCP project-local when trusted | Prompt-layer-only (Codex `PreToolUse` is Bash-only — see decision record) | `mcp_perfxpert_*` |
+| **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (trust) + `./.codex/config.toml` when trusted or fallback `~/.codex/config.toml` for MCP + `./AGENTS.override.md` | Trust in user config; MCP project-local when trusted | Prompt-layer-only (Codex `PreToolUse` is Bash-only — see decision record) | `mcp__perfxpert__*` |
 
 Consent is requested once per **(backend, cwd-hash, file-set-hash)**
 tuple and persisted — re-running the same subcommand in the same
@@ -193,6 +193,14 @@ embedded in a perfxpert-managed `AGENTS.override.md`
 appends a perfxpert-managed block so Codex sees both the repo guidance
 and the perfxpert gate. `AGENTS.override.md` is a compatibility file
 owned by the adapter, not a native Codex-only source of truth.
+Codex can defer MCP tool metadata out of the initial model-visible tool
+inventory when the session is crowded. In that case, the generated
+Codex prompt allows exactly one pre-gate exception: use Codex's
+metadata search tool (`tool_search` / `tool_search_tool`) to expose the
+PerfXpert `intent_classify` and `workflow_next_step` MCP tools, then
+call the gate immediately. If discovery does not expose the gate, the
+agent must still stop with a PerfXpert configuration error instead of
+using shell, SSH, build, edit, or profiling commands as a fallback.
 Smaller models may bypass advisory language; if
 mechanical enforcement matters for your workflow, use
 `perfxpert-code claude` or the bundled `opencode` default (both

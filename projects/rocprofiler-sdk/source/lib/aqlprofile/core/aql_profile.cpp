@@ -20,8 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/aql_profile.hpp"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
+
+#include "lib/aqlprofile/core/counter_dimensions.hpp"
+
+#include "lib/aqlprofile/core/logger.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/common/environment.hpp"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/spm_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
+
+#include "lib/aqlprofile/core/commandbuffermgr.hpp"
 
 #include <cstdint>
 #include <future>
@@ -30,17 +42,6 @@
 #include <vector>
 #include <mutex>
 
-#include "core/counter_dimensions.hpp"
-
-#include "core/logger.h"
-#include "core/pm4_factory.h"
-#include "pm4/cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/spm_builder.h"
-#include "pm4/sqtt_builder.h"
-
-#include "core/commandbuffermgr.hpp"
-
 #ifdef _WIN32
 #    define CONSTRUCTOR_API
 #    define DESTRUCTOR_API
@@ -48,15 +49,6 @@
 #    define CONSTRUCTOR_API __attribute__((constructor))
 #    define DESTRUCTOR_API  __attribute__((destructor))
 #endif
-#define ERR_CHECK(cond, err, msg)                                                                  \
-    {                                                                                              \
-        if(cond)                                                                                   \
-        {                                                                                          \
-            ERR_LOGGING << msg;                                                                    \
-            return err;                                                                            \
-        }                                                                                          \
-    }
-
 // Getting SPM data using driver API
 hsa_status_t
 spm_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* profile,
@@ -187,28 +179,25 @@ DefaultTracedataCallback(hsa_ven_amd_aqlprofile_info_type_t  info_type,
     return status;
 }
 
-Logger::mutex_t          Logger::mutex_;
-Logger*                  Logger::instance_                   = NULL;
 bool                     Pm4Factory::concurrent_create_mode_ = false;
 bool                     Pm4Factory::spm_kfd_mode_           = false;
 Pm4Factory::mutex_t      Pm4Factory::mutex_;
-Pm4Factory::instances_t* Pm4Factory::instances_ = NULL;
-bool                     read_api_enabled       = true;
+Pm4Factory::instances_t* Pm4Factory::instances_ = nullptr;
 
-CONSTRUCTOR_API void
-constructor()
+// Lazy initialization to avoid reading env in constructor context
+static bool
+is_read_api_enabled()
 {
-    const char* read_api_enabled_str = getenv("AQLPROFILE_READ_API");
-    if(read_api_enabled_str != NULL)
-    {
-        if(atoi(read_api_enabled_str) == 0) read_api_enabled = false;
-    }
+    static const bool enabled = []() {
+        auto value = rocprofiler::common::get_env("AQLPROFILE_READ_API", "1");
+        return std::atoi(value.c_str()) != 0;
+    }();
+    return enabled;
 }
 
 DESTRUCTOR_API void
 destructor()
 {
-    Logger::Destroy();
     Pm4Factory::Destroy();
 }
 
@@ -232,7 +221,7 @@ hsa_ven_amd_aqlprofile_version_minor()
 PUBLIC_API hsa_status_t
 hsa_ven_amd_aqlprofile_error_string(const char** str)
 {
-    *str = aql_profile::Logger::LastMessage().c_str();
+    *str = aql_profile::get_last_error();
     return HSA_STATUS_SUCCESS;
 }
 
@@ -248,13 +237,13 @@ hsa_ven_amd_aqlprofile_validate_event(hsa_agent_t                           agen
     try
     {
         aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(agent);
-        if(pm4_factory->GetBlockInfo(event) != NULL) *result = true;
+        if(pm4_factory->GetBlockInfo(event) != nullptr) *result = true;
     } catch(aql_profile::event_exception& e)
     {
-        INFO_LOGGING << e.what();
+        INFO_LOGGING("{}", e.what());
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         status = HSA_STATUS_ERROR;
     }
 
@@ -281,11 +270,11 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
 
             // Generate read commands
             auto data_size = pmc_builder->Read(&commands, countersVec, profile->output_buffer.ptr);
-            if(!aql_profile::read_api_enabled) commands.Clear();
+            if(!aql_profile::is_read_api_enabled()) commands.Clear();
             cmd_buffer_mgr.SetRdSize(commands.Size());
 
             // Copy generated read commands
-            if(profile->command_buffer.ptr != NULL)
+            if(profile->command_buffer.ptr != nullptr)
             {
                 const aql_profile::descriptor_t rd_descr = cmd_buffer_mgr.GetRdDescr();
                 memcpy(rd_descr.ptr, commands.Data(), commands.Size());
@@ -297,14 +286,14 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
             cmd_buffer_mgr.SetPreSize(commands.Size());
 
             // Generate stop commands
-            if(!aql_profile::read_api_enabled)
+            if(!aql_profile::is_read_api_enabled())
                 pmc_builder->Read(&commands, countersVec, profile->output_buffer.ptr);
             pmc_builder->Stop(&commands, countersVec);
 
             if(profile->output_buffer.size < data_size)
             {
                 profile->output_buffer.size = data_size;
-                if(profile->output_buffer.ptr != NULL) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+                if(profile->output_buffer.ptr != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
             }
         }
         else if(profile->type == HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE)
@@ -389,7 +378,8 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
                                 trace_config.perfcounters.push_back({p->value, 0xF});
                             break;
                         default:
-                            ERR_LOGGING << "Bad trace parameter name (" << p->parameter_name << ")";
+                            ERR_LOGGING("Bad trace parameter name ({})",
+                                        static_cast<int>(p->parameter_name));
                             return HSA_STATUS_ERROR_INVALID_ARGUMENT;
                     }
                 }
@@ -415,8 +405,8 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
             }
             else
             {
-                const char* sz_sampling_rate = getenv("AQLPROFILE_SPM_SAMPLE_RATE");
-                if(sz_sampling_rate != NULL) trace_config.sampleRate = atoi(sz_sampling_rate);
+                auto env_val = rocprofiler::common::get_env_optional("AQLPROFILE_SPM_SAMPLE_RATE");
+                if(env_val) trace_config.sampleRate = std::atoi(env_val->c_str());
 
                 pm4_builder::SpmBuilder* spm_builder = pm4_factory->GetSpmBuilder();
                 // Generate start commands
@@ -429,7 +419,7 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
         }
         else
         {
-            ERR_LOGGING << "Bad profile type (" << profile->type << ")";
+            ERR_LOGGING("Bad profile type ({})", static_cast<int>(profile->type));
             return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
 
@@ -440,7 +430,7 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
             uint32_t old_size            = profile->command_buffer.size;
             profile->command_buffer.size = cmd_size;
 
-            if(profile->command_buffer.ptr != NULL)
+            if(profile->command_buffer.ptr != nullptr)
             {
                 std::cerr << "ERROR: command_buffer too small: "
                           << "provided=" << old_size << " required=" << cmd_size
@@ -448,7 +438,7 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
                 return HSA_STATUS_ERROR_INVALID_ARGUMENT;
             }
         }
-        if(profile->command_buffer.ptr != NULL)
+        if(profile->command_buffer.ptr != nullptr)
         {
             // Copy generated commands
             const aql_profile::descriptor_t pre_descr  = cmd_buffer_mgr.GetPreDescr();
@@ -463,7 +453,7 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
         }
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     }
 
@@ -485,7 +475,7 @@ hsa_ven_amd_aqlprofile_stop(const hsa_ven_amd_aqlprofile_profile_t* profile,
         aql_profile::PopulateAql(post_descr.ptr, post_descr.size, cmd_writer, aql_stop_packet);
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     }
 
@@ -497,7 +487,7 @@ PUBLIC_API hsa_status_t
 hsa_ven_amd_aqlprofile_read(const hsa_ven_amd_aqlprofile_profile_t* profile,
                             aql_profile::packet_t*                  aql_read_packet)
 {
-    if(!aql_profile::read_api_enabled) return HSA_STATUS_ERROR;
+    if(!aql_profile::is_read_api_enabled()) return HSA_STATUS_ERROR;
     try
     {
         // Populate read aql packet
@@ -511,7 +501,7 @@ hsa_ven_amd_aqlprofile_read(const hsa_ven_amd_aqlprofile_profile_t* profile,
         aql_profile::PopulateAql(rd_descr.ptr, rd_descr.size, cmd_writer, aql_read_packet);
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     }
     return HSA_STATUS_SUCCESS;
@@ -536,16 +526,16 @@ hsa_ven_amd_aqlprofile_get_info(const hsa_ven_amd_aqlprofile_profile_t* profile,
     const uint32_t begin_op = (uint32_t) HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD;
     if(attr_op >= begin_op) attribute = (hsa_ven_amd_aqlprofile_info_type_t) begin_op;
 
-    if(profile == NULL)
+    if(profile == nullptr)
     {
-        ERR_LOGGING << "NULL argument 'profile'";
+        ERR_LOGGING("nullptr argument 'profile'");
         return HSA_STATUS_ERROR;
     }
     if(attribute != HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD)
     {
-        if(value == NULL)
+        if(value == nullptr)
         {
-            ERR_LOGGING << "NULL argument 'value'";
+            ERR_LOGGING("nullptr argument 'value'");
             return HSA_STATUS_ERROR;
         }
     }
@@ -582,7 +572,7 @@ hsa_ven_amd_aqlprofile_get_info(const hsa_ven_amd_aqlprofile_profile_t* profile,
                     reinterpret_cast<hsa_ven_amd_aqlprofile_id_query_t*>(value);
                 const uint32_t      block = pm4_factory->FindBlock(query->name);
                 const GpuBlockInfo* info  = pm4_factory->GetBlockInfo(block);
-                status                    = (info == NULL) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS;
+                status = (info == nullptr) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS;
                 if(status == HSA_STATUS_SUCCESS)
                 {
                     query->id             = block;
@@ -604,11 +594,11 @@ hsa_ven_amd_aqlprofile_get_info(const hsa_ven_amd_aqlprofile_profile_t* profile,
                     case 1: pmc_builder->Disable(&commands); break;
                     case 2: pmc_builder->WaitIdle(&commands); break;
                     default:
-                        ERR_LOGGING << "get_info, not supported op (" << op << ")";
+                        ERR_LOGGING("get_info, not supported op ({})", op);
                         status = HSA_STATUS_ERROR;
                 }
 
-                if(profile->command_buffer.ptr == NULL)
+                if(profile->command_buffer.ptr == nullptr)
                 {
                     const_cast<hsa_ven_amd_aqlprofile_profile_t*>(profile)->command_buffer.size =
                         commands.Size();
@@ -617,13 +607,13 @@ hsa_ven_amd_aqlprofile_get_info(const hsa_ven_amd_aqlprofile_profile_t* profile,
 
                 if(profile->command_buffer.size != commands.Size())
                 {
-                    ERR_LOGGING << "get_info, wrong profile cmd size";
+                    ERR_LOGGING("get_info, wrong profile cmd size");
                     status = HSA_STATUS_ERROR;
                     break;
                 }
-                if(value == NULL)
+                if(value == nullptr)
                 {
-                    ERR_LOGGING << "NULL argument 'value'";
+                    ERR_LOGGING("nullptr argument 'value'");
                     status = HSA_STATUS_ERROR;
                     break;
                 }
@@ -638,11 +628,11 @@ hsa_ven_amd_aqlprofile_get_info(const hsa_ven_amd_aqlprofile_profile_t* profile,
             }
             default:
                 status = HSA_STATUS_ERROR_INVALID_ARGUMENT;
-                ERR_LOGGING << "Invalid attribute (" << attribute << ")";
+                ERR_LOGGING("Invalid attribute ({})", static_cast<int>(attribute));
         }
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     }
 
@@ -655,8 +645,8 @@ hsa_ven_amd_aqlprofile_iterate_event_ids(hsa_ven_amd_aqlprofile_eventname_callba
     try
     {
         EventDimension::init();
-        for(auto& [name, id] : EventDimension::dimension_table)
-            callback(id, name.c_str());
+        for(const auto& [name, id] : EventDimension::get_dimension_table())
+            callback(id, name.data());
     } catch(...)
     {
         return HSA_STATUS_ERROR;
@@ -707,6 +697,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
         aql_profile::Pm4Factory* pm4_factory   = aql_profile::Pm4Factory::Create(profile);
         const bool               is_concurrent = pm4_factory->IsConcurrent();
         const uint32_t           xcc_num       = pm4_factory->GetXccNumber();
+        const uint32_t           xcc_per_aid   = pm4_factory->GetXccPerAid();
         const uint32_t           se_number     = pm4_factory->GetShaderEnginesNumber() / xcc_num;
         const uint32_t           sa_number     = pm4_factory->GetShaderArraysNumber();
 
@@ -760,6 +751,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                     // this check needs to be the first check as it takes care of a corner case
                     // in which a UMC event is the last event in profile->events
                     if(pm4_factory->GetBlockInfo(p)->attr & CounterBlockAidAttr) continue;
+                    if(pm4_factory->GetBlockInfo(p)->attr & CounterBlockGrbmaAttr) continue;
 
                     if((char*) samples >
                        (char*) profile->output_buffer.ptr + profile->output_buffer.size)
@@ -802,6 +794,49 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                     }
                 }
             }
+            // AIGC blocks
+            for(uint32_t xcc_index = 0; xcc_index < xcc_num; xcc_index += xcc_per_aid)
+            {
+                for(const hsa_ven_amd_aqlprofile_event_t* p = profile->events;
+                    p < profile->events + profile->event_count;
+                    ++p)
+                {
+                    if(!(pm4_factory->GetBlockInfo(p)->attr & CounterBlockGrbmaAttr)) continue;
+
+                    if((char*) samples >
+                       (char*) profile->output_buffer.ptr + profile->output_buffer.size)
+                        return HSA_STATUS_ERROR;
+
+                    // AIGC counter event
+                    uint32_t block_samples_count = 1;
+
+                    for(uint32_t blk = 0; blk < block_samples_count; ++blk)
+                    {
+                        hsa_ven_amd_aqlprofile_info_data_t sample_info;
+                        sample_info.sample_id      = blk;
+                        sample_info.pmc_data.event = *p;
+#if DEBUG_TRACE == 2
+                        printf(
+                            "DATA: xcc(%u) id(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
+                            xcc_index,
+                            blk,
+                            p->block_name,
+                            p->block_index,
+                            p->counter_id,
+                            *samples);
+#endif
+                        sample_info.pmc_data.result = *samples;
+                        status = callback(HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA, &sample_info, data);
+                        if(status == HSA_STATUS_INFO_BREAK)
+                        {
+                            status = HSA_STATUS_SUCCESS;
+                            break;
+                        }
+                        if(status != HSA_STATUS_SUCCESS) break;
+                        samples++;
+                    }
+                }
+            }
         }
         else if(profile->type == HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE)
         {
@@ -830,12 +865,12 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                 {
                     if(control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask())
                     {
-                        ERR_LOGGING << "SQTT memory error received, SE(" << se_index << ")";
+                        ERR_LOGGING("SQTT memory error received, SE({})", se_index);
                         status = HSA_STATUS_ERROR_EXCEPTION;
                     }
                     else if(control_ptr[se_index].status & sqttbuilder->GetBufferFullMask())
                     {
-                        ERR2_LOGGING << "SQTT data buffer full, SE(" << se_index << ")";
+                        AQL_WARNING << "SQTT data buffer full, SE(" << se_index << ")";
                         if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
                     }
                 }
@@ -862,8 +897,10 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
 
                     if(sample_size >= sample_capacity)
                     {
-                        ERR_LOGGING << "SQTT data out of bounds, sample_id(" << se_index
-                                    << ") size(" << sample_size << "/" << sample_capacity << ")";
+                        ERR_LOGGING("SQTT data out of bounds, sample_id({}) size({}/{})",
+                                    se_index,
+                                    sample_size,
+                                    sample_capacity);
                         sample_size = sample_capacity;
                         if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
                     }
@@ -887,7 +924,8 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                         pcsmp_data->id    = se_index;
                         pcsmp_data->cycle = 333;
                         pcsmp_data->pc    = 0x333;
-                        call_status = callback(HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA, NULL, data);
+                        call_status =
+                            callback(HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA, nullptr, data);
                     }
                 }
             }
@@ -915,8 +953,9 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                         }
                         if(status != HSA_STATUS_SUCCESS)
                         {
-                            ERR_LOGGING << "SQTT data callback error, sample_id(" << i
-                                        << ") status(" << status << ")";
+                            ERR_LOGGING("SQTT data callback error, sample_id({}) status({})",
+                                        i,
+                                        static_cast<int>(status));
                             break;
                         }
                         sample_ptr = reinterpret_cast<char*>(sample_ptr) + sample_capacity;
@@ -930,12 +969,12 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
         }
         else
         {
-            ERR_LOGGING << "Bad profile type (" << profile->type << ")";
+            ERR_LOGGING("Bad profile type ({})", static_cast<int>(profile->type));
             status = HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
     } catch(std::exception& e)
     {
-        ERR_LOGGING << e.what();
+        ERR_LOGGING("{}", e.what());
         return HSA_STATUS_ERROR;
     }
 
@@ -949,7 +988,9 @@ hsa_ven_amd_aqlprofile_att_marker(hsa_ven_amd_aqlprofile_profile_t*           pr
                                   uint32_t                                    data,
                                   hsa_ven_amd_aqlprofile_att_marker_channel_t channel)
 {
-    assert(profile->type == HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE);
+    ROCP_FATAL_IF(profile->type != HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE)
+        << "ATT Marker can be used only with HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE profiling "
+           "type";
 
     aql_profile::Pm4Factory*  pm4_factory  = aql_profile::Pm4Factory::Create(profile);
     pm4_builder::SqttBuilder* sqtt_builder = pm4_factory->GetSqttBuilder();
@@ -964,7 +1005,7 @@ hsa_ven_amd_aqlprofile_att_marker(hsa_ven_amd_aqlprofile_profile_t*           pr
     size_t cmd_size = cmdbuffer.size;
     cmdbuffer.size  = commands.Size();
 
-    if(cmdbuffer.ptr == NULL) return HSA_STATUS_SUCCESS;
+    if(cmdbuffer.ptr == nullptr) return HSA_STATUS_SUCCESS;
     if(cmd_size < commands.Size()) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
     // Populate stop aql packet
@@ -981,11 +1022,9 @@ hsa_ven_amd_aqlprofile_att_marker(hsa_ven_amd_aqlprofile_profile_t*           pr
 extern "C" BOOL WINAPI
 DllMain(HINSTANCE /*hinstDLL*/, DWORD fdwReason, LPVOID /*lpvReserved*/)
 {
-    switch(fdwReason)
+    if(fdwReason == DLL_PROCESS_DETACH)
     {
-        case DLL_PROCESS_ATTACH: aql_profile::constructor(); break;
-        case DLL_PROCESS_DETACH: aql_profile::destructor(); break;
-        default: break;
+        aql_profile::destructor();
     }
     return TRUE;
 }

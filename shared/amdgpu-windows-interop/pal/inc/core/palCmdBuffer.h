@@ -188,53 +188,6 @@ enum class AtomicOp : uint32
 };
 #endif
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 928
-/// Specifies the point in the GPU pipeline where an action should take place.
-///
-/// Relevant operations include setting GPU events, waiting on GPU events in hardware, or writing timestamps.
-///
-/// @note The numeric value of these enums are ordered such that a "newState < oldState" comparison will generally yield
-///        true if a stall is necessary to resolve a hazard between those two pipe points.  This guideline does not
-///        hold up when comparing PreRasterization or PostPs with PostCs, as CS work is not properly pipelined with
-///        graphics shader work.
-///
-/// @see ICmdBuffer::CmdSetEvent()
-/// @see ICmdBuffer::CmdResetEvent()
-/// @see ICmdBuffer::CmdPredicateEvent()
-/// @see ICmdBuffer::CmdBarrier()
-/// @see ICmdBuffer::CmdWriteTimestamp()
-/// @see ICmdBuffer::CmdWriteImmediate()
-enum HwPipePoint : uint32
-{
-    HwPipeTop              = 0x0,                   ///< Earliest possible point in the GPU pipeline (CP PFP), can be
-                                                    ///  used as wait point for indirect args and index buffer fetch.
-    HwPipePostPrefetch     = 0x1,                   ///< Indirect arguments have been fetched for all prior
-                                                    ///  draws/dispatches (CP ME).
-    HwPipePreRasterization = 0x2,                   ///< All prior generated VS/HS/DS/GS waves have completed, can be
-                                                    ///  used as release point for VB/IB fetch and streamout target.
-    HwPipePostPs           = 0x3,                   ///< All prior generated PS waves have completed.
-                                                    ///  Only valid as a pipe point to wait on (release point).
-    HwPipePreColorTarget   = 0x4,                   ///< Represents the same point in pipe to HwPipePostPs, but provides
-                                                    ///  clients with a better option to accurately specify the pipeline
-                                                    ///  sync request. And PAL uses it as entry-point to add partial
-                                                    ///  flushes to prevent write-after-read hazard from corner cases.
-                                                    ///  Only valid as a wait point (acquire point).
-    HwPipePreIndexBuffer   = HwPipeTop,             ///< As late as possible before index buffer fetches (CP PFP).
-    HwPipePostIndexBuffer  = HwPipePreRasterization,///< All prior index buffer fetches have completed.
-
-    // The following points apply to compute-specific work:
-    HwPipePreCs            = HwPipePostPrefetch,    ///< As late as possible before CS waves are launched (CP ME).
-    HwPipePostCs           = 0x5,                   ///< All prior generated CS waves have completed.
-
-    // The following points apply to BLT-specific work:
-    HwPipePreBlt           = HwPipePostPrefetch,    ///< As late as possible before BLT operations are launched.
-    HwPipePostBlt          = 0x6,                   ///< All prior requested BLTs have completed.
-
-    HwPipeBottom           = 0x7,                   ///< All prior GPU work (graphics, compute, or BLT) has completed.
-    HwPipePointCount
-};
-#endif
-
 /// Bitmask values that can be OR'ed together to specify a synchronization scope.  See srcStageMask and dstStageMask in
 /// @ref AcquireReleaseInfo.
 ///
@@ -472,8 +425,15 @@ struct CmdBufferCreateInfo
             /// This is a best effort as not all implementations or Queues may support this.
             uint32 dispatchPingPongWalk       :  1;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 991
+            /// This command buffer will be built by component external to PAL, for example: MMPAL
+            uint32 externalCommandBuilding    :  1;
+#else
+            uint32 reserved991                :  1;
+#endif
+
             /// Reserved for future use.
-            uint32 reserved                   : 28;
+            uint32 reserved                   : 27;
         };
 
         /// Flags packed as 32-bit uint.
@@ -707,7 +667,10 @@ struct DynamicGraphicsState
                                                        ///  transform: 0 to 1 or -1 to 1).
         DepthClampMode depthClampMode             : 2; ///< Depth clamping behavior.
         uint32         reserved1                  : 7; ///< Reserved
-        uint32         reserved                   : 5; ///< Reserved for future use.
+        uint32         forceLateZ                 : 1; ///< Force late-Z mode, overriding the pipeline Z_ORDER to
+                                                       ///  LATE_Z in DB_SHADER_CONTROL.
+        uint32         rasterStream               : 2; ///< Which vertex stream to rasterize.
+        uint32         reserved                   : 2; ///< Reserved for future use.
     };
 
     union
@@ -726,7 +689,9 @@ struct DynamicGraphicsState
             uint32 dualSourceBlendEnable   :  1;  ///< Whether to enable dynamic state dualSourceBlendEnable
             uint32 vertexBufferCount       :  1;  ///< Whether to enable dynamic state vertexBufferCount.
             uint32 reserved1               :  1;  ///< Reserved.
-            uint32 reserved                : 20;  ///< Reserved for future use.
+            uint32 forceLateZ              :  1;  ///< Whether to enable dynamic state forceLateZ.
+            uint32 rasterStream            :  1;  ///< Whether to enable dynamic state rasterStream.
+            uint32 reserved                : 18;  ///< Reserved for future use.
         };
         uint32     u32All;
     } enable;
@@ -821,110 +786,6 @@ struct DepthStencilBindInfo
                                                  ///  engine flag must be set.  Ignored if the specified view does not
                                                  ///  have a stencil plane.
 };
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 928
-/// Represents a GPU memory or image transition as part of a barrier.
-///
-/// A single transition will ensure cache coherency of dirty data in the specific set of source caches with the
-/// specified set of destination caches. The source and destination designation is relative to the barrier itself
-/// and does not indicate whether a particular cache is a read or write cache.
-///
-/// Typically a transition flushes written data from the source caches into the destination caches and thus the source
-/// cache mask typically only contains write caches. However, the client is encouraged to include flags for any prior
-/// read-only caches accesses as PAL may be able to optimize its cache operations.
-///
-/// If the both cache masks are zero the client is indicating that no cache coherency operations are required but PAL
-/// may still issue cache operations for internal reasons.
-///
-/// In addition, the client can change an image's layout usage/engine flags which may result in a metadata blt.
-///
-/// @note There is no range provided to control the range of addresses that will be flushed/invalidated in GPU caches.
-struct BarrierTransition
-{
-
-    uint32 srcCacheMask; ///< Bitmask of @ref CacheCoherencyUsageFlags describing previous write operations whose
-                         ///  results need to be visible for subsequent operations. Flags for prior read operations
-                         ///  may be included as well and may be used for internal optimizations.
-    uint32 dstCacheMask; ///< Bitmask of @ref CacheCoherencyUsageFlags describing the operations expected to read
-                         ///  and/or write data flushed from the caches indicated by the srcCacheMask.
-
-    struct
-    {
-        const IImage* pImage;      ///< If non-null, indicates this transition only applies to the specified image.
-                                   ///  The remaining members of this structure are ignored if this member is null.
-        SubresRange   subresRange; ///< Subset of pImage this transition applies to. If newLayout includes @ref
-                                   ///  LayoutUninitializedTarget this range must cover all subresources of pImage
-                                   ///  unless the perSubresInit image create flag was specified.
-        ImageLayout   oldLayout;   ///< Specifies the current image layout based on bitmasks of allowed operations and
-                                   ///  engines up to this point.  These masks imply the previous compression state. No
-                                   ///  usage flags should ever be set in oldLayout.usages that correspond to usages
-                                   ///  that are not supported by the engine that is performing the transition.  The
-                                   ///  queue type performing the transition must be set in oldLayout.engines.
-        ImageLayout   newLayout;   ///< Specifies the upcoming image layout based on bitmasks of allowed operations and
-                                   ///  engines after this point.  These masks imply the upcoming compression state.
-                                   ///  point.  This usage mask implies the upcoming compressions state.  A difference
-                                   ///  between oldLayoutUsageMask and newLayoutUsageMask may result in a
-                                   ///  decompression.
-
-        /// Specifies a custom sample pattern over a 2x2 pixel quad.  The position for each sample is specified on a
-        /// grid where the pixel center is <0,0>, the top left corner of the pixel is <-8,-8>, and <7,7> is the maximum
-        /// valid position (not quite to the bottom/right border of the pixel).
-        /// Specifies a custom sample pattern over a 2x2 pixel quad. Can be left null for non-MSAA images or when
-        /// a valid MsaaQuadSamplePattern is bound prior to the CmdBarrier call.
-        const MsaaQuadSamplePattern* pQuadSamplePattern;
-
-    } imageInfo; ///< Image-specific transition information.
-};
-
-/// Describes a barrier as inserted by a call to ICmdBuffer::CmdBarrier().
-///
-/// A barrier can be used to 1) stall GPU execution at a specified point to resolve a data hazard, 2) flush/invalidate
-/// GPU caches to ensure data coherency, and/or 3) compress/decompress image resources as necessary when changing how
-/// the GPU will use the image.
-///
-/// This structure directly specifies how #1 is performed.  #2 and #3 are managed by the list of @ref BarrierTransition
-/// structures passed in pTransitions.
-struct BarrierInfo
-{
-    /// Determine at what point the GPU should stall until all specified waits and transitions have completed.  If the
-    /// specified wait point is unavailable, PAL will wait at the closest available earlier point.
-    HwPipePoint        waitPoint;
-
-    uint32             pipePointWaitCount;           ///< Number of entries in pPipePoints.
-    const HwPipePoint* pPipePoints;                  ///< The barrier will stall until the hardware pipeline has cleared
-                                                     ///  up to each point specified in this array.  One entry in this
-                                                     ///  array is typically enough, but CS and GFX operate in parallel
-                                                     ///  at certain stages.
-
-    uint32             gpuEventWaitCount;            ///< Number of entries in ppGpuEvents.
-    const IGpuEvent**  ppGpuEvents;                  ///< The barrier will stall until each GPU event in this array is
-                                                     ///  in the set state.
-
-    uint32             rangeCheckedTargetWaitCount;  ///< Number of entries in ppTargets.
-    const IImage**     ppTargets;                    ///< The barrier will stall until all previous rendering with any
-                                                     ///  color or depth/stencil image in this list bound as a target
-                                                     ///  has completed. If one of the targets is a nullptr it will
-                                                     ///  perform a full range sync.
-
-    uint32                   transitionCount;        ///< Number of entries in pTransitions.
-    const BarrierTransition* pTransitions;           ///< List of image/memory transitions to process.  See
-                                                     ///  @ref BarrierTransition. The same subresource should never
-                                                     ///  be specified more than once in the list of transitions.
-                                                     ///  PAL assumes that all specified subresources are unique.
-
-    uint32  globalSrcCacheMask; ///< This is a global bitmask of @ref CacheCoherencyUsageFlags which is combined
-                                ///  (bitwise logical union) with the @ref srcCacheMask field belonging to every
-                                ///  element in @ref pTransitions. If this is zero or if there are no transitions,
-                                ///  then no global cache flags are applied during every transition.
-
-    uint32  globalDstCacheMask; ///< This is a global bitmask of @ref CacheCoherencyUsageFlags which is combined
-                                ///  (bitwise logical union) with the @ref dstCacheMask field belonging to every
-                                ///  element in @ref pTransitions. If this is zero or if there are no transitions,
-                                ///  then no global cache flags are applied during every transition.
-
-    uint32 reason; ///< The reason that the barrier was invoked.
-};
-#endif
 
 /// Specifies execution dependencies, *availability* and/or *visibility* operations on a section of an IGpuMemory
 /// object that does not contain valid IImage data. PAL may assume image data is not present and skip certain
@@ -1333,24 +1194,12 @@ enum class PrtPlusResolveType : uint32
 /// Input structure to the CmdResolvePrtPlusImage function
 struct PrtPlusImageResolveRegion
 {
-    Offset3d  srcOffset;       ///< Offset to the start of the chosen region in the source subresource.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 938
-    SubresId  srcSubresId;       ///< Selects the source subresource
-#else
-    uint32    srcMipLevel;     ///< Selects source mip level
-    uint32    srcSlice;        ///< Selects the source starting slice
-#endif
-
-    Offset3d  dstOffset;       ///< Offset to the start of the chosen region in the destination subresource.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 938
-    SubresId  dstSubresId;       ///< Selects the destination subresource
-#else
-    uint32    dstMipLevel;     ///< Selects destination mip level
-    uint32    dstSlice;        ///< Selects the destination starting slice
-#endif
-
-    Extent3d  extent;          ///< Size of the resolve region in pixels.
-    uint32    numSlices;       ///< Number of slices to be resolved
+    Offset3d srcOffset;   ///< Offset to the start of the chosen region in the source subresource.
+    SubresId srcSubresId; ///< Selects the source subresource
+    Offset3d dstOffset;   ///< Offset to the start of the chosen region in the destination subresource.
+    SubresId dstSubresId; ///< Selects the destination subresource
+    Extent3d extent;      ///< Size of the resolve region in pixels.
+    uint32   numSlices;   ///< Number of slices to be resolved
 };
 
 /// Input structure to ICmdBuffer::CmdResolvePrtPlusImageToBuffer()
@@ -1696,11 +1545,9 @@ struct DispatchAqlParams
     uint32                               scratchSize;   ///< Scratch buffer size
     uint32                               scratchOffset; ///< Scratch buffer offset from the base for generic
                                                         ///  address space
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 920
+
     const llvm::amdhsa::kernel_descriptor_t* pCpuAqlCode; ///< AMD kernel descriptor on CPU for PM4 emulation
-#else
-    const amd_kernel_code_t*             pCpuAqlCode;   ///< AMD kernel code object on CPU for PM4 emulation
-#endif
+
     gpusize                              hsaQueueVa;    ///< GPU VM address where amd_queue_t is allocated
     uint32                               wavesPerSh;    ///< Waves Per Shade Array
     bool                                 useAtc;        ///< Indicates whether ATC bit in registers should be set
@@ -2866,16 +2713,6 @@ public:
     virtual void CmdSetGlobalScissor(
         const GlobalScissorParams& params) = 0;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 928
-    /// Inserts a barrier in the current command stream that can stall GPU execution, flush/invalidate caches, or
-    /// decompress images before further, dependent work can continue in this command buffer.
-    ///
-    /// This operation does not honor the command buffer's predication state, if active.
-    ///
-    /// @param [in] barrierInfo See @ref BarrierInfo for detailed information.
-    virtual void CmdBarrier(
-        const BarrierInfo& barrierInfo) = 0;
-#endif
     /// Perform source pipeline stage and cache access optimization based on the acquire/release interface.
     ///
     /// @param [in]     barrierType    Barrier transition type @ref BarrierType.
@@ -4568,6 +4405,47 @@ public:
         uint32      data,
         uint32      mask,
         CompareFunc compareFunc) = 0;
+
+    /// Stalls an engine's command buffer execution until all IQueueSemaphores reach or pass their wait value.
+    /// Exactly one waitValue must be provided per IQueueSemaphore, mappped 1:1 by Span index.
+    /// The caller is responsible for avoiding deadlocks.
+    ///
+    /// An Engine must support @ref supportsGpuFence (@ref DeviceProperties::engineProperties::flags)
+    /// to support this call. Calling when missing engine support will cause undefined behavior.
+    ///
+    /// Creation (@ref QueueSemaphoreCreateInfo)
+    /// IQueueSemaphores must be created as fences on the GPU to be safely waited on. See flags.gpuFence
+    /// IQueueSemaphores can be created from externally-owned objects if they have a 64-bit counter on the GPU.
+    /// To use an external object, create an IQueueSemaphore with flags.forceUseMonitoredFence set and
+    /// provide the 64-bit counters gpuva in CounterGpuVA.
+    ///
+    /// @param [in] queueSemaphores  A reference to a Span of IQueueSemaphore objects.
+    /// @param [in] waitValues       A reference to a Span of values to use with the queueSemaphores.
+    /// @param [in] stageMask        Bitmask of PipelineStageFlag values defining the synchronization
+    ///                              scope of where to wait in the pipeline.
+    virtual void CmdWaitGpuFences(
+        const Util::Span<const IQueueSemaphore* const>& queueSemaphores,
+        const Util::Span<const uint64>&                 waitValues,
+        uint32                                          stageMask) = 0;
+
+    /// Sets a synchronization object's counter to a value on the GPU, then triggers interrupts to check on waiters.
+    ///
+    /// An Engine must support @ref supportsGpuFence (@ref DeviceProperties::engineProperties::flags)
+    /// to support this call. Calling when missing engine support will cause undefined behavior.
+    ///
+    /// Creation (@ref QueueSemaphoreCreateInfo)
+    /// IQueueSemaphores must be created as fences on the GPU to be safely signaled. See flags.gpuFence.
+    /// IQueueSemaphores can be created from externally-owned objects if they have a 64-bit counter on the GPU.
+    ///    set flags.forceUseMonitoredFence and provide the 64-bit counters gpuva in CounterGpuVA.
+    ///
+    /// @param [in] pQueueSemaphore  The pointer to the IQueueSemaphore to use when signaling.
+    /// @param [in] value            The value to write when signaling.
+    /// @param [in] stageMask        Bitmask of PipelineStageFlag values defining the synchronization
+    ///                              scope that must be completed before writing the value.
+    virtual void CmdSignalGpuFence(
+        const IQueueSemaphore* const pQueueSemaphore,
+        const uint64                 value,
+        uint32                       stageMask) = 0;
 
     /// Stalls a command buffer execution until an external device writes to the marker surface in the GPU bus
     /// addressable memory location.

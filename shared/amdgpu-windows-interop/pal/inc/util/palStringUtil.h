@@ -39,25 +39,6 @@
 
 namespace Util
 {
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 919
-/// Returns the length of a wchar_t based string.
-///
-/// @param [in]  wide string to query
-///
-/// @returns The length of the given string in wide characters
-extern size_t PalWcslen(
-    const wchar_t* pWideStr);
-
-/// Performs a reverse string find of wide character wc.
-///
-/// @param [in]  wide string to scan
-/// @param [in]  wide character to find
-///
-/// @returns The matching character at the end of the string or nullptr if not found.
-extern wchar_t* PalWcsrchr(
-    wchar_t *pStr,
-    wchar_t wc);
-#endif
 
 /// When the -fshort-char compiler option is specified, wchar_t is 16 bits, but mbstowcs still treats the dest
 /// as 32 bit so we provide our own implementation.

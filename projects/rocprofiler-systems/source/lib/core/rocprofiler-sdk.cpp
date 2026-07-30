@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/rocprofiler-sdk.hpp"
+#include "common/delimit.hpp"
+#include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "timemory.hpp"
 #include <regex>
@@ -11,7 +13,6 @@
 #include <spdlog/fmt/ranges.h>
 
 #include <timemory/defines.h>
-#include <timemory/utility/demangle.hpp>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
@@ -22,6 +23,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -32,7 +34,7 @@
         {                                                                                \
             std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);         \
             LOG_WARNING("rocprofiler-sdk call [{}] failed with error code {} :: {}",     \
-                        #result, status_msg);                                            \
+                        #result, static_cast<int>(CHECKSTATUS), status_msg);             \
         }                                                                                \
     }
 
@@ -45,26 +47,28 @@ namespace
 std::string
 get_setting_name(std::string _v)
 {
-    constexpr auto _prefix = tim::string_view_t{ "rocprofsys_" };
+    constexpr auto _prefix = std::string_view{ "rocprofsys_" };
     for(auto& itr : _v)
         itr = tolower(itr);
-    auto _pos = _v.find(_prefix);
-    if(_pos == 0) return _v.substr(_prefix.length());
+    if(_v.starts_with(_prefix)) return _v.substr(_prefix.length());
     return _v;
 }
 
-#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
-    [&]() {                                                                              \
-        auto _ret = _config->insert<TYPE, TYPE>(                                         \
-            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, TYPE{ INITIAL_VALUE },    \
-            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",             \
-                                   __VA_ARGS__ });                                       \
-        if(!_ret.second)                                                                 \
-        {                                                                                \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),        \
-                        ENV_NAME);                                                       \
-        }                                                                                \
-        return _config->find(ENV_NAME)->second;                                          \
+// Accepts either a `const char*` literal or `std::string_view` (e.g. env_vars::FOO)
+// for ENV_NAME — std::string{} can be constructed from either.
+#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)           \
+    [&]() {                                                                                  \
+        auto _env_name = std::string{ ENV_NAME };                                            \
+        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
+            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",            \
+                                        __VA_ARGS__ });                                      \
+        if(!_ret.second)                                                                     \
+        {                                                                                    \
+            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
+                        _env_name);                                                          \
+        }                                                                                    \
+        return _config->find(_env_name)->second;                                             \
     }()
 
 template <typename Tp>
@@ -89,7 +93,7 @@ auto callback_operation_option_names =
 auto buffered_operation_option_names =
     std::unordered_map<rocprofiler_buffer_tracing_kind_t, operation_options>{};
 
-std::unordered_set<int32_t>
+std::unordered_set<std::int32_t>
 get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
                     const std::string&                  optname = {})
 {
@@ -98,7 +102,7 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
 
     if(optname.empty())
     {
-        auto _ret = std::unordered_set<int32_t>{};
+        auto _ret = std::unordered_set<std::int32_t>{};
         for(auto iitr : callback_tracing_info[kindv].items())
         {
             if(iitr.second && *iitr.second != "none") _ret.emplace(iitr.first);
@@ -115,10 +119,10 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
         std::abort();
     }
 
-    if(_val->empty()) return std::unordered_set<int32_t>{};
+    if(_val->empty()) return std::unordered_set<std::int32_t>{};
 
-    auto _ret = std::unordered_set<int32_t>{};
-    for(const auto& itr : tim::delimit(*_val, " ,;:\n\t"))
+    auto _ret = std::unordered_set<std::int32_t>{};
+    for(const auto& itr : rocprofsys::delimit(*_val, " ,;:\n\t"))
     {
         for(auto iitr : callback_tracing_info[kindv].items())
         {
@@ -134,7 +138,7 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
     return _ret;
 }
 
-std::unordered_set<int32_t>
+std::unordered_set<std::int32_t>
 get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
                     const std::string&                optname = {})
 {
@@ -143,7 +147,7 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
 
     if(optname.empty())
     {
-        auto _ret = std::unordered_set<int32_t>{};
+        auto _ret = std::unordered_set<std::int32_t>{};
         for(auto iitr : buffered_tracing_info[kindv].items())
         {
             if(iitr.second && *iitr.second != "none") _ret.emplace(iitr.first);
@@ -160,10 +164,10 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
         std::abort();
     }
 
-    if(_val->empty()) return std::unordered_set<int32_t>{};
+    if(_val->empty()) return std::unordered_set<std::int32_t>{};
 
-    auto _ret = std::unordered_set<int32_t>{};
-    for(const auto& itr : tim::delimit(*_val, " ,;:\n\t"))
+    auto _ret = std::unordered_set<std::int32_t>{};
+    for(const auto& itr : rocprofsys::delimit(*_val, " ,;:\n\t"))
     {
         for(auto iitr : buffered_tracing_info[kindv].items())
         {
@@ -178,13 +182,13 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
     return _ret;
 }
 
-std::vector<int32_t>
-get_operations_impl(const std::unordered_set<int32_t>& _complete,
-                    const std::unordered_set<int32_t>& _include,
-                    const std::unordered_set<int32_t>& _exclude)
+std::vector<std::int32_t>
+get_operations_impl(const std::unordered_set<std::int32_t>& _complete,
+                    const std::unordered_set<std::int32_t>& _include,
+                    const std::unordered_set<std::int32_t>& _exclude)
 {
     auto _convert = [](const auto& _dset) {
-        auto _dret = std::vector<int32_t>{};
+        auto _dret = std::vector<std::int32_t>{};
         _dret.reserve(_dset.size());
         for(auto itr : _dset)
             _dret.emplace_back(itr);
@@ -212,9 +216,9 @@ get_version()
 
     if(_version.formatted == 0)
     {
-        uint32_t _major = 0;
-        uint32_t _minor = 0;
-        uint32_t _patch = 0;
+        std::uint32_t _major = 0;
+        std::uint32_t _minor = 0;
+        std::uint32_t _patch = 0;
 
         ROCPROFILER_CALL(rocprofiler_get_version(&_major, &_minor, &_patch));
 
@@ -336,12 +340,12 @@ config_settings(const std::shared_ptr<settings>& _config)
     _domain_defaults.append(",page_migration");
 #endif
 
-    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_ROCM_DOMAINS", _domain_description,
+    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_DOMAINS, _domain_description,
                               _domain_defaults, "rocm", "rocprofiler-sdk")
         ->set_choices(_domain_choices);
 
     ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_ROCM_EVENTS",
+        std::string, env_vars::ROCM_EVENTS,
         "ROCm hardware counters. Use ':device=N' syntax to specify collection on device "
         "number N, e.g. ':device=0'. If no device specification is provided, the event "
         "is collected on every available device",
@@ -368,7 +372,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     if(_has_hip_stream)
     {
         ROCPROFSYS_CONFIG_SETTING(
-            bool, "ROCPROFSYS_ROCM_GROUP_BY_QUEUE",
+            bool, env_vars::ROCM_GROUP_BY_QUEUE,
             "By default, Perfetto trace will show the HIP streams to which kernel "
             "and memory copy operations submitted. With the "
             "`ROCPROFSYS_ROCM_GROUP_BY_QUEUE` option, the trace will display HSA queues "
@@ -413,12 +417,24 @@ get_callback_domains()
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
     }
 #endif
+#if(ROCPROFILER_VERSION >= 10304)
+    if(_version.formatted >= 10304)
+    {
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API);
+    }
+#endif
+#if(ROCPROFILER_VERSION >= 10305)
+    if(_version.formatted >= 10305)
+    {
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API);
+    }
+#endif
 
-    auto _data = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
-    auto _domains =
-        tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
-                         .value_or(std::string{}),
-                     " ,;:\t\n");
+    auto _data    = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
+    auto _domains = rocprofsys::delimit(
+        config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
+            .value_or(std::string{}),
+        " ,;:\t\n");
 
     if(config::get_use_rcclp() && _version.formatted >= 600)
     {
@@ -436,7 +452,7 @@ get_callback_domains()
 
     // Check that the domains are valid
     const auto valid_choices =
-        settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS")->get_choices();
+        settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS })->get_choices();
 
     auto invalid_domain = [&valid_choices](const auto& domainv) {
         return !std::any_of(valid_choices.begin(), valid_choices.end(),
@@ -511,18 +527,26 @@ get_buffered_domains()
 #endif
     };
 
-    auto _data = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
-    auto _domains =
-        tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
-                         .value_or(std::string{}),
-                     " ,;:\t\n");
+    auto _data    = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
+    auto _domains = rocprofsys::delimit(
+        config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
+            .value_or(std::string{}),
+        " ,;:\t\n");
     const auto valid_choices =
-        settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS")->get_choices();
+        settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS })->get_choices();
 
     auto invalid_domain = [&valid_choices](const auto& domainv) {
         return !std::any_of(valid_choices.begin(), valid_choices.end(),
                             [&domainv](const auto& aitr) { return (aitr == domainv); });
     };
+
+#if(ROCPROFILER_VERSION >= 10000)  // KFD tracing APIs available in headers
+    // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
+    // undefined node IDs (0xFFFFFFFF). Guard at runtime to avoid abort().
+    constexpr std::uint32_t kfd_min_version = 10202;  // 1.2.2
+    const auto              kfd_version     = get_version();
+    const bool kfd_supported_by_runtime     = (kfd_version.formatted >= kfd_min_version);
+#endif
 
     for(const auto& itr : _domains)
     {
@@ -566,11 +590,7 @@ get_buffered_domains()
                 itr == "kfd_event_queue" || itr == "kfd_event_unmap_from_gpu" ||
                 itr == "kfd_event_dropped_events")
         {
-            // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
-            // undefined node IDs (0xFFFFFFFF). Guard at runtime to avoid abort().
-            constexpr uint32_t kfd_min_version = 10202;  // 1.2.2
-            auto               _ver            = get_version();
-            if(_ver.formatted < kfd_min_version)
+            if(!kfd_supported_by_runtime)
             {
                 static bool _warned = false;
                 if(!_warned)
@@ -578,7 +598,8 @@ get_buffered_domains()
                     LOG_WARNING("KFD tracing domain '{}' disabled: rocprofiler-sdk "
                                 "{}.{}.{} has a "
                                 "bug with undefined KFD node IDs (fixed in >= 1.2.2)",
-                                itr, _ver.major, _ver.minor, _ver.patch);
+                                itr, kfd_version.major, kfd_version.minor,
+                                kfd_version.patch);
                     _warned = true;
                 }
                 continue;
@@ -622,28 +643,40 @@ get_buffered_domains()
         }
     }
 
+#if(ROCPROFILER_VERSION >= 10000)
+    // Automatically enable KFD domains when unified memory profiling is enabled
+    if(config::get_use_unified_memory_profiling())
+    {
+        if(kfd_supported_by_runtime)
+        {
+            LOG_INFO("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON: implicitly enabling "
+                     "KFD page_fault and page_migrate buffered tracing domains");
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT);
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE);
+        }
+        else
+        {
+            LOG_WARNING("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON requested KFD "
+                        "page_fault/page_migrate tracing, but rocprofiler-sdk "
+                        "{}.{}.{} is too old (requires >= 1.2.2)",
+                        kfd_version.major, kfd_version.minor, kfd_version.patch);
+        }
+    }
+#endif
+
     return _data;
 }
 
 std::vector<std::string>
 get_rocm_events()
 {
-    return tim::delimit(
-        get_setting_value<std::string>("ROCPROFSYS_ROCM_EVENTS").value_or(std::string{}),
+    return rocprofsys::delimit(
+        get_setting_value<std::string>(std::string{ env_vars::ROCM_EVENTS })
+            .value_or(std::string{}),
         " ,;\t\n");
 }
 
-bool
-get_group_by_queue(void)
-{
-    std::optional<bool> _group_by_queue =
-        config::get_setting_value<bool>("ROCPROFSYS_ROCM_GROUP_BY_QUEUE");
-    bool _ret = _group_by_queue.value_or(true);
-
-    return _ret;
-}
-
-std::vector<int32_t>
+std::vector<std::int32_t>
 get_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
@@ -663,7 +696,7 @@ get_operations(rocprofiler_callback_tracing_kind_t kindv)
     return get_operations_impl(_complete, _include, _exclude);
 }
 
-std::vector<int32_t>
+std::vector<std::int32_t>
 get_operations(rocprofiler_buffer_tracing_kind_t kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
@@ -683,7 +716,7 @@ get_operations(rocprofiler_buffer_tracing_kind_t kindv)
     return get_operations_impl(_complete, _include, _exclude);
 }
 
-std::unordered_set<int32_t>
+std::unordered_set<std::int32_t>
 get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
@@ -696,14 +729,14 @@ get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
 
     auto _data = get_operations_impl(
         kindv, callback_operation_option_names.at(kindv).operations_annotate_backtrace);
-    auto _ret = std::unordered_set<int32_t>{};
+    auto _ret = std::unordered_set<std::int32_t>{};
     _ret.reserve(_data.size());
     for(auto itr : _data)
         _ret.emplace(itr);
     return _ret;
 }
 
-std::unordered_set<int32_t>
+std::unordered_set<std::int32_t>
 get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
@@ -716,7 +749,7 @@ get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
 
     auto _data = get_operations_impl(
         kindv, buffered_operation_option_names.at(kindv).operations_annotate_backtrace);
-    auto _ret = std::unordered_set<int32_t>{};
+    auto _ret = std::unordered_set<std::int32_t>{};
     _ret.reserve(_data.size());
     for(auto itr : _data)
         _ret.emplace(itr);

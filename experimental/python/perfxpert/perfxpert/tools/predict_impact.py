@@ -34,6 +34,7 @@ import hashlib
 import json
 import sqlite3
 import threading
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from perfxpert.knowledge import load_yaml
@@ -138,6 +139,13 @@ def _kernel_time_pct(baseline_db: str, kernel_name: str) -> Optional[float]:
 _COUNTER_TABLE_CANDIDATES = ("rocpd_counter_values", "counter_values", "COUNTER")
 
 
+def _readonly_sqlite_uri(db_path: str) -> str:
+    """Build a read-only SQLite file URI with path metacharacters escaped."""
+    if not db_path:
+        raise ValueError("db_path must not be empty")
+    return f"{Path(db_path).expanduser().resolve(strict=False).as_uri()}?mode=ro"
+
+
 def _baseline_has_counters(baseline_db: str) -> bool:
     """Return True iff the rocpd DB has any counter rows.
 
@@ -146,7 +154,7 @@ def _baseline_has_counters(baseline_db: str) -> bool:
     allowlist + fall back to ``False`` on any exception.
     """
     try:
-        with sqlite3.connect(f"file:{baseline_db}?mode=ro", uri=True) as conn:
+        with sqlite3.connect(_readonly_sqlite_uri(baseline_db), uri=True) as conn:
             cur = conn.cursor()
             for tbl in _COUNTER_TABLE_CANDIDATES:
                 try:
@@ -156,7 +164,7 @@ def _baseline_has_counters(baseline_db: str) -> bool:
                         return True
                 except sqlite3.Error:
                     continue
-    except sqlite3.Error:
+    except (ValueError, sqlite3.Error):
         return False
     return False
 

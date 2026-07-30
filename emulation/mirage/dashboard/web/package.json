@@ -1,0 +1,54 @@
+{
+  "name": "mirage-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.6.1",
+    "rete": "^2.0.6",
+    "rete-area-plugin": "^2.1.5",
+    "rete-auto-arrange-plugin": "^2.0.2",
+    "rete-connection-plugin": "^2.0.5",
+    "rete-connection-reroute-plugin": "^2.0.3",
+    "rete-context-menu-plugin": "^2.0.6",
+    "rete-history-plugin": "^2.1.1",
+    "rete-react-plugin": "^2.1.0",
+    "rete-render-utils": "^2.0.3",
+    "styled-components": "^6.3.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.59.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.12.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "express": "^5.2.1",
+    "globals": "^17.4.0",
+    "tsx": "^4.21.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.58.0",
+    "vite": "^8.0.4",
+    "vitest": "^4.1.4"
+  }
+}

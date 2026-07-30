@@ -9,7 +9,6 @@
 # -----------------------------------------------------------------------------
 
 import csv
-import fcntl
 import math
 from abc import ABC
 from collections import namedtuple
@@ -34,6 +33,7 @@ from typing import Any
 
 import utils.hip_interface as hip
 import utils.hiprtc_interface as hiprtc
+from utils import utils_profile
 
 # =============================================================================
 # GLOBAL VARIABLES
@@ -57,7 +57,9 @@ VALU_NFMA = 1024
 # Bench_base Class (ABSTRACT)
 # =============================================================================
 class Bench_base(ABC):
-    def __init__(self, device_ids: list) -> None:
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        self.device_id = device_id
+
         # Arch or hardware-specific variables must be set in child classes
         # self.lds_sizes: dict[str, int]
         self.unsupported_data_types: list[str]
@@ -70,10 +72,13 @@ class Bench_base(ABC):
         self.WAVEFRONT_SIZE: int
         self.MATRIX_OPS_TYPE: str
 
+        self.cache_sizes = cache_sizes
+
         # Some data types have different rates. Set the number of iterations
         # to keep running time under control.
         self.flops_kernel_iterations = {
             "FP16": 256,
+            "BF16": 256,
             "FP32": 256,
             "FP64": 128,
             "INT8": 128,
@@ -83,6 +88,7 @@ class Bench_base(ABC):
 
         self.flops_kernel_selector = {
             "FP16": [f"flops_benchmark<_Float16, {VALU_NFMA}>", sizeof(c_short)],
+            "BF16": ["bf16_dot_flops", sizeof(c_short)],
             "FP32": [f"flops_benchmark<float, {VALU_NFMA}>", sizeof(c_float)],
             "FP64": [f"flops_benchmark<double, {VALU_NFMA}>", sizeof(c_double)],
             "INT8": [f"flops_benchmark<char, {VALU_NFMA}>", sizeof(c_int8)],
@@ -105,13 +111,9 @@ class Bench_base(ABC):
         self.mall_bw_src: str
         self.l2_bw_src: str
         self.l1_bw_src: str
+        self.l0_bw_src: str
         self.lds_bw_src: str
-        self.fp16_src: str
-        self.fp32_src: str
-        self.fp64_src: str
-        self.int8_src: str
-        self.int32_src: str
-        self.int64_src: str
+        self.bf16_flops_benchmark_src: str
         self.matrix_f4_src: str
         self.matrix_f6_src: str
         self.matrix_f6f4_src: str
@@ -122,10 +124,12 @@ class Bench_base(ABC):
         self.matrix_f64_src: str
         self.matrix_i8_src: str
         self.set_kernel_source()
+        self.set_cache_kernel_selector()
 
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes
     # -----------------------------------------------------------------------------
+
     @contextmanager
     def gpu_benchmark_lock(self, device: int) -> Generator[None, None, None]:
         """Acquire exclusive lock for benchmarking a specific GPU."""
@@ -141,18 +145,16 @@ class Bench_base(ABC):
 
         lock_file = lock_dir / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
 
-        with open(lock_file, "a") as f:
-            try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                msg = (
-                    f"Waiting for GPU {device} (UUID: {gpu_uuid[:8]}...) - "
-                    "another rocprof-compute benchmark is in progress..."
-                )
-                print(msg, flush=True)
-                fcntl.flock(f, fcntl.LOCK_EX)  # Blocking wait
-                msg = f"Acquired lock for GPU {device}, proceeding with benchmark."
-                print(msg, flush=True)
+        with utils_profile.file_lock(
+            lock_file,
+            wait_message=(
+                f"Waiting for GPU {device} (UUID: {gpu_uuid[:8]}...) - "
+                "another rocprof-compute benchmark is in progress..."
+            ),
+            acquired_message=(
+                f"Acquired lock for GPU {device}, proceeding with benchmark."
+            ),
+        ):
             yield
 
     def show_progress(self, pct: float) -> None:
@@ -248,6 +250,15 @@ class Bench_base(ABC):
         # Parse out only gfx
         return arch_str.split(":", 1)[0]
 
+    def set_cache_kernel_selector(self) -> None:
+        self.cache_kernel_selector = {}
+
+        for level in ["L0", "L1", "L2", "MALL"]:
+            if level in self.cache_sizes.keys():
+                self.cache_kernel_selector[level] = (
+                    f"Cache_bw<float, {self.cache_sizes[level]}, 256>"
+                )
+
     def run_get_samples(
         self,
         count: int,
@@ -289,18 +300,6 @@ class Bench_base(ABC):
     # -----------------------------------------------------------------------------
 
     def set_kernel_source(self) -> None:
-        # HBM Bandwidth benchmark
-        self.hbm_bw_src = """
-        template<typename T>
-        __global__ void HBM_bw(T *dst, const T *src)
-        {
-            const unsigned int gid = blockDim.x * blockIdx.x + threadIdx.x;
-            const unsigned int tid = threadIdx.x;
-
-            dst[gid] = src[gid];
-        }
-        """
-
         # Cache Bandwidth benchmark
         self.cache_bw_src = """
         template <typename T, int cacheSize, int workgroup_size>
@@ -534,6 +533,10 @@ class Bench_base(ABC):
     def mall_bw_bench(self, device: int) -> PerfMetrics:
         return self.cache_bw_bench(device, "MALL", 1)
 
+    # L0 cache bandwidth benchmark
+    def l0_bw_bench(self, device: int) -> PerfMetrics:
+        return self.cache_bw_bench(device, "L0", 100)
+
     # L1 cache bandwidth benchmark
     def l1_bw_bench(self, device: int) -> PerfMetrics:
         return self.cache_bw_bench(device, "L1", 100)
@@ -614,7 +617,12 @@ class Bench_base(ABC):
         iterations = self.flops_kernel_iterations[type]
         total_flops = threads * iterations * VALU_NFMA * 2
 
-        prog = self.Program(self.flops_benchmark_src, [kernel_name])
+        src = (
+            self.bf16_flops_benchmark_src
+            if type == "BF16"
+            else self.flops_benchmark_src
+        )
+        prog = self.Program(src, [kernel_name])
 
         func = prog.get_kernel(kernel_name)
 
@@ -761,6 +769,9 @@ class Bench_base(ABC):
     def fp16_benchmark(self, device: int) -> PerfMetrics:
         return self.flops_bench(device, "FP16", "FLOP", "GFLOPS")
 
+    def bf16_benchmark(self, device: int) -> PerfMetrics:
+        return self.flops_bench(device, "BF16", "FLOP", "GFLOPS")
+
     def fp32_benchmark(self, device: int) -> PerfMetrics:
         return self.flops_bench(device, "FP32", "FLOP", "GFLOPS")
 
@@ -777,7 +788,10 @@ class Bench_base(ABC):
         return self.flops_bench(device, "INT64", "IOP", "GOPS")
 
     def run_benchmark(self, device: int) -> dict[PerfMetrics]:
-        """Run the roofline tests on the specified device."""
+        """
+        Run the roofline tests on the specified device.
+        Returns a dictionary of PerfMetrics.
+        """
         with self.gpu_benchmark_lock(device):
             metrics_dict = {}
 
@@ -795,24 +809,13 @@ class Bench_base(ABC):
 
                 metrics_dict[name] = metrics
 
+            print("GPU Benchmarking completed")
             return metrics_dict
 
-    def run_on_devices(self, devices: list[str]) -> dict[dict[PerfMetrics]]:
-        """
-        Run the benchmark test on the all requested devices in a given list.
-        Returns a dictionary mapping device ID to dictionary of metrics.
-        """
-        metrics = {}
-        for d in devices:
-            metrics[d] = self.run_benchmark(int(d))
-
-        print("GPU Benchmarking completed")
-        return metrics
-
-    def dump_csv(self, metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
+    def dump_csv(self, metrics: dict[PerfMetrics], file_path: str) -> None:
         """Generate a csv file containing the collected benchmark metrics."""
         # TODO: Better way to map CSV column names?
-        with open(file_path, "w") as f:
+        with open(file_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
 
             types = self.csv_cols_map.keys()
@@ -826,11 +829,10 @@ class Bench_base(ABC):
 
             writer.writerow(row)
 
-            for d in metrics:
-                row = [d]
-                for t in types:
-                    row.append(metrics[d][t].mean)
-                    row.append(metrics[d][t].low)
-                    row.append(metrics[d][t].high)
+            row = [self.device_id]
+            for t in types:
+                row.append(metrics[t].mean)
+                row.append(metrics[t].low)
+                row.append(metrics[t].high)
 
-                writer.writerow(row)
+            writer.writerow(row)

@@ -21,7 +21,9 @@
 // SOFTWARE.
 
 #include <gtest/gtest.h>
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include "gfx12/gfx12parser.h"
 #include "gfx12/gfx12token.h"
@@ -72,7 +74,8 @@ TEST(Gfx12WaveStartTest, GetReturnsCommonType)
     ws.simd = 1;
     ws.wgp = 8;
     ws.wid = 10;
-    ws.dispatcher = 0b10101; // 5 bits: pipe=01, me=1, upper bits ignored
+    ws.pipe = 0b01;
+    ws.me = 1;
     ws.count = 50;
 
     wstart_type_common common = ws.get();
@@ -81,8 +84,8 @@ TEST(Gfx12WaveStartTest, GetReturnsCommonType)
     EXPECT_EQ(common.simd, 1);
     EXPECT_EQ(common.wgp, 8);
     EXPECT_EQ(common.wid, 10);
-    EXPECT_EQ(common.pipe, 0b01);             // dispatcher & 0x3
-    EXPECT_EQ(common.me, (0b10101 >> 2) & 1); // (dispatcher >> 2) & 1
+    EXPECT_EQ(common.pipe, 0b01);
+    EXPECT_EQ(common.me, 1);
     EXPECT_EQ(common.count, 50);
 }
 
@@ -174,10 +177,10 @@ TEST(Gfx12TokenTest, InheritsFromGfx11Token)
     EXPECT_EQ(gfx10->contents, 0x87654321);
 }
 
-// Tests for gfx12::wave_t::map_to_common_type
+// Tests for gfx12::map_to_common_type
 TEST(Gfx12InstMapTest, FirstEntryMapsToSalu)
 {
-    auto result = gfx12::wave_t::map_to_common_type(0, 1, 1);
+    auto result = gfx12::map_to_common_type(0, 1, 1);
     EXPECT_EQ(result.category, WaveInstCategory::SALU);
     EXPECT_EQ(result.cycles, 1);
 }
@@ -185,12 +188,12 @@ TEST(Gfx12InstMapTest, FirstEntryMapsToSalu)
 TEST(Gfx12InstMapTest, OtherSimdRangeMapsCorrectly)
 {
     // lds_other_simd_1 = 80 - now handled by map_to_common_type
-    auto resultStart = gfx12::wave_t::map_to_common_type(80, 1, 1);
+    auto resultStart = gfx12::map_to_common_type(80, 1, 1);
     EXPECT_EQ(resultStart.category, WaveInstCategory::LDS_OTHER_SIMD);
     EXPECT_EQ(resultStart.cycles, 1);
 
     // einst 102 is not in the table - unmapped
-    auto resultEnd = gfx12::wave_t::map_to_common_type(102, 1, 1);
+    auto resultEnd = gfx12::map_to_common_type(102, 1, 1);
     EXPECT_EQ(resultEnd.category, WaveInstCategory::NONE);
     EXPECT_EQ(resultEnd.cycles, 0);
 }
@@ -198,11 +201,11 @@ TEST(Gfx12InstMapTest, OtherSimdRangeMapsCorrectly)
 TEST(Gfx12InstMapTest, VmemOtherSimdRangeMapsCorrectly)
 {
     // vmem_other_simd_start = 188 - now handled by map_to_common_type
-    auto resultStart = gfx12::wave_t::map_to_common_type(188, 1, 1);
+    auto resultStart = gfx12::map_to_common_type(188, 1, 1);
     EXPECT_EQ(resultStart.category, WaveInstCategory::VMEM_OTHER_SIMD);
     EXPECT_EQ(resultStart.cycles, 1);
 
-    auto resultBeforeEnd = gfx12::wave_t::map_to_common_type(221, 1, 1);
+    auto resultBeforeEnd = gfx12::map_to_common_type(221, 1, 1);
     EXPECT_EQ(resultBeforeEnd.category, WaveInstCategory::VMEM_OTHER_SIMD);
     EXPECT_EQ(resultBeforeEnd.cycles, 34);
 }
@@ -210,14 +213,14 @@ TEST(Gfx12InstMapTest, VmemOtherSimdRangeMapsCorrectly)
 TEST(Gfx12InstMapTest, HighUnmappedInstReturnsNone)
 {
     // Values between other_simd_end and vmem_other_simd_start that aren't mapped
-    auto result = gfx12::wave_t::map_to_common_type(160, 1, 1);
+    auto result = gfx12::map_to_common_type(160, 1, 1);
     EXPECT_EQ(result.category, WaveInstCategory::NONE);
     EXPECT_EQ(result.cycles, 0);
 }
 
 TEST(Gfx12InstMapTest, NegativeInstReturnsNone)
 {
-    auto result = gfx12::wave_t::map_to_common_type(-1, 1, 1);
+    auto result = gfx12::map_to_common_type(-1, 1, 1);
     EXPECT_EQ(result.category, WaveInstCategory::NONE);
     EXPECT_EQ(result.cycles, 0);
 }
@@ -226,7 +229,7 @@ TEST(Gfx12InstMapTest, NegativeInstReturnsNone)
 TEST(Gfx12OtherSimdMapTest, BelowOtherSimdRangeNotAffected)
 {
     // einst 79 is not in the other_simd range and not otherwise mapped
-    auto result79 = gfx12::wave_t::map_to_common_type(79, 1, 1);
+    auto result79 = gfx12::map_to_common_type(79, 1, 1);
     EXPECT_EQ(result79.category, WaveInstCategory::NONE);
     EXPECT_EQ(result79.cycles, 0);
 }
@@ -234,7 +237,7 @@ TEST(Gfx12OtherSimdMapTest, BelowOtherSimdRangeNotAffected)
 TEST(Gfx12OtherSimdMapTest, LdsOtherSimdMapsCorrectly)
 {
     // lds_other_simd_1 = 80
-    auto result80 = gfx12::wave_t::map_to_common_type(80, 1, 1);
+    auto result80 = gfx12::map_to_common_type(80, 1, 1);
     EXPECT_EQ(result80.category, WaveInstCategory::LDS_OTHER_SIMD);
     EXPECT_EQ(result80.cycles, 1);
 }
@@ -242,7 +245,7 @@ TEST(Gfx12OtherSimdMapTest, LdsOtherSimdMapsCorrectly)
 TEST(Gfx12OtherSimdMapTest, VmemOtherSimdMapsCorrectly)
 {
     // vmem_other_simd_start = 188
-    auto result190 = gfx12::wave_t::map_to_common_type(190, 1, 1);
+    auto result190 = gfx12::map_to_common_type(190, 1, 1);
     EXPECT_EQ(result190.category, WaveInstCategory::VMEM_OTHER_SIMD);
     EXPECT_EQ(result190.cycles, 3);
 }
@@ -250,7 +253,7 @@ TEST(Gfx12OtherSimdMapTest, VmemOtherSimdMapsCorrectly)
 TEST(Gfx12OtherSimdMapTest, AtBlockStoreReturnsVmem)
 {
     // block_store = 222 - maps to VMEM
-    auto result222 = gfx12::wave_t::map_to_common_type(222, 1, 1);
+    auto result222 = gfx12::map_to_common_type(222, 1, 1);
     EXPECT_EQ(result222.category, WaveInstCategory::VMEM);
     EXPECT_EQ(result222.cycles, 1);
 }
@@ -296,17 +299,38 @@ TEST(Gfx12TokenGeneratorTest, LargeBufferProcessesWithoutOob)
     EXPECT_GT(tokenCount, 0);
 }
 
+TEST(Gfx12TokenGeneratorTest, SafeReaderRecordsRealtimeTimestamp)
+{
+    gfx12::timestamp_type ts{};
+    ts.header = 0b0000001;
+    ts.rt = 1;
+    ts.pl = 0;
+    ts.time = 0x23456789ull;
+
+    std::array<uint8_t, sizeof(uint64_t)> buffer{};
+    std::memcpy(buffer.data(), &ts.raw, sizeof(ts.raw));
+
+    gfx12::TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+    auto token = gen.next();
+
+    EXPECT_EQ(token.type, RdnaType::TIMESTAMP);
+    ASSERT_EQ(gen.realtime.size(), 1u);
+    EXPECT_EQ(gen.realtime.front().shader_clock, 0);
+    EXPECT_EQ(gen.realtime.front().realtime_clock, ts.time);
+}
+
 // Edge case tests for field boundaries
 TEST(Gfx12WaveStartEdgeCaseTest, MaxFieldValues)
 {
     gfx12::wstart_type ws{};
     ws.raw = 0;
-    ws.sa = 1;          // Max for 1-bit
-    ws.simd = 3;        // Max for 2-bit
-    ws.wgp = 15;        // Max for 4-bit
-    ws.wid = 31;        // Max for 5-bit
-    ws.dispatcher = 31; // Max for 5-bit
-    ws.count = 127;     // Max for 7-bit
+    ws.sa = 1;      // Max for 1-bit
+    ws.simd = 3;    // Max for 2-bit
+    ws.wgp = 15;    // Max for 4-bit
+    ws.wid = 31;    // Max for 5-bit
+    ws.pipe = 3;    // Max for 2-bit
+    ws.me = 1;      // Max for 1-bit
+    ws.count = 127; // Max for 7-bit
 
     wstart_type_common common = ws.get();
 
@@ -356,7 +380,7 @@ TEST(Gfx12ShaderDataEdgeCaseTest, MaxFieldValues)
 // Edge case: map_to_common_type at block_store boundary - 221 is in the excluded rangeapping table
 TEST(Gfx12InstMapEdgeCaseTest, DurationFromMappingTable)
 {
-    auto result = gfx12::wave_t::map_to_common_type(0, 100, 50);
+    auto result = gfx12::map_to_common_type(0, 100, 50);
     EXPECT_EQ(result.category, WaveInstCategory::SALU);
     // The cycles value comes from the mapping table, not the input
     EXPECT_GE(result.cycles, 0);
@@ -383,7 +407,7 @@ TEST(Gfx12WaveEndEdgeCaseTest, MaxFieldValues)
 // Tests for map_to_common_type edge cases
 TEST(Gfx12WaveTest, MapToCommonTypeBlockStore)
 {
-    auto result = gfx12::wave_t::map_to_common_type(222, 1, 1); // block_store=222
+    auto result = gfx12::map_to_common_type(222, 1, 1); // block_store=222
     EXPECT_EQ(result.category, WaveInstCategory::VMEM);
     EXPECT_EQ(result.cycles, 1);
 }
@@ -391,12 +415,12 @@ TEST(Gfx12WaveTest, MapToCommonTypeBlockStore)
 TEST(Gfx12WaveTest, MapToCommonTypeValuDpfpAndDerate)
 {
     // valu_dpfp=146 => VALU with dprate
-    auto dpfp = gfx12::wave_t::map_to_common_type(146, 4, 2);
+    auto dpfp = gfx12::map_to_common_type(146, 4, 2);
     EXPECT_EQ(dpfp.category, WaveInstCategory::VALU);
     EXPECT_EQ(dpfp.cycles, 4);
 
     // valu_derate=147 => VALU with dprate*derate
-    auto derate = gfx12::wave_t::map_to_common_type(147, 4, 2);
+    auto derate = gfx12::map_to_common_type(147, 4, 2);
     EXPECT_EQ(derate.category, WaveInstCategory::VALU);
     EXPECT_EQ(derate.cycles, 8);
 }
@@ -405,14 +429,14 @@ TEST(Gfx12WaveTest, MapToCommonTypeValuDpfpAndDerate)
 TEST(Gfx12WaveTest, MapToCommonTypeOtherSimd)
 {
     // LDS other simd: lds_other_simd_1=80
-    EXPECT_EQ(gfx12::wave_t::map_to_common_type(80, 1, 1).category, WaveInstCategory::LDS_OTHER_SIMD);
+    EXPECT_EQ(gfx12::map_to_common_type(80, 1, 1).category, WaveInstCategory::LDS_OTHER_SIMD);
 
     // VMEM other simd: vmem_other_simd_start=188
-    EXPECT_EQ(gfx12::wave_t::map_to_common_type(190, 1, 1).category, WaveInstCategory::VMEM_OTHER_SIMD);
+    EXPECT_EQ(gfx12::map_to_common_type(190, 1, 1).category, WaveInstCategory::VMEM_OTHER_SIMD);
 
     // Below other_simd range (79 not in table)
-    EXPECT_EQ(gfx12::wave_t::map_to_common_type(79, 1, 1).category, WaveInstCategory::NONE);
+    EXPECT_EQ(gfx12::map_to_common_type(79, 1, 1).category, WaveInstCategory::NONE);
 
     // block_store=222 maps to VMEM
-    EXPECT_EQ(gfx12::wave_t::map_to_common_type(222, 1, 1).category, WaveInstCategory::VMEM);
+    EXPECT_EQ(gfx12::map_to_common_type(222, 1, 1).category, WaveInstCategory::VMEM);
 }

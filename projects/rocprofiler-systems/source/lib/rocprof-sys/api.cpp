@@ -14,6 +14,12 @@ rocprofsys_push_trace(const char* _name)
 }
 
 extern "C" void
+rocprofsys_push_trace_with_args(const char* _name, const char* _serialized_args)
+{
+    rocprofsys_push_trace_with_args_hidden(_name, _serialized_args);
+}
+
+extern "C" void
 rocprofsys_pop_trace(const char* _name)
 {
     rocprofsys_pop_trace_hidden(_name);
@@ -131,9 +137,9 @@ rocprofsys_set_env(const char* env_name, const char* env_val)
 }
 
 extern "C" void
-rocprofsys_set_mpi(bool use, bool attached)
+rocprofsys_set_mpi(bool use)
 {
-    rocprofsys_set_mpi_hidden(use, attached);
+    rocprofsys_set_mpi_hidden(use);
 }
 
 extern "C" void

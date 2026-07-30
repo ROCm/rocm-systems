@@ -1,0 +1,41 @@
+digraph writer_insert_flow {
+    rankdir=TB;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=10, style=filled, shape=box];
+    edge [fontname="Helvetica", fontsize=9];
+
+    label="Writer: Insert Data Flow (e.g. region)";
+    labelloc=t;
+    fontsize=14;
+
+    start [label="writer_t::insert_region_data()", fillcolor="#c8ddf0"];
+    impl [label="m_impl->insert_region_data()", fillcolor="#c8ddf0"];
+    dispatch [label="m_region_writer->insert()", fillcolor="#c0e0c0"];
+    crtp [label="region_writer_interface::insert()\n→ self().insert_impl()", fillcolor="#ddd0f0"];
+    insert_impl [label="region_writer<schema_v3_tag>::insert_impl()", fillcolor="#f0dcc0"];
+
+    begin_tx [label="1. backend->begin_transaction()", fillcolor="#ffffc0"];
+    validate [label="2. validator->require_node()\n   .require_process()\n   .require_thread()", fillcolor="#ffffc0"];
+    resolve [label="3. resolve foreign keys\n   (process_pk, thread_pk, name_pk)", fillcolor="#ffffc0"];
+    event [label="4. common_ops->insert_event()\n   (if event metadata present)", fillcolor="#ffffc0"];
+    get_pk [label="5. key_providers->region_data().next()", fillcolor="#ffffc0"];
+    execute [label="6. stmts->region_statement()(pk, ...)", fillcolor="#ffffc0"];
+    args [label="7. common_ops->insert_arg()\n   (for each argument)", fillcolor="#ffffc0"];
+    sample [label="8. common_ops->maybe_insert_sample()\n   (timeline correlation)", fillcolor="#ffffc0"];
+    commit [label="9. transaction_guard destructor\n   → COMMIT", fillcolor="#ffffc0"];
+
+    start -> impl;
+    impl -> dispatch;
+    dispatch -> crtp;
+    crtp -> insert_impl;
+
+    insert_impl -> begin_tx;
+    begin_tx -> validate;
+    validate -> resolve;
+    resolve -> event;
+    event -> get_pk;
+    get_pk -> execute;
+    execute -> args;
+    args -> sample;
+    sample -> commit;
+}

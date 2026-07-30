@@ -23,12 +23,21 @@
 #ifndef SRC_UTIL_HSA_RSRC_FACTORY_H_
 #define SRC_UTIL_HSA_RSRC_FACTORY_H_
 
-#include "hsa_includes.h"
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+// Deliberate include cycle: aqlprofile.hpp -> hsa_rsrc_factory.h (when
+// ROCPROFILER_EXTERNAL_AQLPROFILE == 0) -> aqlprofile.hpp. The cycle is safe
+// because aqlprofile.hpp drives the ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE
+// gate and includes aql_profile_v2.h *before* including this header, and our
+// own include guard (SRC_UTIL_HSA_RSRC_FACTORY_H_) short-circuits the
+// re-entry. Do not reorder the includes in aqlprofile.hpp, or this cycle
+// will produce an incomplete aqlprofile_cu_bitmap_t at AgentInfo's point of
+// use below.
+#include "lib/aqlprofile/aqlprofile.hpp"  // aqlprofile_cu_bitmap_t (gated aql_profile_v2.h)
+#include "lib/aqlprofile/hsa_includes.h"
 
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -44,9 +53,10 @@
     {                                                                                              \
         if((status) != HSA_STATUS_SUCCESS)                                                         \
         {                                                                                          \
-            const char* emsg = 0;                                                                  \
-            hsa_status_string(status, &emsg);                                                      \
-            printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                              \
+            const char* emsg = nullptr;                                                            \
+            if(rocprofiler::aqlprofile::get_core_table()->hsa_status_string_fn)                    \
+                rocprofiler::aqlprofile::get_core_table()->hsa_status_string_fn(status, &emsg);    \
+            fprintf(stderr, "%s: %s\n", msg, emsg ? emsg : "<unknown error>");                     \
             abort();                                                                               \
         }                                                                                          \
     } while(0)
@@ -56,9 +66,10 @@
     {                                                                                              \
         if((status) != HSA_STATUS_INFO_BREAK)                                                      \
         {                                                                                          \
-            const char* emsg = 0;                                                                  \
-            hsa_status_string(status, &emsg);                                                      \
-            printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                              \
+            const char* emsg = nullptr;                                                            \
+            if(rocprofiler::aqlprofile::get_core_table()->hsa_status_string_fn)                    \
+                rocprofiler::aqlprofile::get_core_table()->hsa_status_string_fn(status, &emsg);    \
+            fprintf(stderr, "%s: %s\n", msg, emsg ? emsg : "<unknown error>");                     \
             abort();                                                                               \
         }                                                                                          \
     } while(0)
@@ -66,6 +77,21 @@
 static const size_t                   MEM_PAGE_BYTES = 0x1000;
 static const size_t                   MEM_PAGE_MASK  = MEM_PAGE_BYTES - 1;
 typedef decltype(hsa_agent_t::handle) hsa_agent_handle_t;
+
+namespace rocprofiler
+{
+namespace aqlprofile
+{
+void
+hsa_rsrc_factory_init(::HsaApiTable* table);
+
+const ::CoreApiTable*
+get_core_table();
+
+const ::AmdExtTable*
+get_amd_ext_table();
+}  // namespace aqlprofile
+}  // namespace rocprofiler
 
 // Encapsulates information about a Hsa Agent such as its
 // handle, name, max queue size, max wavefront size, etc.
@@ -129,6 +155,18 @@ struct AgentInfo
 
     // Timestamp frequency for realtime clock
     uint32_t timestamp_freq{0};
+
+    // Per-SE/SA active CU bitmap from DRM. Bit set = active CU. All-zero
+    // means the bitmap is unavailable, in which case GFX11+ WGP iteration
+    // falls back to the legacy sequential formula based on cu_num. Uses the
+    // shared aqlprofile_cu_bitmap_t so this internal cache cannot drift
+    // from the public V2 ABI layout.
+    aqlprofile_cu_bitmap_t cu_bitmap{};
+
+    // Number of XCC per AID
+    uint32_t xcc_per_aid{1};
+
+    uint32_t se_per_xcc() const { return se_num / xcc_num; }
 };
 
 // HSA timer class
@@ -143,13 +181,13 @@ public:
     HsaTimer()
     {
         timestamp_t  sysclock_hz = 0;
-        hsa_status_t status =
-            hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
+        hsa_status_t status = rocprofiler::aqlprofile::get_core_table()->hsa_system_get_info_fn(
+            HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
         CHECK_STATUS("hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY)", status);
         sysclock_factor_ = (freq_t) 1000000000 / (freq_t) sysclock_hz;
     }
 
-    // Methids for system-clock/ns conversion
+    // Methods for system-clock/ns conversion
     timestamp_t sysclock_to_ns(const timestamp_t& sysclock) const
     {
         return timestamp_t((freq_t) sysclock * sysclock_factor_);
@@ -163,7 +201,8 @@ public:
     timestamp_t timestamp_ns() const
     {
         timestamp_t  sysclock;
-        hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
+        hsa_status_t status = rocprofiler::aqlprofile::get_core_table()->hsa_system_get_info_fn(
+            HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
         CHECK_STATUS("hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP)", status);
         return sysclock_to_ns(sysclock);
     }
@@ -183,7 +222,7 @@ public:
     static HsaRsrcFactory* Create(bool initialize_hsa = true)
     {
         std::lock_guard<mutex_t> lck(mutex_);
-        if(instance_ == NULL)
+        if(instance_ == nullptr)
         {
             instance_ = new HsaRsrcFactory(initialize_hsa);
         }
@@ -192,8 +231,8 @@ public:
 
     static HsaRsrcFactory& Instance()
     {
-        if(instance_ == NULL) instance_ = Create(false);
-        hsa_status_t status = (instance_ != NULL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+        if(instance_ == nullptr) instance_ = Create(false);
+        hsa_status_t status = (instance_ != nullptr) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
         CHECK_STATUS("HsaRsrcFactory::Instance() failed", status);
         return *instance_;
     }
@@ -201,8 +240,8 @@ public:
     static void Destroy()
     {
         std::lock_guard<mutex_t> lck(mutex_);
-        if(instance_) delete instance_;
-        instance_ = NULL;
+        delete instance_;
+        instance_ = nullptr;
     }
 
     // Return system agent info
@@ -249,14 +288,14 @@ public:
     uint8_t* AllocateLocalMemory(const AgentInfo* agent_info, size_t size);
 
     // Allocate memory tp pass kernel parameters
-    // Memory is alocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
+    // Memory is allocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
     // @param agent_info Agent from whose memory region to allocate
     // @param size Size of memory in terms of bytes
     // @return uint8_t* Pointer to buffer, null if allocation fails.
     uint8_t* AllocateKernArgMemory(const AgentInfo* agent_info, size_t size);
 
     // Allocate system memory accessible from both CPU and GPU
-    // Memory is alocated accessible to all CPU agents and AgentInfo parameter is ignored.
+    // Memory is allocated accessible to all CPU agents and AgentInfo parameter is ignored.
     // @param agent_info Agent from whose memory region to allocate
     // @param size Size of memory in terms of bytes
     // @return uint8_t* Pointer to buffer, null if allocation fails.
@@ -323,7 +362,7 @@ public:
     {
         std::lock_guard<mutex_t> lck(mutex_);
         timeout_ns_ = time;
-        if(instance_ != NULL) instance_->timeout_ = instance_->timer_->ns_to_sysclock(time);
+        if(instance_ != nullptr) instance_->timeout_ = instance_->timer_->ns_to_sysclock(time);
     }
 
 private:
@@ -347,42 +386,41 @@ private:
     const AgentInfo* AddAgentInfo(const hsa_agent_t agent);
 
     // To mmap command buffer memory
-    static const bool CMD_MEMORY_MMAP = false;
-
-    // HSA was initialized
-    const bool initialize_hsa_;
-
+    static constexpr bool  CMD_MEMORY_MMAP = false;
     static HsaRsrcFactory* instance_;
     static mutex_t         mutex_;
-
-    // Used to maintain a list of Hsa Gpu Agent Info
-    std::vector<const AgentInfo*> gpu_list_;
-    std::vector<hsa_agent_t>      gpu_agents_;
-
-    // Used to maintain a list of Hsa Cpu Agent Info
-    std::vector<const AgentInfo*> cpu_list_;
-    std::vector<hsa_agent_t>      cpu_agents_;
-
-    // System agents map
-    std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_;
-
-    // AqlProfile API table
-    aqlprofile_pfn_t aqlprofile_api_;
-
-    // Loader API table
-    hsa_ven_amd_loader_1_00_pfn_t loader_api_;
-
     // System timeout, ns
     static timestamp_t timeout_ns_;
+
+    // HSA was initialized
+    const bool initialize_hsa_ = false;
+
+    // Used to maintain a list of Hsa Gpu Agent Info
+    std::vector<const AgentInfo*> gpu_list_   = {};
+    std::vector<hsa_agent_t>      gpu_agents_ = {};
+
+    // Used to maintain a list of Hsa Cpu Agent Info
+    std::vector<const AgentInfo*> cpu_list_   = {};
+    std::vector<hsa_agent_t>      cpu_agents_ = {};
+
+    // System agents map
+    std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_ = {};
+
+    // AqlProfile API table
+    aqlprofile_pfn_t aqlprofile_api_ = {};
+
+    // Loader API table
+    hsa_ven_amd_loader_1_00_pfn_t loader_api_ = {};
+
     // System timeout, sysclock
-    timestamp_t timeout_;
+    timestamp_t timeout_ = HsaTimer::TIMESTAMP_MAX;
 
     // HSA timer
-    HsaTimer* timer_;
+    HsaTimer* timer_ = nullptr;
 
     // CPU/kern-arg memory pools
-    hsa_amd_memory_pool_t* cpu_pool_;
-    hsa_amd_memory_pool_t* kern_arg_pool_;
+    hsa_amd_memory_pool_t* cpu_pool_      = nullptr;
+    hsa_amd_memory_pool_t* kern_arg_pool_ = nullptr;
 };
 
 #endif  // SRC_UTIL_HSA_RSRC_FACTORY_H_

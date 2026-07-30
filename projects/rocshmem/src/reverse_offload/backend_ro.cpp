@@ -29,6 +29,7 @@
 #include <unistd.h>
 
 #include <cassert>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -54,7 +55,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   poll_block_count_ = envvar::max_num_contexts;
 
-  profiler_proxy_ = ProfilerProxyT(envvar::max_num_contexts);
+  profiler_proxy_ = ProfilerProxy(envvar::max_num_contexts);
 
   int device_id;
   CHECK_HIP(hipGetDevice(&device_id));
@@ -89,8 +90,8 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   bp->heap_ptr = &heap;
 
-  ro_window_proxy_ = new WindowProxyT(&heap, transport_->get_world_comm(),
-                                      num_windows_);
+  ro_window_proxy_ = new WindowProxy(&heap, transport_->get_world_comm(),
+                                     num_windows_);
 
   bp->heap_window_info = ro_window_proxy_->get();
 
@@ -104,7 +105,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
-  team_world_proxy_ = new ROTeamProxy<HIPAllocator>(
+  team_world_proxy_ = new ROTeamProxy(
       this, transport_->get_world_comm(), my_pe, num_pes);
   team_tracker.set_team_world(team_world_proxy_->get());
 
@@ -127,7 +128,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
-  default_context_proxy_ = DefaultContextProxyT(this, tinfo);
+  default_context_proxy_ = DefaultContextProxy(this, tinfo);
 
   block_handle_proxy_ = BlockHandleProxyT(g_ret_buffer_.get(),
                         atomic_ret_buffer_.get(), &queue_,
@@ -276,11 +277,11 @@ void ROBackend::create_new_team(Team *parent_team,
                                 const TeamInfo& team_info_wrt_parent,
                                 const TeamInfo& team_info_wrt_world,
                                 int num_pes, int my_pe_in_new_team,
-                                MPI_Comm team_comm,
+                                MPI_Comm new_team_comm,
                                 rocshmem_team_t *new_team) {
   transport_->createNewTeam(this, parent_team, team_info_wrt_parent,
                             team_info_wrt_world, num_pes, my_pe_in_new_team,
-                            team_comm, new_team);
+                            new_team_comm, new_team);
 }
 
 void ROBackend::ctx_create(int64_t options, void **ctx) {
@@ -298,6 +299,33 @@ void ROBackend::ctx_destroy(Context *ctx) {
   delete ro_net_host_ctx;
 }
 
+int ROBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
+                                         [[maybe_unused]] size_t length,
+                                         [[maybe_unused]] void **registered_addr) {
+  LOG_WARN("rocshmem_buffer_register_symmetric is not supported by the RO "
+           "backend");
+  return ROCSHMEM_ERROR;
+}
+
+int ROBackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
+  LOG_WARN("rocshmem_buffer_unregister_symmetric is not supported by the RO "
+           "backend");
+  return ROCSHMEM_ERROR;
+}
+
+void ROBackend::accumulate_ctx_device_stats() {
+  ROCStats tmp;
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
+                        hipMemcpyDeviceToHost));
+    globalStats.hostAccumulateStats(tmp);
+  }
+}
+
+void ROBackend::accumulate_default_host_ctx_stats() {
+  globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
+}
+
 void ROBackend::reset_backend_stats() {
   auto *bp{backend_proxy.get()};
 
@@ -311,6 +339,7 @@ void ROBackend::dump_backend_stats() {
   for (int i = 0; i < NUM_STATS; i++) {
     total += globalStats.getStat(i);
   }
+  if (!total) return;
 
   int device_id;
   CHECK_HIP(hipGetDevice(&device_id));
@@ -327,28 +356,40 @@ void ROBackend::dump_backend_stats() {
   auto *bp{backend_proxy.get()};
 
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
-    // Average latency as perceived from a thread
-    const ROStats &prof{bp->profiler[i]};
-    us_wait_slot += prof.getStat(WAITING_ON_SLOT) / gpu_frequency_mhz;
-    us_pack += prof.getStat(PACK_QUEUE) / gpu_frequency_mhz;
-    us_fence1 += prof.getStat(THREAD_FENCE_1) / gpu_frequency_mhz;
-    us_fence2 += prof.getStat(THREAD_FENCE_2) / gpu_frequency_mhz;
-    us_wait_host += prof.getStat(WAITING_ON_HOST) / gpu_frequency_mhz;
+    ROStats tmp;
+    CHECK_HIP(hipMemcpy(&tmp, bp->profiler + i, sizeof(ROStats), hipMemcpyDeviceToHost));
+    us_wait_slot += tmp.getStat(WAITING_ON_SLOT) / gpu_frequency_mhz;
+    us_pack      += tmp.getStat(PACK_QUEUE)      / gpu_frequency_mhz;
+    us_fence1    += tmp.getStat(THREAD_FENCE_1)  / gpu_frequency_mhz;
+    us_fence2    += tmp.getStat(THREAD_FENCE_2)  / gpu_frequency_mhz;
+    us_wait_host += tmp.getStat(WAITING_ON_HOST) / gpu_frequency_mhz;
   }
+  if (!us_wait_slot && !us_pack && !us_fence1 && !us_fence2 && !us_wait_host) return;
 
-  constexpr int FIELD_WIDTH{20};
-  constexpr int FLOAT_PRECISION{2};
+  char buf[1024];
+  int pos = 0;
+  auto append = [&](const char* fmt, ...) {
+    if (pos >= static_cast<int>(sizeof(buf)) - 1) return;
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(buf + pos, sizeof(buf) - pos, fmt, args);
+    va_end(args);
+    if (n > 0) pos += n;
+  };
 
-  printf("%*s%*s%*s%*s%*s\n", FIELD_WIDTH + 1, "Wait On Slot (us)",
-         FIELD_WIDTH + 1, "Pack Queue (us)", FIELD_WIDTH + 1, "Fence 1 (us)",
-         FIELD_WIDTH + 1, "Fence 2 (us)", FIELD_WIDTH + 1, "Wait Host (us)");
+  auto pstat = [&](const char* name, uint64_t cycles) {
+    double us = static_cast<double>(cycles) / total;
+    if (us != 0.0) append("  %-30s %.2f us\n", name, us);
+  };
 
-  printf("%*.*f %*.*f %*.*f %*.*f %*.*f\n\n", FIELD_WIDTH, FLOAT_PRECISION,
-         static_cast<double>(us_wait_slot) / total, FIELD_WIDTH,
-         FLOAT_PRECISION, static_cast<double>(us_pack) / total, FIELD_WIDTH,
-         FLOAT_PRECISION, static_cast<double>(us_fence1) / total, FIELD_WIDTH,
-         FLOAT_PRECISION, static_cast<double>(us_fence2) / total, FIELD_WIDTH,
-         FLOAT_PRECISION, static_cast<double>(us_wait_host) / total);
+  append("PROXY STATS\n");
+  pstat("Wait_On_Slot",  us_wait_slot);
+  pstat("Pack_Queue",    us_pack);
+  pstat("Fence_1",       us_fence1);
+  pstat("Fence_2",       us_fence2);
+  pstat("Wait_Host",     us_wait_host);
+
+  LOG_INFO("%s", buf);
 }
 
 void ROBackend::ro_net_free_runtime() {
@@ -375,9 +416,9 @@ void ROBackend::ro_net_free_runtime() {
   }
   transport_->finalizeTransport();
 
-  ro_window_proxy_->~WindowProxyT();
-  team_world_proxy_->~ROTeamProxy<HIPAllocator>();
-  transport_->~MPITransport();
+  delete ro_window_proxy_;
+  delete team_world_proxy_;
+  delete transport_;
   /*
    * Free the profiler statistics structure.
    */

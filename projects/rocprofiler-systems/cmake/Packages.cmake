@@ -21,9 +21,6 @@ rocprofiler_systems_add_interface_library(
     rocprofiler-systems-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-boost
-    "Boost interface library (for Dyninst)"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-elfutils
     "ElfUtils interface library (for Dyninst)"
 )
@@ -63,7 +60,7 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
-                                          "Provides spdlog library"
+    "Provides spdlog library"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
     "Provides timemory libraries"
@@ -266,53 +263,37 @@ endif()
 
 target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 
-# Detect AMD SMI library version from header
-set(_AMDSMI_HEADER "${ROCM_PATH}/include/amd_smi/amdsmi.h")
-if(EXISTS "${_AMDSMI_HEADER}")
-    file(READ "${_AMDSMI_HEADER}" _AMDSMI_HEADER_CONTENTS)
-
-    string(
-        REGEX MATCH
-        "#define AMDSMI_LIB_VERSION_MAJOR ([0-9]+)"
-        _
-        "${_AMDSMI_HEADER_CONTENTS}"
-    )
-    set(ROCPROFSYS_AMDSMI_VERSION_MAJOR "${CMAKE_MATCH_1}")
-
-    string(
-        REGEX MATCH
-        "#define AMDSMI_LIB_VERSION_MINOR ([0-9]+)"
-        _
-        "${_AMDSMI_HEADER_CONTENTS}"
-    )
-    set(ROCPROFSYS_AMDSMI_VERSION_MINOR "${CMAKE_MATCH_1}")
-
+# AMD SMI version is provided by config-mode find_package(amd_smi) above.
+# If the package does not report a version, treat it as 0.0 (AI NIC unsupported).
+if(amd_smi_VERSION)
+    message(STATUS "AMD SMI version detected: ${amd_smi_VERSION}")
+else()
+    set(amd_smi_VERSION "0.0")
     message(
         STATUS
-        "AMD SMI version detected: ${ROCPROFSYS_AMDSMI_VERSION_MAJOR}.${ROCPROFSYS_AMDSMI_VERSION_MINOR}"
+        "AMD SMI version not reported by find_package; assuming ${amd_smi_VERSION}"
     )
 endif()
 
 # AINIC requires AMD SMI >= 26.3 AND ROCPROFSYS_USE_AINIC option
-set(ROCPROFSYS_BUILD_AINIC OFF CACHE INTERNAL "Build AINIC support")
+set(ROCPROFSYS_BUILD_AINIC OFF CACHE INTERNAL "Build AINIC support" FORCE)
 if(ROCPROFSYS_USE_AINIC)
-    if(
-        ROCPROFSYS_AMDSMI_VERSION_MAJOR GREATER 26
-        OR (
-            ROCPROFSYS_AMDSMI_VERSION_MAJOR EQUAL 26
-            AND ROCPROFSYS_AMDSMI_VERSION_MINOR GREATER 2
-        )
-    )
+    if(amd_smi_VERSION VERSION_GREATER_EQUAL 26.3)
         set(ROCPROFSYS_BUILD_AINIC ON CACHE INTERNAL "Build AINIC support" FORCE)
         message(STATUS "AINIC support enabled (AMD SMI >= 26.3)")
     else()
-        message(
-            STATUS
-            "AINIC disabled: AMD SMI ${ROCPROFSYS_AMDSMI_VERSION_MAJOR}.${ROCPROFSYS_AMDSMI_VERSION_MINOR} < 26.3"
-        )
+        message(STATUS "AINIC disabled: AMD SMI ${amd_smi_VERSION} < 26.3")
     endif()
 else()
     message(STATUS "AINIC disabled: ROCPROFSYS_USE_AINIC is OFF")
+endif()
+
+# Expose ROCPROFSYS_BUILD_AINIC as a global compile definition.
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_BUILD_AINIC=1
+    )
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -407,6 +388,14 @@ endif()
 if(NOT ROCPROFSYS_USE_ROCPD_LIBRARY)
     rocprofsys_configure_rocpd_schema_files()
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# Profiler Hub
+#
+# ----------------------------------------------------------------------------------------#
+
+include(ProfilerHub)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -560,17 +549,6 @@ if(ROCPROFSYS_BUILD_DYNINST)
 
     target_link_libraries(rocprofiler-systems-dyninst INTERFACE Dyninst::Dyninst)
 else()
-    # Find Boost before finding Dyninst
-    find_package(Boost)
-    if(NOT TARGET Dyninst::Boost_headers)
-        add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
-        target_include_directories(
-            Dyninst::Boost_headers
-            SYSTEM
-            INTERFACE ${Boost_INCLUDE_DIRS}
-        )
-    endif()
-
     find_package(
         Dyninst
         ${rocprofiler_systems_FIND_QUIETLY}
@@ -578,9 +556,22 @@ else()
         COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI
     )
 
-    if(TARGET Dyninst::Dyninst) # updated Dyninst CMake system was found
+    if(TARGET Dyninst::Dyninst) # CMake package exports aggregated target (no-Boost OK)
         target_link_libraries(rocprofiler-systems-dyninst INTERFACE Dyninst::Dyninst)
-    else() # updated Dyninst CMake system was not found
+        rocprofiler_systems_target_compile_definitions(rocprofiler-systems-dyninst
+            INTERFACE ROCPROFSYS_USE_DYNINST
+        )
+    else() # legacy Dyninst install: Boost component libraries
+        find_package(Boost)
+        if(NOT TARGET Dyninst::Boost_headers)
+            add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
+            target_include_directories(
+                Dyninst::Boost_headers
+                SYSTEM
+                INTERFACE ${Boost_INCLUDE_DIRS}
+            )
+        endif()
+
         set(_BOOST_COMPONENTS atomic system thread date_time)
         set(rocprofiler_systems_BOOST_COMPONENTS
             "${_BOOST_COMPONENTS}"
@@ -668,6 +659,12 @@ else()
         )
     endif()
 endif()
+
+# Dyninst's Annotatable.h triggers GCC 14's -Wcalloc-transposed-args; suppress it
+# for any TU that pulls in dyninst headers since the project builds with -Werror.
+add_target_cxx_flag_if_avail(
+    rocprofiler-systems-dyninst "-Wno-calloc-transposed-args"
+)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -851,18 +848,6 @@ set(TIMEMORY_USE_BFD
 )
 set(TIMEMORY_USE_LIBUNWIND ON CACHE BOOL "Enable libunwind support in timemory")
 set(TIMEMORY_USE_VISIBILITY OFF CACHE BOOL "Enable/disable using visibility decorations")
-set(TIMEMORY_USE_SANITIZER
-    ${ROCPROFSYS_USE_SANITIZER}
-    CACHE BOOL
-    "Build with -fsanitze=\${ROCPROFSYS_SANITIZER_TYPE}"
-    FORCE
-)
-set(TIMEMORY_SANITIZER_TYPE
-    ${ROCPROFSYS_SANITIZER_TYPE}
-    CACHE STRING
-    "Sanitizer type, e.g. leak, thread, address, memory, etc."
-    FORCE
-)
 
 if(DEFINED TIMEMORY_BUILD_GOTCHA AND NOT TIMEMORY_BUILD_GOTCHA)
     rocprofiler_systems_message(
@@ -925,7 +910,7 @@ rocprofiler_systems_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/ROCm/timemory.git
-    REPO_BRANCH omnitrace
+    REPO_BRANCH rocprofiler-systems-cppstd20
 )
 
 rocprofiler_systems_save_variables(
@@ -945,7 +930,30 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(TIMEMORY_BUILD_HIDDEN_VISIBILITY OFF CACHE BOOL "" FORCE)
 endif()
 
+# Under sanitizer builds, ASan's globals-dead-stripping optimization converts
+# timemory's explicit template instantiations (STB_GLOBAL) into COMDAT groups
+# with STB_GLOBAL leaders. Rocprofiler-systems TUs that include timemory headers
+# produce COMDAT groups with STB_WEAK leaders for the same symbols (implicit
+# instantiation). lld rejects the resulting mix of STB_WEAK and STB_GLOBAL
+# COMDAT group leaders for the same symbol.
+#
+# -fno-sanitize-address-globals-dead-stripping disables this COMDAT conversion
+# for timemory's compilation, keeping explicit instantiations as regular
+# STB_GLOBAL symbols (as they are without sanitizers). lld then applies its
+# normal STB_GLOBAL-overrides-COMDAT-STB_WEAK rule, which is the same
+# behaviour as non-sanitizer builds and what GNU ld always does.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _timemory_sanitizer_flag_pos)
+if(_timemory_sanitizer_flag_pos GREATER -1)
+    set(TIMEMORY_BUILD_HIDDEN_VISIBILITY OFF CACHE BOOL "" FORCE)
+    set(_timemory_saved_cxx_flags "${CMAKE_CXX_FLAGS}")
+    string(APPEND CMAKE_CXX_FLAGS " -fno-sanitize-address-globals-dead-stripping")
+endif()
+
 add_subdirectory(external/timemory EXCLUDE_FROM_ALL)
+
+if(_timemory_sanitizer_flag_pos GREATER -1)
+    set(CMAKE_CXX_FLAGS "${_timemory_saved_cxx_flags}")
+endif()
 
 install(
     TARGETS gotcha

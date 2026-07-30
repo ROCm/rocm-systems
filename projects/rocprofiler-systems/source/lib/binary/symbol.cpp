@@ -12,6 +12,15 @@
 #define PACKAGE     "rocprofiler-systems"
 #define L_LNNO_SIZE 4
 
+#include <elf.h>
+// The RELR (relative-relocation) types were added to glibc's <elf.h> in glibc 2.36.
+// Older glibc versions (e.g. RHEL 8/9) lack them, but they are referenced by the
+// binutils headers below, so define the typedefs here to avoid compile errors.
+#ifndef SHT_RELR
+typedef Elf32_Word  Elf32_Relr;
+typedef Elf64_Xword Elf64_Relr;
+#endif
+
 #include <bfd.h>
 #include <coff/external.h>
 #include <coff/internal.h>
@@ -22,6 +31,7 @@
 #include <elfutils/libdw.h>
 #include <libcoff.h>
 
+#include "common/path.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/demangler.hpp"
 #include "core/timemory.hpp"
@@ -50,8 +60,7 @@ read_inliner_info(bfd* _inp)
         if(bfd_find_inliner_info(_inp, &_file, &_func, &_line) != 0)
         {
             if(_file && _func && _line > 0)
-                _data.emplace_back(inlined_symbol{
-                    _line, filepath::realpath(_file, nullptr, false), _func });
+                _data.emplace_back(inlined_symbol{ _line, path::realpath(_file), _func });
         }
         else
         {
@@ -233,7 +242,7 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
                 file = bfd_get_filename(_inp);
             if(!func.empty())
             {
-                file    = filepath::realpath(file, nullptr, false);
+                file    = path::realpath(file);
                 line    = _line;
                 inlines = read_inliner_info(_inp);
                 return true;

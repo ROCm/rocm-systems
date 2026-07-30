@@ -28,7 +28,7 @@
 #include <amd_smi/impl/amd_smi_processor.h>
 #include <amd_smi/impl/amd_smi_socket.h>
 #include <amd_smi/impl/nic/amd_smi_ainic_device.h>
-#include <amdsmi_unified/interface/smi_nic_interface.h>
+#include <amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h>
 
 #include <set>
 #include <vector>
@@ -37,6 +37,7 @@
 #include "amd_smi/impl/nic/amd_smi_no_drm_nic.h"
 #include "amd_smi/impl/nic/amd_smi_no_drm_switch.h"
 #endif  // BRCM_NIC
+
 namespace amd::smi {
 
 // Singleton: Only one system in an application

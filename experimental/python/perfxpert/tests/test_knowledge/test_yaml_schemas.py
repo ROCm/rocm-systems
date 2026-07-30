@@ -16,7 +16,7 @@ KNOWLEDGE_DIR = (
 )
 SCHEMAS_DIR = KNOWLEDGE_DIR / "_schemas"
 
-# The 21 YAML files expected per spec Appendix B
+# Core YAML files expected per spec Appendix B and later agentic extensions.
 _EXPECTED_YAMLS = {
     "gpu_specs",
     "bottleneck_types",
@@ -56,7 +56,7 @@ def test_every_yaml_validates_against_its_schema(yaml_path):
     jsonschema.validate(data, schema)
 
 
-def test_all_21_expected_yaml_files_present():
+def test_expected_yaml_files_present():
     present = {p.stem for p in _all_yaml_files()}
     missing = _EXPECTED_YAMLS - present
     assert not missing, f"missing YAMLs: {missing}"

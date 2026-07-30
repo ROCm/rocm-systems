@@ -97,11 +97,7 @@ enum class GpuBlock : uint32
     Wgs      = 0x35,
     EaCpwd   = 0x36,
     EaSe     = 0x37,
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 926
-    RlcUser  = 0x38,
-#else
     RlcLocal = 0x38,
-#endif
     Count
 };
 

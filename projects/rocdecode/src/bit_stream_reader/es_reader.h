@@ -203,7 +203,7 @@ class RocVideoESParser {
         int CheckHevcEStream(uint8_t *p_stream, int stream_size);
 
         /*! \brief Function to convert from Encapsulated Byte Sequence Packets to Raw Byte Sequence Payload
-        * \param [inout] stream_buffer A pointer of <tt>uint8_t</tt> for the converted RBSP buffer.
+        * \param [in,out] stream_buffer A pointer of <tt>uint8_t</tt> for the converted RBSP buffer.
         * \param [in] begin_bytepos Start position in the EBSP buffer to convert
         * \param [in] end_bytepos End position in the EBSP buffer to convert, generally it's size.
         * \return Returns the size of the converted buffer

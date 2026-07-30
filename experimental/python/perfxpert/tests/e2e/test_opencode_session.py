@@ -3,36 +3,27 @@
 Requires:
 - perfxpert-code installed (entry point)
 - perfxpert-mcp installed (entry point)
-- bundled opencode binary OR PERFXPERT_OPENCODE_PATH set
+- bundled patched opencode binary available
 - Any LLM provider configured, OR --no-llm / air-gap mode
 
 Skips gracefully if the opencode binary isn't available.
 """
 
 import os
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture
 def opencode_available():
-    # Check bundled OR PATH
-    if os.environ.get("PERFXPERT_OPENCODE_PATH"):
-        if Path(os.environ["PERFXPERT_OPENCODE_PATH"]).is_file():
-            return True
-    if shutil.which("opencode"):
-        return True
     try:
-        from importlib import resources
-        with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode") as p:
-            if p.is_file():
-                return True
+        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+
+        resolve_opencode_binary()
+        return True
     except Exception:
-        pass
-    return False
+        return False
 
 
 def test_perfxpert_code_launches_if_opencode_available(opencode_available):
@@ -71,7 +62,11 @@ def test_perfxpert_code_launches_if_opencode_available(opencode_available):
 
 def test_mcp_server_accepts_a_call_from_shell(opencode_available):
     """Verify perfxpert-mcp at least starts and can receive an initialization message."""
-    import json, time
+    if not opencode_available:
+        pytest.skip("opencode binary not available on this system")
+
+    import json
+    import select
 
     # Start perfxpert-mcp with stdio
     p = subprocess.Popen(
@@ -82,20 +77,30 @@ def test_mcp_server_accepts_a_call_from_shell(opencode_available):
         # Send an MCP initialize request (simplified; real MCP uses JSON-RPC framing)
         init = json.dumps({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {"protocolVersion": "2024-11-05", "capabilities": {}},
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "perfxpert-e2e", "version": "1.0"},
+            },
         }) + "\n"
         p.stdin.write(init.encode("utf-8"))
         p.stdin.flush()
-        time.sleep(0.5)
-        # Close stdin to signal EOF; server should exit cleanly
-        p.stdin.close()
-        p.wait(timeout=5)
+
+        ready, _, _ = select.select([p.stdout], [], [], 5)
+        assert ready, "perfxpert-mcp did not respond to initialize within 5s"
+        response_line = p.stdout.readline().decode("utf-8").strip()
+        response = json.loads(response_line)
+        assert "result" in response or "error" in response
     finally:
+        if p.stdin and not p.stdin.closed:
+            p.stdin.close()
         if p.poll() is None:
             p.terminate()
-            p.wait(timeout=2)
-    # The process should at least start without an immediate crash
-    # (exact protocol handling depends on MCP SDK version; deeper testing in test_mcp_server.py)
+            try:
+                p.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait(timeout=2)
 
 
 # NOTE: The test_end_to_end_interactive_session was a flaky pexpect-based TUI test.

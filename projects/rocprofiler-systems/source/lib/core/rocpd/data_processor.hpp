@@ -23,30 +23,31 @@ struct data_processor
     using insert_pmc_event_stmt =
         std::function<void(const char*, size_t, size_t, double, const char*)>;
     using insert_sample_stmt =
-        std::function<void(const char*, size_t, uint64_t, size_t, const char*)>;
+        std::function<void(const char*, size_t, std::uint64_t, size_t, const char*)>;
     using insert_region_stmt =
-        std::function<void(const char*, size_t, size_t, size_t, uint64_t, uint64_t,
-                           size_t, size_t, const char*)>;
-    using insert_kernel_dispatch_stmt       = std::function<void(
+        std::function<void(const char*, size_t, size_t, size_t, std::uint64_t,
+                           std::uint64_t, size_t, size_t, const char*)>;
+    using insert_kernel_dispatch_stmt = std::function<void(
         const char*, size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
-        uint64_t, uint64_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
-        size_t, size_t, size_t, const char*)>;
-    using insert_memory_copy_stmt           = std::function<void(
-        const char*, size_t, size_t, size_t, uint64_t, uint64_t, size_t, size_t, size_t,
-        size_t, size_t, size_t, size_t, size_t, size_t, size_t, const char*)>;
-    using insert_memory_alloc_stmt          = std::function<void(
-        const char*, size_t, size_t, size_t, size_t, const char*, const char*, uint64_t,
-        uint64_t, size_t, size_t, size_t, size_t, size_t, const char*)>;
+        std::uint64_t, std::uint64_t, size_t, size_t, size_t, size_t, size_t, size_t,
+        size_t, size_t, size_t, size_t, const char*)>;
+    using insert_memory_copy_stmt     = std::function<void(
+        const char*, size_t, size_t, size_t, std::uint64_t, std::uint64_t, size_t, size_t,
+        size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t, const char*)>;
+    using insert_memory_alloc_stmt =
+        std::function<void(const char*, size_t, size_t, size_t, size_t, const char*,
+                           const char*, std::uint64_t, std::uint64_t, size_t, size_t,
+                           size_t, size_t, size_t, const char*)>;
     using insert_memory_alloc_no_agent_stmt = std::function<void(
-        const char*, size_t, size_t, size_t, const char*, const char*, uint64_t, uint64_t,
-        size_t, size_t, size_t, size_t, size_t, const char*)>;
-    using insert_kernel_symbol_stmt =
-        std::function<void(size_t, const char*, size_t, size_t, uint64_t, const char*,
-                           const char*, uint64_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                           uint32_t, uint32_t, uint32_t, const char*)>;
-    using insert_code_object_stmt =
-        std::function<void(size_t, const char*, size_t, size_t, size_t, const char*,
-                           uint64_t, uint64_t, uint64_t, const char*, const char*)>;
+        const char*, size_t, size_t, size_t, const char*, const char*, std::uint64_t,
+        std::uint64_t, size_t, size_t, size_t, size_t, size_t, const char*)>;
+    using insert_kernel_symbol_stmt         = std::function<void(
+        size_t, const char*, size_t, size_t, std::uint64_t, const char*, const char*,
+        std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t,
+        std::uint32_t, std::uint32_t, std::uint32_t, const char*)>;
+    using insert_code_object_stmt           = std::function<void(
+        size_t, const char*, size_t, size_t, size_t, const char*, std::uint64_t,
+        std::uint64_t, std::uint64_t, const char*, const char*)>;
     using insert_args_stmt = std::function<void(const char*, size_t, size_t, const char*,
                                                 const char*, const char*, const char*)>;
 
@@ -104,7 +105,7 @@ public:
 
     size_t insert_agent(size_t node_id, size_t pid, const char* agent_type,
                         size_t absolute_index, size_t logical_index, size_t type_index,
-                        uint64_t uuid, const char* name, const char* model_name,
+                        std::uint64_t uuid, const char* name, const char* model_name,
                         const char* vendor_name, const char* product_name,
                         const char* user_name, const char* extdata = "{}");
 
@@ -125,19 +126,19 @@ public:
                                 const char* description, const char* long_description,
                                 const char* component, const char* units,
                                 const char* value_type, const char* block,
-                                const char* expression, uint32_t is_constant,
-                                uint32_t is_derived, const char* extdata = "{}");
+                                const char* expression, std::uint32_t is_constant,
+                                std::uint32_t is_derived, const char* extdata = "{}");
 
-    void insert_sample(const char* track, uint64_t timestamp, size_t event_id,
+    void insert_sample(const char* track, std::uint64_t timestamp, size_t event_id,
                        const char* extdata = "{}");
 
     void insert_region(size_t node_id, size_t process_id, size_t thread_id,
-                       uint64_t start, uint64_t end, size_t name_id, size_t event_id,
-                       const char* extdata = "{}");
+                       std::uint64_t start, std::uint64_t end, size_t name_id,
+                       size_t event_id, const char* extdata = "{}");
 
     size_t insert_thread_info(size_t node_id, size_t parent_process_id, size_t process_id,
-                              size_t thread_id, const char* name, uint64_t start = 0,
-                              uint64_t end = 0, const char* extdata = "{}");
+                              size_t thread_id, const char* name, std::uint64_t start = 0,
+                              std::uint64_t end = 0, const char* extdata = "{}");
 
     void insert_stream_info(size_t stream_id, size_t node_id, size_t process_id,
                             const char* name, const char* extdata = "{}");
@@ -146,8 +147,8 @@ public:
 
     void insert_kernel_dispatch(size_t node_id, size_t process_id, size_t thread_id,
                                 size_t agent_id, size_t kernel_id, size_t dispatch_id,
-                                size_t queue_id, size_t stream_id, uint64_t start,
-                                uint64_t end, size_t private_segment_size,
+                                size_t queue_id, size_t stream_id, std::uint64_t start,
+                                std::uint64_t end, size_t private_segment_size,
                                 size_t group_segment_size, size_t workgroup_size_x,
                                 size_t workgroup_size_y, size_t workgroup_size_z,
                                 size_t grid_size_x, size_t grid_size_y,
@@ -155,24 +156,25 @@ public:
                                 size_t event_id, const char* extdata = "{}");
 
     void insert_memory_copy(size_t node_id, size_t process_id, size_t thread_id,
-                            uint64_t start, uint64_t end, size_t name_id,
+                            std::uint64_t start, std::uint64_t end, size_t name_id,
                             size_t dst_agent_id, size_t dst_addr, size_t src_agent_id,
                             size_t src_addr, size_t size, size_t queue_id,
                             size_t stream_id, size_t region_name_id, size_t event_id,
                             const char* extdata = "{}");
 
     void insert_kernel_symbol(size_t id, size_t node_id, size_t process_id,
-                              uint64_t code_obj_id, const char* name,
-                              const char* display_name, uint32_t kernel_obj,
-                              uint32_t kernarg_segmnt_size,
-                              uint32_t kernarg_segment_alignment,
-                              uint32_t group_segment_size, uint32_t private_segment_size,
-                              uint32_t sgrp_count, uint32_t arch_vgrp_count,
-                              uint32_t accum_vgrp_count, const char* extdata = "{}");
+                              std::uint64_t code_obj_id, const char* name,
+                              const char* display_name, std::uint32_t kernel_obj,
+                              std::uint32_t kernarg_segmnt_size,
+                              std::uint32_t kernarg_segment_alignment,
+                              std::uint32_t group_segment_size,
+                              std::uint32_t private_segment_size,
+                              std::uint32_t sgrp_count, std::uint32_t arch_vgrp_count,
+                              std::uint32_t accum_vgrp_count, const char* extdata = "{}");
 
     void insert_code_object(size_t id, size_t node_id, size_t process_id, size_t agent_id,
-                            const char* uri, uint64_t ld_base, uint64_t ld_size,
-                            uint64_t ld_delta, const char* storage_type,
+                            const char* uri, std::uint64_t ld_base, std::uint64_t ld_size,
+                            std::uint64_t ld_delta, const char* storage_type,
                             const char* extdata = "{}");
 
     void insert_args(size_t event_id, size_t position, const char* type, const char* name,
@@ -180,7 +182,7 @@ public:
 
     void insert_memory_alloc(size_t node_id, size_t process_id, size_t thread_id,
                              std::optional<size_t> agent_id, const char* type,
-                             const char* level, uint64_t start, uint64_t end,
+                             const char* level, std::uint64_t start, std::uint64_t end,
                              size_t address, size_t size, size_t queue_id,
                              size_t stream_id, size_t event_id,
                              const char* extdata = "{}");

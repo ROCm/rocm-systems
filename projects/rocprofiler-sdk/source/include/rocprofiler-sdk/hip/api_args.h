@@ -3469,6 +3469,161 @@ typedef union rocprofiler_hip_api_args_t
         const hipLaunchConfig_t* config;
     } hipOccupancyMaxActiveClusters;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 28
+    struct
+    {
+        hipExecutionCtx_t*   ctx;
+        hipDevResourceDesc_t desc;
+        int                  device;
+        unsigned int         flags;
+    } hipGreenCtxCreate;
+    struct
+    {
+        hipExecutionCtx_t ctx;
+    } hipExecutionCtxDestroy;
+    struct
+    {
+        hipStream_t*      stream;
+        hipExecutionCtx_t greenctx;
+        unsigned int      flags;
+        int               priority;
+    } hipExecutionCtxStreamCreate;
+    struct
+    {
+        hipDevice_t        device;
+        hipDevResource*    resource;
+        hipDevResourceType type;
+    } hipDeviceGetDevResource;
+    struct
+    {
+        hipDevResource*       result;
+        unsigned int*         nbGroups;
+        const hipDevResource* input;
+        hipDevResource*       remainder;
+        unsigned int          flags;
+        unsigned int          minCount;
+    } hipDevSmResourceSplitByCount;
+    struct
+    {
+        hipDevResource*              result;
+        unsigned int                 nbGroups;
+        const hipDevResource*        input;
+        hipDevResource*              remainder;
+        unsigned int                 flags;
+        hipDevSmResourceGroupParams* groupParams;
+    } hipDevSmResourceSplit;
+    struct
+    {
+        hipDevResourceDesc_t* phDesc;
+        hipDevResource*       resources;
+        unsigned int          nbResources;
+    } hipDevResourceGenerateDesc;
+    struct
+    {
+        hipExecutionCtx_t* ctx;
+        int                device;
+    } hipDeviceGetExecutionCtx;
+    struct
+    {
+        hipExecutionCtx_t  ctx;
+        hipDevResource*    resource;
+        hipDevResourceType type;
+    } hipExecutionCtxGetDevResource;
+    struct
+    {
+        int*              device;
+        hipExecutionCtx_t ctx;
+    } hipExecutionCtxGetDevice;
+    struct
+    {
+        hipExecutionCtx_t   ctx;
+        unsigned long long* ctxId;
+    } hipExecutionCtxGetId;
+    struct
+    {
+        hipStream_t        hStream;
+        hipDevResource*    resource;
+        hipDevResourceType type;
+    } hipStreamGetDevResource;
+    struct
+    {
+        hipExecutionCtx_t ctx;
+        hipEvent_t        event;
+    } hipExecutionCtxRecordEvent;
+    struct
+    {
+        hipExecutionCtx_t ctx;
+    } hipExecutionCtxSynchronize;
+    struct
+    {
+        hipExecutionCtx_t ctx;
+        hipEvent_t        event;
+    } hipExecutionCtxWaitEvent;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 29
+    struct
+    {
+        void**       dptr;
+        size_t*      bytes;
+        hipLibrary_t library;
+        const char*  name;
+    } hipLibraryGetGlobal;
+    struct
+    {
+        void**       dptr;
+        size_t*      bytes;
+        hipLibrary_t library;
+        const char*  name;
+    } hipLibraryGetManaged;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
+    struct
+    {
+        void**             dev_ptrs;
+        size_t*            sizes;
+        size_t             count;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipMemDiscardBatchAsync;
+    struct
+    {
+        hipDeviceptr_t*    dptrs;
+        size_t*            sizes;
+        size_t             count;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipDrvMemDiscardBatchAsync;
+    struct
+    {
+        void**             dptrs;
+        size_t*            sizes;
+        size_t             count;
+        hipMemLocation*    prefetchLocs;
+        size_t*            prefetchLocIdxs;
+        size_t             numPrefetchLocs;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipMemDiscardAndPrefetchBatchAsync;
+    struct
+    {
+        hipDeviceptr_t*    dptrs;
+        size_t*            sizes;
+        size_t             count;
+        hipMemLocation*    prefetchLocs;
+        size_t*            prefetchLocIdxs;
+        size_t             numPrefetchLocs;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipDrvMemDiscardAndPrefetchBatchAsync;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 31
+    struct
+    {
+        hipMemPool_t*        memPool;
+        hipMemLocation*      location;
+        hipMemAllocationType type;
+    } hipMemGetDefaultMemPool;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

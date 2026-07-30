@@ -139,7 +139,7 @@ protected:
 
     /*! \brief Function to notify decoder about new sequence format through callback
      * \param [in] p_seq_header Pointer to the current sequence header
-     * \param [in] p_frame_header Ponter to the current frame header
+     * \param [in] p_frame_header Pointer to the current frame header
      * \return <tt>ParserResult</tt>
      */
     ParserResult NotifyNewSequence(Av1SequenceHeader *p_seq_header, Av1FrameHeader *p_frame_header);
@@ -241,7 +241,7 @@ protected:
 
     /*! \brief Function to mark reference frames
      * \param [in] p_seq_header Pointer to sequence header
-     * \param [in] p_frame_header Ponter to frame header
+     * \param [in] p_frame_header Pointer to frame header
      * \param [in] id_len Current frame id length
      */
     void MarkRefFrames(Av1SequenceHeader *p_seq_header, Av1FrameHeader *p_frame_header, uint32_t id_len);
@@ -291,7 +291,7 @@ protected:
     int GetRelativeDist(Av1SequenceHeader *p_seq_header, int a, int b);
 
     /*! \brief Function to compute the elements in the ref_frame_idx array. 7.8. Set frame refs process.
-     * \param [in] p_seq_header Pinter to sequence header struct
+     * \param [in] p_seq_header Pointer to sequence header struct
      * \param [out] p_frame_header Pointer to frame header struct
      * \return None
      */
@@ -511,7 +511,7 @@ protected:
      *         via multiplying by div_factor and shifting right by div_shift.
      *  \param [in] d Input variable d
      *  \param [out] div_shift The output shift value
-     *  \param [out] div_factor The ouput factor value
+     *  \param [out] div_factor The output factor value
      *  \return None
      */
     void ResolveDivisor(int d, int *div_shift, int *div_factor);

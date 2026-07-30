@@ -86,7 +86,7 @@ void runTestReduceForTypes(hiprtcProgram& prog, const std::tuple<T, Types...>) {
 }
 
 template <class T, template <typename> class Op>
-void opToString(std::string& scalarName, std::string& intrinsicName) {
+void reduceOpToString(std::string& scalarName, std::string& intrinsicName) {
   if constexpr (std::is_same<Op<T>, std::plus<T>>::value) {
     scalarName = "std::plus";
     intrinsicName = "__reduce_add_sync";
@@ -105,9 +105,6 @@ void opToString(std::string& scalarName, std::string& intrinsicName) {
   } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
     scalarName = "std::bit_xor";
     intrinsicName = "__reduce_xor_sync";
-  } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
-    scalarName = "std::bit_xor";
-    intrinsicName = "__reduce_xor_sync";
   } else
     static_assert(std::is_void<T>::value, "Unexpected operator");
 }
@@ -119,7 +116,7 @@ void compileProgram(hiprtcProgram& prog, const std::tuple<>&) {
   hiprtcResult compileResult;
   const char* options[] = {"-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-DHIP_ENABLE_EXTRA_WARP_SYNC_TYPES"};
 
-  opToString<int, Op>(scalarName, intrinsicName);
+  reduceOpToString<int, Op>(scalarName, intrinsicName);
   compileResult = hiprtcResult{hiprtcCompileProgram(prog, NELEMS(options), options)};
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
 
@@ -139,7 +136,7 @@ void runAndCompileTest(const std::tuple<Types...> types) {
   std::string scalarName, intrinsicName, kernelStr;
   hiprtcProgram prog;
 
-  opToString<int, Op>(scalarName, intrinsicName);
+  reduceOpToString<int, Op>(scalarName, intrinsicName);
   kernelStr = R"(
     template <class T, class MaskType>
     __global__ void reduceRtcKernel(T* output, const T* input, const MaskType* masks, int* numReduces)

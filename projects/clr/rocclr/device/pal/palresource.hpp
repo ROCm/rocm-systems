@@ -73,7 +73,7 @@ class GpuMemoryReference : public amd::ReferenceCountedObject {
 static constexpr Pal::gpusize MaxGpuAlignment = 4 * Ki;
 
 //! GPU resource
-class Resource : public amd::HeapObject {
+class Resource {
  public:
   enum InteropType {
     InteropTypeless = 0,
@@ -181,7 +181,7 @@ class Resource : public amd::HeapObject {
   };
 
   //! Resource descriptor
-  struct Descriptor : public amd::HeapObject {
+  struct Descriptor {
     MemoryType type_;              //!< Memory type
     size_t width_;                 //!< Resource width
     size_t height_;                //!< Resource height
@@ -521,7 +521,7 @@ class Resource : public amd::HeapObject {
 
 typedef Util::BuddyAllocator<Device> MemBuddyAllocator;
 
-class MemorySubAllocator : public amd::HeapObject {
+class MemorySubAllocator {
  public:
   MemorySubAllocator(Device* device, bool retain_final_chunk = false)
       : device_(device), retain_final_chunk_(retain_final_chunk) {}
@@ -566,7 +566,7 @@ class FineUncachedMemorySubAllocator : public MemorySubAllocator {
   bool CreateChunk(const Pal::IGpuMemory* reserved_va) override;
 };
 
-class ResourceCache : public amd::HeapObject {
+class ResourceCache {
  public:
   //! Default constructor
   ResourceCache(Device* device, size_t cacheSizeLimit)

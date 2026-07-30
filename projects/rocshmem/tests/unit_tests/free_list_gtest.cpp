@@ -82,8 +82,8 @@ TYPED_TEST(FreeListTestFixture, pop_empty_device) {
                           sizeof(bool));
 
   CHECK_HIP(hipMemset(is_empty, 0, sizeof(bool)));
-  FreeListProxy<Allocator, T> empty_list_proxy{};
-  FreeList<T, Allocator>* empty_free_list{empty_list_proxy.get()};
+  FreeListProxy<T> empty_list_proxy{};
+  FreeList<T>* empty_free_list{empty_list_proxy.get()};
 
   rocshmem::pop_empty<<<1, 1>>>(empty_free_list, is_empty);
   CHECK_HIP(hipDeviceSynchronize());
@@ -166,7 +166,7 @@ TYPED_TEST(FreeListTestFixture, push_host_concurrent_pop_device) {
 TYPED_TEST(FreeListTestFixture, push_host_pop_push_device) {
   using Allocator = typename TestFixture::Allocator;
   using T = typename TestFixture::T;
-  using FreeListType = FreeList<T, Allocator>;
+  using FreeListType = FreeList<T>;
 
   auto& h_input = this->h_input;
   auto& free_list = this->free_list;
@@ -205,7 +205,7 @@ TYPED_TEST(FreeListTestFixture, push_host_pop_push_device) {
 TYPED_TEST(FreeListTestFixture, push_host_pop_concurrent_push_device) {
   using Allocator = typename TestFixture::Allocator;
   using T = typename TestFixture::T;
-  using FreeListType = FreeList<T, Allocator>;
+  using FreeListType = FreeList<T>;
 
   auto& h_input = this->h_input;
   auto& free_list = this->free_list;
@@ -255,7 +255,7 @@ TYPED_TEST(FreeListTestFixture, push_host_pop_concurrent_push_device) {
 TYPED_TEST(FreeListTestFixture, push_host_concurrent_pop_push_device) {
   using Allocator = typename TestFixture::Allocator;
   using T = typename TestFixture::T;
-  using FreeListType = FreeList<T, Allocator>;
+  using FreeListType = FreeList<T>;
 
   auto& h_input = this->h_input;
   auto& free_list = this->free_list;

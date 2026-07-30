@@ -65,6 +65,9 @@ struct ring_buffer
     /// Returns whether the buffer has been allocated
     bool is_initialized() const { return m_init; }
 
+    /// Base address of the allocation
+    const void* data() const { return m_ptr; }
+
     /// Get the total number of bytes supported
     size_t capacity() const { return m_size; }
 
@@ -117,7 +120,7 @@ struct ring_buffer
     /// Returns number of bytes currently held by the buffer.
     size_t count() const { return (m_write_count - m_read_count); }
 
-    /// Returns how many bytes are availiable in the buffer.
+    /// Returns how many bytes are available in the buffer.
     size_t free() const { return (m_size - count()); }
 
     /// Returns if the buffer is empty.
@@ -342,7 +345,7 @@ struct ring_buffer : private base::ring_buffer
     /// Returns number of Tp instances currently held by the buffer.
     size_t count() const { return (base_type::count()) / aligned_data_size(); }
 
-    /// Returns how many Tp instances are availiable in the buffer.
+    /// Returns how many Tp instances are available in the buffer.
     size_t free() const { return (base_type::free()) / aligned_data_size(); }
 
     /// Returns if the buffer is empty.

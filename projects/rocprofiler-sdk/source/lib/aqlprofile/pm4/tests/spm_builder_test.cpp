@@ -1,17 +1,18 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "lib/aqlprofile/pm4/spm_builder.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/cmd_config.h"
+#include "lib/aqlprofile/pm4/trace_config.h"
+#include "lib/aqlprofile/def/gpu_block_info.h"
+
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
-#include <cstring>
-#include <vector>
-#include <memory>
 
-#include "pm4/spm_builder.h"
-#include "pm4/cmd_builder.h"
-#include "pm4/cmd_config.h"
-#include "pm4/trace_config.h"
-#include "def/gpu_block_info.h"
+#include <cstring>
+#include <memory>
+#include <vector>
 
 using namespace pm4_builder;
 // using namespace aql_profile;
@@ -36,8 +37,7 @@ class SpmBuilderTest : public ::testing::Test
 protected:
     void SetUp() override
     {
-        // TraceConfig has default member initializers (including non-trivial std::vector /
-        // std::unordered_map members), so do NOT memset it — just set the fields we need.
+        test_config_ = SpmConfig{};
 
         // Set up default SPM config
         test_config_.sampleRate       = 1000;
@@ -45,7 +45,7 @@ protected:
         test_config_.data_buffer_size = test_buffer_.size() * sizeof(uint32_t);
 
         // Initialize agent info for creating concrete SpmBuilder
-        memset(&agent_info_, 0, sizeof(agent_info_));
+        agent_info_ = AgentInfo{};
         strncpy(agent_info_.name, "gfx90a", sizeof(agent_info_.name) - 1);
         strncpy(agent_info_.gfxip, "gfx90a", sizeof(agent_info_.gfxip) - 1);
         agent_info_.cu_num               = 104;
