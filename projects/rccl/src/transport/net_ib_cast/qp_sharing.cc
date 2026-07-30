@@ -129,6 +129,14 @@ void IbCastFreeCommIdLocked(uint16_t commId) {
     }
 }
 
+struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id) {
+  uint16_t commId = (wr_id >> WR_ID_RX_COMM_ID_SHIFT) & WR_ID_RX_COMM_ID_MASK;
+  if (commId == 0 || commId >= IBCAST_MAX_COMMS || !g_IbCastCommTable[commId].used) return NULL;
+  return g_IbCastCommTable[commId].isSend
+    ? &((struct ncclIbSendComm*)g_IbCastCommTable[commId].comm)->base
+    : &((struct ncclIbRecvComm*)g_IbCastCommTable[commId].comm)->base;
+}
+
 // Self-locking variant for callers that do NOT already hold the mutex
 // (e.g. the connect/accept non-sharing fallback paths).
 void IbCastFreeCommId(uint16_t commId) {

@@ -100,4 +100,14 @@ void IbCastFreeCommIdLocked(uint16_t commId);
 // Destroy all CQs for a group when cqRefcount reaches 0
 void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry);
 
+// Strip the commId from wr_id[63:48], recovering the original index. Safe when
+// sharing is disabled (commId==0, so the mask is a no-op).
+static inline uint64_t IbCastStripCommId(uint64_t wr_id) {
+  return wr_id & ~((uint64_t)WR_ID_RX_COMM_ID_MASK << WR_ID_RX_COMM_ID_SHIFT);
+}
+
+// Look up the target comm from the commId encoded in wr_id[63:48]. Returns NULL
+// if sharing is disabled or the commId is invalid.
+struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id);
+
 #endif // NET_IB_CAST_QP_SHARING_H_

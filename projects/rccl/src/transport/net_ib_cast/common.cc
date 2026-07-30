@@ -88,11 +88,9 @@ ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
     recvComm->prepostReceiveWorkRequests = true;
   }
   if (rcclParamIbCastCommNGroups() > 0) {
-    // On-demand recv-WQE accounting (rxPosts[qpIndex]) is per-comm, but a shared
-    // RQ's WQEs are fungible across the comms in a group -- a WQE posted by one
-    // comm can be consumed for another, so the per-comm counters drift and the RQ
-    // starves ("rq is empty"). Prepost mode reposts one WQE per completion with no
-    // per-comm counter, which is correct for a shared RQ.
+    // WQE posted by one comm can be consumed by another comm, so the per-comm counters drift
+    // and the RQ starves. Prepost mode reposts one WQE per completion with no per-comm counter,
+    // which is correct for a shared RQ.
     if (ncclParamIbCastPrepostReceiveWorkRequests() == 0) {
       INFO(NCCL_NET, "NET/IB: %s: QP sharing is enabled, Overriding pre-posting to true (1).", __func__);
     }

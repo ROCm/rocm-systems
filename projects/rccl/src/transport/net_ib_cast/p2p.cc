@@ -136,6 +136,9 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   }
 
   // For ID-based matching scheme, immData carries the request ID.
+  //   If QP sharing is enabled, immData also carries the receiver's commId:
+  //       reqId in bits[7:0],
+  //       remCommId in bits[23:8].
   // For index-based matching scheme, immData layout (BY_INDEX):
   //   bits [31:24] - rxReqIndex: receiver's request slot index (from CTS fifo)
   //   bit  [23]    - WR_IMM_SPLIT_DATA_FLAG: set when sending across >1 QPs
@@ -147,16 +150,11 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     uint32_t immData;
     if (comm->base.recvMatchingScheme != BY_INDEX) {
       immData = (uint32_t)(reqs[0]->id % UINT32_MAX);
-      // QP Sharing (BY_ID): the receiver polls a shared QP, so encode the receiver's
-      // commId alongside the request id to route the completion to the right comm.
-      // Layout: reqId in bits[7:0], remCommId in bits[23:8]. reqId is the low byte
-      // of reqs[0]->id (receiver does recvReqs[id % NET_IB_MAX_REQUESTS], <=256).
       if (rcclParamIbCastCommNGroups() > 0 && comm->base.commId != 0 && comm->remCommId != 0) {
         immData = ((uint32_t)reqs[0]->id & WR_IMM_BYID_REQ_ID_MASK) |
                   (((uint32_t)comm->remCommId & WR_IMM_BYID_COMM_ID_MASK) << WR_IMM_BYID_COMM_ID_SHIFT);
       }
     } else {
-      // BY_INDEX (non-sharing CAST default): rxReqIndex in imm_data[31:24].
       uint32_t rxReqIdx = (uint32_t)slots[0].rxReqIndex;
       immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT);
       if (nqps > 1) {
@@ -791,9 +789,6 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
           __func__, wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len);
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
     uint32_t immDataHost = be32toh(wc->imm_data);
-    // QP Sharing (BY_ID): imm_data carries reqId in bits[7:0] and the receiver's
-    // commId in bits[23:8]; route the completion to that comm's recvReqs. On a
-    // shared QP `base` is the polling comm, not necessarily the target.
     if (rcclParamIbCastCommNGroups() > 0) {
       uint16_t immCommId = (immDataHost >> WR_IMM_BYID_COMM_ID_SHIFT) & WR_IMM_BYID_COMM_ID_MASK;
       uint8_t reqSlot = immDataHost & WR_IMM_BYID_REQ_ID_MASK;
@@ -812,8 +807,7 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
   } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
     // wr_id[63:48] may carry a commId for completion routing (zero if sharing is
     // disabled). Strip it to recover the original request index.
-    uint64_t flushWrId = (wc->wr_id & ~((uint64_t)WR_ID_RX_COMM_ID_MASK << WR_ID_RX_COMM_ID_SHIFT));
-    NCCLCHECK(IbCastRequestRetrieveAsIndex(base->reqs, (flushWrId - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET), req));
+    NCCLCHECK(IbCastRequestRetrieveAsIndex(base->reqs, (IbCastStripCommId(wc->wr_id) - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET), req));
   } else if (!base->isSend) {
     // Non-wr-imm recv (e.g. signalled CTS completion). base is the polling comm.
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
@@ -934,8 +928,6 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)commBase;
     req = sendComm->sendReqs[wc->wr_id & 0xff][0];
   } else {
-    // TODO - QP sharing: 
-    //        confirm for matchingScheme ByOrder, limiting num requests (from wr_id) to 8 bits is correct. 
     req = &(commBase->reqs[wc->wr_id & 0xff]);
   }
 
@@ -1120,11 +1112,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
         req->recv.cmplsRecords->completions[qpIndex] = 1;
         IbCastPostRecvWorkRequest(qp->qp, &recvComm->ibRecvWorkRequest);
       } else {
-        // In the prepost path wr_id is UINT64_MAX (sentinel); only decrement rxPosts
-        // in the non-prepost path where wr_id is a valid slot index.
-        // TODO: QP sharing - mask commId bits (msb 16 bits) and confirm if there are any assumption on if all 64 bits of wr_id is used anywhere
-        uint64_t rawWrId = (wc->wr_id & ~((uint64_t) WR_ID_RX_COMM_ID_MASK << WR_ID_RX_COMM_ID_SHIFT));
-        commBase->rxPosts[rawWrId]--;
+        commBase->rxPosts[wc->wr_id]--;
       }
 
       if (commBase->recvMatchingScheme == BY_INDEX) {
@@ -1234,21 +1222,14 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
           }
           NCCLCHECK(IbCastResiliencyHandleCompletionError(r->base->resiliency, wc, i));
         } else {
-          // QP sharing: route completions to the target comm encoded in wr_id[63:48].
-          // Sender completions carry the commId directly (scheduler is disabled under
-          // sharing, so wr_id is not remapped). Recv RECV_RDMA_WITH_IMM completions
-          // carry commId in imm_data instead and are routed in the retrieve step, so
-          // only redirect targetBase for the send / non-imm cases here.
           struct ncclIbNetCommBase* targetBase = (struct ncclIbNetCommBase*)r->base;
-          if (rcclParamIbCastCommNGroups() > 0 && wc->opcode != IBV_WC_RECV_RDMA_WITH_IMM) {
-              uint16_t wridCommId = (wc->wr_id >> WR_ID_RX_COMM_ID_SHIFT) & WR_ID_RX_COMM_ID_MASK;
-              if (wridCommId != 0 && wridCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[wridCommId].used) {
-                if (g_IbCastCommTable[wridCommId].isSend) {
-                  targetBase = &((struct ncclIbSendComm*)g_IbCastCommTable[wridCommId].comm)->base;
-                } else {
-                  targetBase = &((struct ncclIbRecvComm*)g_IbCastCommTable[wridCommId].comm)->base;
-                }
-              }
+          // RECV_RDMA_WITH_IMM (data receive) carries commId in imm_data and is
+          // routed in IbCastRequestRetrieveFromCompletion. All other completions
+          // (send, CTS/RDMA_WRITE, flush/RDMA_READ) carry commId in wr_id[63:48]
+          // and are routed here.
+          if (wc->opcode != IBV_WC_RECV_RDMA_WITH_IMM) {
+            struct ncclIbNetCommBase* routed = IbCastRouteCommFromWrId(wc->wr_id);
+            if (routed) targetBase = routed;
           }
 
           TRACE(NCCL_NET, "NET/IB: %s: Processing a completion event (devIndex=%d, comm=%p (%s), req=%p, wr_id=0x%lx, qp_num=%d)", __func__, i, targetBase, targetBase->isSend ? "send" : "recv", r, wc->wr_id, wc->qp_num);

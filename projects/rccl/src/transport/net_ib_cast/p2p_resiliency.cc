@@ -269,9 +269,6 @@ static ncclResult_t IbCastResiliencyRepostRequest(struct ncclIbRequest* request)
   return ncclSuccess;
 }
 
-// TODO - QP sharing
-//        refer to all usage of wc->wr_id and extract needed bits only as it contains the 16bits commId for QP sharing
-//        refer to all usage of wc->imm_data and extract needed bits only as it contains 8 bits rxReqIdx & 16 bits CommId for QP sharing
 static ncclResult_t IbCastResiliencyHandleCompletionErrorReceiver(struct ncclIbResiliency* resCtx, struct ibv_wc* wc,
                                                                   int devIndex) {
   INFO(NCCL_NET, "NET/IB: %s: Handling an error on the receiver side (comm %p)", __func__, resCtx->baseComm);
@@ -345,9 +342,6 @@ static ncclResult_t IbCastResiliencyHandleCompletionErrorReceiver(struct ncclIbR
   return ncclSuccess;
 }
 
-// TODO - QP sharing
-//        refer to all usage of wc->wr_id and extract needed bits only as it contains the 16bits commId for QP sharing
-//        refer to all usage of wc->imm_data and extract needed bits only as it contains 8 bits rxReqIdx & 16 bits CommId for QP sharing
 static ncclResult_t IbCastResiliencyHandleCompletionErrorSender(struct ncclIbResiliency* resCtx, struct ibv_wc* wc,
                                                                 int devIndex) {
   ncclResult_t res;
@@ -820,8 +814,6 @@ ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
   qpCreateAttrs.maxRecvWorkRequest = 0;
   // Every send request can initiate at most one probing request.
   qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
-  // TODO - QP sharing:
-  //        QP sharing disabled for resiliency sender QP
   qpCreateAttrs.isQpSharingEnabled = false;
   qpCreateAttrs.qpSharingGroupIdx = -1;
   qpCreateAttrs.cqDepthMultiplier = 1;
@@ -913,8 +905,6 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
   qpCreateAttrs.maxSendWorkRequest = 0;
-  // TODO - QP sharing:
-  //        QP sharing disabled for resiliency QP
   qpCreateAttrs.isQpSharingEnabled = false;
   qpCreateAttrs.qpSharingGroupIdx = -1;
   qpCreateAttrs.cqDepthMultiplier = 1;

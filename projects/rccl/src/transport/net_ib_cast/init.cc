@@ -570,8 +570,6 @@ exit:
     castGlobalQpSchedParms.enable = false;
   }
   if (ret == ncclSuccess && castGlobalQpSchedParms.enable && rcclParamIbCastCommNGroups() > 0) {
-    // QP sharing uses the BY_ID matching scheme and keeps features orthogonal;
-    // the CAST QP scheduler (BY_INDEX wr_id remap) is not used with QP sharing.
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling QP scheduler");
     castGlobalQpSchedParms.enable = false;
   }
