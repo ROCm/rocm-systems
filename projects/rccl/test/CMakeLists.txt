@@ -256,6 +256,7 @@ if(BUILD_TESTS)
       DdaCollCommonTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/NarrowFloatReduce_test.cpp
       device/GinDeviceTests.cpp
       device/GinAnvilIpcDevice_test.cpp
       DeviceApiTests.cpp
