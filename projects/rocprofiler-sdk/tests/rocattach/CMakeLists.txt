@@ -88,8 +88,8 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
     target_compile_definitions(rocattach-symbol-lookup-fixture-shifted
                                PRIVATE ROCATTACH_FIXTURE_PADDED=1)
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-no-build-id 7 "")
-    # rocattach_add_symbol_lookup_fixture links with "--build-id". This appends
-    # after it, and the last --build-id flag on the link line wins.
+    # rocattach_add_symbol_lookup_fixture links with "--build-id". This appends after it,
+    # and the last --build-id flag on the link line wins.
     target_link_options(rocattach-symbol-lookup-fixture-no-build-id PRIVATE
                         "LINKER:--build-id=none")
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-a 4 "")
