@@ -14,11 +14,21 @@ The VideoToSequence sample illustrates decoding a single packetized video stream
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_sample && cd video_decode_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+> [!NOTE]
+> Before running, add the rocDecode and FFmpeg DLL directories to your PATH:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+> ```
 
 ## Run
 

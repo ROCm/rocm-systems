@@ -16,11 +16,21 @@ The sample provides a user class `FileStreamProvider` derived from the existing 
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_mem_sample && cd video_decode_mem_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+> [!NOTE]
+> Before running, add the rocDecode and FFmpeg DLL directories to your PATH:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+> ```
 
 ## Run
 

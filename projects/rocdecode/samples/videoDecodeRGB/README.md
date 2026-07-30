@@ -20,11 +20,21 @@ HIP kernels are used for color conversion. After the frame has been decoded, the
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_rgb_sample && cd video_decode_rgb_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+> [!NOTE]
+> Before running, add the rocDecode and FFmpeg DLL directories to your PATH:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+> ```
 
 ## Run
 

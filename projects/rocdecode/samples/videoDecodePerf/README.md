@@ -16,11 +16,21 @@ This sample uses multiple threads to decode the same input video parallelly.
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_perf_sample && cd video_decode_perf_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+> [!NOTE]
+> Before running, add the rocDecode and FFmpeg DLL directories to your PATH:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+> ```
 
 ## Run
 

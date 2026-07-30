@@ -8,11 +8,21 @@ The video decode picture files sample illustrates decoding an elementary video s
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_pic_files && cd video_decode_pic_files
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+> [!NOTE]
+> Before running, add the rocDecode DLL directory to your PATH:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;%PATH%
+> ```
 
 ## Run
 

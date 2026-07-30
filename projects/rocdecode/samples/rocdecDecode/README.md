@@ -18,11 +18,21 @@ The rocdec decode sample illustrates decoding of individual frames of video elem
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir rocdec_decode_sample && cd rocdec_decode_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+> [!NOTE]
+> Before running, add the rocDecode and FFmpeg DLL directories to your PATH:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+> ```
 
 ## Run
 

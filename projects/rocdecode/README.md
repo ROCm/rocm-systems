@@ -105,7 +105,11 @@ cmake --install . --config Release
 
   **Windows:**
 
+  Before running tests or samples, add the rocDecode and FFmpeg DLL directories to your PATH so that
+  executables can locate the required DLLs at runtime:
+
   ```bat
+  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
   ctest -C Release
   ```
 

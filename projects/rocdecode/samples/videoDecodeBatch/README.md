@@ -16,11 +16,21 @@ If the number of files is lesser than the number of threads requested by the use
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_batch && cd video_decode_batch
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+> [!NOTE]
+> Before running, add the rocDecode and FFmpeg DLL directories to your PATH:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+> ```
 
 ## Run
 
