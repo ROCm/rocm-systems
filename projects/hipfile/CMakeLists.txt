@@ -162,10 +162,6 @@ message(STATUS "ROCM_PATH set to: ${ROCM_PATH}")
 list(APPEND CMAKE_PREFIX_PATH
     ${ROCM_PATH}/llvm
     ${ROCM_PATH}
-    ${ROCM_PATH}/hip
-    /opt/rocm/llvm
-    /opt/rocm
-    /opt/rocm/hip
 )
 
 # Set hipFile Install Path to the ROCm directory
