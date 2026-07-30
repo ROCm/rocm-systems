@@ -20,21 +20,21 @@
 #define KFD_DISPATCH_LOG_FW_RECORD_BYTES 20U
 #define KFD_IOC_PROFILER_VERSION_NUM     5
 
-enum kfd_profiler_op
+enum kfd_profiler_ops
 {
-    KFD_IOC_PROFILER_PMC                    = 0,
-    KFD_IOC_PROFILER_VERSION                = 2,
-    KFD_IOC_PROFILER_PTL_CONTROL            = 3,
-    KFD_IOC_PROFILER_DLOG_REGISTER_BUFFER   = 4,
-    KFD_IOC_PROFILER_DLOG_UNREGISTER_BUFFER = 5,
-    KFD_IOC_PROFILER_DLOG_OPEN_STREAM       = 6,
-    KFD_IOC_PROFILER_DISPATCH_LOG_TARGET    = 9,
+    KFD_IOC_PROFILER_PMC         = 0,
+    KFD_IOC_PROFILER_PC_SAMPLE   = 1,
+    KFD_IOC_PROFILER_VERSION     = 2,
+    KFD_IOC_PROFILER_PTL_CONTROL = 3,
+    KFD_IOC_PROFILER_DLOG        = 4,
 };
 
-enum kfd_dispatch_log_op
+/* Sub-operation for KFD_IOC_PROFILER_DLOG. */
+enum kfd_profiler_dlog_op
 {
-    KFD_DISPATCH_LOG_OP_DISABLE = 0,
-    KFD_DISPATCH_LOG_OP_ENABLE  = 1,
+    KFD_IOC_PROFILER_DLOG_REGISTER_BUFFER = 0,
+    KFD_IOC_PROFILER_DLOG_UNREGISTER_BUFFER,
+    KFD_IOC_PROFILER_DLOG_OPEN_STREAM,
 };
 
 struct kfd_ioctl_alloc_memory_of_gpu_args
@@ -94,65 +94,59 @@ struct kfd_ioctl_get_process_apertures_new_args
     __u32 pad;
 };
 
-struct kfd_ioctl_dlog_register_buffer_args
-{
-    __u32 gpu_id;
-    __u32 buffer_size;
-    __u64 buffer_addr;
-};
-
-struct kfd_ioctl_dlog_unregister_buffer_args
-{
-    __u32 gpu_id;
-    __u32 pad;
-};
-
 #define KFD_DLOG_OPEN_F_RAW_MMAP     (1u << 0)
 #define KFD_DLOG_OPEN_F_READ_RECORDS (1u << 1)
 
-struct kfd_ioctl_dlog_open_stream_args
+/*
+ * Unified args for the KFD_IOC_PROFILER_DLOG op. @dlog_op selects the action
+ * (enum kfd_profiler_dlog_op); @gpu_id is common to all actions. @dlog_op must
+ * stay at offset 0 and @gpu_id at offset 4 so the kernel can read them before
+ * selecting the union variant.
+ */
+struct kfd_ioctl_dlog_args
 {
-    __u32 gpu_id;
-    __u32 target_pid;
-    __u32 pad;
-    __u32 flags;
-    __s32 stream_fd;
-};
-
-struct kfd_ioctl_dispatch_log_target_args
-{
-    __u32 target_pid;
-    __u32 gpu_id;
-    __u32 op;
-    __u32 region_records;
-    __s32 dmabuf_fd_out;
-    __u32 num_regions_out;
-    __u32 region_records_out;
-    __u32 record_bytes_out;
-    __u64 wptr_array_off_out;
-    __u64 rptr_array_off_out;
-    __u64 signal_array_off_out;
-};
-
-struct kfd_ioctl_profiler_args
-{
-    __u32 op;
+    __u32 dlog_op;  /* IN: enum kfd_profiler_dlog_op */
+    __u32 gpu_id;   /* IN: KFD user gpu_id */
     union
     {
-        __u32                                        version;
-        struct kfd_ioctl_dlog_register_buffer_args   dlog_register;
-        struct kfd_ioctl_dlog_unregister_buffer_args dlog_unregister;
-        struct kfd_ioctl_dlog_open_stream_args       dlog_open;
-        __u64                                        reserved[7];
+        /* REGISTER_BUFFER: register a GPUVM-mapped buffer as backing store */
+        struct
+        {
+            __u32 buffer_size;  /* IN */
+            __u32 pad;          /* IN: must be 0 */
+            __u64 buffer_addr;  /* IN: mapped GPU VA */
+        } reg;
+        /* UNREGISTER_BUFFER */
+        struct
+        {
+            __u32 pad;  /* IN: must be 0 */
+        } unreg;
+        /* OPEN_STREAM: open a stream fd against a target process */
+        struct
+        {
+            __u32 target_pid;  /* IN: target tgid */
+            __u32 pad;         /* IN: must be 0 */
+            __u32 flags;       /* IN: exactly one KFD_DLOG_OPEN_F_* */
+            __s32 stream_fd;   /* OUT: anon_inode stream fd */
+        } open;
     };
 };
 
-struct legacy_kfd_ioctl_profiler_args
+/*
+ * Mirror of the kernel's AMDKFD_IOC_PROFILER (0x28) args. The union is capped at
+ * exactly 32 bytes (reserved[8]) and lives at offset 8 (after @op + @pad) so the
+ * _IOWR-encoded size baked into AMDKFD_IOC_PROFILER matches the kernel. Do not
+ * grow the union past 32 bytes.
+ */
+struct kfd_ioctl_profiler_args
 {
-    __u32 op;
+    __u32 op;   /* enum kfd_profiler_ops */
+    __u32 pad;  /* IN: must be 0 (reserved) */
     union
     {
-        struct kfd_ioctl_dispatch_log_target_args dispatch_log_target;
+        __u32                     version;  /* KFD_IOC_PROFILER_VERSION_NUM */
+        struct kfd_ioctl_dlog_args dlog;
+        __u32                     reserved[8];
     };
 };
 
@@ -205,26 +199,29 @@ struct kfd_dlog_stream_status
     __u64 backing_retained_count;
 };
 
-struct kfd_dlog_mem_span
+/* Sub-operation selector for the dispatch-log stream fd ioctl. */
+enum kfd_dlog_stream_op
 {
-    __u64 offset;
-    __u64 size;
+    KFD_DLOG_STREAM_OP_INFO = 0,
+    KFD_DLOG_STREAM_OP_STATUS,
 };
 
-struct kfd_dlog_layout
+struct kfd_dlog_stream_args
 {
-    __u32                    num_pipes;
-    __u32                    slot_bytes;
-    __u32                    slots_per_pipe;
-    __u32                    pad;
-    struct kfd_dlog_mem_span records;
-    struct kfd_dlog_mem_span wptr;
-    struct kfd_dlog_mem_span rptr;
-    struct kfd_dlog_mem_span signal;
+    __u32 op;   /* IN: enum kfd_dlog_stream_op */
+    __u32 pad;  /* IN: must be 0 */
+    union
+    {
+        struct kfd_dlog_stream_info   info;    /* OUT for OP_INFO */
+        struct kfd_dlog_stream_status status;  /* OUT for OP_STATUS */
+    };
 };
 
-#define KFD_DLOG_STREAM_IOC_INFO   _IOR('D', 1, struct kfd_dlog_stream_info)
-#define KFD_DLOG_STREAM_IOC_STATUS _IOR('D', 2, struct kfd_dlog_stream_status)
+/*
+ * Stream-fd ioctl. Dispatched only on the anon_inode dispatch-log stream fd,
+ * never through /dev/kfd. Reuses amdkfd's 'K' magic with NR 0x88.
+ */
+#define KFD_DLOG_STREAM_IOC _IOWR('K', 0x88, struct kfd_dlog_stream_args)
 
 #define AMDKFD_IOC_PROFILER            AMDKFD_IOWR(0x28, struct kfd_ioctl_profiler_args)
 #define AMDKFD_IOC_ALLOC_MEMORY_OF_GPU AMDKFD_IOWR(0x16, struct kfd_ioctl_alloc_memory_of_gpu_args)

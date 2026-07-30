@@ -241,11 +241,12 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
         return false;
     }
 
-    auto reg                      = kfd_ioctl_profiler_args{};
-    reg.op                        = KFD_IOC_PROFILER_DLOG_REGISTER_BUFFER;
-    reg.dlog_register.gpu_id      = gpu_id;
-    reg.dlog_register.buffer_size = static_cast<uint32_t>(buf_bytes);
-    reg.dlog_register.buffer_addr = s->buffer_va;
+    auto reg                       = kfd_ioctl_profiler_args{};
+    reg.op                         = KFD_IOC_PROFILER_DLOG;
+    reg.dlog.dlog_op               = KFD_IOC_PROFILER_DLOG_REGISTER_BUFFER;
+    reg.dlog.gpu_id                = gpu_id;
+    reg.dlog.reg.buffer_size       = static_cast<uint32_t>(buf_bytes);
+    reg.dlog.reg.buffer_addr       = s->buffer_va;
     if(ioctl(kfd, AMDKFD_IOC_PROFILER, &reg) != 0)
     {
         ROCP_WARNING << fmt::format("KFD dispatch-log: REGISTER_BUFFER failed (errno={})", errno);
@@ -253,23 +254,27 @@ setup_session(int kfd, uint32_t gpu_id, dlog_session* s)
     }
 
     auto open                 = kfd_ioctl_profiler_args{};
-    open.op                   = KFD_IOC_PROFILER_DLOG_OPEN_STREAM;
-    open.dlog_open.gpu_id     = gpu_id;
-    open.dlog_open.target_pid = static_cast<uint32_t>(getpid());
-    open.dlog_open.flags      = KFD_DLOG_OPEN_F_RAW_MMAP;
-    open.dlog_open.stream_fd  = -1;
-    if(ioctl(kfd, AMDKFD_IOC_PROFILER, &open) != 0 || open.dlog_open.stream_fd < 0)
+    open.op                   = KFD_IOC_PROFILER_DLOG;
+    open.dlog.dlog_op         = KFD_IOC_PROFILER_DLOG_OPEN_STREAM;
+    open.dlog.gpu_id          = gpu_id;
+    open.dlog.open.target_pid = static_cast<uint32_t>(getpid());
+    open.dlog.open.flags      = KFD_DLOG_OPEN_F_RAW_MMAP;
+    open.dlog.open.stream_fd  = -1;
+    if(ioctl(kfd, AMDKFD_IOC_PROFILER, &open) != 0 || open.dlog.open.stream_fd < 0)
     {
         ROCP_WARNING << fmt::format("KFD dispatch-log: OPEN_STREAM failed (errno={})", errno);
         return false;
     }
-    s->stream_fd = open.dlog_open.stream_fd;
+    s->stream_fd = open.dlog.open.stream_fd;
 
-    if(ioctl(s->stream_fd, KFD_DLOG_STREAM_IOC_INFO, &s->info) != 0)
+    auto sinfo = kfd_dlog_stream_args{};
+    sinfo.op   = KFD_DLOG_STREAM_OP_INFO;
+    if(ioctl(s->stream_fd, KFD_DLOG_STREAM_IOC, &sinfo) != 0)
     {
-        ROCP_WARNING << "KFD dispatch-log: STREAM_IOC_INFO failed";
+        ROCP_WARNING << "KFD dispatch-log: STREAM_OP_INFO failed";
         return false;
     }
+    s->info = sinfo.info;
 
     if(s->info.fw_record_size != kFwRecBytes || s->info.num_regions == 0 || s->info.num_regions > 8)
     {
@@ -320,9 +325,10 @@ teardown_session(int kfd, dlog_session* s)
     }
     if(s->buffer_va != 0 && kfd >= 0)
     {
-        auto unreg                   = kfd_ioctl_profiler_args{};
-        unreg.op                     = KFD_IOC_PROFILER_DLOG_UNREGISTER_BUFFER;
-        unreg.dlog_unregister.gpu_id = s->gpu_id;
+        auto unreg           = kfd_ioctl_profiler_args{};
+        unreg.op             = KFD_IOC_PROFILER_DLOG;
+        unreg.dlog.dlog_op   = KFD_IOC_PROFILER_DLOG_UNREGISTER_BUFFER;
+        unreg.dlog.gpu_id    = s->gpu_id;
         ioctl(kfd, AMDKFD_IOC_PROFILER, &unreg);
 
         auto unmap                 = kfd_ioctl_unmap_memory_from_gpu_args{};
