@@ -34,6 +34,9 @@ terminal, and takes everything with it when it exits.
   echo, line editing and Ctrl-C all work. There is no pseudo-terminal in
   the way, no output relay, and no stdin forwarding — which is also why
   redirected runs are byte-exact, with stdout and stderr still separate.
+  Your environment comes with it too: whatever you exported is what the
+  workload sees, with the emulator's variables layered on top. Pass
+  `--clear-env-vars` for the strict, ambient-free version.
 * **A second terminal when you want one.** While a run is up it serves a
   socket naming its session, so `mirage exec -- <command>` from another
   window starts a process in that same emulated machine — in *that*

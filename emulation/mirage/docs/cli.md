@@ -52,7 +52,7 @@ mirage run [--profile NAME] [--emulator NAME]
            [--container-provider PROV] [--hack HACK]...
            [--exec-mode functional|clocked] [-o|--option KEY=VALUE]...
            [--plugin NAME]... [--config PATH]
-           [--daemon | --in-process] [--capture-all]
+           [--daemon | --in-process] [--capture-all] [--clear-env-vars]
            -- <cmd> [args...]
 ```
 
@@ -209,11 +209,52 @@ Details worth knowing:
 * **No rank gets stdin.** Capturing costs you interactivity; that is the
   trade. Do not use it for `bash`.
 
+### The workload's environment
+
+A workload inherits the environment of the terminal you ran mirage from.
+Mirage's parent *is* your shell, so anything you exported there — an API
+token, a `PYTHONPATH`, an `HTTP_PROXY`, a framework tuning variable — is
+something you meant for the workload, and it arrives unchanged.
+
+Three things are layered on top of it, in this order:
+
+1. the emulator's own variables and its `LD_PRELOAD` interposer,
+2. anything you passed with `--env KEY=VALUE`,
+3. mirage's rank variables (`RANK`, `WORLD_SIZE`, `LOCAL_RANK`,
+   `MASTER_ADDR`, `MASTER_PORT`, `MIRAGE_RANK`, …).
+
+Mirage's own go last, so a workload cannot break its own rendezvous by
+exporting `RANK`. `LD_PRELOAD` is the one exception to "last wins": the
+emulator's interposer is *prepended* to yours rather than replacing it,
+because both have to be loaded.
+
+### `--clear-env-vars`
+
+Starts the workload with an almost-empty environment instead:
+
+```sh
+mirage run --profile mi350x --clear-env-vars -- ./benchmark
+```
+
+Only what a process needs in order to be a process survives — `PATH`,
+`HOME`, `USER`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR`, `SHELL` — plus the
+three layers above, which are passed explicitly and are therefore
+unaffected. In particular the emulator's injection always survives; a
+workload that lost it would run unemulated on whatever hardware is
+actually present, and still exit 0.
+
+Reach for it when a result must not depend on ambient state: a benchmark,
+a reproduction, a CI job compared against a recorded baseline.
+
+It has no effect on a containerised session. A container never inherits
+the host's environment in the first place — the workload sees exactly
+what mirage passes it with `-e`, and nothing else.
+
 ## `mirage exec`
 
 ```text
 mirage exec [-s|--session ID] [--nproc-per-node N] [--capture-all]
-            [--env KEY=VALUE]... [--workdir DIR]
+            [--clear-env-vars] [--env KEY=VALUE]... [--workdir DIR]
             -- <cmd> [args...]
 ```
 
