@@ -1019,6 +1019,81 @@ ncclResult_t ncclIbResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
   return ncclSuccess;
 }
 
+ncclResult_t ncclIbResiliencyQpReconfigure(struct ncclIbResiliency* resCtx, struct ncclIbQp* qp,
+                                           struct ncclIbNetCommDevBase* devBase, int devIndex, bool* success) {
+  if (resCtx == NULL || qp == NULL || qp->qp == NULL || devBase == NULL || success == NULL) return ncclInternalError;
+
+  *success = false;
+  const char* dir = resCtx->baseComm->isSend ? "send" : "recv";
+  ncclResult_t res;
+
+  NOWARN(res = ncclIbQpReset(qp), NCCL_NET);
+  if (res != ncclSuccess) {
+    INFO(NCCL_NET, "NET/IB: %s: Reset failed (%d) for QP devIndex=%d qp_num=%u (%s comm=%p)", __func__, res, devIndex,
+         qp->qp->qp_num, dir, resCtx->baseComm);
+    return ncclSuccess;
+  }
+  NOWARN(res = ncclIbQpInit(qp), NCCL_NET);
+  if (res != ncclSuccess) {
+    INFO(NCCL_NET, "NET/IB: %s: Init failed (%d) for QP devIndex=%d qp_num=%u (%s comm=%p)", __func__, res, devIndex,
+         qp->qp->qp_num, dir, resCtx->baseComm);
+    return ncclSuccess;
+  }
+  if (qp->eceSupported) {
+    NOWARN(res = wrap_ibv_set_ece(qp->qp, &qp->ece, &qp->eceSupported), NCCL_NET);
+    if (res != ncclSuccess) {
+      INFO(NCCL_NET, "NET/IB: %s: ECE failed (%d) for QP devIndex=%d qp_num=%u (%s comm=%p)", __func__, res, devIndex,
+           qp->qp->qp_num, dir, resCtx->baseComm);
+      return ncclSuccess;
+    }
+  }
+  qp->rtrAttr.localGid = devBase->gidInfo.localGid;
+  qp->rtrAttr.localGidIndex = devBase->gidInfo.localGidIndex;
+  NOWARN(res = ncclIbQpRtr(qp), NCCL_NET);
+  if (res != ncclSuccess) {
+    INFO(NCCL_NET,
+         "NET/IB: %s: RTR failed (%d) for QP devIndex=%d qp_num=%u localGidIndex=%d (port still down or GID not yet "
+         "registered) (%s comm=%p)",
+         __func__, res, devIndex, qp->qp->qp_num, qp->rtrAttr.localGidIndex, dir, resCtx->baseComm);
+    return ncclSuccess;
+  }
+  NOWARN(res = ncclIbQpRts(qp), NCCL_NET);
+  if (res != ncclSuccess) {
+    INFO(NCCL_NET, "NET/IB: %s: RTS failed (%d) for QP devIndex=%d qp_num=%u (%s comm=%p)", __func__, res, devIndex,
+         qp->qp->qp_num, dir, resCtx->baseComm);
+    return ncclSuccess;
+  }
+  *success = true;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbResiliencyQpsReconfigure(struct ncclIbResiliency* resCtx, int devIndex, bool* success) {
+  *success = false;
+  bool isSend = resCtx->baseComm->isSend;
+
+  struct ncclIbNetCommDevBase* devBase = ncclIbGetNetCommDevBase(resCtx->baseComm, devIndex);
+  if (devBase == NULL) return ncclInternalError;
+
+  ncclIbGidInfoSnapshot(devBase, &ncclIbDevs[devBase->ibDevN]);
+
+  for (int i = 0; i < resCtx->nProbingQps; i++) {
+    struct ncclIbQp* qp = &resCtx->probingQps[i];
+    if (qp->qp == NULL || qp->devIndex != devIndex) continue;
+
+    INFO(NCCL_NET, "NET/IB: %s: Reconfiguring probing QP devIndex=%d qp_num=%u (%s comm=%p)", __func__, devIndex,
+         qp->qp->qp_num, isSend ? "send" : "recv", resCtx->baseComm);
+    bool qpReconfigured;
+    NCCLCHECK(ncclIbResiliencyQpReconfigure(resCtx, qp, devBase, devIndex, &qpReconfigured));
+    if (!qpReconfigured) {
+      INFO(NCCL_NET, "NET/IB: %s: Failed to reconfigure probing QP devIndex=%d qp_num=%u (%s comm=%p)", __func__,
+           devIndex, qp->qp->qp_num, isSend ? "send" : "recv", resCtx->baseComm);
+      return ncclSuccess;
+    }
+  }
+
+  return ncclIbPortRecoveryQpsReconfigure(resCtx, devIndex, success);
+}
+
 ncclResult_t ncclIbResiliencyClose(struct ncclIbResiliency* resCtx) {
   if (resCtx == NULL) {
     WARN("NET/IB: Resiliency context is NULL. Nothing to destroy.");

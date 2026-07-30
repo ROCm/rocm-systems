@@ -113,6 +113,37 @@ ncclResult_t ncclIbSendCommInit(struct ncclIbSendComm* sendComm) {
   return ncclSuccess;
 }
 
+static ncclResult_t ncclIbEventGidChange(struct ncclIbDev* dev) {
+  INFO(NCCL_NET, "NET/IB: %s: GID table changed on %s:%d", __func__, dev->devName, dev->portNum);
+  if (dev->gidInfo.link_layer != IBV_LINK_LAYER_ETHERNET) {
+    INFO(NCCL_NET, "NET/IB : %s:%d link is not Ethernet; ignoring GID change", dev->devName, dev->portNum);
+    return ncclSuccess;
+  }
+  struct ibv_port_attr portAttr;
+  ncclResult_t res = wrap_ibv_query_port(dev->context, dev->portNum, &portAttr);
+  if (res != ncclSuccess) {
+    WARN("NET/IB : %s:%d query_port failed during GID change (res=%d)", dev->devName, dev->portNum, (int)res);
+    return res;
+  }
+
+  std::lock_guard<std::mutex> lock(dev->mutex);
+  int oldIdx = dev->gidInfo.localGidIndex;
+  union ibv_gid oldGid = dev->gidInfo.localGid;
+  res = ncclIbGidInfoQuery(dev->context, dev->portNum, &portAttr, &dev->gidInfo);
+  if (res != ncclSuccess) {
+    WARN("NET/IB : %s:%d GID info query failed (%d) during GID change", dev->devName, dev->portNum, (int)res);
+    return res;
+  }
+  dev->portAttr = portAttr; // publish only once everything succeeded
+  char oldGidStr[INET6_ADDRSTRLEN] = "";
+  char newGidStr[INET6_ADDRSTRLEN] = "";
+  ibvGetGidStr(&oldGid, oldGidStr, sizeof(oldGidStr));
+  ibvGetGidStr(&dev->gidInfo.localGid, newGidStr, sizeof(newGidStr));
+  INFO(NCCL_NET, "NET/IB : %s:%d GID refreshed: idx %d -> %d, gid %s -> %s", dev->devName, dev->portNum, oldIdx,
+       dev->gidInfo.localGidIndex, oldGidStr, newGidStr);
+  return ncclSuccess;
+}
+
 static void ncclIbUpdateDeviceSpeed(struct ncclIbDev* dev) {
   uint64_t oldSpeed = COMPILER_ATOMIC_LOAD(&dev->currSpeed, std::memory_order_relaxed);
   uint64_t newSpeed = 0;
@@ -175,7 +206,11 @@ void* ncclIbAsyncThreadMain(void* args) {
       WARN("NET/IB : %s:%d async fatal event on SRQ, unused for now (%p): %s", dev->devName, dev->portNum, srq, str);
       break;
     case IBV_EVENT_GID_CHANGE:
-      INFO(NCCL_NET, "NET/IB: %s: GID table changed on %s:%d", __func__, dev->devName, dev->portNum);
+      if (ncclIbEventGidChange(dev) != ncclSuccess) {
+        WARN("NET/IB : %s:%d marking device with fatal error after GID-change event handler failed", dev->devName,
+             dev->portNum);
+        ncclIbDevFatalError(dev);
+      }
       break;
     case IBV_EVENT_DEVICE_SPEED_CHANGE:
       ncclIbUpdateDeviceSpeed(dev);
