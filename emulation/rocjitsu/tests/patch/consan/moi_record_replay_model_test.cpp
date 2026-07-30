@@ -941,33 +941,31 @@ TEST(ConSanMoi, RecordReplayAtomicAcquireSuppressesSameEpochConflict) {
   std::array<uint64_t, 1> shadow{};
   std::array<ConSanMoiAtomicReleaseRecord, 1> releases{};
   std::array<ConSanMoiAcquiredEpochToken, 1> tokens{};
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*access_capacity=*/2,
+                                       ConSanMoiEngine::RecordReplay);
 
-  const ConSanMoiRecordReplayAccess writer{
+  const ConSanMoiExactByteAccess writer{
       /*generation=*/7,
       /*owner_id=*/0,
       /*epoch=*/0,
       ConSanMoiShadowAccessKind::Write,
       /*lds_byte_offset=*/0,
       /*lds_byte_count=*/4,
-      /*start_cell=*/0,
-      /*cell_count=*/1,
       /*instruction_offset=*/0x10,
       /*lane_mask=*/0x1,
   };
-  const ConSanMoiRecordReplayAccess reader{
+  const ConSanMoiExactByteAccess reader{
       /*generation=*/7,
       /*owner_id=*/1,
       /*epoch=*/0,
       ConSanMoiShadowAccessKind::Read,
       /*lds_byte_offset=*/0,
       /*lds_byte_count=*/4,
-      /*start_cell=*/0,
-      /*cell_count=*/1,
       /*instruction_offset=*/0x20,
       /*lane_mask=*/0x2,
   };
 
-  EXPECT_FALSE(consan_moi_record_replay_access(shadow, writer).conflict);
+  EXPECT_FALSE(model.access(writer, {}, shadow).conflict);
   const ConSanMoiAtomicSyncResult release = consan_moi_record_replay_atomic_release(
       releases, /*generation=*/7, /*atomic_address=*/0x4000, /*producer_owner_id=*/0,
       /*producer_epoch=*/0, /*release_instruction_offset=*/0x100);
@@ -984,7 +982,7 @@ TEST(ConSanMoi, RecordReplayAtomicAcquireSuppressesSameEpochConflict) {
   EXPECT_EQ(tokens[0].producer_owner_id, 0u);
   EXPECT_EQ(tokens[0].producer_epoch_plus_one, 1u);
 
-  const auto second = consan_moi_record_replay_access(shadow, reader, tokens);
+  const auto second = model.access(reader, tokens, shadow);
   EXPECT_FALSE(second.conflict);
   const ConSanMoiExactShadowEntry updated = decode_consan_moi_exact_shadow_entry(shadow[0]);
   EXPECT_EQ(updated.kind, ConSanMoiShadowAccessKind::Read);
@@ -994,29 +992,25 @@ TEST(ConSanMoi, RecordReplayAtomicAcquireSuppressesSameEpochConflict) {
 
 TEST(ConSanMoi, RecordReplayAtomicOrderingRequiresMatchingAcquireAddress) {
   const auto make_writer = [] {
-    return ConSanMoiRecordReplayAccess{
+    return ConSanMoiExactByteAccess{
         /*generation=*/7,
         /*owner_id=*/0,
         /*epoch=*/0,
         ConSanMoiShadowAccessKind::Write,
         /*lds_byte_offset=*/0,
         /*lds_byte_count=*/4,
-        /*start_cell=*/0,
-        /*cell_count=*/1,
         /*instruction_offset=*/0x10,
         /*lane_mask=*/0x1,
     };
   };
   const auto make_reader = [] {
-    return ConSanMoiRecordReplayAccess{
+    return ConSanMoiExactByteAccess{
         /*generation=*/7,
         /*owner_id=*/1,
         /*epoch=*/0,
         ConSanMoiShadowAccessKind::Read,
         /*lds_byte_offset=*/0,
         /*lds_byte_count=*/4,
-        /*start_cell=*/0,
-        /*cell_count=*/1,
         /*instruction_offset=*/0x20,
         /*lane_mask=*/0x2,
     };
@@ -1027,15 +1021,17 @@ TEST(ConSanMoi, RecordReplayAtomicOrderingRequiresMatchingAcquireAddress) {
     std::array<uint64_t, 1> shadow{};
     std::array<ConSanMoiAtomicReleaseRecord, 1> releases{};
     std::array<ConSanMoiAcquiredEpochToken, 1> tokens{};
+    ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*access_capacity=*/2,
+                                         ConSanMoiEngine::RecordReplay);
 
-    EXPECT_FALSE(consan_moi_record_replay_access(shadow, make_writer()).conflict);
+    EXPECT_FALSE(model.access(make_writer(), {}, shadow).conflict);
     EXPECT_FALSE(consan_moi_record_replay_atomic_release(
                      releases, /*generation=*/7, /*atomic_address=*/0x4000,
                      /*producer_owner_id=*/0, /*producer_epoch=*/0,
                      /*release_instruction_offset=*/0x100)
                      .metadata_full);
 
-    const auto second = consan_moi_record_replay_access(shadow, make_reader(), tokens);
+    const auto second = model.access(make_reader(), tokens, shadow);
     EXPECT_TRUE(second.conflict);
     EXPECT_FALSE(second.metadata_full);
   }
@@ -1045,8 +1041,10 @@ TEST(ConSanMoi, RecordReplayAtomicOrderingRequiresMatchingAcquireAddress) {
     std::array<uint64_t, 1> shadow{};
     std::array<ConSanMoiAtomicReleaseRecord, 1> releases{};
     std::array<ConSanMoiAcquiredEpochToken, 1> tokens{};
+    ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*access_capacity=*/2,
+                                         ConSanMoiEngine::RecordReplay);
 
-    EXPECT_FALSE(consan_moi_record_replay_access(shadow, make_writer()).conflict);
+    EXPECT_FALSE(model.access(make_writer(), {}, shadow).conflict);
     EXPECT_FALSE(consan_moi_record_replay_atomic_release(
                      releases, /*generation=*/7, /*atomic_address=*/0x4000,
                      /*producer_owner_id=*/0, /*producer_epoch=*/0,
@@ -1058,7 +1056,7 @@ TEST(ConSanMoi, RecordReplayAtomicOrderingRequiresMatchingAcquireAddress) {
                   .updated_record_count,
               0u);
 
-    const auto second = consan_moi_record_replay_access(shadow, make_reader(), tokens);
+    const auto second = model.access(make_reader(), tokens, shadow);
     EXPECT_TRUE(second.conflict);
     EXPECT_FALSE(second.metadata_full);
   }
@@ -1353,6 +1351,54 @@ TEST(ConSanMoi, RecordReplayAdjacentSubwordRangesInOneCellStayClean) {
   EXPECT_EQ(header.diagnostic_count, 0u);
 }
 
+TEST(ConSanMoi, SparseExactByteShadowBoundsProvenanceAndIntervalSplits) {
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/8, /*access_capacity=*/2,
+                                       ConSanMoiEngine::RecordReplay);
+  ConSanMoiExactByteAccess outer{
+      /*generation=*/7,
+      /*owner_id=*/1,
+      /*epoch=*/3,
+      ConSanMoiShadowAccessKind::Write,
+      /*lds_byte_offset=*/0,
+      /*lds_byte_count=*/8,
+      /*instruction_offset=*/0x10,
+      /*lane_mask=*/0x1,
+  };
+  ConSanMoiExactByteAccess middle = outer;
+  middle.lds_byte_offset = 2;
+  middle.lds_byte_count = 2;
+  middle.instruction_offset = 0x20;
+
+  EXPECT_FALSE(model.access(outer).conflict);
+  EXPECT_FALSE(model.access(middle).conflict);
+  EXPECT_EQ(model.provenance_count(), 2u);
+  EXPECT_EQ(model.interval_count(), 3u);
+
+  ConSanMoiExactByteAccess overflow = middle;
+  overflow.lds_byte_offset = 6;
+  overflow.instruction_offset = 0x30;
+  const ConSanMoiExactByteAccessResult result = model.access(overflow);
+  EXPECT_TRUE(result.conflict);
+  EXPECT_TRUE(result.metadata_full);
+  EXPECT_EQ(result.diagnostic.kind, static_cast<uint32_t>(ConSanMoiDiagnosticKind::MetadataFull));
+  EXPECT_EQ(model.provenance_count(), 2u);
+  EXPECT_EQ(model.interval_count(), 3u);
+
+  ConSanMoiSparseExactByteShadow conflict_model(/*byte_capacity=*/8, /*access_capacity=*/1,
+                                                ConSanMoiEngine::RecordReplay);
+  ConSanMoiExactByteAccess conflicting = outer;
+  conflicting.owner_id = 2;
+  conflicting.kind = ConSanMoiShadowAccessKind::Read;
+  conflicting.instruction_offset = 0x40;
+  EXPECT_FALSE(conflict_model.access(outer).conflict);
+  const ConSanMoiExactByteAccessResult conflict = conflict_model.access(conflicting);
+  EXPECT_TRUE(conflict.conflict);
+  EXPECT_FALSE(conflict.metadata_full);
+  EXPECT_EQ(conflict.diagnostic.kind,
+            static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict));
+  EXPECT_EQ(conflict_model.provenance_count(), 1u);
+}
+
 TEST(ConSanMoi, RecordReplayMultiLaneWriteReportsExactSameWaveConflict) {
   ConSanMoiReportHeader header = make_consan_moi_report_header(
       /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/1,
@@ -1476,25 +1522,29 @@ TEST(ConSanMoi, RecordReplaySameWaveDifferentSitesAreProgramOrdered) {
 
 TEST(ConSanMoi, RecordReplayDirectWaveMaskDoesNotInventAnIntraWaveConflict) {
   ConSanMoiReportHeader header = make_consan_moi_report_header(
-      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/1,
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
       /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
       /*sampled_watchpoint_capacity=*/0);
-  header.access_record_count = 1;
+  header.access_record_count = 2;
 
-  ConSanMoiAccessRecord record{};
-  record.wave_id = 3;
-  record.lane_mask = std::numeric_limits<uint64_t>::max();
-  record.instruction_offset = 0x40;
-  record.access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
-  record.lds_byte_count = 4;
-  record.cell_count = 1;
+  std::array<ConSanMoiAccessRecord, 2> records{};
+  for (ConSanMoiAccessRecord &record : records) {
+    record.wave_id = 3;
+    record.instruction_offset = 0x40;
+    record.access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    record.lds_byte_count = 4;
+    record.cell_count = 1;
+  }
+  records[0].lane_mask = std::numeric_limits<uint64_t>::max();
+  records[1].lane_mask = 0x5555555555555555ull;
 
   std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
   std::array<uint64_t, 1> shadow{};
-  const ConSanMoiRecordReplayResult replay = consan_moi_record_replay_access_records(
-      header, std::span<const ConSanMoiAccessRecord>(&record, 1), diagnostics, shadow);
+  const ConSanMoiRecordReplayResult replay =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
 
   EXPECT_FALSE(replay.conflict);
+  EXPECT_EQ(replay.processed_access_count, 2u);
   EXPECT_EQ(replay.emitted_diagnostic_count, 0u);
 }
 

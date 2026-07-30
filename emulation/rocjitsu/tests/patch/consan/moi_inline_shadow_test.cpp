@@ -6382,42 +6382,77 @@ TEST(ConSanMoi, ExactShadowConflictPredicateMatchesSubgroupContract) {
   EXPECT_FALSE(consan_moi_exact_shadow_entries_conflict(current, prior_read));
 }
 
-TEST(ConSanMoi, RecordReplayExactShadowReportsSameEpochConflicts) {
+TEST(ConSanMoi, ExactByteConflictModelDistinguishesAdjacentAndOverlappingGroups) {
+  ConSanMoiExactByteAccess prior{
+      /*generation=*/7,
+      /*owner_id=*/1,
+      /*epoch=*/3,
+      ConSanMoiShadowAccessKind::Write,
+      /*lds_byte_offset=*/0,
+      /*lds_byte_count=*/2,
+      /*instruction_offset=*/0x10,
+      /*lane_mask=*/0x1,
+      /*exact_address_group=*/true,
+  };
+  ConSanMoiExactByteAccess current = prior;
+  current.owner_id = 2;
+  current.lds_byte_offset = 2;
+  current.instruction_offset = 0x20;
+  current.lane_mask = 0x2;
+
+  EXPECT_TRUE(consan_moi_exact_byte_overlap(current, prior).empty());
+  EXPECT_FALSE(consan_moi_exact_byte_accesses_conflict(current, prior));
+
+  current.lds_byte_offset = 1;
+  const ConSanMoiExactByteOverlap overlap = consan_moi_exact_byte_overlap(current, prior);
+  EXPECT_EQ(overlap.byte_offset, 1u);
+  EXPECT_EQ(overlap.byte_count, 1u);
+  EXPECT_TRUE(consan_moi_exact_byte_accesses_conflict(current, prior));
+
+  current.owner_id = prior.owner_id;
+  current.instruction_offset = prior.instruction_offset;
+  EXPECT_TRUE(consan_moi_exact_byte_accesses_conflict(current, prior));
+  current.exact_address_group = false;
+  EXPECT_FALSE(consan_moi_exact_byte_accesses_conflict(current, prior));
+  current.exact_address_group = true;
+  current.instruction_offset = 0x28;
+  EXPECT_FALSE(consan_moi_exact_byte_accesses_conflict(current, prior));
+}
+
+TEST(ConSanMoi, InlineReferenceExactByteShadowReportsSameEpochConflicts) {
   std::array<uint64_t, 1> shadow{};
-  const ConSanMoiRecordReplayAccess writer{
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*access_capacity=*/2,
+                                       ConSanMoiEngine::InlineShadow);
+  const ConSanMoiExactByteAccess writer{
       /*generation=*/7,
       /*owner_id=*/1,
       /*epoch=*/3,
       ConSanMoiShadowAccessKind::Write,
       /*lds_byte_offset=*/0,
       /*lds_byte_count=*/4,
-      /*start_cell=*/0,
-      /*cell_count=*/1,
       /*instruction_offset=*/0x10,
       /*lane_mask=*/0x1,
   };
-  const ConSanMoiRecordReplayAccess reader{
+  const ConSanMoiExactByteAccess reader{
       /*generation=*/7,
       /*owner_id=*/2,
       /*epoch=*/3,
       ConSanMoiShadowAccessKind::Read,
       /*lds_byte_offset=*/0,
       /*lds_byte_count=*/4,
-      /*start_cell=*/0,
-      /*cell_count=*/1,
       /*instruction_offset=*/0x20,
       /*lane_mask=*/0x2,
   };
 
-  const auto first = consan_moi_record_replay_access(shadow, writer);
+  const auto first = model.access(writer, {}, shadow);
   EXPECT_FALSE(first.conflict);
   EXPECT_NE(shadow[0], 0u);
 
-  const auto second = consan_moi_record_replay_access(shadow, reader);
+  const auto second = model.access(reader, {}, shadow);
   EXPECT_TRUE(second.conflict);
   EXPECT_FALSE(second.metadata_full);
   EXPECT_EQ(second.diagnostic.kind, static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict));
-  EXPECT_EQ(second.diagnostic.backend, static_cast<uint32_t>(ConSanMoiEngine::RecordReplay));
+  EXPECT_EQ(second.diagnostic.backend, static_cast<uint32_t>(ConSanMoiEngine::InlineShadow));
   EXPECT_EQ(second.diagnostic.generation, 7u);
   EXPECT_EQ(second.diagnostic.epoch, 3u);
   EXPECT_EQ(second.diagnostic.first_owner_id, 1u);
@@ -6429,29 +6464,29 @@ TEST(ConSanMoi, RecordReplayExactShadowReportsSameEpochConflicts) {
             static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read));
 }
 
-TEST(ConSanMoi, RecordReplayExactShadowTreatsDifferentEpochAsOrdered) {
+TEST(ConSanMoi, InlineReferenceExactByteShadowTreatsDifferentEpochAsOrdered) {
   std::array<uint64_t, 1> shadow{};
-  ConSanMoiRecordReplayAccess writer{
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*access_capacity=*/2,
+                                       ConSanMoiEngine::InlineShadow);
+  ConSanMoiExactByteAccess writer{
       /*generation=*/7,
       /*owner_id=*/1,
       /*epoch=*/3,
       ConSanMoiShadowAccessKind::Write,
       /*lds_byte_offset=*/0,
       /*lds_byte_count=*/4,
-      /*start_cell=*/0,
-      /*cell_count=*/1,
       /*instruction_offset=*/0x10,
       /*lane_mask=*/0x1,
   };
-  ConSanMoiRecordReplayAccess reader = writer;
+  ConSanMoiExactByteAccess reader = writer;
   reader.owner_id = 2;
   reader.epoch = 4;
   reader.kind = ConSanMoiShadowAccessKind::Read;
   reader.instruction_offset = 0x20;
   reader.lane_mask = 0x2;
 
-  EXPECT_FALSE(consan_moi_record_replay_access(shadow, writer).conflict);
-  const auto second = consan_moi_record_replay_access(shadow, reader);
+  EXPECT_FALSE(model.access(writer, {}, shadow).conflict);
+  const auto second = model.access(reader, {}, shadow);
   EXPECT_FALSE(second.conflict);
   const ConSanMoiExactShadowEntry updated = decode_consan_moi_exact_shadow_entry(shadow[0]);
   EXPECT_EQ(updated.kind, ConSanMoiShadowAccessKind::Read);
@@ -6459,22 +6494,22 @@ TEST(ConSanMoi, RecordReplayExactShadowTreatsDifferentEpochAsOrdered) {
   EXPECT_EQ(updated.epoch, 4u);
 }
 
-TEST(ConSanMoi, RecordReplayExactShadowReportsMetadataFullForOutOfRangeAccess) {
+TEST(ConSanMoi, InlineReferenceExactByteShadowReportsMetadataFullForOutOfRangeAccess) {
   std::array<uint64_t, 1> shadow{};
-  const ConSanMoiRecordReplayAccess access{
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*access_capacity=*/1,
+                                       ConSanMoiEngine::InlineShadow);
+  const ConSanMoiExactByteAccess access{
       /*generation=*/9,
       /*owner_id=*/3,
       /*epoch=*/5,
       ConSanMoiShadowAccessKind::Write,
       /*lds_byte_offset=*/8,
       /*lds_byte_count=*/4,
-      /*start_cell=*/2,
-      /*cell_count=*/1,
       /*instruction_offset=*/0x30,
       /*lane_mask=*/0x4,
   };
 
-  const auto result = consan_moi_record_replay_access(shadow, access);
+  const auto result = model.access(access, {}, shadow);
 
   EXPECT_TRUE(result.conflict);
   EXPECT_TRUE(result.metadata_full);

@@ -369,6 +369,77 @@ consan_moi_exact_shadow_entries_conflict(const ConSanMoiExactShadowEntry &curren
          consan_moi_shadow_kind_conflicts(current.kind, prior.kind);
 }
 
+struct ConSanMoiExactByteOverlap {
+  uint32_t byte_offset = 0;
+  uint32_t byte_count = 0;
+
+  [[nodiscard]] constexpr bool empty() const { return byte_count == 0; }
+};
+
+[[nodiscard]] constexpr ConSanMoiExactByteOverlap
+consan_moi_exact_byte_overlap(const ConSanMoiExactByteAccess &first,
+                              const ConSanMoiExactByteAccess &second) {
+  const uint64_t first_end = static_cast<uint64_t>(first.lds_byte_offset) + first.lds_byte_count;
+  const uint64_t second_end = static_cast<uint64_t>(second.lds_byte_offset) + second.lds_byte_count;
+  const uint64_t overlap_begin = std::max(first.lds_byte_offset, second.lds_byte_offset);
+  const uint64_t overlap_end = std::min(first_end, second_end);
+  if (overlap_begin >= overlap_end)
+    return {};
+  return {
+      static_cast<uint32_t>(overlap_begin),
+      static_cast<uint32_t>(overlap_end - overlap_begin),
+  };
+}
+
+/// Target-neutral conflict contract shared by exact-byte backend models.
+/// Different sites in one wave are program ordered. Distinct exact address
+/// groups from one site are concurrent lane groups and conflict on overlap.
+[[nodiscard]] constexpr bool
+consan_moi_exact_byte_accesses_conflict(const ConSanMoiExactByteAccess &current,
+                                        const ConSanMoiExactByteAccess &prior) {
+  if (consan_moi_exact_byte_overlap(current, prior).empty() || current.epoch != prior.epoch ||
+      current.generation != prior.generation ||
+      !consan_moi_shadow_kind_conflicts(current.kind, prior.kind)) {
+    return false;
+  }
+  if (current.owner_id != prior.owner_id)
+    return true;
+  return current.exact_address_group && prior.exact_address_group &&
+         current.instruction_offset == prior.instruction_offset &&
+         current.lane_mask != prior.lane_mask;
+}
+
+/// Bounded sparse byte-range provenance for backend reference models. Storage
+/// scales with admitted accesses and interval boundaries, not the LDS extent
+/// multiplied by the number of workgroups.
+class ConSanMoiSparseExactByteShadow {
+public:
+  explicit ConSanMoiSparseExactByteShadow(uint64_t byte_capacity, uint32_t access_capacity,
+                                          ConSanMoiEngine backend);
+
+  [[nodiscard]] ConSanMoiExactByteAccessResult
+  access(const ConSanMoiExactByteAccess &current,
+         std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens = {},
+         std::span<uint64_t> exported_exact_shadow_entries = {});
+
+  [[nodiscard]] uint64_t byte_capacity() const { return byte_capacity_; }
+  [[nodiscard]] uint32_t access_capacity() const { return access_capacity_; }
+  [[nodiscard]] size_t provenance_count() const { return provenance_.size(); }
+  [[nodiscard]] size_t interval_count() const { return intervals_.size(); }
+
+private:
+  struct Interval {
+    uint64_t end = 0;
+    uint32_t provenance_index = 0;
+  };
+
+  uint64_t byte_capacity_ = 0;
+  uint32_t access_capacity_ = 0;
+  ConSanMoiEngine backend_ = ConSanMoiEngine::RecordReplay;
+  std::map<uint32_t, Interval> intervals_;
+  std::vector<ConSanMoiExactByteAccess> provenance_;
+};
+
 [[nodiscard]] constexpr uint32_t consan_moi_inline_acquired_epoch_token_value(uint32_t epoch) {
   return epoch >= consan_moi_exact_shadow::max_epoch ? consan_moi_exact_shadow::max_epoch
                                                      : epoch + 1u;
@@ -782,15 +853,6 @@ consan_moi_sampled_watchpoints_conflict(const ConSanMoiSampledWatchpointEntry &c
          consan_moi_cell_ranges_overlap(current.start_cell, current.cell_count, prior.start_cell,
                                         prior.cell_count);
 }
-
-[[nodiscard]] ConSanMoiRecordReplayAccessResult
-consan_moi_record_replay_access(std::span<uint64_t> exact_shadow_entries,
-                                const ConSanMoiRecordReplayAccess &access);
-
-[[nodiscard]] ConSanMoiRecordReplayAccessResult
-consan_moi_record_replay_access(std::span<uint64_t> exact_shadow_entries,
-                                const ConSanMoiRecordReplayAccess &access,
-                                std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens);
 
 [[nodiscard]] bool
 consan_moi_acquired_epoch_orders(std::span<const ConSanMoiAcquiredEpochToken> tokens,

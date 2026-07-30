@@ -811,73 +811,142 @@ ConSanMoiAtomicSyncResult consan_moi_record_replay_atomic_acquire(
   return result;
 }
 
-ConSanMoiRecordReplayAccessResult
-consan_moi_record_replay_access(std::span<uint64_t> exact_shadow_entries,
-                                const ConSanMoiRecordReplayAccess &access) {
-  return consan_moi_record_replay_access(exact_shadow_entries, access,
-                                         std::span<const ConSanMoiAcquiredEpochToken>{});
-}
+ConSanMoiSparseExactByteShadow::ConSanMoiSparseExactByteShadow(uint64_t byte_capacity,
+                                                               uint32_t access_capacity,
+                                                               ConSanMoiEngine backend)
+    : byte_capacity_(byte_capacity), access_capacity_(access_capacity), backend_(backend) {}
 
-ConSanMoiRecordReplayAccessResult consan_moi_record_replay_access(
-    std::span<uint64_t> exact_shadow_entries, const ConSanMoiRecordReplayAccess &access,
-    std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens) {
-  ConSanMoiRecordReplayAccessResult result;
-  if (access.cell_count == 0 || consan_moi_shadow_kind_is_empty(access.kind))
+ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
+    const ConSanMoiExactByteAccess &current,
+    std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens,
+    std::span<uint64_t> exported_exact_shadow_entries) {
+  ConSanMoiExactByteAccessResult result;
+  if (current.lds_byte_count == 0 || consan_moi_shadow_kind_is_empty(current.kind))
     return result;
 
-  const uint32_t end_cell = consan_moi_range_end_cell(access.start_cell, access.cell_count);
-  if (end_cell < access.start_cell || end_cell > exact_shadow_entries.size()) {
+  const uint64_t byte_end = static_cast<uint64_t>(current.lds_byte_offset) + current.lds_byte_count;
+  const uint64_t start_cell = current.lds_byte_offset >> consan_moi_exact_shadow::granule_shift;
+  const uint64_t end_cell = (byte_end + consan_moi_exact_shadow::granule_bytes - 1u) >>
+                            consan_moi_exact_shadow::granule_shift;
+  const bool export_too_small =
+      !exported_exact_shadow_entries.empty() && end_cell > exported_exact_shadow_entries.size();
+  const auto make_metadata_full = [&]() {
     result.metadata_full = true;
     result.conflict = true;
     result.diagnostic.kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::MetadataFull);
-    result.diagnostic.backend = static_cast<uint32_t>(ConSanMoiEngine::RecordReplay);
-    result.diagnostic.generation = access.generation;
-    result.diagnostic.epoch = access.epoch;
-    result.diagnostic.second_owner_id = access.owner_id;
-    result.diagnostic.second_lane_mask = access.lane_mask;
-    result.diagnostic.second_instruction_offset = access.instruction_offset;
-    result.diagnostic.second_lds_byte_offset = access.lds_byte_offset;
-    result.diagnostic.second_lds_byte_count = access.lds_byte_count;
-    result.diagnostic.second_access_kind = static_cast<uint32_t>(access.kind);
+    result.diagnostic.backend = static_cast<uint32_t>(backend_);
+    result.diagnostic.generation = current.generation;
+    result.diagnostic.epoch = current.epoch;
+    result.diagnostic.second_owner_id = current.owner_id;
+    result.diagnostic.second_lane_mask = current.lane_mask;
+    result.diagnostic.second_instruction_offset = current.instruction_offset;
+    result.diagnostic.second_lds_byte_offset = current.lds_byte_offset;
+    result.diagnostic.second_lds_byte_count = current.lds_byte_count;
+    result.diagnostic.second_access_kind = static_cast<uint32_t>(current.kind);
+  };
+  if (byte_end > byte_capacity_ || export_too_small) {
+    make_metadata_full();
     return result;
   }
 
-  const ConSanMoiExactShadowEntry current{
-      access.kind,
-      access.owner_id,
-      access.epoch,
-      static_cast<uint32_t>(access.generation),
-      access.instruction_offset,
+  const ConSanMoiExactShadowEntry current_entry{
+      current.kind,
+      current.owner_id,
+      current.epoch,
+      static_cast<uint32_t>(current.generation),
+      current.instruction_offset,
   };
-  for (uint32_t cell = access.start_cell; cell < end_cell; ++cell) {
-    const ConSanMoiExactShadowEntry prior =
-        decode_consan_moi_exact_shadow_entry(exact_shadow_entries[cell]);
-    if (!consan_moi_exact_shadow_entries_conflict(current, prior))
+
+  auto overlap = intervals_.upper_bound(current.lds_byte_offset);
+  if (overlap != intervals_.begin()) {
+    auto prior_interval = std::prev(overlap);
+    if (prior_interval->second.end > current.lds_byte_offset)
+      overlap = prior_interval;
+  }
+  for (; overlap != intervals_.end() && overlap->first < byte_end; ++overlap) {
+    if (overlap->second.end <= current.lds_byte_offset)
       continue;
-    if (consan_moi_acquired_epoch_orders(acquired_epoch_tokens, current, prior))
+    const uint32_t prior_index = overlap->second.provenance_index;
+    if (prior_index == 0 || prior_index > provenance_.size()) {
+      make_metadata_full();
+      return result;
+    }
+    const ConSanMoiExactByteAccess &prior = provenance_[prior_index - 1u];
+    if (!consan_moi_exact_byte_accesses_conflict(current, prior))
       continue;
+    const ConSanMoiExactShadowEntry prior_entry{
+        prior.kind,
+        prior.owner_id,
+        prior.epoch,
+        static_cast<uint32_t>(prior.generation),
+        prior.instruction_offset,
+    };
+    if (consan_moi_acquired_epoch_orders(acquired_epoch_tokens, current_entry, prior_entry))
+      continue;
+
     result.conflict = true;
     result.diagnostic.kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict);
-    result.diagnostic.backend = static_cast<uint32_t>(ConSanMoiEngine::RecordReplay);
-    result.diagnostic.generation = access.generation;
-    result.diagnostic.epoch = access.epoch;
+    result.diagnostic.backend = static_cast<uint32_t>(backend_);
+    result.diagnostic.generation = current.generation;
+    result.diagnostic.epoch = current.epoch;
     result.diagnostic.first_owner_id = prior.owner_id;
-    result.diagnostic.second_owner_id = access.owner_id;
-    result.diagnostic.second_lane_mask = access.lane_mask;
+    result.diagnostic.second_owner_id = current.owner_id;
+    result.diagnostic.first_lane_mask = prior.lane_mask;
+    result.diagnostic.second_lane_mask = current.lane_mask;
     result.diagnostic.first_instruction_offset = prior.instruction_offset;
-    result.diagnostic.second_instruction_offset = access.instruction_offset;
-    result.diagnostic.second_lds_byte_offset = access.lds_byte_offset;
-    result.diagnostic.second_lds_byte_count = access.lds_byte_count;
+    result.diagnostic.second_instruction_offset = current.instruction_offset;
+    result.diagnostic.first_lds_byte_offset = prior.lds_byte_offset;
+    result.diagnostic.first_lds_byte_count = prior.lds_byte_count;
+    result.diagnostic.second_lds_byte_offset = current.lds_byte_offset;
+    result.diagnostic.second_lds_byte_count = current.lds_byte_count;
     result.diagnostic.first_access_kind = static_cast<uint32_t>(prior.kind);
-    result.diagnostic.second_access_kind = static_cast<uint32_t>(access.kind);
+    result.diagnostic.second_access_kind = static_cast<uint32_t>(current.kind);
     return result;
   }
 
+  if (provenance_.size() >= access_capacity_) {
+    make_metadata_full();
+    return result;
+  }
+  provenance_.push_back(current);
+  const uint32_t provenance_index = static_cast<uint32_t>(provenance_.size());
+  auto replace_begin = intervals_.lower_bound(current.lds_byte_offset);
+  if (replace_begin != intervals_.begin()) {
+    auto prior_interval = std::prev(replace_begin);
+    if (prior_interval->second.end > current.lds_byte_offset)
+      replace_begin = prior_interval;
+  }
+  std::optional<std::pair<uint32_t, Interval>> left_remainder;
+  std::optional<std::pair<uint32_t, Interval>> right_remainder;
+  auto replace_end = replace_begin;
+  for (; replace_end != intervals_.end() && replace_end->first < byte_end; ++replace_end) {
+    if (replace_end->second.end <= current.lds_byte_offset)
+      continue;
+    if (replace_end->first < current.lds_byte_offset) {
+      left_remainder =
+          std::pair{replace_end->first,
+                    Interval{current.lds_byte_offset, replace_end->second.provenance_index}};
+    }
+    if (replace_end->second.end > byte_end) {
+      right_remainder =
+          std::pair{static_cast<uint32_t>(byte_end),
+                    Interval{replace_end->second.end, replace_end->second.provenance_index}};
+    }
+  }
+  intervals_.erase(replace_begin, replace_end);
+  if (left_remainder)
+    intervals_.insert(*left_remainder);
+  intervals_.emplace(current.lds_byte_offset, Interval{byte_end, provenance_index});
+  if (right_remainder)
+    intervals_.insert(*right_remainder);
+
   const uint64_t packed = pack_consan_moi_exact_shadow_entry(
-      access.kind, access.owner_id, access.epoch, static_cast<uint32_t>(access.generation),
-      access.instruction_offset);
-  for (uint32_t cell = access.start_cell; cell < end_cell; ++cell)
-    exact_shadow_entries[cell] = packed;
+      current.kind, current.owner_id, current.epoch, static_cast<uint32_t>(current.generation),
+      current.instruction_offset);
+  for (uint64_t cell = start_cell; cell < end_cell && !exported_exact_shadow_entries.empty();
+       ++cell) {
+    exported_exact_shadow_entries[cell] = packed;
+  }
   return result;
 }
 
@@ -960,10 +1029,6 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       std::min(header.diagnostic_capacity, span_size_u32(diagnostic_records.size()));
 
   struct ReplayWorkgroupState {
-    struct ExactByteInterval {
-      uint32_t end = 0;
-      uint32_t provenance_index = 0;
-    };
     struct ReportedDiagnosticKey {
       uint32_t kind = 0;
       uint32_t first_site = 0;
@@ -974,15 +1039,15 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       auto operator<=>(const ReportedDiagnosticKey &) const = default;
     };
 
+    ReplayWorkgroupState(uint64_t exact_byte_capacity, uint32_t access_capacity)
+        : exact_byte_shadow(exact_byte_capacity, access_capacity, ConSanMoiEngine::RecordReplay) {}
+
     uint64_t generation = 0;
     uint32_t workgroup_x = 0;
     uint32_t workgroup_y = 0;
     uint32_t workgroup_z = 0;
     std::vector<uint32_t> owner_epochs;
-    // Non-overlapping byte intervals retain exact provenance without scaling
-    // every workgroup by the largest admitted LDS offset.
-    std::map<uint32_t, ExactByteInterval> exact_byte_provenance;
-    std::vector<ConSanMoiRecordReplayAccess> exact_provenance_entries;
+    ConSanMoiSparseExactByteShadow exact_byte_shadow;
     std::vector<uint64_t> exported_exact_shadow_entries;
     std::vector<ConSanMoiAtomicReleaseRecord> atomic_release_records;
     std::vector<ConSanMoiAcquiredEpochToken> acquired_epoch_tokens;
@@ -999,7 +1064,9 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         return state;
     }
 
-    ReplayWorkgroupState state;
+    ReplayWorkgroupState state(static_cast<uint64_t>(exact_shadow_entries.size()) *
+                                   consan_moi_exact_shadow::granule_bytes,
+                               access_count);
     state.generation = generation;
     state.workgroup_x = workgroup_x;
     state.workgroup_y = workgroup_y;
@@ -1015,8 +1082,8 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     return workgroups.back();
   };
 
-  const auto make_access_conflict_diagnostic = [](const ConSanMoiRecordReplayAccess &first,
-                                                  const ConSanMoiRecordReplayAccess &second) {
+  const auto make_access_conflict_diagnostic = [](const ConSanMoiExactByteAccess &first,
+                                                  const ConSanMoiExactByteAccess &second) {
     ConSanMoiDiagnosticRecord diagnostic;
     diagnostic.kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict);
     diagnostic.backend = static_cast<uint32_t>(ConSanMoiEngine::RecordReplay);
@@ -1037,144 +1104,14 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     return diagnostic;
   };
 
-  const auto make_metadata_full_diagnostic = [](const ConSanMoiRecordReplayAccess &access) {
-    ConSanMoiDiagnosticRecord diagnostic;
-    diagnostic.kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::MetadataFull);
-    diagnostic.backend = static_cast<uint32_t>(ConSanMoiEngine::RecordReplay);
-    diagnostic.generation = access.generation;
-    diagnostic.epoch = access.epoch;
-    diagnostic.second_owner_id = access.owner_id;
-    diagnostic.second_lane_mask = access.lane_mask;
-    diagnostic.second_instruction_offset = access.instruction_offset;
-    diagnostic.second_lds_byte_offset = access.lds_byte_offset;
-    diagnostic.second_lds_byte_count = access.lds_byte_count;
-    diagnostic.second_access_kind = static_cast<uint32_t>(access.kind);
-    return diagnostic;
-  };
-
-  const auto replay_exact_byte_access = [&](ReplayWorkgroupState &state,
-                                            const ConSanMoiRecordReplayAccess &access) {
-    ConSanMoiRecordReplayAccessResult result;
-    if (access.lds_byte_count == 0 || consan_moi_shadow_kind_is_empty(access.kind))
-      return result;
-
-    const uint64_t byte_end = static_cast<uint64_t>(access.lds_byte_offset) + access.lds_byte_count;
-    const uint64_t end_cell = static_cast<uint64_t>(access.start_cell) + access.cell_count;
-    const uint64_t exact_byte_capacity =
-        static_cast<uint64_t>(exact_shadow_entries.size()) * consan_moi_exact_shadow::granule_bytes;
-    if (byte_end > exact_byte_capacity || end_cell > exact_shadow_entries.size()) {
-      result.metadata_full = true;
-      result.conflict = true;
-      result.diagnostic = make_metadata_full_diagnostic(access);
-      return result;
-    }
-
-    const ConSanMoiExactShadowEntry current{
-        access.kind,
-        access.owner_id,
-        access.epoch,
-        static_cast<uint32_t>(access.generation),
-        access.instruction_offset,
-    };
-    auto overlap = state.exact_byte_provenance.upper_bound(access.lds_byte_offset);
-    if (overlap != state.exact_byte_provenance.begin()) {
-      auto prior = std::prev(overlap);
-      if (prior->second.end > access.lds_byte_offset)
-        overlap = prior;
-    }
-    for (; overlap != state.exact_byte_provenance.end() && overlap->first < byte_end; ++overlap) {
-      if (overlap->second.end <= access.lds_byte_offset)
-        continue;
-      const uint32_t prior_index = overlap->second.provenance_index;
-      if (prior_index > state.exact_provenance_entries.size()) {
-        result.metadata_full = true;
-        result.conflict = true;
-        result.diagnostic = make_metadata_full_diagnostic(access);
-        return result;
-      }
-      const ConSanMoiRecordReplayAccess &prior = state.exact_provenance_entries[prior_index - 1u];
-      if ((prior.owner_id == access.owner_id &&
-           (prior.instruction_offset != access.instruction_offset ||
-            prior.lane_mask == access.lane_mask)) ||
-          prior.epoch != access.epoch || prior.generation != access.generation ||
-          !consan_moi_shadow_kind_conflicts(access.kind, prior.kind)) {
-        continue;
-      }
-      const ConSanMoiExactShadowEntry prior_entry{
-          prior.kind,
-          prior.owner_id,
-          prior.epoch,
-          static_cast<uint32_t>(prior.generation),
-          prior.instruction_offset,
-      };
-      if (consan_moi_acquired_epoch_orders(state.acquired_epoch_tokens, current, prior_entry))
-        continue;
-      result.conflict = true;
-      result.diagnostic = make_access_conflict_diagnostic(prior, access);
-      return result;
-    }
-
-    if (state.exact_provenance_entries.size() >= std::numeric_limits<uint32_t>::max()) {
-      result.metadata_full = true;
-      result.conflict = true;
-      result.diagnostic = make_metadata_full_diagnostic(access);
-      return result;
-    }
-    state.exact_provenance_entries.push_back(access);
-    const uint32_t provenance_index = static_cast<uint32_t>(state.exact_provenance_entries.size());
-
-    auto replace_begin = state.exact_byte_provenance.lower_bound(access.lds_byte_offset);
-    if (replace_begin != state.exact_byte_provenance.begin()) {
-      auto prior = std::prev(replace_begin);
-      if (prior->second.end > access.lds_byte_offset)
-        replace_begin = prior;
-    }
-    std::optional<std::pair<uint32_t, ReplayWorkgroupState::ExactByteInterval>> left_remainder;
-    std::optional<std::pair<uint32_t, ReplayWorkgroupState::ExactByteInterval>> right_remainder;
-    auto replace_end = replace_begin;
-    for (; replace_end != state.exact_byte_provenance.end() && replace_end->first < byte_end;
-         ++replace_end) {
-      if (replace_end->second.end <= access.lds_byte_offset)
-        continue;
-      if (replace_end->first < access.lds_byte_offset) {
-        left_remainder = std::pair{
-            replace_end->first, ReplayWorkgroupState::ExactByteInterval{
-                                    access.lds_byte_offset, replace_end->second.provenance_index}};
-      }
-      if (replace_end->second.end > byte_end) {
-        right_remainder =
-            std::pair{static_cast<uint32_t>(byte_end),
-                      ReplayWorkgroupState::ExactByteInterval{
-                          replace_end->second.end, replace_end->second.provenance_index}};
-      }
-    }
-    state.exact_byte_provenance.erase(replace_begin, replace_end);
-    if (left_remainder)
-      state.exact_byte_provenance.insert(*left_remainder);
-    state.exact_byte_provenance.emplace(
-        access.lds_byte_offset,
-        ReplayWorkgroupState::ExactByteInterval{static_cast<uint32_t>(byte_end), provenance_index});
-    if (right_remainder)
-      state.exact_byte_provenance.insert(*right_remainder);
-
-    const uint64_t packed = pack_consan_moi_exact_shadow_entry(
-        access.kind, access.owner_id, access.epoch, static_cast<uint32_t>(access.generation),
-        access.instruction_offset);
-    for (uint64_t cell = access.start_cell;
-         cell < end_cell && !state.exported_exact_shadow_entries.empty(); ++cell) {
-      state.exported_exact_shadow_entries[cell] = packed;
-    }
-    return result;
-  };
-
   const auto make_intra_wave_write_diagnostic =
-      [&](const ConSanMoiRecordReplayAccess &access) -> std::optional<ConSanMoiDiagnosticRecord> {
+      [&](const ConSanMoiExactByteAccess &access) -> std::optional<ConSanMoiDiagnosticRecord> {
     if (!consan_moi_shadow_kind_conflicts(access.kind, access.kind) ||
         std::popcount(access.lane_mask) < 2) {
       return std::nullopt;
     }
-    ConSanMoiRecordReplayAccess first = access;
-    ConSanMoiRecordReplayAccess second = access;
+    ConSanMoiExactByteAccess first = access;
+    ConSanMoiExactByteAccess second = access;
     first.lane_mask = access.lane_mask & (~access.lane_mask + uint64_t{1});
     second.lane_mask = access.lane_mask ^ first.lane_mask;
     return make_access_conflict_diagnostic(first, second);
@@ -1431,15 +1368,8 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         record.lds_byte_count != 0
             ? record.lds_byte_count
             : static_cast<uint64_t>(record.cell_count) * consan_moi_exact_shadow::granule_bytes;
-    const uint64_t lds_byte_end_u64 = lds_byte_offset_u64 + lds_byte_count_u64;
-    const uint64_t start_cell_u64 = lds_byte_offset_u64 >> consan_moi_exact_shadow::granule_shift;
-    const uint64_t end_cell_u64 =
-        (lds_byte_end_u64 + consan_moi_exact_shadow::granule_bytes - 1u) >>
-        consan_moi_exact_shadow::granule_shift;
     if (lds_byte_offset_u64 > std::numeric_limits<uint32_t>::max() ||
-        lds_byte_count_u64 > std::numeric_limits<uint32_t>::max() ||
-        start_cell_u64 > std::numeric_limits<uint32_t>::max() ||
-        end_cell_u64 > std::numeric_limits<uint32_t>::max()) {
+        lds_byte_count_u64 > std::numeric_limits<uint32_t>::max()) {
       ++replay.processed_access_count;
       ++replay.unsupported_access_count;
       replay.metadata_full = true;
@@ -1448,28 +1378,24 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     }
     const uint32_t lds_byte_offset = static_cast<uint32_t>(lds_byte_offset_u64);
     const uint32_t lds_byte_count = static_cast<uint32_t>(lds_byte_count_u64);
-    const ConSanMoiLdsCellRange range{
-        static_cast<uint32_t>(start_cell_u64),
-        static_cast<uint32_t>(end_cell_u64 - start_cell_u64),
-    };
 
     const uint64_t generation = record.generation != 0 ? record.generation : header.generation;
     ReplayWorkgroupState &state = find_workgroup_state(generation, record.workgroup_x,
                                                        record.workgroup_y, record.workgroup_z);
     state.in_barrier_run = false;
-    const ConSanMoiRecordReplayAccess access{
+    const ConSanMoiExactByteAccess access{
         generation,
         /*owner_id=*/record.wave_id,
         record.epoch != 0 ? record.epoch : state.owner_epochs[record.wave_id],
         *access_kind,
         lds_byte_offset,
         lds_byte_count,
-        range.start_cell,
-        range.cell_count,
         record.instruction_offset,
         record.lane_mask,
+        (record.flags & kConSanMoiAccessRecordFlagExactAddressGroupMask) != 0u,
     };
-    const ConSanMoiRecordReplayAccessResult access_result = replay_exact_byte_access(state, access);
+    const ConSanMoiExactByteAccessResult access_result = state.exact_byte_shadow.access(
+        access, state.acquired_epoch_tokens, state.exported_exact_shadow_entries);
     ++replay.processed_access_count;
     replay.metadata_full |= access_result.metadata_full;
     if (access_result.conflict) {
