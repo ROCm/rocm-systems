@@ -16,9 +16,15 @@
 #include <memory>
 #include <new>
 
+// The scratch size caps DDA eligibility (a collective is skipped when its
+// staging need exceeds it) and, for the CE scratch path, sets both the
+// single-shot cutoff (recvBytes <= scratch) and the largest CE pipeline
+// sub-chunk (scratch / (RCCL_CE_PIPELINE_NBUF * nRanks)).
 #define DDA_IPC_MAXBLOCKS 24
 #define DDA_IPC_BUFFER_SIZE 268435456
 
+#define DDA_FABRIC_MAXBLOCKS 24
+#define DDA_FABRIC_BUFFER_SIZE 268435456
 #define DDA_FABRIC_MAXBLOCKS 256
 
 namespace nccl_dda_detail {

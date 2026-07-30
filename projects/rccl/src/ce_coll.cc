@@ -40,15 +40,6 @@ RCCL_PARAM(CeCoopLaunch, "CE_COOP_LAUNCH", 0);
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM(CePipeline, "CE_PIPELINE", 0);
 RCCL_PARAM(CePipelineChunkBytes, "CE_PIPELINE_CHUNK_BYTES", 0);
-RCCL_PARAM(CePipelineDepth, "CE_PIPELINE_DEPTH", RCCL_CE_PIPELINE_DEFAULT_DEPTH);
-
-// Resolve the runtime pipeline depth, clamped to [1, RCCL_CE_PIPELINE_MAX_DEPTH].
-int ncclCePipelineDepth() {
-  int64_t d = rcclParamCePipelineDepth();
-  if (d < 1) d = 1;
-  if (d > RCCL_CE_PIPELINE_MAX_DEPTH) d = RCCL_CE_PIPELINE_MAX_DEPTH;
-  return (int)d;
-}
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 // Runtime detection: does the running driver actually implement hipMemcpyBatchAsync?
@@ -96,65 +87,34 @@ static void ceDestroyCopyStreams(struct ncclComm* comm, int nPairs) {
   comm->ceColl.nCopyStreams = 0;
 }
 
-// ---- thread-2: persistent copy-back worker -----------------------------------
-static void ncclCeCopyWorker(struct ncclCePipeline* p) {
-  if (!CUDASUCCESS(cudaSetDevice(p->comm->cudaDev))) {
-    p->asyncErr = ncclSystemError; return;
+// Relies on the ncclCalloc zero-init to tolerate a partially constructed
+// pipeline, so a failure midway through creation frees exactly what exists.
+static void ceDestroyPipeline(struct ncclCePipeline* p) {
+  if (p == nullptr) return;
+  for (int b = 0; b < NCCL_CE_NUM_SLOTS; b++) {
+    if (p->readyEvent[b]) CUDACHECKIGNORE(cudaEventDestroy(p->readyEvent[b]));
+    if (p->doneEvent[b]) CUDACHECKIGNORE(cudaEventDestroy(p->doneEvent[b]));
   }
-  for (;;) {
-    ncclCeCopyJob job;
-    {
-      std::unique_lock<std::mutex> lk(p->mtx);
-      p->cvFull.wait(lk, [&]{ return p->count > 0; });
-      job = p->ring[p->head];
-      p->head = (p->head + 1) % p->depth;
-     // do NOT free the slot yet (holds until doneEvent recorded)
-    }
-    if (job.stop) break;
+  if (p->copyStream) CUDACHECKIGNORE(cudaStreamDestroy(p->copyStream));
+  free(p);
+}
 
-    // GPU ordering: wait until producer's complete-sync filled this scratch half.
-    if (cudaStreamWaitEvent(p->copyStream, p->readyEvent[job.buf], 0) != cudaSuccess)
-      p->asyncErr = ncclSystemError;
-    for (int r = 0; r < job.nCopies; r++) {
-      // local slot is read straight from the user sendbuff (no scratch round-trip);
-      // remote slots come from this rank's scratch half written by peers' SDMA.
-      const uint8_t* src = (r == job.localCopyIdx)
-                           ? job.localSrc
-                           : job.scratchHalf + (size_t)r*job.perRankSub;
-      if (cudaMemcpyAsync(job.userRecv + (size_t)r*job.userStride + job.userOff,
-                          src,
-                          job.n, cudaMemcpyDeviceToDevice, p->copyStream) != cudaSuccess)
-        p->asyncErr = ncclSystemError;
-    }
-    if (cudaEventRecord(p->doneEvent[job.buf], p->copyStream) != cudaSuccess)
-      p->asyncErr = ncclSystemError;
+static ncclResult_t ceCreatePipeline(struct ncclComm* comm) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclCePipeline* p = nullptr;
 
-    {
-      std::unique_lock<std::mutex> lk(p->mtx);
-      p->count--;                 // free slot AFTER doneEvent recorded
-      p->cvEmpty.notify_one();
-    }
+  NCCLCHECK(ncclCalloc(&p, 1));
+  CUDACHECKGOTO(cudaStreamCreateWithFlags(&p->copyStream, cudaStreamNonBlocking), ret, fail);
+  for (int b = 0; b < NCCL_CE_NUM_SLOTS; b++) {
+    CUDACHECKGOTO(cudaEventCreateWithFlags(&p->readyEvent[b], cudaEventDisableTiming), ret, fail);
+    CUDACHECKGOTO(cudaEventCreateWithFlags(&p->doneEvent[b], cudaEventDisableTiming), ret, fail);
   }
-}
+  comm->ceColl.pipeline = p;
+  return ncclSuccess;
 
-// producer: block until a slot is free (single producer => no reservation needed)
-static void ncclCePipelineWaitFree(struct ncclCePipeline* p) {
-  std::unique_lock<std::mutex> lk(p->mtx);
-  p->cvEmpty.wait(lk, [&]{ return p->count < p->depth; });
-}
-// producer: publish a job and notify the worker
-static void ncclCePipelinePush(struct ncclCePipeline* p, const ncclCeCopyJob& job) {
-  std::unique_lock<std::mutex> lk(p->mtx);
-  p->ring[p->tail] = job;
-  p->tail = (p->tail + 1) % p->depth;
-  p->count++;
-  p->cvFull.notify_one();
-}
-
-// producer: wait until all posted jobs drained
-static void ncclCePipelineDrain(struct ncclCePipeline* p) {
-  std::unique_lock<std::mutex> lk(p->mtx);
-  p->cvEmpty.wait(lk, [&]{ return p->count == 0; });
+fail:
+  ceDestroyPipeline(p);
+  return ret;
 }
 
 ncclResult_t ncclCeInit(struct ncclComm* comm) {
@@ -251,18 +211,9 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 
   comm->ceColl.pipeline = nullptr;
   if (rcclParamCePipeline()) {
-    struct ncclCePipeline* p = nullptr;
-    NCCLCHECKGOTO(ncclCalloc(&p, 1), ret, fail);
-    p->comm = comm; p->head = p->tail = p->count = 0; p->asyncErr = ncclSuccess;
-    p->depth = ncclCePipelineDepth();
-    CUDACHECKGOTO(cudaStreamCreateWithFlags(&p->copyStream, cudaStreamNonBlocking), ret, fail);
-    for (int b = 0; b < p->depth; b++) {
-      CUDACHECKGOTO(cudaEventCreateWithFlags(&p->readyEvent[b], cudaEventDisableTiming), ret, fail);
-      CUDACHECKGOTO(cudaEventCreateWithFlags(&p->doneEvent[b],  cudaEventDisableTiming), ret, fail);
-    }
-    p->worker = std::thread(ncclCeCopyWorker, p);
-    comm->ceColl.pipeline = p;
-    INFO(NCCL_INIT, "CE pipeline worker started: rank %d, depth %d", comm->rank, p->depth);
+    NCCLCHECKGOTO(ceCreatePipeline(comm), ret, fail_pipeline);
+    INFO(NCCL_INIT, "CE pipeline enabled: rank %d, %d scratch buffers, 2 streams", comm->rank,
+         NCCL_CE_NUM_SLOTS);
   }
 
 exit:
@@ -275,6 +226,9 @@ fail_ce_event:
 fail_ce_stream:
   INFO(NCCL_INIT, "CE init failed on rank %d after creating %d/%d copy streams", comm->rank, i, targetStreams);
   ceDestroyCopyStreams(comm, i);
+  goto fail;
+fail_pipeline:
+  ceDestroyCopyStreams(comm, comm->ceColl.nCopyStreams);
   goto fail;
 fail:
   // ncclCeFinalize() runs unconditionally from commFree(), including after a failed
@@ -347,19 +301,8 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
     comm->ceColl.signalWin = NULL;
   }
 
-  if (comm->ceColl.pipeline != nullptr) {
-    struct ncclCePipeline* p = comm->ceColl.pipeline;
-    ncclCeCopyJob stop = {}; stop.stop = true;
-    ncclCePipelinePush(p, stop);     // depth>=1 guaranteed free at shutdown
-    if (p->worker.joinable()) p->worker.join();
-    for (int b = 0; b < p->depth; b++) {
-      CUDACHECKIGNORE(cudaEventDestroy(p->readyEvent[b]));
-      CUDACHECKIGNORE(cudaEventDestroy(p->doneEvent[b]));
-    }
-    CUDACHECKIGNORE(cudaStreamDestroy(p->copyStream));
-    free(p);
-    comm->ceColl.pipeline = nullptr;
-  }
+  ceDestroyPipeline(comm->ceColl.pipeline);
+  comm->ceColl.pipeline = nullptr;
   // Clean up copy streams and events
   ceDestroyCopyStreams(comm, comm->ceColl.nCopyStreams);
   if (comm->ceColl.d_barrierSync != nullptr) CUDACHECKIGNORE(hipFree(comm->ceColl.d_barrierSync));
@@ -769,28 +712,28 @@ static ncclResult_t ncclCeAllGatherPipelined(struct ncclComm* comm, struct ncclC
   ncclResult_t ret = ncclSuccess;
   struct ncclCePipeline* p = comm->ceColl.pipeline;
   const int    nRanks     = comm->nRanks;
-  const size_t chunkBytes = args->nElts * args->eltSize;     // this rank's contribution
+  const size_t totalBytes = args->nElts * args->eltSize;     // this rank's contribution
   const size_t sub        = args->ceDdaSubChunkBytes;
-  const size_t halfSize   = (size_t)nRanks * sub;            // one double-buffer half
+  const size_t slotBytes  = (size_t)nRanks * sub;            // half of the total bytes for one slot (double buffer)
   uint8_t* sendBuff = (uint8_t*)args->sendBuff;
   uint8_t* userRecv = (uint8_t*)args->ddaUserRecvBuff;
   uint8_t* scratch  = (uint8_t*)args->recvBuff;              // DDA scratch base
   struct ncclCeBatchOpsParams batch = {};
-  const int depth = p->depth;
-  int round = 0;
-
+  int chunk = 0;  
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batch, nRanks), ret, fail);
 
-  for (size_t off = 0; off < chunkBytes; off += sub, round++) {
-    size_t n      = std::min(sub, chunkBytes - off);
-    int    buf    = round % depth;
-    size_t bufOff = (size_t)buf * halfSize;
+  // Both slots are issued from this thread, so the record-then-wait pairs below are
+  // ordered by program order: each cudaStreamWaitEvent snapshots the recording made
+  // for the chunk that owned the buffer last, even though the host runs ahead of the
+  // GPU. Cross-chunk correctness is enforced entirely by these events. 
+  for (size_t off = 0; off < totalBytes; off += sub, chunk++) {
+    size_t n      = std::min(sub, totalBytes - off);
+    int    slot    = chunk % NCCL_CE_NUM_SLOTS;
+    size_t slotOff = (size_t)slot * slotBytes;
 
-
-    // doneEvent has been recorded by the worker -> the GPU wait below is valid.
-    ncclCePipelineWaitFree(p);
-    if (round >= depth)
-      CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[buf], 0), ret, fail);
+    // Reusing this scratch half: hold off until its previous copy-back drained.
+    if (chunk >= NCCL_CE_NUM_SLOTS)
+      CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[slot], 0), ret, fail);
 
     NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);            // (1) ready
 
@@ -798,7 +741,7 @@ static ncclResult_t ncclCeAllGatherPipelined(struct ncclComm* comm, struct ncclC
     for (int r = 0; r < nRanks; r++) {
       if (r == comm->rank) continue;     // skip self: own data is copied locally from sendBuff
       batch.srcs[batch.numOps]  = (void*)(sendBuff + off);
-      batch.dsts[batch.numOps]  = (void*)((uint8_t*)args->ddaPeerBases[r] + bufOff + (size_t)comm->rank*sub);
+      batch.dsts[batch.numOps]  = (void*)((uint8_t*)args->ddaPeerBases[r] + slotOff + (size_t)comm->rank*sub);
       batch.sizes[batch.numOps] = n;
       batch.numOps++;
     }
@@ -806,24 +749,23 @@ static ncclResult_t ncclCeAllGatherPipelined(struct ncclComm* comm, struct ncclC
 
     NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);            // (3) complete
 
-    CUDACHECKGOTO(cudaEventRecord(p->readyEvent[buf], stream), ret, fail);  // notify thread-2
-    ncclCeCopyJob job = {};
-    job.userRecv = userRecv; job.scratchHalf = scratch + bufOff;
-    job.perRankSub = sub;    job.userStride = chunkBytes; job.userOff = off;
-    job.n = n;               job.nCopies = nRanks;        job.buf = buf;
-    job.localSrc = sendBuff + off;   job.localCopyIdx = comm->rank;
-    ncclCePipelinePush(p, job);                                             // (4) notify
+    // (4) copy-back slot: overlaps the next chunk's barrier + SDMA push.
+    CUDACHECKGOTO(cudaEventRecord(p->readyEvent[slot], stream), ret, fail);
+    CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[slot], 0), ret, fail);
+    for (int r = 0; r < nRanks; r++) {
+      // local slot is read straight from the user sendbuff (no scratch round-trip);
+      // remote slots come from this rank's scratch half written by peers' SDMA.
+      const uint8_t* src = (r == comm->rank) ? (sendBuff + off) : (scratch + slotOff + (size_t)r*sub);
+      CUDACHECKGOTO(cudaMemcpyAsync(userRecv + (size_t)r*totalBytes + off, src, n,
+                                    hipMemcpyDeviceToDevice, p->copyStream), ret, fail);
+    }
+    CUDACHECKGOTO(cudaEventRecord(p->doneEvent[slot], p->copyStream), ret, fail);
   }
 
-  ncclCePipelineDrain(p);                                                   // wait all copies posted+done
-  // Make the main stream wait on every buffer that held at least one job, so
-  // the collective's stream is correctly ordered after all copy-backs finish.
-  {
-    int usedBufs = (round < depth) ? round : depth;
-    for (int b = 0; b < usedBufs; b++)
-      CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[b], 0), ret, fail);
-  }
-  if (p->asyncErr != ncclSuccess) { ret = p->asyncErr; goto fail; }
+  // copyStream is in-order, so the last chunk's doneEvent dominates all earlier
+  // copy-backs; one wait rejoins the collective's stream.
+  if (chunk > 0)
+    CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[(chunk - 1) % NCCL_CE_NUM_SLOTS], 0), ret, fail);
 
 exit:
   ncclCeFreeBatchOpsParams(&batch);
@@ -831,6 +773,7 @@ exit:
 fail:
   goto exit;
 }
+
 ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
   int myLsaRank = comm->devrState.lsaSelf;

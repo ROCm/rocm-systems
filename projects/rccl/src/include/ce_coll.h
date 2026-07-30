@@ -11,9 +11,6 @@
 #include "nccl.h"
 #include "nccl_common.h"
 #include "bitops.h"
-#include <thread>
-#include <mutex>
-#include <condition_variable>
 #include <cuda_runtime.h>   // cudaStream_t, cudaEvent_t 
 
 // Memory operations per rank for different synchronization protocols
@@ -62,42 +59,57 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   return alignDown(targetChunkBytes, (size_t)16);
 }
 
-// Pipeline depth (number of in-flight scratch buffers) is runtime-tunable via
-// RCCL_CE_PIPELINE_DEPTH. The fixed-size ring/event arrays are sized to the
-// compile-time maximum; the resolved runtime depth is stored in
-// ncclCePipeline::depth and must satisfy 1 <= depth <= RCCL_CE_PIPELINE_MAX_DEPTH.
-#define RCCL_CE_PIPELINE_DEFAULT_DEPTH 2  // double buffer
-#define RCCL_CE_PIPELINE_MAX_DEPTH     16
+// Default is <= 256 MiB (holds NUM_SLOTS * nRanks chunks (2 scatter slots),
+// and the reduced output goes to the user recvbuff)
+#define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
 
-// One copy-back job handed producer (thread-1) -> copy worker (thread-2).
-struct ncclCeCopyJob {
-  uint8_t* userRecv;     // user recvbuff base
-  uint8_t* scratchHalf;  // scratch double-buffer half base
-  size_t   perRankSub;   // src stride in scratch (= subChunkBytes); 0 for scatter
-  size_t   userStride;   // dst stride in userRecv (= chunkBytes);   0 for scatter
-  size_t   userOff;      // byte offset within each user slot (= off)
-  size_t   n;            // bytes this round
-  int      nCopies;      // per-rank copies (nRanks; or 1 for scatter)
-  int      buf;          // double-buffer index 0/1
-  uint8_t* localSrc;     // local send source (= sendBuff+off); slot localCopyIdx is
-                         // copied from here directly, bypassing the scratch bounce
-  int      localCopyIdx; // rank slot sourced from localSrc instead of scratch (-1 = none)
-  bool     stop;         // sentinel to terminate worker
-};
+#ifndef NCCL_CE_REDUCE_MAX_BLOCKS
+#define NCCL_CE_REDUCE_MAX_BLOCKS 46
+#endif
+
+#ifndef NCCL_CE_NUM_SLOTS
+#define NCCL_CE_NUM_SLOTS 2
+#endif
+
+// Per-rank staging capacity in ceARTmpBuf. ncclCeInit sizes the buffer from this
+// value, so every runtime offset must stay within it.
+inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {
+  return (size_t)NCCL_CE_AR_MAX_MSG_BYTES / (size_t)nRanks;
+}
+
+// Per-rank slot size in ceARTmpBuf. The host scatter addresses slots in bytes
+// (rank * slotChunkBytes) while the reduce kernel addresses them in elements
+// (rank * slotChunkElems), so a slot must hold a whole number of elements. 16 is
+// a multiple of every supported element size and also keeps each rank boundary
+// aligned for the kernel's 16B vector loads, so one round-down satisfies both.
+inline size_t ncclCeAllReduceSlotChunkBytes(size_t maxChunkBytes) {
+  return alignDown(maxChunkBytes, (size_t)16);
+}
+
+// Chunk size for the pipelined path, i.e. when a shard does not fit in one slot.
+// A chunk must fit its slot, and needs the same 16B rounding as the slot itself:
+// the host walks chunks in bytes (ch * chunkBytes) while the kernel walks them in
+// elements (ch * baseChunkElems).
+inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChunkBytes) {
+  const size_t MIN_CHUNK_BYTES = 4 * 1024 * 1024ULL;
+  const size_t MAX_CHUNK_BYTES = 256 * 1024 * 1024ULL;
+  size_t targetChunkBytes = shardBytes / 4;
+  if (targetChunkBytes > MAX_CHUNK_BYTES) targetChunkBytes = MAX_CHUNK_BYTES;
+  if (targetChunkBytes < MIN_CHUNK_BYTES) targetChunkBytes = MIN_CHUNK_BYTES;
+  if (targetChunkBytes > slotChunkBytes) targetChunkBytes = slotChunkBytes;
+  return alignDown(targetChunkBytes, (size_t)16);
+}
+
+
+
+#ifndef NCCL_CE_NUM_SLOTS
+#define NCCL_CE_NUM_SLOTS 2
+#endif
 
 struct ncclCePipeline {
-  struct ncclComm* comm;
-  std::thread worker;
-  std::mutex  mtx;
-  std::condition_variable cvFull;   // a job was posted
-  std::condition_variable cvEmpty;  // a slot was freed
-  int depth;                                            // runtime pipeline depth (1..MAX)
-  ncclCeCopyJob ring[RCCL_CE_PIPELINE_MAX_DEPTH];
-  int head, tail, count;
-  cudaStream_t copyStream;                              // thread-2's stream
-  cudaEvent_t  readyEvent[RCCL_CE_PIPELINE_MAX_DEPTH];  // producer -> consumer (scratch filled)
-  cudaEvent_t  doneEvent[RCCL_CE_PIPELINE_MAX_DEPTH];   // consumer -> producer (scratch free)
-  ncclResult_t asyncErr;                                // sticky error from worker
+  cudaStream_t copyStream;                         // copy-back leg
+  cudaEvent_t  readyEvent[NCCL_CE_NUM_SLOTS];  // stream -> copyStream (slot filled)
+  cudaEvent_t  doneEvent[NCCL_CE_NUM_SLOTS];   // copyStream -> stream (slot free)
 };
 
 struct ncclCeColl {
