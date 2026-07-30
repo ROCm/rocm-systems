@@ -58,6 +58,10 @@ static __global__ void WriteManagedNonBlocking(int v) {
   if (i < kN) g_managed_nonblocking[i] = v;
 }
 
+static __global__ void ReadManagedInitialized(int* value) {
+  *value = g_managed_initialized[0];
+}
+
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
@@ -314,10 +318,7 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
   const hipExtent extent = make_hipExtent(k3dDim * sizeof(int), k3dDim, k3dDim);
-  hipPitchedPtr src{};
-  hipPitchedPtr dst{};
-  HIP_CHECK(hipMalloc3D(&src, extent));
-  HIP_CHECK(hipMalloc3D(&dst, extent));
+  LinearAllocGuard3D<int> dst(extent);
 
   HipTest::BlockingContext b_context{nullptr};
   hipStream_t kernel_stream{nullptr};
@@ -328,8 +329,8 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior) {
   REQUIRE(b_context.is_blocked());
 
   hipMemcpy3DParms parms = {};
-  parms.srcPtr = src;
-  parms.dstPtr = dst;
+  parms.srcPtr = make_hipPitchedPtr(g_managed_3d, k3dDim * sizeof(int), k3dDim, k3dDim);
+  parms.dstPtr = dst.pitched_ptr();
   parms.extent = extent;
   parms.kind = hipMemcpyDeviceToDevice;
 
@@ -339,9 +340,6 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior) {
   b_context.unblock_stream();
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(hipStreamQuery(kernel_stream) == hipSuccess);
-
-  HIP_CHECK(hipFree(src.ptr));
-  HIP_CHECK(hipFree(dst.ptr));
 }
 
 HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemset3D) {
@@ -470,6 +468,39 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeer) {
     INFO("Index " << i);
     REQUIRE(g_managed_b[i] == i);
   }
+}
+
+HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream) {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  if (numDevices < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
+  }
+  CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(0);
+  CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(1);
+
+  HIP_CHECK(hipSetDevice(1));
+  hipStream_t deviceOneStream = nullptr;
+  HIP_CHECK(hipStreamCreate(&deviceOneStream));
+  int* deviceResult = nullptr;
+  HIP_CHECK(hipMalloc(&deviceResult, sizeof(*deviceResult)));
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipMemcpyAsync(nullptr, nullptr, 0, hipMemcpyDefault, deviceOneStream));
+
+  HIP_CHECK(hipSetDevice(1));
+  ReadManagedInitialized<<<1, 1, 0, deviceOneStream>>>(deviceResult);
+  HIP_CHECK(hipGetLastError());
+
+  int result = 0;
+  HIP_CHECK(hipMemcpyAsync(&result, deviceResult, sizeof(result), hipMemcpyDeviceToHost,
+                           deviceOneStream));
+  HIP_CHECK(hipStreamSynchronize(deviceOneStream));
+  REQUIRE(result == 1);
+
+  HIP_CHECK(hipFree(deviceResult));
+  HIP_CHECK(hipStreamDestroy(deviceOneStream));
 }
 
 // A hipStreamNonBlocking stream does not serialize with the null stream where the

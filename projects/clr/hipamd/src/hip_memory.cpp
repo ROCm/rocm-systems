@@ -716,13 +716,13 @@ void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, hip::Stream& s
 }
 
 // ================================================================================================
-hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                      hip::Stream& stream, bool isHostAsync, bool isGPUAsync,
-                      amd::Command** retainedCommand) {
-  // <REVIEW HELPER> Clear the optional output before validation so every early
-  // return has an unambiguous "no command was submitted" result.
+// retainedCommand transfers ownership of the submitted copy command when the
+// caller must inspect its asynchronous completion status later.
+static hipError_t ihipMemcpyImpl(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
+                                 hip::Stream& stream, bool isHostAsync, bool isGPUAsync,
+                                 CommandHandle* retainedCommand) {
   if (retainedCommand != nullptr) {
-    *retainedCommand = nullptr;
+    retainedCommand->reset();
   }
   if (sizeBytes == 0) {
     // Skip if nothing needs writing.
@@ -826,15 +826,28 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
       }
     }
   }
-  // <REVIEW HELPER> Retain before dropping ihipMemcpy's reference. Returning
-  // this exact object was chosen over getLastQueuedCommand(), which another
-  // thread can change after this enqueue.
   if (retainedCommand != nullptr) {
-    command->retain();
-    *retainedCommand = command;
+    retainedCommand->reset(command);
+  } else {
+    command->release();
   }
-  command->release();
   return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
+                      hip::Stream& stream, bool isHostAsync, bool isGPUAsync) {
+  return ihipMemcpyImpl(dst, src, sizeBytes, kind, stream, isHostAsync, isGPUAsync, nullptr);
+}
+
+// ================================================================================================
+MemcpyCommandResult ihipMemcpyWithCommand(void* dst, const void* src, size_t sizeBytes,
+                                          hipMemcpyKind kind, hip::Stream& stream,
+                                          bool isHostAsync, bool isGPUAsync) {
+  CommandHandle command;
+  hipError_t status =
+      ihipMemcpyImpl(dst, src, sizeBytes, kind, stream, isHostAsync, isGPUAsync, &command);
+  return {status, std::move(command)};
 }
 
 // ================================================================================================
@@ -2885,12 +2898,6 @@ hipError_t ihipMemcpy3DCommand(amd::Command*& command, const hipMemcpy3DParms* p
 }
 
 hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream, bool isAsync) {
-  hip::Stream* hip_stream = hip::getStream(stream);
-  if (hip_stream == nullptr) {
-    return hipErrorInvalidValue;
-  }
-  IHIP_INIT_MANAGED_VAR_DEVICE_PTR(hip_stream);
-
   hipError_t status = ihipMemcpy3D_validate(p);
   if (status != hipSuccess) {
     return status;
