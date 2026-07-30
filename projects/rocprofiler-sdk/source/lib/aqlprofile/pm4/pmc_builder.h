@@ -283,6 +283,40 @@ private:
         }
     }
 
+    // Ungate CHC perfmon clock and enable CP-sourced request marking on CPC/CPF/CPG.
+    void EnableCpPerfCounters(CmdBuffer* cmd_buffer)
+    {
+        builder.BuildWriteConfigRegPacket(cmd_buffer,
+                                          Primitives::ICG_CHC_CLK_CTRL_ADDR,
+                                          Primitives::chc_perf_clock_enable_value());
+        builder.BuildWriteConfigRegPacket(cmd_buffer,
+                                          Primitives::CPC_TC_PERF_COUNTER_WINDOW_SELECT_ADDR,
+                                          Primitives::cp_request_marking_enable_value());
+        builder.BuildWriteConfigRegPacket(cmd_buffer,
+                                          Primitives::CPF_TC_PERF_COUNTER_WINDOW_SELECT_ADDR,
+                                          Primitives::cp_request_marking_enable_value());
+        builder.BuildWriteConfigRegPacket(cmd_buffer,
+                                          Primitives::CPG_TC_PERF_COUNTER_WINDOW_SELECT_ADDR,
+                                          Primitives::cp_request_marking_enable_value());
+    }
+
+    // Disable CP-sourced request marking then re-gate CHC perfmon clock.
+    void DisableCpPerfCounters(CmdBuffer* cmd_buffer)
+    {
+        builder.BuildWriteConfigRegPacket(cmd_buffer,
+                                          Primitives::CPC_TC_PERF_COUNTER_WINDOW_SELECT_ADDR,
+                                          Primitives::cp_request_marking_disable_value());
+        builder.BuildWriteConfigRegPacket(cmd_buffer,
+                                          Primitives::CPF_TC_PERF_COUNTER_WINDOW_SELECT_ADDR,
+                                          Primitives::cp_request_marking_disable_value());
+        builder.BuildWriteConfigRegPacket(cmd_buffer,
+                                          Primitives::CPG_TC_PERF_COUNTER_WINDOW_SELECT_ADDR,
+                                          Primitives::cp_request_marking_disable_value());
+        builder.BuildWriteConfigRegPacket(cmd_buffer,
+                                          Primitives::ICG_CHC_CLK_CTRL_ADDR,
+                                          Primitives::chc_perf_clock_disable_value());
+    }
+
     uint32_t GetInstanceIndex(uint32_t instance_index, const GpuBlockInfo* block_info)
     {
         // GLARB blocks require special instance handling, so we encode instance_count into
@@ -425,6 +459,10 @@ public:
             builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                Primitives::SQ_PERFCOUNTER_CTRL2_ADDR,
                                                Primitives::sq_control2_enable_value());
+        }
+        if constexpr(Primitives::GFXIP_LEVEL >= 12)
+        {
+            if(counters_vec.get_attr() & CounterBlockTcAttr) EnableCpPerfCounters(cmd_buffer);
         }
 #if defined(_GFX10_PRIMITIVES_H_) || defined(_GFX11_PRIMITIVES_H_)
         // Clear and enable GUS counters
@@ -1077,6 +1115,11 @@ public:
         if(Primitives::GFXIP_LEVEL == 9)
             builder.BuildWriteUConfigRegPacket(
                 cmd_buffer, Primitives::RLC_PERFMON_CLK_CNTL_ADDR, 0);
+
+        if constexpr(Primitives::GFXIP_LEVEL >= 12)
+        {
+            if(counters_vec.get_attr() & CounterBlockTcAttr) DisableCpPerfCounters(cmd_buffer);
+        }
 
         builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }

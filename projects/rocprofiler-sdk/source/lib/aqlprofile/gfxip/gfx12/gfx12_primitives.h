@@ -729,6 +729,29 @@ public:
         const uint32_t NUM_PIPES  = 8;
         return (1u << (NUM_PIPES + PIPE_START)) - (1u << PIPE_START);
     }
+    // CP engine TC perf window registers — required to count CP-sourced requests in CHC.
+    static constexpr Register CPC_TC_PERF_COUNTER_WINDOW_SELECT_ADDR =
+        REG_32B_ADDR(GC, 0, regCPC_TC_PERF_COUNTER_WINDOW_SELECT);
+    static constexpr Register CPF_TC_PERF_COUNTER_WINDOW_SELECT_ADDR =
+        REG_32B_ADDR(GC, 0, regCPF_TC_PERF_COUNTER_WINDOW_SELECT);
+    static constexpr Register CPG_TC_PERF_COUNTER_WINDOW_SELECT_ADDR =
+        REG_32B_ADDR(GC, 0, regCPG_TC_PERF_COUNTER_WINDOW_SELECT);
+
+    // CHC perfmon clock gate control — gated by default, must be ungated during collection.
+    static constexpr Register ICG_CHC_CLK_CTRL_ADDR = REG_32B_ADDR(GC, 0, regICG_CHC_CLK_CTRL);
+
+    static uint32_t cp_request_marking_enable_value()
+    {
+        return SET_REG_FIELD_BITS(CPC_TC_PERF_COUNTER_WINDOW_SELECT, ENABLE, 1) |
+               SET_REG_FIELD_BITS(CPC_TC_PERF_COUNTER_WINDOW_SELECT, ALWAYS, 1);
+    }
+    static uint32_t cp_request_marking_disable_value() { return 0; }
+
+    static uint32_t chc_perf_clock_enable_value()
+    {
+        return SET_REG_FIELD_BITS(ICG_CHC_CLK_CTRL, PERF_CLK_OVERRIDE, 1);
+    }
+    static uint32_t chc_perf_clock_disable_value() { return 0; }
 };
 
 }  // namespace gfx12xx
