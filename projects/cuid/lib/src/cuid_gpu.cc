@@ -279,11 +279,14 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   info.bdf = bdf;
   info.render_node = full_device_node;
 
-  // Fallback for GIM SR-IOV hosts, where PCI device files are not exposed to
-  // userspace: fill the core identifiers from the GIM SMI ioctl interface.
-  const bool needs_gim_fallback = !info.bdf.empty() && gim_client != nullptr &&
-                                  (info.header.fields.gpu.vendor_id == 0 ||
-                                   info.header.fields.gpu.device_id == 0);
+  // For GIM SR-IOV hosts, query the GIM SMI ioctl interface for every GIM
+  // device. When PCI device files are not exposed to userspace this fills the
+  // core identifiers (vendor/device/revision). Crucially, it always captures
+  // the per-GPU ASIC serial as the hardware fingerprint: on hosts where PCI
+  // sysfs vendor/device *are* present, no sysfs unique_id or usable PCI config
+  // space exists for the SR-IOV PF, so without the GIM ASIC serial every GPU
+  // would collapse to an identical fallback CUID.
+  const bool needs_gim_fallback = !info.bdf.empty() && gim_client != nullptr;
   if (needs_gim_fallback) {
     cuid::gim::GimAsicInfo asic;
     if (gim_client->get_asic_info_for_bdf(info.bdf, asic) ==

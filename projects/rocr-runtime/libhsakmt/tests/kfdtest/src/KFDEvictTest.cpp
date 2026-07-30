@@ -63,10 +63,8 @@ void KFDEvictTest::AllocBuffers(bool m_IsParent, HSAuint32 defaultGPUNode, HSAui
               << totalMB << ")MB VRAM in KFD" << std::endl;
     }
 
-    HsaMemMapFlags mapFlags = {0};
-    HSAKMT_STATUS ret;
+    HSAKMT_STATUS ret = 0;
     HSAuint32 retry = 0;
-
     m_Flags.Value = 0;
     m_Flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
     m_Flags.ui32.HostAccess = 0;
@@ -77,7 +75,7 @@ void KFDEvictTest::AllocBuffers(bool m_IsParent, HSAuint32 defaultGPUNode, HSAui
         if (ret == HSAKMT_STATUS_SUCCESS) {
             if (hsakmt_is_dgpu()) {
                 if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, m_pBuf, vramBufSize, NULL,
-                       mapFlags, 1, reinterpret_cast<HSAuint32 *>(&defaultGPUNode)) == HSAKMT_STATUS_ERROR) {
+                       m_Flags, 1, reinterpret_cast<HSAuint32 *>(&defaultGPUNode)) == HSAKMT_STATUS_ERROR) {
                     EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, m_pBuf, vramBufSize));
                     LOG() << "Map failed for " << i << "/" << count << " buffer. Retrying allocation" << std::endl;
                     goto retry;

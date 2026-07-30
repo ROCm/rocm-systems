@@ -141,6 +141,12 @@ void VMovB16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VMovB16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VMovB64Vop3::VMovB64Vop3(const MachineInst *inst)
     : Vop3("v_mov_b64", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(645)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -1132,6 +1138,13 @@ void VCndmaskB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VCndmaskB16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VPermlaneBcastB32Vop3::VPermlaneBcastB32Vop3(const MachineInst *inst)
