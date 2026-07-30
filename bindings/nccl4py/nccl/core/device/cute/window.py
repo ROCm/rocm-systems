@@ -132,18 +132,18 @@ class Window:
         return _bindings.nccl_get_multimem_pointer(
             self.ptr, cutlass.Int64(offset), _to_value(mm_handle))
 
-    def lsa_multimem_pointer(self, offset: int, comm: DevComm) -> ir.Value:
+    def lsa_multimem_pointer(self, offset: int, dev_comm: DevComm) -> ir.Value:
         """Translate ``offset`` to the LSA multimem virtual address.
 
         Args:
             offset: Byte offset within the window.
-            comm: Device communicator supplying the LSA multimem handle.
+            dev_comm: Device communicator supplying the LSA multimem handle.
 
         Returns:
             ``!llvm.ptr`` MLIR value.
         """
         return _bindings.nccl_get_lsa_multimem_pointer(
-            self.ptr, cutlass.Int64(offset), comm.ptr)
+            self.ptr, cutlass.Int64(offset), dev_comm.ptr)
 
     def tensor(self, dtype, layout, offset: int = 0):
         """Construct a ``cute.Tensor`` view over the registered buffer.

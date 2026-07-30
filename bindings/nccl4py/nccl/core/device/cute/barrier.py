@@ -1,6 +1,6 @@
 """Barrier sessions for the device API.
 
-Three session types mirror the C++ wrapper:
+Three session types:
 
   * :class:`LsaBarrierSession` — LSA-only (intra-node, NVLink/peer-access).
   * :class:`GinBarrierSession` — GIN-only (inter-node, network).
@@ -11,16 +11,23 @@ Construct via the module-level factories:
   * Explicit — caller supplies the team and barrier handle::
 
         sess = barrier.lsa_session(coop, dev_comm, team, lsa_handle, index=0)
-        sess = barrier.gin_session(coop, gin, team, gin_handle, index=0)
+        sess = barrier.gin_session(coop, gin, dev_comm, team, gin_handle,
+                                   index=0)
         sess = barrier.hybrid_session(coop, inner_team, outer_team, gin,
                                        lsa_handle, gin_handle, index=0)
 
-  * DevComm-derived (mirror the C++ tag-based barrier constructors)::
+  * DevComm-derived — team and handle pulled from ``dev_comm``::
 
         sess = barrier.lsa_default(coop, dev_comm, index=0)
         sess = barrier.world_gin(coop, gin, dev_comm, index=0)
         sess = barrier.rail_gin(coop, gin, dev_comm, index=0)
         sess = barrier.world_hybrid(coop, gin, dev_comm, index=0)
+
+The three GIN factories also accept :data:`GIN_ALL_CONTEXTS` in place of a
+:class:`Gin`, to fence every GIN context on the comm rather than one::
+
+        sess = barrier.world_gin(coop, barrier.GIN_ALL_CONTEXTS, dev_comm,
+                                 index=0)
 """
 
 import cutlass
@@ -38,12 +45,12 @@ from ._structs import (
     ncclMultimemHandle,
 )
 from .comm import DevComm
+from .gin import Gin
 from .handles import (
     GinBarrierHandle,
     LsaBarrierHandle,
     MultimemHandle,
 )
-from .gin import Gin
 from .types import MemoryOrder, GinFenceLevel
 
 
@@ -128,7 +135,7 @@ def lsa_session(
     index: int,
     *,
     multimem: bool = False,
-    mm_handle: MultimemHandle = None,
+    mm_handle: MultimemHandle | None = None,
 ) -> "LsaBarrierSession":
     """Create and initialize an :class:`LsaBarrierSession`.
 
@@ -257,7 +264,7 @@ def hybrid_session(
     index: int,
     *,
     multimem: bool = False,
-    inner_mm_handle: MultimemHandle = None,
+    inner_mm_handle: MultimemHandle | None = None,
 ) -> "BarrierSession":
     """Create and initialize a hybrid :class:`BarrierSession`.
 
@@ -289,8 +296,7 @@ def hybrid_session(
 
 # === Convenience factories ===
 # Pull the right team and handle from a DevComm so the user doesn't have to
-# wire them up manually. Mirror the C++ tag-based barrier constructors
-# (ncclTeamTagWorld / ncclTeamTagRail / ncclTeamTagLsa).
+# wire them up manually.
 
 def lsa_default(
     coop: ncclCoopAny,
@@ -298,7 +304,7 @@ def lsa_default(
     index: int,
     *,
     multimem: bool = False,
-    mm_handle: MultimemHandle = None,
+    mm_handle: MultimemHandle | None = None,
 ) -> "LsaBarrierSession":
     """LSA barrier on the default LSA team using ``dev_comm.lsa_barrier``.
 
@@ -367,7 +373,7 @@ def world_hybrid(
     index: int,
     *,
     multimem: bool = False,
-    inner_mm_handle: MultimemHandle = None,
+    inner_mm_handle: MultimemHandle | None = None,
 ) -> "BarrierSession":
     """Hybrid barrier (LSA + rail-GIN) using the embedded hybrid handles.
 

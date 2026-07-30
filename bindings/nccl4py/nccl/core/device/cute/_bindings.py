@@ -149,8 +149,6 @@ def nccl_get_lsa_multimem_pointer(
 
 
 # === Resource buffer pointers ===
-#
-# ``handle`` is an ``ncclDevResourceHandle`` (``uint32_t``).
 
 @cute.extern(name="ncclGetResourceBufferLocalPointer", source=_BC)
 def nccl_get_resource_buffer_local_pointer(

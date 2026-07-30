@@ -3,20 +3,13 @@
 #
 # See LICENSE.txt for more license information
 
-"""CuTeDSL views over host-created NCCL resource handles.
+"""CuTeDSL views over NCCL resource handles.
 
-``ncclMultimemHandle``, ``ncclLsaBarrierHandle`` and ``ncclGinBarrierHandle``
-are POD structs NCCL fills in during ``ncclDevCommCreate``. The handles
-embedded in ``ncclDevComm`` are reachable through :class:`DevComm`
-properties, but the ones returned per-requirement — a non-LSA team's
-multimem handle, or an entry of ``DevCommResource.resource_handles`` — have
-to be passed in from the host.
-
-A ``@cute.native_struct`` supplies ``__extract_mlir_values__`` but no
-``__c_pointers__``, so it cannot be a JIT argument on its own. Each host
-view therefore gets a thin wrapper here that marshals the struct by value
-into the kernel, mirroring :class:`DevComm`, plus a registered JIT arg
-adapter so the host view can be passed directly.
+Each view marshals its handle struct by value into a kernel and registers
+a JIT arg adapter, so the host-side handles from :mod:`nccl.core.resources`
+can be passed as ``@cute.jit`` arguments directly.
+:meth:`_Handle.from_native_struct` wraps the copies embedded in
+:class:`DevComm`, so both sources present one type per handle.
 """
 
 import cutlass
@@ -35,11 +28,11 @@ from ._structs import (
 
 
 class _Handle:
-    """Base for a by-value CuTeDSL view over a host-owned handle struct.
+    """Base for a by-value CuTeDSL view over a handle struct.
 
-    Subclasses set ``_struct_cls`` (the ``@cute.native_struct`` mirror) and
-    ``_view_cls`` (the host-side :mod:`nccl.core.resources` view), then
-    expose the fields they want as properties over ``value``.
+    Subclasses set ``_struct_cls`` (the ``@cute.native_struct`` type) and
+    ``_view_cls`` (the host-side :mod:`nccl.core.resources` type), then
+    expose fields as properties over ``value``.
     """
 
     _struct_cls: type
@@ -80,13 +73,9 @@ class _Handle:
     def from_native_struct(cls, struct):
         """Wrap an already-traced native struct in this view.
 
-        Lets a handle read out of ``ncclDevComm`` present the same type as
-        one passed in from the host, so callers see one type per handle
-        rather than a union.
-
         Args:
-            struct: value-mode ``_struct_cls`` instance, e.g. the
-                ``ncclLsaBarrierHandle`` behind ``DevComm.lsa_barrier``.
+            struct: value-mode ``_struct_cls`` instance, such as the one
+                behind :py:attr:`DevComm.lsa_barrier`.
 
         Returns:
             Value-mode view over ``struct``.
