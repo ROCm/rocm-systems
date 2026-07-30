@@ -29,6 +29,7 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <thread>
 #include <vector>
@@ -1112,11 +1113,37 @@ TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
 // against a failed op (e.g. -ENOSYS) mutating caller memory and against a
 // daemon-returned count larger than the caller's buffer.
 
+// Closes an fd however the enclosing scope exits. A daemon stand-in that
+// returns early without closing leaves the client blocked in rpc_recv_msg()
+// waiting for an EOF that never arrives, which hangs the run instead of
+// failing the test.
+struct CloseOnScopeExit {
+  explicit CloseOnScopeExit(int fd) : fd_(fd) {}
+  CloseOnScopeExit(const CloseOnScopeExit &) = delete;
+  CloseOnScopeExit &operator=(const CloseOnScopeExit &) = delete;
+  ~CloseOnScopeExit() {
+    if (fd_ >= 0)
+      ::close(fd_);
+  }
+  int fd_;
+};
+
+// Inspect the request header and rewrite the arg struct the reply echoes back,
+// so one stand-in can model a daemon that reports different outputs than the
+// caller requested.
+using IoctlReplyPatch =
+    std::function<void(const rocjitsu::RpcHeader &request, kfd_ioctl_dbg_trap_args &echoed)>;
+
+// Lay out the reply's inline tail by hand instead of flooding it with `poison`,
+// for tests that must tell one returned entry from another.
+using IoctlReplyTailFill = std::function<void(uint8_t *tail, size_t bytes)>;
+
 // One-shot daemon stand-in: read a single RPC_IOCTL, then reply with `result`
 // and a response whose inline tail (after the echoed arg struct) is
 // `extra_bytes` of `poison`. Does not close `server_fd` (caller owns it).
 void serve_one_ioctl_reply(int server_fd, int32_t result, size_t arg_struct_size,
-                           size_t extra_bytes, uint8_t poison) {
+                           size_t extra_bytes, uint8_t poison, const IoctlReplyPatch &patch = {},
+                           const IoctlReplyTailFill &fill_tail = {}) {
   rocjitsu::RpcHeader hdr{};
   int in_fds[1] = {-1};
   size_t num_in = 1;
@@ -1133,7 +1160,17 @@ void serve_one_ioctl_reply(int server_fd, int32_t result, size_t arg_struct_size
   // inline snapshot data to write into the caller's snapshot buffer.
   std::vector<uint8_t> out(arg_struct_size + extra_bytes);
   std::memcpy(out.data(), req.data() + sizeof(rocjitsu::RpcIoctlRequest), arg_struct_size);
-  std::memset(out.data() + arg_struct_size, poison, extra_bytes);
+  if (fill_tail)
+    fill_tail(out.data() + arg_struct_size, extra_bytes);
+  else
+    std::memset(out.data() + arg_struct_size, poison, extra_bytes);
+
+  if (patch && arg_struct_size >= sizeof(kfd_ioctl_dbg_trap_args)) {
+    kfd_ioctl_dbg_trap_args echoed{};
+    std::memcpy(&echoed, out.data(), sizeof(echoed));
+    patch(hdr, echoed);
+    std::memcpy(out.data(), &echoed, sizeof(echoed));
+  }
 
   rocjitsu::RpcHeader resp{};
   resp.opcode = rocjitsu::RPC_IOCTL;
@@ -1225,40 +1262,14 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotClampsCopyToCallerCapacity) 
   server.join();
 }
 
-// As serve_one_ioctl_reply, but overrides the snapshot outputs in the echoed
-// arg struct so the reply can report a device total and entry size that differ
-// from the request — what a daemon with fewer GPUs than the caller asked for
-// returns.
-void serve_one_snapshot_reply(int server_fd, uint32_t out_num_devices, uint32_t out_entry_size,
-                              size_t arg_struct_size, size_t extra_bytes, uint8_t poison) {
-  rocjitsu::RpcHeader hdr{};
-  int in_fds[1] = {-1};
-  size_t num_in = 1;
-  if (rocjitsu::rpc_recv_msg(server_fd, &hdr, sizeof(hdr), in_fds, &num_in) <= 0)
-    return;
-  if (in_fds[0] >= 0)
-    ::close(in_fds[0]);
-  std::vector<uint8_t> req(hdr.payload_bytes);
-  if (!rocjitsu::rpc_recv_exact(server_fd, req.data(), hdr.payload_bytes))
-    return;
-
-  std::vector<uint8_t> out(arg_struct_size + extra_bytes);
-  std::memcpy(out.data(), req.data() + sizeof(rocjitsu::RpcIoctlRequest), arg_struct_size);
-  std::memset(out.data() + arg_struct_size, poison, extra_bytes);
-
-  kfd_ioctl_dbg_trap_args echoed{};
-  std::memcpy(&echoed, out.data(), sizeof(echoed));
-  echoed.device_snapshot.num_devices = out_num_devices;
-  echoed.device_snapshot.entry_size = out_entry_size;
-  std::memcpy(out.data(), &echoed, sizeof(echoed));
-
-  rocjitsu::RpcHeader resp{};
-  resp.opcode = rocjitsu::RPC_IOCTL;
-  resp.request_id = hdr.request_id;
-  resp.result = 0;
-  resp.payload_bytes = static_cast<uint32_t>(out.size());
-  rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
-  rocjitsu::rpc_send_exact(server_fd, out.data(), out.size());
+// Reply patch modelling a daemon that enumerates fewer GPUs than the caller
+// asked for: report the true device total and the driver's clamped entry size.
+IoctlReplyPatch snapshot_outputs(uint32_t out_num_devices, uint32_t out_entry_size) {
+  return [out_num_devices, out_entry_size](const rocjitsu::RpcHeader &,
+                                           kfd_ioctl_dbg_trap_args &echoed) {
+    echoed.device_snapshot.num_devices = out_num_devices;
+    echoed.device_snapshot.entry_size = out_entry_size;
+  };
 }
 
 // libhsakmt's hsaKmtDbgGetDeviceDataCtx() asks for UINT32_MAX devices and lets
@@ -1282,38 +1293,18 @@ TEST(RemoteDriverDbgSnapshotTest, OversizedSnapshotRequestIsClampedToPayloadLimi
   std::atomic<uint32_t> observed_num_devices{0};
 
   std::jthread server([&, server_fd = sv[1]] {
-    rocjitsu::RpcHeader hdr{};
-    int in_fds[1] = {-1};
-    size_t num_in = 1;
-    if (rocjitsu::rpc_recv_msg(server_fd, &hdr, sizeof(hdr), in_fds, &num_in) <= 0)
-      return;
-    if (in_fds[0] >= 0)
-      ::close(in_fds[0]);
-    observed_payload_bytes = hdr.payload_bytes;
-    std::vector<uint8_t> req(hdr.payload_bytes);
-    if (!rocjitsu::rpc_recv_exact(server_fd, req.data(), hdr.payload_bytes))
-      return;
-
-    kfd_ioctl_dbg_trap_args echoed{};
-    std::memcpy(&echoed, req.data() + sizeof(rocjitsu::RpcIoctlRequest), sizeof(echoed));
-    observed_num_devices = echoed.device_snapshot.num_devices;
-
+    // Close unconditionally: an early return that leaves the socket open would
+    // hang the client in rpc_recv_msg() instead of failing the test.
+    const CloseOnScopeExit closer{server_fd};
     // Report the true device total and return only the entries that exist —
     // exactly what a daemon with one GPU does.
-    echoed.device_snapshot.num_devices = kActualDevices;
-    echoed.device_snapshot.entry_size = kEntryBytes;
-    std::vector<uint8_t> out(arg_struct_size + kEntryBytes);
-    std::memcpy(out.data(), &echoed, sizeof(echoed));
-    std::memset(out.data() + arg_struct_size, kPoison, kEntryBytes);
-
-    rocjitsu::RpcHeader resp{};
-    resp.opcode = rocjitsu::RPC_IOCTL;
-    resp.request_id = hdr.request_id;
-    resp.result = 0;
-    resp.payload_bytes = static_cast<uint32_t>(out.size());
-    rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
-    rocjitsu::rpc_send_exact(server_fd, out.data(), out.size());
-    ::close(server_fd);
+    serve_one_ioctl_reply(server_fd, 0, arg_struct_size, kEntryBytes, kPoison,
+                          [&](const rocjitsu::RpcHeader &request, kfd_ioctl_dbg_trap_args &echoed) {
+                            observed_payload_bytes = request.payload_bytes;
+                            observed_num_devices = echoed.device_snapshot.num_devices;
+                            echoed.device_snapshot.num_devices = kActualDevices;
+                            echoed.device_snapshot.entry_size = kEntryBytes;
+                          });
   });
 
   rocjitsu::RemoteDriver rd(sv[0]);
@@ -1360,14 +1351,26 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotLeavesUnfilledEntriesAndPadd
   constexpr uint32_t kStride = kEntryBytes + 16; // caller pads each entry
   constexpr size_t kCap = static_cast<size_t>(kRequested) * kStride;
   constexpr uint8_t kSentinel = 0xAB;
-  constexpr uint8_t kPoison = 0xCD;
+  constexpr uint8_t kUnwritten = 0;
+  // Distinct per-entry contents, so reading the tail at the wrong stride (the
+  // daemon lays entries out at entry_size(IN), not densely at entry_size(OUT))
+  // shows up as the wrong entry rather than as identical bytes.
+  const auto entry_byte = [](uint32_t i) { return static_cast<uint8_t>(0xC0 + i); };
   const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
 
   std::vector<uint8_t> caller_buf(kCap, kSentinel);
 
   std::jthread server([&, server_fd = sv[1]] {
-    serve_one_snapshot_reply(server_fd, kReturned, kEntryBytes, arg_struct_size, kCap, kPoison);
-    ::close(server_fd);
+    const CloseOnScopeExit closer{server_fd};
+    // Mirror what SimulatedKfd writes into the daemon's tail: kReturned entries
+    // of kEntryBytes at kStride, everything else untouched.
+    serve_one_ioctl_reply(
+        server_fd, 0, arg_struct_size, kCap, kUnwritten, snapshot_outputs(kReturned, kEntryBytes),
+        [&](uint8_t *tail, size_t bytes) {
+          std::memset(tail, kUnwritten, bytes);
+          for (uint32_t i = 0; i < kReturned; ++i)
+            std::memset(tail + static_cast<size_t>(i) * kStride, entry_byte(i), kEntryBytes);
+        });
   });
 
   rocjitsu::RemoteDriver rd(sv[0]);
@@ -1385,9 +1388,10 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotLeavesUnfilledEntriesAndPadd
   for (uint32_t i = 0; i < kRequested; ++i) {
     const auto entry = caller_buf.begin() + static_cast<size_t>(i) * kStride;
     const bool filled = i < kReturned;
-    EXPECT_TRUE(std::all_of(entry, entry + kEntryBytes,
-                            [&](uint8_t b) { return b == (filled ? kPoison : kSentinel); }))
-        << "entry " << i << (filled ? " was not populated" : " was written past the device total");
+    const uint8_t want = filled ? entry_byte(i) : kSentinel;
+    EXPECT_TRUE(std::all_of(entry, entry + kEntryBytes, [&](uint8_t b) { return b == want; }))
+        << "entry " << i
+        << (filled ? " holds the wrong entry's bytes" : " was written past the device total");
     EXPECT_TRUE(
         std::all_of(entry + kEntryBytes, entry + kStride, [](uint8_t b) { return b == kSentinel; }))
         << "entry " << i << " padding was clobbered";
@@ -1591,7 +1595,8 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   EXPECT_NE(entry.simd_count, 0u);
   EXPECT_NE(entry.max_waves_per_simd, 0u);
   EXPECT_NE(entry.array_count, 0u);
-  EXPECT_NE(entry.simd_arrays_per_engine, 0u);
+  // Fatal: the shader-engine check below divides by this.
+  ASSERT_NE(entry.simd_arrays_per_engine, 0u);
 
   // The snapshot reports shader arrays per XCC, as amdkfd does. rocdbgapi turns
   // that back into shader engines and uses the result for CWSR and scratch
