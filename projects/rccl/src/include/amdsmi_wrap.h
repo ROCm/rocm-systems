@@ -353,15 +353,16 @@ typedef struct {
 } amdsmi_fabric_telemetry_t;
 
 #define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
-#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
+#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 16
 
 /**
  * @brief Fabric type
  */
 typedef enum {
   AMDSMI_FABRIC_TYPE_UALOE,
-  AMDSMI_FABRIC_TYPE_UALLINK,
-  AMDSMI_FABRIC_TYPE_UNKNOWN
+  AMDSMI_FABRIC_TYPE_UALINK,
+  AMDSMI_FABRIC_TYPE_UNKNOWN,
+  AMDSMI_FABRIC_TYPE_UALLINK = AMDSMI_FABRIC_TYPE_UALINK //!< Deprecated, use AMDSMI_FABRIC_TYPE_UALINK instead
 } amdsmi_fabric_type_t;
 
 /**
@@ -403,19 +404,15 @@ typedef struct {
   amdsmi_fabric_accelerator_vpod_state_t accel_state; //!< Accelerator vPoD State
 } amdsmi_fabric_info_v1_t;
 
-typedef struct {
-  uint32_t version;
-  union fabric_info_ {
-    amdsmi_fabric_info_v1_t v1;
-  } fabric_version;
-} amdsmi_fabric_info_ver_t;
-
 /**
  * @brief Fabric device information structure
  */
 typedef struct {
   amdsmi_bdf_t bdf; //!< BDF of the Fabric device
-  amdsmi_fabric_info_ver_t fabric_info;
+  uint32_t fabric_version;
+  union fabric_info_ {
+    amdsmi_fabric_info_v1_t v1;
+  } fabric_info;
   uint32_t reserved[15];
 } amdsmi_fabric_info_t;
 
@@ -449,18 +446,18 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details Given a telemetry item ID @p telem_id,
- *  this function returns a pointer to a string containing the human-readable name
- *  for the specified telemetry item. The returned string is statically allocated
- *  and should not be freed by the caller.
- *
+ *  @details Given a telemetry item ID @p telem_id, this function writes a pointer
+ *  to a human-readable name for the specified telemetry item through @p telem_name.
+ *  The returned string is statically allocated and should not be freed by the caller.
  *
  *  @param[in] telem_id The telemetry item ID for which the name is requested
  *
- *  @return const char* | Pointer to string containing the telemetry item name,
- *  or UNKNOWN if the category or telemetry ID is not recognized
+ *  @param[out] telem_name Receives a pointer to the telemetry item name string,
+ *  or "UNKNOWN" if the category or telemetry ID is not recognized
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
+amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** telem_name);
 
 /** @} End rcclFabricCompat */
 #endif // !AMDSMI_FABRIC_DIRECT
