@@ -59,6 +59,10 @@ set(SRC_LIST
     "${NIC_SOURCES}"
 )
 
+if(ENABLE_WSL_BACKEND)
+    list(APPEND SRC_LIST "${SRC_DIR}/amd_smi_wsl_device.cc")
+endif()
+
 # CONFIGURE_DEPENDS re-evaluates the glob at build time so adding or removing an
 # impl header triggers a regenerate instead of going unnoticed until a clean build.
 file(GLOB IMPL_HEADERS CONFIGURE_DEPENDS "${INC_DIR}/impl/*.h")
@@ -121,6 +125,25 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 
 add_subdirectory(nic/ai-nic/amdsmi_unified)
 
+option(BUILD_CUID "Build CUID library" OFF)
+
+if(BUILD_CUID)
+    set(ROCM_DIR_CORE "/opt/rocm/core")
+    # include CUID library
+    find_library(
+        AMDCUID_LIB
+        NAMES libamdcuid_static.a amdcuid_static
+        HINTS ${ROCM_DIR_CORE}/lib ${CMAKE_PREFIX_PATH}
+        REQUIRED
+    )
+    find_path(
+        AMDCUID_INCLUDE_DIR
+        NAMES amd_cuid.h
+        HINTS ${ROCM_DIR_CORE}/include/amdcuid ${CMAKE_PREFIX_PATH}/include/amdcuid
+        REQUIRED
+    )
+    find_package(OpenSSL REQUIRED)
+endif(BUILD_CUID)
 #
 #   --- When BUILD_BOTH_LIBS: build shared and static; tests/examples link to static ---
 #   Otherwise: build one library (BUILD_SHARED_LIBS).
@@ -138,11 +161,21 @@ else()
     set(_AMD_SMI_ALL_TARGETS ${AMD_SMI})
 endif()
 
-foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
+# Apply the include dirs, link libraries and link dirs shared by every amd_smi
+# library target (the main/static libraries and the wheel-only
+# libamd_smi_python). Target-specific settings -- version script, SOVERSION,
+# -Bsymbolic-functions, the extra NIC interface includes -- are applied by the
+# caller after this.
+function(amdsmi_configure_common_target _TARGET)
     target_link_libraries(
         ${_TARGET}
         PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
     )
+
+    if(ENABLE_WSL_BACKEND)
+        target_compile_definitions(${_TARGET} PRIVATE ENABLE_WSL_BACKEND AMDSMI_ENABLE_WSL_BACKEND)
+        target_include_directories(${_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
+    endif()
 
     target_include_directories(
         ${_TARGET}
@@ -157,7 +190,6 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
             ${NIC_INCLUDE_DIRS}
             ${UALOE_INCLUDE_DIR}
     )
-
     target_include_directories(
         ${_TARGET}
         PUBLIC
@@ -165,7 +197,17 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
             "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
     )
 
+    if(BUILD_CUID)
+        target_compile_definitions(${_TARGET} PRIVATE BUILD_CUID)
+        target_link_libraries(${_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+        target_include_directories(${_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
+    endif()
+
     target_link_directories(${_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)
+endfunction()
+
+foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
+    amdsmi_configure_common_target(${_TARGET})
 endforeach()
 
 #
@@ -213,7 +255,7 @@ set_property(TARGET ${AMD_SMI} PROPERTY SOVERSION "${MAJOR}")
 set_property(TARGET ${AMD_SMI} PROPERTY VERSION "${SO_VERSION_STRING}")
 
 ## If the library is a release, strip the target library
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+if("${CMAKE_BUILD_TYPE}" STREQUAL Release AND CMAKE_STRIP)
     if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
         if(TARGET ${AMD_SMI})
             add_custom_command(TARGET ${AMD_SMI} POST_BUILD COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${AMD_SMI}>)
@@ -224,11 +266,15 @@ endif()
 ## Create Python-specific library if BUILD_PYTHON_WHEEL is enabled
 if(BUILD_PYTHON_WHEEL)
     add_library(${AMD_SMI}_python ${SRC_LIST} ${INC_LIST})
-    target_link_libraries(
+    amdsmi_configure_common_target(${AMD_SMI}_python)
+    # Extra NIC interface includes the wheel target needs on top of the common
+    # set applied above.
+    target_include_directories(
         ${AMD_SMI}_python
-        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc
+            ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface
     )
-    target_link_directories(${AMD_SMI}_python PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)
     # Apply the same UALOE netlink compile flags (e.g. -I.../libnl3 for
     # <netlink/*.h> and -DUALOE_NETLINK) that the other amd_smi targets receive;
     # this target is created after the shared _AMD_SMI_ALL_TARGETS loop above and
@@ -237,27 +283,6 @@ if(BUILD_PYTHON_WHEEL)
         separate_arguments(UALOE_FLAGS_PYTHON NATIVE_COMMAND "${UALOE_COMPILE_FLAGS}")
         target_compile_options(${AMD_SMI}_python PRIVATE ${UALOE_FLAGS_PYTHON})
     endif()
-    target_include_directories(
-        ${AMD_SMI}_python
-        PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../
-            ${PROJECT_SOURCE_DIR}/rocm_smi/include
-            ${PROJECT_SOURCE_DIR}/common/shared_mutex
-            ${RAS_DECODE_INC_DIR}
-            ${DRM_INCLUDE_DIRS}
-            ${DRM_AMDGPU_INCLUDE_DIRS}
-            ${NIC_INCLUDE_DIRS}
-            ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc
-            ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface
-            ${UALOE_INCLUDE_DIR}
-    )
-    target_include_directories(
-        ${AMD_SMI}_python
-        PUBLIC
-            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
-    )
     set_property(TARGET ${AMD_SMI}_python PROPERTY SOVERSION "${MAJOR}")
     set_property(TARGET ${AMD_SMI}_python PROPERTY VERSION "${SO_VERSION_STRING}")
     set_target_properties(${AMD_SMI}_python PROPERTIES OUTPUT_NAME "amd_smi_python")
@@ -274,7 +299,7 @@ if(BUILD_PYTHON_WHEEL)
     set_property(TARGET ${AMD_SMI}_python APPEND PROPERTY LINK_DEPENDS "${VERSION_SCRIPT}")
     ## Strip the wheel-shipped library in Release so the published wheel does
     ## not carry DWARF debug symbols (mirrors the system-library strip above).
-    if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+    if("${CMAKE_BUILD_TYPE}" STREQUAL Release AND CMAKE_STRIP)
         add_custom_command(TARGET ${AMD_SMI}_python POST_BUILD COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${AMD_SMI}_python>)
     endif()
 endif()
@@ -307,6 +332,8 @@ install(
 # error. Build them, but keep them out of the installed dev headers.
 set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_device")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_syms")
 install(FILES ${INSTALL_IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
 
 install(FILES ${NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)

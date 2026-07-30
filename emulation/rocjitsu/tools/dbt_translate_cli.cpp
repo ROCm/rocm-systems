@@ -522,6 +522,8 @@ void print_text_report(std::ostream &os, const CliOptions &options,
   os << "rj_dbt_translate: " << (result.ok() ? "ok" : "failed") << "\n";
   os << "input: " << options.translate.input_path << "\n";
   os << "input_target: " << options.input_target_name << "\n";
+  os << "source_code_object_id: fnv1a64:" << std::hex << std::setfill('0') << std::setw(16)
+     << output.source_code_object_id << std::dec << std::setfill(' ') << "\n";
   if (options.saw_input_revision)
     os << "input_revision: " << revision_name(output.input_revision) << "\n";
   os << "output_target: " << options.output_target_name << "\n";

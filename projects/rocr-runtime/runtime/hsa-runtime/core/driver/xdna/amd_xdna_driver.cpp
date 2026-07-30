@@ -1417,7 +1417,7 @@ hsa_status_t XdnaDriver::RegisterMemory(void* ptr, uint64_t size, HsaMemFlags me
 hsa_status_t XdnaDriver::DeregisterMemory(void* ptr) const { return HSA_STATUS_ERROR; }
 
 hsa_status_t XdnaDriver::MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
-                                            const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
+                                            const HsaMemFlags* mem_flags, uint32_t num_nodes,
                                             const uint32_t* nodes) const {
   return HSA_STATUS_ERROR;
 }

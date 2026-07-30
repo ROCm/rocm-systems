@@ -62,6 +62,18 @@ set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
     "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}"
 )
 
+# PyPI rejects a PEP 440 local version (the +hash suffix), so a published wheel
+# needs a clean MAJOR.MINOR.PATCH. Per-commit CI wheels keep +hash for unique
+# filenames; the commit is always recoverable via amdsmi.__commit__.
+option(AMDSMI_WHEEL_RELEASE "Use a clean PEP 440 version (no +hash) for the wheel" OFF)
+if(AMDSMI_WHEEL_RELEASE)
+    set(${AMD_SMI_LIBS_TARGET}_WHEEL_VERSION
+        "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}"
+    )
+else()
+    set(${AMD_SMI_LIBS_TARGET}_WHEEL_VERSION "${${AMD_SMI_LIBS_TARGET}_VERSION_STRING}")
+endif()
+
 set(DEFAULT_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 update_version_in_file("include/amd_smi/amdsmi.h" ${DEFAULT_VERSION} "#define AMDSMI_LIB_VERSION_" " *" " ")
 update_version_in_file("rust-interface/src/amdsmi_wrapper.rs" ${DEFAULT_VERSION} "AMDSMI_LIB_VERSION_" " *: *u32 *= *"
@@ -111,6 +123,11 @@ include(GNUInstallDirs)
 
 option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
+
+# WSL/WDDM GPU backend. Default OFF so native builds and CI are unchanged. When
+# ON, the WSL intercept hooks and mock backend are compiled
+option(ENABLE_WSL_BACKEND "Build the experimental WSL (WDDM/dxg) GPU backend" OFF)
+set(AMDSMI_ENABLE_WSL_BACKEND ${ENABLE_WSL_BACKEND})
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
@@ -192,13 +209,13 @@ generic_package()
 
 # Dependencies
 find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
 # Netlink libraries for network interface functionality (required)
 # TheRock RUNTIME_DEPS automatically configure PKG_CONFIG_PATH for bundled sysdeps
-find_package(PkgConfig REQUIRED)
 
 # Try to use CMake config files first (bundled sysdeps provide these)
 find_package(libnl CONFIG QUIET)
@@ -481,7 +498,11 @@ set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-dev, sudo, libc6, python3 (>= 3.6.8)")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
-set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
+# The tests package ships amdsmitst, which dynamically links libamd_smi.so from
+# the main package. Keep amd-smi-lib (set by generic_package()) as the first
+# dependency and append the runtime deps, so the tests package is never
+# installable without the library it links against.
+set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "${CPACK_PACKAGE_NAME}, ${CPACK_DEBIAN_PACKAGE_DEPENDS}")
 
 # $CURRENT_YEAR is used by copyright.in
 string(TIMESTAMP CURRENT_YEAR "%Y")
@@ -527,9 +548,25 @@ install(
 )
 
 # RPM package specific variables
+# The Python module installs under an absolute system site-packages path
+# (e.g. /usr/lib64/python3.9/site-packages) that the OS python package already
+# owns. Left alone, CPack's RPM generator declares %dir ownership of that
+# directory and its parents -- co-owning system directories, with the default
+# group-writable (0775) mode. Exclude the sitelib and its ancestors from the
+# auto filelist so the RPM owns only its own <sitelib>/amdsmi subtree, not the
+# shared /usr python directories.
+set(_amdsmi_sitelib_excludes "")
+if(AMDSMI_SYSTEM_PYTHON_SITELIB)
+    set(_amdsmi_walk "${AMDSMI_SYSTEM_PYTHON_SITELIB}")
+    while(_amdsmi_walk AND NOT _amdsmi_walk STREQUAL "/" AND NOT _amdsmi_walk STREQUAL "/usr")
+        list(APPEND _amdsmi_sitelib_excludes "${_amdsmi_walk}")
+        get_filename_component(_amdsmi_walk "${_amdsmi_walk}" DIRECTORY)
+    endwhile()
+endif()
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     "${CPACK_PACKAGING_INSTALL_PREFIX}"
     "${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
+    ${_amdsmi_sitelib_excludes}
 )
 #Set rpm distro
 if(CPACK_RPM_PACKAGE_RELEASE)
@@ -590,7 +627,10 @@ message(STATUS "amdsmi RPM python interpreter dependency: ${_amdsmi_py_req}")
 set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, ${_amdsmi_py_req}")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
-set(CPACK_RPM_TESTS_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
+# amdsmitst dynamically links libamd_smi.so; keep amd-smi-lib (set by
+# generic_package()) first and append the runtime requires so the tests RPM
+# cannot install without the library it links against.
+set(CPACK_RPM_TESTS_PACKAGE_REQUIRES "${CPACK_PACKAGE_NAME}, ${CPACK_RPM_PACKAGE_REQUIRES}")
 
 # don't terminate if bytecompile of python files fails
 set(CPACK_RPM_SPEC_MORE_DEFINE "%define _python_bytecompile_errors_terminate_build 0")
