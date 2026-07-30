@@ -20,7 +20,7 @@ ROCm Compute Profiler and ROCm Optiq work together through an analysis database.
 :ref:`analysis output format <analysis-output-format>`. Then, open the database in ROCm Optiq.
 See :ref:`analysis database schema <analysis-database>` for what it contains.
 
-Before using this workflow, review the `ROCm Optiq system requirements`_ and confirm that
+Before you begin, review the `ROCm Optiq system requirements`_. Also, make sure that
 your ROCm Optiq version supports the analysis database schema emitted by your installed
 ROCm Compute Profiler. Compatibility requirements for ROCm Optiq and ROCm Compute Profiler can change
 independently.
