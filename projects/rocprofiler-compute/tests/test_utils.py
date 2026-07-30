@@ -50,6 +50,12 @@ logging.trace = lambda *args, **kwargs: None
 
 ANALYSIS_CONFIGS = Path(SRC) / "rocprof_compute_soc" / "analysis_configs"
 
+# Long-form rocpd counter CSV header used by the run_prof tests.
+COUNTER_CSV_HEADER = (
+    "PID,Dispatch_ID,Kernel_Name,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
+    "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
+)
+
 ##################################################
 ##          Generated tests                     ##
 ##################################################
@@ -1090,12 +1096,6 @@ def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
     )
 
 
-COUNTER_CSV_HEADER = (
-    "PID,Dispatch_ID,Kernel_Name,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
-    "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
-)
-
-
 @pytest.mark.parametrize(
     "counter_csv_body",
     [
@@ -1115,7 +1115,7 @@ def test_run_prof_zero_kernels_writes_no_results_csv(
     (workload_dir / "out" / "pmc_1").mkdir(parents=True)
 
     warnings: list[str] = []
-    _stub_run_prof_deps(monkeypatch, counter_csv_body, warnings)
+    stub_run_prof_deps(monkeypatch, counter_csv_body, warnings)
 
     utils_profile.run_prof(
         str(fname),
@@ -1144,7 +1144,7 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
         "100,99,kernel_b,512,64,0,50,60,5,SQ_WAVES,4\n"
     )
     warnings: list[str] = []
-    _stub_run_prof_deps(monkeypatch, body, warnings)
+    stub_run_prof_deps(monkeypatch, body, warnings)
 
     utils_profile.run_prof(
         str(fname),

@@ -404,10 +404,12 @@ class OmniAnalyze_Base:
                         writer.writerow(row)
                         rows_written += 1
 
-        if writer is None:
+        # A header-only pmc_perf.csv would be reused by later analyze runs and
+        # misread as valid, so refuse to leave one behind.
+        if rows_written == 0:
             output_file.unlink(missing_ok=True)
             console_error(
-                f"All results_*.csv files in {output_file.parent} are empty.\n"
+                f"No counter data in results_*.csv under {output_file.parent}.\n"
                 f"Please re-run 'rocprof-compute profile'."
             )
 
@@ -422,7 +424,7 @@ class OmniAnalyze_Base:
         pmc_perf = workload_dir / "pmc_perf.csv"
         result_files = list(workload_dir.glob("results_*.csv"))
 
-        if pmc_perf.exists():
+        if pmc_perf.exists() and pmc_perf.stat().st_size > 0:
             console_debug(f"Using existing {pmc_perf}")
         elif result_files:
             console_log(f"Joining results_*.csv for {workload_dir}...")

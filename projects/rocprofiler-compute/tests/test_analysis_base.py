@@ -74,6 +74,23 @@ def test_concat_result_csvs_skips_empty_and_errors_when_all_empty(
     assert len(skipped) == 2
 
 
+def test_concat_result_csvs_errors_when_only_headers(tmp_path, monkeypatch) -> None:
+    """Header-only results files carry no counter rows; concat must error rather
+    than leave a header-only pmc_perf.csv that a later analyze run reuses."""
+    common.patch_console(monkeypatch, MODULE, "debug", "warning")
+    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
+    (tmp_path / "results_pmc_perf_0.csv").write_text(header)
+    (tmp_path / "results_pmc_perf_1.csv").write_text(header)
+
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    with pytest.raises(SystemExit):
+        inst.concat_result_csvs(
+            sorted(tmp_path.glob("results_*.csv")), tmp_path / "pmc_perf.csv"
+        )
+
+    assert not (tmp_path / "pmc_perf.csv").exists()
+
+
 @pytest.mark.parametrize(
     "profiling_config",
     [

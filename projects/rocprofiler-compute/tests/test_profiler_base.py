@@ -360,10 +360,8 @@ def test_attach_library_resolution_with_fallback():
 
 
 def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypatch):
-    """get_profiler_options preserves the user's LD_PRELOAD (appending the
-    profiler libs in order), selects the counter-collection mode from the
-    presence of a native tool, and sets the rocprofiler-sdk env vars and
-    APP_CMD. Previously exercised indirectly through run_prof."""
+    """get_profiler_options appends the profiler libs to the user's LD_PRELOAD
+    and sets counter-collection mode from whether a native tool is present."""
     args = argparse.Namespace(
         remaining="my_app --flag",
         rocprofiler_sdk_tool_path="sdk_tool",

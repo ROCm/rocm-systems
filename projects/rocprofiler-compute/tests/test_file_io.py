@@ -156,27 +156,18 @@ def test_filters() -> None:
 # =============================================================================
 
 
-LONG_FORM_CSV = (
-    "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
-    "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
-    "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
-    "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
-    "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_BUSY_CYCLES,100\n"
-)
-
-WIDE_CSV = (
-    "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
-    "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
-    "Start_Timestamp,End_Timestamp,Kernel_ID,SQ_WAVES,SQ_BUSY_CYCLES\n"
-    "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,4,100\n"
-)
-
-
 def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> None:
     """rocpd counter rows are pivoted into one row per dispatch based on the
     shape of the data, so a workload with no profiling_config.yaml is still read
     correctly instead of being handed to the parser one counter at a time."""
-    (tmp_path / "pmc_perf.csv").write_text(LONG_FORM_CSV)
+    long_form_csv = (
+        "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
+        "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
+        "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
+        "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
+        "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_BUSY_CYCLES,100\n"
+    )
+    (tmp_path / "pmc_perf.csv").write_text(long_form_csv)
 
     df = create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0)
 
@@ -189,7 +180,13 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
 def test_create_df_pmc_passes_through_wide_pmc_perf(tmp_path) -> None:
     """A pre-rocpd workload ships an already-wide pmc_perf.csv, which must be
     read as-is rather than run through the rocpd pivot."""
-    (tmp_path / "pmc_perf.csv").write_text(WIDE_CSV)
+    wide_csv = (
+        "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
+        "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
+        "Start_Timestamp,End_Timestamp,Kernel_ID,SQ_WAVES,SQ_BUSY_CYCLES\n"
+        "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,4,100\n"
+    )
+    (tmp_path / "pmc_perf.csv").write_text(wide_csv)
 
     df = create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0)
 

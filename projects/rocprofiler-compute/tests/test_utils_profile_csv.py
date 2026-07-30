@@ -166,9 +166,9 @@ def test_full_workflow(temp_csv_file):
 
     groups = csv_ops.GroupIdAssigner(["category"], "group_id")
     output_file = temp_csv_file + ".out"
-    rows_written = csv_ops.stream_csv_to_files(
+    rows_written = csv_ops.stream_csv_to_file(
         temp_csv_file,
-        [output_file],
+        output_file,
         transform=groups.apply,
         drop_columns=["value"],
     )
@@ -190,34 +190,32 @@ def test_full_workflow(temp_csv_file):
 # =============================================================================
 
 
-def test_stream_csv_to_files_writes_every_destination(tmp_path):
-    """The ML API trace path needs the same rows in two places from one pass."""
+def test_stream_csv_to_file_copies_rows(tmp_path):
+    """A row-for-row copy with the header preserved."""
     src = tmp_path / "in.csv"
     src.write_text("a,b\n1,2\n3,4\n")
-    first = tmp_path / "first.csv"
-    second = tmp_path / "second.csv"
+    dest = tmp_path / "out.csv"
 
-    assert csv_ops.stream_csv_to_files(str(src), [str(first), str(second)]) == 2
-    assert first.read_bytes() == second.read_bytes()
-    assert first.read_text() == "a,b\n1,2\n3,4\n"
+    assert csv_ops.stream_csv_to_file(str(src), str(dest)) == 2
+    assert dest.read_text() == "a,b\n1,2\n3,4\n"
 
 
-def test_stream_csv_to_files_header_only_writes_no_rows(tmp_path):
+def test_stream_csv_to_file_header_only_writes_no_rows(tmp_path):
     """A workload that dispatched no kernels yields a header-only CSV; the caller
     detects that from the returned count."""
     src = tmp_path / "in.csv"
     src.write_text("a,b\n")
     dest = tmp_path / "out.csv"
 
-    assert csv_ops.stream_csv_to_files(str(src), [str(dest)]) == 0
+    assert csv_ops.stream_csv_to_file(str(src), str(dest)) == 0
 
 
-def test_stream_csv_to_files_rejects_headerless_input(tmp_path):
+def test_stream_csv_to_file_rejects_headerless_input(tmp_path):
     src = tmp_path / "empty.csv"
     src.write_text("")
 
     with pytest.raises(ValueError, match="no header row"):
-        csv_ops.stream_csv_to_files(str(src), [str(tmp_path / "out.csv")])
+        csv_ops.stream_csv_to_file(str(src), str(tmp_path / "out.csv"))
 
 
 def test_group_id_assigner_reuses_ids_for_repeated_keys():

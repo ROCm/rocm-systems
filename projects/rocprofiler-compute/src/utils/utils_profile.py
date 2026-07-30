@@ -323,28 +323,23 @@ def run_prof(
         "Kernel_ID",
     )
 
-    # The counter CSV holds one row per dispatch per counter, so it is streamed
-    # rather than held in memory. Only the ML API trace path reads the relabeled
-    # copy under out/, so it is written only when that path needs it.
-    # PID is only needed to group dispatches; it is dropped from the output.
-    relabeled_counter_csv = out_pmc_1 / f"{fbase}_counter_collection.relabeled.csv"
-    dests = [Path(workload_dir) / f"results_{fbase}.csv"]
-    if ml_api_trace_enabled:
-        dests.append(relabeled_counter_csv)
+    # The counter CSV has one row per dispatch per counter, so it is streamed
+    # rather than held in memory. PID only groups dispatches; drop it from output.
+    results_csv = Path(workload_dir) / f"results_{fbase}.csv"
+
     # Subprocess succeeded but may have dispatched zero GPU kernels,
     # in which case the CSV is missing or has no data rows.
     try:
-        rows_written = csv_ops.stream_csv_to_files(
+        rows_written = csv_ops.stream_csv_to_file(
             str(counter_csv),
-            [str(dest) for dest in dests],
+            str(results_csv),
             transform=lambda row: kernel_ids.apply(dispatch_ids.apply(row)),
             drop_columns=["PID"],
         )
     except (FileNotFoundError, ValueError):
         rows_written = 0
     if not rows_written:
-        for dest in dests:
-            dest.unlink(missing_ok=True)
+        results_csv.unlink(missing_ok=True)
         console_warning(
             "No GPU kernel data collected. "
             "The workload may not have dispatched any GPU kernels."
@@ -352,9 +347,9 @@ def run_prof(
         shutil.rmtree(str(out_dir), ignore_errors=True)
         return
     if ml_api_trace_enabled:
-        # move counter collection and marker trace to workload dir
-        relabeled_counter_csv.replace(counter_csv)
-        save_ml_api_trace_inputs(workload_dir, fbase)
+        # results_*.csv already holds the relabeled counters the ML API trace
+        # path needs; copy it and the marker trace to the workload dir.
+        save_ml_api_trace_inputs(workload_dir, fbase, results_csv)
     if retain_rocpd_output:
         console_warning(
             "--retain-rocpd-output is deprecated and will be removed in "
@@ -480,6 +475,7 @@ def _augment_marker_csv(src_marker: str, dst_marker: str) -> None:
 def save_ml_api_trace_inputs(
     workload_dir: str,
     fbase: str,
+    src_counter: Path,
 ) -> None:
     """
     Move counter_collection and marker_api_trace data to workload_dir,
@@ -491,7 +487,6 @@ def save_ml_api_trace_inputs(
     """
     src_dir = Path(workload_dir) / "out" / "pmc_1"
     # Only one pair expected
-    src_counter = src_dir / f"{fbase}_counter_collection.csv"
     src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
     dst_counter = Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
     dst_marker = Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"

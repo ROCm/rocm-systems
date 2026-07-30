@@ -13,7 +13,7 @@ This module is ONLY used in profile mode. Analyze mode can use pandas freely.
 """
 
 import csv
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import ExitStack
 from typing import Callable, Optional
 
@@ -94,13 +94,13 @@ class GroupIdAssigner:
         return row
 
 
-def stream_csv_to_files(
+def stream_csv_to_file(
     src: str,
-    dests: Iterable[str],
+    dest: str,
     transform: Optional[Callable[[dict], dict]] = None,
     drop_columns: Sequence[str] = (),
 ) -> int:
-    """Copy src to every destination one row at a time, and return the row count.
+    """Copy src to dest one row at a time, and return the row count.
 
     Each row passes through transform before being written, so callers can
     relabel columns without materializing the file. Columns in drop_columns are
@@ -123,14 +123,9 @@ def stream_csv_to_files(
         header_source = reader.fieldnames if first_row is None else first_row
         fieldnames = [f for f in header_source if f not in dropped]
 
-        writers = []
-        for dest in dests:
-            outfile = stack.enter_context(open(dest, "w", newline="", encoding="utf-8"))
-            writer = csv.DictWriter(
-                outfile, fieldnames=fieldnames, extrasaction="ignore"
-            )
-            writer.writeheader()
-            writers.append(writer)
+        outfile = stack.enter_context(open(dest, "w", newline="", encoding="utf-8"))
+        writer = csv.DictWriter(outfile, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
 
         if first_row is None:
             return 0
@@ -138,8 +133,7 @@ def stream_csv_to_files(
         rows_written = 0
         row: Optional[dict] = first_row
         while row is not None:
-            for writer in writers:
-                writer.writerow(row)
+            writer.writerow(row)
             rows_written += 1
             row = next(reader, None)
             if row is not None and transform is not None:
