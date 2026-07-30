@@ -4,8 +4,6 @@
 #include "core/categories.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/constraint.hpp"
-#include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
 
@@ -70,48 +68,12 @@ disable_categories(const std::set<std::string>& _categories)
 void
 setup()
 {
-    // disable specified categories
+    // disable user-disabled categories. TRACE_DELAY/DURATION gating is
+    // owned by the time_window trigger wired into the control session
+    // (see library.cpp); recording paths are paused via subsystem subscribers
+    // when the session pauses, so no per-category trait flipping is needed
+    // here.
     disable_categories();
-
-    auto _trace_specs = constraint::get_trace_specs();
-
-    if(!_trace_specs.empty())
-    {
-        auto _trace_stages = constraint::get_trace_stages();
-
-        _trace_stages.init = [](const constraint::spec& _spec) {
-            if(_spec.delay > 1.0e-3) disable_categories(config::get_enabled_categories());
-            return state::process::get() < state::process::Finalized;
-        };
-
-        _trace_stages.start = [](const constraint::spec&) {
-            enable_categories(config::get_enabled_categories());
-            return state::process::get() < state::process::Finalized;
-        };
-
-        _trace_stages.stop = [](const constraint::spec&) {
-            // only disable categories if not finalized since this might run in background
-            // during finalization and disable output of data in those categories
-            if(state::process::get() < state::process::Finalized)
-                disable_categories(config::get_enabled_categories());
-            return state::process::get() < state::process::Finalized;
-        };
-
-        auto _promise = std::promise<void>();
-        std::thread{ [_trace_specs, _trace_stages](std::promise<void>* _prom) {
-                        // ensure all categories are disabled before proceeding
-                        // if a delay is requested
-                        if(_trace_specs.front().delay > 1.0e-3)
-                            disable_categories(config::get_enabled_categories());
-                        _prom->set_value();
-                        for(const auto& itr : _trace_specs)
-                            itr(_trace_stages);
-                    },
-                     &_promise }
-            .detach();
-
-        _promise.get_future().wait_for(std::chrono::seconds{ 1 });
-    }
 }
 
 void
