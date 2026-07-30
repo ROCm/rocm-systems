@@ -108,6 +108,47 @@ def find_roctx_site_packages(
     return None
 
 
+def roctx_runtime_env_updates(
+    roctx_site_packages: Path,
+    python_executable: Optional[Path],
+    pythonpath_base: str = "",
+    ld_library_path_base: str = "",
+) -> dict[str, str]:
+    """Compute the env updates needed to import ROCm's roctx bindings.
+
+    ROCm's compiled ``libpyroctx.<abi>.so`` extension links directly against
+    ``libpython<version>.so`` rather than using an rpath/``$ORIGIN`` entry, so
+    the interpreter's own lib directory must be added to ``LD_LIBRARY_PATH``
+    in addition to putting the roctx site-packages directory on
+    ``PYTHONPATH`` - otherwise the import fails (``cannot open shared object
+    file``) even though the files are all present on disk.
+
+    Args:
+        roctx_site_packages: Directory containing the ``roctx`` package, as
+            returned by :func:`find_roctx_site_packages`.
+        python_executable: The interpreter that will run the import, or None
+            if unknown (in which case only PYTHONPATH is updated).
+        pythonpath_base: Existing PYTHONPATH value to prepend/append to.
+        ld_library_path_base: Existing LD_LIBRARY_PATH value to prepend/append to.
+
+    Returns:
+        A dict of environment variables to merge into the target environment.
+    """
+    updates: dict[str, str] = {
+        "PYTHONPATH": os.pathsep.join(
+            p for p in (pythonpath_base, str(roctx_site_packages)) if p
+        )
+    }
+    if python_executable is not None:
+        # Typical layout: <env_root>/bin/python3.X -> <env_root>/lib
+        python_lib_dir = python_executable.parent.parent / "lib"
+        if python_lib_dir.is_dir():
+            updates["LD_LIBRARY_PATH"] = os.pathsep.join(
+                p for p in (ld_library_path_base, str(python_lib_dir)) if p
+            )
+    return updates
+
+
 @dataclass
 class SystemCapabilities:
     """
@@ -468,8 +509,43 @@ class SystemCapabilities:
             )
 
     def roctx_available_for(self, python_version: str) -> bool:
-        """Return whether ROCm's roctx Python bindings are installed for this version."""
-        return find_roctx_site_packages(self.rocm_path, python_version) is not None
+        """Return whether ROCm's roctx Python bindings are installed AND
+        importable for this version.
+
+        File presence alone isn't sufficient (see
+        :func:`roctx_runtime_env_updates`): this actually invokes the target
+        interpreter with the same PYTHONPATH/LD_LIBRARY_PATH augmentation
+        ``PythonRunner`` uses for the real test run, so it accurately
+        reflects whether the test would succeed.
+        """
+        roctx_site_packages = find_roctx_site_packages(self.rocm_path, python_version)
+        if roctx_site_packages is None:
+            return False
+        try:
+            python_executable = self.get_python_executable(python_version)
+        except FileNotFoundError:
+            return False
+
+        env = os.environ.copy()
+        env.update(
+            roctx_runtime_env_updates(
+                roctx_site_packages,
+                python_executable,
+                pythonpath_base=env.get("PYTHONPATH", ""),
+                ld_library_path_base=env.get("LD_LIBRARY_PATH", ""),
+            )
+        )
+        try:
+            result = subprocess.run(
+                [str(python_executable), "-c", "import roctx"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=env,
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            return False
 
     # ---------------------------------------------------------------------------
 
