@@ -244,6 +244,17 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
                     assert str(actual) == str(
                         expected
                     ), f"{method_key}[{index}].{column}: DB={actual!r} JSON={expected!r}"
+                elif isinstance(actual, float):
+                    # SQLite has no unsigned-64-bit integer storage: a uint64
+                    # value above INT64_MAX bound to a numeric-affinity column
+                    # (the BIGINT timestamp is the only PC-sample field that can
+                    # exceed it; exec_mask uses a TEXT column precisely to avoid
+                    # this) is coerced to REAL and comes back as a float.  Compare
+                    # with the same rounding SQLite applied -- values SQLite can
+                    # store exactly are returned as ints and checked exactly below.
+                    assert float(actual) == float(
+                        int(expected)
+                    ), f"{method_key}[{index}].{column}: DB={actual} JSON={expected}"
                 else:
                     assert int(actual) == int(
                         expected
