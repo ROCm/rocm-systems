@@ -926,6 +926,7 @@ protected:
                                        MultiSegmentBuffer& buf)
     {
         buf = MultiSegmentBuffer{};
+#if ROCM_VERSION >= 71200
         ASSERT_GE(numSegments, 1);
         ASSERT_GE(numHostSegments, 0);
         ASSERT_LE(numHostSegments, numSegments);
@@ -997,6 +998,14 @@ protected:
         buf.segmentSize = segSize;
         buf.totalSize   = totalSize;
         buf.handles     = std::move(handles);
+#else
+        // Host VMM (hipMemLocationTypeHost) is only available on ROCm >= 7.12.
+        // Leave buf.totalSize == 0 so callers GTEST_SKIP().
+        (void)dev;
+        (void)requestedSegmentSize;
+        (void)numSegments;
+        (void)numHostSegments;
+#endif
     }
 };
 

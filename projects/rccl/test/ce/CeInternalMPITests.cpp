@@ -33,10 +33,6 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
 
 ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int nRanks);
 void         ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params);
-ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm,
-                                  struct ncclCeCollArgs* args,
-                                  struct ncclCeBatchOpsParams* params,
-                                  hipStream_t stream);
 
 // Fixture: skip if no CE driver; create comm; warmup AllGather → ncclCeInit; TearDown destroys comm.
 class CeInternalMPITest : public MPITestBase
@@ -386,7 +382,7 @@ TEST_F(CeInternalMPITest, LaunchEmptyBatchSucceeds)
 {
     ncclCeBatchOpsParams params{};
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs), ncclSuccess);
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 }
 
@@ -428,7 +424,7 @@ TEST_F(CeInternalMPITest, LaunchFourOpsSucceeds)
     params.numOps = kOps;
 
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs), ncclSuccess);
     ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 
     for(int i = 0; i < kOps; ++i)
@@ -488,7 +484,7 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
     params.numOps = kOps;
 
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, nullStream), ncclSuccess)
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, nullStream, &collArgs), ncclSuccess)
         << "ncclCeLaunchBatchOps must succeed on the legacy null stream";
     ASSERT_EQ(hipStreamSynchronize(nullStream), hipSuccess);
 
@@ -602,12 +598,12 @@ TEST_F(CeFaultInjTest, LaunchBatchOpsErrorPropagates)
 
     ncclCeCollArgs collArgs{};
     ASSERT_EQ(ncclCeFaultSet(ceComm, CE_FAULT_LAUNCH_OP), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs),
               ncclSystemError)
         << "Expected ncclSystemError when CE_FAULT_LAUNCH_OP is armed";
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs),
               ncclSuccess)
         << "Expected ncclSuccess after fault cleared";
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
@@ -653,7 +649,7 @@ TEST_F(CeFaultInjTest, MultipleFaultsArmedAndCleared)
     ncclCeBatchOpsParams emptyParams{};
     emptyParams.numOps = 1; // non-zero to bypass the early-out
     ncclCeCollArgs collArgs{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &emptyParams, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &emptyParams, getActiveStream(), &collArgs),
               ncclSystemError);
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);

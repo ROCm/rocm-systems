@@ -5,11 +5,13 @@
 # See LICENSE.txt for more license information
 #
 
-# RCCL Examples Main Makefile (ported from NCCL examples)
+# NCCL Examples Main Makefile
 
-# Define all category directories. 06_device_api is RCCL-specific and lives
-# alongside but uses its own build system, so it's intentionally omitted here.
-CATEGORIES := 01_communicators 02_point_to_point 03_collectives 04_user_buffer_registration 05_symmetric_memory
+# Define all category directories
+CATEGORIES := 01_communicators 02_point_to_point 03_collectives 04_user_buffer_registration 05_symmetric_memory 06_device_api 07_kernel_fusion
+
+
+
 
 # Default target
 all: $(CATEGORIES)
@@ -42,7 +44,7 @@ install: all
 
 # Help target
 help:
-	@echo "RCCL Examples Main Makefile"
+	@echo "NCCL Examples Main Makefile"
 	@echo "==========================="
 	@echo ""
 	@echo "Available targets:"

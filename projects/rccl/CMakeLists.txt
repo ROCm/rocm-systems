@@ -658,7 +658,9 @@ if(EMIT_LLVM_IR)
   add_subdirectory(bindings/ir)
   # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
   # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
-  add_dependencies(llvm_ir copy_nccl_device_headers)
+  # nccl_device_header_symlinks provides the un-suffixed core.h/comm.h/gin.h
+  # aliases (hipify renames them to *_tmp.h) that the verbatim IR wrapper needs.
+  add_dependencies(llvm_ir copy_nccl_device_headers nccl_device_header_symlinks)
   # Convenience aggregate target: builds librccl.so together with the bitcode.
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
 endif()

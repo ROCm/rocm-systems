@@ -61,7 +61,7 @@ static ncclResult_t ncclIbResiliencyCheckErrorNotFatal(struct ncclIbResiliency* 
     failureReason = "Fatal error status in work completion";
   }
 
-  WARN("NET/IB: %s: The error is fatal (%s). Cannot continue.", __func__, failureReason);
+  WARN("NET/IB: The error is fatal (%s). Cannot continue.", failureReason);
   return ncclRemoteError;
 }
 
@@ -183,7 +183,7 @@ static ncclResult_t ncclIbResiliencySendRequestFree(struct ncclIbResiliencySend*
   assert(failedSendRequest != NULL);
   if (failedSendRequest->request == NULL) {
     int slot = failedSendRequest - sendResCtx->failedRequests;
-    WARN("NET/IB: %s: Attempting to free a non-existent failed request (slot=%d).", __func__, slot);
+    WARN("NET/IB: Attempting to free a non-existent failed request (slot=%d).", slot);
     return ncclInternalError;
   }
   INFO(NCCL_NET, "NET/IB: %s: Done handling failed send request (req=%p, comm=%p, id=%ld, slot=%ld).", __func__,
@@ -205,7 +205,7 @@ static ncclResult_t ncclIbResiliencySendRequestFree(struct ncclIbResiliencySend*
 // Function to repost a given request.
 static ncclResult_t ncclIbResiliencyRepostRequest(struct ncclIbRequest* request) {
   if (request->type == NCCL_NET_IB_REQ_UNUSED) {
-    WARN("NET/IB: %s: Attempting to repost an unused request (id=%ld).", __func__, request->id);
+    WARN("NET/IB: Attempting to repost an unused request (id=%ld).", request->id);
     return ncclInternalError;
   }
   int slot = request->id % NET_IB_MAX_REQUESTS;
@@ -259,7 +259,7 @@ static ncclResult_t ncclIbResiliencyRepostRequest(struct ncclIbRequest* request)
          request->base, request->id, request->id % NET_IB_MAX_REQUESTS);
     NCCLCHECK(ncclIbPostFifo((struct ncclIbRecvComm*)request->base, request, slot));
   } else {
-    WARN("NET/IB: %s: Unsupported type of request reposting (type=%d, id=%ld).", __func__, request->type, request->id);
+    WARN("NET/IB: Unsupported type of request reposting (type=%d, id=%ld).", request->type, request->id);
     return ncclInternalError;
   }
   return ncclSuccess;
@@ -268,7 +268,7 @@ static ncclResult_t ncclIbResiliencyRepostRequest(struct ncclIbRequest* request)
 static ncclResult_t ncclIbResiliencyHandleCompletionErrorReceiver(struct ncclIbResiliency* resCtx, struct ibv_wc* wc,
                                                                   int devIndex) {
   INFO(NCCL_NET, "NET/IB: %s: Handling an error on the receiver side (comm %p)", __func__, resCtx->baseComm);
-  bool inRecvRange = (wc->wr_id >= 0 && wc->wr_id <= NET_IB_MAX_REQUESTS);
+  bool inRecvRange = (wc->wr_id >= 0 && wc->wr_id < NET_IB_MAX_REQUESTS);
   bool inFlushRange =
     (wc->wr_id >= NCCL_IB_FLUSH_REQ_WR_ID_OFFSET && wc->wr_id < (NCCL_IB_FLUSH_REQ_WR_ID_OFFSET + NET_IB_MAX_REQUESTS));
   if (!inRecvRange && !inFlushRange && (wc->wr_id != NCCL_IB_RECV_WR_ID_DUMMY)) {
@@ -864,6 +864,7 @@ ncclResult_t ncclIbResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, str
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
     rtrAttr->localIbPort = remDevInfo->ib_port;
+    rtrAttr->localPortFlags = ibDev->portAttr.flags;
     rtrAttr->localGid = sendCommDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = sendCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(ncclIbQpRtr(localQp));
@@ -931,6 +932,7 @@ ncclResult_t ncclIbResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
     rtrAttr->localIbPort = remDevInfo->ib_port;
+    rtrAttr->localPortFlags = ibDev->portAttr.flags;
     rtrAttr->localGid = recvCommDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = recvCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(ncclIbQpRtr(localQp));
@@ -954,7 +956,7 @@ ncclResult_t ncclIbResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
 
 ncclResult_t ncclIbResiliencyClose(struct ncclIbResiliency* resCtx) {
   if (resCtx == NULL) {
-    WARN("NET/IB: %s: Resiliency context is NULL. Nothing to destroy.", __func__);
+    WARN("NET/IB: Resiliency context is NULL. Nothing to destroy.");
     return ncclSuccess;
   }
   INFO(NCCL_NET, "NET/IB: %s: Resiliency context close for %s communicator (comm=%p)", __func__,

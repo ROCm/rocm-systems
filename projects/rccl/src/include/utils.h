@@ -51,10 +51,12 @@ ncclResult_t getRandomData(void* buffer, size_t bytes);
 struct netIf {
   char prefix[64];
   int port;
+  int16_t rail;
+  int16_t plane;
 };
 
 int parseStringList(const char* string, struct netIf* ifList, int maxList);
-bool matchIfList(const char* string, int port, struct netIf* ifList, int listSize, bool matchExact);
+bool matchIfList(const char* string, int port, struct netIf* ifList, int listSize, bool matchExact, int* ifId = NULL);
 
 static long log2i(long n) {
   return log2Down(n);
@@ -486,7 +488,8 @@ bool ncclIntruQueueMpscEnqueue(ncclIntruQueueMpsc<T, next>* me, T* x) {
   T* prev = reinterpret_cast<T*>(utail);
   T** prevNext = utail <= 0x2 ? &me->head : &(prev->*next);
   COMPILER_ATOMIC_STORE(prevNext, x, std::memory_order_relaxed);
-  if (utail == 0x1) { // waiting
+  if (utail == 0x1) {
+    // waiting
     std::atomic_thread_fence(std::memory_order_acquire); // to see me->waiting
     // This lock/unlock is essential to ensure we don't race ahead of the consumer
     // and signal the cond before they begin waiting on it.
@@ -630,6 +633,9 @@ struct ncclIntruAddressMap {
   ncclIntruAddressMap_untyped base;
 };
 
+// Destructor (optional - only needed if entries remain in map)
+// Note: Map auto-cleans when last entry is removed, so this is only needed
+// if abandoning a non-empty map to avoid leaking the bucket table.
 template <typename Obj, typename Key, Key Obj::* keyField, Obj* Obj::* nextField>
 static inline void ncclIntruAddressMapDestruct(struct ncclIntruAddressMap<Obj, Key, keyField, nextField>* map) {
   if (map->base.table != nullptr) {
@@ -640,6 +646,7 @@ static inline void ncclIntruAddressMapDestruct(struct ncclIntruAddressMap<Obj, K
   map->base.count = 0;
 }
 
+// Internal untyped function prototypes
 ncclResult_t ncclIntruAddressMapInsert_untyped(struct ncclIntruAddressMap_untyped* map, int keySize, int keyFieldOffset,
                                                int nextFieldOffset, uintptr_t key, void* object);
 
@@ -649,6 +656,7 @@ ncclResult_t ncclIntruAddressMapFind_untyped(struct ncclIntruAddressMap_untyped*
 ncclResult_t ncclIntruAddressMapRemove_untyped(struct ncclIntruAddressMap_untyped* map, int keySize, int keyFieldOffset,
                                                int nextFieldOffset, uintptr_t key);
 
+// Typed template implementations (type-erasing wrappers)
 template <typename Obj, typename Key, Key Obj::* keyField, Obj* Obj::* nextField>
 static inline ncclResult_t ncclIntruAddressMapInsert(struct ncclIntruAddressMap<Obj, Key, keyField, nextField>* map,
                                                      Key key, Obj* object) {

@@ -21,7 +21,7 @@
 USE_NCCL_PARAM(ncclParamDumpAllFlag, bool);
 
 // Helper to unwrap opaque handle to ncclParamRegistry::mapEntry*
-static inline ncclParamRegistry::mapEntry* unwrap(ncclParamHandle_t* h) {
+static inline ncclParamRegistry::mapEntry* unwrap(ncclParamHandle_t h) {
   return reinterpret_cast<ncclParamRegistry::mapEntry*>(h);
 }
 
@@ -52,8 +52,8 @@ static inline void ncclParamCheckFlag(uint64_t flags, const char* key) {
 // Handle-based Access Interface
 // ============================================================================
 
-NCCL_API(ncclResult_t, ncclParamBind, ncclParamHandle_t** out, const char* key);
-ncclResult_t ncclParamBind(ncclParamHandle_t** out, const char* key) {
+NCCL_API(ncclResult_t, ncclParamBind, ncclParamHandle_t* out, const char* key);
+ncclResult_t ncclParamBind(ncclParamHandle_t* out, const char* key) {
   if (!out || !key) return ncclInvalidArgument;
   auto* entry = ncclParamRegistry::find(key);
   if (!entry) {
@@ -61,7 +61,7 @@ ncclResult_t ncclParamBind(ncclParamHandle_t** out, const char* key) {
     return ncclInvalidArgument;
   }
   ncclParamCheckFlag(entry->info.flags, key);
-  *out = reinterpret_cast<ncclParamHandle_t*>(entry);
+  *out = reinterpret_cast<ncclParamHandle_t>(entry);
   return ncclSuccess;
 }
 
@@ -70,8 +70,8 @@ ncclResult_t ncclParamBind(ncclParamHandle_t** out, const char* key) {
 // ============================================================================
 
 #define NCCL_PARAM_DEFINE_TYPED_GETTER(suffix, ctype, tid) \
-  NCCL_API(ncclResult_t, ncclParamGet##suffix, ncclParamHandle_t* h, ctype* out); \
-  ncclResult_t ncclParamGet##suffix(ncclParamHandle_t* h, ctype* out) { \
+  NCCL_API(ncclResult_t, ncclParamGet##suffix, ncclParamHandle_t h, ctype* out); \
+  ncclResult_t ncclParamGet##suffix(ncclParamHandle_t h, ctype* out) { \
     if (!h || !out) return ncclInvalidArgument; \
     auto* e = unwrap(h); \
     if (e->info.typeId != (tid)) { \
@@ -97,8 +97,8 @@ NCCL_PARAM_DEFINE_TYPED_GETTER(U64, uint64_t, NCCL_PARAM_TYPE_U64)
 // String Accessors
 // ============================================================================
 
-NCCL_API(ncclResult_t, ncclParamGetStr, ncclParamHandle_t* h, const char** out);
-ncclResult_t ncclParamGetStr(ncclParamHandle_t* h, const char** out) {
+NCCL_API(ncclResult_t, ncclParamGetStr, ncclParamHandle_t h, const char** out);
+ncclResult_t ncclParamGetStr(ncclParamHandle_t h, const char** out) {
   if (!h || !out) return ncclInvalidArgument;
   auto* e = unwrap(h);
   if (e->info.typeId != NCCL_PARAM_TYPE_CSTR) {
@@ -112,8 +112,8 @@ ncclResult_t ncclParamGetStr(ncclParamHandle_t* h, const char** out) {
   return ncclSuccess;
 }
 
-NCCL_API(ncclResult_t, ncclParamGet, ncclParamHandle_t* h, void* out, int maxLen, int* len);
-ncclResult_t ncclParamGet(ncclParamHandle_t* h, void* out, int maxLen, int* len) {
+NCCL_API(ncclResult_t, ncclParamGet, ncclParamHandle_t h, void* out, int maxLen, int* len);
+ncclResult_t ncclParamGet(ncclParamHandle_t h, void* out, int maxLen, int* len) {
   if (!h || !out) return ncclInvalidArgument;
   return unwrap(h)->param->getRawData(out, maxLen, len);
 }
