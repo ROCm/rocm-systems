@@ -25,7 +25,7 @@ your ROCm Optiq version supports the analysis database schema emitted by your in
 ROCm Compute Profiler version. Version and platform compatibility requirements can change
 independently.
 
-See the `ROCm Optiq analysis guide`_ for the current opening workflow and interface
+For information about opening the analysis databases and using the interface, see the `ROCm Optiq analysis guide`_.
 details.
 
 .. _ROCm Optiq analysis guide: https://rocm.docs.amd.com/projects/roc-optiq/en/latest/how-to/view-analysis.html
