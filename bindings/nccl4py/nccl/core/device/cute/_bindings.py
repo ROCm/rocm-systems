@@ -344,6 +344,12 @@ def nccl_gin_barrier_session_init(
     team: ncclTeam, handle: ncclGinBarrierHandle, index: cutlass.Uint32,
 ) -> None: ...
 
+@cute.extern(name="ncclGinBarrierSessionInitAllContexts", source=_BC)
+def nccl_gin_barrier_session_init_all_contexts(
+    session: _LLVMPtrType, coop: ncclCoopAny, dev_comm: _LLVMPtrType,
+    team: ncclTeam, handle: ncclGinBarrierHandle, index: cutlass.Uint32,
+) -> None: ...
+
 @cute.extern(name="ncclGinBarrierSessionSync", source=_BC)
 def nccl_gin_barrier_session_sync(
     session: _LLVMPtrType, coop: ncclCoopAny, order: cutlass.Int32,

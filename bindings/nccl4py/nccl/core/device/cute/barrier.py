@@ -174,21 +174,35 @@ class GinBarrierSession:
             self.ptr, _to_coop_value(coop), cutlass.Int32(int(order)), cutlass.Int32(int(fence)))
 
 
+class _GinAllContexts:
+    """Type of :data:`GIN_ALL_CONTEXTS`."""
+
+    def __repr__(self) -> str:
+        return "GIN_ALL_CONTEXTS"
+
+
+GIN_ALL_CONTEXTS = _GinAllContexts()
+"""Pass in place of a :class:`Gin` to fence every GIN context on the comm."""
+
+
 def gin_session(
     coop: ncclCoopAny,
-    gin: Gin,
+    gin: Gin | _GinAllContexts,
+    dev_comm: DevComm,
     team: ncclTeam,
     handle: GinBarrierHandle,
     index: int,
 ) -> "GinBarrierSession":
     """Create and initialize a :class:`GinBarrierSession`.
 
-    The ``ncclGin_C`` value is loaded from ``gin``'s buffer for the
-    by-value FFI signature.
-
     Args:
         coop: cooperative group running the session.
-        gin: :class:`Gin` from ``DevComm.gin(...)``.
+        gin: :class:`Gin` whose context ``sync`` fences, or
+            :data:`GIN_ALL_CONTEXTS` to fence every context on the comm.
+            Needed when puts and gets span several contexts, at the cost of
+            a flush per ``(context, peer)`` pair instead of per peer.
+        dev_comm: owning :class:`DevComm`; unused unless ``gin`` is
+            :data:`GIN_ALL_CONTEXTS`.
         team: team participating in the barrier.
         handle: GIN barrier handle (typically
             ``dev_comm.rail_gin_barrier`` or ``dev_comm.world_gin_barrier``).
@@ -198,10 +212,16 @@ def gin_session(
         Initialized :class:`GinBarrierSession`.
     """
     storage = _alloca_session(cutlass.Int64(_bindings.nccl_gin_barrier_session_c_size()))
-    _bindings.nccl_gin_barrier_session_init(
-        storage, _to_coop_value(coop), gin.ptr, _to_value(team),
-        _to_value(handle), cutlass.Uint32(index),
-    )
+    if isinstance(gin, _GinAllContexts):
+        _bindings.nccl_gin_barrier_session_init_all_contexts(
+            storage, _to_coop_value(coop), dev_comm.ptr, _to_value(team),
+            _to_value(handle), cutlass.Uint32(index),
+        )
+    else:
+        _bindings.nccl_gin_barrier_session_init(
+            storage, _to_coop_value(coop), gin.ptr, _to_value(team),
+            _to_value(handle), cutlass.Uint32(index),
+        )
     return GinBarrierSession(ptr=storage)
 
 
@@ -282,9 +302,6 @@ def lsa_default(
 ) -> "LsaBarrierSession":
     """LSA barrier on the default LSA team using ``dev_comm.lsa_barrier``.
 
-    C++ equivalent:
-    ``ncclLsaBarrierSession<...>{coop, dev_comm, ncclTeamTagLsa(), index}``.
-
     Args:
         coop: cooperative group running the session.
         dev_comm: owning :class:`DevComm`.
@@ -299,41 +316,47 @@ def lsa_default(
                        index, multimem=multimem, mm_handle=mm_handle)
 
 
-def world_gin(coop: ncclCoopAny, gin: Gin, dev_comm: DevComm, index: int) -> "GinBarrierSession":
+def world_gin(
+    coop: ncclCoopAny,
+    gin: Gin | _GinAllContexts,
+    dev_comm: DevComm,
+    index: int,
+) -> "GinBarrierSession":
     """GIN barrier on the world team using ``dev_comm.world_gin_barrier``.
-
-    C++ equivalent:
-    ``ncclGinBarrierSession<...>{coop, gin, ncclTeamTagWorld(), index}``.
 
     Args:
         coop: cooperative group running the session.
-        gin: :class:`Gin` instance.
+        gin: :class:`Gin`, or :data:`GIN_ALL_CONTEXTS`. See
+            :func:`gin_session`.
         dev_comm: owning :class:`DevComm`.
         index: barrier slot index.
 
     Returns:
         Initialized :class:`GinBarrierSession`.
     """
-    return gin_session(coop, gin, dev_comm.team_world,
+    return gin_session(coop, gin, dev_comm, dev_comm.team_world,
                        dev_comm.world_gin_barrier, index)
 
 
-def rail_gin(coop: ncclCoopAny, gin: Gin, dev_comm: DevComm, index: int) -> "GinBarrierSession":
+def rail_gin(
+    coop: ncclCoopAny,
+    gin: Gin | _GinAllContexts,
+    dev_comm: DevComm,
+    index: int,
+) -> "GinBarrierSession":
     """GIN barrier on the rail team using ``dev_comm.rail_gin_barrier``.
-
-    C++ equivalent:
-    ``ncclGinBarrierSession<...>{coop, gin, ncclTeamTagRail(), index}``.
 
     Args:
         coop: cooperative group running the session.
-        gin: :class:`Gin` instance.
+        gin: :class:`Gin`, or :data:`GIN_ALL_CONTEXTS`. See
+            :func:`gin_session`.
         dev_comm: owning :class:`DevComm`.
         index: barrier slot index.
 
     Returns:
         Initialized :class:`GinBarrierSession`.
     """
-    return gin_session(coop, gin, dev_comm.team_rail,
+    return gin_session(coop, gin, dev_comm, dev_comm.team_rail,
                        dev_comm.rail_gin_barrier, index)
 
 
@@ -347,9 +370,6 @@ def world_hybrid(
     inner_mm_handle: MultimemHandle = None,
 ) -> "BarrierSession":
     """Hybrid barrier (LSA + rail-GIN) using the embedded hybrid handles.
-
-    C++ equivalent:
-    ``ncclBarrierSession<...>{coop, ncclTeamTagWorld(), gin, index}``.
 
     Args:
         coop: cooperative group running the session.
@@ -374,6 +394,7 @@ __all__ = [
     "LsaBarrierSession",
     "GinBarrierSession",
     "BarrierSession",
+    "GIN_ALL_CONTEXTS",
     "lsa_session",
     "gin_session",
     "hybrid_session",
