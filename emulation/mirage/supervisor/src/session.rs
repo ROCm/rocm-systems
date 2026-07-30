@@ -9,16 +9,12 @@
 //! destroyed must be able to rely on that.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::Utc;
 use mirage_core::common::MaybeRef;
-use mirage_core::container::{
-    ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_LOCAL_RANK, ENV_MASTER_ADDR,
-    ENV_MASTER_PORT, ENV_NCCL_HOSTID, ENV_RANK, ENV_TORCH_RANK, ENV_WORLD_SIZE, container_name,
-};
+use mirage_core::container::{ContainerState, container_name};
 use mirage_core::emulator::EmulatorDaemon;
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, InjectionDef};
@@ -27,7 +23,8 @@ use mirage_core::session::{SessionContext, SessionDef, SessionHealth, SessionId,
 use tokio::sync::watch;
 
 use crate::exec::Exec;
-use crate::process::{SpawnSpec, StdioMode};
+use mirage_container::NodeClient;
+use mirage_core::proto::{ContainerTargets, SessionDescription};
 
 /// Path the mirage binary is bind-mounted at inside every node container.
 const CONTAINER_MIRAGE_BIN: &str = "/mnt/mirage/bin/mirage";
@@ -54,15 +51,6 @@ const CONTAINER_RUNTIME_DIR: &str = "/mnt/mirage/runtime";
 /// ran `mirage host --rank N` here, which meant every container had a
 /// second mirage process inside it polling a bind-mounted directory.
 const CONTAINER_IDLE_COMMAND: &[&str] = &["sleep", "infinity"];
-
-/// Most processes one exec may start, across every node.
-///
-/// An emulated job is bounded by what the host can actually fork, and the
-/// grid size comes off the wire (`nproc_per_node`) multiplied by the
-/// topology's node count. A cap turns a typo or a hostile client into a
-/// clear error instead of an overflow and a fork bomb inside a daemon
-/// that owns every other session on the machine.
-const MAX_WORLD_SIZE: u32 = 4096;
 
 /// A live session.
 #[derive(Debug)]
@@ -94,6 +82,9 @@ struct Inner {
     next_exec: u32,
     /// Containers backing this session, once brought up.
     containers: Option<ContainerState>,
+    /// The provider clients running those containers. Each one *is* its
+    /// container's lifetime; dropping them stops the containers.
+    container_clients: Vec<NodeClient>,
     /// The emulator's out-of-process daemon, if it hosts one.
     emulator_daemon: Option<Box<dyn EmulatorDaemon>>,
     /// The injection to apply to every workload process.
@@ -191,9 +182,29 @@ impl Session {
         self.lock().containers.clone()
     }
 
-    /// Record the container state produced by bring-up.
-    pub fn set_containers(&self, state: ContainerState) {
-        self.lock().containers = Some(state);
+    /// Record the containers produced by bring-up, and take ownership of
+    /// the provider clients running them.
+    ///
+    /// Holding the clients here is what ties the containers' lifetime to
+    /// the session's: they are killed by [`Session::teardown`], and by
+    /// their own `Drop` if the process dies some other way.
+    pub fn set_containers(&self, state: ContainerState, clients: Vec<NodeClient>) {
+        let mut inner = self.lock();
+        inner.containers = Some(state);
+        inner.container_clients = clients;
+    }
+
+    /// Whether every container backing this session is still running.
+    ///
+    /// `true` for a non-containerised session, which has none. A client
+    /// that exited on its own means the container died underneath the
+    /// session — an OOM kill, an external `podman stop`, a crashed engine
+    /// — and the caller would otherwise only find out through an exec
+    /// failing with "no such container".
+    #[must_use]
+    pub fn containers_alive(&self) -> bool {
+        let mut inner = self.lock();
+        inner.container_clients.iter_mut().all(NodeClient::alive)
     }
 
     /// Record the emulator injection to apply to every workload.
@@ -250,9 +261,7 @@ impl Session {
     pub async fn start_exec(
         &self,
         def: &ExecDef,
-        replay_bytes: usize,
-        max_finished: usize,
-    ) -> Result<Arc<Exec>> {
+    ) -> Result<(Arc<Exec>, tokio::sync::mpsc::Receiver<crate::process::OutputChunk>)> {
         // Refuse until bring-up has finished. This is a correctness
         // guard, not politeness: the emulator injection and the container
         // record are both written by bring-up, and `build_specs` reads
@@ -263,17 +272,12 @@ impl Session {
         // actually installed, and exits 0. Mirage reports success for a
         // job that never went near the emulator.
         //
-        // Reachable from `mirage session start --no-wait` followed
-        // immediately by `mirage exec start`, and from the HTTP API with
-        // `ready_timeout: 0`.
         let health = self.health();
         if !health.healthy {
             return Err(MirageError::other(format!(
-                "session {} is not ready ({}); wait for it with \
-                 `mirage session wait {}`",
+                "session {} is not ready ({})",
                 self.def.id,
                 health.state.as_deref().unwrap_or("unknown"),
-                self.def.id
             )));
         }
 
@@ -300,20 +304,6 @@ impl Session {
                 )));
             }
 
-            // Forget the oldest finished execs beyond the cap.
-            //
-            // The daemon is long-lived and each finished exec retains its
-            // output for replay, so a session that runs execs in a loop
-            // would otherwise grow without bound — a slow leak that only
-            // shows up after hours. Evicting here, as new execs arrive,
-            // keeps it deterministic: no timer, and no window in which an
-            // exec is dropped out from under a client that just asked for
-            // it.
-            //
-            // Only *finished* execs are candidates. A running exec is
-            // never evicted, however old.
-            Self::evict_finished(&mut inner, max_finished);
-
             let id = ExecId::from_counter(inner.next_exec);
             inner.next_exec += 1;
             inner.starting += 1;
@@ -322,11 +312,11 @@ impl Session {
         };
 
         // Everything from here to the re-lock runs without the lock held.
-        let started = self.spawn_exec(def, &id, replay_bytes);
+        let started = self.spawn_exec(def, &id);
 
         let tearing_down = {
             let mut inner = self.lock();
-            if let Ok(exec) = &started {
+            if let Ok((exec, _)) = &started {
                 inner.execs.insert(id.clone(), exec.clone());
             }
             inner.starting -= 1;
@@ -336,7 +326,7 @@ impl Session {
             inner.tearing_down
         };
 
-        let exec = started?;
+        let (exec, output) = started?;
         if tearing_down {
             // Teardown began while we were spawning. It waits for
             // quiescence, so it will find this exec in the map and kill
@@ -349,7 +339,7 @@ impl Session {
                 self.def.id
             )));
         }
-        Ok(exec)
+        Ok((exec, output))
     }
 
     /// Build the specs for `id` and spawn its processes.
@@ -357,9 +347,74 @@ impl Session {
     /// Split out so the caller can keep this off the critical section:
     /// it materialises the pid-file directory, forks once per rank and
     /// wires up the output pumps.
-    fn spawn_exec(&self, def: &ExecDef, id: &ExecId, replay_bytes: usize) -> Result<Arc<Exec>> {
-        let specs = self.build_specs(def, id)?;
-        Ok(Exec::start(id.clone(), def.clone(), specs, replay_bytes))
+    fn spawn_exec(
+        &self,
+        def: &ExecDef,
+        id: &ExecId,
+    ) -> Result<(Arc<Exec>, tokio::sync::mpsc::Receiver<crate::process::OutputChunk>)> {
+        let specs = crate::spec::build_specs(&self.describe()?, def, id)?;
+        Ok(Exec::start(id.clone(), def.clone(), specs))
+    }
+
+    /// Describe this session for a client that wants to start processes
+    /// in it.
+    ///
+    /// The same description `mirage run` builds its own specs from, so an
+    /// exec started from another terminal lands in exactly the same
+    /// environment. For a containerised session the emulator's paths are
+    /// remapped onto the in-container mounts here, once, rather than at
+    /// every call site.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the topology cannot be resolved.
+    pub fn describe(&self) -> Result<SessionDescription> {
+        let (injection, containers) = {
+            let inner = self.lock();
+            (inner.injection.clone(), inner.containers.clone())
+        };
+        let node_count = resolve_node_count(&self.ctx.profile)?;
+
+        let (head_addr, head_port) = match &containers {
+            Some(state) => (container_name(&self.def.id, 0), state.head_port),
+            None => ("127.0.0.1".to_string(), pick_head_port()),
+        };
+
+        // The emulator's environment was computed against the host
+        // filesystem; inside a container those paths do not exist.
+        let (env, ld_preload) = match &containers {
+            Some(_) => (
+                remap_env_for_container(&injection.env, &self.ctx.runtime_dir),
+                injection
+                    .ld_preload
+                    .as_ref()
+                    .map(|p| library_in_container(p).unwrap_or_else(|| p.clone())),
+            ),
+            None => (injection.env.clone(), injection.ld_preload.clone()),
+        };
+
+        Ok(SessionDescription {
+            session: self.def.id.clone(),
+            node_count,
+            workdir: self.def.workdir.clone(),
+            containers: containers.map(|state| ContainerTargets {
+                provider: state.provider.clone(),
+                names: (0..node_count)
+                    .map(|rank| {
+                        state
+                            .nodes
+                            .iter()
+                            .find(|n| n.rank == rank)
+                            .map_or_else(|| container_name(&self.def.id, rank), |n| n.name.clone())
+                    })
+                    .collect(),
+                scratch: self.ctx.runtime_dir.clone(),
+            }),
+            env,
+            ld_preload,
+            head_addr,
+            head_port,
+        })
     }
 
     /// Resolve once no `start_exec` call is mid-spawn.
@@ -379,23 +434,6 @@ impl Session {
                 "an exec was still starting when teardown began; \
                  proceeding without it"
             );
-        }
-    }
-
-    /// Drop the oldest finished execs until at most `max_finished`
-    /// remain. Running execs are never dropped.
-    fn evict_finished(inner: &mut Inner, max_finished: usize) {
-        let finished: Vec<ExecId> = inner
-            .execs
-            .iter()
-            .filter(|(_, exec)| exec.is_ended())
-            .map(|(id, _)| id.clone())
-            .collect();
-        // `execs` is a BTreeMap keyed by a zero-padded counter, so
-        // iteration order is creation order and the front is the oldest.
-        let excess = finished.len().saturating_sub(max_finished);
-        for id in finished.into_iter().take(excess) {
-            inner.execs.remove(&id);
         }
     }
 
@@ -458,11 +496,12 @@ impl Session {
         // prevent.
         self.await_quiescent().await;
 
-        let (execs, containers, emulator_daemon) = {
+        let (execs, containers, mut clients, emulator_daemon) = {
             let mut inner = self.lock();
             (
                 inner.execs.values().cloned().collect::<Vec<_>>(),
                 inner.containers.take(),
+                std::mem::take(&mut inner.container_clients),
                 inner.emulator_daemon.take(),
             )
         };
@@ -495,6 +534,24 @@ impl Session {
         }
 
         // 4. Containers and the per-session network.
+        //
+        // Killing the provider clients is what actually stops the
+        // containers, and `--rm` then removes them. The explicit teardown
+        // that follows is the belt to that braces: it removes the network
+        // (which no client owns) and force-removes any container the
+        // provider has not finished reaping, so `Ok` from here means the
+        // resources are gone rather than scheduled to go.
+        if !clients.is_empty() {
+            let kills = tokio::task::spawn_blocking(move || {
+                for client in &mut clients {
+                    client.kill();
+                }
+            })
+            .await;
+            if let Err(e) = kills {
+                tracing::warn!(session = %self.def.id, "stopping container clients failed: {e}");
+            }
+        }
         if let Some(state) = containers
             && let Err(e) =
                 tokio::task::spawn_blocking(move || mirage_core::container::teardown(&state)).await
@@ -520,190 +577,6 @@ impl Session {
         tracing::info!(session = %self.def.id, "session destroyed");
     }
 
-    /// Build the per-process spawn specs for an exec.
-    fn build_specs(&self, def: &ExecDef, exec_id: &ExecId) -> Result<Vec<SpawnSpec>> {
-        let (injection, containers) = {
-            let inner = self.lock();
-            (inner.injection.clone(), inner.containers.clone())
-        };
-
-        let node_count = resolve_node_count(&self.ctx.profile)?;
-        let nproc = def.nproc_per_node.max(1);
-
-        // Materialise the directory the containers write their pid files
-        // into. The bind mount is read-write but the container cannot
-        // create the path itself: `sh` would have to `mkdir -p` before
-        // redirecting, and a redirect into a missing directory fails
-        // silently enough that the first sign of trouble would be a
-        // signal that went nowhere.
-        if containers.is_some() {
-            let dir = self.ctx.runtime_dir.join("exec").join(exec_id.as_str());
-            std::fs::create_dir_all(&dir).map_err(|e| MirageError::io(dir, e))?;
-        }
-
-        // A terminal is allocated per process when the exec asked for one.
-        // Only rank 0 is interactive in practice, but giving every rank a
-        // terminal keeps `isatty` consistent across the job — a workload
-        // that branches on it would otherwise behave differently on rank 0
-        // than on its workers.
-        let stdio = if def.tty {
-            StdioMode::Tty {
-                rows: def.tty_rows,
-                cols: def.tty_cols,
-            }
-        } else {
-            StdioMode::Pipes
-        };
-        // `nproc_per_node` arrives from a client over the socket, so the
-        // grid size is attacker- (or typo-) controlled and the product
-        // has to be checked. Unchecked, `--nproc-per-node 2000000000`
-        // panics the connection task in a debug build and wraps in a
-        // release one, leaving the nested loop below trying to fork
-        // billions of processes inside the daemon every other session
-        // shares.
-        let world_size = node_count
-            .checked_mul(nproc)
-            .filter(|n| *n <= MAX_WORLD_SIZE)
-            .ok_or_else(|| {
-                MirageError::other(format!(
-                    "{node_count} nodes x {nproc} processes per node is \
-                     {} processes, more than the {MAX_WORLD_SIZE} mirage \
-                     will start for one exec",
-                    u64::from(node_count) * u64::from(nproc)
-                ))
-            })?;
-        let (head_addr, head_port) = match &containers {
-            Some(state) => (container_name(&self.def.id, 0), state.head_port),
-            None => ("127.0.0.1".to_string(), pick_head_port()),
-        };
-
-        let mut specs = Vec::with_capacity(world_size as usize);
-        for node in 0..node_count {
-            for local in 0..nproc {
-                let global = node * nproc + local;
-                let args = if node == 0 {
-                    &def.exec
-                } else {
-                    def.worker_exec.as_ref().unwrap_or(&def.exec)
-                };
-
-                // Layering order: the emulator's injection first, then the
-                // user's per-exec environment, then mirage's own rank
-                // variables. Mirage's go last so a workload cannot
-                // accidentally break its own rendezvous by exporting
-                // `RANK` or `WORLD_SIZE`.
-                //
-                // For a containerised session the emulator's env is
-                // remapped onto the in-container mounts first: it was
-                // computed against the host filesystem, and those paths do
-                // not exist inside the container.
-                let mut env: BTreeMap<String, String> = if containers.is_some() {
-                    remap_env_for_container(&injection.env, &self.ctx.runtime_dir)
-                } else {
-                    injection.env.clone()
-                };
-                env.extend(args.env.clone());
-                env.extend(proc_env(global, node, local, world_size, &head_addr, head_port));
-
-                // `LD_PRELOAD` is the exception: the emulator's interposer
-                // and a user-supplied preload must coexist, so they are
-                // concatenated rather than one clobbering the other. In a
-                // container the interposer is named by its mount.
-                if let Some(preload) = &injection.ld_preload {
-                    let resolved = if containers.is_some() {
-                        library_in_container(preload).unwrap_or_else(|| preload.clone())
-                    } else {
-                        preload.clone()
-                    };
-                    let combined = match args.env.get("LD_PRELOAD") {
-                        Some(user) if !user.is_empty() => format!("{resolved}:{user}"),
-                        _ => resolved,
-                    };
-                    env.insert("LD_PRELOAD".to_string(), combined);
-                }
-
-                // The session's working directory is a *host* path — the
-                // directory the client was in when it created the
-                // session. It is a sensible default for a process running
-                // on the host, and meaningless inside a container, where
-                // nothing mounts it and `provider exec -w` fails the whole
-                // exec with "chdir: no such file or directory". A
-                // containerised exec therefore only gets a working
-                // directory when one was asked for explicitly, and
-                // otherwise keeps the image's own.
-                let host_workdir = args
-                    .workdir
-                    .clone()
-                    .or_else(|| Some(self.def.workdir.clone()));
-
-                specs.push(match &containers {
-                    // Containerised: run the workload inside the node's
-                    // container via the provider, as a direct child of the
-                    // daemon. The provider client is what we supervise;
-                    // the workload itself lives in the container's PID
-                    // namespace and is signalled through the provider
-                    // (see `ContainerProc`).
-                    Some(state) => {
-                        let container = state
-                            .nodes
-                            .iter()
-                            .find(|n| n.rank == node)
-                            .map(|n| n.name.clone())
-                            .unwrap_or_else(|| container_name(&self.def.id, node));
-                        let engine = mirage_container::Engine::with_provider(&state.provider);
-                        let env_pairs: Vec<(String, String)> = env.into_iter().collect();
-                        let pid_file = exec_pid_file(&self.ctx.runtime_dir, exec_id, global);
-                        let (command, rest) =
-                            pid_recording_command(&args.command, &args.args, exec_id, global);
-                        let argv = engine.exec_command_line(
-                            &container,
-                            args.workdir.as_deref(),
-                            &env_pairs,
-                            &command,
-                            &rest,
-                            def.tty,
-                        );
-                        let (command, rest) = argv
-                            .split_first()
-                            .map(|(c, r)| (c.clone(), r.to_vec()))
-                            .unwrap_or_else(|| (state.provider.clone(), Vec::new()));
-                        SpawnSpec {
-                            node: global,
-                            command,
-                            args: rest,
-                            env: BTreeMap::new(),
-                            workdir: None,
-                            // The provider is given `-t` when a terminal
-                            // was asked for, and we run *it* on our own
-                            // pty so the two ends line up.
-                            stdio,
-                            // The provider CLI needs its own environment
-                            // to locate its socket and configuration.
-                            inherit_env: true,
-                            container: Some(crate::process::ContainerProc {
-                                provider: state.provider.clone(),
-                                container,
-                                pid_file,
-                            }),
-                        }
-                    }
-                    None => SpawnSpec {
-                        node: global,
-                        command: args.command.clone(),
-                        args: args.args.clone(),
-                        env,
-                        workdir: host_workdir,
-                        stdio,
-                        inherit_env: false,
-                        // The process we spawn *is* the workload, so
-                        // signalling its group reaches it directly.
-                        container: None,
-                    },
-                });
-            }
-        }
-        Ok(specs)
-    }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
@@ -719,47 +592,6 @@ impl Session {
 /// supervisor reads it off the host filesystem, with no provider round
 /// trip and nothing to clean up separately (teardown removes the whole
 /// directory).
-fn exec_pid_file(runtime_dir: &std::path::Path, exec: &ExecId, global: u32) -> PathBuf {
-    runtime_dir
-        .join("exec")
-        .join(exec.as_str())
-        .join(format!("{global}.pid"))
-}
-
-/// The in-container path matching [`exec_pid_file`].
-fn container_pid_file(exec: &ExecId, global: u32) -> String {
-    format!("{CONTAINER_RUNTIME_DIR}/exec/{}/{global}.pid", exec.as_str())
-}
-
-/// Wrap a workload command so it records its own in-container pid before
-/// becoming the workload.
-///
-/// Returns the command and arguments to hand the provider. The shell
-/// writes `$$`, then `exec`s the real program *into that same pid*, so
-/// the recorded number identifies the workload and not a wrapper that has
-/// since exited. Without it there is no way to name the workload from
-/// outside the container, and `podman exec` neither forwards signals to
-/// it nor reports its pid.
-///
-/// The program and its arguments are passed as `$0`/`$@` rather than
-/// interpolated into the script, so nothing about them is ever parsed by
-/// the shell — a command containing a space, a quote or a `;` is handed
-/// through byte-for-byte.
-fn pid_recording_command(
-    command: &str,
-    args: &[String],
-    exec: &ExecId,
-    global: u32,
-) -> (String, Vec<String>) {
-    // The path is built from a constant and an `ExecId` (`e-` plus
-    // digits), so it holds no shell metacharacters; it is quoted anyway.
-    let pid_file = container_pid_file(exec, global);
-    let script = format!("echo $$ > '{pid_file}' 2>/dev/null; exec \"$0\" \"$@\"");
-    let mut argv = vec!["-c".to_string(), script, command.to_string()];
-    argv.extend(args.iter().cloned());
-    ("/bin/sh".to_string(), argv)
-}
-
 /// Resolve how many nodes a profile's topology describes.
 ///
 /// # Errors
@@ -805,41 +637,6 @@ pub(crate) fn pick_head_port() -> u16 {
         .ok()
         .and_then(|l| l.local_addr().ok())
         .map_or(0, |a| a.port())
-}
-
-/// The mirage/`torch.distributed` environment for one workload process.
-///
-/// Three ranks identify a process: `node` (which emulated node it runs
-/// on), `global` (its index across the whole job) and `local` (its index
-/// within the node, which a workload typically uses to pin a GPU). With
-/// the default of one process per node, `global == node` and `local == 0`.
-fn proc_env(
-    global: u32,
-    node: u32,
-    local: u32,
-    world_size: u32,
-    head_addr: &str,
-    head_port: u16,
-) -> Vec<(String, String)> {
-    // Processes on the head node reach the rendezvous over loopback;
-    // everyone else needs the head's address.
-    let head = if node == 0 { "localhost" } else { head_addr };
-    vec![
-        (ENV_RANK.to_string(), node.to_string()),
-        (ENV_TORCH_RANK.to_string(), global.to_string()),
-        (ENV_HEAD_ADDR.to_string(), head.to_string()),
-        (ENV_HEAD_PORT.to_string(), head_port.to_string()),
-        (ENV_MASTER_ADDR.to_string(), head.to_string()),
-        (ENV_MASTER_PORT.to_string(), head_port.to_string()),
-        (ENV_WORLD_SIZE.to_string(), world_size.to_string()),
-        (ENV_LOCAL_RANK.to_string(), local.to_string()),
-        // Every emulated node runs on the same real host and is
-        // synthesised from an identical config, so their GPUs report the
-        // same location id and RCCL would reject them as duplicates. A
-        // distinct host id per node is the correct model: one emulated
-        // GPU per node.
-        (ENV_NCCL_HOSTID.to_string(), format!("mirage-node-{node}")),
-    ]
 }
 
 /// Build the mounts, environment and command a node container is launched
@@ -1028,6 +825,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+    use std::path::PathBuf;
     use mirage_core::emulator::{EmulatorDef, ExecMode};
     use mirage_core::topology::TopologyDef;
 
@@ -1057,49 +855,6 @@ mod tests {
             },
             containerize: None,
         }
-    }
-
-    fn env_map(pairs: Vec<(String, String)>) -> BTreeMap<String, String> {
-        pairs.into_iter().collect()
-    }
-
-    #[test]
-    fn head_process_reaches_the_rendezvous_over_loopback() {
-        let env = env_map(proc_env(0, 0, 0, 4, "mirage-s-node-0", 29500));
-        assert_eq!(env[ENV_RANK], "0");
-        assert_eq!(env[ENV_TORCH_RANK], "0");
-        assert_eq!(env[ENV_MASTER_ADDR], "localhost");
-        assert_eq!(env[ENV_MASTER_PORT], "29500");
-        assert_eq!(env[ENV_WORLD_SIZE], "4");
-        assert_eq!(env[ENV_LOCAL_RANK], "0");
-    }
-
-    #[test]
-    fn worker_process_reaches_the_rendezvous_by_head_address() {
-        let env = env_map(proc_env(2, 2, 0, 4, "mirage-s-node-0", 29500));
-        assert_eq!(env[ENV_RANK], "2");
-        assert_eq!(env[ENV_MASTER_ADDR], "mirage-s-node-0");
-        assert_eq!(env[ENV_NCCL_HOSTID], "mirage-node-2");
-    }
-
-    #[test]
-    fn local_and_global_ranks_are_distinct_with_multiple_procs_per_node() {
-        // 2 nodes x 2 procs. The second process on node 1 is global 3,
-        // local 1.
-        let env = env_map(proc_env(3, 1, 1, 4, "mirage-s-node-0", 29500));
-        assert_eq!(env[ENV_RANK], "1", "MIRAGE_RANK identifies the node");
-        assert_eq!(env[ENV_TORCH_RANK], "3", "RANK is the global process rank");
-        assert_eq!(env[ENV_LOCAL_RANK], "1");
-        assert_eq!(env[ENV_WORLD_SIZE], "4");
-    }
-
-    #[test]
-    fn processes_sharing_a_node_share_a_host_id() {
-        let a = env_map(proc_env(0, 0, 0, 4, "h", 1));
-        let b = env_map(proc_env(1, 0, 1, 4, "h", 1));
-        assert_eq!(a[ENV_NCCL_HOSTID], b[ENV_NCCL_HOSTID]);
-        let other_node = env_map(proc_env(2, 1, 0, 4, "h", 1));
-        assert_ne!(a[ENV_NCCL_HOSTID], other_node[ENV_NCCL_HOSTID]);
     }
 
     #[test]

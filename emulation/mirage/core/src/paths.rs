@@ -37,17 +37,19 @@
 //! | Agents                   | `$XDG_CONFIG_HOME` | `mirage/agent/<name>.json`   |
 //! | Daemon socket + log      | `$XDG_RUNTIME_DIR` | `mirage/`                    |
 //! | Per-session scratch      | `$XDG_RUNTIME_DIR` | `mirage/session/<id>/`       |
-//! | Persistent state         | `$XDG_STATE_HOME`  | `mirage/`                    |
 //!
-//! Three environment variables provide direct overrides for the
-//! per-app directories, bypassing the XDG base lookup:
+//! Two environment variables provide direct overrides for the per-app
+//! directories, bypassing the XDG base lookup:
 //!
 //! * `$MIRAGE_CONFIG` — overrides the mirage config dir (would otherwise
 //!   be `$XDG_CONFIG_HOME/mirage`).
-//! * `$MIRAGE_STATE` — overrides the mirage state dir (would otherwise
-//!   be `$XDG_STATE_HOME/mirage`).
 //! * `$MIRAGE_RUNTIME` — overrides the mirage runtime dir (would
 //!   otherwise be `$XDG_RUNTIME_DIR/mirage`).
+//!
+//! There is no persistent *state* directory. Mirage writes nothing that
+//! has to survive a reboot beyond its configuration: a session and
+//! everything in it belongs to the `mirage run` that created it and is
+//! gone when that process is.
 //!
 //! ```text
 //! $XDG_RUNTIME_DIR/mirage/
@@ -67,15 +69,8 @@ use crate::session::SessionId;
 /// Root namespace under each XDG base directory.
 pub const APP_NAMESPACE: &str = "mirage";
 
-/// File name of the supervisor daemon's control socket.
-pub const DAEMON_SOCKET_NAME: &str = "mirage.sock";
-
-/// File name of the lock the running supervisor daemon holds exclusively.
-pub const DAEMON_LOCK_NAME: &str = "mirage.lock";
-
-/// File name the daemon's stderr is redirected to when the CLI starts it
-/// in the background.
-pub const DAEMON_LOG_NAME: &str = "daemon.log";
+/// Directory holding one socket per live `mirage run`.
+pub const RUN_SOCKET_DIR: &str = "run";
 
 /// Process-wide test override root. When set (via [`set_test_root`]),
 /// every directory lookup resolves under this root instead of consulting
@@ -155,21 +150,6 @@ pub fn mirage_config_dir() -> PathBuf {
     xdg_config_home().join(APP_NAMESPACE)
 }
 
-/// Returns the mirage persistent state directory.
-///
-/// Honors `$MIRAGE_STATE` as a direct override; otherwise returns
-/// `$XDG_STATE_HOME/mirage`.
-#[must_use]
-pub fn mirage_state_dir() -> PathBuf {
-    if test_root().is_none()
-        && let Ok(p) = std::env::var("MIRAGE_STATE")
-        && !p.is_empty()
-    {
-        return PathBuf::from(p);
-    }
-    xdg_state_home().join(APP_NAMESPACE)
-}
-
 /// Returns the mirage runtime directory.
 ///
 /// Honors `$MIRAGE_RUNTIME` as a direct override; otherwise returns
@@ -185,28 +165,25 @@ pub fn mirage_runtime_dir() -> PathBuf {
     xdg_runtime_dir().join(APP_NAMESPACE)
 }
 
-/// Path of the supervisor daemon's Unix control socket.
+/// Directory holding the sockets of every live run:
+/// `<mirage_runtime_dir>/run`.
 #[must_use]
-pub fn daemon_socket_path() -> PathBuf {
-    mirage_runtime_dir().join(DAEMON_SOCKET_NAME)
+pub fn run_socket_root() -> PathBuf {
+    mirage_runtime_dir().join(RUN_SOCKET_DIR)
 }
 
-/// Path of the lock file the running supervisor daemon holds.
+/// Path of the socket a `mirage run` serves for its session.
 ///
-/// The lock is what makes "is a daemon already running?" answerable
-/// without races: a starting daemon takes an exclusive `flock` on this
-/// file and only then binds the socket, so two daemons can never both
-/// believe they own the control plane, and a socket left behind by a
-/// crashed daemon is recognisable as stale (the lock is free).
+/// One socket per run, named after the session, rather than one
+/// well-known socket for a daemon. That is not a detail: with a single
+/// shared socket, "who owns this session?" needs a registry and a lock
+/// protocol, and a socket file left behind by a crashed process is
+/// indistinguishable from a live one. Here the socket *is* the
+/// registration — connecting to it either reaches the owner or fails,
+/// and failing is how a stale entry is recognised.
 #[must_use]
-pub fn daemon_lock_path() -> PathBuf {
-    mirage_runtime_dir().join(DAEMON_LOCK_NAME)
-}
-
-/// Path the daemon's stderr is redirected to when auto-started.
-#[must_use]
-pub fn daemon_log_path() -> PathBuf {
-    mirage_runtime_dir().join(DAEMON_LOG_NAME)
+pub fn run_socket_path(id: &SessionId) -> PathBuf {
+    run_socket_root().join(format!("{}.sock", id.as_str()))
 }
 
 /// Root directory for mirage profiles: `<mirage_config_dir>/profile`.
@@ -324,14 +301,19 @@ mod tests {
     }
 
     #[test]
-    fn daemon_paths_live_under_the_runtime_dir() {
+    fn a_runs_socket_is_named_after_its_session() {
+        // Per-run rather than one well-known path: the socket *is* the
+        // registration, so two runs can never disagree about who owns a
+        // session, and a socket nobody answers on is recognisably stale.
         let _g = test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         set_test_root(tmp.path());
-        let runtime = tmp.path().join("runtime/mirage");
-        assert_eq!(daemon_socket_path(), runtime.join("mirage.sock"));
-        assert_eq!(daemon_lock_path(), runtime.join("mirage.lock"));
-        assert_eq!(daemon_log_path(), runtime.join("daemon.log"));
+        let runs = tmp.path().join("runtime/mirage/run");
+        assert_eq!(run_socket_root(), runs);
+        assert_eq!(
+            run_socket_path(&SessionId::new("s-1").unwrap()),
+            runs.join("s-1.sock")
+        );
     }
 
     #[test]

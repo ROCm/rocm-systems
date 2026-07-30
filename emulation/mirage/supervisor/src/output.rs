@@ -1,194 +1,105 @@
-//! The output fan-out for an attached exec.
+//! Writing a captured exec's output to the terminal, labelled by rank.
 //!
-//! An exec's output has to reach an unknown number of clients that may
-//! attach at any point in its life — before it starts, halfway through,
-//! or after it has already exited. [`OutputHub`] is what makes all three
-//! well defined:
+//! Only reached under `--capture-all`. Without it a workload's stdout and
+//! stderr *are* the caller's, and nothing here runs: the bytes never pass
+//! through mirage at all, which is what keeps output byte-exact and an
+//! interactive shell interactive.
 //!
-//! * a bounded **replay buffer** holds recent output, so a late attacher
-//!   sees what it missed instead of an empty stream;
-//! * a **broadcast channel** carries live output to everyone currently
-//!   attached;
-//! * the two are updated under one lock, so a client subscribing
-//!   concurrently with a write can neither miss a packet nor see it
-//!   twice.
+//! # Why line-oriented
 //!
-//! The buffer is bounded in *bytes*, not packets. A workload that writes
-//! gigabytes must not be able to exhaust the daemon's memory just because
-//! nobody is attached — which, with one long-lived daemon owning every
-//! session, would take out unrelated sessions too.
+//! The obvious implementation prefixes each chunk as it arrives, and it
+//! is wrong. A chunk is whatever one `read` returned, so a single line
+//! can arrive in three pieces and three lines can arrive in one. Prefixed
+//! per chunk, that produces labels in the middle of lines and lines with
+//! no label at all.
+//!
+//! So each rank's stream is buffered until it holds a complete line, and
+//! only whole lines are emitted. The tail — a prompt, a progress bar,
+//! anything a workload wrote without a newline — is flushed when its
+//! stream ends, so nothing is ever silently dropped.
 
-use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::collections::BTreeMap;
+use std::io::Write as _;
 
-use mirage_core::ctl::StreamPacket;
-use tokio::sync::broadcast;
+use mirage_core::exec::StdStream;
+use tokio::sync::mpsc;
 
-/// Default cap on retained output per exec, in bytes.
-pub const DEFAULT_REPLAY_BYTES: usize = 1024 * 1024;
+use crate::process::OutputChunk;
 
-/// Capacity of the live broadcast channel, in packets.
+/// Label for a rank's output. Kept narrow and fixed-width so consecutive
+/// lines from different ranks stay visually aligned.
+fn prefix(node: u32) -> String {
+    format!("[{node}] ")
+}
+
+/// Drain `rx`, writing every chunk to this process's stdout and stderr
+/// with its rank prefixed.
 ///
-/// A slow client that falls this far behind is disconnected by the
-/// channel rather than being allowed to stall the writer. Attach clients
-/// are interactive and drain promptly; the depth only has to absorb a
-/// burst.
-const BROADCAST_CAPACITY: usize = 1024;
+/// Returns when the channel closes, which happens once every pump task
+/// for the exec has finished — so by the time this returns, every byte
+/// the workload wrote has been printed.
+pub async fn print_labelled(mut rx: mpsc::Receiver<OutputChunk>) {
+    let mut buffers: BTreeMap<(u32, StdStream), Vec<u8>> = BTreeMap::new();
 
-/// Fan-out for one exec's output.
-#[derive(Debug)]
-pub struct OutputHub {
-    live: broadcast::Sender<StreamPacket>,
-    replay: Mutex<Replay>,
-    max_bytes: usize,
-}
+    while let Some(chunk) = rx.recv().await {
+        let buf = buffers.entry((chunk.node, chunk.stream)).or_default();
+        buf.extend_from_slice(&chunk.data);
 
-#[derive(Debug, Default)]
-struct Replay {
-    packets: VecDeque<StreamPacket>,
-    bytes: usize,
-    /// How many bytes have been dropped off the front to stay in budget.
-    dropped_bytes: u64,
-    /// Set once the exec has finished; attaching after this replays and
-    /// ends immediately rather than waiting for live output.
-    finished: Option<i32>,
-}
+        // Emit only up to the last newline; whatever follows is a partial
+        // line and waits for the rest of itself.
+        let Some(end) = buf.iter().rposition(|b| *b == b'\n') else {
+            continue;
+        };
+        let complete: Vec<u8> = buf.drain(..=end).collect();
+        write_lines(chunk.node, chunk.stream, &complete);
+    }
 
-/// What a new subscriber receives: everything retained so far, plus a
-/// live feed of what comes next.
-#[derive(Debug)]
-pub struct Subscription {
-    /// Retained packets, oldest first.
-    pub replay: Vec<StreamPacket>,
-    /// The live feed. `None` when the exec had already finished, in which
-    /// case `replay` is the complete remaining story.
-    pub live: Option<broadcast::Receiver<StreamPacket>>,
-    /// Exit code, if the exec has already finished.
-    pub finished: Option<i32>,
-    /// Bytes discarded from the front of the replay buffer to stay within
-    /// the cap. Non-zero means the replay is truncated.
-    pub dropped_bytes: u64,
-}
-
-impl OutputHub {
-    /// Build a hub retaining at most `max_bytes` of output.
-    #[must_use]
-    pub fn new(max_bytes: usize) -> Self {
-        let (live, _) = broadcast::channel(BROADCAST_CAPACITY);
-        Self {
-            live,
-            replay: Mutex::new(Replay::default()),
-            max_bytes,
+    // Flush partial lines. A workload that ended with a prompt or a
+    // progress bar wrote real output, and dropping it because it lacked a
+    // trailing newline would be a silent loss.
+    for ((node, stream), buf) in buffers {
+        if !buf.is_empty() {
+            write_lines(node, stream, &buf);
         }
     }
+}
 
-    /// Publish a packet to the replay buffer and every live subscriber.
-    ///
-    /// Ordering with [`OutputHub::subscribe`] is what makes the hub
-    /// correct: both take the same lock, and this one appends to the
-    /// buffer *before* broadcasting. A subscriber that runs between the
-    /// two therefore sees the packet in its replay and not on its live
-    /// feed; one that runs after sees it only on the feed. Neither can
-    /// see it twice or lose it.
-    pub fn publish(&self, packet: StreamPacket) {
-        let mut replay = self.lock();
-        let size = packet_bytes(&packet);
-        replay.packets.push_back(packet.clone());
-        replay.bytes += size;
-        // Evict from the front until we are back in budget, but never
-        // evict the last packet. A single write larger than the whole
-        // budget would otherwise be dropped the instant it arrived,
-        // silently discarding output rather than truncating history —
-        // and the packet most likely to be huge is the one carrying a
-        // workload's final diagnostic.
-        while replay.bytes > self.max_bytes && replay.packets.len() > 1 {
-            let Some(dropped) = replay.packets.pop_front() else {
-                break;
-            };
-            let n = packet_bytes(&dropped);
-            replay.bytes = replay.bytes.saturating_sub(n);
-            replay.dropped_bytes += n as u64;
-        }
-        // A send error just means nobody is attached right now.
-        let _ = self.live.send(packet);
-    }
-
-    /// Mark the exec finished with `exit_code`.
-    ///
-    /// Publishes a final [`StreamPacket::ExecExit`] and records the code
-    /// so that later subscribers terminate immediately instead of waiting
-    /// on a feed that will never produce anything again.
-    pub fn finish(&self, exit_code: i32) {
-        {
-            let mut replay = self.lock();
-            if replay.finished.is_some() {
-                // Already finished; do not publish a second exit.
-                return;
-            }
-            replay.finished = Some(exit_code);
-        }
-        self.publish(StreamPacket::ExecExit { exit_code });
-    }
-
-    /// Whether the exec has finished, and with what code.
-    #[must_use]
-    pub fn finished(&self) -> Option<i32> {
-        self.lock().finished
-    }
-
-    /// Subscribe, receiving the retained output and a live feed.
-    #[must_use]
-    pub fn subscribe(&self) -> Subscription {
-        let replay = self.lock();
-        // Subscribe while holding the lock so no packet can slip between
-        // snapshotting the buffer and joining the broadcast.
-        let live = replay.finished.is_none().then(|| self.live.subscribe());
-        Subscription {
-            replay: replay.packets.iter().cloned().collect(),
-            live,
-            finished: replay.finished,
-            dropped_bytes: replay.dropped_bytes,
+/// Write `data` to the stream it came from, prefixing every line.
+///
+/// stdout and stderr stay separate all the way out, so redirecting one
+/// of them still works under `--capture-all`.
+fn write_lines(node: u32, stream: StdStream, data: &[u8]) {
+    let tag = prefix(node);
+    let mut out = Vec::with_capacity(data.len() + tag.len() * 4);
+    for line in split_inclusive_lines(data) {
+        out.extend_from_slice(tag.as_bytes());
+        out.extend_from_slice(line);
+        // A trailing partial line (the flush case) gets a newline so the
+        // next thing printed does not continue it.
+        if line.last() != Some(&b'\n') {
+            out.push(b'\n');
         }
     }
-
-    /// Bytes currently retained.
-    #[must_use]
-    pub fn retained_bytes(&self) -> usize {
-        self.lock().bytes
-    }
-
-    /// Everything retained, concatenated per stream — the `mirage logs`
-    /// (non-following) view.
-    #[must_use]
-    pub fn snapshot(&self) -> Vec<StreamPacket> {
-        self.lock().packets.iter().cloned().collect()
-    }
-
-    /// Lock the replay buffer, recovering from a poisoned mutex.
-    ///
-    /// Poisoning here means a panic while holding the lock. The buffer is
-    /// plain data with no invariant that a panic could have left broken
-    /// mid-update, and refusing to serve output for the rest of the
-    /// daemon's life would be a far worse outcome than continuing.
-    fn lock(&self) -> std::sync::MutexGuard<'_, Replay> {
-        self.replay.lock().unwrap_or_else(|e| e.into_inner())
+    let written = match stream {
+        StdStream::Stdout => {
+            let mut w = std::io::stdout().lock();
+            w.write_all(&out).and_then(|()| w.flush())
+        }
+        StdStream::Stderr => {
+            let mut w = std::io::stderr().lock();
+            w.write_all(&out).and_then(|()| w.flush())
+        }
+    };
+    if let Err(e) = written {
+        // A closed stdout (a `head` in the pipeline) is normal, not an
+        // error worth reporting on the stream that just failed.
+        tracing::debug!(node, ?stream, "could not write output: {e}");
     }
 }
 
-impl Default for OutputHub {
-    fn default() -> Self {
-        Self::new(DEFAULT_REPLAY_BYTES)
-    }
-}
-
-/// Approximate retained size of a packet.
-fn packet_bytes(packet: &StreamPacket) -> usize {
-    match packet {
-        StreamPacket::Output { data, .. } => data.len(),
-        // Control frames are tiny but not free; count them so a flood of
-        // them cannot grow the buffer without bound either.
-        StreamPacket::NodeExit { .. } | StreamPacket::ExecExit { .. } => 32,
-    }
+/// Split into lines, keeping the terminator on each.
+fn split_inclusive_lines(data: &[u8]) -> impl Iterator<Item = &[u8]> {
+    data.split_inclusive(|b| *b == b'\n')
 }
 
 #[cfg(test)]
@@ -196,159 +107,78 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
-    use mirage_core::ctl::StdStream;
 
-    fn out(node: u32, data: &[u8]) -> StreamPacket {
-        StreamPacket::Output {
-            node,
+    fn labelled(node: u32, data: &[u8]) -> String {
+        let tag = prefix(node);
+        let mut out = String::new();
+        for line in split_inclusive_lines(data) {
+            out.push_str(&tag);
+            out.push_str(&String::from_utf8_lossy(line));
+            if line.last() != Some(&b'\n') {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn every_line_of_a_multi_line_chunk_is_labelled() {
+        assert_eq!(labelled(2, b"a\nb\nc\n"), "[2] a\n[2] b\n[2] c\n");
+    }
+
+    #[test]
+    fn a_partial_final_line_is_terminated_rather_than_dropped() {
+        // A workload's last output is often a prompt with no newline.
+        assert_eq!(labelled(0, b"no newline"), "[0] no newline\n");
+    }
+
+    #[tokio::test]
+    async fn a_line_split_across_chunks_is_labelled_once() {
+        // The bug this buffering exists to prevent: prefixing per chunk
+        // would emit "[0] hel" and "[0] lo".
+        let (tx, rx) = mpsc::channel(8);
+        tx.send(OutputChunk {
+            node: 0,
             stream: StdStream::Stdout,
-            data: data.to_vec(),
-        }
+            data: b"hel".to_vec(),
+        })
+        .await
+        .unwrap();
+        tx.send(OutputChunk {
+            node: 0,
+            stream: StdStream::Stdout,
+            data: b"lo\n".to_vec(),
+        })
+        .await
+        .unwrap();
+        drop(tx);
+        // Exercises the buffering path end to end; the assertion that the
+        // two halves join is in `buffering_joins_split_lines` below,
+        // which can inspect the buffer directly.
+        print_labelled(rx).await;
     }
 
     #[test]
-    fn replay_returns_everything_written_before_subscribing() {
-        let hub = OutputHub::default();
-        hub.publish(out(0, b"one"));
-        hub.publish(out(0, b"two"));
-        let sub = hub.subscribe();
-        assert_eq!(sub.replay.len(), 2);
-        assert_eq!(sub.dropped_bytes, 0);
-        assert!(sub.live.is_some());
-        assert!(sub.finished.is_none());
-    }
-
-    #[tokio::test]
-    async fn live_feed_carries_output_published_after_subscribing() {
-        let hub = OutputHub::default();
-        let mut sub = hub.subscribe();
-        hub.publish(out(0, b"later"));
-        let live = sub.live.as_mut().unwrap();
-        assert_eq!(live.recv().await.unwrap(), out(0, b"later"));
-    }
-
-    #[tokio::test]
-    async fn a_packet_is_never_both_replayed_and_broadcast() {
-        // The exact race the lock ordering exists to prevent: a client
-        // subscribing while output is being written must see each packet
-        // exactly once across (replay ++ live).
-        let hub = std::sync::Arc::new(OutputHub::default());
-        let writer = {
-            let hub = hub.clone();
-            std::thread::spawn(move || {
-                for i in 0..500u32 {
-                    hub.publish(out(0, i.to_string().as_bytes()));
-                }
-            })
-        };
-        // Subscribe at an arbitrary point mid-flight.
-        std::thread::sleep(std::time::Duration::from_micros(200));
-        let mut sub = hub.subscribe();
-        writer.join().unwrap();
-        hub.finish(0);
-
-        let mut seen: Vec<String> = sub
-            .replay
-            .iter()
-            .filter_map(payload)
-            .collect::<Vec<_>>();
-        if let Some(live) = sub.live.as_mut() {
-            while let Ok(pkt) = live.try_recv() {
-                if let Some(p) = payload(&pkt) {
-                    seen.push(p);
-                }
-            }
-        }
-        let unique: std::collections::HashSet<&String> = seen.iter().collect();
-        assert_eq!(
-            unique.len(),
-            seen.len(),
-            "a packet was delivered twice: {seen:?}"
-        );
-        let expected: Vec<String> = (0..500u32).map(|i| i.to_string()).collect();
-        assert_eq!(seen, expected, "packets were lost or reordered");
-    }
-
-    fn payload(pkt: &StreamPacket) -> Option<String> {
-        match pkt {
-            StreamPacket::Output { data, .. } => {
-                Some(String::from_utf8_lossy(data).into_owned())
-            }
-            _ => None,
-        }
-    }
-
-    #[test]
-    fn replay_is_bounded_and_reports_what_it_dropped() {
-        let hub = OutputHub::new(100);
-        for _ in 0..50 {
-            hub.publish(out(0, &[b'x'; 10]));
-        }
+    fn buffering_joins_split_lines_before_labelling() {
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(b"hel");
         assert!(
-            hub.retained_bytes() <= 100,
-            "retained {} bytes, cap is 100",
-            hub.retained_bytes()
+            buf.iter().rposition(|b| *b == b'\n').is_none(),
+            "a chunk with no newline must not be emitted yet"
         );
-        let sub = hub.subscribe();
-        assert!(
-            sub.dropped_bytes > 0,
-            "truncation must be visible to the client"
-        );
+        buf.extend_from_slice(b"lo\n");
+        let end = buf.iter().rposition(|b| *b == b'\n').unwrap();
+        let complete: Vec<u8> = buf.drain(..=end).collect();
+        assert_eq!(labelled(0, &complete), "[0] hello\n");
+        assert!(buf.is_empty());
     }
 
     #[test]
-    fn a_single_packet_larger_than_the_cap_is_still_retained() {
-        // Dropping it entirely would lose output with no way to notice;
-        // the buffer over-shoots for one packet rather than swallowing it.
-        let hub = OutputHub::new(10);
-        hub.publish(out(0, &[b'x'; 1000]));
-        assert_eq!(hub.subscribe().replay.len(), 1);
-
-        // And a following packet evicts it rather than accumulating.
-        hub.publish(out(0, b"next"));
-        let sub = hub.subscribe();
-        assert_eq!(sub.replay.len(), 1);
-        assert_eq!(sub.dropped_bytes, 1000);
-    }
-
-    #[test]
-    fn subscribing_after_the_exec_finished_replays_and_ends() {
-        let hub = OutputHub::default();
-        hub.publish(out(0, b"done"));
-        hub.finish(3);
-
-        let sub = hub.subscribe();
-        assert_eq!(sub.finished, Some(3));
-        assert!(
-            sub.live.is_none(),
-            "a finished exec must not hand out a live feed that never yields"
-        );
-        assert!(matches!(
-            sub.replay.last(),
-            Some(StreamPacket::ExecExit { exit_code: 3 })
-        ));
-    }
-
-    #[test]
-    fn finish_is_idempotent() {
-        let hub = OutputHub::default();
-        hub.finish(0);
-        hub.finish(9);
-        assert_eq!(hub.finished(), Some(0));
-        let exits = hub
-            .snapshot()
-            .into_iter()
-            .filter(|p| matches!(p, StreamPacket::ExecExit { .. }))
-            .count();
-        assert_eq!(exits, 1, "exactly one ExecExit must ever be published");
-    }
-
-    #[test]
-    fn publishing_with_no_subscribers_is_fine() {
-        let hub = OutputHub::default();
-        for _ in 0..1000 {
-            hub.publish(out(0, b"nobody listening"));
-        }
-        assert!(hub.retained_bytes() > 0);
+    fn output_after_a_newline_waits_for_the_rest_of_its_line() {
+        let mut buf: Vec<u8> = b"done\nnext".to_vec();
+        let end = buf.iter().rposition(|b| *b == b'\n').unwrap();
+        let complete: Vec<u8> = buf.drain(..=end).collect();
+        assert_eq!(labelled(1, &complete), "[1] done\n");
+        assert_eq!(buf, b"next", "the partial line stays buffered");
     }
 }

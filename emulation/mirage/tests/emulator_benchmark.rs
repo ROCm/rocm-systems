@@ -33,12 +33,14 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod harness;
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use tempfile::TempDir;
+use harness::Env;
 
 /// Emulator backends to compare, in report order.
 const EMULATORS: &[&str] = &["rocjitsu", "hotswap"];
@@ -74,65 +76,22 @@ struct SupportRow {
 }
 
 // ----- harness ---------------------------------------------------------------
+//
+// The benchmark uses the shared [`harness::Env`]: a private XDG root per
+// benchmark, on a path short enough for a run's control socket to bind.
+// There is nothing to tear down beyond that — each `mirage run` here is a
+// foreground process that owns its session and takes it away when it
+// exits, so no background process can outlive the benchmark and no
+// measurement can be polluted by one a previous iteration left behind.
 
-struct Env {
-    _dir: TempDir,
-    config: PathBuf,
-    runtime: PathBuf,
-    state: PathBuf,
-    mirage_bin: PathBuf,
-    /// A private daemon per benchmark run, kept on a short path: Unix
-    /// `sun_path` is a fixed-size array and a socket nested in a long
-    /// tempdir can exceed it.
-    socket: PathBuf,
-}
-
-impl Env {
-    fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        let socket =
-            std::env::temp_dir().join(format!("mrgb-{}.sock", std::process::id()));
-        Self {
-            config: dir.path().join("config"),
-            runtime: dir.path().join("runtime"),
-            state: dir.path().join("state"),
-            mirage_bin: PathBuf::from(env!("CARGO_BIN_EXE_mirage")),
-            socket,
-            _dir: dir,
-        }
-    }
-
-    fn mirage(&self) -> Command {
-        let mut c = Command::new(&self.mirage_bin);
-        c.env("XDG_CONFIG_HOME", &self.config)
-            .env("XDG_RUNTIME_DIR", &self.runtime)
-            .env("XDG_STATE_HOME", &self.state)
-            .env("MIRAGE_BIN", &self.mirage_bin)
-            .env("MIRAGE_SOCKET", &self.socket)
-            .env_remove("MIRAGE_LOG");
-        c
-    }
-
-    /// The emulator registry as mirage sees it on this host.
-    fn registry(&self) -> Vec<EmulatorRow> {
-        let out = self
-            .mirage()
-            .args(["emulators", "--json"])
-            .output()
-            .expect("failed to run `mirage emulators --json`");
-        serde_json::from_slice(&out.stdout).expect("malformed emulators JSON")
-    }
-}
-
-impl Drop for Env {
-    fn drop(&mut self) {
-        // Stop the daemon this run started. Without this it would linger
-        // until its idle timeout, holding a process long after the test
-        // binary has exited.
-        let _ = self.mirage().args(["daemon", "stop"]).output();
-        let _ = std::fs::remove_file(&self.socket);
-        let _ = std::fs::remove_file(self.socket.with_extension("lock"));
-    }
+/// The emulator registry as mirage sees it on this host.
+fn registry(env: &Env) -> Vec<EmulatorRow> {
+    let out = env
+        .mirage()
+        .args(["emulators", "--json"])
+        .output()
+        .expect("failed to run `mirage emulators --json`");
+    serde_json::from_slice(&out.stdout).expect("malformed emulators JSON")
 }
 
 fn fixtures_dir() -> PathBuf {
@@ -186,6 +145,12 @@ struct Sample {
 
 /// Run `mirage run --profile <emu> -- <args...>` once, timing the full
 /// invocation and checking the accuracy sentinel.
+///
+/// The workload inherits this command's stdout — mirage does not sit in
+/// the middle of it — so the pipe `output()` installs is what the kernel
+/// prints its sentinel to. That is also why the timing is honest: the
+/// measured wall clock is the workload's own, with no capture thread or
+/// forwarding hop added to it.
 fn timed_run(env: &Env, emulator: &str, args: &[&Path], sentinel: Option<&str>) -> Sample {
     let mut cmd = env.mirage();
     cmd.arg("run").args(["--profile", emulator]).arg("--");
@@ -193,6 +158,9 @@ fn timed_run(env: &Env, emulator: &str, args: &[&Path], sentinel: Option<&str>) 
         cmd.arg(a);
     }
     let start = Instant::now();
+    // `mirage run` is the session: the wall clock below covers bring-up,
+    // the workload, and teardown, because they all happen inside this one
+    // process. Nothing is left running when it returns.
     let out = cmd.output().expect("failed to spawn `mirage run`");
     let wall_ms = start.elapsed().as_secs_f64() * 1000.0;
     let exit_ok = out.status.success();
@@ -263,7 +231,7 @@ fn benchmark_emulators_and_write_report() {
     }
 
     let env = Env::new();
-    let registry = env.registry();
+    let registry = registry(&env);
     // Build the workload once; shared by every backend.
     let bin_dir = tempfile::tempdir().unwrap();
     let fat = compile_fat_binary(bin_dir.path());
@@ -415,8 +383,8 @@ fn render_report(results: &[EmulatorResult], n: usize) -> String {
     writeln!(
         s,
         "- **Driver:** each run is a full `mirage run --profile <emulator> -- \
-         <binary>` invocation (profile create → session bring-up → exec → \
-         attach → teardown), exactly as an end user would invoke it."
+         <binary>` invocation (session bring-up → workload → teardown, all in \
+         that one process), exactly as an end user would invoke it."
     )
     .unwrap();
     writeln!(

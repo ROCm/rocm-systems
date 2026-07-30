@@ -41,6 +41,20 @@ pub struct ExecArgs {
     pub workdir: Option<String>,
 }
 
+/// Which of a process's standard streams a chunk of output came from.
+///
+/// The two stay distinct all the way to the terminal: workloads run on
+/// pipes or on inherited file descriptors, never on a shared
+/// pseudo-terminal, so stdout and stderr are never merged and
+/// redirecting one without the other works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum StdStream {
+    /// The process's standard output.
+    Stdout,
+    /// The process's standard error.
+    Stderr,
+}
+
 /// Identifier of a single exec within a session.
 ///
 /// Ids are stable and follow the same rules as `SessionId`.
@@ -128,47 +142,24 @@ pub struct ExecDef {
 
     /// Run the workload on a pseudo-terminal instead of pipes.
     ///
-    /// Interactive programs need a real terminal: a shell only prints a
-    /// prompt, echoes input and enables line editing and job control when
-    /// `isatty(0)` is true. `mirage run -- bash` is unusable without one.
+    /// Send every rank's output to this terminal, prefixed with the rank
+    /// that produced it, instead of letting the ranks write to it
+    /// directly.
     ///
-    /// The cost is that a PTY has a single stream, so stdout and stderr
-    /// are merged and reported as [`StdStream::Stdout`], and the terminal
-    /// may translate output (`\n` becomes `\r\n`). Non-interactive runs
-    /// therefore default to pipes, where the two streams stay distinct
-    /// and output is byte-exact.
-    ///
-    /// [`StdStream::Stdout`]: crate::ctl::StdStream::Stdout
+    /// Without this each process inherits the caller's own stdout and
+    /// stderr, which is what makes an interactive `bash` work and what
+    /// keeps output byte-exact under redirection. That does not scale
+    /// past one node: several ranks writing to one terminal interleave
+    /// with nothing to say which wrote what. Capturing puts mirage back
+    /// in the middle so it can label each line — at the cost of stdin,
+    /// which cannot be meaningfully shared between ranks and is
+    /// therefore closed for all of them.
     #[serde(default)]
-    pub tty: bool,
-
-    /// Initial terminal height, in character cells. Ignored without
-    /// [`ExecDef::tty`]; `0` means "use a sensible default".
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub tty_rows: u16,
-
-    /// Initial terminal width, in character cells. Ignored without
-    /// [`ExecDef::tty`]; `0` means "use a sensible default".
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub tty_cols: u16,
-
-    /// Whether the client intends to keep this exec after it finishes.
-    ///
-    /// Advisory: the supervisor never removes an exec on its own, because
-    /// doing so would race a client attaching to read its result. The CLI
-    /// calls `exec_remove` explicitly when this is `false`. Independently,
-    /// a session forgets its oldest *finished* execs once too many
-    /// accumulate, so history is bounded either way.
-    #[serde(default)]
-    pub keep: bool,
+    pub capture_all: bool,
 }
 
 fn one_proc() -> u32 {
     1
-}
-
-fn is_zero(n: &u16) -> bool {
-    *n == 0
 }
 
 fn is_one_proc(n: &u32) -> bool {
@@ -257,18 +248,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tty_defaults_to_off_for_documents_that_omit_it() {
-        // Pipes are the safe default: byte-exact output with stdout and
-        // stderr distinct. A document written before `tty` existed, or by
-        // a client that does not set it, must not silently gain a
-        // terminal and start rewriting newlines.
+    fn capture_defaults_to_off_for_documents_that_omit_it() {
+        // Inheriting the caller's streams is the default, and it is the
+        // one that has to be safe to fall into: it keeps output
+        // byte-exact, keeps stdout and stderr distinct, and is what makes
+        // an interactive shell interactive. Capturing is the opt-in,
+        // because it costs stdin.
         let json = r#"{
             "timestamp": "2026-01-01T00:00:00Z",
             "session": "s",
             "exec": {"command": "/bin/true"}
         }"#;
         let def: ExecDef = serde_json::from_str(json).unwrap();
-        assert!(!def.tty);
+        assert!(!def.capture_all);
         assert_eq!(def.nproc_per_node, 1);
     }
 

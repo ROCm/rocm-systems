@@ -5,14 +5,14 @@
 //! combination through the canonical lifecycle:
 //!
 //! ```text
-//! create  ->  run  ->  delete  ->  ensure deleted
+//! create  ->  run  ->  ensure nothing survived the run  ->  delete
 //! ```
 //!
 //! Every combination is exercised end-to-end against the real `mirage`
-//! binary (via `assert_cmd`) under an isolated XDG root. Combinations
-//! that the current machine *cannot* run are deliberately **skipped** with
-//! a recorded reason rather than failed, so the same suite is
-//! meaningful on a laptop, in CI, and on an emulation host:
+//! binary under an isolated XDG root. Combinations that the current
+//! machine *cannot* run are deliberately **skipped** with a recorded
+//! reason rather than failed, so the same suite is meaningful on a
+//! laptop, in CI, and on an emulation host:
 //!
 //! * `rocjitsu-dbt` is skipped unless a translation-target GPU is
 //!   physically present (DBT runs translated code on real hardware).
@@ -20,21 +20,41 @@
 //! * the `race` plugin is skipped when the selected backend does not
 //!   advertise it.
 //!
+//! # The run *is* the session
+//!
+//! There is no daemon to start and no session to delete. `mirage run`
+//! holds its session in its own process: the socket other terminals find
+//! it by, the containers, the emulator and the workload all exist exactly
+//! as long as that one command does. So "ensure deleted" is not a
+//! separate step asking a server whether it forgot anything — it is the
+//! claim that when the run process is gone, its socket, its scratch
+//! directory and its containers are gone too, for every combination and
+//! whether the payload exited cleanly or crashed.
+//!
 //! The containerised dimensions (`podman`, `docker`) are driven through
 //! a hermetic mock provider — a small shell script standing in for the
 //! container CLI — so the provider bring-up/teardown contract is
-//! exercised without requiring a real image or daemon, mirroring
-//! `tests/container_e2e.rs`.
+//! exercised without requiring a real image or container engine,
+//! mirroring `tests/container_e2e.rs`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod harness;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use assert_cmd::prelude::*;
-use tempfile::TempDir;
+use harness::{Env as BaseEnv, assert_suite_can_run, skip_without_emulator};
+
+/// How long one combination's `mirage run` gets to finish.
+///
+/// Generous, because it covers session bring-up (which has its own
+/// 60-second budget inside mirage) as well as the payload. It exists to
+/// turn a regression that would hang the whole suite — a multi-node
+/// aggregator waiting forever, a container that never reports running —
+/// into a failure that names the combination.
+const RUN_TIMEOUT: Duration = Duration::from_secs(90);
 
 // ---------------------------------------------------------------------------
 // Matrix dimensions
@@ -125,7 +145,7 @@ impl Payload {
     /// The heavy real workloads (a torch import, an RCCL all-reduce) are
     /// represented here by lightweight, deterministic stand-ins that
     /// print a sentinel: the goal of this suite is to prove the *mirage
-    /// lifecycle* (create/run/clean-up) across the matrix, not to
+    /// lifecycle* (bring up, run, clean up) across the matrix, not to
     /// benchmark the emulator. The real torch fixture is driven
     /// separately by `tests/run_tiny_torch_mi350.sh`.
     fn argv(self) -> Vec<&'static str> {
@@ -137,6 +157,20 @@ impl Payload {
             // Simulate a crashing workload: emit output, then exit with a
             // SIGSEGV-style code. mirage must still tear the session down.
             Payload::Crash => vec!["/bin/sh", "-c", "echo crashing; exit 139"],
+        }
+    }
+
+    /// What the payload prints on stdout, once per rank.
+    ///
+    /// Asserting on it is what separates "the workload ran" from "mirage
+    /// exited with the status I expected". Without a sentinel the crash
+    /// row would pass just as happily on a session that never came up —
+    /// a failed bring-up also exits non-zero.
+    fn sentinel(self) -> &'static str {
+        match self {
+            Payload::TinyTorch => "tiny_torch_ok",
+            Payload::Rccl => "rccl_ok",
+            Payload::Crash => "crashing",
         }
     }
 
@@ -273,20 +307,12 @@ impl Caps {
 
 /// Query `mirage emulators --json` for the install/support state of
 /// every backend and the plugins they advertise.
-fn probe_caps(mirage_bin: &Path) -> Caps {
+fn probe_caps() -> Caps {
     // Isolated, like every other invocation in this suite. `emulators` is
-    // answered in-process and starts no daemon, but a test must not read
-    // or write the developer's real mirage directories regardless.
-    let probe_dir = tempfile::tempdir().expect("tempdir");
-    let mut cmd = Command::new(mirage_bin);
-    cmd.args(["--json", "emulators"])
-        .env("XDG_CONFIG_HOME", probe_dir.path().join("config"))
-        .env("XDG_RUNTIME_DIR", probe_dir.path().join("runtime"))
-        .env("XDG_STATE_HOME", probe_dir.path().join("state"))
-        .env("MIRAGE_SOCKET", probe_dir.path().join("probe.sock"))
-        .env("MIRAGE_AUTOSTART", "0")
-        .env_remove("MIRAGE_LOG");
-    let out = cmd.output().expect("run `mirage emulators`");
+    // answered in-process and starts nothing, but a test must not read or
+    // write the developer's real mirage directories regardless.
+    let probe = BaseEnv::new();
+    let out = probe.run(&["--json", "emulators"]);
     let json: serde_json::Value =
         serde_json::from_slice(&out.stdout).expect("emulators output should be JSON");
 
@@ -315,95 +341,34 @@ fn probe_caps(mirage_bin: &Path) -> Caps {
 // Per-combo harness
 // ---------------------------------------------------------------------------
 
-/// An isolated XDG root plus a mock container provider for one run.
+/// An isolated mirage installation plus a mock container provider for one
+/// combination.
 struct Env {
-    _dir: TempDir,
-    runtime: PathBuf,
-    config: PathBuf,
-    state: PathBuf,
+    base: BaseEnv,
     provider: PathBuf,
-    mirage_bin: PathBuf,
-    /// Each combination gets its own daemon, so one cannot see another's
-    /// sessions. Kept short: `sun_path` is a fixed 108-byte array and a
-    /// socket nested in a long tempdir silently fails to bind.
-    socket: PathBuf,
 }
 
 impl Env {
-    fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        let runtime = dir.path().join("runtime");
-        let config = dir.path().join("config");
-        let state = dir.path().join("state");
-        let provider = dir.path().join("mock-provider.sh");
-        write_mock_provider(&provider);
-        let socket = {
-            use std::sync::atomic::{AtomicU32, Ordering};
-            static SEQ: AtomicU32 = AtomicU32::new(0);
-            std::env::temp_dir().join(format!(
-                "mrgm-{}-{}.sock",
-                std::process::id(),
-                SEQ.fetch_add(1, Ordering::Relaxed)
-            ))
-        };
-        Self {
-            _dir: dir,
-            runtime,
-            config,
-            state,
-            provider,
-            mirage_bin: PathBuf::from(env!("CARGO_BIN_EXE_mirage")),
-            socket,
-        }
-    }
-
-    fn mirage(&self) -> Command {
-        let mut c = Command::new(&self.mirage_bin);
-        c.env("XDG_CONFIG_HOME", &self.config)
-            .env("XDG_RUNTIME_DIR", &self.runtime)
-            .env("XDG_STATE_HOME", &self.state)
-            .env("MIRAGE_BIN", &self.mirage_bin)
-            .env("MIRAGE_SOCKET", &self.socket)
-            .env("MOCK_DIR", self._dir.path())
-            .env_remove("MIRAGE_LOG");
-        c
-    }
-
-    /// True when the daemon reports no sessions.
+    /// Build an environment whose mock provider is named after `label`.
     ///
-    /// Asked over the control plane rather than by listing directories:
-    /// sessions have no on-disk representation to count, and inferring
-    /// liveness from files is what the previous design got wrong.
-    fn no_sessions_left(&self) -> bool {
-        let Ok(out) = self.mirage().args(["--json", "session", "list"]).output() else {
-            return false;
-        };
-        let text = String::from_utf8_lossy(&out.stdout);
-        serde_json::from_str::<serde_json::Value>(&text)
-            .ok()
-            .and_then(|v| v.as_array().map(Vec::is_empty))
-            .unwrap_or(false)
-    }
-
-    /// Stop this combo's daemon, so each combination is fully isolated
-    /// and nothing it started outlives it.
-    fn shutdown(&self) {
-        let _ = self.mirage().args(["daemon", "stop"]).output();
-        let _ = std::fs::remove_file(&self.socket);
-        let _ = std::fs::remove_file(self.socket.with_extension("lock"));
-    }
-}
-
-impl Drop for Env {
-    fn drop(&mut self) {
-        self.shutdown();
+    /// The name matters: mirage decides how to pass GPU groups through to
+    /// a container by looking at the provider's basename (podman takes
+    /// `--group-add keep-groups`, docker does not). A single
+    /// `mock-provider.sh` would make the `podman` and `docker` rows of
+    /// the matrix byte-for-byte identical runs.
+    fn new(label: &str) -> Self {
+        let base = BaseEnv::new();
+        let provider = base.root().join(format!("mock-{label}.sh"));
+        write_mock_provider(&provider);
+        Self { base, provider }
     }
 }
 
 /// A hermetic `docker`/`podman` stand-in. It satisfies bring-up
-/// (pull/network/run/rm) and executes `exec` invocations locally, which
-/// is where workloads now arrive: a node container's own process just
-/// idles. Mirrors `tests/container_e2e.rs`.
+/// (pull/network/run/inspect) and executes `exec` invocations locally,
+/// which is where workloads now arrive: a node container's own process
+/// just idles. Mirrors `tests/container_e2e.rs`, which asserts on the
+/// argv in detail; here the mock only has to behave.
 fn write_mock_provider(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
     let script = r#"#!/bin/sh
@@ -418,7 +383,13 @@ case "$1" in
       exit 1
     fi
     exit 0 ;;
-  run) echo "cid-0"; exit 0 ;;
+  run)
+    # Deliberately does not return. A node container is no longer started
+    # detached: the provider client is a child mirage owns, and killing it
+    # is what stops the container. Exiting here would make every teardown
+    # in this suite look successful for the wrong reason — there would be
+    # nothing left to kill.
+    exec sleep 300 ;;
   exec)
     shift
     envs=""
@@ -445,15 +416,17 @@ case "$1" in
     exec "$@" ;;
   rm) exit 0 ;;
   inspect)
-    # Either the ownership check (a Go template naming mirage.owner) or
-    # the running-state probe.
-    if [ "$2" = "--format" ]; then
-      case "$3" in
-        *mirage.owner*) printf mirage ;;
-        *) echo true ;;
-      esac
-      exit 0
-    fi
+    # Either the ownership check (a Go template naming mirage.owner), or
+    # the `-f {{.State.Running}}` liveness probe bring-up waits on before
+    # it runs anything in the container.
+    case "$2" in
+      --format|-f)
+        case "$3" in
+          *mirage.owner*) printf mirage ;;
+          *) echo true ;;
+        esac
+        exit 0 ;;
+    esac
     echo true; exit 0 ;;
   *) exit 0 ;;
 esac
@@ -468,19 +441,20 @@ enum Outcome {
     Skipped(String),
 }
 
-/// Drive a single combination through create -> run -> delete ->
-/// ensure-deleted. Panics on any deviation from the expected contract.
+/// Drive a single combination through create -> run -> ensure nothing
+/// survived -> delete. Panics on any deviation from the expected
+/// contract.
 fn run_combo(c: &Combo, caps: &Caps) -> Outcome {
     if let Some(reason) = caps.skip_reason(c) {
         return Outcome::Skipped(reason);
     }
 
-    let env = Env::new();
+    let env = Env::new(c.container.label());
     let profile = c.name();
+    let provider = env.provider.to_string_lossy().into_owned();
 
     // 1. create
-    let mut create = env.mirage();
-    create.args([
+    let mut create = vec![
         "profile",
         "create",
         &profile,
@@ -489,104 +463,92 @@ fn run_combo(c: &Combo, caps: &Caps) -> Outcome {
         "--agent",
         c.hardware.agent(),
         "--no-input",
-    ]);
+    ];
     if c.payload.nodes() > 1 {
-        create.args(["--num-nodes", "2"]);
+        create.extend(["--num-nodes", "2"]);
     }
     if c.container.is_containerized() {
-        create.args(["--image", "img:latest", "--container-provider"]);
-        create.arg(&env.provider);
+        create.extend(["--image", "img:latest", "--container-provider", &provider]);
     }
-    create.assert().success();
+    env.base.ok(&create);
 
     // Confirm the profile is persisted and readable.
-    env.mirage()
-        .args(["profile", "show", &profile])
-        .assert()
-        .success();
+    env.base.ok(&["profile", "show", &profile]);
 
-    // 2. run — the workhorse that creates a transient session, executes
-    //    the payload (every node), then tears the session back down. A
-    //    timeout guards against regressions that could otherwise hang the
-    //    whole suite (e.g. a multi-node aggregator waiting forever).
-    let mut run = env.mirage();
-    run.args(["run", "--profile", &profile]);
+    // 2. run — the workhorse. It brings the session up in its own
+    //    process, runs the payload on every node, and tears everything
+    //    back down on the way out.
+    let mut args = vec!["--profile", &profile];
     if c.plugin == Plugin::Race {
-        run.args(["--plugin", "race"]);
+        args.extend(["--plugin", "race"]);
     }
-    run.arg("--");
-    run.args(c.payload.argv());
-    let status = run_with_timeout(run, Duration::from_secs(60), &profile);
+    let mut run = env.base.spawn_run(&args, &c.payload.argv());
+    let out = run.wait(RUN_TIMEOUT);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
 
     if c.payload.expect_success() {
         assert!(
-            status.success(),
-            "[{}] run failed: status={:?}",
-            profile,
-            status.code(),
+            out.status.success(),
+            "[{profile}] run failed: status={:?}\nstdout: {stdout}\nstderr: {stderr}",
+            out.status.code(),
         );
     } else {
         assert!(
-            !status.success(),
-            "[{}] crash payload unexpectedly succeeded",
-            profile,
+            !out.status.success(),
+            "[{profile}] crash payload unexpectedly succeeded\nstdout: {stdout}"
         );
     }
 
-    // 3. ensure deleted — the transient session must clean itself up,
-    //    leaving no session directories behind (regardless of how the
-    //    payload exited).
-    let cleaned = wait_for(Duration::from_secs(5), || env.no_sessions_left());
-    assert!(
-        cleaned,
-        "[{}] session was not cleaned up after run; session root still populated",
-        profile,
+    // The payload's own output reaches this terminal because every rank
+    // inherits it: there is no pseudo-terminal and no forwarding, the
+    // workload's stdout *is* the run's stdout. Counting the sentinel also
+    // proves the command ran on every node rather than only the first.
+    let seen = stdout.matches(c.payload.sentinel()).count();
+    assert_eq!(
+        seen,
+        c.payload.nodes() as usize,
+        "[{profile}] expected {:?} once per node ({} node(s)), saw it {seen} time(s)\nstdout: {stdout}",
+        c.payload.sentinel(),
+        c.payload.nodes(),
     );
 
-    // 4. delete the profile and confirm it is gone.
-    env.mirage()
-        .args(["profile", "delete", &profile, "-f"])
-        .assert()
-        .success();
-    env.mirage()
-        .args(["profile", "show", &profile])
-        .assert()
-        .failure();
+    // 3. ensure nothing survived the run. A session exists exactly while
+    //    the `mirage run` that created it does, so once the process has
+    //    exited there must be no socket for another terminal to find and
+    //    no scratch directory left on disk — however the payload exited.
+    let session = session_id(&stderr).unwrap_or_else(|| {
+        panic!("[{profile}] the run never announced its session id\nstderr: {stderr}")
+    });
+    assert!(
+        env.base.live_runs().is_empty(),
+        "[{profile}] a run socket outlived the run: {:?}",
+        env.base.live_runs()
+    );
+    let scratch = env.base.session_scratch(&session);
+    assert!(
+        !scratch.exists(),
+        "[{profile}] session scratch survived the run: {}",
+        scratch.display()
+    );
+
+    // 4. delete the profile and confirm it is gone. Profiles are the one
+    //    thing a run does *not* own: they are config, and outlive it.
+    env.base.ok(&["profile", "delete", &profile, "-f"]);
+    env.base.fails(&["profile", "show", &profile]);
 
     Outcome::Ran
 }
 
-fn wait_for<F: FnMut() -> bool>(timeout: Duration, mut f: F) -> bool {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if f() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    f()
-}
-
-/// Run a command to completion, but fail loudly (rather than hang the
-/// whole suite) if it overruns `timeout`. stdio is discarded — callers
-/// assert on the exit status, and tiny payload output is uninteresting.
-fn run_with_timeout(mut cmd: Command, timeout: Duration, ctx: &str) -> ExitStatus {
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let mut child = cmd.spawn().expect("spawn `mirage run`");
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait().expect("poll child") {
-            Some(status) => return status,
-            None if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!("[{ctx}] `mirage run` did not finish within {timeout:?}");
-            }
-            None => std::thread::sleep(Duration::from_millis(50)),
-        }
-    }
+/// The session id a run announces on stderr as it starts.
+///
+/// This is how a user finds the session to `mirage exec` into from
+/// another terminal, so it is worth insisting the line is there.
+fn session_id(stderr: &str) -> Option<String> {
+    stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("mirage: session "))
+        .map(|id| id.trim().to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -595,8 +557,11 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration, ctx: &str) -> ExitStatu
 
 #[test]
 fn matrix_lifecycle_across_all_dimensions() {
-    let mirage_bin = PathBuf::from(env!("CARGO_BIN_EXE_mirage"));
-    let caps = probe_caps(&mirage_bin);
+    assert_suite_can_run();
+    if skip_without_emulator() {
+        return;
+    }
+    let caps = probe_caps();
 
     let combos = all_combos();
     let total = combos.len();
@@ -610,14 +575,19 @@ fn matrix_lifecycle_across_all_dimensions() {
     );
 
     for c in &combos {
+        // The name goes out *before* the combination runs. A combination
+        // that hangs or panics takes the whole suite with it, and a table
+        // that only prints completed rows would name every combination
+        // except the one that failed.
+        eprint!("  {:<58}  ", c.name());
         match run_combo(c, &caps) {
             Outcome::Ran => {
                 ran += 1;
-                eprintln!("  {:<58}  RAN", c.name());
+                eprintln!("RAN");
             }
             Outcome::Skipped(reason) => {
                 skipped += 1;
-                eprintln!("  {:<58}  SKIP ({reason})", c.name());
+                eprintln!("SKIP ({reason})");
             }
         }
     }

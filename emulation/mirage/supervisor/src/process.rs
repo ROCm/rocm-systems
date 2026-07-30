@@ -35,28 +35,32 @@
 //! if a supervising task is cancelled abruptly, tokio kills the child
 //! rather than orphaning it.
 //!
-//! # Pipes and pseudo-terminals
+//! # Standard streams
 //!
-//! A process runs on one or the other, chosen per exec.
+//! A workload gets the *caller's* streams, not ones mirage manufactured.
+//! Whoever spawns a process here — `mirage run`, or a `mirage exec` in
+//! another terminal — is the process the user is sitting in front of, so
+//! inheriting its file descriptors puts the workload on the user's real
+//! terminal.
 //!
-//! **Pipes** are the default: stdout and stderr stay distinct, output is
-//! byte-exact, and redirection behaves. This is what a non-interactive
-//! workload wants.
+//! That is worth stating because the obvious alternative is what mirage
+//! used to do, and it was worse in every direction. A long-lived daemon
+//! owned every workload, so the workload's terminal could not be the
+//! user's; it had to be a pseudo-terminal the daemon allocated, with
+//! output shipped back over a socket and keystrokes shipped forward. The
+//! costs were real: a PTY has one stream, so stdout and stderr were
+//! merged and redirecting one of them stopped working; the client had to
+//! put the user's terminal in raw mode and forward `SIGWINCH` by hand;
+//! and `pre_exec`-based session-leader setup was the only `unsafe` in
+//! the workspace.
 //!
-//! **A pseudo-terminal** is what an interactive one needs. A shell prints
-//! no prompt, echoes nothing and offers no line editing unless
-//! `isatty(0)` is true, so `mirage run -- bash` is unusable on pipes. The
-//! PTY is allocated through [`pty_process`], which also owns the `unsafe`
-//! the setup requires: making the child a session leader and claiming the
-//! terminal has to happen between `fork` and `exec`, in a context where
-//! almost nothing is legal to call. Isolating that in a crate built for
-//! it is why every crate in this workspace can be
-//! `forbid(unsafe_code)` — an earlier version of mirage hand-rolled the
-//! same `pre_exec` here.
+//! Inheriting deletes all of it. An interactive `bash` works because its
+//! stdin *is* the terminal, not because mirage emulated one.
 //!
-//! Note that a PTY child is *also* in its own process group: `setsid`
-//! creates a new session, and with it a new process group led by the
-//! child. Group-kill therefore works identically for both.
+//! [`StdioMode::Capture`] is the exception, and exists for one reason:
+//! several ranks writing to one terminal are unreadable without labels.
+//! Capturing puts mirage back in the middle so it can prefix each chunk
+//! with the rank that produced it, at the price of stdin.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -67,7 +71,7 @@ use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
-use mirage_core::ctl::StdStream;
+use mirage_core::exec::StdStream;
 
 /// How long a process gets to exit after `SIGTERM` before `SIGKILL`.
 ///
@@ -206,94 +210,64 @@ impl ContainerProc {
 }
 
 /// How a process's standard streams are wired up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum StdioMode {
-    /// Separate pipes for stdin, stdout and stderr.
-    #[default]
-    Pipes,
-    /// A pseudo-terminal, sized `rows` x `cols`.
-    Tty {
-        /// Initial terminal height in character cells.
-        rows: u16,
-        /// Initial terminal width in character cells.
-        cols: u16,
-    },
-}
-
-/// A terminal size that is always usable.
 ///
-/// A zero dimension makes programs that divide by it misbehave, and it is
-/// what an unopened or non-terminal fd reports, so it reaches us easily
-/// from a client whose stdout is redirected.
-const fn sane_size(rows: u16, cols: u16) -> (u16, u16) {
-    (if rows == 0 { 24 } else { rows }, if cols == 0 { 80 } else { cols })
+/// Both modes are about *the caller's* terminal, because in this design
+/// the process that spawns a workload is always the process the user is
+/// sitting in front of. Mirage never allocates a pseudo-terminal: if the
+/// caller is on a terminal, an inherited fd already is one, and if the
+/// caller is a pipe, inheriting keeps the bytes exact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StdioMode {
+    /// The child inherits the caller's own stdout and stderr, writing to
+    /// the terminal directly with mirage not in the middle.
+    ///
+    /// `stdin` decides whether it also inherits the caller's input. Only
+    /// one process can meaningfully read a terminal, so exactly one rank
+    /// gets it; the rest read `/dev/null` and see an immediate EOF.
+    Inherit {
+        /// Whether this rank inherits the caller's stdin.
+        stdin: bool,
+    },
+    /// Separate pipes for stdout and stderr, so the caller can read,
+    /// label and forward the output itself. stdin is `/dev/null`.
+    ///
+    /// This is what `--capture-all` selects.
+    Capture,
 }
 
-/// The writable end of a process's input.
-#[derive(Debug)]
-pub enum ProcessInput {
-    /// The child's stdin pipe. Dropping it signals EOF.
-    Pipe(tokio::process::ChildStdin),
-    /// The terminal master. There is no way to "close" this to signal
-    /// EOF, so [`ProcessInput::send_eof`] writes the EOF character and
-    /// lets the line discipline do it.
-    Tty(Box<pty_process::OwnedWritePty>),
+impl Default for StdioMode {
+    fn default() -> Self {
+        Self::Inherit { stdin: false }
+    }
 }
 
-impl ProcessInput {
-    /// Write `data` to the process's input.
+impl StdioMode {
+    /// The mode for `rank` under a given capture setting.
     ///
-    /// # Errors
-    ///
-    /// Returns the underlying I/O error, typically a broken pipe once the
-    /// process has exited.
-    pub async fn write_all(&mut self, data: &[u8]) -> std::io::Result<()> {
-        use tokio::io::AsyncWriteExt as _;
-        match self {
-            Self::Pipe(stdin) => {
-                stdin.write_all(data).await?;
-                stdin.flush().await
-            }
-            Self::Tty(pty) => {
-                pty.write_all(data).await?;
-                pty.flush().await
-            }
+    /// Rank 0 is the one that gets the terminal's input: it is the rank a
+    /// user talks to, and the only one an interactive program is started
+    /// on.
+    #[must_use]
+    pub fn for_rank(rank: u32, capture_all: bool) -> Self {
+        if capture_all {
+            Self::Capture
+        } else {
+            Self::Inherit { stdin: rank == 0 }
         }
     }
 
-    /// Signal end-of-input.
-    ///
-    /// For a pipe that means closing it, which the caller does by
-    /// dropping this value. For a terminal there is nothing to close —
-    /// the master stays open as long as we hold it — so the EOF
-    /// *character* is written and the line discipline turns it into an
-    /// end-of-file for the reader. That is exactly what pressing Ctrl-D
-    /// does, and it is the only way to end `cat` on a terminal.
-    pub async fn send_eof(&mut self) -> std::io::Result<()> {
-        const EOT: u8 = 0x04;
-        match self {
-            // Closing is the caller's job (drop); nothing to write.
-            Self::Pipe(_) => Ok(()),
-            Self::Tty(_) => self.write_all(&[EOT]).await,
-        }
+    /// Whether output is pumped through mirage rather than written to
+    /// the terminal by the child itself.
+    #[must_use]
+    pub fn is_captured(self) -> bool {
+        matches!(self, Self::Capture)
     }
 
-    /// Tell the terminal its new size, so the program can redraw.
-    ///
-    /// A no-op for pipes, which have no geometry.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the resize ioctl fails.
-    pub fn resize(&self, rows: u16, cols: u16) -> std::io::Result<()> {
-        match self {
-            Self::Pipe(_) => Ok(()),
-            Self::Tty(pty) => {
-                let (rows, cols) = sane_size(rows, cols);
-                pty.resize(pty_process::Size::new(rows, cols))
-                    .map_err(std::io::Error::other)
-            }
-        }
+    /// Whether a process on this mode holds the caller's terminal, and
+    /// therefore needs to be made its foreground process group.
+    #[must_use]
+    pub fn owns_terminal(self) -> bool {
+        matches!(self, Self::Inherit { stdin: true })
     }
 }
 
@@ -315,9 +289,9 @@ pub struct Spawned {
     child: Child,
     /// Its pid, captured at spawn time.
     pid: u32,
-    /// The writable end of its input.
-    pub stdin: Option<ProcessInput>,
-    /// Tasks pumping stdout and stderr into the output channel.
+    /// Tasks pumping stdout and stderr into the output channel. Empty
+    /// for a child that inherited the caller's streams, which mirage
+    /// never reads.
     pumps: Vec<tokio::task::JoinHandle<()>>,
     /// Set when `child` is a container provider client, so termination
     /// reaches the workload inside the container instead of stopping at
@@ -407,10 +381,80 @@ const INHERITED_ENV: &[&str] = &[
 /// "command not found: foo" rather than "No such file or directory (os
 /// error 2)", which says nothing about *which* file.
 pub fn spawn(spec: &SpawnSpec, output: mpsc::Sender<OutputChunk>) -> Result<Spawned, String> {
-    match spec.stdio {
-        StdioMode::Pipes => spawn_piped(spec, output),
-        StdioMode::Tty { rows, cols } => spawn_on_tty(spec, output, rows, cols),
+    use std::process::Stdio;
+
+    let (stdin, stdout, stderr) = match spec.stdio {
+        StdioMode::Inherit { stdin } => (
+            if stdin { Stdio::inherit() } else { Stdio::null() },
+            Stdio::inherit(),
+            Stdio::inherit(),
+        ),
+        StdioMode::Capture => (Stdio::null(), Stdio::piped(), Stdio::piped()),
+    };
+
+    let mut cmd = Command::new(&spec.command);
+    cmd.args(&spec.args)
+        .stdin(stdin)
+        .stdout(stdout)
+        .stderr(stderr)
+        // Lead a new process group, always, so the whole descendant tree
+        // can be signalled as one. A workload that forks — a shell
+        // script, `torchrun`, an MPI launcher — would otherwise leave its
+        // grandchildren running when signalled, invisible and still
+        // holding the GPU socket and its ports. Safe API; the old design
+        // needed a `pre_exec` closure calling `setsid()` for this.
+        //
+        // It also means no group mirage signals is ever *mirage's own*,
+        // which is what keeps `kill(-pgid)` from reaching the shell the
+        // user started mirage from.
+        //
+        // The cost is that the child is not in the terminal's foreground
+        // process group, so reading the terminal would earn it a
+        // `SIGTTIN` and stop it. The rank that holds the terminal is
+        // therefore handed the terminal explicitly — see
+        // `mirage_ctl::run`'s terminal handoff, which is exactly what a
+        // shell does when it puts a job in the foreground.
+        .process_group(0)
+        // Backstop: if the owning task is dropped without going through
+        // `wait`/`terminate`, do not orphan the child.
+        .kill_on_drop(true);
+
+    if !spec.inherit_env {
+        cmd.env_clear();
     }
+    cmd.envs(resolved_env(spec));
+    if let Some(wd) = &spec.workdir {
+        cmd.current_dir(wd);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| spawn_error(&spec.command, &e))?;
+
+    // `id()` only returns `None` after the child has been waited on,
+    // which cannot have happened yet.
+    let pid = child.id().unwrap_or(0);
+
+    // Only a captured child has pipes to pump; an inheriting one writes
+    // to the terminal without mirage ever seeing the bytes.
+    let mut pumps = Vec::with_capacity(2);
+    if let Some(out) = child.stdout.take() {
+        pumps.push(tokio::spawn(pump(
+            out,
+            spec.node,
+            StdStream::Stdout,
+            output.clone(),
+        )));
+    }
+    if let Some(err) = child.stderr.take() {
+        pumps.push(tokio::spawn(pump(err, spec.node, StdStream::Stderr, output)));
+    }
+
+    Ok(Spawned {
+        child,
+        pid,
+        pumps,
+        container: spec.container.clone(),
+        exit: None,
+    })
 }
 
 /// The environment a process should see, given the spec.
@@ -452,124 +496,6 @@ fn spawn_error(command: &str, e: &std::io::Error) -> String {
     }
 }
 
-/// Spawn with separate pipes for stdin, stdout and stderr.
-fn spawn_piped(spec: &SpawnSpec, output: mpsc::Sender<OutputChunk>) -> Result<Spawned, String> {
-    use std::process::Stdio;
-
-    let mut cmd = Command::new(&spec.command);
-    cmd.args(&spec.args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // Lead a new process group so the whole descendant tree can be
-        // signalled as one. Safe API; no `pre_exec` required.
-        .process_group(0)
-        // Backstop: if the owning task is dropped without going through
-        // `wait`/`terminate`, do not orphan the child.
-        .kill_on_drop(true);
-
-    if !spec.inherit_env {
-        cmd.env_clear();
-    }
-    cmd.envs(resolved_env(spec));
-    if let Some(wd) = &spec.workdir {
-        cmd.current_dir(wd);
-    }
-
-    let mut child = cmd.spawn().map_err(|e| spawn_error(&spec.command, &e))?;
-
-    // `id()` only returns `None` after the child has been waited on,
-    // which cannot have happened yet.
-    let pid = child.id().unwrap_or(0);
-    let stdin = child.stdin.take().map(ProcessInput::Pipe);
-
-    let mut pumps = Vec::with_capacity(2);
-    if let Some(out) = child.stdout.take() {
-        pumps.push(tokio::spawn(pump(
-            out,
-            spec.node,
-            StdStream::Stdout,
-            output.clone(),
-        )));
-    }
-    if let Some(err) = child.stderr.take() {
-        pumps.push(tokio::spawn(pump(err, spec.node, StdStream::Stderr, output)));
-    }
-
-    Ok(Spawned {
-        child,
-        pid,
-        stdin,
-        pumps,
-        container: spec.container.clone(),
-        exit: None,
-    })
-}
-
-/// Spawn on a pseudo-terminal, so the process believes it has a terminal.
-///
-/// The child is made a session leader with the pty as its controlling
-/// terminal — which is what makes `isatty` true, job control work, and a
-/// shell print a prompt. All three of the child's standard streams point
-/// at the terminal, so its output arrives on one stream and is reported
-/// as [`StdStream::Stdout`].
-fn spawn_on_tty(
-    spec: &SpawnSpec,
-    output: mpsc::Sender<OutputChunk>,
-    rows: u16,
-    cols: u16,
-) -> Result<Spawned, String> {
-    let (pty, pts) = pty_process::open()
-        .map_err(|e| format!("could not allocate a pseudo-terminal: {e}"))?;
-    let (rows, cols) = sane_size(rows, cols);
-    pty.resize(pty_process::Size::new(rows, cols))
-        .map_err(|e| format!("could not size the pseudo-terminal: {e}"))?;
-
-    let mut cmd = pty_process::Command::new(&spec.command)
-        .args(&spec.args)
-        // Note the absence of `process_group(0)`. `pty_process` makes the
-        // child a session leader via `setsid`, which already creates a new
-        // process group led by the child — and calling `process_group(0)`
-        // as well would make it a group leader *before* exec, at which
-        // point `setsid` fails with EPERM and the child gets no
-        // controlling terminal at all.
-        .kill_on_drop(true);
-    if !spec.inherit_env {
-        cmd = cmd.env_clear();
-    }
-    cmd = cmd.envs(resolved_env(spec));
-    if let Some(wd) = &spec.workdir {
-        cmd = cmd.current_dir(wd);
-    }
-
-    let child = cmd
-        .spawn(pts)
-        .map_err(|e| match e {
-            pty_process::Error::Io(io) => spawn_error(&spec.command, &io),
-            other => format!("failed to spawn {} on a terminal: {other}", spec.command),
-        })?;
-    let pid = child.id().unwrap_or(0);
-
-    // Split the master: the read half feeds the output pump, the write
-    // half becomes the process's input and carries resizes.
-    let (read_pty, write_pty) = pty.into_split();
-    let pumps = vec![tokio::spawn(pump(
-        read_pty,
-        spec.node,
-        StdStream::Stdout,
-        output,
-    ))];
-
-    Ok(Spawned {
-        child,
-        pid,
-        stdin: Some(ProcessInput::Tty(Box::new(write_pty))),
-        pumps,
-        container: spec.container.clone(),
-        exit: None,
-    })
-}
-
 /// Read one of a child's streams to EOF, forwarding it in chunks.
 ///
 /// stdout and stderr are pumped by separate tasks so a workload that
@@ -599,10 +525,6 @@ where
                     return;
                 }
             }
-            // A terminal master reports EIO once the last process
-            // holding the slave exits — that is a PTY's version of EOF,
-            // not a failure, so it must not be surfaced as one.
-            Err(e) if e.raw_os_error() == Some(libc::EIO) => return,
             Err(e) => {
                 tracing::debug!(node, ?stream, "output stream ended: {e}");
                 return;
@@ -875,7 +797,7 @@ mod tests {
             args: args.iter().map(|s| (*s).to_string()).collect(),
             env: BTreeMap::new(),
             workdir: None,
-            stdio: StdioMode::Pipes,
+            stdio: StdioMode::Capture,
             inherit_env: false,
             container: None,
         }
@@ -1118,13 +1040,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stdin_reaches_the_process() {
+    async fn a_captured_process_gets_no_stdin_at_all() {
+        // `--capture-all` means mirage is reading the output, and there
+        // is no sensible way to share one terminal's input across ranks.
+        // `/dev/null` rather than an open-but-unwritten pipe is the
+        // point: a workload that reads to EOF — `cat`, `sort`, a launcher
+        // reading a manifest — must finish rather than block forever on
+        // input that can never arrive.
         let (tx, mut rx) = mpsc::channel(64);
         let mut child = spawn(&spec("/bin/cat", &[]), tx).unwrap();
-        let mut stdin = child.stdin.take().expect("stdin must be piped");
-        stdin.write_all(b"echoed\n").await.unwrap();
-        // Closing stdin is what makes `cat` exit.
-        drop(stdin);
 
         let collector = tokio::spawn(async move {
             let mut out = Vec::new();
@@ -1133,9 +1057,11 @@ mod tests {
             }
             out
         });
-        let exit = child.wait().await;
+        let exit = tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .expect("cat must see EOF immediately, not hang on an open pipe");
         assert_eq!(exit.code, 0);
-        assert_eq!(collector.await.unwrap(), b"echoed\n");
+        assert!(collector.await.unwrap().is_empty());
     }
 
     #[tokio::test]

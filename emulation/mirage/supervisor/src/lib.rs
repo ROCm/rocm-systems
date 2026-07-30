@@ -1,51 +1,53 @@
-//! `mirage_supervisor`: the in-process engine that owns every session.
+//! `mirage_supervisor`: the engine a `mirage run` is built out of.
 //!
-//! # What replaced what
+//! # One owner, no exceptions
 //!
-//! Mirage used to run a detached `mirage host` process per session. The
-//! CLI and that host communicated by writing and polling files: an exec
-//! was requested by dropping a `def.json` into a directory the host
-//! scanned every 50ms, its output arrived by tailing a file, its stdin
-//! was a FIFO, and its completion was a `status.json` the CLI polled for.
+//! Every process mirage starts is owned by the process that asked for it,
+//! and dies with it. `mirage run` owns its session's containers, its
+//! emulator daemon and its workload processes; a `mirage exec` in another
+//! terminal owns the processes *it* starts. Nothing is detached, nothing
+//! is inherited by init, and nothing has to be reclaimed later.
 //!
-//! That design leaked processes, and the reasons are worth stating
-//! because they shaped this one:
+//! That is a deliberate reversal. Mirage previously had a long-lived
+//! supervisor daemon owning every session, because sessions outlived the
+//! commands that created them; before that, a detached `mirage host` per
+//! session, with the filesystem as the channel to it. Both leaked, and
+//! for the same underlying reason: a process nobody is responsible for is
+//! a process nobody reaps.
 //!
-//! * **No single owner.** The host was detached from the CLI that spawned
-//!   it, so when the CLI exited the host was reparented to init. Nothing
-//!   was responsible for it, and nothing reaped it.
-//! * **Files outlive writers.** A `health.json` claiming `healthy: true`
-//!   says nothing about whether its author is alive, so the design needed
-//!   a heartbeat and a staleness ladder to *guess* — and a guess is not a
-//!   basis for deciding whether to kill something.
-//! * **Kill paths were open-loop.** Teardown signalled pids read from
-//!   files and then removed the directory. If a signal did not land, or a
-//!   grandchild had escaped the process group, nothing noticed: the state
-//!   was gone, so the leak was invisible.
+//! Three properties fall out of the current design, and each one used to
+//! need machinery to approximate:
 //!
-//! The supervisor inverts all three. Sessions are values in a map inside
-//! one process; every child process is owned by exactly one task that
-//! always waits on it; teardown is closed-loop and does not return until
-//! the process table agrees.
+//! * **Liveness is a fact, not an inference.** "Is this session alive?"
+//!   is answered by whether the owning process is alive, so there is no
+//!   heartbeat file, no staleness ladder, and no guessing.
+//! * **Teardown is closed-loop.** Destroying a session does not return
+//!   until every child has been waited on and every container removed.
+//! * **Nothing needs a cap.** Finished-exec eviction and bounded output
+//!   replay existed because a daemon ran forever; a process that exits
+//!   frees its memory by exiting.
 //!
 //! # Structure
 //!
-//! * [`SessionManager`] — the map of sessions, and the
-//!   [`MirageCtl`](mirage_core::ctl::MirageCtl) implementation over it.
-//! * [`session::Session`] — one session: profile, emulator runtime,
-//!   containers, execs, health.
+//! * [`Run`] — one session: bring-up, health, teardown.
+//! * [`session::Session`] — its profile, emulator runtime, containers and
+//!   execs.
 //! * [`exec::Exec`] — one command invocation's process grid.
-//! * [`output::OutputHub`] — replay-plus-live output fan-out.
+//! * [`spec`] — the shared mapping from a session description plus a
+//!   command to the processes that implement it.
 //! * [`process`] — spawning, supervising and reliably killing processes.
+//! * [`rpc`] — the socket a run serves so `mirage exec` can find it.
 
 pub mod exec;
-pub mod manager;
 pub mod output;
 pub mod process;
+pub mod rpc;
+pub mod run;
 pub mod session;
+pub mod spec;
 
 pub use exec::Exec;
-pub use manager::{ManagerConfig, SessionManager};
-pub use output::{OutputHub, Subscription};
-pub use process::{Exit, ProcessInput, SpawnSpec, Spawned, StdioMode};
+pub use process::{Exit, OutputChunk, SpawnSpec, Spawned, StdioMode};
+pub use run::Run;
 pub use session::Session;
+pub use spec::build_specs;

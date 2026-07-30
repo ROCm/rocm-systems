@@ -1,24 +1,18 @@
-//! `mirage` — a single executable that is both the CLI and the
-//! supervisor daemon.
+//! `mirage` — one executable, and no background anything.
 //!
-//! Top-level layout:
+//! Every subcommand is flattened in from [`mirage_ctl::CtlCmd`]:
+//! `profile`, `topology`, `agent`, `emulators`, `state`, `paths`, `run`
+//! and `exec`. There is no daemon to start, so there is no `mirage
+//! daemon`; there is no web UI, so there is no `mirage webui`.
 //!
-//! * `mirage <ctl-command>` — every control-plane subcommand
-//!   (`profile`, `topology`, `agent`, `emulators`, `session`, `exec`,
-//!   `state`, `run`, `attach`, `logs`, `paths`). These are flattened in
-//!   from [`mirage_ctl::CtlCmd`] and reach their sessions by talking to
-//!   the daemon over its Unix socket, auto-starting one if none is
-//!   running.
-//! * `mirage daemon` — runs the supervisor daemon in the foreground,
-//!   plus `stop`, `status` and `install` subcommands. `webui` is accepted
-//!   as an alias for compatibility.
+//! `mirage run` is the runtime. It brings a session up inside its own
+//! process, runs the command, and takes the session with it when it
+//! exits.
 
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use mirage_ctl::CtlCmd;
-use mirage_ctl::rpc_client::RpcClient;
-use mirage_daemon::DaemonArgs;
 
 // Link-only dependencies on the emulator backend crates. The binary
 // never names them: each crate registers itself into the emulator
@@ -59,22 +53,12 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 #[allow(clippy::large_enum_variant)]
 enum TopCmd {
-    /// Run the supervisor daemon, or manage a running one
-    /// (`stop`, `status`, `install`).
-    ///
-    /// The CLI starts one automatically when needed, so this is mainly
-    /// for running it in the foreground, inspecting it, or installing it
-    /// as a service.
-    #[command(alias = "webui")]
-    Daemon(DaemonArgs),
-
     /// Show version, copyright, and the third-party crates mirage is
     /// built from (with their licenses).
     About,
 
-    /// All control-plane subcommands (profile, topology, agent,
-    /// emulators, session, exec, state, run, attach, logs, paths) are
-    /// flattened in here.
+    /// Every other subcommand (profile, topology, agent, emulators,
+    /// state, run, exec, paths) is flattened in here.
     #[command(flatten)]
     Ctl(CtlCmd),
 }
@@ -96,18 +80,13 @@ fn main() -> ExitCode {
 /// `rocjitsu`-style `mirage [--config …] [--daemon] -- <app>` call that
 /// should be routed to `run`.
 const SUBCOMMANDS: &[&str] = &[
-    "webui",
-    "daemon",
     "profile",
     "topology",
     "agent",
     "emulators",
-    "session",
     "exec",
     "state",
     "run",
-    "attach",
-    "logs",
     "paths",
     "about",
     "help",
@@ -187,49 +166,19 @@ fn dropin_argv(args: Vec<String>) -> Vec<String> {
 
 fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
     match cli.command {
-        TopCmd::Daemon(args) => {
-            mirage_daemon::run(args)?;
-            Ok(ExitCode::from(0))
-        }
         TopCmd::About => {
             print_about();
             Ok(ExitCode::from(0))
         }
+        // Everything else, including `run`, happens right here in this
+        // process. There is no routing decision to make: no command
+        // reaches a session it does not own, because the only command
+        // that owns one is `run`, and the only command that borrows one
+        // — `exec` — dials it directly.
         TopCmd::Ctl(cmd) => {
             let json = cli.json;
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(async move {
-                match mirage_ctl::daemon_need(&cmd) {
-                    // Anything touching a session runs against the
-                    // daemon, which owns them. It is started on demand,
-                    // so a first-time user never has to know it exists.
-                    mirage_ctl::DaemonNeed::Always => {
-                        let ctl = RpcClient::connect().await?;
-                        mirage_ctl::dispatch(cmd, ctl, json).await
-                    }
-                    // `state purge` has to reach a *running* daemon to
-                    // stop its sessions, but starting one so it can be
-                    // told to exit is both pointless and, when
-                    // auto-start is disabled or the previous daemon
-                    // crashed, a hard failure that deletes nothing.
-                    mirage_ctl::DaemonNeed::IfRunning => {
-                        match RpcClient::connect_existing(&mirage_ctl::rpc_client::default_socket())
-                            .await
-                        {
-                            Ok(ctl) => mirage_ctl::dispatch(cmd, ctl, json).await,
-                            Err(_) => mirage_ctl::dispatch(cmd, mirage_ctl::LocalCtl, json).await,
-                        }
-                    }
-                    // Configuration and registry queries are answered
-                    // here. Starting a background daemon to read a
-                    // directory would be a surprise the user did not ask
-                    // for — and, in a test harness, a stray process in
-                    // the real user's runtime directory.
-                    mirage_ctl::DaemonNeed::Never => {
-                        mirage_ctl::dispatch(cmd, mirage_ctl::LocalCtl, json).await
-                    }
-                }
-            })
+            rt.block_on(mirage_ctl::dispatch(cmd, json))
         }
     }
 }

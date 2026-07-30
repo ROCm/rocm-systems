@@ -20,10 +20,12 @@ tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-pty-process = { version = "0.5.3", features = ["async"] }
+thiserror = { workspace = true }
+
 
 [dev-dependencies]
 tempfile = { workspace = true }
+inventory = { workspace = true }
 chrono = { workspace = true }
 mirage_rocjitsu = { workspace = true }
 mirage_builtin = { workspace = true }

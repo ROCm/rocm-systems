@@ -1,14 +1,19 @@
 //! Shared harness for the end-to-end CLI tests.
 //!
-//! Every test gets a private XDG root and therefore a private daemon,
-//! socket and config store. That isolation is what lets the suite run in
-//! parallel and lets a test make absolute claims — "no session exists",
-//! "no process is left running" — without another test's state making the
+//! Every test gets a private XDG root and therefore its own config store
+//! and run directory. That isolation is what lets the suite run in
+//! parallel and lets a test make absolute claims — "no run is live", "no
+//! process is left running" — without another test's state making the
 //! claim false.
 //!
-//! [`Env`] tears its daemon down on drop, including when a test fails and
-//! unwinds, so a failing assertion cannot leak a daemon or its workloads
-//! into the rest of the run.
+//! # There is nothing to tear down
+//!
+//! A `mirage run` is a foreground process, so a test owns its lifetime
+//! directly: it spawns one and kills it, or waits for it to exit. There
+//! is no daemon to stop on drop, no socket to unlink, and no way for a
+//! test that panics mid-assertion to strand a background process — the
+//! run is a child of the test binary, and [`Run`] kills it in its own
+//! `Drop`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, dead_code, unreachable_pub)]
 
@@ -18,33 +23,27 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-/// A private mirage installation: its own XDG root, socket and daemon.
+/// A private mirage installation: its own XDG root and config store.
 pub struct Env {
     dir: TempDir,
     config: PathBuf,
     runtime: PathBuf,
-    state: PathBuf,
-    socket: PathBuf,
     bin: PathBuf,
 }
 
 impl Env {
-    /// Create an isolated environment. No daemon is started yet; the
-    /// first command that needs one starts it.
+    /// Create an isolated environment.
+    ///
+    /// The XDG runtime root is kept shallow — directly under `TMPDIR`
+    /// rather than inside the test's tempdir — because a run's control
+    /// socket lives under it. `sun_path` is 108 bytes on Linux, and a
+    /// deep tempdir path plus `mirage/run/<session>.sock` can exceed it,
+    /// which presents as a baffling "invalid argument" at bind time.
     pub fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        // The socket lives outside the XDG runtime dir. Unix socket paths
-        // are limited to ~104 bytes, and a tempdir under a long
-        // `TMPDIR` plus `runtime/mirage/mirage.sock` can exceed it — a
-        // failure that presents as a baffling "invalid argument" at bind
-        // time. Keeping the socket shallow avoids it.
-        let socket = short_socket_path();
         Self {
-            config: root.join("config"),
-            runtime: root.join("runtime"),
-            state: root.join("state"),
-            socket,
+            config: dir.path().join("config"),
+            runtime: short_runtime_dir(),
             bin: PathBuf::from(env!("CARGO_BIN_EXE_mirage")),
             dir,
         }
@@ -55,9 +54,28 @@ impl Env {
         &self.bin
     }
 
-    /// This environment's control socket.
-    pub fn socket(&self) -> &Path {
-        &self.socket
+    /// This environment's XDG runtime root.
+    pub fn runtime(&self) -> &Path {
+        &self.runtime
+    }
+
+    /// The directory live runs put their sockets in.
+    pub fn run_socket_dir(&self) -> PathBuf {
+        self.runtime.join("mirage/run")
+    }
+
+    /// Session ids of every run currently serving a socket.
+    pub fn live_runs(&self) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(self.run_socket_dir()) else {
+            return Vec::new();
+        };
+        let mut ids: Vec<String> = entries
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "sock"))
+            .filter_map(|e| Some(e.path().file_stem()?.to_str()?.to_string()))
+            .collect();
+        ids.sort();
+        ids
     }
 
     /// The temp root.
@@ -70,34 +88,21 @@ impl Env {
         self.runtime.join("mirage/session").join(id)
     }
 
-    /// The daemon's log, useful in assertion messages.
-    pub fn daemon_log(&self) -> String {
-        std::fs::read_to_string(self.runtime.join("mirage/daemon.log")).unwrap_or_default()
-    }
-
     /// A `mirage` command wired to this environment.
     pub fn mirage(&self) -> Command {
         let mut c = Command::new(&self.bin);
         c.env("XDG_CONFIG_HOME", &self.config)
             .env("XDG_RUNTIME_DIR", &self.runtime)
-            .env("XDG_STATE_HOME", &self.state)
-            .env("MIRAGE_SOCKET", &self.socket)
-            // Auto-start must re-exec *this* binary, not whatever
-            // `mirage` happens to be installed on the machine.
-            .env("MIRAGE_BIN", &self.bin)
             .env_remove("MIRAGE_LOG")
             .env_remove("MIRAGE_CONFIG")
-            .env_remove("MIRAGE_RUNTIME")
-            .env_remove("MIRAGE_STATE")
-            .env_remove("MIRAGE_AUTOSTART");
+            .env_remove("MIRAGE_RUNTIME");
         c
     }
 
     /// The environment every mirage invocation in this test needs.
     ///
     /// Exposed separately from [`Env::mirage`] so a test that builds its
-    /// own command — one running on a pseudo-terminal, say — still gets
-    /// the same isolation.
+    /// own command still gets the same isolation.
     pub fn child_env(&self) -> Vec<(String, String)> {
         vec![
             (
@@ -108,12 +113,6 @@ impl Env {
                 "XDG_RUNTIME_DIR".to_string(),
                 self.runtime.display().to_string(),
             ),
-            (
-                "XDG_STATE_HOME".to_string(),
-                self.state.display().to_string(),
-            ),
-            ("MIRAGE_SOCKET".to_string(), self.socket.display().to_string()),
-            ("MIRAGE_BIN".to_string(), self.bin.display().to_string()),
         ]
     }
 
@@ -130,12 +129,11 @@ impl Env {
         let out = self.run(args);
         assert!(
             out.status.success(),
-            "`mirage {}` failed with {:?}\nstdout: {}\nstderr: {}\ndaemon log:\n{}",
+            "`mirage {}` failed with {:?}\nstdout: {}\nstderr: {}",
             args.join(" "),
             out.status.code(),
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr),
-            self.daemon_log()
         );
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
@@ -164,56 +162,109 @@ impl Env {
         ]);
     }
 
-    /// Start a session on `profile` and return its id.
-    pub fn start_session(&self, profile: &str, id: &str) -> String {
-        self.ok(&[
-            "session", "start", "--profile", profile, "--id", id, "--no-input",
-        ])
-        .trim()
-        .to_string()
-    }
-
-    /// Whether a daemon is currently serving this environment.
-    pub fn daemon_running(&self) -> bool {
-        let out = self.run(&["daemon", "status"]);
-        out.status.success()
-            && String::from_utf8_lossy(&out.stdout).starts_with("running")
-    }
-
-    /// The daemon's pid, if one is running.
-    pub fn daemon_pid(&self) -> Option<u32> {
-        let out = self.run(&["daemon", "status"]);
-        let text = String::from_utf8_lossy(&out.stdout);
-        text.lines()
-            .find_map(|l| l.strip_prefix("running   pid "))
-            .and_then(|p| p.trim().parse().ok())
-    }
-
-    /// Stop this environment's daemon and wait for it to go away.
+    /// Spawn a background `mirage run` and wait until it is serving.
     ///
-    /// Runs from `Drop`, including while a failed assertion is unwinding,
-    /// so it must not panic: a panic during unwinding aborts the process,
-    /// which takes down every test sharing this binary and loses the
-    /// original assertion message. `run` panics when it cannot spawn —
-    /// exactly what an EMFILE or a fork failure under the strain suite's
-    /// load produces — so spawn directly here and give up quietly.
-    pub fn stop_daemon(&self) {
-        let Ok(status) = self.mirage().args(["daemon", "status"]).output() else {
-            return;
-        };
-        let pid = String::from_utf8_lossy(&status.stdout)
-            .lines()
-            .find_map(|l| l.strip_prefix("running   pid "))
-            .and_then(|p| p.trim().parse::<u32>().ok());
-        let _ = self.mirage().args(["daemon", "stop"]).output();
-        let Some(pid) = pid else { return };
-        // `daemon stop` is acknowledged before the daemon exits, so wait
-        // for the process itself: a test asserting nothing leaked needs
-        // teardown to have actually finished.
-        let deadline = Instant::now() + Duration::from_secs(30);
-        while Instant::now() < deadline && pid_alive(pid) {
+    /// The returned [`Run`] owns the process: it is killed when the value
+    /// is dropped, so a test that panics cannot strand a session.
+    ///
+    /// `args` go before the `--`; `argv` is the command to run.
+    pub fn spawn_run(&self, args: &[&str], argv: &[&str]) -> Run {
+        let mut cmd = self.mirage();
+        cmd.arg("run")
+            .args(args)
+            .arg("--")
+            .args(argv)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let child = cmd.spawn().expect("spawning `mirage run`");
+        Run {
+            child: Some(child),
+            socket_dir: self.run_socket_dir(),
+        }
+    }
+}
+
+/// A background `mirage run`, killed when this value is dropped.
+pub struct Run {
+    child: Option<std::process::Child>,
+    socket_dir: PathBuf,
+}
+
+impl Run {
+    /// Wait until this run is serving its socket, and return its session
+    /// id.
+    ///
+    /// The socket appearing is the signal that the session is *ready*:
+    /// `mirage run` binds it only after bring-up succeeds, so a test that
+    /// gets an id here can exec into the session immediately.
+    pub fn await_ready(&mut self, timeout: Duration) -> String {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if let Some(child) = self.child.as_mut()
+                && let Ok(Some(status)) = child.try_wait()
+            {
+                panic!("`mirage run` exited before serving its socket: {status:?}");
+            }
+            if let Ok(entries) = std::fs::read_dir(&self.socket_dir)
+                && let Some(id) = entries
+                    .flatten()
+                    .filter(|e| e.path().extension().is_some_and(|x| x == "sock"))
+                    .find_map(|e| Some(e.path().file_stem()?.to_str()?.to_string()))
+            {
+                return id;
+            }
             std::thread::sleep(Duration::from_millis(20));
         }
+        panic!("`mirage run` did not start serving within {timeout:?}");
+    }
+
+    /// This run's pid, while it is alive.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.as_ref().map(std::process::Child::id)
+    }
+
+    /// Signal the run, as a user pressing Ctrl-C in its terminal would.
+    pub fn signal(&self, sig: nix::sys::signal::Signal) {
+        if let Some(pid) = self.pid() {
+            let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), sig);
+        }
+    }
+
+    /// Wait for the run to exit, returning its output.
+    pub fn wait(&mut self, timeout: Duration) -> Output {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.child.as_mut().map(std::process::Child::try_wait) {
+                Some(Ok(Some(_))) | None => break,
+                Some(Ok(None)) => {}
+                Some(Err(e)) => panic!("waiting on `mirage run`: {e}"),
+            }
+            assert!(
+                Instant::now() < deadline,
+                "`mirage run` did not exit within {timeout:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let child = self.child.take().expect("a run is waited on once");
+        child.wait_with_output().expect("collecting run output")
+    }
+
+    /// Stop the run and wait for it to go away.
+    pub fn kill(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+impl Drop for Run {
+    fn drop(&mut self) {
+        // Runs on the failure path too, so one failing test cannot leave
+        // a run (and its workloads and containers) behind.
+        self.kill();
     }
 }
 
@@ -225,11 +276,9 @@ impl Default for Env {
 
 impl Drop for Env {
     fn drop(&mut self) {
-        // Runs on the failure path too, so one failing test cannot leave
-        // a daemon (and its workloads) behind for the rest of the suite.
-        self.stop_daemon();
-        let _ = std::fs::remove_file(&self.socket);
-        let _ = std::fs::remove_file(self.socket.with_extension("lock"));
+        // The shallow runtime root lives outside the tempdir, so it is
+        // this type's job to remove it.
+        let _ = std::fs::remove_dir_all(&self.runtime);
     }
 }
 
@@ -264,9 +313,6 @@ pub fn test_emulator_available() -> bool {
             .args(["--json", "emulators"])
             .env("XDG_CONFIG_HOME", probe.path().join("config"))
             .env("XDG_RUNTIME_DIR", probe.path().join("runtime"))
-            .env("XDG_STATE_HOME", probe.path().join("state"))
-            .env("MIRAGE_SOCKET", probe.path().join("probe.sock"))
-            .env("MIRAGE_AUTOSTART", "0")
             .output();
         let Ok(output) = output else { return false };
         let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
@@ -331,17 +377,18 @@ an install that provides librocjitsu.so.\n\n\
     );
 }
 
-/// A short, unique socket path.
+/// A short, unique XDG runtime root.
 ///
-/// `sun_path` is a fixed-size array (108 bytes on Linux), so a socket
-/// nested inside a long tempdir path silently fails to bind. Tests that
-/// need a private daemon put their socket directly under `TMPDIR`.
-pub fn short_socket_path() -> PathBuf {
+/// `sun_path` is a fixed-size array (108 bytes on Linux), so a run socket
+/// nested inside a long tempdir path silently fails to bind. Putting the
+/// runtime root directly under `TMPDIR` keeps every socket well inside
+/// the limit.
+pub fn short_runtime_dir() -> PathBuf {
     use std::sync::atomic::{AtomicU32, Ordering};
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(tmp).join(format!(
-        "mrg-{}-{}.sock",
+        "mrg-{}-{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     ))

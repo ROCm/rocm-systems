@@ -17,16 +17,6 @@
 #                           runtime library is not discoverable.
 #
 # Options:
-#   * `MIRAGE_ENABLE_DAEMON`  (OFF)   — compile in the daemon's HTTP/WS
-#                                       API server (cargo feature
-#                                       `daemon`). The daemon itself is
-#                                       always built; this only adds its
-#                                       HTTP surface.
-#   * `MIRAGE_ENABLE_WEBUI`   (OFF)   — compile in the full web UI:
-#                                       the daemon plus the bundled
-#                                       dashboard SPA (cargo feature
-#                                       `webui`; requires the Node.js
-#                                       toolchain). Implies the daemon.
 #   * `MIRAGE_ALLOW_TEST_SKIP` (OFF)  — let the end-to-end suites report
 #                                       success when the `rocjitsu`
 #                                       runtime is missing and every
@@ -40,14 +30,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(mirage NONE)
 
-# Web UI is opt-in and off by default: a plain build/test never needs
-# Node.js or builds the daemon/dashboard crates.
-option(MIRAGE_ENABLE_DAEMON "Build the daemon's HTTP/WS API server" OFF)
-option(
-    MIRAGE_ENABLE_WEBUI
-    "Build the full web UI (daemon + dashboard SPA; needs Node.js)"
-    OFF
-)
 # HotSwap is a full LLVM + COMGR + ROCR source build, so it is opt-in. When ON,
 # cmake/Hotswap.cmake builds and stages the HotSwap artifacts mirage discovers.
 option(
@@ -90,23 +72,20 @@ if(MIRAGE_ALLOW_TEST_SKIP)
     )
 endif()
 
-# Select the cargo features for the (optional) web UI. `webui` pulls in
-# the daemon's HTTP surface plus the bundled SPA; `daemon` is just the
-# API server. Both are off by default; the emulator default is
-# `rocjitsu`.
-set(_mirage_feature_names)
-if(MIRAGE_ENABLE_WEBUI)
-    list(APPEND _mirage_feature_names "webui")
-    message(STATUS "mirage: web UI enabled (cargo --features webui)")
-elseif(MIRAGE_ENABLE_DAEMON)
-    list(APPEND _mirage_feature_names "daemon")
-    message(STATUS "mirage: daemon enabled (cargo --features daemon)")
-endif()
+# Cargo features. The only optional things left are the emulator
+# backends, and the default (`rocjitsu`) is what the suites run on, so a
+# plain build selects nothing here. Enable another backend with
+# `-DMIRAGE_CARGO_FEATURES=hotswap`.
+set(MIRAGE_CARGO_FEATURES
+    ""
+    CACHE STRING
+    "Extra cargo features (comma-separated)"
+)
 
 set(_mirage_features)
-if(_mirage_feature_names)
-    list(JOIN _mirage_feature_names "," _mirage_feature_arg)
-    set(_mirage_features "--features" "${_mirage_feature_arg}")
+if(MIRAGE_CARGO_FEATURES)
+    set(_mirage_features "--features" "${MIRAGE_CARGO_FEATURES}")
+    message(STATUS "mirage: cargo features: ${MIRAGE_CARGO_FEATURES}")
 endif()
 
 # The end-to-end suites run their sessions on the default `rocjitsu`

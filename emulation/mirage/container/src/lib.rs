@@ -24,6 +24,75 @@ use std::process::{Command, Stdio};
 use mirage_core::container::{ContainerState, NodeContainer};
 use mirage_core::profile::{ContainerizedDef, FileMount, PortMapping};
 
+/// Foreground process of a node container.
+///
+/// The container needs a PID 1 that simply stays alive: workloads are
+/// started from outside with `provider exec`, so the container's own
+/// entrypoint has no work to do. An earlier design ran
+/// `mirage host --rank N` here, which meant every container had a second
+/// mirage process inside it polling a bind-mounted directory.
+pub const CONTAINER_IDLE_COMMAND: &[&str] = &["sleep", "infinity"];
+
+/// How long a node container gets to report itself running before
+/// bring-up gives up on it.
+///
+/// Generous: the image is already pulled by this point, but a cold
+/// container runtime on a loaded machine can still take seconds to set up
+/// namespaces, mounts and the network.
+pub const NODE_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// A provider client owning one node container.
+///
+/// The container runs for exactly as long as this value is alive. That is
+/// the whole point of launching it in the foreground: there is no step
+/// where a container exists without something responsible for it, so a
+/// `mirage run` that dies — cleanly, by `SIGKILL`, or with its terminal —
+/// cannot leave one behind.
+#[derive(Debug)]
+pub struct NodeClient {
+    /// Rank this container hosts.
+    pub rank: u32,
+    /// Its container name.
+    pub name: String,
+    /// The provider client process. `None` once it has been killed.
+    child: Option<std::process::Child>,
+}
+
+impl NodeClient {
+    /// Stop the container by killing its provider client, and reap the
+    /// client so it does not become a zombie.
+    ///
+    /// Idempotent, and safe to call from a `Drop`: it never blocks on
+    /// anything but the client's own exit, which follows immediately from
+    /// the kill.
+    pub fn kill(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    /// Whether the provider client is still running.
+    ///
+    /// A client that has exited on its own means the container died
+    /// underneath the session — an OOM kill, an external `podman stop`,
+    /// a crashed engine — which the session reports as unhealthy rather
+    /// than discovering later through a failing exec.
+    pub fn alive(&mut self) -> bool {
+        match self.child.as_mut() {
+            Some(child) => matches!(child.try_wait(), Ok(None)),
+            None => false,
+        }
+    }
+}
+
+impl Drop for NodeClient {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
 /// Errors raised while driving a container provider.
 #[derive(Debug, thiserror::Error)]
 pub enum ContainerError {
@@ -55,6 +124,15 @@ pub enum ContainerError {
         code: i32,
         /// Captured stderr, trimmed.
         stderr: String,
+    },
+
+    /// A container was launched but never reported itself running.
+    #[error("container `{name}` did not start within {waited:?}")]
+    NotRunning {
+        /// Name of the container that failed to come up.
+        name: String,
+        /// How long mirage waited for it.
+        waited: std::time::Duration,
     },
 }
 
@@ -256,7 +334,16 @@ impl Engine {
     ) -> Vec<String> {
         let mut argv = vec![
             "run".to_string(),
-            "-d".to_string(),
+            // Not detached. The provider client stays in the foreground
+            // and mirage owns it as a child process, so the container's
+            // lifetime is bounded by the `mirage run` that asked for it
+            // rather than by whoever remembers to remove it later.
+            //
+            // `--rm` closes the other half: the container is deleted the
+            // moment it stops, however it stops. Between the two there is
+            // no state left behind by a run that crashed, was `SIGKILL`ed,
+            // or had its terminal closed.
+            "--rm".to_string(),
             "--name".to_string(),
             name.to_string(),
             "--hostname".to_string(),
@@ -333,22 +420,22 @@ impl Engine {
     /// command inside an already-running node container.
     ///
     /// `-i` keeps stdin open so input reaches the workload exactly as it
-    /// would for a non-containerised exec; `tty` additionally requests a
-    /// terminal inside the container, which is what an interactive
-    /// program needs to see `isatty`. Environment is injected explicitly
-    /// with `-e` rather than inherited from the host.
+    /// would for a non-containerised exec. Environment is injected
+    /// explicitly with `-e` rather than inherited from the host.
+    ///
+    /// There is deliberately no `-t`. Mirage allocates no
+    /// pseudo-terminal: the provider client inherits the caller's real
+    /// stdin, stdout and stderr, so if the caller is on a terminal the
+    /// workload already is too, and if it is not, asking the provider for
+    /// one would merge stderr into stdout and break redirection.
     pub fn exec_argv(
         container: &str,
         workdir: Option<&str>,
         env: &[(String, String)],
         command: &str,
         args: &[String],
-        tty: bool,
     ) -> Vec<String> {
         let mut argv = vec!["exec".to_string(), "-i".to_string()];
-        if tty {
-            argv.push("-t".to_string());
-        }
         if let Some(wd) = workdir {
             argv.push("-w".to_string());
             argv.push(wd.to_string());
@@ -366,7 +453,6 @@ impl Engine {
     /// Full argv including the provider binary for executing a command
     /// inside a node container. Convenience for callers that build a
     /// `Command` from a single vector.
-    #[allow(clippy::too_many_arguments)]
     pub fn exec_command_line(
         &self,
         container: &str,
@@ -374,10 +460,9 @@ impl Engine {
         env: &[(String, String)],
         command: &str,
         args: &[String],
-        tty: bool,
     ) -> Vec<String> {
         let mut full = vec![self.provider.clone()];
-        full.extend(Self::exec_argv(container, workdir, env, command, args, tty));
+        full.extend(Self::exec_argv(container, workdir, env, command, args));
         full
     }
 
@@ -535,8 +620,21 @@ impl Engine {
         self.checked(&argv)
     }
 
-    /// Launch a detached node container and return its id (the trimmed
-    /// stdout of `run -d`).
+    /// Launch a node container and return the provider client running it.
+    ///
+    /// The client is *not* detached: it is a child of this process, and
+    /// the caller owns it for as long as the container should live.
+    /// Dropping or killing it stops the container, and `--rm` then
+    /// removes it.
+    ///
+    /// Its standard streams go to `/dev/null`. The container's foreground
+    /// process is an idle placeholder — workloads arrive later via
+    /// `provider exec` — so it has nothing to say, and letting it write
+    /// to mirage's terminal would interleave provider chatter with the
+    /// workload output the user actually asked for.
+    ///
+    /// Returns as soon as the client has been spawned. The container is
+    /// not necessarily running yet; use [`Self::await_running`] for that.
     ///
     /// `host_gpus` requests host GPU access for the container; the
     /// group passthrough it implies is provider-specific (see
@@ -554,8 +652,11 @@ impl Engine {
         groups: &[String],
         env: &[(String, String)],
         labels: &[(String, String)],
-        command: &[String],
-    ) -> Result<String> {
+    ) -> Result<std::process::Child> {
+        let command: Vec<String> = CONTAINER_IDLE_COMMAND
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
         let argv = Self::run_argv(
             &self.provider,
             name,
@@ -568,10 +669,21 @@ impl Engine {
             groups,
             env,
             labels,
-            command,
+            &command,
         );
-        let out = self.output(&argv)?;
-        Ok(String::from_utf8_lossy(&out).trim().to_string())
+        spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(&argv)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: argv.clone(),
+            source,
+        })
     }
 
     /// Whether a container named `name` is currently running.
@@ -587,6 +699,35 @@ impl Engine {
         }
     }
 
+    /// Block until `name` reports itself running, or `timeout` elapses.
+    ///
+    /// A detached `run -d` returned only once the container existed, so
+    /// the next `exec` was guaranteed a target. A foreground client
+    /// returns immediately and the container comes up behind it, so that
+    /// guarantee has to be re-established explicitly — otherwise the
+    /// first exec races bring-up and fails with "no such container".
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ContainerError::NotRunning`] if the container has not
+    /// come up within `timeout`.
+    pub fn await_running(&self, name: &str, timeout: std::time::Duration) -> Result<()> {
+        const POLL: std::time::Duration = std::time::Duration::from_millis(50);
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if self.container_running(name) {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(ContainerError::NotRunning {
+                    name: name.to_string(),
+                    waited: timeout,
+                });
+            }
+            std::thread::sleep(POLL);
+        }
+    }
+
     /// Best-effort removal of a single container.
     pub fn rm(&self, name: &str) {
         let _ = self.status(&["rm".to_string(), "-f".to_string(), name.to_string()]);
@@ -598,8 +739,12 @@ impl Engine {
     }
 
     /// Pull the image, create the network, and launch one container per
-    /// rank, returning the [`ContainerState`] the host should persist
-    /// plus the per-rank container ids (the trimmed stdout of `run -d`).
+    /// rank, returning the [`ContainerState`] describing them plus the
+    /// provider clients that own them.
+    ///
+    /// The caller must keep the returned clients alive for as long as the
+    /// session lasts: each one *is* its container's lifetime. Dropping
+    /// them stops the containers, and `--rm` removes them.
     ///
     /// `host_gpus` requests host GPU access for every node container
     /// (the provider-specific group passthrough described on
@@ -608,15 +753,13 @@ impl Engine {
     ///
     /// `node_env(rank)` yields the environment for the node of that rank
     /// (mirage injects `MIRAGE_RANK`/`MIRAGE_HEAD_ADDR`/`MIRAGE_HEAD_PORT`
-    /// there). `node_command(rank)` yields the container's foreground
-    /// command for that rank (mirage runs the node's own `mirage host
-    /// --rank <n>`). `progress(phase)` is invoked before/after each step
+    /// there). `progress(phase)` is invoked before/after each step
     /// ([`BringUpPhase`]) so callers can surface detailed live status.
     /// On any failure the partially-created containers and network are
     /// torn down before returning the error, so a failed bring-up never
     /// leaks resources.
     #[allow(clippy::too_many_arguments)]
-    pub fn bring_up<F, G, P>(
+    pub fn bring_up<F, P>(
         &self,
         session: &mirage_core::session::SessionId,
         def: &ContainerizedDef,
@@ -624,12 +767,10 @@ impl Engine {
         node_count: u32,
         head_port: u16,
         mut node_env: F,
-        mut node_command: G,
         mut progress: P,
-    ) -> Result<(ContainerState, Vec<(u32, String)>)>
+    ) -> Result<(ContainerState, Vec<NodeClient>)>
     where
         F: FnMut(u32) -> Vec<(String, String)>,
-        G: FnMut(u32) -> Vec<String>,
         P: FnMut(BringUpPhase),
     {
         let network = mirage_core::container::network_name(session);
@@ -662,10 +803,15 @@ impl Engine {
             head_port,
             nodes: Vec::new(),
         };
-        let mut cids: Vec<(u32, String)> = Vec::new();
+        let mut clients: Vec<NodeClient> = Vec::new();
 
         // Helper that removes anything created so far on failure.
-        let rollback = |engine: &Engine, nodes: &[NodeContainer]| {
+        // Killing the clients first stops the containers; `rm -f` then
+        // cleans up any that `--rm` has not caught up with yet.
+        let rollback = |engine: &Engine, nodes: &[NodeContainer], clients: &mut Vec<NodeClient>| {
+            for c in clients.iter_mut() {
+                c.kill();
+            }
             for n in nodes {
                 engine.rm(&n.name);
             }
@@ -706,37 +852,47 @@ impl Engine {
                 name: name.clone(),
             });
             let env = node_env(rank);
-            let command = node_command(rank);
-            match self.launch_node(
-                &name,
-                &def.image,
-                Some(&network),
-                host_gpus,
-                &def.mounts,
-                &def.ports,
-                &devices,
-                &groups,
-                &env,
-                &labels,
-                &command,
-            ) {
-                Ok(cid) => {
+            let launched = self
+                .launch_node(
+                    &name,
+                    &def.image,
+                    Some(&network),
+                    host_gpus,
+                    &def.mounts,
+                    &def.ports,
+                    &devices,
+                    &groups,
+                    &env,
+                    &labels,
+                )
+                .and_then(|child| {
+                    // The client is spawned; the container is not up yet.
+                    // Wait for it here rather than letting the first exec
+                    // discover the race.
+                    self.await_running(&name, NODE_START_TIMEOUT).map(|()| child)
+                });
+            match launched {
+                Ok(child) => {
                     progress(BringUpPhase::NodeStarted {
                         rank,
                         total: node_count,
                         name: name.clone(),
                     });
-                    cids.push((rank, cid));
+                    clients.push(NodeClient {
+                        rank,
+                        name: name.clone(),
+                        child: Some(child),
+                    });
                     state.nodes.push(NodeContainer { rank, name });
                 }
                 Err(e) => {
-                    rollback(self, &state.nodes);
+                    rollback(self, &state.nodes, &mut clients);
                     return Err(e);
                 }
             }
         }
 
-        Ok((state, cids))
+        Ok((state, clients))
     }
 
     // ---- private command plumbing ---------------------------------
@@ -867,6 +1023,7 @@ mod tests {
             "#!/bin/sh\necho \"$@\" >> {log}\n\
              if [ \"$1\" = network ] && [ \"$2\" = inspect ]; then exit 1; fi\n\
              if [ \"$1\" = image ] && [ \"$2\" = inspect ]; then exit 1; fi\n\
+             if [ \"$1\" = inspect ]; then echo true; exit 0; fi\n\
              echo fake-cid-123\n",
             log = log.display()
         );
@@ -909,7 +1066,7 @@ mod tests {
         );
 
         let joined = argv.join(" ");
-        assert!(joined.starts_with("run -d --name mirage-s-node-0 --hostname mirage-s-node-0"));
+        assert!(joined.starts_with("run --rm --name mirage-s-node-0 --hostname mirage-s-node-0"));
         assert!(joined.contains("--security-opt seccomp=unconfined"));
         assert!(joined.contains("--group-add keep-groups"));
         assert!(joined.contains("--network mirage-s"));
@@ -1017,7 +1174,6 @@ mod tests {
             &env,
             "/bin/echo",
             &["hi".to_string(), "there".to_string()],
-            false,
         );
         assert_eq!(
             argv,
@@ -1037,21 +1193,19 @@ mod tests {
     }
 
     #[test]
-    fn exec_argv_requests_a_terminal_when_asked() {
-        // Without `-t` the program inside the container sees a pipe and
-        // an interactive shell prints no prompt, however the outside is
-        // wired up.
-        let argv = Engine::exec_argv("c", None, &[], "bash", &[], true);
-        assert_eq!(argv, vec!["exec", "-i", "-t", "c", "bash"]);
-
-        let piped = Engine::exec_argv("c", None, &[], "bash", &[], false);
-        assert!(!piped.contains(&"-t".to_string()), "{piped:?}");
+    fn exec_argv_never_requests_a_terminal() {
+        // Mirage allocates no pty and asks the provider for none either:
+        // the client inherits the caller's real terminal, so `-t` would
+        // only add a second one and merge stderr into stdout.
+        let argv = Engine::exec_argv("c", None, &[], "bash", &[]);
+        assert_eq!(argv, vec!["exec", "-i", "c", "bash"]);
+        assert!(!argv.contains(&"-t".to_string()), "{argv:?}");
     }
 
     #[test]
     fn exec_command_line_prefixes_provider() {
         let engine = Engine::with_provider("podman");
-        let line = engine.exec_command_line("c", None, &[], "ls", &[], false);
+        let line = engine.exec_command_line("c", None, &[], "ls", &[]);
         assert_eq!(line, vec!["podman", "exec", "-i", "c", "ls"]);
     }
 
@@ -1115,13 +1269,13 @@ mod tests {
     }
 
     #[test]
-    fn launch_node_returns_cid() {
+    fn launch_node_owns_the_client_and_never_detaches() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("log");
         let provider = mock_provider(dir.path(), &log);
         let engine = Engine::with_provider(provider.to_string_lossy().to_string());
 
-        let cid = engine
+        let mut child = engine
             .launch_node(
                 "mirage-s-node-0",
                 "img",
@@ -1133,15 +1287,44 @@ mod tests {
                 &[],
                 &[],
                 &labels(),
-                &["sleep".to_string(), "infinity".to_string()],
             )
             .unwrap();
-        assert_eq!(cid, "fake-cid-123");
+        // The mock exits on its own; wait for it so the argv it recorded
+        // is on disk before we read it.
+        child.wait().unwrap();
+
         let recorded = std::fs::read_to_string(&log).unwrap();
         assert!(
-            recorded.contains("run -d --name mirage-s-node-0"),
-            "{recorded:?}"
+            recorded.contains("run --rm --name mirage-s-node-0"),
+            "the container must be launched attached and self-removing: {recorded:?}"
         );
+        assert!(
+            !recorded.split_whitespace().any(|a| a == "-d"),
+            "a detached container outlives the run that owns it: {recorded:?}"
+        );
+    }
+
+    #[test]
+    fn killing_a_node_client_is_idempotent() {
+        // Teardown kills explicitly and `Drop` kills again; the second
+        // call must not panic or block on an already-reaped child.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        let mut client = NodeClient {
+            rank: 0,
+            name: "mirage-s-node-0".to_string(),
+            child: Some(
+                engine
+                    .launch_node("n", "img", None, false, &[], &[], &[], &[], &[], &labels())
+                    .unwrap(),
+            ),
+        };
+        client.kill();
+        assert!(!client.alive());
+        client.kill();
     }
 
     #[test]
@@ -1163,7 +1346,7 @@ mod tests {
         };
 
         let mut phases: Vec<BringUpPhase> = Vec::new();
-        let (state, cids) = engine
+        let (state, clients) = engine
             .bring_up(
                 &session,
                 &def,
@@ -1171,14 +1354,6 @@ mod tests {
                 2,
                 6000,
                 |rank| vec![("MIRAGE_RANK".to_string(), rank.to_string())],
-                |rank| {
-                    vec![
-                        "mirage".to_string(),
-                        "host".to_string(),
-                        "--rank".to_string(),
-                        rank.to_string(),
-                    ]
-                },
                 |phase| phases.push(phase),
             )
             .unwrap();
@@ -1189,9 +1364,13 @@ mod tests {
         assert_eq!(state.nodes.len(), 2);
         assert_eq!(state.nodes[0].name, "mirage-s-node-0");
         assert_eq!(state.nodes[1].name, "mirage-s-node-1");
-        assert_eq!(cids.len(), 2);
-        assert_eq!(cids[0], (0, "fake-cid-123".to_string()));
-        assert_eq!(cids[1], (1, "fake-cid-123".to_string()));
+        // One owned provider client per rank: the session's containers
+        // have an owner from the moment they exist.
+        assert_eq!(clients.len(), 2);
+        assert_eq!(clients[0].rank, 0);
+        assert_eq!(clients[0].name, "mirage-s-node-0");
+        assert_eq!(clients[1].rank, 1);
+        assert_eq!(clients[1].name, "mirage-s-node-1");
 
         let recorded = std::fs::read_to_string(&log).unwrap();
         assert!(recorded.contains("pull img:latest"), "{recorded:?}");
@@ -1204,11 +1383,11 @@ mod tests {
             "{recorded:?}"
         );
         assert!(
-            recorded.contains("run -d --name mirage-s-node-0"),
+            recorded.contains("run --rm --name mirage-s-node-0"),
             "{recorded:?}"
         );
         assert!(
-            recorded.contains("run -d --name mirage-s-node-1"),
+            recorded.contains("run --rm --name mirage-s-node-1"),
             "{recorded:?}"
         );
         assert!(recorded.contains("-e MIRAGE_RANK=0"), "{recorded:?}");

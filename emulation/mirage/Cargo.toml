@@ -10,11 +10,6 @@ path = "src/main.rs"
 [dependencies]
 mirage_core = { workspace = true }
 mirage_ctl = { workspace = true }
-# The supervisor daemon: owns every session in-process and serves the
-# control plane over a Unix socket. Not optional — it *is* the runtime.
-# Its HTTP/WebSocket dashboard is what's optional, behind the `daemon`
-# and `webui` features below.
-mirage_daemon = { workspace = true }
 # Emulator backends. Each is an optional, link-only dependency pulled in
 # by its matching feature below; the binary never references them
 # directly — they register themselves into the emulator registry via
@@ -25,30 +20,14 @@ mirage_hotswap = { workspace = true, optional = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
-tracing-subscriber = { workspace = true }
 
 [features]
 # All backends are compiled in by default. Disable a backend by
 # building with `--no-default-features` and selecting the subset you
 # want, e.g. `cargo build --no-default-features --features rocjitsu`.
-#
-# The web UI is OFF by default. Enable just the HTTP API server with
-# `--features daemon`, or the full dashboard (API + bundled SPA, needs
-# the Node.js toolchain) with `--features webui`.
 default = ["rocjitsu"]
 rocjitsu = ["dep:mirage_rocjitsu"]
 hotswap = ["dep:mirage_hotswap"]
-# Serve the HTTP/WebSocket API alongside the daemon's Unix-socket
-# control plane. No SPA, no Node.js.
-daemon = ["mirage_daemon/http"]
-# Everything in `daemon` plus the embedded dashboard SPA and its
-# client-side routing (via `mirage_daemon/webui` ->
-# `mirage_dashboard/webui`).
-webui = ["daemon", "mirage_daemon/webui"]
-
-[[test]]
-name = "daemon_e2e"
-required-features = ["webui"]
 
 [lints]
 workspace = true
@@ -65,16 +44,11 @@ tempfile = "3"
 serde = { workspace = true }
 serde_json = "1.0"
 chrono = { workspace = true }
-reqwest = { version = "0.12", features = ["json", "blocking"] }
-tokio-tungstenite = "0.24"
-futures-util = "0.3"
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 futures = { workspace = true }
-tungstenite = "0.24"
 libc = { workspace = true }
 nix = { workspace = true }
-pty-process = "0.5.3"
 
 [workspace]
 members = [
@@ -82,8 +56,6 @@ members = [
     "core",
     "container",
     "ctl",
-    "daemon",
-    "dashboard",
     "hotswap",
     "rocjitsu",
     "rocjitsu_sys",
@@ -164,7 +136,6 @@ mirage_core = { path = "core" }
 mirage_ctl = { path = "ctl" }
 mirage_builtin = { path = "builtin" }
 mirage_supervisor = { path = "supervisor" }
-mirage_daemon = { path = "daemon" }
 mirage_rocjitsu = { path = "rocjitsu" }
 mirage_hotswap = { path = "hotswap" }
 mirage_container = { path = "container" }

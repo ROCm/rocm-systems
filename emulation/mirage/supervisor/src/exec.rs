@@ -16,22 +16,24 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
-use mirage_core::ctl::StreamPacket;
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, NodeStatus};
 use nix::sys::signal::Signal;
-use tokio::sync::{Mutex as AsyncMutex, mpsc, watch};
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
-use crate::output::OutputHub;
-use crate::process::{ContainerProc, Exit, SpawnSpec, Spawned, signal_process_group_only, spawn};
+use crate::process::{ContainerProc, Exit, OutputChunk, SpawnSpec, Spawned, signal_process_group_only, spawn};
 
-/// Depth of the channel carrying output from the pump tasks to the hub.
+/// Depth of the channel carrying output from the pump tasks to whoever
+/// is printing it.
 ///
-/// Back-pressure is intentional: if the hub cannot keep up, the pumps
+/// Back-pressure is intentional: if the printer cannot keep up, the pumps
 /// slow down and eventually the workload blocks on a full pipe, which is
 /// exactly how a pipe is supposed to behave. Dropping output instead
-/// would make `mirage logs` quietly lossy.
+/// would make `--capture-all` quietly lossy.
+///
+/// Only reached under `--capture-all`; otherwise nothing is piped and the
+/// channel stays empty for the exec's whole life.
 const OUTPUT_CHANNEL_DEPTH: usize = 512;
 
 /// A running or finished exec.
@@ -41,8 +43,6 @@ pub struct Exec {
     pub id: ExecId,
     /// The definition it was started from.
     pub def: ExecDef,
-    /// Output fan-out for attach and logs.
-    pub hub: Arc<OutputHub>,
     /// Aggregate status, updated as processes start and exit.
     status: Mutex<ExecStatus>,
     /// Live pids by global rank, for signal delivery. Entries are removed
@@ -55,16 +55,8 @@ pub struct Exec {
     /// delivered through the provider instead. Fixed at start, because
     /// the mapping does not change over the exec's life.
     containers: BTreeMap<u32, ContainerProc>,
-    /// Rank 0's input, whether a pipe or a terminal. Async because
-    /// writing can block when the reader is slow, and blocking the
-    /// runtime there would stall every other session the daemon owns.
-    stdin: AsyncMutex<Option<crate::process::ProcessInput>>,
     /// Cancels every process supervisor belonging to this exec.
     cancel: CancellationToken,
-    /// The task moving pumped output into the hub. Awaited before the
-    /// exec is marked finished, so every byte a process wrote is
-    /// published before its `ExecExit`.
-    forwarder: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Set once the exec has fully finished and been cleaned up.
     ///
     /// A `watch` channel rather than a `Notify`. `Notify` is
@@ -87,8 +79,11 @@ impl Exec {
     /// the exec sees *why* rather than an exec that started and never
     /// ended. That distinction matters — an exec with no terminal state
     /// is one a client waits on forever.
-    pub fn start(id: ExecId, def: ExecDef, specs: Vec<SpawnSpec>, replay_bytes: usize) -> Arc<Self> {
-        let hub = Arc::new(OutputHub::new(replay_bytes));
+    pub fn start(
+        id: ExecId,
+        def: ExecDef,
+        specs: Vec<SpawnSpec>,
+    ) -> (Arc<Self>, mpsc::Receiver<OutputChunk>) {
         let (tx, rx) = mpsc::channel(OUTPUT_CHANNEL_DEPTH);
 
         let mut status = ExecStatus {
@@ -141,68 +136,42 @@ impl Exec {
         // Drop our sender so the forwarder ends once every pump is done.
         drop(tx);
 
-        // Only rank 0 gets an attached stdin: it is the process a user
-        // interacts with, and fanning one input stream out to several
-        // readers has no sensible semantics.
-        //
-        // Every other rank's input is taken and dropped immediately,
-        // which closes the pipe and gives that process EOF on stdin.
-        // Merely *not attaching* it is not the same thing: the handle
-        // would stay inside its `Spawned` for the process's whole life,
-        // holding the write end open, and a worker that reads to EOF —
-        // `cat`, `sort`, a launcher reading a manifest — would block
-        // forever on input that can never arrive, so the exec would never
-        // finish either.
-        let mut stdin = None;
-        for (node, child) in &mut spawned {
-            let input = child.stdin.take();
-            if *node == 0 {
-                stdin = input;
-            }
-        }
-
         let exec = Arc::new(Self {
             id,
             def,
-            hub: hub.clone(),
             status: Mutex::new(status),
             pids: Mutex::new(pids),
             containers,
-            stdin: AsyncMutex::new(stdin),
             cancel: CancellationToken::new(),
-            forwarder: Mutex::new(None),
             finished: watch::channel(false).0,
         });
 
-        // Report spawn failures on the exec's own output stream, where an
-        // attached client will actually see them.
+        // Report spawn failures on this process's own stderr. A rank that
+        // never started still has to say why: an exec that silently runs
+        // three of its four ranks is far worse than one that fails.
         for (node, reason) in failures {
-            hub.publish(StreamPacket::Output {
-                node,
-                stream: mirage_core::ctl::StdStream::Stderr,
-                data: format!("mirage: {reason}\n").into_bytes(),
-            });
-            hub.publish(StreamPacket::NodeExit {
-                node,
-                exit_code: Exit::NOT_FOUND,
-            });
+            eprintln!("mirage: node {node}: {reason}");
         }
-
-        // Forward pumped output into the hub, and remember the task so
-        // teardown can wait for it to drain.
-        *exec.forwarder.lock().unwrap_or_else(|e| e.into_inner()) =
-            Some(tokio::spawn(forward_output(rx, hub)));
 
         // Supervise the processes to completion.
         tokio::spawn(supervise(exec.clone(), spawned));
 
-        exec
+        (exec, rx)
     }
 
     /// A snapshot of the exec's aggregate status.
     #[must_use]
     pub fn status(&self) -> ExecStatus {
         self.lock_status().clone()
+    }
+
+    /// Rank 0's pid, while it is running.
+    ///
+    /// Rank 0 is the process that holds the caller's terminal, so this is
+    /// the process group the caller hands the terminal to.
+    #[must_use]
+    pub fn rank_zero_pid(&self) -> Option<u32> {
+        self.lock_pids().get(&0).copied()
     }
 
     /// Pids of the processes still running in this exec.
@@ -284,67 +253,6 @@ impl Exec {
         Ok(())
     }
 
-    /// Write to rank 0's stdin.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the exec has no stdin (its rank 0 failed to
-    /// spawn) or the pipe has been closed by the process exiting.
-    pub async fn write_stdin(&self, data: &[u8]) -> Result<()> {
-        let mut guard = self.stdin.lock().await;
-        let Some(stdin) = guard.as_mut() else {
-            return Err(MirageError::other(
-                "exec has no open stdin (the process has exited or never started)",
-            ));
-        };
-        match stdin.write_all(data).await {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                // A broken pipe means the process is gone. Drop the handle
-                // so the next write reports the clearer "no open stdin"
-                // rather than repeating an OS error.
-                *guard = None;
-                Err(MirageError::other(format!(
-                    "writing to exec stdin failed: {e}"
-                )))
-            }
-        }
-    }
-
-    /// Signal end-of-input to rank 0.
-    ///
-    /// For a pipe this closes it. For a terminal there is nothing to
-    /// close, so the EOF character is written and the line discipline
-    /// turns it into an end-of-file — which is what makes `cat` on a
-    /// terminal finish, exactly as pressing Ctrl-D would.
-    pub async fn close_stdin(&self) {
-        let mut guard = self.stdin.lock().await;
-        if let Some(input) = guard.as_mut()
-            && let Err(e) = input.send_eof().await
-        {
-            tracing::debug!("could not signal end-of-input: {e}");
-        }
-        guard.take();
-    }
-
-    /// Resize rank 0's terminal. A no-op on pipes.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the exec has no open input, or the resize
-    /// fails.
-    pub async fn resize(&self, rows: u16, cols: u16) -> Result<()> {
-        let guard = self.stdin.lock().await;
-        let Some(input) = guard.as_ref() else {
-            // Nothing to resize; the process has exited. Not worth an
-            // error: a resize is advisory and racing an exit is normal.
-            return Ok(());
-        };
-        input
-            .resize(rows, cols)
-            .map_err(|e| MirageError::other(format!("resizing the terminal failed: {e}")))
-    }
-
     /// Terminate every process and wait until the exec is fully finished.
     ///
     /// Returns only once every process has been reaped, so a caller that
@@ -372,17 +280,6 @@ impl Exec {
 
     fn lock_pids(&self) -> std::sync::MutexGuard<'_, BTreeMap<u32, u32>> {
         self.pids.lock().unwrap_or_else(|e| e.into_inner())
-    }
-}
-
-/// Move pumped output into the hub until every pump has finished.
-async fn forward_output(mut rx: mpsc::Receiver<crate::process::OutputChunk>, hub: Arc<OutputHub>) {
-    while let Some(chunk) = rx.recv().await {
-        hub.publish(StreamPacket::Output {
-            node: chunk.node,
-            stream: chunk.stream,
-            data: chunk.data,
-        });
     }
 }
 
@@ -420,10 +317,6 @@ async fn supervise(exec: Arc<Exec>, spawned: Vec<(u32, Spawned)>) {
                     },
                 );
             }
-            exec.hub.publish(StreamPacket::NodeExit {
-                node,
-                exit_code: exit.code,
-            });
             exit
         }));
     }
@@ -437,34 +330,6 @@ async fn supervise(exec: Arc<Exec>, spawned: Vec<(u32, Spawned)>) {
         }
     }
 
-    // Wait for the forwarder to drain before publishing the exit.
-    //
-    // Output travels pump task -> channel -> hub, which is two hops, and
-    // waiting on the child only guarantees the first. Without this, a
-    // process that writes and exits immediately can have its final bytes
-    // reach the hub *after* the `ExecExit` packet — and since a client is
-    // documented to stop reading at the exit, that output is simply lost.
-    // It shows up as flakiness under load, where the forwarder is less
-    // likely to be scheduled promptly.
-    //
-    // The wait is bounded: if a descendant outlived the exec and is still
-    // holding the write end of a pipe, its pump never ends and neither
-    // would this.
-    let forwarder = exec
-        .forwarder
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
-    if let Some(forwarder) = forwarder {
-        const DRAIN: std::time::Duration = std::time::Duration::from_secs(5);
-        if tokio::time::timeout(DRAIN, forwarder).await.is_err() {
-            tracing::debug!(
-                exec = %exec.id,
-                "output forwarder did not drain; a descendant is holding a pipe"
-            );
-        }
-    }
-
     let exit_code = {
         let mut status = exec.lock_status();
         let code = aggregate_exit_code(&status);
@@ -474,28 +339,6 @@ async fn supervise(exec: Arc<Exec>, spawned: Vec<(u32, Spawned)>) {
         code
     };
 
-    // Close stdin so nothing holds the write end of a pipe to a dead
-    // process, and so a later `session_stdin` gets a clear error.
-    //
-    // Bounded, like the two waits above and for the same reason. This
-    // takes the stdin lock, and on a terminal it also *writes* the EOF
-    // character — so a concurrent `session_stdin` blocked on a full pipe
-    // that a surviving grandchild is not reading would hold it forever.
-    // Everything downstream of here is what makes an exec finish, and
-    // `session_destroy` waits on that with no timeout of its own: a hang
-    // in this line is a permanently unkillable session.
-    const CLOSE_STDIN: std::time::Duration = std::time::Duration::from_secs(5);
-    if tokio::time::timeout(CLOSE_STDIN, exec.close_stdin())
-        .await
-        .is_err()
-    {
-        tracing::debug!(
-            exec = %exec.id,
-            "closing stdin did not complete; a descendant is holding the pipe"
-        );
-    }
-
-    exec.hub.finish(exit_code);
     // Publish completion. `send_replace` rather than `send`: the value
     // must be recorded even when nothing is currently waiting, so a
     // caller that asks later still sees it.
@@ -524,9 +367,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
-    use crate::output::DEFAULT_REPLAY_BYTES;
-    use mirage_core::ctl::StdStream;
-    use mirage_core::exec::ExecArgs;
+    use mirage_core::exec::{ExecArgs, StdStream};
     use mirage_core::session::SessionId;
     use std::time::Duration;
 
@@ -542,10 +383,7 @@ mod tests {
             },
             worker_exec: None,
             nproc_per_node: 1,
-            tty: false,
-            tty_rows: 0,
-            tty_cols: 0,
-            keep: true,
+            capture_all: true,
         }
     }
 
@@ -556,14 +394,49 @@ mod tests {
             args: vec!["-c".to_string(), script.to_string()],
             env: BTreeMap::new(),
             workdir: None,
-            stdio: crate::process::StdioMode::Pipes,
+            // Captured, so the tests can read what the processes wrote.
+            // The default — inheriting the test runner's own streams —
+            // would print the output instead of returning it.
+            stdio: crate::process::StdioMode::Capture,
             inherit_env: false,
             container: None,
         }
     }
 
-    fn start(specs: Vec<SpawnSpec>) -> Arc<Exec> {
-        Exec::start(ExecId::from_counter(0), def(), specs, DEFAULT_REPLAY_BYTES)
+    /// Start an exec and collect its output into a shared buffer.
+    ///
+    /// The collector runs for the exec's whole life, exactly as the CLI's
+    /// printer does, so these tests exercise the real path by which
+    /// output leaves a captured exec.
+    fn start(specs: Vec<SpawnSpec>) -> (Arc<Exec>, Collected) {
+        let (exec, rx) = Exec::start(ExecId::from_counter(0), def(), specs);
+        (exec, Collected::draining(rx))
+    }
+
+    /// Output gathered from a running exec, readable at any point.
+    #[derive(Clone)]
+    struct Collected(Arc<Mutex<Vec<OutputChunk>>>);
+
+    impl Collected {
+        fn draining(mut rx: mpsc::Receiver<OutputChunk>) -> Self {
+            let chunks = Arc::new(Mutex::new(Vec::new()));
+            let sink = chunks.clone();
+            tokio::spawn(async move {
+                while let Some(chunk) = rx.recv().await {
+                    sink.lock().unwrap_or_else(|e| e.into_inner()).push(chunk);
+                }
+            });
+            Self(chunks)
+        }
+
+        fn text(&self, stream: StdStream) -> String {
+            let guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            let mut buf = Vec::new();
+            for chunk in guard.iter().filter(|c| c.stream == stream) {
+                buf.extend_from_slice(&chunk.data);
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        }
     }
 
     async fn finish(exec: &Arc<Exec>) -> ExecStatus {
@@ -573,21 +446,9 @@ mod tests {
         exec.status()
     }
 
-    fn output_text(exec: &Arc<Exec>, stream: StdStream) -> String {
-        let mut buf = Vec::new();
-        for pkt in exec.hub.snapshot() {
-            if let StreamPacket::Output { stream: s, data, .. } = pkt
-                && s == stream
-            {
-                buf.extend_from_slice(&data);
-            }
-        }
-        String::from_utf8_lossy(&buf).into_owned()
-    }
-
     #[tokio::test]
     async fn a_single_process_exec_reports_its_exit_code() {
-        let exec = start(vec![spec(0, "exit 4")]);
+        let (exec, _out) = start(vec![spec(0, "exit 4")]);
         let status = finish(&exec).await;
         assert!(status.started);
         assert!(status.ended);
@@ -597,16 +458,16 @@ mod tests {
 
     #[tokio::test]
     async fn output_is_captured_per_stream() {
-        let exec = start(vec![spec(0, "echo out; echo err 1>&2")]);
+        let (exec, out) = start(vec![spec(0, "echo out; echo err 1>&2")]);
         finish(&exec).await;
-        assert_eq!(output_text(&exec, StdStream::Stdout).trim(), "out");
-        assert_eq!(output_text(&exec, StdStream::Stderr).trim(), "err");
+        assert_eq!(out.text(StdStream::Stdout).trim(), "out");
+        assert_eq!(out.text(StdStream::Stderr).trim(), "err");
     }
 
     #[tokio::test]
     async fn the_worst_exit_across_ranks_wins() {
         // Rank 0 succeeds, a worker fails: the exec must report failure.
-        let exec = start(vec![spec(0, "exit 0"), spec(1, "exit 9"), spec(2, "exit 0")]);
+        let (exec, _out) = start(vec![spec(0, "exit 0"), spec(1, "exit 9"), spec(2, "exit 0")]);
         let status = finish(&exec).await;
         assert_eq!(status.exit_code, Some(9));
         assert_eq!(status.nodes.len(), 3);
@@ -618,32 +479,31 @@ mod tests {
         // end, or an attached client waits forever.
         let mut bad = spec(0, "");
         bad.command = "definitely-not-a-real-binary".to_string();
-        let exec = start(vec![bad]);
+        let (exec, _out) = start(vec![bad]);
         let status = finish(&exec).await;
-        assert!(status.ended);
+        assert!(status.ended, "an exec that cannot start must still end");
         assert_eq!(status.exit_code, Some(127));
-        assert!(
-            output_text(&exec, StdStream::Stderr).contains("command not found"),
-            "the reason must reach the client: {:?}",
-            output_text(&exec, StdStream::Stderr)
-        );
+        // The reason itself goes to mirage's own stderr — it is a mirage
+        // diagnostic, not workload output, and the workload produced
+        // none.
+        assert_eq!(status.nodes[&0].pid, None);
     }
 
     #[tokio::test]
     async fn a_partial_spawn_failure_still_runs_the_others() {
         let mut bad = spec(1, "");
         bad.command = "definitely-not-a-real-binary".to_string();
-        let exec = start(vec![spec(0, "echo alive"), bad]);
+        let (exec, out) = start(vec![spec(0, "echo alive"), bad]);
         let status = finish(&exec).await;
         assert_eq!(status.nodes[&0].exit_code, Some(0));
         assert_eq!(status.nodes[&1].exit_code, Some(127));
         assert_eq!(status.exit_code, Some(127));
-        assert!(output_text(&exec, StdStream::Stdout).contains("alive"));
+        assert!(out.text(StdStream::Stdout).contains("alive"));
     }
 
     #[tokio::test]
     async fn terminate_ends_a_long_running_exec_and_reaps_it() {
-        let exec = start(vec![spec(0, "sleep 300"), spec(1, "sleep 300")]);
+        let (exec, _out) = start(vec![spec(0, "sleep 300"), spec(1, "sleep 300")]);
         // Let the processes actually start.
         tokio::time::sleep(Duration::from_millis(100)).await;
         let pids: Vec<u32> = exec.status().nodes.values().filter_map(|n| n.pid).collect();
@@ -664,7 +524,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminate_is_idempotent_and_safe_after_natural_exit() {
-        let exec = start(vec![spec(0, "exit 0")]);
+        let (exec, _out) = start(vec![spec(0, "exit 0")]);
         finish(&exec).await;
         // Terminating a finished exec must return immediately, not hang
         // waiting for a notification that will never come.
@@ -687,7 +547,7 @@ mod tests {
         // Hammering a very short exec puts the finish inside that window
         // often enough to catch a regression.
         for _ in 0..200 {
-            let exec = start(vec![spec(0, "exit 0")]);
+            let (exec, _out) = start(vec![spec(0, "exit 0")]);
             tokio::time::timeout(Duration::from_secs(10), exec.terminate())
                 .await
                 .expect("terminate must never hang");
@@ -697,7 +557,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_finished_returns_for_an_already_finished_exec() {
-        let exec = start(vec![spec(0, "exit 0")]);
+        let (exec, _out) = start(vec![spec(0, "exit 0")]);
         finish(&exec).await;
         // Level-triggered: asking after the fact must answer immediately
         // rather than waiting for an edge that has already passed.
@@ -710,7 +570,7 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_terminates_all_return() {
-        let exec = start(vec![spec(0, "sleep 300")]);
+        let (exec, _out) = start(vec![spec(0, "sleep 300")]);
         tokio::time::sleep(Duration::from_millis(100)).await;
         let waiters: Vec<_> = (0..8)
             .map(|_| {
@@ -729,7 +589,7 @@ mod tests {
 
     #[tokio::test]
     async fn signal_reaches_the_workload() {
-        let exec = start(vec![spec(0, "sleep 300")]);
+        let (exec, _out) = start(vec![spec(0, "sleep 300")]);
         tokio::time::sleep(Duration::from_millis(100)).await;
         exec.signal(libc::SIGTERM).await.unwrap();
         let status = finish(&exec).await;
@@ -738,7 +598,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_invalid_signal_number_is_rejected() {
-        let exec = start(vec![spec(0, "exit 0")]);
+        let (exec, _out) = start(vec![spec(0, "exit 0")]);
         let err = exec.signal(9999).await.unwrap_err();
         assert!(err.to_string().contains("invalid signal"), "{err}");
         finish(&exec).await;
@@ -746,180 +606,11 @@ mod tests {
 
     #[tokio::test]
     async fn signalling_a_finished_exec_is_harmless() {
-        let exec = start(vec![spec(0, "exit 0")]);
+        let (exec, _out) = start(vec![spec(0, "exit 0")]);
         finish(&exec).await;
         // Every pid has been retired, so this must reach nothing at all
         // rather than an unrelated process that reused the number.
         exec.signal(libc::SIGKILL).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn stdin_is_forwarded_to_rank_zero() {
-        let exec = Exec::start(
-            ExecId::from_counter(0),
-            def(),
-            vec![SpawnSpec {
-                node: 0,
-                command: "/bin/cat".to_string(),
-                args: vec![],
-                env: BTreeMap::new(),
-                workdir: None,
-                stdio: crate::process::StdioMode::Pipes,
-                inherit_env: false,
-                container: None,
-            }],
-            DEFAULT_REPLAY_BYTES,
-        );
-        exec.write_stdin(b"hello stdin\n").await.unwrap();
-        exec.close_stdin().await;
-        finish(&exec).await;
-        assert_eq!(output_text(&exec, StdStream::Stdout), "hello stdin\n");
-    }
-
-    #[tokio::test]
-    async fn workers_get_eof_on_stdin_rather_than_an_open_pipe() {
-        // Only rank 0 has an attached stdin, but "not attached" has to
-        // mean *closed*, not "held open by the daemon". A worker that
-        // reads to EOF — `cat`, `sort`, a launcher reading a manifest —
-        // otherwise blocks forever on input that can never arrive, and
-        // because the exec ends only when every rank does, the whole exec
-        // hangs and `session destroy` hangs with it.
-        let exec = Exec::start(
-            ExecId::from_counter(0),
-            def(),
-            vec![
-                spec(0, "exit 0"),
-                SpawnSpec {
-                    node: 1,
-                    command: "/bin/cat".to_string(),
-                    args: vec![],
-                    env: BTreeMap::new(),
-                    workdir: None,
-                    stdio: crate::process::StdioMode::Pipes,
-                    inherit_env: false,
-                    container: None,
-                },
-            ],
-            DEFAULT_REPLAY_BYTES,
-        );
-        let status = tokio::time::timeout(Duration::from_secs(30), exec.wait_finished())
-            .await
-            .map(|()| exec.status())
-            .expect("a worker reading stdin must see EOF, not hang");
-        assert_eq!(status.nodes[&1].exit_code, Some(0));
-    }
-
-    #[tokio::test]
-    async fn writing_stdin_after_exit_reports_an_error() {
-        let exec = start(vec![spec(0, "exit 0")]);
-        finish(&exec).await;
-        let err = exec.write_stdin(b"too late").await.unwrap_err();
-        assert!(err.to_string().contains("stdin"), "{err}");
-    }
-
-    #[tokio::test]
-    async fn attach_after_completion_replays_everything() {
-        let exec = start(vec![spec(0, "echo replayed; exit 2")]);
-        finish(&exec).await;
-        let sub = exec.hub.subscribe();
-        assert_eq!(sub.finished, Some(2));
-        let text: String = sub
-            .replay
-            .iter()
-            .filter_map(|p| match p {
-                StreamPacket::Output { data, .. } => {
-                    Some(String::from_utf8_lossy(data).into_owned())
-                }
-                _ => None,
-            })
-            .collect();
-        assert!(text.contains("replayed"), "{text:?}");
-    }
-
-    #[tokio::test]
-    async fn all_output_is_published_before_the_exit_packet() {
-        // A client is documented to stop reading at `ExecExit`, so any
-        // output published after it is lost. Output travels
-        // pump -> channel -> hub, and waiting on the child only covers
-        // the first hop; without waiting for the forwarder too, a process
-        // that writes and exits immediately loses its final bytes. It
-        // reproduces under load, so the loop matters.
-        for i in 0..40 {
-            let exec = start(vec![spec(0, &format!("echo marker-{i}"))]);
-            finish(&exec).await;
-
-            let packets = exec.hub.snapshot();
-            let exit_at = packets
-                .iter()
-                .position(|p| matches!(p, StreamPacket::ExecExit { .. }))
-                .expect("an exit must be published");
-            let text: String = packets[..exit_at]
-                .iter()
-                .filter_map(|p| match p {
-                    StreamPacket::Output { data, .. } => {
-                        Some(String::from_utf8_lossy(data).into_owned())
-                    }
-                    _ => None,
-                })
-                .collect();
-            assert!(
-                text.contains(&format!("marker-{i}")),
-                "round {i}: output was published after the exit packet, \
-                 so a client would never see it. Packets: {packets:?}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn a_late_attacher_sees_the_full_output_of_a_finished_exec() {
-        for i in 0..25 {
-            let exec = start(vec![spec(0, &format!("echo late-{i}"))]);
-            finish(&exec).await;
-
-            // Subscribing only after completion is the `mirage logs` path.
-            let sub = exec.hub.subscribe();
-            let text: String = sub
-                .replay
-                .iter()
-                .filter_map(|p| match p {
-                    StreamPacket::Output { data, .. } => {
-                        Some(String::from_utf8_lossy(data).into_owned())
-                    }
-                    _ => None,
-                })
-                .collect();
-            assert!(text.contains(&format!("late-{i}")), "round {i}: {text:?}");
-            assert!(sub.finished.is_some());
-        }
-    }
-
-    #[tokio::test]
-    async fn exactly_one_exec_exit_is_published() {
-        let exec = start(vec![spec(0, "exit 0"), spec(1, "exit 0")]);
-        finish(&exec).await;
-        let exits = exec
-            .hub
-            .snapshot()
-            .into_iter()
-            .filter(|p| matches!(p, StreamPacket::ExecExit { .. }))
-            .count();
-        assert_eq!(exits, 1);
-    }
-
-    #[tokio::test]
-    async fn every_rank_reports_a_node_exit() {
-        let exec = start(vec![spec(0, "exit 0"), spec(1, "exit 1"), spec(2, "exit 2")]);
-        finish(&exec).await;
-        let mut seen: Vec<(u32, i32)> = exec
-            .hub
-            .snapshot()
-            .into_iter()
-            .filter_map(|p| match p {
-                StreamPacket::NodeExit { node, exit_code } => Some((node, exit_code)),
-                _ => None,
-            })
-            .collect();
-        seen.sort_unstable();
-        assert_eq!(seen, vec![(0, 0), (1, 1), (2, 2)]);
-    }
 }

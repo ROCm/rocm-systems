@@ -295,7 +295,24 @@ pub struct SessionDef {
     pub created_at: DateTime<Utc>,
 }
 
-/// Aggregate view returned by `MirageCtl::session_state`.
+/// Parameters for creating a session.
+#[derive(Debug, Clone)]
+pub struct CreateSessionRequest {
+    /// Pre-validated id; if `None` mirage generates one.
+    pub id: Option<SessionId>,
+    /// Inline or by-name profile reference. Containerisation (image,
+    /// mounts, provider) travels with the profile via
+    /// [`crate::profile::ContainerizedDef`].
+    pub profile: MaybeRef<ProfileDef>,
+    /// Working directory used as the default cwd for execs.
+    pub workdir: String,
+    /// Run the emulator in out-of-process daemon mode for this session
+    /// instead of in-process emulation.
+    pub daemon: bool,
+}
+
+/// Aggregate view of a live session: what it was created from, how it is
+/// doing, and what it is running on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionState {
     /// The definition the session was created from.
