@@ -475,3 +475,24 @@ stream:
   Unit_hipStreamWriteValue_Increment_MultiStream_MultiDevice:
     <<: *level_2
     tags: [synchronization, multigpu]
+  Unit_hipSharedQueueAnyOrderOverlap_Independence:
+    <<: *level_2
+    tags: [synchronization, overlap]
+  Unit_hipSharedQueueAnyOrderOverlap_EventDependencyHonored:
+    <<: *level_2
+    tags: [synchronization, overlap]
+  Unit_hipSharedQueueAnyOrderOverlap_IntraStreamOrderAcrossActivation:
+    <<: *level_2
+    tags: [synchronization, overlap]
+  Unit_hipSharedQueueAnyOrderOverlap_InternalPredecessorOrdering:
+    <<: *level_2
+    tags: [synchronization, overlap]
+  Unit_hipSharedQueueAnyOrderOverlap_PriorityStreamsIndependence:
+    <<: *level_2
+    tags: [synchronization, overlap]
+  Unit_hipSharedQueueAnyOrderOverlap_NullStreamOrdering:
+    <<: *level_2
+    tags: [synchronization, overlap]
+  Unit_hipSharedQueueAnyOrderOverlap_GraphUnaffected:
+    <<: *level_2
+    tags: [synchronization, overlap]

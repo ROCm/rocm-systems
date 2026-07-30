@@ -3341,6 +3341,51 @@ int Device::SharedHwQueueRefCount(hsa_queue_t* queue, amd::CommandQueue::Priorit
 }
 
 // ================================================================================================
+bool Device::SharedQueueAnyOrderDecision(hsa_queue_t* queue, uint64_t my_slot, uint64_t my_prev_slot,
+                                         bool eligible_to_clear, bool treat_as_first) {
+  constexpr uint64_t kNone = std::numeric_limits<uint64_t>::max();
+  amd::ScopedLock l(shared_queue_barrier_lock_);
+  auto it = shared_queue_barrier_index_.find(queue);
+  const uint64_t largest = (it != shared_queue_barrier_index_.end()) ? it->second : kNone;
+
+  bool clear;
+  if (treat_as_first) {
+    // First-ever dispatch: no in-stream predecessor, so clearing only overlaps other streams' work.
+    clear = true;
+  } else if (my_prev_slot != kNone) {
+    // Clear only if a barrier landed between the previous dispatch and this one (predecessor fenced).
+    clear = (largest != kNone) && (largest > my_prev_slot) && (largest < my_slot);
+  } else {
+    // Predecessor exists but its slot is unknown: keep the bit to preserve ordering.
+    clear = false;
+  }
+  clear = clear && eligible_to_clear;
+
+  if (!clear) {
+    // Bit stays set: this dispatch becomes the queue's newest barrier.
+    if (largest == kNone || my_slot > largest) {
+      shared_queue_barrier_index_[queue] = my_slot;
+    }
+  }
+  return clear;
+}
+
+// ================================================================================================
+void Device::SharedQueueRecordBarrier(hsa_queue_t* queue, uint64_t slot) {
+  amd::ScopedLock l(shared_queue_barrier_lock_);
+  auto it = shared_queue_barrier_index_.find(queue);
+  if (it == shared_queue_barrier_index_.end() || slot > it->second) {
+    shared_queue_barrier_index_[queue] = slot;
+  }
+}
+
+// ================================================================================================
+void Device::SharedQueueResetBarrier(hsa_queue_t* queue) {
+  amd::ScopedLock l(shared_queue_barrier_lock_);
+  shared_queue_barrier_index_.erase(queue);
+}
+
+// ================================================================================================
 hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                         hsa_queue_t* preferred,
                                         const std::unordered_set<uint64_t>* excluded_ids) {
@@ -3576,6 +3621,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
       }
     }
     queue_extras_[queue] = extras;
+    // Fresh HW queue at this key: drop any stale barrier-slot state from a prior queue.
+    SharedQueueResetBarrier(queue);
   };
 
   if (!final_mask.empty()) {
