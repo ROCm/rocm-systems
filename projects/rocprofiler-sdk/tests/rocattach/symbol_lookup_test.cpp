@@ -34,11 +34,13 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -250,11 +252,102 @@ expect_malformed_mapped_elf_fails()
     std::filesystem::remove(path_buffer);
 }
 
+std::optional<size_t>
+find_build_id_descriptor(const std::vector<uint8_t>& bytes)
+{
+    auto header = Elf64_Ehdr{};
+    if(bytes.size() < sizeof(header)) return std::nullopt;
+    std::memcpy(&header, bytes.data(), sizeof(header));
+
+    for(auto idx = uint16_t{0}; idx < header.e_phnum; ++idx)
+    {
+        auto segment = Elf64_Phdr{};
+        auto offset  = header.e_phoff + (static_cast<size_t>(idx) * header.e_phentsize);
+        if(offset + sizeof(segment) > bytes.size()) return std::nullopt;
+        std::memcpy(&segment, bytes.data() + offset, sizeof(segment));
+        if(segment.p_type != PT_NOTE) continue;
+
+        auto cursor = static_cast<size_t>(segment.p_offset);
+        auto end    = cursor + static_cast<size_t>(segment.p_filesz);
+        if(end > bytes.size()) return std::nullopt;
+
+        while(cursor + sizeof(Elf64_Nhdr) <= end)
+        {
+            auto note = Elf64_Nhdr{};
+            std::memcpy(&note, bytes.data() + cursor, sizeof(note));
+
+            auto name_offset = cursor + sizeof(note);
+            auto descriptor  = name_offset + ((note.n_namesz + 3U) & ~3U);
+            auto next        = descriptor + ((note.n_descsz + 3U) & ~3U);
+            if(descriptor > end || next > end) break;
+
+            if(note.n_type == NT_GNU_BUILD_ID && note.n_namesz == 4 && note.n_descsz > 0 &&
+               std::memcmp(bytes.data() + name_offset, "GNU", 4) == 0)
+            {
+                return descriptor;
+            }
+            cursor = next;
+        }
+    }
+    return std::nullopt;
+}
+
+// Copies source and flips one byte inside its NT_GNU_BUILD_ID descriptor. The
+// result is byte-identical to the source everywhere else, so a rejection can
+// only come from the Build ID comparison and never from a layout difference.
+void
+copy_with_flipped_build_id(const std::string& source, const std::string& destination)
+{
+    auto input = std::ifstream{source, std::ios::binary};
+    auto bytes = std::vector<uint8_t>{std::istreambuf_iterator<char>{input},
+                                      std::istreambuf_iterator<char>{}};
+    input.close();
+
+    auto descriptor = find_build_id_descriptor(bytes);
+    if(!descriptor)
+    {
+        std::cerr << "could not locate a GNU Build ID note in " << source << '\n';
+        std::exit(1);
+    }
+    bytes.at(*descriptor) ^= 0xffU;
+
+    auto output = std::ofstream{destination, std::ios::binary | std::ios::trunc};
+    output.write(reinterpret_cast<const char*>(bytes.data()),
+                 static_cast<std::streamsize>(bytes.size()));
+    output.close();
+    if(!output)
+    {
+        std::cerr << "failed to write Build ID variant " << destination << '\n';
+        std::exit(1);
+    }
+}
+
+// Callers fork and then run dlopen and std::filesystem in the child, which is
+// only safe from a single-threaded parent. Should a dependency ever start a
+// thread at load time, fail loudly here rather than deadlock on the loader lock.
+void
+require_single_threaded(const char* context)
+{
+    auto status = std::ifstream{"/proc/self/status"};
+    auto line   = std::string{};
+    while(std::getline(status, line))
+    {
+        if(line.rfind("Threads:", 0) != 0) continue;
+        if(std::stoi(line.substr(line.find(':') + 1)) != 1)
+        {
+            std::cerr << context << " requires a single-threaded process, but " << line << '\n';
+            std::exit(1);
+        }
+        return;
+    }
+}
+
 void
 expect_root_fallback_validates_build_id(const loaded_library& source,
-                                        const loaded_library& different_build,
                                         const loaded_library& no_build_id)
 {
+    require_single_threaded("cross-process fallback test");
+
     auto path = std::filesystem::temp_directory_path() /
                 "librocprofiler-register.so.rocattach-replaced-XXXXXX";
     auto path_buffer = path.string();
@@ -323,10 +416,8 @@ expect_root_fallback_validates_build_id(const loaded_library& source,
 
     close(address_pipe[1]);
     close(done_pipe[0]);
-    setenv("ROCATTACH_TEST_DISABLE_MAP_FILES", "1", 1);
 
     auto cleanup = rocprofiler::common::scope_destructor{[&]() {
-        unsetenv("ROCATTACH_TEST_DISABLE_MAP_FILES");
         auto done         = char{};
         auto write_result = write(done_pipe[1], &done, sizeof(done));
         (void) write_result;
@@ -345,26 +436,31 @@ expect_root_fallback_validates_build_id(const loaded_library& source,
         std::exit(1);
     }
 
+    // Forces the /proc/<pid>/root fallback, which is the path a containerized
+    // target takes when /proc/<pid>/map_files is unavailable.
+    constexpr auto pathname_only = true;
+
     void* resolved = nullptr;
-    if(!rocprofiler::rocattach::find_symbol(child, resolved, path_buffer, ATTACH_SYMBOL_NAME) ||
+    if(!rocprofiler::rocattach::find_symbol(
+           child, resolved, path_buffer, ATTACH_SYMBOL_NAME, pathname_only) ||
        reinterpret_cast<uintptr_t>(resolved) != expected)
     {
         std::cerr << "find_symbol failed cross-process Build ID fallback validation\n";
         std::exit(1);
     }
 
-    // A layout-compatible pathname replacement with another Build ID must not
-    // be used to resolve a symbol from the still-mapped original.
+    // A byte-identical pathname replacement that differs only in its Build ID
+    // must not be used to resolve a symbol from the still-mapped original.
     auto replacement = path_buffer + ".replacement";
-    std::filesystem::copy_file(
-        different_build.path, replacement, std::filesystem::copy_options::overwrite_existing);
+    copy_with_flipped_build_id(source.path, replacement);
     std::filesystem::rename(replacement, path_buffer);
 
     resolved = nullptr;
-    if(rocprofiler::rocattach::find_symbol(child, resolved, path_buffer, ATTACH_SYMBOL_NAME))
+    if(rocprofiler::rocattach::find_symbol(
+           child, resolved, path_buffer, ATTACH_SYMBOL_NAME, pathname_only))
     {
-        std::cerr << "find_symbol unexpectedly accepted a replacement ELF with a different "
-                     "Build ID\n";
+        std::cerr << "find_symbol unexpectedly accepted a replacement ELF whose only difference "
+                     "is its Build ID\n";
         std::exit(1);
     }
 
@@ -372,7 +468,8 @@ expect_root_fallback_validates_build_id(const loaded_library& source,
         no_build_id.path, replacement, std::filesystem::copy_options::overwrite_existing);
     std::filesystem::rename(replacement, path_buffer);
     resolved = nullptr;
-    if(rocprofiler::rocattach::find_symbol(child, resolved, path_buffer, ATTACH_SYMBOL_NAME))
+    if(rocprofiler::rocattach::find_symbol(
+           child, resolved, path_buffer, ATTACH_SYMBOL_NAME, pathname_only))
     {
         std::cerr << "find_symbol unexpectedly accepted a replacement ELF without a Build ID\n";
         std::exit(1);
@@ -445,7 +542,7 @@ main(int argc, char** argv)
     }
     expect_ambiguous_basename_fails();
     expect_malformed_mapped_elf_fails();
-    expect_root_fallback_validates_build_id(libraries.at(0), libraries.at(3), libraries.at(4));
+    expect_root_fallback_validates_build_id(libraries.at(0), libraries.at(4));
 
     std::cout << "Test PASSED: target ELF resolver resolved exact mapped libraries and rejected "
                  "ambiguous and malformed mappings\n";

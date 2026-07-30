@@ -42,7 +42,6 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <filesystem>
@@ -66,10 +65,15 @@ namespace
 // ELFs cannot force unbounded memory use or symbol/hash traversal.
 constexpr auto MAX_TARGET_ELF_SIZE      = uint64_t{512} * 1024 * 1024;
 constexpr auto MAX_ELF_NOTE_SIZE        = uint64_t{1024} * 1024;
+constexpr auto MAX_TARGET_READ_SIZE     = uint64_t{1024} * 1024;
 constexpr auto MAX_BUILD_ID_SIZE        = uint64_t{4096};
-constexpr auto ELF_NOTE_ALIGNMENT       = uint64_t{4};
 constexpr auto MAX_DYNAMIC_SYMBOLS      = size_t{1} << 24;
 constexpr auto MAX_GNU_HASH_CHAIN_STEPS = size_t{1} << 24;
+
+// Note names and descriptors are padded to 4 bytes, not to the containing
+// segment's p_align. GNU emits .note.gnu.property in a PT_NOTE declaring
+// p_align 8 yet still pads the name to 4, so honoring p_align misparses it.
+constexpr auto ELF_NOTE_ALIGNMENT = uint64_t{4};
 
 struct memory_mapping
 {
@@ -115,11 +119,11 @@ struct mapped_object_key_hash
 
 struct target_elf
 {
-    std::string             path                      = {};
-    std::vector<uint8_t>    data                      = {};
-    ELFIO::elfio            reader                    = {};
-    std::vector<Elf64_Phdr> load_segments             = {};
-    bool                    metadata_identity_matches = false;
+    std::string             path                     = {};
+    std::vector<uint8_t>    data                     = {};
+    ELFIO::elfio            reader                   = {};
+    std::vector<Elf64_Phdr> load_segments            = {};
+    bool                    identity_matches_mapping = false;
 };
 
 std::optional<uint64_t>
@@ -146,6 +150,7 @@ checked_mul(uint64_t lhs, uint64_t rhs)
 uint64_t
 align_down(uint64_t value, uint64_t alignment)
 {
+    if(alignment == 0) return value;
     return value - (value % alignment);
 }
 
@@ -428,6 +433,10 @@ read_file_from_fd(int fd, const std::string& path, uint64_t size)
     return data;
 }
 
+// When require_identity_match is set, the file is rejected unless its device
+// and inode match what /proc/<pid>/maps reports for the mapping. The outcome is
+// recorded either way in target_elf::identity_matches_mapping; a file admitted
+// without that equality must later pass resolve_target_symbol's Build ID check.
 std::optional<target_elf>
 read_mapped_file(const std::string& path, const mapped_object& object, bool require_identity_match)
 {
@@ -477,33 +486,29 @@ read_mapped_file(const std::string& path, const mapped_object& object, bool requ
     auto data = read_file_from_fd(fd, path, static_cast<uint64_t>(st.st_size));
     if(!data || data->empty()) return std::nullopt;
 
-    auto elf                      = target_elf{};
-    elf.path                      = path;
-    elf.data                      = std::move(*data);
-    elf.metadata_identity_matches = identity_matches;
+    auto elf                     = target_elf{};
+    elf.path                     = path;
+    elf.data                     = std::move(*data);
+    elf.identity_matches_mapping = identity_matches;
     return elf;
 }
 
 std::optional<target_elf>
-open_target_elf(pid_t pid, const mapped_object& object)
+open_target_elf(pid_t pid, const mapped_object& object, bool pathname_only)
 {
-    // Prefer map_files because it identifies the exact file backing the
-    // mapping. If permissions block it, open the pathname through the target
-    // root. Device/inode equality remains the fast path; a mismatch requires
-    // matching GNU Build IDs.
-    const auto& mapping        = object.mappings.front();
-    auto        map_files_path = fmt::format("/proc/{}/map_files/{:x}-{:x}",
-                                      pid,
-                                      static_cast<uint64_t>(mapping.start),
-                                      static_cast<uint64_t>(mapping.end));
-#if defined(ROCPROFILER_ROCATTACH_TESTING)
-    auto disable_map_files = std::getenv("ROCATTACH_TEST_DISABLE_MAP_FILES") != nullptr;
-#else
-    constexpr auto disable_map_files = false;
-#endif
-    if(!disable_map_files)
+    // map_files is preferred because it names the exact file backing the
+    // mapping, so its device/inode must match. The target-root pathname is only
+    // a best guess at the same file, so it settles for a Build ID match.
+    if(!pathname_only)
     {
-        if(auto elf = read_mapped_file(map_files_path, object, true))
+        // Any mapping of this object will do: mapped_object groups mappings by
+        // device/inode, so all of their map_files links resolve to one file.
+        const auto& mapping        = object.mappings.front();
+        auto        map_files_path = fmt::format("/proc/{}/map_files/{:x}-{:x}",
+                                          pid,
+                                          static_cast<uint64_t>(mapping.start),
+                                          static_cast<uint64_t>(mapping.end));
+        if(auto elf = read_mapped_file(map_files_path, object, /*require_identity_match=*/true))
         {
             ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << map_files_path;
             return elf;
@@ -516,7 +521,7 @@ open_target_elf(pid_t pid, const mapped_object& object)
         auto root_path = (std::filesystem::path{fmt::format("/proc/{}/root", pid)} /
                           std::filesystem::path{target_path}.relative_path())
                              .string();
-        if(auto elf = read_mapped_file(root_path, object, false))
+        if(auto elf = read_mapped_file(root_path, object, /*require_identity_match=*/false))
         {
             ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << root_path;
             return elf;
@@ -573,71 +578,44 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
     auto page_size =
         (page_size_value > 0) ? static_cast<uint64_t>(page_size_value) : uint64_t{4096};
 
-    auto load_segment_is_mapped = [&](const Elf64_Phdr& segment, uint64_t bias) {
-        if(segment.p_filesz == 0) return true;
-
-        auto file_page    = align_down(segment.p_offset, page_size);
-        auto virtual_page = align_down(segment.p_vaddr, page_size);
-        auto runtime_page = checked_add(bias, virtual_page);
-        if(!runtime_page) return false;
-
-        return std::any_of(
-            object.mappings.begin(), object.mappings.end(), [&](const auto& mapping) {
-                if(*runtime_page < mapping.start || *runtime_page >= mapping.end) return false;
-
-                auto mapping_delta = *runtime_page - mapping.start;
-                auto mapped_offset = checked_add(mapping.file_offset, mapping_delta);
-                return mapped_offset && *mapped_offset == file_page;
-            });
-    };
-
-    auto candidates = std::vector<uint64_t>{};
-    for(const auto& mapping : object.mappings)
+    auto first_load_segment = std::min_element(
+        elf.load_segments.begin(), elf.load_segments.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.p_vaddr < rhs.p_vaddr;
+        });
+    if(first_load_segment == elf.load_segments.end())
     {
-        for(const auto& segment : elf.load_segments)
-        {
-            if(segment.p_filesz == 0) continue;
-            auto file_end = checked_add(segment.p_offset, segment.p_filesz);
-            if(!file_end) continue;
-            auto file_page_begin = align_down(segment.p_offset, page_size);
-            auto file_page_end   = align_up(*file_end, page_size);
-            if(!file_page_end || mapping.file_offset < file_page_begin ||
-               mapping.file_offset >= *file_page_end)
-            {
-                continue;
-            }
-
-            auto virtual_page = align_down(segment.p_vaddr, page_size);
-            auto relative     = checked_add(virtual_page, mapping.file_offset - file_page_begin);
-            auto candidate = relative ? checked_sub(static_cast<uint64_t>(mapping.start), *relative)
-                                      : std::nullopt;
-            if(!candidate) continue;
-
-            // A valid loader instance must account for every file-backed
-            // PT_LOAD. Other mappings of the same inode are unrelated to that
-            // instance and must not invalidate an otherwise unique bias.
-            auto all_load_segments_mapped = std::all_of(
-                elf.load_segments.begin(), elf.load_segments.end(), [&](const auto& load) {
-                    return load_segment_is_mapped(load, *candidate);
-                });
-            if(all_load_segments_mapped &&
-               std::find(candidates.begin(), candidates.end(), *candidate) == candidates.end())
-            {
-                candidates.emplace_back(*candidate);
-            }
-        }
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Target ELF has no PT_LOAD segments: "
+                   << object.path;
+        return std::nullopt;
     }
 
-    if(candidates.size() != 1)
+    auto first_mapping        = object.mappings.front();
+    auto segment_file_page    = align_down(first_load_segment->p_offset, page_size);
+    auto segment_virtual_page = align_down(first_load_segment->p_vaddr, page_size);
+    // Match the maps entry to the PT_LOAD segment by file page before using it
+    // to derive the ET_DYN load bias.
+    if(first_mapping.file_offset != segment_file_page)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not calculate a unique load bias for "
-                   << object.path << " from its PT_LOAD segments and mappings";
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] First target mapping for " << object.path
+                   << " has file offset 0x" << std::hex << first_mapping.file_offset
+                   << ", but the first PT_LOAD segment starts at file page 0x" << segment_file_page
+                   << std::dec;
+        return std::nullopt;
+    }
+
+    // For ET_DYN shared objects, load bias is runtime start minus page-aligned
+    // segment virtual address.
+    auto bias = checked_sub(static_cast<uint64_t>(first_mapping.start), segment_virtual_page);
+    if(!bias)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid target mapping/segment pair for "
+                   << object.path << ": mapping start is below segment virtual page";
         return std::nullopt;
     }
 
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Calculated target load bias for " << object.path
-               << " as 0x" << std::hex << candidates.front() << std::dec;
-    return candidates.front();
+               << " as 0x" << std::hex << *bias << std::dec;
+    return bias;
 }
 
 std::optional<std::vector<uint8_t>>
@@ -668,11 +646,12 @@ parse_gnu_build_id(const uint8_t* data, size_t size)
                                std::memcmp(data + name_offset, "GNU", 4) == 0;
         if(is_gnu_build_id)
         {
-            // Multiple Build ID notes are ambiguous and should not be used
-            // to relax filesystem identity checks.
-            if(found) return std::nullopt;
-            result.assign(data + cursor, data + cursor + header.n_descsz);
-            found = true;
+            auto build_id = std::vector<uint8_t>(data + cursor, data + cursor + header.n_descsz);
+            // Repeated notes carrying the same Build ID are consistent. Notes
+            // that disagree are ambiguous and must not relax identity checks.
+            if(found && result != build_id) return std::nullopt;
+            result = std::move(build_id);
+            found  = true;
         }
         cursor += *desc_size;
     }
@@ -699,34 +678,51 @@ note_is_file_backed_load(const target_elf& elf, const Elf64_Phdr& note)
     });
 }
 
+// Walks the usable PT_NOTE segments and returns the Build ID they agree on.
+// read_note supplies the bytes of one note segment and returns nullopt when
+// they cannot be obtained from that source.
+template <typename ReadNoteT>
 std::optional<std::vector<uint8_t>>
-build_id_from_file(const target_elf& elf)
+unique_gnu_build_id(const target_elf& elf, ReadNoteT&& read_note)
 {
-    auto result = std::vector<uint8_t>{};
-    auto found  = false;
+    auto result = std::optional<std::vector<uint8_t>>{};
 
     for(const auto& segment : elf.reader.segments)
     {
         if(segment == nullptr || segment->get_type() != PT_NOTE) continue;
 
         auto note = to_phdr(*segment);
+        // Bounds every read of this note, including the pointer arithmetic in
+        // the file-backed read_note, and keeps both sources describing the same
+        // bytes so their Build IDs are comparable.
         if(note.p_filesz == 0 || note.p_filesz > MAX_ELF_NOTE_SIZE ||
+           note.p_memsz < note.p_filesz ||
            !has_range(elf.data.size(), note.p_offset, note.p_filesz) ||
            !note_is_file_backed_load(elf, note))
         {
             continue;
         }
 
-        auto build_id =
-            parse_gnu_build_id(elf.data.data() + note.p_offset, static_cast<size_t>(note.p_filesz));
+        auto note_data = read_note(note);
+        if(!note_data) continue;
+
+        auto build_id = parse_gnu_build_id(note_data->data(), note_data->size());
         if(!build_id) continue;
-        if(found) return std::nullopt;
+
+        if(result && *result != *build_id) return std::nullopt;
         result = std::move(*build_id);
-        found  = true;
     }
 
-    if(!found) return std::nullopt;
     return result;
+}
+
+std::optional<std::vector<uint8_t>>
+build_id_from_file(const target_elf& elf)
+{
+    return unique_gnu_build_id(elf, [&elf](const Elf64_Phdr& note) {
+        const auto* begin = elf.data.data() + note.p_offset;
+        return std::optional<std::vector<uint8_t>>{std::in_place, begin, begin + note.p_filesz};
+    });
 }
 
 bool
@@ -744,7 +740,7 @@ range_is_readable_mapping(const mapped_object& object, uint64_t address, uint64_
 std::optional<std::vector<uint8_t>>
 read_target_memory(pid_t pid, uint64_t address, size_t size)
 {
-    if(size == 0 || size > MAX_ELF_NOTE_SIZE || address > std::numeric_limits<uintptr_t>::max())
+    if(size == 0 || size > MAX_TARGET_READ_SIZE || !checked_add(address, size))
     {
         return std::nullopt;
     }
@@ -754,10 +750,7 @@ read_target_memory(pid_t pid, uint64_t address, size_t size)
     while(read < size)
     {
         auto remote_address = checked_add(address, read);
-        if(!remote_address || *remote_address > std::numeric_limits<uintptr_t>::max())
-        {
-            return std::nullopt;
-        }
+        if(!remote_address) return std::nullopt;
 
         auto local = iovec{data.data() + read, size - read};
         auto remote =
@@ -784,39 +777,14 @@ build_id_from_target_memory(pid_t                pid,
                             const mapped_object& object,
                             uint64_t             load_bias)
 {
-    auto result = std::vector<uint8_t>{};
-    auto found  = false;
-
-    for(const auto& segment : elf.reader.segments)
-    {
-        if(segment == nullptr || segment->get_type() != PT_NOTE) continue;
-
-        auto note = to_phdr(*segment);
-        if(note.p_filesz == 0 || note.p_filesz > MAX_ELF_NOTE_SIZE ||
-           note.p_memsz < note.p_filesz || !note_is_file_backed_load(elf, note))
-        {
-            continue;
-        }
-
+    return unique_gnu_build_id(elf, [&](const Elf64_Phdr& note) {
         auto runtime_address = checked_add(load_bias, note.p_vaddr);
         if(!runtime_address || !range_is_readable_mapping(object, *runtime_address, note.p_filesz))
         {
-            continue;
+            return std::optional<std::vector<uint8_t>>{};
         }
-
-        auto note_data =
-            read_target_memory(pid, *runtime_address, static_cast<size_t>(note.p_filesz));
-        if(!note_data) continue;
-
-        auto build_id = parse_gnu_build_id(note_data->data(), note_data->size());
-        if(!build_id) continue;
-        if(found) return std::nullopt;
-        result = std::move(*build_id);
-        found  = true;
-    }
-
-    if(!found) return std::nullopt;
-    return result;
+        return read_target_memory(pid, *runtime_address, static_cast<size_t>(note.p_filesz));
+    });
 }
 
 bool
@@ -1093,14 +1061,17 @@ address_in_executable_mapping(const mapped_object& object, uint64_t address)
 }
 
 std::optional<uint64_t>
-resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view symbol)
+resolve_target_symbol(pid_t                pid,
+                      const mapped_object& object,
+                      std::string_view     symbol,
+                      bool                 pathname_only)
 {
-    auto elf = open_target_elf(pid, object);
+    auto elf = open_target_elf(pid, object, pathname_only);
     if(!elf || !parse_target_elf(*elf)) return std::nullopt;
 
     auto load_bias = calculate_load_bias(*elf, object);
     if(!load_bias) return std::nullopt;
-    if(!elf->metadata_identity_matches && !build_id_matches_target(pid, *elf, object, *load_bias))
+    if(!elf->identity_matches_mapping && !build_id_matches_target(pid, *elf, object, *load_bias))
     {
         return std::nullopt;
     }
@@ -1139,14 +1110,18 @@ resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view s
 }  // namespace
 
 bool
-find_symbol(int target_pid, void*& addr, const std::string& library, const std::string& symbol)
+find_symbol(int                target_pid,
+            void*&             addr,
+            const std::string& library,
+            const std::string& symbol,
+            bool               pathname_only)
 {
     addr = nullptr;
 
     auto object = select_unique_mapped_object(target_pid, library);
     if(!object) return false;
 
-    if(auto resolved = resolve_target_symbol(target_pid, *object, symbol))
+    if(auto resolved = resolve_target_symbol(target_pid, *object, symbol, pathname_only))
     {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         addr = reinterpret_cast<void*>(*resolved);

@@ -88,8 +88,10 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
     target_compile_definitions(rocattach-symbol-lookup-fixture-shifted
                                PRIVATE ROCATTACH_FIXTURE_PADDED=1)
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-no-build-id 7 "")
-    set_property(TARGET rocattach-symbol-lookup-fixture-no-build-id
-                 PROPERTY LINK_OPTIONS "LINKER:--build-id=none")
+    # rocattach_add_symbol_lookup_fixture links with "--build-id". This appends
+    # after it, and the last --build-id flag on the link line wins.
+    target_link_options(rocattach-symbol-lookup-fixture-no-build-id PRIVATE
+                        "LINKER:--build-id=none")
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-a 4 "")
     rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-b 5 "")
 
@@ -100,8 +102,6 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
         rocattach-symbol-lookup-test
         PRIVATE "${ROCATTACH_SYMBOL_LOOKUP_SOURCE_ROOT}"
                 "${ROCATTACH_SYMBOL_LOOKUP_SOURCE_ROOT}/lib/rocprofiler-sdk-rocattach")
-    target_compile_definitions(rocattach-symbol-lookup-test
-                               PRIVATE ROCPROFILER_ROCATTACH_TESTING=1)
     target_link_libraries(
         rocattach-symbol-lookup-test
         PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library

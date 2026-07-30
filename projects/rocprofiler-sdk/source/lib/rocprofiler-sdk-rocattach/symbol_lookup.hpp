@@ -28,8 +28,14 @@ namespace rocprofiler
 {
 namespace rocattach
 {
+// pathname_only opens the mapped object through /proc/<pid>/root instead of
+// /proc/<pid>/map_files, which containers may not expose.
 bool
-find_symbol(int target_pid, void*& addr, const std::string& library, const std::string& symbol);
+find_symbol(int                target_pid,
+            void*&             addr,
+            const std::string& library,
+            const std::string& symbol,
+            bool               pathname_only = false);
 
 }  // namespace rocattach
 }  // namespace rocprofiler
