@@ -22,6 +22,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_set>
+#include <variant>
 
 namespace rocjitsu {
 
@@ -252,11 +253,29 @@ group_relay_owners(std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> 
 ///
 /// Enumeration stops as soon as the target is directly reachable because an
 /// additional relay cannot improve owner count and only consumes capacity.
-/// Relay offsets must be sorted and unique; the only caller derives them from
-/// the router's ordered map. Each solver instance is single-use. Separate
-/// deterministic budgets count search states and alternatives, plus every
-/// relay inspection performed by polynomial summaries.
+/// `feasibility` stops at the first solution without scoring owners or route
+/// length. `bounded_optimization` accepts only a mode produced by
+/// `BoundedOptimizationMode::for_owner_groups`: a nonempty owner grouping
+/// carries its incumbent owner count and optional relay cap, while an empty
+/// grouping is representable only as relay-count minimization with a zero-owner
+/// incumbent and an engaged relay cap. Optimization returns `NoImprovement`
+/// when its incumbent stands.
+///
+/// Relay offsets must be sorted and unique. Each solver instance is single-use.
+/// Separate deterministic budgets count search states and alternatives, plus
+/// every relay inspection performed by polynomial summaries.
 class ExactFixedRelayBatchSolver {
+  struct BoundedOwnerOptimizationMode {
+    std::span<const size_t> new_owner_group_by_relay;
+    size_t new_owner_group_count = 0u;
+    size_t incumbent_new_owner_count = 0u;
+    std::optional<size_t> maximum_relay_count;
+  };
+
+  struct RelayCountOptimizationMode {
+    size_t incumbent_relay_count = 0u;
+  };
+
 public:
   enum class Termination : uint8_t {
     Solved,
@@ -273,35 +292,54 @@ public:
     bool invariant_failed = false;
   };
 
-  ExactFixedRelayBatchSolver(std::span<const FixedRelayDemand> demands,
-                             std::span<const uint64_t> relays,
-                             std::span<const size_t> new_owner_group_by_relay,
-                             size_t new_owner_group_count,
-                             std::optional<size_t> incumbent_new_owner_count,
-                             std::optional<size_t> maximum_relay_count, bool stop_at_first_solution,
-                             BoundedWorkMeter &search_work, BoundedWorkMeter &scan_work)
-      : demands_(demands), relays_(relays), best_new_owner_count_(incumbent_new_owner_count),
-        best_relay_count_(maximum_relay_count), maximum_relay_count_(maximum_relay_count),
-        stop_at_first_solution_(stop_at_first_solution), available_(relays.size(), true),
-        assigned_(demands.size(), false), routes_(demands.size()), search_work_(search_work),
-        scan_work_(scan_work), new_owner_group_by_relay_(new_owner_group_by_relay),
-        active_new_owner_group_counts_(new_owner_group_count, 0u) {
-    const bool relays_sorted = std::ranges::is_sorted(relays_);
-    const bool relays_unique = std::ranges::adjacent_find(relays_) == relays_.end();
-    const bool owner_shape_valid =
-        new_owner_group_by_relay_.empty() || new_owner_group_by_relay_.size() == relays_.size();
-    const bool owner_groups_valid =
-        std::ranges::all_of(new_owner_group_by_relay_, [=](size_t group) {
-          return group == kNoNewOwnerGroup || group < new_owner_group_count;
-        });
-    const bool incumbent_valid = stop_at_first_solution_ || best_new_owner_count_.has_value();
-    inputs_valid_ = relays_sorted && relays_unique && owner_shape_valid && owner_groups_valid &&
-                    incumbent_valid;
-    assert(relays_sorted);
-    assert(relays_unique);
-    assert(owner_shape_valid);
-    assert(owner_groups_valid);
-    assert(incumbent_valid);
+  class BoundedOptimizationMode {
+  public:
+    [[nodiscard]] static std::optional<BoundedOptimizationMode>
+    for_owner_groups(std::span<const size_t> new_owner_group_by_relay, size_t new_owner_group_count,
+                     size_t incumbent_new_owner_count, std::optional<size_t> maximum_relay_count) {
+      if (new_owner_group_count == 0u) {
+        if (!new_owner_group_by_relay.empty() || incumbent_new_owner_count != 0u ||
+            !maximum_relay_count) {
+          return std::nullopt;
+        }
+        return BoundedOptimizationMode(
+            RelayCountOptimizationMode{.incumbent_relay_count = *maximum_relay_count});
+      }
+      if (new_owner_group_by_relay.empty() || incumbent_new_owner_count > new_owner_group_count) {
+        return std::nullopt;
+      }
+      return BoundedOptimizationMode(BoundedOwnerOptimizationMode{
+          .new_owner_group_by_relay = new_owner_group_by_relay,
+          .new_owner_group_count = new_owner_group_count,
+          .incumbent_new_owner_count = incumbent_new_owner_count,
+          .maximum_relay_count = maximum_relay_count,
+      });
+    }
+
+  private:
+    friend class ExactFixedRelayBatchSolver;
+
+    explicit BoundedOptimizationMode(BoundedOwnerOptimizationMode mode) : mode_(mode) {}
+    explicit BoundedOptimizationMode(RelayCountOptimizationMode mode) : mode_(mode) {}
+
+    std::variant<BoundedOwnerOptimizationMode, RelayCountOptimizationMode> mode_;
+  };
+
+  [[nodiscard]] static ExactFixedRelayBatchSolver
+  feasibility(std::span<const FixedRelayDemand> demands, std::span<const uint64_t> relays,
+              BoundedWorkMeter &search_work, BoundedWorkMeter &scan_work) {
+    return ExactFixedRelayBatchSolver(FeasibilityMode{}, demands, relays, search_work, scan_work);
+  }
+
+  [[nodiscard]] static ExactFixedRelayBatchSolver
+  bounded_optimization(std::span<const FixedRelayDemand> demands, std::span<const uint64_t> relays,
+                       const BoundedOptimizationMode &mode, BoundedWorkMeter &search_work,
+                       BoundedWorkMeter &scan_work) {
+    if (const auto *owner_mode = std::get_if<BoundedOwnerOptimizationMode>(&mode.mode_)) {
+      return ExactFixedRelayBatchSolver(*owner_mode, demands, relays, search_work, scan_work);
+    }
+    return ExactFixedRelayBatchSolver(std::get<RelayCountOptimizationMode>(mode.mode_), demands,
+                                      relays, search_work, scan_work);
   }
 
   [[nodiscard]] SolveResult solve(std::vector<std::vector<uint64_t>> &routes_out) {
@@ -326,7 +364,7 @@ public:
           routes_out[demand].push_back(relays_[relay]);
       }
     }
-    if (stop_at_first_solution_ && found_better_solution_)
+    if (is_feasibility() && found_better_solution_)
       return {Termination::Solved, true, false};
     if (work_budget_exhausted())
       return {Termination::WorkBudgetExhausted, found_better_solution_, false};
@@ -335,6 +373,82 @@ public:
   }
 
 private:
+  struct FeasibilityMode {};
+
+  enum class Mode : uint8_t {
+    Feasibility,
+    OwnerOptimization,
+    RelayCountOptimization,
+  };
+
+  ExactFixedRelayBatchSolver(FeasibilityMode, std::span<const FixedRelayDemand> demands,
+                             std::span<const uint64_t> relays, BoundedWorkMeter &search_work,
+                             BoundedWorkMeter &scan_work)
+      : demands_(demands), relays_(relays), mode_(Mode::Feasibility),
+        available_(relays.size(), true), assigned_(demands.size(), false), routes_(demands.size()),
+        search_work_(search_work), scan_work_(scan_work) {
+    validate_inputs();
+  }
+
+  ExactFixedRelayBatchSolver(BoundedOwnerOptimizationMode mode,
+                             std::span<const FixedRelayDemand> demands,
+                             std::span<const uint64_t> relays, BoundedWorkMeter &search_work,
+                             BoundedWorkMeter &scan_work)
+      : demands_(demands), relays_(relays), best_new_owner_count_(mode.incumbent_new_owner_count),
+        best_relay_count_(mode.maximum_relay_count), maximum_relay_count_(mode.maximum_relay_count),
+        mode_(Mode::OwnerOptimization), available_(relays.size(), true),
+        assigned_(demands.size(), false), routes_(demands.size()), search_work_(search_work),
+        scan_work_(scan_work), new_owner_group_by_relay_(mode.new_owner_group_by_relay),
+        active_new_owner_group_counts_(mode.new_owner_group_count, 0u) {
+    validate_inputs();
+  }
+
+  ExactFixedRelayBatchSolver(RelayCountOptimizationMode mode,
+                             std::span<const FixedRelayDemand> demands,
+                             std::span<const uint64_t> relays, BoundedWorkMeter &search_work,
+                             BoundedWorkMeter &scan_work)
+      : demands_(demands), relays_(relays), best_new_owner_count_(0u),
+        best_relay_count_(mode.incumbent_relay_count),
+        maximum_relay_count_(mode.incumbent_relay_count), mode_(Mode::RelayCountOptimization),
+        available_(relays.size(), true), assigned_(demands.size(), false), routes_(demands.size()),
+        search_work_(search_work), scan_work_(scan_work) {
+    validate_inputs();
+  }
+
+  void validate_inputs() {
+    const bool relays_sorted = std::ranges::is_sorted(relays_);
+    const bool relays_unique = std::ranges::adjacent_find(relays_) == relays_.end();
+    const bool owner_shape_valid =
+        new_owner_group_by_relay_.empty() || new_owner_group_by_relay_.size() == relays_.size();
+    const bool owner_groups_valid =
+        std::ranges::all_of(new_owner_group_by_relay_, [this](size_t group) {
+          return group == kNoNewOwnerGroup || group < active_new_owner_group_counts_.size();
+        });
+    const bool mode_shape_valid = [this] {
+      switch (mode_) {
+      case Mode::Feasibility:
+        return new_owner_group_by_relay_.empty() && active_new_owner_group_counts_.empty() &&
+               !best_new_owner_count_ && !maximum_relay_count_;
+      case Mode::OwnerOptimization:
+        return new_owner_group_by_relay_.size() == relays_.size() &&
+               !active_new_owner_group_counts_.empty() && best_new_owner_count_.has_value();
+      case Mode::RelayCountOptimization:
+        return new_owner_group_by_relay_.empty() && active_new_owner_group_counts_.empty() &&
+               best_new_owner_count_ == 0u && maximum_relay_count_.has_value();
+      }
+      return false;
+    }();
+    inputs_valid_ = relays_sorted && relays_unique && owner_shape_valid && owner_groups_valid &&
+                    mode_shape_valid;
+    assert(relays_sorted);
+    assert(relays_unique);
+    assert(owner_shape_valid);
+    assert(owner_groups_valid);
+    assert(mode_shape_valid);
+  }
+
+  [[nodiscard]] bool is_feasibility() const { return mode_ == Mode::Feasibility; }
+
   struct DemandSummary {
     size_t minimum_relay_count = 0u;
     size_t first_hop_options = 0u;
@@ -350,7 +464,7 @@ private:
   }
 
   [[nodiscard]] Termination no_solution_termination() const {
-    return stop_at_first_solution_ ? Termination::Infeasible : Termination::NoImprovement;
+    return is_feasibility() ? Termination::Infeasible : Termination::NoImprovement;
   }
 
   [[nodiscard]] size_t owner_group(size_t relay) const {
@@ -537,8 +651,8 @@ private:
 #endif
     const size_t owner_count = active_new_owner_group_count_;
     if (!best_new_owner_count_) {
-      assert(stop_at_first_solution_);
-      if (!stop_at_first_solution_) {
+      assert(is_feasibility());
+      if (!is_feasibility()) {
         invariant_failed_ = true;
         return true;
       }
@@ -571,7 +685,7 @@ private:
     best_relay_count_ = relay_count;
     best_routes_ = routes_;
     found_better_solution_ = true;
-    return stop_at_first_solution_ || (owner_count == 0u && !maximum_relay_count_);
+    return is_feasibility() || (owner_count == 0u && !maximum_relay_count_);
   }
 
   [[nodiscard]] bool solve_remaining(size_t assigned_count) {
@@ -647,7 +761,7 @@ private:
   std::optional<size_t> best_new_owner_count_;
   std::optional<size_t> best_relay_count_;
   std::optional<size_t> maximum_relay_count_;
-  bool stop_at_first_solution_;
+  Mode mode_;
   bool solve_started_ = false;
   bool inputs_valid_ = false;
   bool invariant_failed_ = false;
@@ -739,10 +853,8 @@ struct ExactOwnerAffinitySolveResult {
     result.routing_invariant_failed = true;
     return result;
   }
-  ExactFixedRelayBatchSolver feasibility_solver(
-      demands, relays, /*new_owner_group_by_relay=*/{}, /*new_owner_group_count=*/0u,
-      /*incumbent_new_owner_count=*/std::nullopt, /*maximum_relay_count=*/std::nullopt,
-      /*stop_at_first_solution=*/true, search_work, scan_work);
+  ExactFixedRelayBatchSolver feasibility_solver =
+      ExactFixedRelayBatchSolver::feasibility(demands, relays, search_work, scan_work);
   const ExactFixedRelayBatchSolver::SolveResult feasibility = feasibility_solver.solve(routes_out);
   result.termination = feasibility.termination;
   result.routing_invariant_failed = feasibility.invariant_failed;
@@ -902,12 +1014,21 @@ struct ExactOwnerAffinitySolveResult {
     should_optimize = !lower_bound || baseline_owner_count > *lower_bound;
   }
   if (should_optimize) {
-    ExactFixedRelayBatchSolver optimization_solver(
-        demands, optimization_relays, owner_groups->group_by_relay, owner_groups->group_count,
-        baseline_owner_count,
-        constrain_optimized_relay_count ? std::optional<size_t>(baseline_relay_count)
-                                        : std::nullopt,
-        /*stop_at_first_solution=*/false, optimization_search_work, optimization_scan_work);
+    const std::optional<ExactFixedRelayBatchSolver::BoundedOptimizationMode> optimization_mode =
+        ExactFixedRelayBatchSolver::BoundedOptimizationMode::for_owner_groups(
+            owner_groups->group_by_relay, owner_groups->group_count, baseline_owner_count,
+            constrain_optimized_relay_count ? std::optional<size_t>(baseline_relay_count)
+                                            : std::nullopt);
+    assert(optimization_mode);
+    if (!optimization_mode) {
+      record_optimization_work();
+      result.optimization_invariant_failed = true;
+      return result;
+    }
+    ExactFixedRelayBatchSolver optimization_solver =
+        ExactFixedRelayBatchSolver::bounded_optimization(
+            demands, optimization_relays, *optimization_mode, optimization_search_work,
+            optimization_scan_work);
     optimization = optimization_solver.solve(optimized_routes);
   }
   record_optimization_work();
@@ -1012,6 +1133,279 @@ plan_greedy_fixed_relay_route(const FixedRelayDemand &demand, FixedRelayInventor
       .offsets = std::move(route),
       .claimed_relays = std::move(claimed_relays),
   };
+}
+
+/// Borrowed prefix produced by the ordered relay-qualification pass. Offsets
+/// are sorted and unique, affinities are parallel, and `complete` distinguishes
+/// the full inventory from a sound prefix retained after bounded qualification.
+struct QualifiedRelayInventoryView {
+  std::span<const uint64_t> offsets;
+  std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> owner_affinities;
+  bool complete = false;
+
+  [[nodiscard]] bool shape_valid() const { return offsets.size() == owner_affinities.size(); }
+};
+
+/// Recovers pair-atomic routes after the full-batch exact solve fails. This
+/// helper owns the fallback inventory, owner affinities materialized by
+/// earlier pairs, and the policy that preserves a nonfinal pair's complete
+/// feasibility baseline for later requests.
+[[nodiscard]] std::optional<std::string> plan_exact_pair_fallbacks(
+    std::span<const BranchOnlyRelayPairRequest> requests, const std::vector<bool> &valid_request,
+    QualifiedRelayInventoryView qualified_relays, bool has_owner_affinity,
+    const BranchOnlyRelaySearchLimits &limits, BranchOnlyRelayBatchPlan &batch) {
+  batch.strategy = BranchOnlyRelayPlanStrategy::ExactPairFallback;
+  const bool input_shape_valid =
+      valid_request.size() == requests.size() && qualified_relays.shape_valid();
+  assert(input_shape_valid);
+  if (!input_shape_valid) {
+    batch.routing_invariant_failed = true;
+    batch.failure = BranchOnlyRelayPlanFailure::Reservation;
+    return "branch-only router received inconsistent fallback inventory";
+  }
+
+  const std::span<const uint64_t> relay_offsets = qualified_relays.offsets;
+  const std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> relay_owner_affinities =
+      qualified_relays.owner_affinities;
+
+  BoundedWorkMeter fallback_setup_work(limits.batch_fallback_setup_work);
+  const size_t fallback_setup_cost = multiply_saturated(
+      relay_offsets.size(), std::max<size_t>(std::bit_width(relay_offsets.size()), 1u));
+  const bool fallback_inventory_available = fallback_setup_work.consume(fallback_setup_cost);
+  add_saturated(batch.scan_work_consumed, fallback_setup_work.consumed());
+  FixedRelayInventory unused_relays;
+  if (fallback_inventory_available) {
+    for (size_t relay = 0u; relay < relay_offsets.size(); ++relay)
+      unused_relays.emplace(relay_offsets[relay], relay_owner_affinities[relay]);
+  }
+
+  std::set<BranchOnlyRelayOwnerIdentity> materialized_owner_affinities;
+  const auto restore_unused_relays = [&](GreedyFixedRelayRoute &route) {
+    unused_relays.merge(route.claimed_relays);
+    if (!route.claimed_relays.empty()) {
+      batch.routing_invariant_failed = true;
+      return false;
+    }
+    return true;
+  };
+  const auto materialize_inventory_owners = [&](const FixedRelayInventory &inventory) {
+    for (const auto &[offset, owner_affinity] : inventory) {
+      (void)offset;
+      if (owner_affinity)
+        materialized_owner_affinities.insert(*owner_affinity);
+    }
+  };
+  // Exact routes draw only from `unused_relays`, which is constructed from
+  // this qualified inventory. Resolving against the same domain detects a
+  // broken fallback-inventory invariant instead of accepting a broader router
+  // offer that was ineligible for this plan.
+  const auto materialize_route_owners = [&](const BranchOnlyRelayRoute &route) {
+    for (const std::vector<uint64_t> *offsets :
+         {&route.entry_relay_offsets, &route.return_relay_offsets}) {
+      for (uint64_t offset : *offsets) {
+        const auto offered = std::ranges::lower_bound(relay_offsets, offset);
+        assert(offered != relay_offsets.end() && *offered == offset);
+        if (offered == relay_offsets.end() || *offered != offset) {
+          batch.routing_invariant_failed = true;
+          return false;
+        }
+        const size_t relay = static_cast<size_t>(offered - relay_offsets.begin());
+        if (relay_owner_affinities[relay])
+          materialized_owner_affinities.insert(*relay_owner_affinities[relay]);
+      }
+    }
+    return true;
+  };
+
+  std::vector<bool> valid_request_at_or_after(requests.size() + 1u, false);
+  for (size_t request_index = requests.size(); request_index-- != 0u;) {
+    valid_request_at_or_after[request_index] =
+        valid_request[request_index] || valid_request_at_or_after[request_index + 1u];
+  }
+
+  for (size_t request_index = 0u; request_index < requests.size(); ++request_index) {
+    if (!valid_request[request_index])
+      continue;
+    batch.pair_strategies[request_index] = BranchOnlyRelayPlanStrategy::ExactPairFallback;
+    if (!fallback_inventory_available) {
+      batch.work_budget_exhausted = true;
+      batch.rejected_pair_indices.push_back(request_index);
+      batch.rejection_reasons[request_index] = BranchOnlyRelayPairRejection::WorkBudget;
+      continue;
+    }
+
+    const BranchOnlyRelayPairRequest &request = requests[request_index];
+    const std::array pair_demands = {
+        FixedRelayDemand{request_index, true, request.entry_source, request.entry_target},
+        FixedRelayDemand{request_index, false, request.return_source, request.return_target},
+    };
+    const bool has_later_valid_request = valid_request_at_or_after[request_index + 1u];
+
+    BoundedWorkMeter pair_search_work(limits.pair_search_work);
+    BoundedWorkMeter pair_scan_work(exact_pair_scan_work(limits, unused_relays.size()));
+    std::vector<std::vector<uint64_t>> pair_routes;
+    ExactFixedRelayBatchSolver::Termination pair_termination =
+        ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted;
+    bool pair_routing_invariant_failed = false;
+    bool pair_optimization_exhausted = false;
+    bool pair_optimization_invariant_failed = false;
+    if (pair_scan_work.consume(unused_relays.size())) {
+      std::vector<uint64_t> available_relays;
+      std::vector<std::optional<BranchOnlyRelayOwnerIdentity>> available_owner_affinities;
+      available_relays.reserve(unused_relays.size());
+      available_owner_affinities.reserve(unused_relays.size());
+      for (const auto &[relay, owner_affinity] : unused_relays) {
+        available_relays.push_back(relay);
+        available_owner_affinities.push_back(owner_affinity);
+      }
+      const ExactOwnerAffinitySolveResult solve = solve_exact_minimum_owner_affinity(
+          pair_demands, available_relays, available_owner_affinities, materialized_owner_affinities,
+          pair_search_work, pair_scan_work,
+          route_optimization_search_work(limits.pair_route_optimization_search_work,
+                                         limits.pair_route_optimization_search_work_per_demand,
+                                         pair_demands.size()),
+          route_optimization_scan_work(limits.pair_route_optimization_scan_work,
+                                       limits.pair_route_optimization_scan_work_per_demand_relay,
+                                       pair_demands.size(), available_relays.size()),
+          /*constrain_optimized_relay_count=*/true,
+          /*constrain_optimized_relays_to_baseline=*/has_later_valid_request, has_owner_affinity,
+          pair_routes);
+      pair_termination = solve.termination;
+      pair_routing_invariant_failed = solve.routing_invariant_failed;
+      pair_optimization_exhausted = solve.optimization_exhausted;
+      pair_optimization_invariant_failed = solve.optimization_invariant_failed;
+      batch.routing_invariant_failed =
+          batch.routing_invariant_failed || solve.routing_invariant_failed;
+      add_saturated(batch.route_optimization_search_work_consumed, solve.optimization_search_work);
+      add_saturated(batch.route_optimization_scan_work_consumed, solve.optimization_scan_work);
+      if (pair_termination == ExactFixedRelayBatchSolver::Termination::Solved) {
+        const size_t reserved_relay_count = has_later_valid_request
+                                                ? solve.feasibility_relay_offsets.size()
+                                                : pair_routes[0].size() + pair_routes[1].size();
+        const size_t removal_work = multiply_saturated(
+            reserved_relay_count, std::max<size_t>(std::bit_width(unused_relays.size()), 1u));
+        if (!pair_scan_work.consume(removal_work)) {
+          pair_termination = ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted;
+          pair_routes.clear();
+        } else if (has_later_valid_request) {
+          // Keep the exact feasibility baseline unavailable until the batch
+          // ends. The optimized route is a subset, so later pairs see the
+          // same inventory as the feasibility-only plan.
+          for (uint64_t relay : solve.feasibility_relay_offsets)
+            unused_relays.erase(relay);
+        }
+      }
+    }
+    if (pair_termination == ExactFixedRelayBatchSolver::Termination::Solved) {
+      batch.route_optimization_exhausted =
+          batch.route_optimization_exhausted || pair_optimization_exhausted;
+      batch.route_optimization_invariant_failed =
+          batch.route_optimization_invariant_failed || pair_optimization_invariant_failed;
+    }
+    add_saturated(batch.search_work_consumed, pair_search_work.consumed());
+    add_saturated(batch.scan_work_consumed, pair_scan_work.consumed());
+
+    if (pair_termination == ExactFixedRelayBatchSolver::Termination::Solved) {
+      batch.routes[request_index].entry_relay_offsets = std::move(pair_routes[0]);
+      batch.routes[request_index].return_relay_offsets = std::move(pair_routes[1]);
+      if (!has_later_valid_request) {
+        for (uint64_t relay : batch.routes[request_index].entry_relay_offsets)
+          unused_relays.erase(relay);
+        for (uint64_t relay : batch.routes[request_index].return_relay_offsets)
+          unused_relays.erase(relay);
+      }
+      if (!materialize_route_owners(batch.routes[request_index])) {
+        batch.failure = BranchOnlyRelayPlanFailure::Reservation;
+        return "branch-only router lost relay ownership during exact fallback";
+      }
+      continue;
+    }
+
+    if (pair_termination == ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted ||
+        pair_routing_invariant_failed) {
+      batch.strategy = BranchOnlyRelayPlanStrategy::GreedyPairFallback;
+      batch.pair_strategies[request_index] = BranchOnlyRelayPlanStrategy::GreedyPairFallback;
+      batch.work_budget_exhausted |=
+          pair_termination == ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted;
+      BoundedWorkMeter greedy_work(limits.pair_greedy_work);
+      GreedyFixedRelayRoute entry_route =
+          plan_greedy_fixed_relay_route(pair_demands[0], unused_relays, greedy_work);
+      GreedyFixedRelayRoute return_route;
+      if (entry_route.status == GreedyFixedRelayRoute::Status::Solved) {
+        return_route = plan_greedy_fixed_relay_route(pair_demands[1], unused_relays, greedy_work);
+      }
+      add_saturated(batch.scan_work_consumed, greedy_work.consumed());
+      if (entry_route.status == GreedyFixedRelayRoute::Status::InvariantFailure ||
+          return_route.status == GreedyFixedRelayRoute::Status::InvariantFailure) {
+        batch.routing_invariant_failed = true;
+        batch.failure = BranchOnlyRelayPlanFailure::Reservation;
+        return "branch-only router could not restore its greedy relay inventory";
+      }
+      if (entry_route.status == GreedyFixedRelayRoute::Status::Solved &&
+          return_route.status == GreedyFixedRelayRoute::Status::Solved) {
+        batch.routes[request_index].entry_relay_offsets = std::move(entry_route.offsets);
+        batch.routes[request_index].return_relay_offsets = std::move(return_route.offsets);
+        materialize_inventory_owners(entry_route.claimed_relays);
+        materialize_inventory_owners(return_route.claimed_relays);
+        continue;
+      }
+      if (!restore_unused_relays(entry_route)) {
+        batch.failure = BranchOnlyRelayPlanFailure::Reservation;
+        return "branch-only router could not restore its greedy relay inventory";
+      }
+      if (entry_route.status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted ||
+          return_route.status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted) {
+        batch.rejected_pair_indices.push_back(request_index);
+        batch.rejection_reasons[request_index] = BranchOnlyRelayPairRejection::WorkBudget;
+        continue;
+      }
+    }
+
+    batch.rejected_pair_indices.push_back(request_index);
+    if (!qualified_relays.complete) {
+      batch.rejection_reasons[request_index] = BranchOnlyRelayPairRejection::WorkBudget;
+      continue;
+    }
+
+    // A single monotonic demand is feasible exactly when farthest-progress
+    // greedy routing succeeds. Probe each half independently so shared relay
+    // contention is not misreported as an unreachable return corridor. The
+    // probes restore successful routes and share one bounded meter.
+    BoundedWorkMeter classification_work(limits.pair_greedy_work);
+    const auto probe = [&](const FixedRelayDemand &demand) {
+      GreedyFixedRelayRoute result =
+          plan_greedy_fixed_relay_route(demand, unused_relays, classification_work);
+      if (!restore_unused_relays(result))
+        result.status = GreedyFixedRelayRoute::Status::InvariantFailure;
+      return result.status;
+    };
+    const GreedyFixedRelayRoute::Status entry_status = probe(pair_demands[0]);
+    const GreedyFixedRelayRoute::Status return_status =
+        entry_status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted ||
+                entry_status == GreedyFixedRelayRoute::Status::InvariantFailure
+            ? entry_status
+            : probe(pair_demands[1]);
+    add_saturated(batch.scan_work_consumed, classification_work.consumed());
+    if (entry_status == GreedyFixedRelayRoute::Status::InvariantFailure ||
+        return_status == GreedyFixedRelayRoute::Status::InvariantFailure) {
+      batch.failure = BranchOnlyRelayPlanFailure::Reservation;
+      return "branch-only router could not restore its relay-classification inventory";
+    }
+    if (entry_status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted ||
+        return_status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted) {
+      batch.work_budget_exhausted = true;
+      batch.rejection_reasons[request_index] = BranchOnlyRelayPairRejection::WorkBudget;
+      continue;
+    }
+    batch.rejection_reasons[request_index] =
+        entry_status != GreedyFixedRelayRoute::Status::Solved
+            ? BranchOnlyRelayPairRejection::EntryUnreachable
+        : return_status != GreedyFixedRelayRoute::Status::Solved
+            ? BranchOnlyRelayPairRejection::ReturnUnreachable
+            : BranchOnlyRelayPairRejection::RelayContention;
+  }
+
+  return std::nullopt;
 }
 
 } // namespace
@@ -1355,19 +1749,17 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
       relay_owner_affinities.push_back(relay.owner_affinity);
     }
   }
+  const QualifiedRelayInventoryView qualified_relays{
+      .offsets = relay_offsets,
+      .owner_affinities = relay_owner_affinities,
+      .complete = relay_inventory_complete,
+  };
+  assert(qualified_relays.shape_valid());
   add_saturated(batch.scan_work_consumed, qualification_work.consumed());
-  batch.work_budget_exhausted |= !relay_inventory_complete;
+  batch.work_budget_exhausted |= !qualified_relays.complete;
 
   ExactFixedRelayBatchSolver::Termination exact_termination =
       ExactFixedRelayBatchSolver::Termination::Infeasible;
-  bool route_optimization_exhausted_for_retained_routes = false;
-  bool routing_invariant_failed = false;
-  bool route_optimization_invariant_failed = false;
-  const auto publish_outcome_flags = [&] {
-    batch.route_optimization_exhausted = route_optimization_exhausted_for_retained_routes;
-    batch.routing_invariant_failed = routing_invariant_failed;
-    batch.route_optimization_invariant_failed = route_optimization_invariant_failed;
-  };
   std::vector<std::vector<uint64_t>> solved_routes;
   // Producers omit the affinity for storage materialized before this plan.
   // The empty set here is distinct: a simultaneous batch has no earlier
@@ -1375,27 +1767,29 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
   const std::set<BranchOnlyRelayOwnerIdentity> no_materialized_owner_affinities;
   if (!demands.empty()) {
     BoundedWorkMeter search_work(exact_batch_search_work(limits, demands.size()));
-    BoundedWorkMeter scan_work(exact_batch_scan_work(limits, demands.size(), relay_offsets.size()));
-    if (!scan_work.consume(relay_offsets.size())) {
+    BoundedWorkMeter scan_work(
+        exact_batch_scan_work(limits, demands.size(), qualified_relays.offsets.size()));
+    if (!scan_work.consume(qualified_relays.offsets.size())) {
       exact_termination = ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted;
     } else {
       const ExactOwnerAffinitySolveResult solve = solve_exact_minimum_owner_affinity(
-          demands, relay_offsets, relay_owner_affinities, no_materialized_owner_affinities,
-          search_work, scan_work,
+          demands, qualified_relays.offsets, qualified_relays.owner_affinities,
+          no_materialized_owner_affinities, search_work, scan_work,
           route_optimization_search_work(limits.batch_route_optimization_search_work,
                                          limits.batch_route_optimization_search_work_per_demand,
                                          demands.size()),
           route_optimization_scan_work(limits.batch_route_optimization_scan_work,
                                        limits.batch_route_optimization_scan_work_per_demand_relay,
-                                       demands.size(), relay_offsets.size()),
+                                       demands.size(), qualified_relays.offsets.size()),
           /*constrain_optimized_relay_count=*/false,
           /*constrain_optimized_relays_to_baseline=*/false, has_owner_affinity_, solved_routes);
       exact_termination = solve.termination;
-      route_optimization_exhausted_for_retained_routes =
-          route_optimization_exhausted_for_retained_routes || solve.optimization_exhausted;
-      routing_invariant_failed = routing_invariant_failed || solve.routing_invariant_failed;
-      route_optimization_invariant_failed =
-          route_optimization_invariant_failed || solve.optimization_invariant_failed;
+      batch.route_optimization_exhausted =
+          batch.route_optimization_exhausted || solve.optimization_exhausted;
+      batch.routing_invariant_failed =
+          batch.routing_invariant_failed || solve.routing_invariant_failed;
+      batch.route_optimization_invariant_failed =
+          batch.route_optimization_invariant_failed || solve.optimization_invariant_failed;
       add_saturated(batch.route_optimization_search_work_consumed, solve.optimization_search_work);
       add_saturated(batch.route_optimization_scan_work_consumed, solve.optimization_scan_work);
     }
@@ -1411,247 +1805,12 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
       route = std::move(solved_routes[demand_index]);
     }
   } else if (!demands.empty()) {
-    batch.strategy = BranchOnlyRelayPlanStrategy::ExactPairFallback;
     batch.work_budget_exhausted |=
         exact_termination == ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted;
-
-    // A failed or bounded full assignment still returns pair-atomic partial
-    // routes. Each pair gets a bounded exact solve before the final greedy tier
-    // so entry routing cannot strand an otherwise feasible return route.
-    BoundedWorkMeter fallback_setup_work(limits.batch_fallback_setup_work);
-    const size_t fallback_setup_cost = multiply_saturated(
-        relay_offsets.size(), std::max<size_t>(std::bit_width(relay_offsets.size()), 1u));
-    const bool fallback_inventory_available = fallback_setup_work.consume(fallback_setup_cost);
-    add_saturated(batch.scan_work_consumed, fallback_setup_work.consumed());
-    FixedRelayInventory unused_relays;
-    if (fallback_inventory_available) {
-      for (size_t relay = 0u; relay < relay_offsets.size(); ++relay)
-        unused_relays.emplace(relay_offsets[relay], relay_owner_affinities[relay]);
-    }
-    std::set<BranchOnlyRelayOwnerIdentity> fallback_materialized_owner_affinities;
-    const auto restore_unused_relays = [&](GreedyFixedRelayRoute &route) {
-      unused_relays.merge(route.claimed_relays);
-      if (!route.claimed_relays.empty()) {
-        routing_invariant_failed = true;
-        return false;
-      }
-      return true;
-    };
-    const auto materialize_inventory_owners = [&](const FixedRelayInventory &inventory) {
-      for (const auto &[offset, owner_affinity] : inventory) {
-        (void)offset;
-        if (owner_affinity)
-          fallback_materialized_owner_affinities.insert(*owner_affinity);
-      }
-    };
-    const auto materialize_route_owners = [&](const BranchOnlyRelayRoute &route) {
-      for (const std::vector<uint64_t> *offsets :
-           {&route.entry_relay_offsets, &route.return_relay_offsets}) {
-        for (uint64_t offset : *offsets) {
-          const auto offered = relays_.find(offset);
-          assert(offered != relays_.end());
-          if (offered == relays_.end()) {
-            routing_invariant_failed = true;
-            return false;
-          }
-          if (offered->second.owner_affinity)
-            fallback_materialized_owner_affinities.insert(*offered->second.owner_affinity);
-        }
-      }
-      return true;
-    };
-    std::vector<bool> valid_request_at_or_after(requests.size() + 1u, false);
-    for (size_t request_index = requests.size(); request_index-- != 0u;) {
-      valid_request_at_or_after[request_index] =
-          valid_request[request_index] || valid_request_at_or_after[request_index + 1u];
-    }
-    for (size_t request_index = 0u; request_index < requests.size(); ++request_index) {
-      if (!valid_request[request_index])
-        continue;
-      batch.pair_strategies[request_index] = BranchOnlyRelayPlanStrategy::ExactPairFallback;
-      if (!fallback_inventory_available) {
-        batch.work_budget_exhausted = true;
-        batch.rejected_pair_indices.push_back(request_index);
-        batch.rejection_reasons[request_index] = BranchOnlyRelayPairRejection::WorkBudget;
-        continue;
-      }
-      const BranchOnlyRelayPairRequest &request = requests[request_index];
-      const std::array pair_demands = {
-          FixedRelayDemand{request_index, true, request.entry_source, request.entry_target},
-          FixedRelayDemand{request_index, false, request.return_source, request.return_target},
-      };
-      const bool has_later_valid_request = valid_request_at_or_after[request_index + 1u];
-
-      BoundedWorkMeter pair_search_work(limits.pair_search_work);
-      BoundedWorkMeter pair_scan_work(exact_pair_scan_work(limits, unused_relays.size()));
-      std::vector<std::vector<uint64_t>> pair_routes;
-      ExactFixedRelayBatchSolver::Termination pair_termination =
-          ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted;
-      bool pair_routing_invariant_failed = false;
-      bool pair_optimization_exhausted = false;
-      bool pair_optimization_invariant_failed = false;
-      if (pair_scan_work.consume(unused_relays.size())) {
-        std::vector<uint64_t> available_relays;
-        std::vector<std::optional<BranchOnlyRelayOwnerIdentity>> available_owner_affinities;
-        available_relays.reserve(unused_relays.size());
-        available_owner_affinities.reserve(unused_relays.size());
-        for (const auto &[relay, owner_affinity] : unused_relays) {
-          available_relays.push_back(relay);
-          available_owner_affinities.push_back(owner_affinity);
-        }
-        const ExactOwnerAffinitySolveResult solve = solve_exact_minimum_owner_affinity(
-            pair_demands, available_relays, available_owner_affinities,
-            fallback_materialized_owner_affinities, pair_search_work, pair_scan_work,
-            route_optimization_search_work(limits.pair_route_optimization_search_work,
-                                           limits.pair_route_optimization_search_work_per_demand,
-                                           pair_demands.size()),
-            route_optimization_scan_work(limits.pair_route_optimization_scan_work,
-                                         limits.pair_route_optimization_scan_work_per_demand_relay,
-                                         pair_demands.size(), available_relays.size()),
-            /*constrain_optimized_relay_count=*/true,
-            /*constrain_optimized_relays_to_baseline=*/has_later_valid_request, has_owner_affinity_,
-            pair_routes);
-        pair_termination = solve.termination;
-        pair_routing_invariant_failed = solve.routing_invariant_failed;
-        pair_optimization_exhausted = solve.optimization_exhausted;
-        pair_optimization_invariant_failed = solve.optimization_invariant_failed;
-        routing_invariant_failed = routing_invariant_failed || solve.routing_invariant_failed;
-        add_saturated(batch.route_optimization_search_work_consumed,
-                      solve.optimization_search_work);
-        add_saturated(batch.route_optimization_scan_work_consumed, solve.optimization_scan_work);
-        if (pair_termination == ExactFixedRelayBatchSolver::Termination::Solved) {
-          const size_t reserved_relay_count = has_later_valid_request
-                                                  ? solve.feasibility_relay_offsets.size()
-                                                  : pair_routes[0].size() + pair_routes[1].size();
-          const size_t removal_work = multiply_saturated(
-              reserved_relay_count, std::max<size_t>(std::bit_width(unused_relays.size()), 1u));
-          if (!pair_scan_work.consume(removal_work)) {
-            pair_termination = ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted;
-            pair_routes.clear();
-          } else if (has_later_valid_request) {
-            // Keep the exact feasibility baseline unavailable until the batch
-            // ends. The optimized route is a subset, so later pairs see the
-            // same inventory as the feasibility-only plan.
-            for (uint64_t relay : solve.feasibility_relay_offsets)
-              unused_relays.erase(relay);
-          }
-        }
-      }
-      if (pair_termination == ExactFixedRelayBatchSolver::Termination::Solved) {
-        route_optimization_exhausted_for_retained_routes =
-            route_optimization_exhausted_for_retained_routes || pair_optimization_exhausted;
-        route_optimization_invariant_failed =
-            route_optimization_invariant_failed || pair_optimization_invariant_failed;
-      }
-      add_saturated(batch.search_work_consumed, pair_search_work.consumed());
-      add_saturated(batch.scan_work_consumed, pair_scan_work.consumed());
-      if (pair_termination == ExactFixedRelayBatchSolver::Termination::Solved) {
-        batch.routes[request_index].entry_relay_offsets = std::move(pair_routes[0]);
-        batch.routes[request_index].return_relay_offsets = std::move(pair_routes[1]);
-        if (!has_later_valid_request) {
-          for (uint64_t relay : batch.routes[request_index].entry_relay_offsets)
-            unused_relays.erase(relay);
-          for (uint64_t relay : batch.routes[request_index].return_relay_offsets)
-            unused_relays.erase(relay);
-        }
-        if (!materialize_route_owners(batch.routes[request_index])) {
-          batch.failure = BranchOnlyRelayPlanFailure::Reservation;
-          publish_outcome_flags();
-          report(error_out, "branch-only router lost relay ownership during exact fallback");
-          return batch;
-        }
-        continue;
-      }
-
-      if (pair_termination == ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted ||
-          pair_routing_invariant_failed) {
-        batch.strategy = BranchOnlyRelayPlanStrategy::GreedyPairFallback;
-        batch.pair_strategies[request_index] = BranchOnlyRelayPlanStrategy::GreedyPairFallback;
-        batch.work_budget_exhausted |=
-            pair_termination == ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted;
-        BoundedWorkMeter greedy_work(limits.pair_greedy_work);
-        GreedyFixedRelayRoute entry_route =
-            plan_greedy_fixed_relay_route(pair_demands[0], unused_relays, greedy_work);
-        GreedyFixedRelayRoute return_route;
-        if (entry_route.status == GreedyFixedRelayRoute::Status::Solved) {
-          return_route = plan_greedy_fixed_relay_route(pair_demands[1], unused_relays, greedy_work);
-        }
-        add_saturated(batch.scan_work_consumed, greedy_work.consumed());
-        if (entry_route.status == GreedyFixedRelayRoute::Status::InvariantFailure ||
-            return_route.status == GreedyFixedRelayRoute::Status::InvariantFailure) {
-          routing_invariant_failed = true;
-          batch.failure = BranchOnlyRelayPlanFailure::Reservation;
-          publish_outcome_flags();
-          report(error_out, "branch-only router could not restore its greedy relay inventory");
-          return batch;
-        }
-        if (entry_route.status == GreedyFixedRelayRoute::Status::Solved &&
-            return_route.status == GreedyFixedRelayRoute::Status::Solved) {
-          batch.routes[request_index].entry_relay_offsets = std::move(entry_route.offsets);
-          batch.routes[request_index].return_relay_offsets = std::move(return_route.offsets);
-          materialize_inventory_owners(entry_route.claimed_relays);
-          materialize_inventory_owners(return_route.claimed_relays);
-          continue;
-        }
-        if (!restore_unused_relays(entry_route)) {
-          batch.failure = BranchOnlyRelayPlanFailure::Reservation;
-          publish_outcome_flags();
-          report(error_out, "branch-only router could not restore its greedy relay inventory");
-          return batch;
-        }
-        if (entry_route.status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted ||
-            return_route.status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted) {
-          batch.rejected_pair_indices.push_back(request_index);
-          batch.rejection_reasons[request_index] = BranchOnlyRelayPairRejection::WorkBudget;
-          continue;
-        }
-      }
-
-      batch.rejected_pair_indices.push_back(request_index);
-      if (!relay_inventory_complete) {
-        batch.rejection_reasons[request_index] = BranchOnlyRelayPairRejection::WorkBudget;
-        continue;
-      }
-
-      // A single monotonic demand is feasible exactly when farthest-progress
-      // greedy routing succeeds. Probe each half independently so shared relay
-      // contention is not misreported as an unreachable return corridor. The
-      // probes restore successful routes and share one bounded meter.
-      BoundedWorkMeter classification_work(limits.pair_greedy_work);
-      const auto probe = [&](const FixedRelayDemand &demand) {
-        GreedyFixedRelayRoute result =
-            plan_greedy_fixed_relay_route(demand, unused_relays, classification_work);
-        if (!restore_unused_relays(result))
-          result.status = GreedyFixedRelayRoute::Status::InvariantFailure;
-        return result.status;
-      };
-      const GreedyFixedRelayRoute::Status entry_status = probe(pair_demands[0]);
-      const GreedyFixedRelayRoute::Status return_status =
-          entry_status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted ||
-                  entry_status == GreedyFixedRelayRoute::Status::InvariantFailure
-              ? entry_status
-              : probe(pair_demands[1]);
-      add_saturated(batch.scan_work_consumed, classification_work.consumed());
-      if (entry_status == GreedyFixedRelayRoute::Status::InvariantFailure ||
-          return_status == GreedyFixedRelayRoute::Status::InvariantFailure) {
-        batch.failure = BranchOnlyRelayPlanFailure::Reservation;
-        publish_outcome_flags();
-        report(error_out,
-               "branch-only router could not restore its relay-classification inventory");
-        return batch;
-      }
-      if (entry_status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted ||
-          return_status == GreedyFixedRelayRoute::Status::WorkBudgetExhausted) {
-        batch.work_budget_exhausted = true;
-        batch.rejection_reasons[request_index] = BranchOnlyRelayPairRejection::WorkBudget;
-        continue;
-      }
-      batch.rejection_reasons[request_index] =
-          entry_status != GreedyFixedRelayRoute::Status::Solved
-              ? BranchOnlyRelayPairRejection::EntryUnreachable
-          : return_status != GreedyFixedRelayRoute::Status::Solved
-              ? BranchOnlyRelayPairRejection::ReturnUnreachable
-              : BranchOnlyRelayPairRejection::RelayContention;
+    if (std::optional<std::string> fallback_error = plan_exact_pair_fallbacks(
+            requests, valid_request, qualified_relays, has_owner_affinity_, limits, batch)) {
+      report(error_out, std::move(*fallback_error));
+      return batch;
     }
   }
 
@@ -1734,8 +1893,6 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
     }
     report(error_out, std::move(diagnostic));
   }
-
-  publish_outcome_flags();
 
   for (size_t request_index = 0u; request_index < requests.size(); ++request_index) {
     if (batch.rejection_reasons[request_index] != BranchOnlyRelayPairRejection::None)
