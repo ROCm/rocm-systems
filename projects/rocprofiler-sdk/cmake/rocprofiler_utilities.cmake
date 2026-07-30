@@ -234,7 +234,6 @@ function(ROCPROFILER_CHECKOUT_GIT_SUBMODULE)
                     WARNING
                         "Command failed: \"${_CMD}\". Falling back to cloning ${CHECKOUT_REPO_URL}."
                     )
-                set(_TEST_FILE_EXISTS OFF)
             else()
                 message(STATUS "function(rocprofiler_checkout_git_submodule) failed.")
                 message(FATAL_ERROR "Command: \"${_CMD}\"")
