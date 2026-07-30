@@ -56,6 +56,10 @@ FEATURE_SCHEMA_VERSIONS: Dict[str, FeatureVersionRange] = {
         min_version=libpyrocpd.schema_version(3, 0, 2),
         max_version=None,
     ),
+    "spm_counters": FeatureVersionRange(
+        min_version=libpyrocpd.schema_version(3, 0, 3),
+        max_version=None,
+    ),
 }
 
 

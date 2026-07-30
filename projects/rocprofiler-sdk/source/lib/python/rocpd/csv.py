@@ -509,8 +509,9 @@ def write_csv(importData, config):
     if "graph_launch" in importData.supported_features:
         write_graph_launch_csv(importData, config)
 
-    if importData.schema_version >= libpyrocpd.schema_version(3, 0, 3):
+    if "spm_counters" in importData.supported_features:
         write_spm_counters_csv(importData, config)
+
 
 def execute(input, config=None, **kwargs):
 
