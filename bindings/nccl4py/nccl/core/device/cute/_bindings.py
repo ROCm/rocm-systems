@@ -136,6 +136,49 @@ def nccl_get_peer_pointer_team(
     peer: cutlass.Int32,
 ) -> _LLVMPtrType: ...
 
+@cute.extern(name="ncclGetMultimemPointer", source=_BC)
+def nccl_get_multimem_pointer(
+    window: _LLVMPtrType, offset: cutlass.Int64,
+    mm_handle: ncclMultimemHandle,
+) -> _LLVMPtrType: ...
+
+@cute.extern(name="ncclGetLsaMultimemPointer", source=_BC)
+def nccl_get_lsa_multimem_pointer(
+    window: _LLVMPtrType, offset: cutlass.Int64, dev_comm: _LLVMPtrType,
+) -> _LLVMPtrType: ...
+
+
+# === Resource buffer pointers ===
+#
+# ``handle`` is an ``ncclDevResourceHandle`` (``uint32_t``).
+
+@cute.extern(name="ncclGetResourceBufferLocalPointer", source=_BC)
+def nccl_get_resource_buffer_local_pointer(
+    dev_comm: _LLVMPtrType, handle: cutlass.Uint32,
+) -> _LLVMPtrType: ...
+
+@cute.extern(name="ncclGetResourceBufferLsaPointer", source=_BC)
+def nccl_get_resource_buffer_lsa_pointer(
+    dev_comm: _LLVMPtrType, handle: cutlass.Uint32, peer: cutlass.Int32,
+) -> _LLVMPtrType: ...
+
+@cute.extern(name="ncclGetResourceBufferPeerPointer", source=_BC)
+def nccl_get_resource_buffer_peer_pointer(
+    dev_comm: _LLVMPtrType, handle: cutlass.Uint32, team: ncclTeam,
+    peer: cutlass.Int32,
+) -> _LLVMPtrType: ...
+
+@cute.extern(name="ncclGetResourceBufferMultimemPointer", source=_BC)
+def nccl_get_resource_buffer_multimem_pointer(
+    dev_comm: _LLVMPtrType, handle: cutlass.Uint32,
+    mm_handle: ncclMultimemHandle,
+) -> _LLVMPtrType: ...
+
+@cute.extern(name="ncclGetResourceBufferLsaMultimemPointer", source=_BC)
+def nccl_get_resource_buffer_lsa_multimem_pointer(
+    dev_comm: _LLVMPtrType, handle: cutlass.Uint32,
+) -> _LLVMPtrType: ...
+
 
 # === GIN API ===
 

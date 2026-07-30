@@ -201,6 +201,77 @@ class DevComm:
         return cutlass.Int32(_bindings.nccl_team_rank_to_lsa(
             self.ptr, _to_value(team), cutlass.Int32(rank)))
 
+    # === Resource buffer pointers ===
+
+    def resource_buffer_local_pointer(self, handle: int) -> ir.Value:
+        """Translate a resource handle to the local buffer address.
+
+        Args:
+            handle: ``ncclDevResourceHandle`` from ``DevCommResource``.
+
+        Returns:
+            ``!llvm.ptr`` MLIR value.
+        """
+        return _bindings.nccl_get_resource_buffer_local_pointer(
+            self.ptr, cutlass.Uint32(handle))
+
+    def resource_buffer_lsa_pointer(self, handle: int, peer: int) -> ir.Value:
+        """Translate a resource handle to ``peer``'s LSA buffer address.
+
+        Args:
+            handle: ``ncclDevResourceHandle`` from ``DevCommResource``.
+            peer: LSA-team peer rank.
+
+        Returns:
+            ``!llvm.ptr`` MLIR value.
+        """
+        return _bindings.nccl_get_resource_buffer_lsa_pointer(
+            self.ptr, cutlass.Uint32(handle), cutlass.Int32(peer))
+
+    def resource_buffer_peer_pointer(
+        self, handle: int, team: Team, peer: int
+    ) -> ir.Value:
+        """Translate a resource handle to ``peer``'s buffer address.
+
+        Args:
+            handle: ``ncclDevResourceHandle`` from ``DevCommResource``.
+            team: Team to address within.
+            peer: Rank within ``team``.
+
+        Returns:
+            ``!llvm.ptr`` MLIR value.
+        """
+        return _bindings.nccl_get_resource_buffer_peer_pointer(
+            self.ptr, cutlass.Uint32(handle), _to_value(team),
+            cutlass.Int32(peer))
+
+    def resource_buffer_multimem_pointer(
+        self, handle: int, mm_handle: ncclMultimemHandle
+    ) -> ir.Value:
+        """Translate a resource handle to its multimem buffer address.
+
+        Args:
+            handle: ``ncclDevResourceHandle`` from ``DevCommResource``.
+            mm_handle: Multimem handle covering the resource window.
+
+        Returns:
+            ``!llvm.ptr`` MLIR value.
+        """
+        return _bindings.nccl_get_resource_buffer_multimem_pointer(
+            self.ptr, cutlass.Uint32(handle), _to_value(mm_handle))
+
+    def resource_buffer_lsa_multimem_pointer(self, handle: int) -> ir.Value:
+        """Translate a resource handle to its LSA multimem buffer address.
+
+        Args:
+            handle: ``ncclDevResourceHandle`` from ``DevCommResource``.
+
+        Returns:
+            ``!llvm.ptr`` MLIR value.
+        """
+        return _bindings.nccl_get_resource_buffer_lsa_multimem_pointer(
+            self.ptr, cutlass.Uint32(handle))
+
     # === Gin factory ===
 
     def gin(
