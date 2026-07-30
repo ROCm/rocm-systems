@@ -26,7 +26,6 @@ from utils.file_io import (
     build_agent_to_gpu_map_from_json,
     load_pc_sampling_results,
     process_pc_sampling_kernel_trace,
-    process_pc_sampling_kernel_traces,
 )
 from utils.parser import (
     PMC_DISPATCH_INFO_TABLE_ID,
@@ -166,7 +165,7 @@ def make_tool_data(
     kernel_dispatch: list | None = None,
     agents: list | None = None,
     code_objects: list | None = None,
-    pid: int | None = None,
+    pid: int | None = 42,
 ) -> dict:
     """Build a single ``rocprofiler-sdk-tool[0]`` dict for the analyze paths."""
     return {
@@ -1053,6 +1052,57 @@ def test_load_pc_sampling_data_method_not_detected() -> None:
     assert df.empty
 
 
+def test_load_pc_sampling_data_detects_method_after_empty_record() -> None:
+    """A zero-sample first process does not hide later sampled processes."""
+    empty_tool_data = make_tool_data(
+        kernel_dispatch=[make_dispatch(0, 100)],
+        pid=101,
+    )
+    sampled_tool_data = make_tool_data(
+        stochastic=[make_record(5, 0x10, 0, dispatch_id=0)],
+        instructions=["v_mov"],
+        comments=["/s/a.cpp:1"],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
+        code_objects=[make_code_object(5)],
+        pid=202,
+    )
+
+    expected = load_pc_sampling_data(
+        schema.Workload(),
+        "ps_file",
+        "count",
+        [sampled_tool_data],
+    )
+    actual = load_pc_sampling_data(
+        schema.Workload(),
+        "ps_file",
+        "count",
+        [empty_tool_data, sampled_tool_data],
+    )
+
+    pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_load_pc_sampling_data_rejects_conflicting_methods() -> None:
+    """Records from one invocation must not mix PC sampling methods."""
+    host_trap_tool_data = setup_pc_sampling_data(method="host_trap")
+    stochastic_tool_data = setup_pc_sampling_data(method="stochastic")
+
+    with patch("utils.parser.console_error") as console_error_mock:
+        df = load_pc_sampling_data(
+            schema.Workload(),
+            "ps_file",
+            "count",
+            [host_trap_tool_data, stochastic_tool_data],
+        )
+
+    assert df.empty
+    console_error_mock.assert_called_once()
+    assert "conflicting" in console_error_mock.call_args.args[0]
+    assert console_error_mock.call_args.kwargs == {"exit": False}
+
+
 @pytest.mark.parametrize(
     "populated, expected_column_count",
     [
@@ -1413,29 +1463,6 @@ def test_load_pc_sampling_results_loads_all_pid_files_in_numeric_order(
     ]
 
 
-def test_load_pc_sampling_results_prefers_pid_files_over_legacy(
-    tmp_path: Path,
-) -> None:
-    """Prefer PID-prefixed result files when the legacy file also exists."""
-    write_results_json(tmp_path / "ps_file_results.json", pid=999)
-    write_results_json(tmp_path / "42_ps_file_results.json", pid=42)
-
-    tool_data_records = load_pc_sampling_results(str(tmp_path))
-
-    assert [record["metadata"]["pid"] for record in tool_data_records] == [42]
-
-
-def test_load_pc_sampling_results_falls_back_to_legacy(
-    tmp_path: Path,
-) -> None:
-    """Load the legacy result file when no PID-prefixed files exist."""
-    write_results_json(tmp_path / "ps_file_results.json", pid=77)
-
-    tool_data_records = load_pc_sampling_results(str(tmp_path))
-
-    assert [record["metadata"]["pid"] for record in tool_data_records] == [77]
-
-
 @pytest.mark.parametrize(
     "directory_exists",
     [
@@ -1454,22 +1481,32 @@ def test_load_pc_sampling_results_returns_empty_without_result_files(
 
 
 @pytest.mark.parametrize(
-    "process_ids",
+    "metadata",
     [
-        pytest.param([101, None], id="missing_pid"),
-        pytest.param([101, 101], id="duplicate_pid"),
+        pytest.param({}, id="missing_pid"),
+        pytest.param({"pid": None}, id="null_pid"),
     ],
 )
-def test_load_pc_sampling_results_multiple_records_require_unique_process_ids(
+def test_load_pc_sampling_results_single_record_requires_process_id(
     tmp_path: Path,
-    process_ids: list[int | None],
+    metadata: dict,
 ) -> None:
-    """Reject multi-file results with missing or duplicate process IDs."""
-    for file_index, process_id in enumerate(process_ids):
-        write_results_json(
-            tmp_path / f"{file_index}_ps_file_results.json",
-            pid=process_id,
-        )
+    tool_data = make_tool_data()
+    tool_data["metadata"] = metadata
+    result_path = tmp_path / "42_ps_file_results.json"
+    result_path.write_text(
+        json.dumps({"rocprofiler-sdk-tool": [tool_data]}), encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit):
+        load_pc_sampling_results(str(tmp_path))
+
+
+def test_load_pc_sampling_results_rejects_duplicate_process_ids(
+    tmp_path: Path,
+) -> None:
+    write_results_json(tmp_path / "101_ps_file_results.json", pid=101)
+    write_results_json(tmp_path / "202_ps_file_results.json", pid=101)
 
     with pytest.raises(SystemExit):
         load_pc_sampling_results(str(tmp_path))
@@ -1478,20 +1515,6 @@ def test_load_pc_sampling_results_multiple_records_require_unique_process_ids(
 # ═══════════════════════════════════════════════════════════════
 # process_pc_sampling_kernel_trace
 # ═══════════════════════════════════════════════════════════════
-
-
-def test_load_pc_sampling_results_parses_single_unprefixed_file(
-    tmp_path: Path,
-) -> None:
-    """Return a list containing the rocprofiler-sdk-tool[0] dict."""
-    write_results_json(
-        tmp_path / "ps_file_results.json",
-        kernel_symbols=[make_kernel_symbol(12, 2, "vecCopy")],
-    )
-    tool_data_records = load_pc_sampling_results(str(tmp_path))
-    assert len(tool_data_records) == 1
-    tool_data = tool_data_records[0]
-    assert tool_data["kernel_symbols"][0]["formatted_kernel_name"] == "vecCopy"
 
 
 def test_process_pc_sampling_none_returns_empty() -> None:
@@ -1578,18 +1601,6 @@ def test_process_pc_sampling_unmapped_kernel_id() -> None:
     assert df.iloc[0]["Kernel_Name"] is None
 
 
-def test_process_pc_sampling_single_record_allows_missing_process_id() -> None:
-    """Allow a single tool record without a process ID during conversion."""
-    tool_data = make_tool_data(
-        kernel_symbols=[make_kernel_symbol(12, 2, "vecCopy")],
-        kernel_dispatch=[make_dispatch(1, 12)],
-    )
-
-    dispatch_trace = process_pc_sampling_kernel_traces([tool_data])
-
-    assert dispatch_trace["PID"].tolist() == [None]
-
-
 # ═══════════════════════════════════════════════════════════════
 # build_agent_to_gpu_map_from_json
 # ═══════════════════════════════════════════════════════════════
@@ -1660,7 +1671,9 @@ def make_multiprocess_dispatch_tool_data() -> list[dict]:
 
 def test_load_pc_sampling_tool_data_gate(tmp_path: Path) -> None:
     """Tool data loads whenever PC sampling was collected, else returns empty."""
-    write_results_json(tmp_path / "ps_file_results.json", **sample_tool_data_kwargs())
+    write_results_json(
+        tmp_path / "42_ps_file_results.json", **sample_tool_data_kwargs()
+    )
     instance = make_db_analysis(str(tmp_path))
 
     instance._profiling_config = {"filter_blocks": ["21", "2"]}  # mixed
@@ -1958,7 +1971,7 @@ def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
         "end_timestamp",
     ]
     assert df.iloc[0]["kernel_name"] == "vecCopy"
-    assert df.iloc[0]["pid"] is None
+    assert df.iloc[0]["pid"] == 42
     assert df.iloc[0]["gpu_id"] == 0
 
 
