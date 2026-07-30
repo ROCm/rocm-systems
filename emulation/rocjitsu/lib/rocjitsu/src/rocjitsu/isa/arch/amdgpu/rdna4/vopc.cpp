@@ -4158,7 +4158,7 @@ void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4241,7 +4241,7 @@ void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4324,7 +4324,7 @@ void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4407,7 +4407,7 @@ void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4490,7 +4490,7 @@ void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4573,7 +4573,7 @@ void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4656,7 +4656,7 @@ void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4739,7 +4739,7 @@ void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4822,7 +4822,7 @@ void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4905,7 +4905,7 @@ void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4988,7 +4988,7 @@ void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5071,7 +5071,7 @@ void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5154,7 +5154,7 @@ void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5237,7 +5237,7 @@ void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5317,7 +5317,7 @@ void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5395,7 +5395,7 @@ void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5473,7 +5473,7 @@ void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5551,7 +5551,7 @@ void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5629,7 +5629,7 @@ void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5707,7 +5707,7 @@ void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5785,7 +5785,7 @@ void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5863,7 +5863,7 @@ void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -5941,7 +5941,7 @@ void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -6019,7 +6019,7 @@ void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -6097,7 +6097,7 @@ void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -6175,7 +6175,7 @@ void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -6253,7 +6253,7 @@ void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -6331,7 +6331,7 @@ void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -6972,7 +6972,7 @@ void VCmpxLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7053,7 +7053,7 @@ void VCmpxEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7134,7 +7134,7 @@ void VCmpxLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7215,7 +7215,7 @@ void VCmpxGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7296,7 +7296,7 @@ void VCmpxNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7377,7 +7377,7 @@ void VCmpxGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7458,7 +7458,7 @@ void VCmpxLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7539,7 +7539,7 @@ void VCmpxEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7620,7 +7620,7 @@ void VCmpxLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7701,7 +7701,7 @@ void VCmpxGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7782,7 +7782,7 @@ void VCmpxNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7863,7 +7863,7 @@ void VCmpxGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -7941,7 +7941,7 @@ void VCmpxLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8019,7 +8019,7 @@ void VCmpxEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8097,7 +8097,7 @@ void VCmpxLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8175,7 +8175,7 @@ void VCmpxGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8253,7 +8253,7 @@ void VCmpxNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8331,7 +8331,7 @@ void VCmpxGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8409,7 +8409,7 @@ void VCmpxLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8487,7 +8487,7 @@ void VCmpxEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8565,7 +8565,7 @@ void VCmpxLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8643,7 +8643,7 @@ void VCmpxGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8721,7 +8721,7 @@ void VCmpxNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8799,7 +8799,7 @@ void VCmpxGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -9336,7 +9336,7 @@ void VCmpxClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -9443,7 +9443,7 @@ void VCmpxClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint64_t result = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
