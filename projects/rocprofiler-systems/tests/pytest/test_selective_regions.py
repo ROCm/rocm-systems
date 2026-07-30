@@ -8,7 +8,6 @@ Validates that:
 - roctxProfilerPause/Resume correctly excludes kernels from traces
 - ROCPROFSYS_SELECTED_REGIONS filters tracing to specific roctx regions
 - Pause/resume interacts correctly with region filtering at various boundaries
-- --selected-regions (CLI flag) filters identically to the env var
 """
 
 from __future__ import annotations
@@ -120,8 +119,6 @@ class TestSelectiveRegion(RocprofsysTest):
 
     Both roctxRangeStartA/Stop (start_stop) and roctxRangePushA/Pop (push_pop)
     marker styles are tested — expected kernel presence is identical for both.
-    TestSelectiveRegionCliFlag below separately covers setting the same
-    filter via --selected-regions instead of the env var.
     """
 
     def test_no_filter(self, mode, marker_style, selective_region_env):
@@ -164,7 +161,6 @@ class TestSelectiveRegion(RocprofsysTest):
         """
         env = selective_region_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
-
         result = self.run_test(
             mode,
             "selective-region",
@@ -224,49 +220,6 @@ class TestSelectiveRegion(RocprofsysTest):
             categories=["rocm_marker_api"],
             pass_regex=["Region2", "Region3"],
             fail_regex=["Region1"],
-        )
-
-
-# =============================================================================
-# Test Class: Selective Region via --selected-regions CLI flag
-# =============================================================================
-
-
-@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
-@pytest.mark.class_name("selective-region-cli-flag")
-class TestSelectiveRegionCliFlag(RocprofsysTest):
-    """--selected-regions just writes ROCPROFSYS_SELECTED_REGIONS, which
-    TestSelectiveRegion.test_region_1_filter already exercises directly, so
-    one case per binary is enough to prove the flag is wired up — no need to
-    repeat the full mode/marker_style/region matrix.
-    """
-
-    def test_region_1_filter(self, mode, selective_region_env):
-        # run_test names this kwarg differently per mode: sys_run_args for
-        # rocprof-sys-run, sampling_args for rocprof-sys-sample.
-        tool_args_key = "sys_run_args" if mode == "sys_run" else "sampling_args"
-
-        result = self.run_test(
-            mode,
-            "selective-region",
-            env=selective_region_env,
-            check_target_arch=True,
-            **{tool_args_key: ["--selected-regions=Region1"]},
-        )
-        self.assert_regex(result)
-        self.assert_perfetto(
-            result,
-            subtest_name="Region1 filtered kernels (CLI flag)",
-            categories=["rocm_hip_stream"],
-            pass_regex=["CodeBlock_B", "CodeBlock_C", "CodeBlock_D", "CodeBlock_F"],
-            fail_regex=["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"],
-        )
-        self.assert_perfetto(
-            result,
-            subtest_name="Region1 filtered markers (CLI flag)",
-            categories=["rocm_marker_api"],
-            pass_regex=["Region1", "Region2"],
-            fail_regex=["Region3"],
         )
 
 

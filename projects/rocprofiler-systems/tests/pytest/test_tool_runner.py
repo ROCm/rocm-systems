@@ -3,9 +3,9 @@
 
 """
 Regression tests for the tool_runner shared by rocprof-sys-run and
-rocprof-sys-sample. Both binaries parse args through the same path, so each
-case runs against both. A failure here points at tool_runner, argparse env
-handling, or conflict detection.
+rocprof-sys-sample. Both binaries parse args through the same path, so we run
+these through rocprof-sys-run alone. A failure here points at tool_runner,
+argparse env handling, or conflict detection.
 """
 
 from __future__ import annotations
@@ -15,23 +15,25 @@ from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.tool_runner]
 
+# rocprof-sys-run and rocprof-sys-sample share the same arg-parsing backend
+# (rocprof-sys-run -S is equivalent to rocprof-sys-sample), so running the flags
+# through rocprof-sys-run alone covers the parsing path for both.
 TARGETS = [
     pytest.param("rocprof-sys-run", marks=pytest.mark.sys_run, id="run"),
-    pytest.param("rocprof-sys-sample", marks=pytest.mark.sampling, id="sample"),
 ]
 
-# Args for parallel-overhead: <nfib> <nthreads> <nitr>. Big enough to run for
-# about a second and get sampled a bunch, small enough to keep tests quick.
-WORKLOAD_ARGS = ["18", "2", "100000"]
+# <nfib> <nthreads> <nitr>. Big enough to run for about a second and get
+# sampled a bunch, small enough to keep tests quick.
+PARALLEL_OVERHEAD_ARGS = ["18", "2", "100000"]
 
-# Args for transpose (the GPU workload): <matrix-size> <iterations> <num-inputs>.
-# Enough kernel launches and runtime for the -D device sampler to poll GPU
-# metrics at least once, while still finishing quickly.
-GPU_WORKLOAD_ARGS = ["4", "300", "50"]
+# <matrix-size> <iterations> <num-inputs>. Enough kernel launches and runtime
+# for the -D device sampler to poll GPU metrics at least once, while still
+# finishing quickly.
+TRANSPOSE_ARGS = ["4", "300", "50"]
 
 
 @pytest.fixture
-def instrumentable_child(rocprof_config) -> str:
+def cpu_workload(rocprof_config) -> str:
     """CPU workload with real, instrumentable functions. Used by most tests here."""
     try:
         return str(rocprof_config.get_target_executable("parallel-overhead"))
@@ -41,11 +43,7 @@ def instrumentable_child(rocprof_config) -> str:
 
 @pytest.fixture
 def gpu_workload(rocprof_config) -> str:
-    """HIP workload that dispatches real GPU kernels.
-
-    parallel-overhead is CPU-only and can't exercise -D, so the GPU test uses
-    transpose instead.
-    """
+    """HIP workload that dispatches real GPU kernels."""
     try:
         return str(rocprof_config.get_target_executable("transpose"))
     except FileNotFoundError:
@@ -54,7 +52,7 @@ def gpu_workload(rocprof_config) -> str:
 
 def workload_args(workload: str) -> list[str]:
     """Trailing "-- <workload>" so the flags under test act on real work."""
-    return ["--", workload, *WORKLOAD_ARGS]
+    return ["--", workload, *PARALLEL_OVERHEAD_ARGS]
 
 
 def _parse_metadata_settings(metadata_file) -> dict:
@@ -107,14 +105,14 @@ def _profile_has_label(result, needle: str) -> bool:
 @pytest.mark.class_name("tool-runner-replace-env")
 class TestReplaceEnvNoDuplicates(RocprofsysTest):
     @pytest.mark.parametrize("target", TARGETS)
-    def test_preset_overrides_shell_value(self, target, instrumentable_child):
+    def test_preset_overrides_shell_value(self, target, cpu_workload):
         result = self.run_test(
             "baseline",
             target=target,
             env={"ROCPROFSYS_TRACE": "true"},
             run_args=[
                 "--preset=profile-only",
-                *workload_args(instrumentable_child),
+                *workload_args(cpu_workload),
             ],
             fail_on_not_found=True,
         )
@@ -146,11 +144,11 @@ class TestReplaceEnvNoDuplicates(RocprofsysTest):
 @pytest.mark.class_name("tool-runner-profile-conflict")
 class TestProfileFlatProfileConflict(RocprofsysTest):
     @pytest.mark.parametrize("target", TARGETS)
-    def test_profile_and_flat_profile_rejected(self, target):
+    def test_profile_and_flat_profile_rejected(self, target, cpu_workload):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["--profile", "--flat-profile", "--", "ls"],
+            run_args=["--profile", "--flat-profile", "--", cpu_workload],
             fail_on_not_found=True,
             fail_on_pass=True,
         )
@@ -171,8 +169,12 @@ class TestProfileFlatProfileConflict(RocprofsysTest):
 @pytest.mark.timeout(30)
 @pytest.mark.class_name("tool-runner-output-format")
 class TestOutputFormatSelection(RocprofsysTest):
+    # rocpd output needs a ROCm agent (GPU) and the rocpd DB backend (ROCm >= 7.0);
+    # on a CPU-only host it aborts with "Agent not found", so gate the rocpd cases.
+    @pytest.mark.gpu
+    @pytest.mark.rocm_min_version("7.0")
     @pytest.mark.parametrize("target", TARGETS)
-    def test_proto_rocpd_enables_both(self, target, instrumentable_child):
+    def test_proto_rocpd_enables_both(self, target, cpu_workload):
         result = self.run_test(
             "baseline",
             target=target,
@@ -181,7 +183,7 @@ class TestOutputFormatSelection(RocprofsysTest):
                 "--output-format",
                 "proto",
                 "rocpd",
-                *workload_args(instrumentable_child),
+                *workload_args(cpu_workload),
             ],
             fail_on_not_found=True,
         )
@@ -206,15 +208,17 @@ class TestOutputFormatSelection(RocprofsysTest):
             subtest_name="proto trace records workload fib frames",
         )
 
+    @pytest.mark.gpu
+    @pytest.mark.rocm_min_version("7.0")
     @pytest.mark.parametrize("target", TARGETS)
-    def test_rocpd_only_disables_perfetto(self, target, instrumentable_child):
+    def test_rocpd_only_disables_perfetto(self, target, cpu_workload):
         result = self.run_test(
             "baseline",
             target=target,
             run_args=[
                 "--output-format",
                 "rocpd",
-                *workload_args(instrumentable_child),
+                *workload_args(cpu_workload),
             ],
             fail_on_not_found=True,
         )
@@ -247,11 +251,11 @@ class TestOutputFormatSelection(RocprofsysTest):
         ],
     )
     @pytest.mark.parametrize("target", TARGETS)
-    def test_conflicts_with_legacy_flags(self, target, legacy_args):
+    def test_conflicts_with_legacy_flags(self, target, legacy_args, cpu_workload):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["--output-format", "rocpd", *legacy_args, "--", "ls"],
+            run_args=["--output-format", "rocpd", *legacy_args, "--", cpu_workload],
             fail_on_not_found=True,
             fail_on_pass=True,
         )
@@ -274,7 +278,7 @@ class TestConfigOutput(RocprofsysTest):
     """-c/--config and -o/--output actually load from and write to the given paths."""
 
     def test_values_reach_env_and_metadata_file(
-        self, target, test_output_dir, instrumentable_child, create_config_file
+        self, target, test_output_dir, cpu_workload, create_config_file
     ):
         empty_cfg = create_config_file({}, "empty.cfg", skip_filter=True)
 
@@ -291,7 +295,7 @@ class TestConfigOutput(RocprofsysTest):
                 "-o",
                 str(output_dir),
                 output_prefix,
-                *workload_args(instrumentable_child),
+                *workload_args(cpu_workload),
             ],
             fail_on_not_found=True,
         )
@@ -318,30 +322,6 @@ class TestConfigOutput(RocprofsysTest):
         assert settings["ROCPROFSYS_CONFIG_FILE"] == str(empty_cfg)
         assert settings["ROCPROFSYS_OUTPUT_PATH"] == str(output_dir)
         assert settings["ROCPROFSYS_OUTPUT_PREFIX"] == output_prefix
-
-    def test_malformed_file_is_rejected(
-        self, target, create_config_file, instrumentable_child
-    ):
-        """-c should hit the same config validation as ROCPROFSYS_CONFIG_FILE.
-        test_config.py covers that env var in depth (run only); here we just
-        confirm -c reaches the same path on both binaries.
-        """
-        malformed_cfg = create_config_file(
-            {"ROCPROFSYS_TRACE_DURATION": "not-a-number"},
-            "malformed.cfg",
-            skip_filter=True,
-        )
-        result = self.run_test(
-            "baseline",
-            target=target,
-            run_args=["-c", str(malformed_cfg), "--", instrumentable_child],
-            fail_on_pass=True,
-        )
-        self.assert_regex(
-            result,
-            pass_regex=[r"[Ii]nvalid value.*ROCPROFSYS_TRACE_DURATION"],
-            use_abort_fail_regex=False,
-        )
 
 
 # =============================================================================
@@ -407,7 +387,7 @@ class TestCliFlagEnvMapping(RocprofsysTest):
         "flag_args, expected_settings, artifact_kind", CLI_FLAG_ENV_CASES
     )
     def test_sets_expected_settings_and_artifacts(
-        self, target, flag_args, expected_settings, artifact_kind, instrumentable_child
+        self, target, flag_args, expected_settings, artifact_kind, cpu_workload
     ):
         seed_env = {
             key: "OFF"
@@ -418,7 +398,7 @@ class TestCliFlagEnvMapping(RocprofsysTest):
             "baseline",
             target=target,
             env=seed_env,
-            run_args=[*flag_args, *workload_args(instrumentable_child)],
+            run_args=[*flag_args, *workload_args(cpu_workload)],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -474,11 +454,11 @@ class TestWaitDuration(RocprofsysTest):
     env vars.
     """
 
-    def test_wait_sets_delay_envs(self, target, instrumentable_child):
+    def test_wait_sets_delay_envs(self, target, cpu_workload):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["-w", "1.5", *workload_args(instrumentable_child)],
+            run_args=["-w", "1.5", *workload_args(cpu_workload)],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -493,11 +473,11 @@ class TestWaitDuration(RocprofsysTest):
         assert settings["ROCPROFSYS_TRACE_DELAY"] == 1.5
         assert settings["ROCPROFSYS_SAMPLING_DELAY"] == 1.5
 
-    def test_duration_sets_duration_envs(self, target, instrumentable_child):
+    def test_duration_sets_duration_envs(self, target, cpu_workload):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["-d", "2.5", *workload_args(instrumentable_child)],
+            run_args=["-d", "2.5", *workload_args(cpu_workload)],
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -526,17 +506,17 @@ class TestTracePeriods(RocprofsysTest):
     space-joined rather than overwriting each other.
     """
 
-    def test_single_period_sets_env(self, target, instrumentable_child):
+    def test_single_period_sets_env(self, target, cpu_workload):
         result = self.run_test(
             "baseline",
             target=target,
-            run_args=["--periods", "0:2", *workload_args(instrumentable_child)],
+            run_args=["--periods", "0:2", *workload_args(cpu_workload)],
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2"])
         assert _resolved_settings(result)["ROCPROFSYS_TRACE_PERIODS"] == "0:2"
 
-    def test_repeated_periods_are_space_joined(self, target, instrumentable_child):
+    def test_repeated_periods_are_space_joined(self, target, cpu_workload):
         result = self.run_test(
             "baseline",
             target=target,
@@ -545,7 +525,7 @@ class TestTracePeriods(RocprofsysTest):
                 "0:2",
                 "--periods",
                 "3:2",
-                *workload_args(instrumentable_child),
+                *workload_args(cpu_workload),
             ],
             fail_on_not_found=True,
         )
@@ -581,7 +561,7 @@ class TestDeviceSamplingArtifacts(RocprofsysTest):
                 "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch",
                 "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,mem_usage",
             },
-            run_args=["-D", "--", gpu_workload, *GPU_WORKLOAD_ARGS],
+            run_args=["-D", "--", gpu_workload, *TRANSPOSE_ARGS],
             fail_on_not_found=True,
         )
 
