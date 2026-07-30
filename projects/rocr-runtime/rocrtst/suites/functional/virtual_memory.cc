@@ -158,12 +158,11 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
 
   if (ag_type == HSA_DEVICE_TYPE_CPU && pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
 
-  // Query whether this agent supports host memory DMA-BUF allocation via vmem APIs
+  // Query whether the system supports host memory DMA-BUF allocation via vmem APIs
   const bool is_cpu_pool = (ag_type == HSA_DEVICE_TYPE_CPU);
   bool vmem_host_supported = false;
-  ASSERT_SUCCESS(hsa_agent_get_info(agent,
-                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
-                                    &vmem_host_supported));
+  ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED,
+                                     &vmem_host_supported));
 
   // Skip test for CPU pools if host memory DMA-BUF is not supported
   if (is_cpu_pool && !vmem_host_supported) {
@@ -423,11 +422,10 @@ void VirtMemoryTestBasic::TestRefCount(hsa_agent_t agent, hsa_amd_memory_pool_t 
 
   if (ag_type == HSA_DEVICE_TYPE_CPU && pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
 
-  // Query whether this agent supports host memory allocation via vmem APIs
+  // Query whether this system supports host memory allocation via vmem APIs
   bool vmem_host_supported = false;
-  ASSERT_SUCCESS(hsa_agent_get_info(agent,
-                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
-                                    &vmem_host_supported));
+  ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED,
+                                     &vmem_host_supported));
 
   // Skip test for CPU pools if host memory allocation is not supported
   if (ag_type == HSA_DEVICE_TYPE_CPU && !vmem_host_supported) {
@@ -521,11 +519,10 @@ void VirtMemoryTestBasic::TestPartialMapping(hsa_agent_t agent, hsa_amd_memory_p
 
   if (ag_type == HSA_DEVICE_TYPE_CPU && pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
 
-  // Query whether this agent supports host memory DMA-BUF allocation via vmem APIs
+  // Query whether this system supports host memory DMA-BUF allocation via vmem APIs
   bool vmem_host_supported = false;
-  ASSERT_SUCCESS(hsa_agent_get_info(agent,
-                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
-                                    &vmem_host_supported));
+  ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED,
+                                     &vmem_host_supported));
 
   // Skip test for CPU pools if host memory DMA-BUF is not supported
   if (ag_type == HSA_DEVICE_TYPE_CPU && !vmem_host_supported) {
@@ -1351,11 +1348,10 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory
   ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type));
   if (ag_type != HSA_DEVICE_TYPE_CPU) return;
 
-  // Query whether this agent supports host memory allocation via vmem APIs
+  // Query whether this system supports host memory allocation via vmem APIs
   bool vmem_host_supported = false;
-  ASSERT_SUCCESS(hsa_agent_get_info(agent,
-                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
-                                    &vmem_host_supported));
+  ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED,
+                                     &vmem_host_supported));
 
   // Skip test for CPU pools if host memory is not supported
   if (!vmem_host_supported) {
@@ -1763,9 +1759,8 @@ void VirtMemoryTestBasic::NonContiguousChunks(hsa_agent_t agent, hsa_amd_memory_
   if (ag_type != HSA_DEVICE_TYPE_CPU) return;
 
   bool vmem_host_supported = false;
-  ASSERT_SUCCESS(hsa_agent_get_info(agent,
-                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
-                                    &vmem_host_supported));
+  ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED,
+                                     &vmem_host_supported));
 
   // Skip test for CPU pools if host memory allocation is not supported
   if (!vmem_host_supported) {
@@ -2317,11 +2312,10 @@ void VirtMemoryTestInterProcess::ChildProcessImpl() {
 void VirtMemoryTestBasic::TestGpuAccessToHostMemoryAllocation(hsa_agent_t cpu_agent,
                                                                hsa_agent_t gpu_agent,
                                                                hsa_amd_memory_pool_t cpu_pool) {
-  // Query whether this CPU agent supports host memory DMA-BUF allocation via vmem APIs
+  // Query whether this system supports host memory DMA-BUF allocation via vmem APIs
   bool vmem_host_supported = false;
-  ASSERT_SUCCESS(hsa_agent_get_info(cpu_agent,
-                                    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED,
-                                    &vmem_host_supported));
+  ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED,
+                                     &vmem_host_supported));
 
   // Skip test if host memory is not supported
   if (!vmem_host_supported) {

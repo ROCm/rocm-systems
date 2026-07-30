@@ -4,7 +4,7 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.8.0 for ROCm 7.15.0 (unreleased)
+## ROCm Systems Profiler 1.8.0 for ROCm 10.0 (unreleased)
 
 ### Added
 
@@ -31,7 +31,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   `signal_wait_until_on_stream`, `broadcastmem_on_stream`, `alltoallmem_on_stream`,
   `barrier_all_on_stream`, `sync_all_on_stream`, `quiet_on_stream`) as
   `rocm_rocshmem_api` spans in Perfetto traces and rocpd databases. Requires
-  rocprofiler-sdk >= 1.3.4 and rocSHMEM >= 3.6.0 (included in ROCm 7.15).
+  rocprofiler-sdk >= 1.3.4 and rocSHMEM >= 3.6.0 (included in ROCm 10.0).
   As of rocSHMEM 3.6.0, `USE_ROCPROFILER_REGISTER` defaults to `ON`, so
   package installations automatically include this support. A `rocshmem` example
   demonstrating two-PE usage of all nine APIs is included under `examples/rocshmem`.
