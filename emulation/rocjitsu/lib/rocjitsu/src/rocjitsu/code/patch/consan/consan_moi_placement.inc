@@ -2322,8 +2322,15 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
           state, options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
           candidate.kernel_descriptor_file_offset, spill_scratch_count, &candidate,
           /*atomic_site=*/nullptr, /*require_spill=*/true);
+      const ConSanResourcePlanAlternative alternative{
+          .kind = ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
+          .source = spill_plan.source,
+          .reason = spill_plan.reason,
+          .scratch_vgpr_count = spill_scratch_count,
+      };
       if (spill_plan.source == ConSanRegisterAllocationSource::SpillRequired)
         plan = std::move(spill_plan);
+      plan.alternative = alternative;
     }
     result.resource_plans.push_back(std::move(plan));
   }

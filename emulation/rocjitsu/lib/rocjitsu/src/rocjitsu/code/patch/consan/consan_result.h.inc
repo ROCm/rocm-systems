@@ -403,6 +403,10 @@ find_consan_sync_sequence_for_event(const ConSanResult &result, std::string_view
 [[nodiscard]] const char *
 consan_register_allocation_source_name(ConSanRegisterAllocationSource source);
 [[nodiscard]] const char *consan_register_plan_reason_name(ConSanRegisterPlanReason reason);
+[[nodiscard]] bool consan_resource_plan_alternative_selected(
+    const ConSanCandidateResourcePlan &plan, const ConSanResourcePlanAlternative &alternative);
+[[nodiscard]] const char *
+consan_resource_plan_alternative_kind_name(ConSanResourcePlanAlternativeKind kind);
 [[nodiscard]] const char *consan_delay_mode_name(ConSanDelayMode mode);
 [[nodiscard]] const char *
 consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source);

@@ -665,6 +665,344 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
   }
 }
 
+TEST(ConSanMoi, Cdna4InlineShadowReportsRejectedSpillBackedWindowAlternative) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 6u, .vdst = 6u});
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0, kArch));
+  std::copy(load.begin(), load.end(), text_words.begin());
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "rejected_spill_backed_window", /*vgpr_granulated=*/1u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+  });
+  append_kernel_metadata_note(bytes, "rejected_spill_backed_window",
+                              /*uses_dynamic_stack=*/false, /*sgpr_count=*/0u,
+                              /*private_segment_fixed_size=*/std::nullopt,
+                              /*required_workgroup_size=*/std::nullopt,
+                              /*has_dynamic_lds=*/true);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  // The only 16-register ordinary window contains this persistent tuple.
+  // The alternative is therefore considered and rejected rather than silently
+  // disappearing behind the retained 17-register failure.
+  options.moi_owner_vgpr = 7u;
+  options.moi_epoch_vgpr = 8u;
+  options.moi_workgroup_key_vgpr = 9u;
+  options.moi_exec_save_sgpr = 40u;
+  options.moi_track_atomics = false;
+  options.moi_track_barriers = false;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::NoLegalWindow);
+  ASSERT_TRUE(plan.alternative);
+  EXPECT_EQ(plan.alternative->kind, ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery);
+  EXPECT_EQ(plan.alternative->scratch_vgpr_count, 16u);
+  EXPECT_EQ(plan.alternative->source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(plan.alternative->reason, ConSanRegisterPlanReason::NoLegalWindow);
+  EXPECT_FALSE(consan_resource_plan_alternative_selected(plan, *plan.alternative));
+  EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 1u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_selected, 0u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_rejected, 1u);
+  EXPECT_EQ(result.resource_plan_summary.alternative_attempts,
+            result.resource_plan_summary.alternative_selected +
+                result.resource_plan_summary.alternative_rejected);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
+                               &ConSanPatchInfo::kind),
+            0u);
+}
+
+TEST(ConSanMoi, Cdna4InlineShadowReloadsOverlappingDynamicStackAddress) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/0u, /*vdata=*/16u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(guest);
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0, kArch));
+  std::copy(guest->begin(), guest->end(), text_words.begin() + 1u);
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "overlapping_dynamic_stack_address", /*vgpr_granulated=*/4u,
+      /*uses_dynamic_stack=*/true, /*workgroup_id_dimension_mask=*/0u,
+      /*group_segment_fixed_size=*/4u);
+  append_kernel_metadata_note(bytes, "overlapping_dynamic_stack_address",
+                              /*uses_dynamic_stack=*/true, /*sgpr_count=*/0u,
+                              /*private_segment_fixed_size=*/0u);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_vgpr_spill = true;
+  // These persistent values split the 40-register allocation so no disjoint
+  // 16-register spill window exists. Operand-overlap fallback deterministically
+  // selects v0:v15 while leaving persistent state outside it.
+  options.moi_owner_vgpr = 24u;
+  options.moi_epoch_vgpr = 25u;
+  options.moi_workgroup_key_vgpr = 26u;
+  options.moi_track_atomics = false;
+  options.moi_track_barriers = false;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(plan.scratch_vgpr, 0u);
+  EXPECT_EQ(plan.scratch_vgpr_count, 16u);
+  EXPECT_FALSE(plan.alternative.has_value());
+  EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 0u);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_EQ(patch->scratch_vgpr, 0u);
+  ASSERT_EQ(patch->spilled_vgpr_count, 16u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave_words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  const auto reload_address = build_cdna4_scratch_load_b32_saddr(
+      /*vdst=*/15u, /*saddr=*/33u, /*byte_offset=*/0u, kArch);
+  const auto wait = ib::build_s_wait_private_load0(kArch);
+  ASSERT_TRUE(reload_address && wait);
+  std::vector<uint32_t> reload_sequence(reload_address->begin(), reload_address->end());
+  reload_sequence.push_back(*wait);
+  EXPECT_EQ(count_subsequence(cave_words, reload_sequence), 2u);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, CdnaInlineShadowAtomicTrackingFitsSpillBackedTransactionWindow) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    std::vector<uint32_t> guest;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      const auto load = build_cdna3_ds_load_b32(
+          /*vdst=*/0u, /*vaddr=*/0u, /*byte_offset=*/0u, arch);
+      ASSERT_TRUE(load);
+      guest.assign(load->begin(), load->end());
+    } else {
+      constexpr auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0u, .vdst = 0u});
+      guest.assign(load.begin(), load.end());
+    }
+    std::vector<uint32_t> text_words(1200u, build_s_nop(0, arch));
+    std::copy(guest.begin(), guest.end(), text_words.begin());
+    size_t cursor = guest.size();
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      const auto release = cdna3::build_mubuf(cdna3::kBufferWbl2Mubuf, {.sc1 = 1});
+      const auto wait = build_cdna3_s_wait_vmcnt_lgkmcnt0(arch);
+      const auto atomic = build_cdna3_flat_atomic_add_u32(
+          /*vaddr=*/2u, /*vsrc=*/4u, /*vdst=*/5u, /*return_old_value=*/true,
+          /*scope=*/2u, arch);
+      ASSERT_TRUE(wait && atomic);
+      std::copy(release.begin(), release.end(), text_words.begin() + cursor);
+      cursor += release.size();
+      text_words[cursor++] = *wait;
+      std::copy(atomic->begin(), atomic->end(), text_words.begin() + cursor);
+    } else {
+      const auto release = cdna4::build_mubuf(cdna4::kBufferWbl2Mubuf, {.sc1 = 1});
+      const auto wait = build_cdna4_s_wait_flat0(arch);
+      const auto atomic = build_cdna4_flat_atomic_add_u32(
+          /*vaddr=*/2u, /*vsrc=*/4u, /*vdst=*/5u, /*return_old_value=*/true,
+          /*scope=*/2u, arch);
+      ASSERT_TRUE(wait && atomic);
+      std::copy(release.begin(), release.end(), text_words.begin() + cursor);
+      cursor += release.size();
+      text_words[cursor++] = *wait;
+      std::copy(atomic->begin(), atomic->end(), text_words.begin() + cursor);
+    }
+    text_words.back() = build_s_endpgm(arch);
+    std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, "atomic_tracking_spill_pressure",
+                                         /*vgpr_granulated=*/3u)
+            : make_cdna4_lds_code_object(text_words, "atomic_tracking_spill_pressure",
+                                         /*vgpr_granulated=*/3u);
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 7u);
+    });
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    options.force_vgpr_spill = true;
+    options.moi_owner_vgpr = 24u;
+    options.moi_epoch_vgpr = 25u;
+    options.moi_workgroup_key_vgpr = 26u;
+    options.moi_exec_save_sgpr = 40u;
+    options.moi_track_atomics = true;
+    options.moi_track_barriers = false;
+    options.moi_report_buffer_address = 0x100000000ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    const auto access_plan =
+        std::ranges::find_if(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+          return plan.site_kind == ConSanResourceSiteKind::Access && plan.text_offset == 0u;
+        });
+    ASSERT_NE(access_plan, result.resource_plans.end());
+    const ConSanCandidateResourcePlan &plan = *access_plan;
+    EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+    EXPECT_EQ(plan.scratch_vgpr, 0u);
+    EXPECT_EQ(plan.scratch_vgpr_count, 24u);
+    ASSERT_TRUE(plan.alternative);
+    EXPECT_EQ(plan.alternative->kind,
+              ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery);
+    EXPECT_EQ(plan.alternative->scratch_vgpr_count, 24u);
+    EXPECT_EQ(plan.alternative->source, ConSanRegisterAllocationSource::SpillRequired);
+    EXPECT_EQ(plan.alternative->reason, plan.reason);
+    EXPECT_TRUE(consan_resource_plan_alternative_selected(plan, *plan.alternative));
+    EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 1u);
+    EXPECT_EQ(result.resource_plan_summary.alternative_selected, 1u);
+    EXPECT_EQ(result.resource_plan_summary.alternative_rejected, 0u);
+    const auto patch = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, result.patches.end());
+    EXPECT_EQ(patch->spilled_vgpr_count, 24u);
+    EXPECT_TRUE(result.final_validation_passed);
+  }
+}
+
+TEST(ConSanMoi, CdnaInlineShadowWideAccessReloadsAddressOutsideCellLoopState) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    std::vector<uint32_t> guest;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      const auto store = build_cdna3_ds_store_b128(
+          /*vaddr=*/0u, /*vdata=*/16u, /*byte_offset=*/0u, arch);
+      ASSERT_TRUE(store);
+      guest.assign(store->begin(), store->end());
+    } else {
+      constexpr auto store = cdna4::build_ds(cdna4::kDsWriteB128Ds, {.addr = 0u, .data0 = 16u});
+      guest.assign(store.begin(), store.end());
+    }
+    std::vector<uint32_t> text_words(1200u, build_s_nop(0, arch));
+    std::copy(guest.begin(), guest.end(), text_words.begin());
+    text_words.back() = build_s_endpgm(arch);
+    std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, "wide_access_spill_pressure",
+                                         /*vgpr_granulated=*/3u)
+            : make_cdna4_lds_code_object(text_words, "wide_access_spill_pressure",
+                                         /*vgpr_granulated=*/3u);
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 7u);
+    });
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+    options.force_vgpr_spill = true;
+    options.moi_owner_vgpr = 24u;
+    options.moi_epoch_vgpr = 25u;
+    options.moi_workgroup_key_vgpr = 26u;
+    options.moi_exec_save_sgpr = 40u;
+    options.moi_track_atomics = false;
+    options.moi_track_barriers = false;
+    options.moi_report_buffer_address = 0x100000000ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_EQ(result.moi_candidates.size(), 1u);
+    EXPECT_EQ(result.moi_candidates.front().width_bits, 128u);
+    ASSERT_EQ(result.resource_plans.size(), 1u);
+    EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+    EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 0u);
+    EXPECT_EQ(result.resource_plans.front().scratch_vgpr_count, 18u);
+    const auto patch = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+    ASSERT_NE(patch, result.patches.end());
+    EXPECT_EQ(patch->spilled_vgpr_count, 18u);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const std::vector<uint32_t> cave_words =
+        text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+    constexpr uint32_t kSpillBase = 0u;
+    constexpr uint16_t kPhaseSharedAddressVgpr = 15u;
+    auto reload_address =
+        arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? build_cdna3_address_free_scratch_load_b32(kPhaseSharedAddressVgpr, kSpillBase, arch)
+            : build_cdna4_address_free_scratch_load_b32(kPhaseSharedAddressVgpr, kSpillBase, arch);
+    const auto wait = ib::build_s_wait_private_load0(arch);
+    ASSERT_TRUE(reload_address && wait);
+    std::vector<uint32_t> reload_sequence(reload_address->begin(), reload_address->end());
+    reload_sequence.push_back(*wait);
+    EXPECT_EQ(count_subsequence(cave_words, reload_sequence), 2u);
+    const uint16_t loop_counter = consan_detail::inline_shadow_loop_counter_vgpr(
+        /*scratch_vgpr=*/0u, /*has_exec_save=*/true, /*track_atomics=*/false);
+    EXPECT_LT(kPhaseSharedAddressVgpr, loop_counter);
+    EXPECT_TRUE(result.final_validation_passed);
+  }
+}
+
+TEST(ConSanMoi, Cdna4InlineShadowReloadsBothSpilledMaybeGroupAddressHalves) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  std::vector<uint32_t> text_words;
+  text_words.push_back(0xBE8001EBu); // s_mov_b64 s[0:1], src_shared_base
+  text_words.push_back(build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(30u), kArch));
+  text_words.push_back(build_v_mov_b32_e32(/*vdst=*/1u, /*s1=*/1u, kArch));
+  constexpr auto load = cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.addr = 0u, .vdst = 16u});
+  text_words.insert(text_words.end(), load.begin(), load.end());
+  text_words.resize(1200u, build_s_nop(0, kArch));
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "maybe_group_spill_overlap", /*vgpr_granulated=*/4u);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_vgpr_spill = true;
+  options.moi_owner_vgpr = 24u;
+  options.moi_epoch_vgpr = 25u;
+  options.moi_workgroup_key_vgpr = 26u;
+  options.moi_exec_save_sgpr = 40u;
+  options.moi_track_atomics = false;
+  options.moi_track_barriers = false;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatMaybeGroup);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 0u);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_EQ(patch->scratch_vgpr, 0u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> cave_words =
+      text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
+  constexpr uint32_t kSpillBase = 0u;
+  const auto reload_low =
+      build_cdna4_address_free_scratch_load_b32(/*vdst=*/15u, kSpillBase, kArch);
+  const auto reload_high = build_cdna4_address_free_scratch_load_b32(
+      /*vdst=*/1u, kSpillBase + sizeof(uint32_t), kArch);
+  const auto wait = ib::build_s_wait_private_load0(kArch);
+  ASSERT_TRUE(reload_low && reload_high && wait);
+  std::vector<uint32_t> low_sequence(reload_low->begin(), reload_low->end());
+  low_sequence.push_back(*wait);
+  std::vector<uint32_t> high_sequence(reload_high->begin(), reload_high->end());
+  high_sequence.push_back(*wait);
+  EXPECT_EQ(count_subsequence(cave_words, low_sequence), 2u);
+  EXPECT_EQ(count_subsequence(cave_words, high_sequence), 1u);
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4ExternalInlineShadowRetainsPrivateWorkgroupKey) {
   std::vector<uint32_t> text_words(1200, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   text_words[0] = 0xd81a0004u;

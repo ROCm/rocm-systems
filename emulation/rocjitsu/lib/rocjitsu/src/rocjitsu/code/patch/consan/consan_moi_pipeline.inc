@@ -1129,6 +1129,13 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
 void summarize_moi_resource_plans(ConSanResult &result) {
   result.resource_plan_summary = {};
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    if (plan.alternative) {
+      ++result.resource_plan_summary.alternative_attempts;
+      if (consan_resource_plan_alternative_selected(plan, *plan.alternative))
+        ++result.resource_plan_summary.alternative_selected;
+      else
+        ++result.resource_plan_summary.alternative_rejected;
+    }
     switch (plan.source) {
     case ConSanRegisterAllocationSource::Explicit:
       ++result.resource_plan_summary.explicit_plans;

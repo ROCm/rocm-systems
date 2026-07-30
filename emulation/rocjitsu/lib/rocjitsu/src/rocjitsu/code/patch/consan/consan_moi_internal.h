@@ -24,6 +24,7 @@
 namespace rocjitsu {
 
 struct ConSanOptions;
+struct VgprSpillSequence;
 
 /// One scalar, vector, or entry-captured private-state source for a
 /// workgroup-coordinate component.
@@ -74,6 +75,25 @@ struct ConSanMoiWorkgroupSource {
 };
 
 namespace consan_detail {
+
+/// Release-active outcome from recovering one guest VGPR out of an
+/// instrumentation spill window.
+enum class MoiSpilledVgprReloadResult : uint8_t {
+  Appended,
+  SourceOutsideWindow,
+  IncompleteSlotMetadata,
+  UnsupportedEncoding,
+};
+
+[[nodiscard]] const char *moi_spilled_vgpr_reload_result_name(MoiSpilledVgprReloadResult result);
+
+/// Append one private-memory reload without leaving partial output on failure.
+///
+/// Dynamic-stack spills select the target-native scalar-addressed encoding.
+/// Fixed-frame spills use the address-free private-load encoding.
+[[nodiscard]] MoiSpilledVgprReloadResult
+append_reload_moi_spilled_vgpr(std::vector<uint32_t> &words, const VgprSpillSequence &spill,
+                               uint16_t destination, uint16_t source, rj_code_arch_t arch);
 
 struct ScalarOwnerContextSummary {
   std::optional<uint64_t> descriptor_file_offset;

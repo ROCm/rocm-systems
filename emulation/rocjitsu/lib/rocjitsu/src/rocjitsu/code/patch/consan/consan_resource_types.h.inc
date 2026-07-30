@@ -87,6 +87,25 @@ struct ConSanSiteDispositionRecord {
   ConSanRegisterPlanReason resource_reason = ConSanRegisterPlanReason::None;
 };
 
+/// A lower-resource window shape considered after the primary resource plan.
+///
+/// Keeping the shape explicit lets diagnostics distinguish a rejected compact
+/// plan from a site that never had a correctness-preserving alternative.
+/// This currently records the single spill-backed CDNA Inline Shadow access
+/// fallback. The retained plan determines whether the recorded attempt won;
+/// no mutable selection state is stored here.
+enum class ConSanResourcePlanAlternativeKind : uint8_t {
+  SpillBackedOperandRecovery,
+};
+
+struct ConSanResourcePlanAlternative {
+  ConSanResourcePlanAlternativeKind kind =
+      ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery;
+  ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
+  ConSanRegisterPlanReason reason = ConSanRegisterPlanReason::None;
+  uint16_t scratch_vgpr_count = 0;
+};
+
 struct ConSanCandidateResourcePlan {
   ConSanResourceSiteKind site_kind = ConSanResourceSiteKind::Access;
   size_t candidate_index = 0;
@@ -109,6 +128,10 @@ struct ConSanCandidateResourcePlan {
   bool has_indirect_sgpr_access = false;
   bool sgpr_reference_coverage_complete = false;
   uint32_t original_private_segment_size = 0;
+  /// Present only when planning evaluated the currently supported structurally
+  /// distinct compact window. A rejected attempt remains attached to the
+  /// retained primary plan.
+  std::optional<ConSanResourcePlanAlternative> alternative;
 };
 
 struct ConSanResourcePlanSummary {
@@ -120,6 +143,9 @@ struct ConSanResourcePlanSummary {
   size_t planned_spill_slot_bytes = 0;
   size_t emitted_spill_patches = 0;
   size_t emitted_spill_slot_bytes = 0;
+  size_t alternative_attempts = 0;
+  size_t alternative_selected = 0;
+  size_t alternative_rejected = 0;
 };
 
 /// Exact redundant-access selection proven by an internal validated composite

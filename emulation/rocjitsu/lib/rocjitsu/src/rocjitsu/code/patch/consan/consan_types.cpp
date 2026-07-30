@@ -266,6 +266,21 @@ const char *consan_register_plan_reason_name(ConSanRegisterPlanReason reason) {
   return "unknown";
 }
 
+bool consan_resource_plan_alternative_selected(const ConSanCandidateResourcePlan &plan,
+                                               const ConSanResourcePlanAlternative &alternative) {
+  return plan.source == ConSanRegisterAllocationSource::SpillRequired &&
+         plan.source == alternative.source && plan.reason == alternative.reason &&
+         plan.scratch_vgpr_count == alternative.scratch_vgpr_count;
+}
+
+const char *consan_resource_plan_alternative_kind_name(ConSanResourcePlanAlternativeKind kind) {
+  switch (kind) {
+  case ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery:
+    return "spill_backed_operand_recovery";
+  }
+  return "unknown";
+}
+
 const char *consan_site_disposition_name(ConSanSiteDisposition disposition) {
   switch (disposition) {
   case ConSanSiteDisposition::NotApplicable:

@@ -1153,7 +1153,8 @@
     rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout, uint16_t address_lo_vgpr,
     uint16_t current_low_vgpr, uint16_t current_high_vgpr, uint16_t old_value_vgpr,
     uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t byte_count,
-    const VgprSpillSequence *spill, std::optional<uint16_t> spill_backed_lds_byte_offset_source) {
+    const VgprSpillSequence *spill, std::optional<uint16_t> spill_backed_lds_byte_offset_source,
+    std::vector<std::string> &errors) {
   if (!options.moi_exec_save_sgpr)
     return false;
 
@@ -1343,11 +1344,20 @@
   words.push_back(restore_address_hi);
   // Narrow spill-backed paths deliberately pay one reload per partition only
   // when diagnostics can consume the recovered guest address.
-  if (layout.diagnostic_capacity != 0 && spill_backed_lds_byte_offset_source &&
-      (spill == nullptr ||
-       !append_reload_moi_spilled_vgpr(words, *spill, lds_byte_offset_vgpr,
-                                       *spill_backed_lds_byte_offset_source, arch))) {
-    return false;
+  if (layout.diagnostic_capacity != 0 && spill_backed_lds_byte_offset_source) {
+    if (spill == nullptr) {
+      errors.emplace_back(
+          "ConSan MOI inline-shadow probe has no spill plan for its diagnostic LDS address");
+      return false;
+    }
+    const auto reload = consan_detail::append_reload_moi_spilled_vgpr(
+        words, *spill, lds_byte_offset_vgpr, *spill_backed_lds_byte_offset_source, arch);
+    if (reload != consan_detail::MoiSpilledVgprReloadResult::Appended) {
+      errors.emplace_back(
+          "ConSan MOI inline-shadow probe could not recover its diagnostic LDS address: " +
+          std::string(consan_detail::moi_spilled_vgpr_reload_result_name(reload)));
+      return false;
+    }
   }
 
   // The partition operations changed VCC/SCC. Restore the incoming values so
@@ -1941,9 +1951,21 @@
   words.reserve(candidate.size / sizeof(uint32_t) + 64u + (options.moi_exec_save_sgpr ? 120u : 0u) +
                 (options.moi_epoch_vgpr ? 2u : 0u));
   const auto reload_spill_backed_lds_byte_offset = [&]() {
-    return !spill_backed_lds_byte_offset_source ||
-           append_reload_moi_spilled_vgpr(words, *spill, *saved_lds_byte_offset_vgpr,
-                                          *spill_backed_lds_byte_offset_source, arch);
+    if (!spill_backed_lds_byte_offset_source)
+      return true;
+    if (spill == nullptr) {
+      errors.emplace_back("ConSan MOI inline-shadow probe has no spill plan for its LDS address");
+      return false;
+    }
+    const auto reload = consan_detail::append_reload_moi_spilled_vgpr(
+        words, *spill, *saved_lds_byte_offset_vgpr, *spill_backed_lds_byte_offset_source, arch);
+    if (reload == consan_detail::MoiSpilledVgprReloadResult::Appended)
+      return true;
+    errors.emplace_back("ConSan MOI inline-shadow probe could not recover its spilled LDS "
+                        "address: " +
+                        std::string(
+                            consan_detail::moi_spilled_vgpr_reload_result_name(reload)));
+    return false;
   };
   const auto append_guest_access = [&] {
     for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
@@ -2098,10 +2120,13 @@
                                      : static_cast<uint16_t>(*candidate.addr_vgpr + 1u);
     if (!materialize_flat_offset && source_is_spilled(address_hi_source)) {
       const uint16_t recovered_address_hi = static_cast<uint16_t>(*options.scratch_vgpr + 1u);
-      if (!append_reload_moi_spilled_vgpr(words, *spill, recovered_address_hi, address_hi_source,
-                                          arch)) {
-        errors.emplace_back(
-            "ConSan MOI inline-shadow probe could not recover a spilled flat address");
+      const auto reload = consan_detail::append_reload_moi_spilled_vgpr(
+          words, *spill, recovered_address_hi, address_hi_source, arch);
+      if (reload != consan_detail::MoiSpilledVgprReloadResult::Appended) {
+        errors.emplace_back("ConSan MOI inline-shadow probe could not recover a spilled flat "
+                            "address: " +
+                            std::string(
+                                consan_detail::moi_spilled_vgpr_reload_result_name(reload)));
         return std::nullopt;
       }
       address_hi_source = recovered_address_hi;
@@ -2412,7 +2437,7 @@
       if (!append_wave_coalesced_exact_shadow_swap(
               words, candidate, options, arch, layout, address_lo_vgpr, low_vgpr, high_vgpr,
               old_value_vgpr, *lds_byte_offset_vgpr, range.static_byte_offset, range.byte_count,
-              spill, spill_backed_lds_byte_offset_source)) {
+              spill, spill_backed_lds_byte_offset_source, errors)) {
         errors.emplace_back(
             "ConSan MOI inline-shadow probe could not encode versioned shadow publish");
         return std::nullopt;

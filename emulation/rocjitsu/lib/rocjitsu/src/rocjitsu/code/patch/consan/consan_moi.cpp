@@ -218,6 +218,61 @@ bool consan_detail::validate_scalar_state_temporaries(const ConSanOptions &optio
   return false;
 }
 
+const char *consan_detail::moi_spilled_vgpr_reload_result_name(MoiSpilledVgprReloadResult result) {
+  switch (result) {
+  case MoiSpilledVgprReloadResult::Appended:
+    return "appended";
+  case MoiSpilledVgprReloadResult::SourceOutsideWindow:
+    return "source_outside_window";
+  case MoiSpilledVgprReloadResult::IncompleteSlotMetadata:
+    return "incomplete_slot_metadata";
+  case MoiSpilledVgprReloadResult::UnsupportedEncoding:
+    return "unsupported_encoding";
+  }
+  return "unknown";
+}
+
+consan_detail::MoiSpilledVgprReloadResult
+consan_detail::append_reload_moi_spilled_vgpr(std::vector<uint32_t> &words,
+                                              const VgprSpillSequence &spill, uint16_t destination,
+                                              uint16_t source, rj_code_arch_t arch) {
+  const uint32_t spill_end = static_cast<uint32_t>(spill.vgpr_base) + spill.vgpr_count;
+  if (source < spill.vgpr_base || source >= spill_end)
+    return MoiSpilledVgprReloadResult::SourceOutsideWindow;
+  if (!spill.has_complete_slot_metadata())
+    return MoiSpilledVgprReloadResult::IncompleteSlotMetadata;
+
+  const uint32_t slot_offset = spill.slot_offsets[source - spill.vgpr_base];
+  const auto wait = instrumentation::build_s_wait_private_load0(arch);
+  InstructionSequence sequence(words);
+  bool encoded = false;
+  if (spill.uses_dynamic_stack_frame) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      encoded =
+          sequence.emit_all(build_cdna3_scratch_load_b32_saddr(
+                                destination, spill.dynamic_frame_base_sgpr, slot_offset, arch),
+                            wait);
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      encoded =
+          sequence.emit_all(build_cdna4_scratch_load_b32_saddr(
+                                destination, spill.dynamic_frame_base_sgpr, slot_offset, arch),
+                            wait);
+    } else {
+      encoded =
+          sequence.emit_all(build_scratch_load_b32_saddr(destination, spill.dynamic_frame_base_sgpr,
+                                                         slot_offset, arch),
+                            wait);
+    }
+  } else {
+    encoded = sequence.emit_all(
+        instrumentation::build_private_load_b32(destination, slot_offset, arch), wait);
+  }
+  if (!encoded)
+    return MoiSpilledVgprReloadResult::UnsupportedEncoding;
+
+  return MoiSpilledVgprReloadResult::Appended;
+}
+
 bool consan_detail::append_workgroup_source_value(std::vector<uint32_t> &words,
                                                   const ConSanMoiWorkgroupSource &source,
                                                   uint16_t value_vgpr, rj_code_arch_t arch) {

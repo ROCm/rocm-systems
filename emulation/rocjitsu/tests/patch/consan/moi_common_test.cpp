@@ -5,10 +5,14 @@
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+
+#include <set>
+#include <string_view>
 
 namespace rocjitsu {
 namespace {
@@ -195,6 +199,158 @@ TEST(ConSanMoi, DynamicRecordAddressRejectsInvalidRegistersWithoutPartialOutput)
   rejects_without_appending(kStrideBytes, 255u, kSlotVgpr, ROCJITSU_CODE_ARCH_RDNA4);
   rejects_without_appending(kStrideBytes, kAddressVgpr, 256u, ROCJITSU_CODE_ARCH_RDNA4);
   rejects_without_appending(kStrideBytes, kAddressVgpr, kSlotVgpr, ROCJITSU_CODE_ARCH_INVALID);
+}
+
+TEST(ConSanMoi, SpilledVgprReloadSelectsFixedAndDynamicTargetEncodings) {
+  constexpr uint16_t kSpillBase = 8u;
+  constexpr uint16_t kSource = 9u;
+  constexpr uint16_t kDestination = 40u;
+  constexpr uint16_t kFrameBaseSgpr = 33u;
+  constexpr uint32_t kSlotOffset = 20u;
+  constexpr std::array kArchitectures = {
+      ROCJITSU_CODE_ARCH_CDNA3,
+      ROCJITSU_CODE_ARCH_CDNA4,
+      ROCJITSU_CODE_ARCH_RDNA4,
+      ROCJITSU_CODE_ARCH_GFX1250,
+  };
+
+  for (rj_code_arch_t arch : kArchitectures) {
+    SCOPED_TRACE(arch);
+    VgprSpillSequence fixed{
+        .vgpr_base = kSpillBase,
+        .vgpr_count = 2u,
+        .slot_offsets = {16u, kSlotOffset},
+        .save_words = {},
+        .restore_words = {},
+        .total_private_bytes = 24u,
+        .uses_dynamic_stack_frame = false,
+        .dynamic_frame_base_sgpr = 0u,
+        .dynamic_frame_bytes = 0u,
+    };
+    std::vector<uint32_t> fixed_words;
+    EXPECT_EQ(consan_detail::append_reload_moi_spilled_vgpr(fixed_words, fixed, kDestination,
+                                                            kSource, arch),
+              consan_detail::MoiSpilledVgprReloadResult::Appended);
+    const auto fixed_load =
+        instrumentation::build_private_load_b32(kDestination, kSlotOffset, arch);
+    const auto wait = instrumentation::build_s_wait_private_load0(arch);
+    ASSERT_TRUE(fixed_load && wait);
+    std::vector<uint32_t> expected_fixed(fixed_load->begin(), fixed_load->end());
+    expected_fixed.push_back(*wait);
+    EXPECT_EQ(fixed_words, expected_fixed);
+
+    VgprSpillSequence dynamic = fixed;
+    dynamic.uses_dynamic_stack_frame = true;
+    dynamic.dynamic_frame_base_sgpr = kFrameBaseSgpr;
+    std::vector<uint32_t> dynamic_words;
+    EXPECT_EQ(consan_detail::append_reload_moi_spilled_vgpr(dynamic_words, dynamic, kDestination,
+                                                            kSource, arch),
+              consan_detail::MoiSpilledVgprReloadResult::Appended);
+    std::vector<uint32_t> expected_dynamic;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      const auto load =
+          build_cdna3_scratch_load_b32_saddr(kDestination, kFrameBaseSgpr, kSlotOffset, arch);
+      ASSERT_TRUE(load);
+      expected_dynamic.assign(load->begin(), load->end());
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      const auto load =
+          build_cdna4_scratch_load_b32_saddr(kDestination, kFrameBaseSgpr, kSlotOffset, arch);
+      ASSERT_TRUE(load);
+      expected_dynamic.assign(load->begin(), load->end());
+    } else {
+      const auto load =
+          build_scratch_load_b32_saddr(kDestination, kFrameBaseSgpr, kSlotOffset, arch);
+      ASSERT_TRUE(load);
+      expected_dynamic.assign(load->begin(), load->end());
+    }
+    expected_dynamic.push_back(*wait);
+    EXPECT_EQ(dynamic_words, expected_dynamic);
+  }
+}
+
+TEST(ConSanMoi, SpilledVgprReloadClassifiesRejectedRequestsWithoutAppending) {
+  using Result = consan_detail::MoiSpilledVgprReloadResult;
+  const auto rejects = [](const VgprSpillSequence &spill, uint16_t destination, uint16_t source,
+                          rj_code_arch_t arch, Result expected) {
+    std::vector<uint32_t> words = {0x12345678u};
+    EXPECT_EQ(
+        consan_detail::append_reload_moi_spilled_vgpr(words, spill, destination, source, arch),
+        expected);
+    EXPECT_EQ(words, std::vector<uint32_t>{0x12345678u});
+  };
+
+  const VgprSpillSequence complete{
+      .vgpr_base = 8u,
+      .vgpr_count = 2u,
+      .slot_offsets = {16u, 20u},
+      .save_words = {},
+      .restore_words = {},
+      .total_private_bytes = 24u,
+      .uses_dynamic_stack_frame = false,
+      .dynamic_frame_base_sgpr = 0u,
+      .dynamic_frame_bytes = 0u,
+  };
+  rejects(complete, /*destination=*/40u, /*source=*/7u, ROCJITSU_CODE_ARCH_CDNA4,
+          Result::SourceOutsideWindow);
+  VgprSpillSequence incomplete = complete;
+  incomplete.slot_offsets.pop_back();
+  rejects(incomplete, /*destination=*/40u, /*source=*/9u, ROCJITSU_CODE_ARCH_CDNA4,
+          Result::IncompleteSlotMetadata);
+  rejects(complete, /*destination=*/256u, /*source=*/9u, ROCJITSU_CODE_ARCH_CDNA4,
+          Result::UnsupportedEncoding);
+  rejects(complete, /*destination=*/40u, /*source=*/9u, ROCJITSU_CODE_ARCH_INVALID,
+          Result::UnsupportedEncoding);
+
+  constexpr std::array kUnsupportedArchitectures = {
+      ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
+      ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+  };
+  for (rj_code_arch_t arch : kUnsupportedArchitectures) {
+    SCOPED_TRACE(arch);
+    rejects(complete, /*destination=*/40u, /*source=*/9u, arch, Result::UnsupportedEncoding);
+    VgprSpillSequence dynamic = complete;
+    dynamic.uses_dynamic_stack_frame = true;
+    dynamic.dynamic_frame_base_sgpr = 33u;
+    rejects(dynamic, /*destination=*/40u, /*source=*/9u, arch, Result::UnsupportedEncoding);
+  }
+}
+
+TEST(ConSanMoi, SpilledVgprReloadResultNamesAreDistinctAndComplete) {
+  using Result = consan_detail::MoiSpilledVgprReloadResult;
+  constexpr std::array kResults = {
+      Result::Appended,
+      Result::SourceOutsideWindow,
+      Result::IncompleteSlotMetadata,
+      Result::UnsupportedEncoding,
+  };
+  std::set<std::string_view> names;
+  for (Result result : kResults) {
+    const std::string_view name = consan_detail::moi_spilled_vgpr_reload_result_name(result);
+    EXPECT_NE(name, "unknown");
+    EXPECT_TRUE(names.insert(name).second) << name;
+  }
+}
+
+TEST(ConSanMoi, ResourcePlanAlternativeSelectionTracksFinalPlanVeto) {
+  ConSanCandidateResourcePlan plan;
+  plan.source = ConSanRegisterAllocationSource::SpillRequired;
+  plan.reason = ConSanRegisterPlanReason::None;
+  plan.scratch_vgpr_count = 16u;
+  const ConSanResourcePlanAlternative alternative{
+      .kind = ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
+      .source = ConSanRegisterAllocationSource::SpillRequired,
+      .reason = ConSanRegisterPlanReason::None,
+      .scratch_vgpr_count = 16u,
+  };
+  EXPECT_TRUE(consan_resource_plan_alternative_selected(plan, alternative));
+  EXPECT_STREQ(consan_resource_plan_alternative_kind_name(
+                   ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery),
+               "spill_backed_operand_recovery");
+
+  plan.source = ConSanRegisterAllocationSource::Unsupported;
+  plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
+  plan.scratch_vgpr.reset();
+  EXPECT_FALSE(consan_resource_plan_alternative_selected(plan, alternative));
 }
 
 TEST(ConSanMoi, PrivateWorkgroupSourceAppliesPackedCoordinateExtraction) {
