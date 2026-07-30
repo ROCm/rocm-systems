@@ -53,8 +53,12 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   }
   // XCD partitions (config num_threads): run each XCD on its own engine
   // partition/thread so the XCDs execute concurrently across their separate L2s.
+  const uint32_t num_threads_requested = loaded.engine_config.num_threads;
   const uint32_t num_threads_used =
-      amdgpu::clamp_xcd_partition_count(partition_socs, loaded.engine_config.num_threads);
+      amdgpu::clamp_xcd_partition_count(partition_socs, num_threads_requested);
+  if (num_threads_used != num_threads_requested)
+    util::Logger::warn("num_threads clamped: requested=", num_threads_requested,
+                       ", effective=", num_threads_used);
   loaded.engine_config.num_threads = num_threads_used;
 
   bool serve = (mode == RJ_VM_MODE_LOCAL || mode == RJ_VM_MODE_DAEMON);

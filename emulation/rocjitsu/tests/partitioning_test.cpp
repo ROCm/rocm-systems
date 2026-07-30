@@ -192,6 +192,28 @@ TEST(XcdPartitioningTest, SpanOverMultipleSocsUsesGlobalXcdIndex) {
   }
 }
 
+TEST(XcdPartitioningTest, RejectsSocOutsideTopologyWithoutChangingPartitionState) {
+  auto loaded = config::load_config(CONFIG_2GPU_PATH, rocjitsu::kEmbeddedSchema);
+  ASSERT_EQ(loaded.extra_gpu_builds.size(), 1u);
+
+  auto *soc0 = loaded.soc();
+  auto *soc1 = dynamic_cast<SoC *>(loaded.extra_gpu_builds[0].root.get());
+  ASSERT_NE(soc0, nullptr);
+  ASSERT_NE(soc1, nullptr);
+
+  simdojo::Topology topology;
+  topology.set_root(loaded.take_root());
+  std::array<SoC *, 2> socs = {soc0, soc1};
+  EXPECT_FALSE(amdgpu::partition_topology_by_xcds(topology, std::span<SoC *>(socs), 16));
+
+  EXPECT_TRUE(topology.partitions().empty());
+  for (SoC *soc : socs) {
+    EXPECT_EQ(soc->partition_id(), simdojo::INVALID_PARTITION_ID);
+    for (uint32_t i = 0; i < soc->num_xcds(); ++i)
+      EXPECT_EQ(soc->xcd(i)->partition_id(), simdojo::INVALID_PARTITION_ID);
+  }
+}
+
 TEST(XcdPartitioningTest, NonXcdComponentsStayOnPartitionZero) {
   auto topology = build_partitioned_topology(8);
 
@@ -251,13 +273,30 @@ TEST(XcdPartitioningTest, CApiClampsSingleGpuThreadsToXcdCount) {
   auto json = config_json_with_num_threads(CONFIG_PATH, 64);
 
   rj_vm_t *raw_vm = nullptr;
-  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm),
-            ROCJITSU_STATUS_SUCCESS);
+  testing::internal::CaptureStderr();
+  const rj_status_t status = rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
+  const std::string warning = testing::internal::GetCapturedStderr();
+  ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(raw_vm, nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
 
+  EXPECT_NE(warning.find("num_threads clamped: requested=64, effective=8"), std::string::npos);
   EXPECT_EQ(vm->engine_config.num_threads, 8u);
   EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+}
+
+TEST(XcdPartitioningTest, CApiDoesNotWarnWhenThreadCountIsUnchanged) {
+  auto json = config_json_with_num_threads(CONFIG_1XCD_PATH, 1);
+
+  rj_vm_t *raw_vm = nullptr;
+  testing::internal::CaptureStderr();
+  const rj_status_t status = rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
+  const std::string warning = testing::internal::GetCapturedStderr();
+  ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_vm, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+
+  EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
 }
 
 TEST(XcdPartitioningTest, CApiClampsMultiGpuThreadsToTotalXcdCountAndRuns) {

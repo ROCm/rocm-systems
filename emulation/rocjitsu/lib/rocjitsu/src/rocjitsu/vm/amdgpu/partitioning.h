@@ -35,7 +35,8 @@ namespace amdgpu {
 /// assigned to global_xcd_index % num_partitions. Components outside XCD
 /// subtrees stay in partition 0.
 /// @returns true when a manual partition was installed; false when
-/// @p num_partitions is zero or no XCDs are present.
+/// @p num_partitions is zero, no XCDs are present, or any supplied XCD is not
+/// a member of @p topology. Failure leaves existing partition state unchanged.
 [[nodiscard]] bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> socs,
                                               uint32_t num_partitions);
 

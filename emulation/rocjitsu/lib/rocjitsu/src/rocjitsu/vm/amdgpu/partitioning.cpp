@@ -7,6 +7,8 @@
 #include <array>
 #include <cassert>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -31,13 +33,19 @@ bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> so
   if (num_partitions == 0)
     return false;
 
+  const std::vector<simdojo::Component *> components = topology.collect_all_components();
+  const std::unordered_set<simdojo::Component *> topology_components(components.begin(),
+                                                                     components.end());
   std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_partitions;
   uint32_t global_xcd_index = 0;
-  for (auto *soc : socs) {
+  for (SoC *soc : socs) {
     if (!soc)
       continue;
     for (uint32_t xcd_index = 0; xcd_index < soc->num_xcds(); ++xcd_index) {
-      xcd_partitions[soc->xcd(xcd_index)] = global_xcd_index % num_partitions;
+      simdojo::Component *xcd = soc->xcd(xcd_index);
+      if (!topology_components.contains(xcd))
+        return false;
+      xcd_partitions[xcd] = global_xcd_index % num_partitions;
       ++global_xcd_index;
     }
   }

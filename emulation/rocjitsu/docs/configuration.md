@@ -68,6 +68,12 @@ The value is clamped to the number of XCDs visible to the VM. With
 round-robin to four partitions; with `num_threads: 8`, each XCD gets its own
 partition. A single XCD is never split across partitions.
 
+For multi-GPU VMs, clamping uses the aggregate XCD count across all SoCs.
+Partition assignment follows one global XCD ordering across the SoCs and is
+deliberately locality-agnostic. For example, two 8-XCD GPUs permit up to 16
+partitions, while `num_threads: 4` assigns XCDs from both GPUs to each
+partition.
+
 ### Topology
 
 Components are defined hierarchically under `topology.root`. Range
