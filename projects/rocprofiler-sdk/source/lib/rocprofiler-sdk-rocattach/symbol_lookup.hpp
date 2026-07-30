@@ -28,8 +28,10 @@ namespace rocprofiler
 {
 namespace rocattach
 {
-// pathname_only opens the mapped object through /proc/<pid>/root instead of
-// /proc/<pid>/map_files, which containers may not expose.
+// pathname_only forces the /proc/<pid>/root path instead of
+// /proc/<pid>/map_files. No production caller sets it: the lookup already falls
+// back to the pathname when map_files is unavailable. It exists so tests can
+// exercise that fallback deterministically.
 bool
 find_symbol(int                target_pid,
             void*&             addr,

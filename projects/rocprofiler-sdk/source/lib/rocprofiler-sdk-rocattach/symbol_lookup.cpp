@@ -70,9 +70,9 @@ constexpr auto MAX_BUILD_ID_SIZE        = uint64_t{4096};
 constexpr auto MAX_DYNAMIC_SYMBOLS      = size_t{1} << 24;
 constexpr auto MAX_GNU_HASH_CHAIN_STEPS = size_t{1} << 24;
 
-// Note names and descriptors are padded to 4 bytes, not to the containing
+// Note names and descriptors are padded to 4 bytes regardless of the containing
 // segment's p_align. GNU emits .note.gnu.property in a PT_NOTE declaring
-// p_align 8 yet still pads the name to 4, so honoring p_align misparses it.
+// p_align 8, yet its name is still padded to 4.
 constexpr auto ELF_NOTE_ALIGNMENT = uint64_t{4};
 
 struct memory_mapping
