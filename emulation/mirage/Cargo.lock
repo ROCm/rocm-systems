@@ -1067,7 +1067,7 @@ dependencies = [
 
 [[package]]
 name = "mirage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1099,7 +1099,7 @@ dependencies = [
 
 [[package]]
 name = "mirage_builtin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mirage_core",
  "tempfile",
@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "mirage_container"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mirage_core",
  "tempfile",
@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "mirage_core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1137,7 +1137,7 @@ dependencies = [
 
 [[package]]
 name = "mirage_ctl"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1163,7 +1163,7 @@ dependencies = [
 
 [[package]]
 name = "mirage_daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1193,11 +1193,11 @@ dependencies = [
 
 [[package]]
 name = "mirage_dashboard"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "mirage_hotswap"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "inventory",
  "mirage_core",
@@ -1205,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "mirage_rocjitsu"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "inventory",
@@ -1221,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "mirage_supervisor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1643,7 +1643,7 @@ dependencies = [
 
 [[package]]
 name = "rocjitsu_sys"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "libloading",
  "tempfile",

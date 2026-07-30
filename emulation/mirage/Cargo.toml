@@ -1,6 +1,6 @@
 [package]
 name = "mirage"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 
 [[bin]]
@@ -89,6 +89,11 @@ members = [
     "rocjitsu_sys",
     "supervisor",
 ]
+
+# Fields shared by every crate in the workspace. Members inherit them with
+# `version.workspace = true`, so a release is a one-line change here.
+[workspace.package]
+version = "0.2.0"
 
 # =============================================================================
 # Workspace lint policy
