@@ -34,7 +34,7 @@
 namespace amd::smi {
 static uint64_t get_value(uint8_t** ptr, struct metric_field* field) {
   uint64_t v;
-// Warnings disabled as working at intended
+// Warnings disabled, working as intended
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-align"
   switch (field->field_type) {

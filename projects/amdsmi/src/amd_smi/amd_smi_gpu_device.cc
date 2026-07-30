@@ -420,7 +420,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
         rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
     if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
       status_result = false;
-      return static_cast<int32_t>(status_result);
+      return status_result;
     }
 
     for (auto device_idx = uint32_t(0); device_idx < list_device_allocation_size; ++device_idx) {
@@ -444,7 +444,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
       }
     }
 
-    return static_cast<int32_t>(status_result);
+    return status_result;
   };
 
   /**
