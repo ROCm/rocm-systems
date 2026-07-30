@@ -1633,7 +1633,10 @@
         {
           "name": "CE_AlltoAll_8Ranks",
           "description": "AlltoAll CE correctness — default production topology (8 ranks)",
-          "test_filter": "CeMPI_AlltoAll.EightRanks"
+          "test_filter": "CeMPI_AlltoAll.EightRanks",
+          "env_variables": {
+            "RCCL_DDA_ENABLE": "0"
+          }
         },
         {
           "name": "CE_Scatter_8Ranks",
