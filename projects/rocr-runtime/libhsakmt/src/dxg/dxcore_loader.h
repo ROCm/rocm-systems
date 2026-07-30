@@ -85,8 +85,6 @@ public:
     typedef NTSTATUS (DXCORE_DEF(D3DKMTEnumAdapters3))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTQueryResourceInfo))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTOpenResource))(void* args);
-    typedef NTSTATUS (DXCORE_DEF(D3DKMTEnumProcesses))(void* args);
-    typedef NTSTATUS (DXCORE_DEF(D3DKMTQueryVideoMemoryInfo))(void* args);
 
     static DxcoreLoader& Instance() {
         static DxcoreLoader* instance = new DxcoreLoader();
@@ -134,8 +132,6 @@ public:
     DXCORE_DEF(D3DKMTEnumAdapters3)* DXCORE_PFN(D3DKMTEnumAdapters3);
     DXCORE_DEF(D3DKMTQueryResourceInfo) * DXCORE_PFN(D3DKMTQueryResourceInfo);
     DXCORE_DEF(D3DKMTOpenResource) * DXCORE_PFN(D3DKMTOpenResource);
-    DXCORE_DEF(D3DKMTEnumProcesses)* DXCORE_PFN(D3DKMTEnumProcesses);
-    DXCORE_DEF(D3DKMTQueryVideoMemoryInfo)* DXCORE_PFN(D3DKMTQueryVideoMemoryInfo);
 
 private:
     DxcoreLoader();
@@ -154,3 +150,4 @@ private:
 } // namespace dxcore
 } // namespace thunk
 } // namespace wsl
+
