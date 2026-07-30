@@ -1019,6 +1019,7 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
     assert set(code_object_stores) == {(42, 5)}
     assert code_object_stores[(42, 5)] is code_object
     assert code_object.code_object_uuid is not None
+    assert code_object.pid == 42
     assert code_object.load_base == 0x1000
 
     lines = db_session.query(orm.InstructionLine).all()
@@ -1071,6 +1072,7 @@ def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
     second_store = code_object_stores[(99, 5)]
     assert first_store is not second_store
     assert first_store.code_object_uuid != second_store.code_object_uuid
+    assert (first_store.pid, second_store.pid) == (42, 99)
     assert {line.kernel for line in first_store.instruction_lines} == {
         kernel_objs[(42, "vecCopy")],
         kernel_objs[(42, "vecAdd")],
@@ -1129,11 +1131,27 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     dispatches = (
         db_session
         .query(orm.Dispatch)
-        .order_by(orm.Dispatch.pid, orm.Dispatch.dispatch_id)
+        .order_by(orm.Dispatch.kernel_uuid, orm.Dispatch.dispatch_id)
         .all()
     )
+    code_object_stores = (
+        db_session.query(orm.CodeObjectStore).order_by(orm.CodeObjectStore.pid).all()
+    )
+    assert [(store.pid, store.code_object_id) for store in code_object_stores] == [
+        (42, 5),
+        (99, 5),
+    ]
+    process_id_by_kernel_uuid = {
+        line.kernel_uuid: store.pid
+        for store in code_object_stores
+        for line in store.instruction_lines
+    }
     assert [
-        (dispatch.pid, dispatch.dispatch_id, dispatch.kernel.kernel_name)
+        (
+            process_id_by_kernel_uuid[dispatch.kernel_uuid],
+            dispatch.dispatch_id,
+            dispatch.kernel.kernel_name,
+        )
         for dispatch in dispatches
     ] == [
         (42, 0, "vecCopy"),
@@ -1142,9 +1160,9 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     ]
     kernel_uuids_by_process_id = {
         process_id: {
-            dispatch.kernel_uuid
-            for dispatch in dispatches
-            if dispatch.pid == process_id
+            kernel_uuid
+            for kernel_uuid, owner_process_id in process_id_by_kernel_uuid.items()
+            if owner_process_id == process_id
         }
         for process_id in (42, 99)
     }
@@ -1155,8 +1173,6 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     assert kernel_uuids_by_process_id[42].isdisjoint(kernel_uuids_by_process_id[99])
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 3
 
-    code_object_stores = db_session.query(orm.CodeObjectStore).all()
-    assert [store.code_object_id for store in code_object_stores] == [5, 5]
     assert len({store.code_object_uuid for store in code_object_stores}) == 2
 
     instruction_lines = db_session.query(orm.InstructionLine).all()
@@ -1168,11 +1184,8 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
         for line in instruction_lines
     } == {(0x10, "v_mov", "/s/shared.cpp:7")}
 
-    process_id_by_kernel_uuid = {
-        dispatch.kernel_uuid: dispatch.pid for dispatch in dispatches
-    }
     instruction_by_process_id = {
-        process_id_by_kernel_uuid[line.kernel_uuid]: line for line in instruction_lines
+        line.code_object_store.pid: line for line in instruction_lines
     }
     assert set(instruction_by_process_id) == {42, 99}
     assert {
@@ -1183,10 +1196,11 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
 
     for process_id, instruction_line in instruction_by_process_id.items():
         assert instruction_line.kernel_uuid in kernel_uuids_by_process_id[process_id]
-        assert {
-            kernel_dispatch.pid
-            for kernel_dispatch in instruction_line.kernel.dispatches
-        } == {process_id}
+        assert instruction_line.kernel.dispatches
+        assert all(
+            dispatch.kernel_uuid == instruction_line.kernel_uuid
+            for dispatch in instruction_line.kernel.dispatches
+        )
         assert instruction_line.code_object_store.code_object_id == 5
 
 
@@ -1204,10 +1218,22 @@ def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
 
     run_analysis_with_materialized_views(analyzer)
 
-    dispatches = db_session.query(orm.Dispatch).order_by(orm.Dispatch.pid).all()
+    code_object_stores = (
+        db_session.query(orm.CodeObjectStore).order_by(orm.CodeObjectStore.pid).all()
+    )
+    assert [(store.pid, store.code_object_id) for store in code_object_stores] == [
+        (42, 5),
+        (99, 5),
+    ]
+    process_id_by_kernel_uuid = {
+        line.kernel_uuid: store.pid
+        for store in code_object_stores
+        for line in store.instruction_lines
+    }
+    dispatches = db_session.query(orm.Dispatch).order_by(orm.Dispatch.kernel_uuid).all()
     assert [
         (
-            dispatch.pid,
+            process_id_by_kernel_uuid[dispatch.kernel_uuid],
             dispatch.dispatch_id,
             dispatch.kernel.kernel_name,
         )
@@ -1219,7 +1245,6 @@ def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 2
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 2
 
-    code_object_stores = db_session.query(orm.CodeObjectStore).all()
     assert len(code_object_stores) == 2
     assert {store.code_object_id for store in code_object_stores} == {5}
     assert len({store.code_object_uuid for store in code_object_stores}) == 2
@@ -1232,11 +1257,8 @@ def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
     assert {line.instruction for line in instruction_lines} == {"v_mov"}
     assert {line.comment for line in instruction_lines} == {"/s/shared.cpp:7"}
 
-    process_id_by_kernel_uuid = {
-        dispatch.kernel_uuid: dispatch.pid for dispatch in dispatches
-    }
     instruction_by_process_id = {
-        process_id_by_kernel_uuid[line.kernel_uuid]: line for line in instruction_lines
+        line.code_object_store.pid: line for line in instruction_lines
     }
     assert set(instruction_by_process_id) == {42, 99}
     assert {
@@ -1247,7 +1269,9 @@ def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
 
     for process_id, instruction_line in instruction_by_process_id.items():
         dispatch = next(
-            dispatch for dispatch in dispatches if dispatch.pid == process_id
+            dispatch
+            for dispatch in dispatches
+            if process_id_by_kernel_uuid[dispatch.kernel_uuid] == process_id
         )
         assert instruction_line.kernel_uuid == dispatch.kernel_uuid
         assert (
@@ -1511,7 +1535,6 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
 
     dispatch = db_session.query(orm.Dispatch).one()
     aggregate_kernel = dispatch.kernel
-    assert dispatch.pid is None
     assert dispatch.dispatch_id == 7
     assert aggregate_kernel.kernel_name == "vecCopy"
 
@@ -1532,9 +1555,9 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
         .order_by(orm.CodeObjectStore.load_base)
         .all()
     )
-    assert [(store.code_object_id, store.load_base) for store in stores] == [
-        (5, 0x1000),
-        (5, 0x3000),
+    assert [(store.pid, store.code_object_id, store.load_base) for store in stores] == [
+        (42, 5, 0x1000),
+        (99, 5, 0x3000),
     ]
 
     chain_by_process_id = {}
@@ -1549,7 +1572,8 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
         assert sampled_line.kernel_uuid == isa_line.kernel_uuid
         assert isa_line.pc_sample_state is None
 
-        process_id = process_id_by_load_base[store.load_base]
+        process_id = store.pid
+        assert process_id_by_load_base[store.load_base] == process_id
         assert (
             sampled_line.pc_sample_state.total_count
             == sample_count_by_process_id[process_id]
@@ -1614,7 +1638,6 @@ def test_run_analysis_does_not_register_filtered_pc_sampling_symbols(
     run_analysis_with_existing_database(analyzer)
 
     dispatch = db_session.query(orm.Dispatch).one()
-    assert dispatch.pid is None
 
     kernels = db_session.query(orm.Kernel).all()
     assert len(kernels) == 2
@@ -1624,6 +1647,7 @@ def test_run_analysis_does_not_register_filtered_pc_sampling_symbols(
     assert [line.code_object_offset for line in instruction_lines] == [0x10]
 
     sampled_line = instruction_lines[0]
+    assert sampled_line.code_object_store.pid == 42
     assert sampled_line.kernel_uuid != dispatch.kernel_uuid
     assert sampled_line.pc_sample_state.total_count == 1
     assert db_session.query(orm.PCSampleState).count() == 1
@@ -1744,6 +1768,7 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
         assert set(by_offset) == {0x10, 0x20, 0x30}
         assert set(code_object_stores) == {(42, 5)}
         code_object_store = code_object_stores[(42, 5)]
+        assert code_object_store.pid == 42
         assert db_session.query(orm.CodeObjectStore).one() is code_object_store
         assert code_object_store is by_offset[0x10].code_object_store
         # The disassembly-only line joins its kernel and carries no sample state.
@@ -1839,6 +1864,7 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
         assert set(code_object_stores) == {(42, 9), (99, 9)}
         first_store = code_object_stores[(42, 9)]
         second_store = code_object_stores[(99, 9)]
+        assert (first_store.pid, second_store.pid) == (42, 99)
         assert first_store.load_base == 0x2000
         assert second_store.load_base == 0x4000
         assert first_store.code_object_uuid != second_store.code_object_uuid
@@ -1904,6 +1930,7 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
         # The store exists (its kernel was dispatched) but no ISA line was added.
         store = db_session.query(orm.CodeObjectStore).filter_by(code_object_id=9).one()
         assert code_object_stores[(42, 9)] is store
+        assert store.pid == 42
         assert store.instruction_lines == []
     finally:
         common.clean_output_dir(True, workload_path)
@@ -1987,6 +2014,7 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
         assert set(code_object_stores) == {(42, 5), (99, 5)}
         first_store = code_object_stores[(42, 5)]
         second_store = code_object_stores[(99, 5)]
+        assert (first_store.pid, second_store.pid) == (42, 99)
         assert first_store.code_object_uuid != second_store.code_object_uuid
 
         first_line = next(
@@ -2081,6 +2109,7 @@ def test_add_code_object_isa_requires_process_local_dispatch(db_session):
 
         assert set(code_object_stores) == {(99, 5)}
         second_store = code_object_stores[(99, 5)]
+        assert second_store.pid == 99
         assert second_store.code_object_uuid is not None
         stored_isa = {
             (line.instruction, line.kernel.kernel_name)

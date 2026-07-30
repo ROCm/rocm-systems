@@ -2156,8 +2156,8 @@ def test_pc_sampling_analyze_database_output(
             db_dispatch_count = conn.execute(
                 "SELECT dispatch_count FROM compute_kernel_view"
             ).fetchone()[0]
-            db_dispatch_process_ids = conn.execute(
-                "SELECT DISTINCT pid FROM compute_dispatch"
+            db_code_object_process_ids = conn.execute(
+                "SELECT DISTINCT pid FROM compute_code_object_store"
             ).fetchall()
         finally:
             conn.close()
@@ -2177,7 +2177,7 @@ def test_pc_sampling_analyze_database_output(
         assert len(db_pc_sampling) == 14
         assert db_pc_sampling["count"].sum() == 390
         assert db_dispatch_count == 3
-        assert db_dispatch_process_ids == [(1429079,)]
+        assert db_code_object_process_ids == [(1429079,)]
     finally:
         common.clean_output_dir(True, str(workload_dir))
 

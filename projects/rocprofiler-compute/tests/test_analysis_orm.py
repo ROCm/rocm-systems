@@ -75,7 +75,6 @@ def add_kernel_with_durations(
         session.add(
             Dispatch(
                 dispatch_id=dispatch_id,
-                pid=1,
                 gpu_id=0,
                 start_timestamp=0,
                 end_timestamp=duration,
@@ -90,6 +89,7 @@ def add_pc_sampling_state(
     *,
     workload: Workload,
     kernel: Kernel,
+    pid: int,
     offset: int | None = 0x10,
     instruction: str | None = "v_mov",
     source: str | None = "/s/a.cpp:1",
@@ -101,6 +101,7 @@ def add_pc_sampling_state(
 ) -> PCSampleState:
     code_object = CodeObjectStore(
         code_object_id=code_object_id,
+        pid=pid,
         load_base=0x1000,
         workload=workload,
     )
@@ -205,8 +206,8 @@ def test_duplicate_dispatch_id_under_same_kernel_rejected(db_session):
     db_session.add(workload)
     kernel = Kernel(kernel_name="k", workload=workload)
     db_session.add(kernel)
-    db_session.add(Dispatch(dispatch_id=0, pid=42, kernel=kernel))
-    db_session.add(Dispatch(dispatch_id=0, pid=42, kernel=kernel))
+    db_session.add(Dispatch(dispatch_id=0, kernel=kernel))
+    db_session.add(Dispatch(dispatch_id=0, kernel=kernel))
     with pytest.raises(IntegrityError):
         db_session.commit()
 
@@ -216,10 +217,11 @@ def test_duplicate_instruction_identity_under_same_parents_rejected(db_session):
     kernel = Kernel(kernel_name="k", workload=workload)
     code_object = CodeObjectStore(
         code_object_id=5,
+        pid=42,
         load_base=0x1000,
         workload=workload,
     )
-    db_session.add(Dispatch(dispatch_id=0, pid=42, kernel=kernel))
+    db_session.add(Dispatch(dispatch_id=0, kernel=kernel))
     db_session.add_all([
         InstructionLine(
             code_object_offset=0x10,
@@ -241,21 +243,34 @@ def test_duplicate_instruction_identity_under_same_parents_rejected(db_session):
         db_session.commit()
 
 
+def test_duplicate_code_object_identity_within_process_rejected(db_session):
+    workload = Workload(name="w", sub_name="s")
+    db_session.add_all([
+        CodeObjectStore(code_object_id=5, pid=42, workload=workload),
+        CodeObjectStore(code_object_id=5, pid=42, workload=workload),
+    ])
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
 def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
     db_session,
 ):
     workload = Workload(name="w", sub_name="s")
     first_kernel = Kernel(kernel_name="k", workload=workload)
     second_kernel = Kernel(kernel_name="k", workload=workload)
-    first_dispatch = Dispatch(dispatch_id=0, pid=42, kernel=first_kernel)
-    second_dispatch = Dispatch(dispatch_id=0, pid=99, kernel=second_kernel)
+    first_dispatch = Dispatch(dispatch_id=0, kernel=first_kernel)
+    second_dispatch = Dispatch(dispatch_id=0, kernel=second_kernel)
     first_code_object = CodeObjectStore(
         code_object_id=5,
+        pid=42,
         load_base=0x1000,
         workload=workload,
     )
     second_code_object = CodeObjectStore(
         code_object_id=5,
+        pid=99,
         load_base=0x1000,
         workload=workload,
     )
@@ -284,6 +299,7 @@ def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
     assert first_kernel.kernel_uuid != second_kernel.kernel_uuid
     assert first_dispatch.dispatch_uuid != second_dispatch.dispatch_uuid
     assert first_code_object.code_object_uuid != second_code_object.code_object_uuid
+    assert (first_code_object.pid, second_code_object.pid) == (42, 99)
     assert first_instruction.instruction_uuid != second_instruction.instruction_uuid
     assert first_instruction.kernel is first_dispatch.kernel
     assert second_instruction.kernel is second_dispatch.kernel
@@ -342,6 +358,7 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
         db_session,
         workload=workload,
         kernel=kernel,
+        pid=42,
         stall_reasons={"WAITCNT": 2},
     )
     Database.create_views()
@@ -371,6 +388,7 @@ def test_pc_sampling_view_aggregates_matching_states_within_kernel_uuid(db_sessi
         db_session,
         workload=workload,
         kernel=kernel,
+        pid=42,
         total_count=8,
         issue_count=2,
         stall_count=6,
@@ -380,6 +398,8 @@ def test_pc_sampling_view_aggregates_matching_states_within_kernel_uuid(db_sessi
         db_session,
         workload=workload,
         kernel=kernel,
+        pid=42,
+        code_object_id=6,
         total_count=9,
         issue_count=3,
         stall_count=6,
@@ -426,6 +446,7 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
         db_session,
         workload=workload,
         kernel=kernel,
+        pid=42,
         total_count=3,
         issue_count=3,
         stall_count=0,
@@ -435,6 +456,8 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
         db_session,
         workload=workload,
         kernel=kernel,
+        pid=42,
+        code_object_id=6,
         total_count=5,
         issue_count=5,
         stall_count=0,
@@ -460,6 +483,7 @@ def test_pc_sampling_view_keeps_same_name_kernel_uuids_separate(db_session):
         db_session,
         workload=workload,
         kernel=first_kernel,
+        pid=42,
         total_count=3,
         issue_count=3,
         stall_count=0,
@@ -468,6 +492,7 @@ def test_pc_sampling_view_keeps_same_name_kernel_uuids_separate(db_session):
         db_session,
         workload=workload,
         kernel=second_kernel,
+        pid=99,
         total_count=5,
         issue_count=5,
         stall_count=0,
@@ -493,6 +518,7 @@ def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
         db_session,
         workload=first_workload,
         kernel=first_kernel,
+        pid=42,
         total_count=3,
         issue_count=3,
         stall_count=0,
@@ -501,6 +527,7 @@ def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
         db_session,
         workload=second_workload,
         kernel=second_kernel,
+        pid=42,
         total_count=5,
         issue_count=5,
         stall_count=0,
@@ -524,6 +551,7 @@ def test_pc_sampling_view_aggregates_host_trap_states_with_null_counts(db_sessio
         db_session,
         workload=workload,
         kernel=kernel,
+        pid=42,
         total_count=3,
         issue_count=None,
         stall_count=None,
@@ -532,6 +560,8 @@ def test_pc_sampling_view_aggregates_host_trap_states_with_null_counts(db_sessio
         db_session,
         workload=workload,
         kernel=kernel,
+        pid=42,
+        code_object_id=6,
         total_count=5,
         issue_count=None,
         stall_count=None,
@@ -565,6 +595,7 @@ def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
         db_session,
         workload=workload,
         kernel=kernel,
+        pid=42,
         total_count=3,
         issue_count=1,
         stall_count=2,
@@ -575,6 +606,8 @@ def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
         db_session,
         workload=workload,
         kernel=kernel,
+        pid=42,
+        code_object_id=6,
         total_count=5,
         issue_count=1,
         stall_count=4,
