@@ -645,10 +645,10 @@ class RocProfCompute:
             args.pc_sampling_interval = PC_SAMPLING_DEFAULT_INTERVALS[method]
 
         interval = args.pc_sampling_interval
-        min_interval = limits["min_interval"]
-        max_interval = limits["max_interval"]
+        min_interval = limits.min_interval
+        max_interval = limits.max_interval
 
-        if interval < min_interval or interval > max_interval:
+        if not (min_interval <= interval <= max_interval):
             console_error(
                 f"PC sampling interval {interval} is outside the range "
                 f"{min_interval} to {max_interval} reported for {method} sampling. "
@@ -656,7 +656,7 @@ class RocProfCompute:
                 "'rocprofv3-avail info --pc-sampling'."
             )
 
-        if limits["interval_pow2"] and interval & (interval - 1) != 0:
+        if limits.interval_pow2 and interval & (interval - 1) != 0:
             console_error(
                 f"PC sampling interval {interval} must be a power of 2 for "
                 f"{method} sampling."

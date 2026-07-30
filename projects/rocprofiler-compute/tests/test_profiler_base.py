@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 import common
 import pytest
 
+from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
@@ -555,13 +556,13 @@ def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
     return instance
 
 
-def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> dict:
+def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> PCSamplingLimits:
     """Stub of the device query, using the limits a gfx950 reports."""
-    return {
-        "min_interval": 256 if method == "stochastic" else 1,
-        "max_interval": 1048576,
-        "interval_pow2": method == "stochastic",
-    }
+    return PCSamplingLimits(
+        min_interval=256 if method == "stochastic" else 1,
+        max_interval=1048576,
+        interval_pow2=method == "stochastic",
+    )
 
 
 @pytest.mark.parametrize(
@@ -817,11 +818,9 @@ def test_sanitize_pc_sampling_default_interval_out_of_range(monkeypatch):
     """The method default is validated too, not just a user-supplied value."""
     monkeypatch.setattr(
         "rocprof_compute_base.pc_sampling_interval_limits",
-        lambda _method, _sdk_tool_path=None: {
-            "min_interval": 256,
-            "max_interval": 65536,
-            "interval_pow2": True,
-        },
+        lambda _method, _sdk_tool_path=None: PCSamplingLimits(
+            min_interval=256, max_interval=65536, interval_pow2=True
+        ),
     )
     args = _make_rpc_args(
         pc_sampling=True,
