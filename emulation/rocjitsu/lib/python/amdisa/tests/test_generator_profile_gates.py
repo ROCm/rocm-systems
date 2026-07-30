@@ -3088,3 +3088,119 @@ def test_shared_wave_mask_reads_qualify_instruction_operands(
     shared = (amdgpu_generated_root / 'shared' / 'execute_shared.h').read_text()
     assert 'read_wave_mask_scalar(inst.src2, wf)' in shared
     assert 'read_wave_mask_scalar(src2, wf)' not in shared
+
+
+def _preserved_dst_codegen(*, uses_vgpr_msb_indexing: bool, supports_dpp: bool):
+    """Bare CodeGenerator wired just enough to exercise the two implicit hooks."""
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        profile=SimpleNamespace(uses_vgpr_msb_indexing=uses_vgpr_msb_indexing)
+    )
+    codegen._supports_vop_dpp_encoding = lambda enc_name: supports_dpp
+    return codegen
+
+
+@pytest.mark.parametrize('supports_dpp', [False, True])
+@pytest.mark.parametrize(
+    'enc_name',
+    [
+        'ENC_VOP1',
+        'ENC_VOP2',
+        'ENC_VOP3',
+        'ENC_VOP3P',
+        'VOP3_SDST_ENC',
+        'ENC_VOPC',
+        'ENC_FLAT',
+        'ENC_SOP1',
+    ],
+)
+@pytest.mark.parametrize('enc_field_names', [frozenset({'vdst'}), frozenset()])
+def test_implicit_use_hooks_agree_on_preserved_dst_applicability(
+    enc_name, enc_field_names, supports_dpp
+):
+    """implicit_uses() and implicit_use_operands() must cover the same encodings.
+
+    On gfx1250 InstDefUse clears the VGPR class from the flat implicit_uses()
+    result and sources banked VGPR reads solely from implicit_use_operands(), so
+    an encoding covered by one hook but not the other silently disappears from
+    liveness. Both bodies come from one shared predicate; this pins that so a
+    future edit to only one side fails here instead of deleting a preserve-read.
+    """
+    codegen = _preserved_dst_codegen(
+        uses_vgpr_msb_indexing=True, supports_dpp=supports_dpp
+    )
+    inst_enc = SimpleNamespace(enc_name=enc_name)
+    fields = set(enc_field_names)
+
+    uses_body = codegen._encoding_implicit_uses_impl(inst_enc, fields)
+    operands_body = codegen._encoding_implicit_use_operands_impl(inst_enc, fields)
+
+    # The FLAT saddr read has no backing Operand, so it is intentionally
+    # exclusive to implicit_uses(); compare only the preserved-dst predicate.
+    preserved_dst_uses = 'num_dst_operands()' in uses_body
+    preserved_dst_operands = 'num_dst_operands()' in operands_body
+    assert preserved_dst_uses == preserved_dst_operands, (
+        f'{enc_name}: implicit_uses={preserved_dst_uses} but '
+        f'implicit_use_operands={preserved_dst_operands}'
+    )
+    if preserved_dst_uses:
+        # Identical guard, differing only in how the destination is reported.
+        assert uses_body.replace('uses.expand(*ref);', 'X') == operands_body.replace(
+            'operands.push_back(dst);', 'X'
+        )
+
+
+def test_implicit_use_operands_is_gated_to_vgpr_msb_profiles():
+    """Only profiles with MODE-controlled VGPR banking get the operand hook."""
+    inst_enc = SimpleNamespace(enc_name='ENC_VOP1')
+    fields = {'vdst'}
+
+    banked = _preserved_dst_codegen(uses_vgpr_msb_indexing=True, supports_dpp=True)
+    assert banked._encoding_implicit_use_operands_impl(inst_enc, fields)
+
+    # The predicate itself is profile-independent; the emission site is what is
+    # gated, so assert the generated text agrees (see the generated-file test).
+    assert banked._encoding_implicit_uses_impl(inst_enc, fields)
+
+
+def test_only_gfx1250_generates_implicit_use_operands_overrides(
+    amdgpu_generated_root: Path,
+):
+    """The operand hook is emitted for gfx1250 and nowhere else.
+
+    InstDefUse consults implicit_use_operands() only on the vgpr_msb != nullptr
+    path, so overrides on other architectures are dead generated/compiled/vtable
+    weight.
+    """
+    gfx1250_hits = sum(
+        path.read_text().count('implicit_use_operands')
+        for path in (amdgpu_generated_root / 'gfx1250').rglob('*')
+        if path.is_file() and path.suffix in ('.h', '.cpp')
+    )
+    assert gfx1250_hits > 0, 'gfx1250 must still emit the operand-backed hook'
+
+    for arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ):
+        arch_root = amdgpu_generated_root / arch
+        if not arch_root.is_dir():
+            continue
+        offenders = [
+            path.relative_to(amdgpu_generated_root).as_posix()
+            for path in arch_root.rglob('*')
+            if path.is_file()
+            and path.suffix in ('.h', '.cpp')
+            and 'implicit_use_operands' in path.read_text()
+        ]
+        assert not offenders, (
+            f'{arch} has no VGPR-MSB banking, so implicit_use_operands() overrides '
+            f'are dead weight: {offenders}'
+        )

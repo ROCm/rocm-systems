@@ -683,15 +683,20 @@ bool Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr, size
   }
   // Readable bytes from image to the end of its committed region (anonymous or not).
   if (region_bound_ptr != nullptr && image != nullptr) {
-    MEMORY_BASIC_INFORMATION mbi;
-    const DWORD readable = PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ |
-                           PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_WRITECOPY;
-    // A PAGE_GUARD page reads as readable but faults (STATUS_GUARD_PAGE_VIOLATION)
-    // on first access, so it must not count toward a "safe to read" bound.
-    if (VirtualQuery(image, &mbi, sizeof(mbi)) != 0 && mbi.State == MEM_COMMIT &&
-        (mbi.Protect & readable) != 0 && (mbi.Protect & PAGE_GUARD) == 0) {
-      uintptr_t region_end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
-      *region_bound_ptr = static_cast<size_t>(region_end - reinterpret_cast<uintptr_t>(image));
+    MEMORY_BASIC_INFORMATION mbi = {};
+    if (VirtualQuery(image, &mbi, sizeof(mbi)) == sizeof(mbi) && mbi.State == MEM_COMMIT &&
+        (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0) {
+      const DWORD protection = mbi.Protect & 0xFF;
+      const bool readable = protection == PAGE_READONLY || protection == PAGE_READWRITE ||
+                            protection == PAGE_WRITECOPY || protection == PAGE_EXECUTE_READ ||
+                            protection == PAGE_EXECUTE_READWRITE ||
+                            protection == PAGE_EXECUTE_WRITECOPY;
+      const uintptr_t base = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+      const uintptr_t address = reinterpret_cast<uintptr_t>(image);
+      const uintptr_t end = base + static_cast<uintptr_t>(mbi.RegionSize);
+      if (readable && address >= base && end >= base && end > address) {
+        *region_bound_ptr = static_cast<size_t>(end - address);
+      }
     }
   }
 

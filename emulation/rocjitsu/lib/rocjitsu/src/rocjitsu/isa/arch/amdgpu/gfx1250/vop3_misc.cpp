@@ -195,6 +195,13 @@ void VSatPkU8I16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VSatPkU8I16Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSatPk4I4I8Vop3::VSatPk4I4I8Vop3(const MachineInst *inst)
     : Vop3("v_sat_pk4_i4_i8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(710)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -241,6 +248,13 @@ void VSatPk4I4I8Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void VSatPk4I4I8Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 VSatPk4U4U8Vop3::VSatPk4U4U8Vop3(const MachineInst *inst)
     : Vop3("v_sat_pk4_u4_u8", reinterpret_cast<const OpEncoding *>(inst), selected_exec_fn(711)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -285,6 +299,13 @@ void VSatPk4U4U8Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void VSatPk4U4U8Vop3::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vop3::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)

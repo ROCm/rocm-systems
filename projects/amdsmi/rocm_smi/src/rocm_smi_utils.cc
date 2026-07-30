@@ -592,39 +592,6 @@ std::string removeString(const std::string origStr, const std::string& removeMe)
   return modifiedStr;
 }
 
-// defaults to trim stdOut
-std::pair<bool, std::string> executeCommand(std::string command, bool stdOut) {
-  char buffer[128];
-  std::string stdoutAndErr;
-  bool successfulRun = true;
-  command = "stdbuf -i0 -o0 -e0 " + command;  // remove stdOut and err buffering
-
-  FILE* pipe = popen(command.c_str(), "r");
-  if (!pipe) {
-    stdoutAndErr = "[ERROR] popen failed to call " + command;
-    successfulRun = false;
-  } else {
-    // read until end of process
-    while (!feof(pipe)) {
-      // use buffer to read and add to stdoutAndErr
-      if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        stdoutAndErr += buffer;
-      }
-    }
-  }
-
-  // any return code other than 0, is a failed execution
-  if (pipe && pclose(pipe) != 0) {
-    successfulRun = false;
-  }
-
-  if (stdOut) {
-    // remove leading and trailing spaces of output and new lines
-    stdoutAndErr = trim(stdoutAndErr);
-  }
-  return std::make_pair(successfulRun, stdoutAndErr);
-}
-
 // originalString - string to search for substring
 // substring - string looking to find
 // displayComparisons = defaults to false, set to true to see debug prints

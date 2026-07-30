@@ -136,14 +136,18 @@ races. Some examples:
 1. A wave issues a global load into a VGPR, then reads that VGPR before issuing
    `s_waitcnt vmcnt(0)`. The load may not have completed, so the read value is
    undefined.
+1. A wave issues a load into a VGPR, then an instruction overwrites that VGPR
+   before the load completes. The load may complete later and clobber the
+   instruction result.
 1. One wave in a workgroup writes to an LDS address. Another wave reads from
    the same address without an intervening `s_barrier`. The read may see stale
    data because the write may not have completed from the reader's perspective.
 
 ## What this plugin detects
 
-- **VGPR races**: a vector register is read before a pending global or LDS load
-  has completed (`s_waitcnt vmcnt` / `s_waitcnt lgkmcnt` insufficient).
+- **VGPR races**: a vector register is read or overwritten by an instruction
+  before a pending global or LDS load has completed (`s_waitcnt vmcnt` /
+  `s_waitcnt lgkmcnt` insufficient).
 - **SGPR races**: a scalar register is read before a pending scalar load has
   completed (`s_waitcnt lgkmcnt` insufficient).
 - **LDS races**: an LDS byte is read or written by one wave while another wave
@@ -171,7 +175,9 @@ operations are in flight. When an instruction in the emulator accesses an LDS
 byte, there is a check to see what memory events are still in flight that
 read/write that byte, from the perspective of the accessing thread. In this way,
 RAW (read-after-write) and WAR (write-after-read) hazards can be detected.
-Similar logic applies for VGPR and SGPR accesses.
+For VGPRs, the detector also flags WAW when an instruction write can be
+clobbered by a pending asynchronous load. Similar logic applies for VGPR and
+SGPR reads.
 
 **LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
 fast-path checks, with interval-based overlap scanning as a fallback. Live
@@ -283,10 +289,15 @@ ctest --test-dir $BUILD_DIR -R "RaceTest"
   (missing `s_waitcnt` and `s_barrier`). It does not detect inter-workgroup
   races, races between dispatches, or host-device synchronization issues.
 
-- **No WAW detection**: write-after-write hazards are not currently flagged.
-  This includes both LDS WAW (two waves writing to the same LDS byte without a
-  barrier) and VGPR WAW (an ALU instruction overwriting a register that has a
-  pending global load).
+- **Limited WAW detection**: VGPR WAW is limited to synchronous instruction
+  writes that overlap a pending asynchronous load. WAW between two asynchronous
+  VGPR writers and LDS WAW are not currently reported.
+
+- **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
+  plugin's instruction-write lane and byte masks. DPP destinations can currently
+  report all active lanes, and SDWA preserve-mode destinations can report a full
+  dword, so writes to architecturally preserved lanes or bytes may be
+  conservatively reported as races.
 
 - **Kernel name resolution**: kernel names in race reports may show as `"?"` if
   symbol information is not available in the code object.
