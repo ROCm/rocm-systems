@@ -12,6 +12,8 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
@@ -2730,6 +2732,7 @@ TEST(LivenessAnalysis, UnavailableQueriesFailClosed) {
 
   EXPECT_THROW((void)liveness.has_live_before(instruction), std::logic_error);
   EXPECT_THROW((void)liveness.live_before(instruction), std::logic_error);
+  EXPECT_THROW((void)liveness.find_globally_unused_vgpr_run(&instruction, 1), std::logic_error);
 }
 
 TEST(LivenessAnalysis, ReportsWhetherLiveBeforeSnapshotWasMaterialized) {
@@ -2786,6 +2789,8 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
   ASSERT_NE(instruction, blocks.front()->instructions().end());
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Src0), 2);
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), 1)
+      << "a known bank-2 access must not make the raw low-bank tuple look used";
   EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}));
   EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}));
 }
@@ -2970,6 +2975,211 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseUnknownBankReadsEveryCandidate) {
     EXPECT_TRUE(liveness.is_live_before(*instruction,
                                         {RegClass::VGPR, static_cast<uint16_t>(1 + bank * 256), 1}))
         << "unknown-bank implicit read must may-read candidate bank " << bank;
+}
+
+TEST(LivenessAnalysis, Gfx1250UnknownBankDefMakesEveryCandidateGloballyUsed) {
+  // A dynamic MODE write leaves the destination bank ambiguous. Whole-kernel
+  // usage must reserve all four candidate tuples, while backward liveness must
+  // not pretend the one physical write kills all four.
+  constexpr uint16_t kModeAllBanksHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeAllBanksHwreg, .sdst = 0});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 128, .vdst = 1});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), std::nullopt);
+  for (uint16_t bank = 0; bank < 4; ++bank) {
+    const uint16_t candidate = static_cast<uint16_t>(1 + bank * 256);
+    EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, candidate, 1,
+                                                     static_cast<uint16_t>(candidate + 1)),
+              std::nullopt)
+        << "unknown-bank definition must reserve candidate bank " << bank;
+  }
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 4), 0);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 2, 1, 4), 2);
+
+  const BlockLiveness &state = liveness.block_liveness(*blocks.front());
+  EXPECT_FALSE(state.kill.contains({RegClass::VGPR, 1, 1}));
+  EXPECT_FALSE(state.kill.contains({RegClass::VGPR, 257, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250RelativeVgprAccessDisablesGlobalUnusedQuery) {
+  // M0 can redirect the encoded v0 source to any relative tuple, including v1
+  // which would otherwise appear globally unused.
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovrelsB32Vop1, {.src0 = 0, .vdst = 2});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &instruction = *blocks.front()->instructions().begin();
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&instruction, 1, 1, 1, 2), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, Gfx1250SwaprelDisablesGlobalUnusedQuery) {
+  constexpr auto swap = gfx1250::build_vop1(gfx1250::kVSwaprelB32Vop1, {.src0 = 0, .vdst = 2});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({swap[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &instruction = *blocks.front()->instructions().begin();
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&instruction, 1, 1, 1, 2), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, Gfx1250GprIndexModeWriteDisablesGlobalUnusedQuery) {
+  // A runtime MODE[27] write can enable GPR indexing, after which ordinary
+  // encoded operands may access M0-offset VGPRs.
+  constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
+  constexpr auto setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregB32Sopk, {.simm16 = kModeGprIdxEnableHwreg, .sdst = 0});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, Gfx1250ImmediateGprIndexModeWriteUsesLiteralValue) {
+  constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
+  constexpr auto setreg =
+      gfx1250::build_sopk(gfx1250::kSSetregImm32B32Sopk, {.simm16 = kModeGprIdxEnableHwreg});
+  constexpr auto move = gfx1250::build_vop1(gfx1250::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+
+  for (uint32_t literal : {0u, 1u}) {
+    SCOPED_TRACE(literal);
+    TestCodeObject co({setreg[0], literal, move[0], end[0]});
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_EQ(blocks.size(), 1u);
+    auto scope = block_scope(blocks);
+
+    LivenessAnalysisOptions options;
+    options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    options.entry_block = scope.front();
+    options.text = text_span(co);
+    LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+    auto instruction = blocks.front()->instructions().begin();
+    ++instruction;
+    ASSERT_NE(instruction, blocks.front()->instructions().end());
+    const auto unused = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+    if (literal == 0)
+      EXPECT_EQ(unused, 1);
+    else
+      EXPECT_EQ(unused, std::nullopt);
+    EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  }
+}
+
+TEST(LivenessAnalysis, Cdna4DynamicGprIndexModeWriteDisablesGlobalUnusedQuery) {
+  constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
+  constexpr auto setreg =
+      cdna4::build_sopk(cdna4::kSSetregB32Sopk, {.simm16 = kModeGprIdxEnableHwreg, .sdst = 0});
+  constexpr auto move = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
+  constexpr auto end = cdna4::build_sopp(cdna4::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, Cdna4ImmediateGprIndexModeWriteUsesLiteralValue) {
+  constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
+  constexpr auto setreg =
+      cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kModeGprIdxEnableHwreg});
+  constexpr auto move = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
+  constexpr auto end = cdna4::build_sopp(cdna4::kSEndpgmSopp);
+
+  for (uint32_t literal : {0u, 1u}) {
+    SCOPED_TRACE(literal);
+    TestCodeObject co({setreg[0], literal, move[0], end[0]});
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_EQ(blocks.size(), 1u);
+    auto scope = block_scope(blocks);
+
+    LivenessAnalysisOptions options;
+    options.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    options.text = text_span(co);
+    LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+    auto instruction = blocks.front()->instructions().begin();
+    ++instruction;
+    ASSERT_NE(instruction, blocks.front()->instructions().end());
+    const auto unused = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
+    if (literal == 0)
+      EXPECT_EQ(unused, 1);
+    else
+      EXPECT_EQ(unused, std::nullopt);
+    EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  }
 }
 
 TEST(LivenessAnalysis, Gfx1250DynamicModeWriteConservativelyUsesEveryBank) {
@@ -3337,6 +3547,42 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
   EXPECT_EQ(liveness.find_free_sgpr(&use, 0), 0);
   EXPECT_EQ(liveness.find_free_run(&use, 1, 0), 4);
   EXPECT_EQ(liveness.find_free_run(&use, 1, 7), 7);
+}
+
+TEST(LivenessAnalysis, GloballyUnusedRunHonorsMinFreeVgprFloor) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  LivenessAnalysisOptions options;
+  options.min_free_vgpr = 4;
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 1, 0, 1, 8), 4);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&use, 1, 0, 1, 4), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, FindsGloballyUnusedRunBeforeSiteDeadFallback) {
+  auto blocks = build_test_blocks({TestOpcode::UseVgpr0, TestOpcode::Nop, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  const LivenessAnalysis liveness{KernelBlockScope(scope)};
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 4), 1);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 2, 0, 2, 4), 2);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 2, 0, 1, 1), std::nullopt);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 0, 1, 0), std::nullopt);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  EXPECT_EQ(liveness.find_free_run(&*instruction, 1), 0)
+      << "v0 is dead at this site but is not globally unused";
+  EXPECT_TRUE(liveness.has_materialized_cfg_liveness());
+
+  Instruction outside_scope("outside_scope", nullptr);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&outside_scope, 1, 0, 1, 4), std::nullopt);
 }
 
 TEST(LivenessAnalysis, FreeVgprAllocationHonorsDestinationLimit) {
