@@ -839,6 +839,7 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_Multicast_Large:
     <<: *level_2
+    # ROCM-28819
     disabled: [amd_windows]
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources:
