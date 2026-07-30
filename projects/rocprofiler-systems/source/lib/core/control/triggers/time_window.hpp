@@ -20,13 +20,14 @@ class time_window
 {
 public:
     time_window(std::shared_ptr<session> sess, Clock& clk, clock_duration delay,
-                clock_duration duration)
+                clock_duration duration, scope event_scope = scope::global)
     : m_session{ std::move(sess) }
     , m_clock{ clk }
     , m_delay{ delay }
     , m_duration{ duration }
     {
-        m_session->register_trigger(trigger_name, initial_action(delay, duration));
+        m_session->register_trigger(trigger_name, initial_action(delay, duration),
+                                    event_scope);
     }
 
     ~time_window()
@@ -59,11 +60,6 @@ public:
         m_thread = std::thread{ [this]() { worker(); } };
     }
 
-    /// Interrupt the clock and join the worker thread. Idempotent.
-    /// m_thread.join() can only throw if joinable() is false (guarded above)
-    /// or if called from the worker thread itself, which never happens -
-    /// stop() is only ever invoked from the owning thread (including via
-    /// the destructor), never from worker().
     void stop() noexcept
     {
         const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);

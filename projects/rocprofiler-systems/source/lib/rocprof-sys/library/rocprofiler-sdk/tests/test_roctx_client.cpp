@@ -9,6 +9,7 @@
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/marker/api_id.h>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -987,4 +988,95 @@ TEST_F(roctx_push_pop_region_test, push_pop_no_filter_always_active)
 
     client->get_trigger().on_range_stop(k_push_id);
     EXPECT_TRUE(client->get_trigger().should_write_markers());
+}
+
+class roctx_marker_gating_test : public mock_cleanup_base
+{
+protected:
+    using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy>;
+    using roctx_config_t = rocprofsys::rocprofiler_sdk::roctx_client_config;
+
+    // Independent trigger used to pause the session without touching the
+    // roctx trigger itself — reproduces "some other trigger (e.g. the
+    // time_window trigger) has paused the global scope".
+    class other_trigger
+    {
+    public:
+        static constexpr std::string_view trigger_name = "other";
+
+        explicit other_trigger(rocprofsys::control::session& sess)
+        : m_session{ sess }
+        {
+            m_session.register_trigger(trigger_name, rocprofsys::control::action::trace);
+        }
+
+        ~other_trigger() { m_session.unregister_trigger(trigger_name); }
+
+        other_trigger(const other_trigger&)            = delete;
+        other_trigger& operator=(const other_trigger&) = delete;
+        other_trigger(other_trigger&&)                 = delete;
+        other_trigger& operator=(other_trigger&&)      = delete;
+
+        void set_action(rocprofsys::control::action a) const
+        {
+            m_session.set_action(trigger_name, a);
+        }
+
+    private:
+        rocprofsys::control::session& m_session;
+    };
+
+    std::shared_ptr<rocprofsys::control::session> m_session =
+        std::make_shared<rocprofsys::control::session>();
+
+    std::unique_ptr<roctx_client_t> make_client(const std::string& regions = "")
+    {
+        const roctx_config_t config{ .pause_resume_enabled   = false,
+                                     .use_perfetto           = false,
+                                     .use_timemory           = false,
+                                     .perfetto_annotations   = false,
+                                     .selected_trace_regions = regions };
+        return std::make_unique<roctx_client_t>(m_session, config);
+    }
+
+    static bool observed_should_write(const roctx_client_t& client)
+    {
+        return client.get_trigger().should_write_markers() &&
+               client.get_session()->is_active_excluding_trigger(
+                   rocprofsys::control::triggers::roctx::trigger_name);
+    }
+};
+
+TEST_F(roctx_marker_gating_test, should_write_true_when_session_fully_active)
+{
+    auto client = make_client();
+    EXPECT_TRUE(observed_should_write(*client));
+}
+
+TEST_F(roctx_marker_gating_test, should_write_false_when_session_paused_by_other_trigger)
+{
+    auto        client  = make_client();
+    const auto& session = client->get_session();
+
+    other_trigger other{ *session };
+    other.set_action(rocprofsys::control::action::pause);
+
+    ASSERT_TRUE(client->get_trigger().should_write_markers())
+        << "the roctx trigger itself has no filter and is not paused - only the "
+           "unrelated 'other' trigger is pausing the session";
+
+    EXPECT_FALSE(observed_should_write(*client))
+        << "should_write() must respect other triggers' votes, not just its own";
+}
+
+TEST_F(roctx_marker_gating_test,
+       should_write_false_when_own_trigger_has_no_matching_region_active)
+{
+    auto client = make_client("Region1");
+
+    ASSERT_FALSE(client->get_trigger().should_write_markers())
+        << "a region filter is configured but no matching region is active yet";
+
+    EXPECT_FALSE(observed_should_write(*client))
+        << "should_write() must also respect the trigger's own filtering decision";
 }

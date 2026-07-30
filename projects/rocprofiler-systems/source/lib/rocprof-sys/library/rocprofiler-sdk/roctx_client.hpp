@@ -73,6 +73,13 @@ private:
     static thread_local marker_range_stack_t m_pushed_ranges;
     static thread_local marker_range_stack_t m_started_ranges;
 
+    [[nodiscard]] bool should_write() const
+    {
+        return m_trigger->should_write_markers() &&
+               m_session->is_active_excluding_trigger(
+                   control::triggers::roctx::trigger_name);
+    }
+
     void handle_marker_core_enter(rocprofiler_callback_tracing_record_t record,
                                   rocprofiler_user_data_t*              user_data,
                                   rocprofiler_timestamp_t               ts);

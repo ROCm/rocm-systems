@@ -475,134 +475,10 @@ get_sampler_running(std::int64_t _tid)
     return sampler_running_instances::instance(construct_on_thread{ _tid }, false);
 }
 
-auto&
-get_duration_disabled()
-{
-    static auto _v = std::atomic<bool>{ false };
-    return _v;
-}
-
-auto&
-get_is_duration_thread()
-{
-    static thread_local auto _v = false;
-    return _v;
-}
-
-auto&
-get_duration_cv()
-{
-    static auto _v = std::condition_variable{};
-    return _v;
-}
-
-auto&
-get_duration_mutex()
-{
-    static auto _v = std::mutex{};
-    return _v;
-}
-
-auto&
-get_duration_thread()
-{
-    static auto _v = std::unique_ptr<std::thread>{};
-    return _v;
-}
-
-auto
-notify_duration_thread()
-{
-    if(get_duration_thread() && !get_is_duration_thread())
-    {
-        std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
-        if(!_lk.owns_lock()) _lk.lock();
-        get_duration_cv().notify_all();
-    }
-}
-
-void
-stop_duration_thread()
-{
-    if(get_duration_thread() && !get_is_duration_thread())
-    {
-        notify_duration_thread();
-        get_duration_thread()->join();
-        get_duration_thread().reset();
-    }
-}
-
-void
-start_duration_thread()
-{
-    static std::mutex            _start_mutex{};
-    std::unique_lock<std::mutex> _start_lk{ _start_mutex, std::defer_lock };
-    if(!_start_lk.owns_lock()) _start_lk.lock();
-
-    if(!get_duration_thread() && config::get_sampling_duration() > 0.0)
-    {
-        // we may need to protect against recursion bc of pthread wrapper
-        static bool _protect = false;
-        if(_protect) return;
-        _protect   = true;
-        auto _now  = std::chrono::steady_clock::now();
-        auto _end  = _now + std::chrono::nanoseconds{ static_cast<std::uint64_t>(
-                               config::get_sampling_duration() * units::sec) };
-        auto _func = [_end]() {
-            thread_info::init(true);
-            threading::set_thread_name("omni.samp.dur");
-            get_is_duration_thread() = true;
-            bool _wait               = true;
-            while(_wait)
-            {
-                _wait = false;
-                std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
-                if(!_lk.owns_lock()) _lk.lock();
-                get_duration_cv().wait_until(_lk, _end);
-                auto _premature = (std::chrono::steady_clock::now() < _end);
-                auto _finalized = (state::process::get() >= state::process::Finalized);
-                if(_premature && !_finalized)
-                {
-                    // protect against spurious wakeups
-                    LOG_WARNING("Spurious wakeup of sampling duration thread...");
-                    _wait = true;
-                }
-                else if(_finalized)
-                {
-                    if(_premature)
-                    {
-                        LOG_INFO("Sampling duration of {:.6f} seconds was "
-                                 "interrupted by finalization. Shutting down "
-                                 "sampling...",
-                                 config::get_sampling_duration());
-                    }
-                    else
-                    {
-                        LOG_INFO("Sampling duration of {:.6f} seconds has "
-                                 "elapsed. Shutting down sampling...",
-                                 config::get_sampling_duration());
-                    }
-                    break;
-                }
-                else
-                {
-                    get_duration_disabled().store(true);
-                    LOG_INFO("Sampling duration of {:.6f} seconds has elapsed. "
-                             "Shutting down sampling...",
-                             config::get_sampling_duration());
-                    configure(false, 0);
-                }
-            }
-        };
-
-        LOG_INFO("Sampling will be disabled after {:.6f} seconds",
-                 config::get_sampling_duration());
-
-        ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-        get_duration_thread() = std::make_unique<std::thread>(_func);
-        _protect              = false;
-    }
-}
+// Hoisted ahead of configure() so the new-sampler guard can consult it.
+// pause_intervals / pause_mutex / pending_pause_ts stay near the pause/resume
+// implementation below since only those touch them.
+auto sampling_paused = std::atomic<bool>{ false };
 
 auto&
 get_offload_file()
@@ -789,7 +665,7 @@ configure(bool _setup, std::int64_t _tid)
 
     if(_setup && !_sampler && !_is_running && !_signal_types->empty())
     {
-        if(get_duration_disabled()) return std::set<int>{};
+        if(sampling_paused.load(std::memory_order_relaxed)) return std::set<int>{};
 
         // if this thread has an offset ID, that means it was created internally
         // and is probably here bc it called a function which was instrumented.
@@ -966,7 +842,6 @@ configure(bool _setup, std::int64_t _tid)
 
         *_running = true;
         sampling::get_sampler_init(_tid)->sample();
-        start_duration_thread();
         _sampler->start();
     }
     else if(!_setup && _sampler && _is_running)
@@ -978,8 +853,6 @@ configure(bool _setup, std::int64_t _tid)
         {
             sampling::block_signals(*_signal_types);
         }
-
-        notify_duration_thread();
 
         if(_tid == 0)
         {
@@ -1013,8 +886,6 @@ configure(bool _setup, std::int64_t _tid)
             // wait for the samples to finish
             for(auto& itr : get_sampler_allocators())
                 if(itr) itr->flush();
-
-            stop_duration_thread();
         }
 
         if(trait::runtime_enabled<backtrace_metrics>::get())
@@ -1053,7 +924,6 @@ struct pause_interval_t
     std::uint64_t resume_ts = 0;
 };
 
-auto sampling_paused  = std::atomic<bool>{ false };
 auto pause_mutex      = std::mutex{};
 auto pause_intervals  = std::vector<pause_interval_t>{};
 auto pending_pause_ts = std::atomic<std::uint64_t>{ 0 };
@@ -1097,9 +967,7 @@ shutdown()
         return std::set<int>{};
     }
 
-    auto _v = configure(false);
-    if(utility::get_thread_index() == 0) stop_duration_thread();
-    return _v;
+    return configure(false);
 }
 
 void

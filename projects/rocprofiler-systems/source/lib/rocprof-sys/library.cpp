@@ -14,6 +14,7 @@
 #include "common/path.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
+#include "common/units.hpp"
 #include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
@@ -21,7 +22,10 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/constraint.hpp"
+#include "core/control/clocks/posix.hpp"
+#include "core/control/clocks/steady.hpp"
 #include "core/control/session.hpp"
+#include "core/control/triggers/time_window.hpp"
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
@@ -85,9 +89,11 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <pthread.h>
 #include <sstream>
 #include <stdexcept>
@@ -429,6 +435,48 @@ invoke_external_resume_callbacks()
         _fn();
 }
 
+using trace_window_t =
+    rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::steady>;
+using posix_trace_window_t =
+    rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::posix>;
+
+// Constructs a time_window<Clock>, which self-registers with the session
+// (and its initial action is reflected) as soon as it's constructed. Does
+// NOT start the worker thread - that must happen after State::Active, since
+// the worker captures its delay/duration reference point (t0) at start()
+// time, and starting any earlier lets init-time overhead eat into the
+// window.
+template <typename Clock>
+std::unique_ptr<rocprofsys::control::triggers::time_window<Clock>>
+make_time_window(
+    std::shared_ptr<rocprofsys::control::session> session, Clock& clock,
+    rocprofsys::control::clock_duration delay,
+    rocprofsys::control::clock_duration duration,
+    rocprofsys::control::scope          event_scope = rocprofsys::control::scope::global)
+{
+    using window_t = rocprofsys::control::triggers::time_window<Clock>;
+    return std::make_unique<window_t>(std::move(session), clock, delay, duration,
+                                      event_scope);
+}
+
+rocprofsys::control::clocks::steady               g_trace_window_clock;
+rocprofsys::control::clocks::steady               g_sampling_dur_window_clock;
+std::optional<rocprofsys::control::clocks::posix> g_posix_window_clock;
+std::unique_ptr<trace_window_t>                   g_trace_window;
+std::unique_ptr<posix_trace_window_t>             g_posix_trace_window;
+std::unique_ptr<trace_window_t>                   g_sampling_dur_window;
+
+void
+stop_time_windows()
+{
+    auto _stop_and_reset = [](auto& _window) {
+        if(_window) _window->stop();
+        _window.reset();
+    };
+    _stop_and_reset(g_sampling_dur_window);
+    _stop_and_reset(g_trace_window);
+    _stop_and_reset(g_posix_trace_window);
+}
 }  // namespace
 
 extern "C" void
@@ -689,7 +737,8 @@ rocprofsys_init_tooling_hidden(void)
             // clang-format off
             auto subscribers = std::to_array<control::subscriber>({
                 { .on_pause = &rocprofiler_sdk::pause, .on_resume = &rocprofiler_sdk::resume, .name = "rocm" },
-                { .on_pause = &sampling::pause, .on_resume = &sampling::resume, .name = "sampling" },
+                { .on_pause = &sampling::pause, .on_resume = &sampling::resume, .name = "sampling",
+                  .scopes = { control::scope::global, control::scope::sampling_only } },
                 { .on_pause = &component::mpi_gotcha::pause, .on_resume = &component::mpi_gotcha::resume, .name = "mpi" },
                 { .on_pause = &ucx_t::pause, .on_resume = &ucx_t::resume, .name = "ucx" },
                 { .on_pause = &shmem_t::pause, .on_resume = &shmem_t::resume, .name = "shmem" },
@@ -706,14 +755,64 @@ rocprofsys_init_tooling_hidden(void)
                 get_control_session()->subscribe(std::move(sub));
             }
 
-            // Every subscriber above must be registered before this call: a
-            // trigger's registration broadcasts a pause/resume transition
-            // immediately, so any subscriber added afterward would miss it.
+            // Every subscriber above must be registered before any trigger
+            // constructed below: a trigger's registration broadcasts a
+            // pause/resume transition immediately, so a subscriber added
+            // afterward would miss it.
+            if(auto _trace_specs = constraint::get_trace_specs(); !_trace_specs.empty())
+            {
+                const auto& _spec  = _trace_specs.front();
+                const auto  _delay = std::chrono::nanoseconds{ static_cast<std::int64_t>(
+                    _spec.delay * units::sec) };
+                const auto  _dur   = std::chrono::nanoseconds{ static_cast<std::int64_t>(
+                    _spec.duration * units::sec) };
+
+                // Safety-net subscriber for category-traited recording paths
+                // (timemory storage, perfetto trace_events from callbacks not
+                // covered by a subsystem pause subscriber). Toggles the
+                // per-category runtime_enabled trait so those sites gate off
+                // during the delay/duration window. Only registered when a
+                // trace window is configured.
+                get_control_session()->subscribe(
+                    { []() {
+                         categories::disable_categories(config::get_enabled_categories());
+                     },
+                      []() {
+                          categories::enable_categories(config::get_enabled_categories());
+                      },
+                      "trace_categories" });
+
+                if(constraint::get_trace_period_clock_id() == CLOCK_PROCESS_CPUTIME_ID)
+                {
+                    g_posix_window_clock.emplace(CLOCK_PROCESS_CPUTIME_ID);
+                    g_posix_trace_window = make_time_window(
+                        get_control_session(), *g_posix_window_clock, _delay, _dur);
+                }
+                else
+                {
+                    g_trace_window = make_time_window(get_control_session(),
+                                                      g_trace_window_clock, _delay, _dur);
+                }
+            }
+
+            if(const auto _samp_dur = config::get_sampling_duration(); _samp_dur > 0.0)
+            {
+                g_sampling_dur_window = make_time_window(
+                    get_control_session(), g_sampling_dur_window_clock, {},
+                    std::chrono::nanoseconds{
+                        static_cast<std::int64_t>(_samp_dur * units::sec) },
+                    control::scope::sampling_only);
+            }
+
             rocprofiler_sdk::create_roctx_client();
         }
 
         state::process::set(
             state::process::Active);  // set to active as very last operation
+
+        if(g_trace_window) g_trace_window->start();
+        if(g_posix_trace_window) g_posix_trace_window->start();
+        if(g_sampling_dur_window) g_sampling_dur_window->start();
     } };
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -1285,6 +1384,7 @@ rocprofsys_finalize_hidden(void)
         _output_registry.print_summary();
     }
 
+    stop_time_windows();
     categories::shutdown();
 
     _finalization.stop();
