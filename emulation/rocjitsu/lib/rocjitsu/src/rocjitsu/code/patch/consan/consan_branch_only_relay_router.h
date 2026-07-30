@@ -37,29 +37,54 @@ enum class BranchOnlyRelayProvenance : uint8_t {
 
 enum class BranchOnlyRelayOwnerKind : uint8_t {
   LdsReservoir,
+  DirectReservoir,
 };
 
-/// Identifies one lazily materialized relay owner. The producer kind is part of
-/// the identity so independently named producer keys cannot collide when more
-/// deferred-storage producers are added.
+enum class BranchOnlyRelayOwnerMaterialization : uint8_t {
+  Paid,
+  Deferred,
+};
+
+/// Identifies one relay-storage owner. The producer kind is part of the
+/// identity, so equal producer-local keys from different domains cannot share
+/// planning or commit state. Whether using the owner adds a materialization
+/// cost belongs to each router offer rather than to this identity: the same
+/// owner may be deferred in one planning view and already paid in another.
 struct BranchOnlyRelayOwnerIdentity {
-  constexpr BranchOnlyRelayOwnerIdentity(BranchOnlyRelayOwnerKind kind, uint64_t producer_key)
-      : kind(kind), producer_key(producer_key) {}
   BranchOnlyRelayOwnerIdentity() = delete;
 
-  BranchOnlyRelayOwnerKind kind;
-  uint64_t producer_key;
+  [[nodiscard]] static constexpr BranchOnlyRelayOwnerIdentity lds_reservoir(uint64_t producer_key) {
+    return BranchOnlyRelayOwnerIdentity(BranchOnlyRelayOwnerKind::LdsReservoir, producer_key);
+  }
+
+  [[nodiscard]] static constexpr BranchOnlyRelayOwnerIdentity
+  direct_reservoir(uint64_t producer_key) {
+    return BranchOnlyRelayOwnerIdentity(BranchOnlyRelayOwnerKind::DirectReservoir, producer_key);
+  }
+
+  [[nodiscard]] constexpr BranchOnlyRelayOwnerKind kind() const { return kind_; }
+  [[nodiscard]] constexpr uint64_t producer_key() const { return producer_key_; }
 
   auto operator<=>(const BranchOnlyRelayOwnerIdentity &) const = default;
+
+private:
+  constexpr BranchOnlyRelayOwnerIdentity(BranchOnlyRelayOwnerKind kind, uint64_t producer_key)
+      : kind_(kind), producer_key_(producer_key) {}
+
+  BranchOnlyRelayOwnerKind kind_;
+  uint64_t producer_key_;
 };
 
 struct BranchOnlyRelayClaim {
   uint64_t offset = 0;
   BranchOnlyRelayProvenance provenance = BranchOnlyRelayProvenance::PristineNop;
-  /// Optional owner whose materialization cost is shared by every relay with
-  /// the same key. It participates in planning and commit identity, but does
-  /// not change relay emission.
+  /// Optional owner shared by every relay from the same producer. Deferred
+  /// owners participate in materialization-cost planning; pre-materialized
+  /// owners remain visible for claim and commit identity. Neither changes
+  /// relay emission.
   std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity;
+  BranchOnlyRelayOwnerMaterialization owner_materialization =
+      BranchOnlyRelayOwnerMaterialization::Paid;
 };
 
 struct BranchOnlyRelayRoute {
@@ -265,18 +290,31 @@ public:
   /// identity form one owner group within this router instance; identities
   /// from independent routers have no shared namespace. The domain is
   /// structural, so different producer kinds cannot collide on a numeric
-  /// value. Producers omit an identity for storage paid before a plan call.
+  /// value. Storage with no producer identity uses the ownerless overload.
   ///
-  /// For lazily selected LDS reservoirs, a newly used group represents one
-  /// reservoir materialization and convergence replay, so group count is the
-  /// primary objective even though reservoir byte sizes vary. Preplanned
-  /// direct reservoirs are untagged because their appended storage is already
-  /// committed before routing. The objective is intentionally unweighted;
-  /// retained appended bytes are reported separately rather than used as a
-  /// secondary score.
-  [[nodiscard]] bool
-  offer(uint64_t offset, BranchOnlyRelayProvenance provenance,
-        std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity = std::nullopt);
+  /// The three overloads distinguish ownerless storage, a deferred owner, and
+  /// a paid owner without an optional identity or cost-state sentinel at call
+  /// sites. For lazily selected LDS reservoirs, a newly used deferred group
+  /// represents one materialization and convergence replay, so group count is
+  /// the primary objective even though reservoir byte sizes vary. Preplanned
+  /// direct reservoirs use `offer_materialized_owner` because their appended
+  /// storage is already committed before routing. The objective is intentionally
+  /// unweighted; retained appended bytes are reported separately rather than
+  /// used as a secondary score.
+  [[nodiscard]] bool offer(uint64_t offset, BranchOnlyRelayProvenance provenance) {
+    return offer_with_owner_materialization(offset, provenance, std::nullopt,
+                                            BranchOnlyRelayOwnerMaterialization::Paid);
+  }
+  [[nodiscard]] bool offer(uint64_t offset, BranchOnlyRelayProvenance provenance,
+                           BranchOnlyRelayOwnerIdentity deferred_owner) {
+    return offer_with_owner_materialization(offset, provenance, deferred_owner,
+                                            BranchOnlyRelayOwnerMaterialization::Deferred);
+  }
+  [[nodiscard]] bool offer_materialized_owner(uint64_t offset, BranchOnlyRelayProvenance provenance,
+                                              BranchOnlyRelayOwnerIdentity paid_owner) {
+    return offer_with_owner_materialization(offset, provenance, paid_owner,
+                                            BranchOnlyRelayOwnerMaterialization::Paid);
+  }
   void retire_range(uint64_t offset, uint64_t size);
 
   [[nodiscard]] std::optional<BranchOnlyRelayRoute>
@@ -310,11 +348,11 @@ public:
   /// improvements. It minimizes each pair against owners selected by earlier
   /// pairs, so it is greedy across the batch rather than globally minimal.
   /// Owner carry is intentionally scoped to one batch; independent plan calls
-  /// have no implicit shared ownership state. Producers omit affinity for
-  /// storage paid before the call, while the exact-pair tier tracks affinities
-  /// paid by earlier fallback pairs in that same call. The final greedy
-  /// fallback is owner-oblivious and preserves pair feasibility rather than
-  /// any minimization guarantee. `route_optimization_exhausted` reports a
+  /// have no implicit shared ownership state. Offers may retain a paid owner
+  /// identity at zero cost; the exact-pair tier also treats deferred identities
+  /// selected by earlier fallback pairs in that same call as paid. The final
+  /// greedy fallback is owner-oblivious and preserves pair feasibility rather
+  /// than any minimization guarantee. `route_optimization_exhausted` reports a
   /// retained feasible route whose independent minimization pass reached its
   /// bound. `routing_invariant_failed` reports an exact tier rejected for
   /// inconsistent routing inputs or output, while
@@ -360,14 +398,22 @@ private:
   struct RelayOffer {
     BranchOnlyRelayProvenance provenance = BranchOnlyRelayProvenance::PristineNop;
     std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity;
+    BranchOnlyRelayOwnerMaterialization owner_materialization =
+        BranchOnlyRelayOwnerMaterialization::Paid;
 
     bool operator==(const RelayOffer &) const = default;
   };
 
+  [[nodiscard]] bool
+  offer_with_owner_materialization(uint64_t offset, BranchOnlyRelayProvenance provenance,
+                                   std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity,
+                                   BranchOnlyRelayOwnerMaterialization owner_materialization);
+
   std::map<uint64_t, RelayOffer> relays_;
-  // Monotonic: false enables the common untagged fast path. Keeping true after
-  // the final tagged relay retires only permits a redundant bounded scan.
-  bool has_owner_affinity_ = false;
+  // Monotonic: false enables the common no-deferred-owner fast path. Keeping
+  // true after the final deferred relay retires only permits a redundant
+  // bounded scan.
+  bool has_deferred_owner_affinity_ = false;
 };
 
 } // namespace rocjitsu

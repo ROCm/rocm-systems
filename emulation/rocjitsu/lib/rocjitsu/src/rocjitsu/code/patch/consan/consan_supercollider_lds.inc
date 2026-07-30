@@ -2836,13 +2836,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             owned_anchor_relays.contains(relay) ? BranchOnlyRelayProvenance::OwnedAnchor
                                                 : BranchOnlyRelayProvenance::OwnedReservoir;
         const auto optimistic_owner = optimistic_relay_owner.find(relay);
-        const std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity =
-            optimistic_owner == optimistic_relay_owner.end()
-                ? std::nullopt
-                : std::optional<BranchOnlyRelayOwnerIdentity>(
-                      BranchOnlyRelayOwnerIdentity(BranchOnlyRelayOwnerKind::LdsReservoir,
-                                                   optimistic_owner->second->anchor_offset));
-        (void)branch_router.offer(relay, provenance, owner_affinity);
+        if (optimistic_owner == optimistic_relay_owner.end()) {
+          (void)branch_router.offer(relay, provenance);
+        } else {
+          (void)branch_router.offer(
+              relay, provenance,
+              BranchOnlyRelayOwnerIdentity::lds_reservoir(optimistic_owner->second->anchor_offset));
+        }
       }
       std::vector<BranchOnlyRelayPairRequest> route_requests;
       route_requests.reserve(tentative_candidates.size());

@@ -80,7 +80,11 @@ constexpr uint32_t kRelayTestClauseTwo = 0x1041u;
 constexpr uint32_t kRelayTestEnd = 0x2000u;
 
 constexpr BranchOnlyRelayOwnerIdentity lds_relay_owner(uint64_t value) {
-  return {BranchOnlyRelayOwnerKind::LdsReservoir, value};
+  return BranchOnlyRelayOwnerIdentity::lds_reservoir(value);
+}
+
+constexpr BranchOnlyRelayOwnerIdentity direct_relay_owner(uint64_t value) {
+  return BranchOnlyRelayOwnerIdentity::direct_reservoir(value);
 }
 
 class RelayTestDecoder : public Decoder {
@@ -208,6 +212,8 @@ void expect_same_batch_plan(const BranchOnlyRelayBatchPlan &lhs,
                 rhs.routes[pair].retired_relay_claims[retired].provenance);
       EXPECT_EQ(lhs.routes[pair].retired_relay_claims[retired].owner_affinity,
                 rhs.routes[pair].retired_relay_claims[retired].owner_affinity);
+      EXPECT_EQ(lhs.routes[pair].retired_relay_claims[retired].owner_materialization,
+                rhs.routes[pair].retired_relay_claims[retired].owner_materialization);
     }
     ASSERT_EQ(lhs.routes[pair].claims.size(), rhs.routes[pair].claims.size());
     for (size_t claim = 0u; claim < lhs.routes[pair].claims.size(); ++claim) {
@@ -216,6 +222,8 @@ void expect_same_batch_plan(const BranchOnlyRelayBatchPlan &lhs,
                 rhs.routes[pair].claims[claim].provenance);
       EXPECT_EQ(lhs.routes[pair].claims[claim].owner_affinity,
                 rhs.routes[pair].claims[claim].owner_affinity);
+      EXPECT_EQ(lhs.routes[pair].claims[claim].owner_materialization,
+                rhs.routes[pair].claims[claim].owner_materialization);
     }
   }
 }
@@ -231,10 +239,12 @@ TEST(ConSanBranchOnlyRelayRouter, PlansCommitsEmitsAndRecordsTypedRelayOwnership
   constexpr uint64_t kOwnedAnchorRelay = 200'000u;
   constexpr uint64_t kGeneratedRelay = 200'004u;
   constexpr uint64_t kOwnedReservoirRelay = 100'004u;
+  constexpr BranchOnlyRelayOwnerIdentity kDirectOwner = direct_relay_owner(kOwnedReservoirRelay);
 
   BranchOnlyRelayRouter router;
   // Discovery order must not affect deterministic coordinate-based routing.
-  EXPECT_TRUE(router.offer(kOwnedReservoirRelay, BranchOnlyRelayProvenance::OwnedReservoir));
+  EXPECT_TRUE(router.offer_materialized_owner(
+      kOwnedReservoirRelay, BranchOnlyRelayProvenance::OwnedReservoir, kDirectOwner));
   EXPECT_TRUE(router.offer(kGeneratedRelay, BranchOnlyRelayProvenance::GeneratedBank));
   EXPECT_TRUE(router.offer(kPristineRelay, BranchOnlyRelayProvenance::PristineNop));
   EXPECT_TRUE(router.offer(kOwnedAnchorRelay, BranchOnlyRelayProvenance::OwnedAnchor));
@@ -263,16 +273,26 @@ TEST(ConSanBranchOnlyRelayRouter, PlansCommitsEmitsAndRecordsTypedRelayOwnership
   BranchOnlyDirectRelayReservoirSet reservoirs;
   reservoirs.reservoirs.resize(1u);
   reservoirs.reservoir_by_relay.emplace(kOwnedReservoirRelay, 0u);
+  const std::array unrelated_lds_claims = {
+      BranchOnlyRelayClaim{
+          .offset = kOwnedReservoirRelay + sizeof(uint32_t),
+          .provenance = BranchOnlyRelayProvenance::OwnedReservoir,
+          .owner_affinity = lds_relay_owner(kOwnedReservoirRelay),
+          .owner_materialization = BranchOnlyRelayOwnerMaterialization::Deferred,
+      },
+  };
+  EXPECT_TRUE(reservoirs.mark_claims_used(unrelated_lds_claims, &error));
+  EXPECT_FALSE(reservoirs.reservoirs.front().used);
   const std::array invalid_reservoir_claims = {
       BranchOnlyRelayClaim{
           .offset = kOwnedReservoirRelay,
           .provenance = BranchOnlyRelayProvenance::OwnedReservoir,
-          .owner_affinity = std::nullopt,
+          .owner_affinity = kDirectOwner,
       },
       BranchOnlyRelayClaim{
           .offset = kOwnedReservoirRelay + sizeof(uint32_t),
           .provenance = BranchOnlyRelayProvenance::OwnedReservoir,
-          .owner_affinity = std::nullopt,
+          .owner_affinity = kDirectOwner,
       },
   };
   EXPECT_FALSE(reservoirs.mark_claims_used(invalid_reservoir_claims, &error));
@@ -575,6 +595,50 @@ TEST(ConSanBranchOnlyRelayRouter, MinimizesMaterializedRelayOwners) {
   }));
 }
 
+TEST(ConSanBranchOnlyRelayRouter, EqualCrossDomainKeysDoNotShareMaterializationCost) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr BranchOnlyRelayOwnerIdentity kDeferredOwner = lds_relay_owner(5u);
+  constexpr BranchOnlyRelayOwnerIdentity kFirstMaterializedOwner = direct_relay_owner(1u);
+  constexpr BranchOnlyRelayOwnerIdentity kSecondMaterializedOwner = direct_relay_owner(2u);
+  static_assert(kDeferredOwner != kFirstMaterializedOwner);
+  static_assert(kDeferredOwner != kSecondMaterializedOwner);
+  const std::array requests = {
+      BranchOnlyRelayPairRequest{
+          .entry_source = 0u,
+          .entry_target = 300'000u,
+          .return_source = 300'004u,
+          .return_target = 200'004u,
+      },
+  };
+  BranchOnlyRelayRouter router;
+  ASSERT_TRUE(router.offer(100'000u, BranchOnlyRelayProvenance::OwnedReservoir, kDeferredOwner));
+  ASSERT_TRUE(router.offer_materialized_owner(120'000u, BranchOnlyRelayProvenance::OwnedReservoir,
+                                              kFirstMaterializedOwner));
+  ASSERT_TRUE(router.offer_materialized_owner(200'000u, BranchOnlyRelayProvenance::OwnedReservoir,
+                                              kSecondMaterializedOwner));
+  ASSERT_TRUE(router.offer(220'000u, BranchOnlyRelayProvenance::OwnedReservoir, kDeferredOwner));
+  DbiPatchPlacementPlanner planner(kArch, 300'008u);
+  std::string error;
+  const BranchOnlyRelayBatchPlan plan = router.plan_pairs(planner, requests, &error);
+
+  ASSERT_TRUE(plan.complete()) << error;
+  ASSERT_EQ(plan.routes.size(), 1u);
+  EXPECT_EQ(plan.routes.front().entry_relay_offsets, (std::vector<uint64_t>{120'000u, 200'000u}));
+  EXPECT_GT(plan.route_optimization_scan_work_consumed, 0u);
+  ASSERT_EQ(plan.routes.front().claims.size(), 2u);
+  const std::set<std::optional<BranchOnlyRelayOwnerIdentity>> selected_owners = {
+      plan.routes.front().claims[0].owner_affinity,
+      plan.routes.front().claims[1].owner_affinity,
+  };
+  EXPECT_EQ(selected_owners, (std::set<std::optional<BranchOnlyRelayOwnerIdentity>>{
+                                 kFirstMaterializedOwner,
+                                 kSecondMaterializedOwner,
+                             }));
+  EXPECT_TRUE(std::ranges::all_of(plan.routes.front().claims, [](const auto &claim) {
+    return claim.owner_materialization == BranchOnlyRelayOwnerMaterialization::Paid;
+  }));
+}
+
 TEST(ConSanBranchOnlyRelayRouter, SharesOneOwnerAcrossBatchAndExactPairFallback) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   constexpr BranchOnlyRelayOwnerIdentity kFirstOwner = lds_relay_owner(11u);
@@ -733,10 +797,12 @@ TEST(ConSanBranchOnlyRelayRouter, OwnerTierClassificationPreservesRoutingSearchW
   const auto plan = [&](bool tagged) {
     BranchOnlyRelayRouter router;
     for (uint64_t relay : kRelays) {
-      EXPECT_TRUE(
-          router.offer(relay, BranchOnlyRelayProvenance::OwnedReservoir,
-                       tagged ? std::optional<BranchOnlyRelayOwnerIdentity>(lds_relay_owner(11u))
-                              : std::nullopt));
+      if (tagged) {
+        EXPECT_TRUE(
+            router.offer(relay, BranchOnlyRelayProvenance::OwnedReservoir, lds_relay_owner(11u)));
+      } else {
+        EXPECT_TRUE(router.offer(relay, BranchOnlyRelayProvenance::OwnedReservoir));
+      }
     }
     DbiPatchPlacementPlanner planner(kArch, 300'008u);
     BranchOnlyRelayPlanOutcome outcome;
@@ -904,7 +970,11 @@ TEST(ConSanBranchOnlyRelayRouter, ExactPairOptimizationCannotConsumeLaterFeasibi
   const auto plan_with_limits = [&](const BranchOnlyRelaySearchLimits &selected_limits) {
     BranchOnlyRelayRouter router;
     for (const auto &[offset, owner] : relays) {
-      EXPECT_TRUE(router.offer(offset, BranchOnlyRelayProvenance::OwnedReservoir, owner));
+      if (owner) {
+        EXPECT_TRUE(router.offer(offset, BranchOnlyRelayProvenance::OwnedReservoir, *owner));
+      } else {
+        EXPECT_TRUE(router.offer(offset, BranchOnlyRelayProvenance::OwnedReservoir));
+      }
     }
     DbiPatchPlacementPlanner planner(kArch, 400'000u);
     return router.plan_pairs(planner, requests, nullptr, selected_limits);
@@ -2359,8 +2429,8 @@ TEST(ConSanBranchOnlyRelayRouter, BoundedSolverMatchesBruteForceOnSmallRandomBat
           selected_relays.push_back(relays[relay]);
           continue;
         }
-        const uint32_t owner_bit = 1u
-                                   << static_cast<uint32_t>(relay_owners[relay]->producer_key - 1u);
+        const uint32_t owner_bit =
+            1u << static_cast<uint32_t>(relay_owners[relay]->producer_key() - 1u);
         if ((owner_mask & owner_bit) != 0u)
           selected_relays.push_back(relays[relay]);
       }
@@ -2371,8 +2441,12 @@ TEST(ConSanBranchOnlyRelayRouter, BoundedSolverMatchesBruteForceOnSmallRandomBat
 
     BranchOnlyRelayRouter router;
     for (size_t relay = 0u; relay < relays.size(); ++relay) {
-      ASSERT_TRUE(router.offer(relays[relay], BranchOnlyRelayProvenance::OwnedReservoir,
-                               relay_owners[relay]));
+      if (relay_owners[relay]) {
+        ASSERT_TRUE(router.offer(relays[relay], BranchOnlyRelayProvenance::OwnedReservoir,
+                                 *relay_owners[relay]));
+      } else {
+        ASSERT_TRUE(router.offer(relays[relay], BranchOnlyRelayProvenance::OwnedReservoir));
+      }
     }
     DbiPatchPlacementPlanner planner(kArch, 400'000u);
     std::string error;
@@ -2402,8 +2476,12 @@ TEST(ConSanBranchOnlyRelayRouter, BoundedSolverMatchesBruteForceOnSmallRandomBat
     const auto plan_with_limits = [&](const BranchOnlyRelaySearchLimits &limits) {
       BranchOnlyRelayRouter pair_router;
       for (size_t relay = 0u; relay < relays.size(); ++relay) {
-        EXPECT_TRUE(pair_router.offer(relays[relay], BranchOnlyRelayProvenance::OwnedReservoir,
-                                      relay_owners[relay]));
+        if (relay_owners[relay]) {
+          EXPECT_TRUE(pair_router.offer(relays[relay], BranchOnlyRelayProvenance::OwnedReservoir,
+                                        *relay_owners[relay]));
+        } else {
+          EXPECT_TRUE(pair_router.offer(relays[relay], BranchOnlyRelayProvenance::OwnedReservoir));
+        }
       }
       DbiPatchPlacementPlanner pair_planner(kArch, 400'000u);
       return pair_router.plan_pairs(pair_planner, requests, nullptr, limits);
@@ -2659,11 +2737,12 @@ TEST(ConSanBranchOnlyRelayRouter, DirectReservoirPlanningShortCircuitsAndAdoptsA
 
 TEST(ConSanBranchOnlyRelayRouter, PreplannedDirectReservoirIsZeroCostRoutingCapacity) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
-  constexpr size_t kDonorWord = 31'250u;
-  constexpr size_t kTextWords = 62'500u;
+  constexpr std::array<size_t, 2> kDonorWords = {50'000u, 62'500u};
+  constexpr size_t kTextWords = 75'000u;
   constexpr uint32_t kRelayTestExcluded = 0x3000u;
   std::vector<uint32_t> words(kTextWords, kRelayTestExcluded);
-  std::fill_n(words.begin() + kDonorWord, 16u, kRelayTestDonor);
+  for (size_t donor_word : kDonorWords)
+    std::fill_n(words.begin() + donor_word, 16u, kRelayTestDonor);
   words.push_back(kRelayTestEnd);
   RelayTestCodeObject object(std::move(words));
   class ExcludedRelayTestDecoder : public RelayTestDecoder {
@@ -2681,18 +2760,46 @@ TEST(ConSanBranchOnlyRelayRouter, PreplannedDirectReservoirIsZeroCostRoutingCapa
   BranchOnlyDirectRelayReservoirSet reservoirs;
   std::string error;
 
-  ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch, 0u, 1u,
+  ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch, 0u, 30u,
                                             planner, reservoirs, &error))
       << error;
-  ASSERT_EQ(reservoirs.reservoirs.size(), 1u);
+  ASSERT_EQ(reservoirs.reservoirs.size(), 2u);
+  ASSERT_NE(reservoirs.reservoirs[0].anchor_offset, reservoirs.reservoirs[1].anchor_offset);
   const size_t occupied_before = planner.occupied_ranges().size();
-  const auto route = router.plan_pair(planner, 0u, 250'000u, 250'004u, 240'004u, &error);
+  const auto expect_route_from_reservoir = [&](BranchOnlyRelayRouter selected_router,
+                                               size_t reservoir_index, uint64_t entry_source,
+                                               uint64_t entry_target) {
+    DbiPatchPlacementPlanner selected_planner = planner;
+    for (size_t index = 0u; index < reservoirs.reservoirs.size(); ++index) {
+      if (index == reservoir_index)
+        continue;
+      const BranchOnlyDirectRelayReservoir &retired = reservoirs.reservoirs[index];
+      selected_router.retire_range(retired.anchor_offset,
+                                   retired.original_words.size() * sizeof(uint32_t));
+    }
+    BranchOnlyRelayPlanOutcome selected_outcome;
+    std::string selected_error;
+    const auto route = selected_router.plan_pair(
+        selected_planner, entry_source, entry_target, entry_target + sizeof(uint32_t),
+        entry_target - 10'000u, &selected_error, &selected_outcome);
 
-  ASSERT_TRUE(route) << error;
-  ASSERT_EQ(route->claims.size(), 1u);
-  EXPECT_EQ(route->claims.front().provenance, BranchOnlyRelayProvenance::OwnedReservoir);
-  EXPECT_FALSE(route->claims.front().owner_affinity);
-  EXPECT_EQ(planner.occupied_ranges().size(), occupied_before);
+    ASSERT_TRUE(route) << selected_error;
+    ASSERT_EQ(route->claims.size(), 1u);
+    const BranchOnlyRelayClaim &claim = route->claims.front();
+    ASSERT_EQ(claim.provenance, BranchOnlyRelayProvenance::OwnedReservoir);
+    ASSERT_TRUE(claim.owner_affinity);
+    EXPECT_EQ(claim.owner_affinity->kind(), BranchOnlyRelayOwnerKind::DirectReservoir);
+    EXPECT_EQ(claim.owner_materialization, BranchOnlyRelayOwnerMaterialization::Paid);
+    EXPECT_EQ(claim.owner_affinity,
+              direct_relay_owner(reservoirs.reservoirs[reservoir_index].anchor_offset));
+    EXPECT_EQ(selected_outcome.route_optimization_scan_work_consumed, 0u);
+    EXPECT_EQ(selected_planner.occupied_ranges().size(), occupied_before);
+  };
+
+  ASSERT_NO_FATAL_FAILURE(expect_route_from_reservoir(router, 0u, 100'000u, 240'000u));
+  ASSERT_NO_FATAL_FAILURE(expect_route_from_reservoir(router, 1u, 120'000u, 300'000u));
+  EXPECT_NE(direct_relay_owner(reservoirs.reservoirs[0].anchor_offset),
+            direct_relay_owner(reservoirs.reservoirs[1].anchor_offset));
 }
 
 TEST(ConSanBranchOnlyRelayRouter, DirectReservoirFailureRollsBackTheWholeCall) {

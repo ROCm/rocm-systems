@@ -190,16 +190,21 @@ struct RelayOwnerGrouping {
 
 [[nodiscard]] std::optional<RelayOwnerGrouping>
 group_relay_owners(std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> owner_affinities,
+                   std::span<const BranchOnlyRelayOwnerMaterialization> owner_materializations,
                    const std::set<BranchOnlyRelayOwnerIdentity> &materialized_owner_affinities,
                    BoundedWorkMeter &scan_work) {
+  assert(owner_affinities.size() == owner_materializations.size());
+  if (owner_affinities.size() != owner_materializations.size())
+    return std::nullopt;
   std::vector<std::pair<BranchOnlyRelayOwnerIdentity, size_t>> tagged_relays;
   tagged_relays.reserve(owner_affinities.size());
   for (size_t relay = 0u; relay < owner_affinities.size(); ++relay) {
     if (!scan_work.consume())
       return std::nullopt;
     const std::optional<BranchOnlyRelayOwnerIdentity> owner = owner_affinities[relay];
-    if (!owner)
+    if (!owner || owner_materializations[relay] != BranchOnlyRelayOwnerMaterialization::Deferred) {
       continue;
+    }
     if (materialized_owner_affinities.empty()) {
       tagged_relays.emplace_back(*owner, relay);
       continue;
@@ -841,15 +846,17 @@ struct ExactOwnerAffinitySolveResult {
 [[nodiscard]] ExactOwnerAffinitySolveResult solve_exact_minimum_owner_affinity(
     std::span<const FixedRelayDemand> demands, std::span<const uint64_t> relays,
     std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> owner_affinities,
+    std::span<const BranchOnlyRelayOwnerMaterialization> owner_materializations,
     const std::set<BranchOnlyRelayOwnerIdentity> &materialized_owner_affinities,
     BoundedWorkMeter &search_work, BoundedWorkMeter &scan_work, size_t optimization_search_limit,
     size_t optimization_scan_limit, bool constrain_optimized_relay_count,
-    bool constrain_optimized_relays_to_baseline, bool has_owner_affinity,
+    bool constrain_optimized_relays_to_baseline, bool has_deferred_owner_affinity,
     std::vector<std::vector<uint64_t>> &routes_out) {
   ExactOwnerAffinitySolveResult result;
   routes_out.clear();
   assert(owner_affinities.size() == relays.size());
-  if (owner_affinities.size() != relays.size()) {
+  assert(owner_materializations.size() == relays.size());
+  if (owner_affinities.size() != relays.size() || owner_materializations.size() != relays.size()) {
     result.routing_invariant_failed = true;
     return result;
   }
@@ -899,7 +906,7 @@ struct ExactOwnerAffinitySolveResult {
     }
   }
 
-  if (!has_owner_affinity && !constrain_optimized_relay_count)
+  if (!has_deferred_owner_affinity && !constrain_optimized_relay_count)
     return result;
 
   BoundedWorkMeter optimization_search_work(optimization_search_limit);
@@ -911,12 +918,16 @@ struct ExactOwnerAffinitySolveResult {
 
   std::vector<uint64_t> constrained_relays;
   std::vector<std::optional<BranchOnlyRelayOwnerIdentity>> constrained_owner_affinities;
+  std::vector<BranchOnlyRelayOwnerMaterialization> constrained_owner_materializations;
   std::span<const uint64_t> optimization_relays = relays;
   std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> optimization_owner_affinities =
       owner_affinities;
+  std::span<const BranchOnlyRelayOwnerMaterialization> optimization_owner_materializations =
+      owner_materializations;
   if (constrain_optimized_relays_to_baseline) {
     constrained_relays.reserve(result.feasibility_relay_offsets.size());
     constrained_owner_affinities.reserve(result.feasibility_relay_offsets.size());
+    constrained_owner_materializations.reserve(result.feasibility_relay_offsets.size());
     const size_t relay_lookup_work = std::max<size_t>(std::bit_width(relays.size()), 1u);
     for (uint64_t offset : result.feasibility_relay_offsets) {
       if (!optimization_scan_work.consume(relay_lookup_work)) {
@@ -934,13 +945,16 @@ struct ExactOwnerAffinitySolveResult {
       const size_t relay_index = static_cast<size_t>(std::distance(relays.begin(), relay));
       constrained_relays.push_back(offset);
       constrained_owner_affinities.push_back(owner_affinities[relay_index]);
+      constrained_owner_materializations.push_back(owner_materializations[relay_index]);
     }
     optimization_relays = constrained_relays;
     optimization_owner_affinities = constrained_owner_affinities;
+    optimization_owner_materializations = constrained_owner_materializations;
   }
 
-  const std::optional<RelayOwnerGrouping> owner_groups = group_relay_owners(
-      optimization_owner_affinities, materialized_owner_affinities, optimization_scan_work);
+  const std::optional<RelayOwnerGrouping> owner_groups =
+      group_relay_owners(optimization_owner_affinities, optimization_owner_materializations,
+                         materialized_owner_affinities, optimization_scan_work);
   if (!owner_groups) {
     result.optimization_exhausted = true;
     record_optimization_work();
@@ -1041,7 +1055,13 @@ struct ExactOwnerAffinitySolveResult {
   return result;
 }
 
-using FixedRelayInventory = std::map<uint64_t, std::optional<BranchOnlyRelayOwnerIdentity>>;
+struct FixedRelayInventoryEntry {
+  std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity;
+  BranchOnlyRelayOwnerMaterialization owner_materialization =
+      BranchOnlyRelayOwnerMaterialization::Paid;
+};
+
+using FixedRelayInventory = std::map<uint64_t, FixedRelayInventoryEntry>;
 
 struct GreedyFixedRelayRoute {
   enum class Status : uint8_t {
@@ -1141,9 +1161,13 @@ plan_greedy_fixed_relay_route(const FixedRelayDemand &demand, FixedRelayInventor
 struct QualifiedRelayInventoryView {
   std::span<const uint64_t> offsets;
   std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> owner_affinities;
+  std::span<const BranchOnlyRelayOwnerMaterialization> owner_materializations;
   bool complete = false;
 
-  [[nodiscard]] bool shape_valid() const { return offsets.size() == owner_affinities.size(); }
+  [[nodiscard]] bool shape_valid() const {
+    return offsets.size() == owner_affinities.size() &&
+           offsets.size() == owner_materializations.size();
+  }
 };
 
 /// Recovers pair-atomic routes after the full-batch exact solve fails. This
@@ -1152,7 +1176,7 @@ struct QualifiedRelayInventoryView {
 /// feasibility baseline for later requests.
 [[nodiscard]] std::optional<std::string> plan_exact_pair_fallbacks(
     std::span<const BranchOnlyRelayPairRequest> requests, const std::vector<bool> &valid_request,
-    QualifiedRelayInventoryView qualified_relays, bool has_owner_affinity,
+    QualifiedRelayInventoryView qualified_relays, bool has_deferred_owner_affinity,
     const BranchOnlyRelaySearchLimits &limits, BranchOnlyRelayBatchPlan &batch) {
   batch.strategy = BranchOnlyRelayPlanStrategy::ExactPairFallback;
   const bool input_shape_valid =
@@ -1167,6 +1191,8 @@ struct QualifiedRelayInventoryView {
   const std::span<const uint64_t> relay_offsets = qualified_relays.offsets;
   const std::span<const std::optional<BranchOnlyRelayOwnerIdentity>> relay_owner_affinities =
       qualified_relays.owner_affinities;
+  const std::span<const BranchOnlyRelayOwnerMaterialization> relay_owner_materializations =
+      qualified_relays.owner_materializations;
 
   BoundedWorkMeter fallback_setup_work(limits.batch_fallback_setup_work);
   const size_t fallback_setup_cost = multiply_saturated(
@@ -1175,8 +1201,11 @@ struct QualifiedRelayInventoryView {
   add_saturated(batch.scan_work_consumed, fallback_setup_work.consumed());
   FixedRelayInventory unused_relays;
   if (fallback_inventory_available) {
-    for (size_t relay = 0u; relay < relay_offsets.size(); ++relay)
-      unused_relays.emplace(relay_offsets[relay], relay_owner_affinities[relay]);
+    for (size_t relay = 0u; relay < relay_offsets.size(); ++relay) {
+      unused_relays.emplace(relay_offsets[relay],
+                            FixedRelayInventoryEntry{relay_owner_affinities[relay],
+                                                     relay_owner_materializations[relay]});
+    }
   }
 
   std::set<BranchOnlyRelayOwnerIdentity> materialized_owner_affinities;
@@ -1189,10 +1218,12 @@ struct QualifiedRelayInventoryView {
     return true;
   };
   const auto materialize_inventory_owners = [&](const FixedRelayInventory &inventory) {
-    for (const auto &[offset, owner_affinity] : inventory) {
+    for (const auto &[offset, entry] : inventory) {
       (void)offset;
-      if (owner_affinity)
-        materialized_owner_affinities.insert(*owner_affinity);
+      if (entry.owner_affinity &&
+          entry.owner_materialization == BranchOnlyRelayOwnerMaterialization::Deferred) {
+        materialized_owner_affinities.insert(*entry.owner_affinity);
+      }
     }
   };
   // Exact routes draw only from `unused_relays`, which is constructed from
@@ -1210,8 +1241,10 @@ struct QualifiedRelayInventoryView {
           return false;
         }
         const size_t relay = static_cast<size_t>(offered - relay_offsets.begin());
-        if (relay_owner_affinities[relay])
+        if (relay_owner_affinities[relay] &&
+            relay_owner_materializations[relay] == BranchOnlyRelayOwnerMaterialization::Deferred) {
           materialized_owner_affinities.insert(*relay_owner_affinities[relay]);
+        }
       }
     }
     return true;
@@ -1252,15 +1285,19 @@ struct QualifiedRelayInventoryView {
     if (pair_scan_work.consume(unused_relays.size())) {
       std::vector<uint64_t> available_relays;
       std::vector<std::optional<BranchOnlyRelayOwnerIdentity>> available_owner_affinities;
+      std::vector<BranchOnlyRelayOwnerMaterialization> available_owner_materializations;
       available_relays.reserve(unused_relays.size());
       available_owner_affinities.reserve(unused_relays.size());
-      for (const auto &[relay, owner_affinity] : unused_relays) {
+      available_owner_materializations.reserve(unused_relays.size());
+      for (const auto &[relay, entry] : unused_relays) {
         available_relays.push_back(relay);
-        available_owner_affinities.push_back(owner_affinity);
+        available_owner_affinities.push_back(entry.owner_affinity);
+        available_owner_materializations.push_back(entry.owner_materialization);
       }
       const ExactOwnerAffinitySolveResult solve = solve_exact_minimum_owner_affinity(
-          pair_demands, available_relays, available_owner_affinities, materialized_owner_affinities,
-          pair_search_work, pair_scan_work,
+          pair_demands, available_relays, available_owner_affinities,
+          available_owner_materializations, materialized_owner_affinities, pair_search_work,
+          pair_scan_work,
           route_optimization_search_work(limits.pair_route_optimization_search_work,
                                          limits.pair_route_optimization_search_work_per_demand,
                                          pair_demands.size()),
@@ -1268,8 +1305,8 @@ struct QualifiedRelayInventoryView {
                                        limits.pair_route_optimization_scan_work_per_demand_relay,
                                        pair_demands.size(), available_relays.size()),
           /*constrain_optimized_relay_count=*/true,
-          /*constrain_optimized_relays_to_baseline=*/has_later_valid_request, has_owner_affinity,
-          pair_routes);
+          /*constrain_optimized_relays_to_baseline=*/has_later_valid_request,
+          has_deferred_owner_affinity, pair_routes);
       pair_termination = solve.termination;
       pair_routing_invariant_failed = solve.routing_invariant_failed;
       pair_optimization_exhausted = solve.optimization_exhausted;
@@ -1555,12 +1592,20 @@ bool is_consan_branch_relay_reservoir_instruction(const Instruction &instruction
          !(instruction.flags() & kControlFlowFlags) && !instruction.branch_offset_bytes();
 }
 
-bool BranchOnlyRelayRouter::offer(uint64_t offset, BranchOnlyRelayProvenance provenance,
-                                  std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity) {
-  if (offset % sizeof(uint32_t) != 0u)
+bool BranchOnlyRelayRouter::offer_with_owner_materialization(
+    uint64_t offset, BranchOnlyRelayProvenance provenance,
+    std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity,
+    BranchOnlyRelayOwnerMaterialization owner_materialization) {
+  const bool owner_state_valid =
+      owner_affinity || owner_materialization == BranchOnlyRelayOwnerMaterialization::Paid;
+  assert(owner_state_valid);
+  if (offset % sizeof(uint32_t) != 0u || !owner_state_valid)
     return false;
-  const bool inserted = relays_.emplace(offset, RelayOffer{provenance, owner_affinity}).second;
-  has_owner_affinity_ |= inserted && owner_affinity.has_value();
+  const bool inserted =
+      relays_.emplace(offset, RelayOffer{provenance, owner_affinity, owner_materialization}).second;
+  has_deferred_owner_affinity_ |=
+      inserted && owner_affinity &&
+      owner_materialization == BranchOnlyRelayOwnerMaterialization::Deferred;
   return inserted;
 }
 
@@ -1604,8 +1649,10 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
 
   std::vector<uint64_t> relay_offsets;
   std::vector<std::optional<BranchOnlyRelayOwnerIdentity>> relay_owner_affinities;
+  std::vector<BranchOnlyRelayOwnerMaterialization> relay_owner_materializations;
   relay_offsets.reserve(relays_.size());
   relay_owner_affinities.reserve(relays_.size());
+  relay_owner_materializations.reserve(relays_.size());
 
   std::vector<bool> invalid_entry(requests.size(), false);
   std::vector<bool> invalid_return(requests.size(), false);
@@ -1747,11 +1794,13 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
       }
       relay_offsets.push_back(offset);
       relay_owner_affinities.push_back(relay.owner_affinity);
+      relay_owner_materializations.push_back(relay.owner_materialization);
     }
   }
   const QualifiedRelayInventoryView qualified_relays{
       .offsets = relay_offsets,
       .owner_affinities = relay_owner_affinities,
+      .owner_materializations = relay_owner_materializations,
       .complete = relay_inventory_complete,
   };
   assert(qualified_relays.shape_valid());
@@ -1761,9 +1810,9 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
   ExactFixedRelayBatchSolver::Termination exact_termination =
       ExactFixedRelayBatchSolver::Termination::Infeasible;
   std::vector<std::vector<uint64_t>> solved_routes;
-  // Producers omit the affinity for storage materialized before this plan.
-  // The empty set here is distinct: a simultaneous batch has no earlier
-  // fallback pair whose newly selected owner needs to become zero-cost.
+  // Paid identities are encoded in the parallel offer state. The empty carry
+  // set here is distinct: a simultaneous batch has no deferred owner selected
+  // by an earlier fallback pair in this call.
   const std::set<BranchOnlyRelayOwnerIdentity> no_materialized_owner_affinities;
   if (!demands.empty()) {
     BoundedWorkMeter search_work(exact_batch_search_work(limits, demands.size()));
@@ -1774,7 +1823,8 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
     } else {
       const ExactOwnerAffinitySolveResult solve = solve_exact_minimum_owner_affinity(
           demands, qualified_relays.offsets, qualified_relays.owner_affinities,
-          no_materialized_owner_affinities, search_work, scan_work,
+          qualified_relays.owner_materializations, no_materialized_owner_affinities, search_work,
+          scan_work,
           route_optimization_search_work(limits.batch_route_optimization_search_work,
                                          limits.batch_route_optimization_search_work_per_demand,
                                          demands.size()),
@@ -1782,7 +1832,8 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
                                        limits.batch_route_optimization_scan_work_per_demand_relay,
                                        demands.size(), qualified_relays.offsets.size()),
           /*constrain_optimized_relay_count=*/false,
-          /*constrain_optimized_relays_to_baseline=*/false, has_owner_affinity_, solved_routes);
+          /*constrain_optimized_relays_to_baseline=*/false, has_deferred_owner_affinity_,
+          solved_routes);
       exact_termination = solve.termination;
       batch.route_optimization_exhausted =
           batch.route_optimization_exhausted || solve.optimization_exhausted;
@@ -1807,8 +1858,9 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
   } else if (!demands.empty()) {
     batch.work_budget_exhausted |=
         exact_termination == ExactFixedRelayBatchSolver::Termination::WorkBudgetExhausted;
-    if (std::optional<std::string> fallback_error = plan_exact_pair_fallbacks(
-            requests, valid_request, qualified_relays, has_owner_affinity_, limits, batch)) {
+    if (std::optional<std::string> fallback_error =
+            plan_exact_pair_fallbacks(requests, valid_request, qualified_relays,
+                                      has_deferred_owner_affinity_, limits, batch)) {
       report(error_out, std::move(*fallback_error));
       return batch;
     }
@@ -1905,7 +1957,8 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
         continue;
       std::vector<BranchOnlyRelayClaim> &retired = batch.routes[request_index].retired_relay_claims;
       if (std::ranges::find(retired, offset, &BranchOnlyRelayClaim::offset) == retired.end())
-        retired.push_back({offset, relay->second.provenance, relay->second.owner_affinity});
+        retired.push_back({offset, relay->second.provenance, relay->second.owner_affinity,
+                           relay->second.owner_materialization});
     }
   }
 
@@ -1921,7 +1974,8 @@ BranchOnlyRelayRouter::plan_pairs(DbiPatchPlacementPlanner &tentative_planner,
         report(error_out, "branch-only router selected an unknown relay");
         return batch;
       }
-      route.claims.push_back({offset, relay->second.provenance, relay->second.owner_affinity});
+      route.claims.push_back({offset, relay->second.provenance, relay->second.owner_affinity,
+                              relay->second.owner_materialization});
     }
   }
 
@@ -1953,7 +2007,11 @@ bool BranchOnlyRelayRouter::commit(std::span<const BranchOnlyRelayRoute> routes,
   for (const BranchOnlyRelayRoute &route : routes) {
     for (const BranchOnlyRelayClaim &claim : route.claims) {
       const auto relay = relays_.find(claim.offset);
-      const RelayOffer expected{claim.provenance, claim.owner_affinity};
+      const RelayOffer expected{
+          claim.provenance,
+          claim.owner_affinity,
+          claim.owner_materialization,
+      };
       if (relay == relays_.end() || relay->second != expected ||
           !claimed_offsets.insert(claim.offset).second) {
         report(error_out, "branch-only router claim changed before commit");
@@ -1965,7 +2023,11 @@ bool BranchOnlyRelayRouter::commit(std::span<const BranchOnlyRelayRoute> routes,
   for (const BranchOnlyRelayRoute &route : routes) {
     for (const BranchOnlyRelayClaim &retired : route.retired_relay_claims) {
       const auto relay = relays_.find(retired.offset);
-      const RelayOffer expected{retired.provenance, retired.owner_affinity};
+      const RelayOffer expected{
+          retired.provenance,
+          retired.owner_affinity,
+          retired.owner_materialization,
+      };
       if (relay == relays_.end() || relay->second != expected ||
           claimed_offsets.contains(retired.offset)) {
         report(error_out, "branch-only router endpoint retirement changed before commit");
@@ -1985,8 +2047,10 @@ bool BranchOnlyDirectRelayReservoirSet::mark_claims_used(
     std::span<const BranchOnlyRelayClaim> claims, std::string *error_out) {
   std::vector<size_t> reservoir_indices;
   for (const BranchOnlyRelayClaim &claim : claims) {
-    if (claim.provenance != BranchOnlyRelayProvenance::OwnedReservoir)
+    if (claim.provenance != BranchOnlyRelayProvenance::OwnedReservoir || !claim.owner_affinity ||
+        claim.owner_affinity->kind() != BranchOnlyRelayOwnerKind::DirectReservoir) {
       continue;
+    }
     const auto reservoir = reservoir_by_relay.find(claim.offset);
     if (reservoir == reservoir_by_relay.end() || reservoir->second >= reservoirs.size()) {
       report(error_out, "branch-only router lost a claimed direct reservoir");
@@ -2163,7 +2227,9 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
     adopted_relays.reserve(candidate.words.size() - 1u);
     for (uint64_t word = 1u; word < candidate.words.size(); ++word) {
       const uint64_t relay = candidate.offset + word * sizeof(uint32_t);
-      const bool offered = offer(relay, BranchOnlyRelayProvenance::OwnedReservoir);
+      const bool offered = offer_materialized_owner(
+          relay, BranchOnlyRelayProvenance::OwnedReservoir,
+          BranchOnlyRelayOwnerIdentity::direct_reservoir(candidate.offset));
       const bool indexed =
           offered && reservoirs.reservoir_by_relay.emplace(relay, reservoir_index).second;
       if (!offered || !indexed) {
