@@ -169,6 +169,53 @@ def test_csv_for_schema_3_0_2_changes_present(output_root, latest_schema):
 
 
 # ---------------------------------------------------------------------------
+# CSV tests — schema 3.0.3 (does not have spm_counters view output to CSV)
+# ---------------------------------------------------------------------------
+
+
+def test_csv_for_schema_3_0_3_changes_absent(output_root, old_schema):
+    """Schema 3.0.3 additions must be absent for the old schema.
+
+    Verifies that:
+    * spm_counters view output to CSV is not present.
+    """
+
+    # Check if the schema is 3.0.3 and newer, then call the present test instead
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 3):
+        print(
+            f"Schema {old_schema} is newer than 3.0.3, calling test_csv_for_schema_3_0_3_changes_present instead"
+        )
+        return test_csv_for_schema_3_0_3_changes_present(output_root, old_schema)
+
+    spm_counters_csv = (
+        output_root / old_schema / "csv" / "out_spm_counter_collection_trace.csv"
+    )
+    assert (
+        not spm_counters_csv.exists()
+    ), f"out_spm_counter_collection_trace.csv found for schema {old_schema}: {spm_counters_csv}"
+
+
+# ---------------------------------------------------------------------------
+# CSV tests — schema 3.0.3 (has spm_counters view output to CSV)
+# ---------------------------------------------------------------------------
+
+
+def test_csv_for_schema_3_0_3_changes_present(output_root, latest_schema):
+    """Schema 3.0.3 additions must be present for the latest schema.
+
+    Verifies that:
+    * SPM_counters view output to CSV.
+    """
+
+    spm_counters_csv = (
+        output_root / latest_schema / "csv" / "out_spm_counter_collection_trace.csv"
+    )
+    assert (
+        spm_counters_csv.exists()
+    ), f"out_spm_counter_collection_trace.csv not found for schema {latest_schema}: {spm_counters_csv}"
+
+
+# ---------------------------------------------------------------------------
 # Perfetto tests — old schemas
 # ---------------------------------------------------------------------------
 

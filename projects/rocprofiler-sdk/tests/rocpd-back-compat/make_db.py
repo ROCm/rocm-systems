@@ -59,6 +59,7 @@ _STR_KERNEL_NAME = 2
 _STR_REGION_NAME = 3
 _STR_MEM_COPY = 4
 _STR_CATEGORY = 5
+_STR_SPM = 6
 
 _EVT_REGION_1 = 1
 _EVT_REGION_2 = 2
@@ -68,6 +69,11 @@ _EVT_KERNEL_2 = 5
 _EVT_GRAPH_1 = 6
 _EVT_GRAPH_2 = 7
 _EVT_GRAPH_3 = 8
+
+_PMC_NO_SPM_ID = 1
+_PMC_SPM_ID = 2
+_TRACK_SPM_ID = 1
+_SAMPLE_SPM_ID = 1
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +123,7 @@ def insert_minimal_data(
             (_STR_REGION_NAME, guid, "myRegion"),
             (_STR_MEM_COPY, guid, "Pageable to Device"),
             (_STR_CATEGORY, guid, "MARKER"),
+            (_STR_SPM, guid, "SPM"),
         ],
     )
 
@@ -420,6 +427,85 @@ def insert_minimal_data(
                     2,
                     _EVT_GRAPH_3,
                 ),
+            ],
+        )
+
+    # SPM counter data was introduced in schema 3.0.3.
+    if ver >= (3, 0, 3):
+        _SQ_WAVES_DESC = (
+            "Count number of waves sent to distributed sequencers (SQs). "
+            "This value represents the number of waves that are sent to each SQ."
+        )
+
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_info_pmc')} "
+            "(id, guid, nid, pid, agent_id, target_arch, name, symbol, description, "
+            "component, value_type, block, expression, is_constant, is_derived, "
+            "spm_support, extdata) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    _PMC_NO_SPM_ID,
+                    guid,
+                    _NID,
+                    _PID,
+                    _AGENT_ID,
+                    "GPU",
+                    "SQ_WAVES",
+                    "SQ_WAVES",
+                    _SQ_WAVES_DESC,
+                    "rocm",
+                    "ABS",
+                    "SQ",
+                    "",
+                    0,
+                    0,
+                    None,  # spm_support = NULL (not SPM-capable)
+                    "{}",
+                ),
+                (
+                    _PMC_SPM_ID,
+                    guid,
+                    _NID,
+                    _PID,
+                    _AGENT_ID,
+                    "GPU",
+                    "SQ_WAVES",
+                    "SQ_WAVES",
+                    _SQ_WAVES_DESC,
+                    "rocm",
+                    "ABS",
+                    "SQ",
+                    "",
+                    0,
+                    0,
+                    1,  # spm_support = 1 (SPM-capable)
+                    "{}",
+                ),
+            ],
+        )
+
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_track')} "
+            "(id, guid, nid, pid, tid, name_id, extdata) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (_TRACK_SPM_ID, guid, _NID, _PID, _TID, _STR_SPM, "{}"),
+        )
+
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_sample')} "
+            "(id, guid, track_id, timestamp, event_id, extdata) "
+            "VALUES (?,?,?,?,?,?)",
+            (_SAMPLE_SPM_ID, guid, _TRACK_SPM_ID, _T_START + 50_000, _EVT_KERNEL_1, "{}"),
+        )
+
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_pmc_event')} "
+            "(id, guid, event_id, sample_id, pmc_id, value, xcc, shader_engine, instance) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            [
+                (1, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 0, 0),
+                (2, guid, _EVT_KERNEL_1, _SAMPLE_SPM_ID, _PMC_SPM_ID, 16.0, 0, 1, 0),
             ],
         )
 
