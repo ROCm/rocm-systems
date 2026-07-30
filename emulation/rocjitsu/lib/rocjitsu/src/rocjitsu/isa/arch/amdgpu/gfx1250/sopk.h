@@ -68,6 +68,7 @@ public:
   SSetregB32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand simm16;
   Operand sdst;
 };
@@ -77,6 +78,7 @@ public:
   SSetregImm32B32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand simm16;
   Operand literal;
 };

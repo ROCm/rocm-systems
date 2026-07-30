@@ -520,8 +520,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
-# ./rocjitsu_tests --gtest_filter='*Benchmark*').
-rj_add_gtest_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
+# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
+# is registered separately so CTest can bound a deadlocked child process.
+rj_add_gtest_tests(
+    rocjitsu_tests
+    TEST_FILTER "-*Benchmark*:*RequestExitWakesAllPartitions*"
+)
+
+# RequestExitWakesAllPartitions may require several runs to show regression
+# (deadlock). Run 30 times with a 10 second timeout to boost chances of seeing
+# the failures. Usually fails within the first 5 times and 30 passing tests
+# takes about 2.5s in CI.
+rj_add_test(
+    NAME "TerminationTest.RequestExitWakesAllPartitions"
+    COMMAND
+        $<TARGET_FILE:rocjitsu_tests>
+        "--gtest_filter=TerminationTest.RequestExitWakesAllPartitions"
+        "--gtest_repeat=30"
+    TIMEOUT 10
+    INSTALL_COMMAND
+        "bin/rocjitsu_tests"
+        "--gtest_filter=TerminationTest.RequestExitWakesAllPartitions"
+        "--gtest_repeat=30"
+)
 
 # Exercise the Linux-only model ISA contract in a decoder-only final link.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -759,7 +780,7 @@ target_include_directories(
 )
 target_link_libraries(
     rj_dbt_translate_smoke_test
-    PRIVATE rocjitsu_tooling GTest::gtest
+    PRIVATE rocjitsu_translate_cli GTest::gtest
 )
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
 add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
