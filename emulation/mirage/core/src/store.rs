@@ -17,6 +17,56 @@ use crate::error::{MirageError, Result};
 use crate::profile::ProfileDef;
 use crate::topology::TopologyDef;
 
+/// Reject a document name that would escape its directory.
+///
+/// Every path here is built by interpolation —
+/// `<config>/profile/<name>.json` — so a name is a path fragment under
+/// another name. `..` in it walks out of the config directory, and a
+/// leading `/` replaces it outright: `profile_get("../../../etc/passwd")`
+/// reads an arbitrary file, and `profile_delete` with the same argument
+/// deletes one.
+///
+/// That was survivable while these were CLI arguments the user typed
+/// about their own machine. It is not now: the daemon serves them over a
+/// socket, so the name arrives off the wire, and every other id that does
+/// (`SessionId`, `ExecId`) is validated at the serde boundary. This is
+/// the same guarantee for the three that are plain `String`s.
+///
+/// # Errors
+///
+/// Returns [`MirageError::Id`]-shaped rejection describing what is wrong.
+fn validate_name(kind: &str, name: &str) -> Result<()> {
+    let bad = |why: &str| {
+        Err(MirageError::other(format!(
+            "invalid {kind} name {name:?}: {why}"
+        )))
+    };
+    if name.is_empty() {
+        return bad("it is empty");
+    }
+    if name.len() > 128 {
+        return bad("it is longer than 128 characters");
+    }
+    if name.starts_with('.') {
+        return bad("it starts with '.'");
+    }
+    // The property that matters is that the name stays a single path
+    // component: no separator, no parent reference, nothing the
+    // filesystem reads as structure. Beyond that the set is deliberately
+    // generous — `+` in particular is both harmless and already used for
+    // composite names like `rocjitsu+node+mi350x`.
+    if let Some(c) = name
+        .chars()
+        .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+')))
+    {
+        return bad(&format!("it contains {c:?}; allowed: [A-Za-z0-9._+-]"));
+    }
+    if name.split('.').any(|part| part.is_empty()) && name.contains("..") {
+        return bad("it contains '..'");
+    }
+    Ok(())
+}
+
 /// List every profile name, sorted.
 ///
 /// # Errors
@@ -33,6 +83,7 @@ pub fn profile_list() -> Result<Vec<String>> {
 /// Returns [`MirageError::ProfileNotFound`] if there is no such profile,
 /// or a parse error if it is malformed.
 pub fn profile_get(name: &str) -> Result<ProfileDef> {
+    validate_name("profile", name)?;
     let path = crate::paths::profile_path(name);
     if !path.exists() {
         return Err(MirageError::ProfileNotFound(name.to_string()));
@@ -48,6 +99,7 @@ pub fn profile_get(name: &str) -> Result<ProfileDef> {
 pub fn profile_put(profile: &ProfileDef) -> Result<()> {
     // Names are case-insensitive and stored lowercase, so the document
     // agrees with the path it lives at.
+    validate_name("profile", &profile.name)?;
     let mut profile = profile.clone();
     profile.name = profile.name.to_lowercase();
     crate::state::write_json(&crate::paths::profile_path(&profile.name), &profile)
@@ -59,6 +111,7 @@ pub fn profile_put(profile: &ProfileDef) -> Result<()> {
 ///
 /// Returns [`MirageError::ProfileNotFound`] if there is no such profile.
 pub fn profile_delete(name: &str) -> Result<()> {
+    validate_name("profile", name)?;
     let path = crate::paths::profile_path(name);
     if !path.exists() {
         return Err(MirageError::ProfileNotFound(name.to_string()));
@@ -81,6 +134,7 @@ pub fn topology_list() -> Result<Vec<String>> {
 ///
 /// Returns an error if there is no such topology, or it is malformed.
 pub fn topology_get(name: &str) -> Result<TopologyDef> {
+    validate_name("topology", name)?;
     let path = crate::paths::topology_path(name);
     if !path.exists() {
         return Err(MirageError::TopologyNotFound(name.to_string()));
@@ -94,6 +148,7 @@ pub fn topology_get(name: &str) -> Result<TopologyDef> {
 ///
 /// Returns an error if the document cannot be written.
 pub fn topology_put(name: &str, topology: &TopologyDef) -> Result<()> {
+    validate_name("topology", name)?;
     crate::topology::store::put(name, topology).map(|_| ())
 }
 
@@ -103,6 +158,7 @@ pub fn topology_put(name: &str, topology: &TopologyDef) -> Result<()> {
 ///
 /// Returns an error if there is no such topology.
 pub fn topology_delete(name: &str) -> Result<()> {
+    validate_name("topology", name)?;
     let path = crate::paths::topology_path(name);
     if !path.exists() {
         return Err(MirageError::TopologyNotFound(name.to_string()));
@@ -125,6 +181,7 @@ pub fn agent_list() -> Result<Vec<String>> {
 ///
 /// Returns an error if there is no such agent, or it is malformed.
 pub fn agent_get(name: &str) -> Result<AgentDef> {
+    validate_name("agent", name)?;
     let path = crate::paths::agent_path(name);
     if !path.exists() {
         return Err(MirageError::AgentNotFound(name.to_string()));
@@ -138,6 +195,7 @@ pub fn agent_get(name: &str) -> Result<AgentDef> {
 ///
 /// Returns an error if the document cannot be written.
 pub fn agent_put(name: &str, agent: &AgentDef) -> Result<()> {
+    validate_name("agent", name)?;
     crate::agent::store::put(name, agent).map(|_| ())
 }
 
@@ -147,6 +205,7 @@ pub fn agent_put(name: &str, agent: &AgentDef) -> Result<()> {
 ///
 /// Returns an error if there is no such agent.
 pub fn agent_delete(name: &str) -> Result<()> {
+    validate_name("agent", name)?;
     let path = crate::paths::agent_path(name);
     if !path.exists() {
         return Err(MirageError::AgentNotFound(name.to_string()));
@@ -241,6 +300,48 @@ mod tests {
         // A fresh machine has written nothing yet; that is not an error.
         assert!(profile_list().unwrap().is_empty());
         assert!(agent_list().unwrap().is_empty());
+        crate::paths::clear_test_root();
+    }
+
+    #[test]
+    fn a_name_cannot_escape_its_directory() {
+        // These names arrive off the daemon's socket. Interpolated into
+        // `<config>/profile/<name>.json`, `..` walks out of the config
+        // directory and a leading `/` replaces it — so `profile_get`
+        // would read, and `profile_delete` would delete, an arbitrary
+        // file the user has access to.
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        let escapes = [
+            "../../../etc/passwd",
+            "..",
+            "/etc/passwd",
+            "a/b",
+            ".hidden",
+            "",
+        ];
+        for name in escapes {
+            assert!(profile_get(name).is_err(), "profile_get({name:?})");
+            assert!(profile_delete(name).is_err(), "profile_delete({name:?})");
+            assert!(topology_get(name).is_err(), "topology_get({name:?})");
+            assert!(agent_delete(name).is_err(), "agent_delete({name:?})");
+            // A rejection must not be reported as "not found": that reads
+            // as a name the caller may safely create.
+            assert!(
+                !profile_get(name).unwrap_err().is_not_found(),
+                "profile_get({name:?}) must reject, not 404"
+            );
+        }
+
+        // Ordinary names still work.
+        profile_put(&profile("mi350x.tuned_v2-a")).unwrap();
+        assert_eq!(
+            profile_get("mi350x.tuned_v2-a").unwrap().name,
+            "mi350x.tuned_v2-a"
+        );
+
         crate::paths::clear_test_root();
     }
 

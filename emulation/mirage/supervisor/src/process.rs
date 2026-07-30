@@ -83,6 +83,128 @@ const REAP_POLL: Duration = Duration::from_millis(20);
 /// most this many bytes.
 const READ_CHUNK: usize = 64 * 1024;
 
+/// Where a workload really runs, when the process we supervise is only a
+/// container provider's client.
+///
+/// `podman exec` (and `docker exec`) put the workload in the container's
+/// own PID namespace and do **not** forward signals to it: killing the
+/// client leaves the workload running, invisible to us and holding the
+/// emulated device. Signalling it therefore has to go back through the
+/// provider, which means knowing the pid it has *inside* the container.
+///
+/// That pid comes from the workload itself. The in-container command is
+/// wrapped in `sh -c 'echo $$ > <pidfile>; exec "$0" "$@"'`, so the shell
+/// records its own pid and then `exec`s the real program *into that same
+/// pid*. The file lands in the session scratch directory, which is
+/// already bind-mounted into every node container, so the supervisor
+/// reads it straight off the host filesystem with no extra round trip.
+#[derive(Debug, Clone)]
+pub struct ContainerProc {
+    /// Provider binary (`podman`, `docker`, or a path).
+    pub provider: String,
+    /// Name of the container the workload runs in.
+    pub container: String,
+    /// Host path of the file the wrapper writes its in-container pid to.
+    pub pid_file: std::path::PathBuf,
+}
+
+/// How long to wait for a freshly-started workload to record its
+/// in-container pid before giving up on signalling it.
+///
+/// Signalling can race the start of a very short exec, and the file
+/// appears as soon as the wrapper's first command runs.
+const PID_FILE_WAIT: Duration = Duration::from_millis(2_000);
+
+impl ContainerProc {
+    /// The workload's pid inside the container, if it has recorded one.
+    fn pid(&self) -> Option<u32> {
+        std::fs::read_to_string(&self.pid_file)
+            .ok()?
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|pid| *pid > 0)
+    }
+
+    /// The workload's pid, waiting briefly for it to appear.
+    async fn pid_soon(&self) -> Option<u32> {
+        let deadline = tokio::time::Instant::now() + PID_FILE_WAIT;
+        loop {
+            if let Some(pid) = self.pid() {
+                return Some(pid);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return None;
+            }
+            tokio::time::sleep(REAP_POLL).await;
+        }
+    }
+
+    /// `<provider> exec <container> /bin/sh -c 'kill …'` for `pid`.
+    ///
+    /// Both the process group and the process itself are signalled. The
+    /// wrapper is not guaranteed to be a group leader, so the negative
+    /// form may fail — harmlessly, because the bare pid follows it — but
+    /// when it does work it reaches a workload's own children too.
+    ///
+    /// `kill` is used as a *shell builtin*, via `/bin/sh -c`: many
+    /// minimal images ship no `/bin/kill` binary, and
+    /// `provider exec <c> kill …` would fail on those.
+    fn kill_argv(&self, pid: u32, sig: Signal) -> Vec<String> {
+        let n = sig as i32;
+        vec![
+            "exec".to_string(),
+            self.container.clone(),
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            format!("kill -{n} -{pid} 2>/dev/null; kill -{n} {pid} 2>/dev/null; exit 0"),
+        ]
+    }
+
+    /// Deliver `sig` to the workload inside the container.
+    ///
+    /// Returns whether the provider ran successfully. Best effort: a
+    /// container that has already gone is not an error, it is the
+    /// outcome we wanted.
+    pub async fn signal(&self, sig: Signal) -> bool {
+        let Some(pid) = self.pid_soon().await else {
+            tracing::debug!(
+                container = %self.container,
+                "no in-container pid recorded; cannot forward the signal"
+            );
+            return false;
+        };
+        let status = Command::new(&self.provider)
+            .args(self.kill_argv(pid, sig))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .status()
+            .await;
+        matches!(status, Ok(s) if s.success())
+    }
+
+    /// Deliver `sig` without awaiting, for the synchronous backstop.
+    ///
+    /// Used from [`crate::exec::Exec::kill_now`], which has to work in a
+    /// `Drop` or a panic handler where there is no runtime to await on.
+    /// The provider is spawned and deliberately not waited for; the
+    /// caller is on its way out and a zombie provider client is reaped by
+    /// init moments later.
+    pub fn signal_now(&self, sig: Signal) {
+        let Some(pid) = self.pid() else {
+            return;
+        };
+        let _ = std::process::Command::new(&self.provider)
+            .args(self.kill_argv(pid, sig))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+}
+
 /// How a process's standard streams are wired up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StdioMode {
@@ -197,6 +319,10 @@ pub struct Spawned {
     pub stdin: Option<ProcessInput>,
     /// Tasks pumping stdout and stderr into the output channel.
     pumps: Vec<tokio::task::JoinHandle<()>>,
+    /// Set when `child` is a container provider client, so termination
+    /// reaches the workload inside the container instead of stopping at
+    /// the client.
+    container: Option<ContainerProc>,
     /// Cached result once the process has been reaped, so `wait` and
     /// `terminate` are both idempotent and safe to call in either order.
     /// The supervisor races them against a cancellation token, so "wait
@@ -255,6 +381,11 @@ pub struct SpawnSpec {
     /// whatever happened to be exported in the shell that started the
     /// daemon.
     pub inherit_env: bool,
+    /// Set when this spec launches a container provider client rather
+    /// than the workload itself, so signals can be forwarded into the
+    /// container. `None` for a workload that runs directly on the host,
+    /// where the process we spawn *is* the workload.
+    pub container: Option<ContainerProc>,
 }
 
 /// Environment variables a directly-spawned workload inherits from the
@@ -370,6 +501,7 @@ fn spawn_piped(spec: &SpawnSpec, output: mpsc::Sender<OutputChunk>) -> Result<Sp
         pid,
         stdin,
         pumps,
+        container: spec.container.clone(),
         exit: None,
     })
 }
@@ -433,6 +565,7 @@ fn spawn_on_tty(
         pid,
         stdin: Some(ProcessInput::Tty(Box::new(write_pty))),
         pumps,
+        container: spec.container.clone(),
         exit: None,
     })
 }
@@ -512,14 +645,31 @@ impl Spawned {
         exit
     }
 
+    /// The container this process's workload runs in, if any.
+    #[must_use]
+    pub fn container(&self) -> Option<&ContainerProc> {
+        self.container.as_ref()
+    }
+
     /// Signal the process group without waiting.
     ///
     /// Used for `mirage exec signal`, where the caller asked to deliver a
     /// signal and not to block on the outcome.
-    pub fn signal(&self, sig: Signal) {
+    ///
+    /// For a containerised exec the signal goes *into the container*
+    /// first. The process group we own contains only the provider's
+    /// client, which is in a different PID namespace from the workload
+    /// and does not relay signals to it — so signalling the group alone
+    /// delivers `mirage exec signal` to a proxy and leaves the workload
+    /// untouched.
+    pub async fn signal(&self, sig: Signal) {
         if self.exit.is_some() {
             // Already reaped. Signalling now would either do nothing or,
             // worse, reach an unrelated process that reused the pid.
+            return;
+        }
+        if let Some(container) = &self.container {
+            container.signal(sig).await;
             return;
         }
         signal_group(self.pid, sig);
@@ -536,6 +686,17 @@ impl Spawned {
             return exit;
         }
 
+        // Containerised: reach the workload before the client. Killing
+        // the provider's client leaves the workload running inside the
+        // container — a different PID namespace, which our signals do not
+        // cross and which the client does not relay into — so it would
+        // survive teardown holding the emulated device and its ports,
+        // with mirage reporting the exec as finished. Terminating the
+        // workload also ends the client naturally, so the group signal
+        // below stays the belt to this braces.
+        if let Some(container) = self.container.clone() {
+            container.signal(Signal::SIGTERM).await;
+        }
         signal_group(self.pid, Signal::SIGTERM);
 
         // Give it the grace period to exit on its own terms.
@@ -548,6 +709,9 @@ impl Spawned {
                     pid = self.pid,
                     "process did not exit within the grace period; sending SIGKILL"
                 );
+                if let Some(container) = self.container.clone() {
+                    container.signal(Signal::SIGKILL).await;
+                }
                 signal_group(self.pid, Signal::SIGKILL);
                 // Reap it. There is deliberately no timeout here: after
                 // SIGKILL the wait is guaranteed to complete, and giving
@@ -713,6 +877,7 @@ mod tests {
             workdir: None,
             stdio: StdioMode::Pipes,
             inherit_env: false,
+            container: None,
         }
     }
 
@@ -937,7 +1102,7 @@ mod tests {
         assert_eq!(child.terminate().await.code, 5);
         // Signalling a reaped process must be a no-op, not a signal to
         // whatever now owns that pid.
-        child.signal(Signal::SIGKILL);
+        child.signal(Signal::SIGKILL).await;
     }
 
     #[tokio::test]
@@ -978,7 +1143,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel(64);
         let mut child = spawn(&spec("/bin/sh", &["-c", "sleep 30"]), tx).unwrap();
         let pid = child.pid();
-        child.signal(Signal::SIGINT);
+        child.signal(Signal::SIGINT).await;
         let exit = tokio::time::timeout(Duration::from_secs(10), child.wait())
             .await
             .expect("signalled process must exit");

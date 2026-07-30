@@ -2373,6 +2373,33 @@ async fn purge<C: MirageCtl + ?Sized>(ctl: &C, all: bool) -> anyhow::Result<()> 
     let _ = ctl.daemon_shutdown().await;
     wait_for_daemon_exit(ctl).await;
 
+    // Reclaim containers and networks no live session accounts for.
+    //
+    // Session state lives in the supervisor's memory, so a daemon that
+    // was `SIGKILL`ed — or an OOM kill, or a machine that lost power —
+    // takes its record of every container with it, and nothing mirage
+    // knows about can name them again. The label on the resource itself
+    // survives that, and this is the command a user reaches for when
+    // something has gone wrong, so it is where the sweep belongs.
+    //
+    // Every session is stopped by this point, so nothing is live and the
+    // whole mirage-owned set is fair game. Resources without mirage's
+    // label are never candidates, so this is safe on a shared engine.
+    if let Some(provider) = mirage_core::container::detect_provider() {
+        let removed = tokio::task::spawn_blocking(move || {
+            mirage_core::container::reclaim_orphans(&provider, &[])
+        })
+        .await
+        .unwrap_or_default();
+        if !removed.is_empty() {
+            println!(
+                "reclaimed {} orphaned container resource(s): {}",
+                removed.len(),
+                removed.join(", ")
+            );
+        }
+    }
+
     let mut targets = vec![
         mirage_core::paths::mirage_runtime_dir(),
         mirage_core::paths::mirage_state_dir(),

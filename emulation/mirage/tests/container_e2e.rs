@@ -99,10 +99,26 @@ case "$1" in
     esac ;;
   network)
     case "$2" in
-      inspect) exit 1 ;;
+      # `network inspect --format` is the ownership check teardown makes
+      # before removing anything; without a label it would (correctly)
+      # refuse. Plain `network inspect` is the existence probe.
+      inspect)
+        if [ "$3" = "--format" ]; then printf mirage; exit 0; fi
+        exit 1 ;;
       *) exit 0 ;;
     esac ;;
   run)
+    # Record the host directory bind-mounted at the session scratch path,
+    # so `exec` below can emulate the mount. Without it the wrapper
+    # mirage wraps every workload in writes its pid to a path that does
+    # not exist on this host, and the in-container signalling this mock
+    # exists to exercise is silently untested.
+    for a in "$@"; do
+      case "$a" in
+        *:/mnt/mirage/runtime|*:/mnt/mirage/runtime:*)
+          echo "${a%%:/mnt/mirage/runtime*}" > __STATE__/runtime-mount ;;
+      esac
+    done
     echo cid-12345
     exit 0 ;;
   exec)
@@ -129,16 +145,50 @@ case "$1" in
     if [ -n "$workdir" ]; then
       cd "$workdir" || { echo "chdir to '$workdir': no such directory" >&2; exit 126; }
     fi
+    # Emulate the bind mount: rewrite the in-container scratch path back
+    # to the host directory it is mounted from, so the pid-recording
+    # wrapper mirage generates actually lands where mirage reads it.
+    host_runtime=""
+    [ -f __STATE__/runtime-mount ] && host_runtime=$(cat __STATE__/runtime-mount)
+    if [ -n "$host_runtime" ]; then
+      rewritten=""
+      for a in "$@"; do
+        case "$a" in
+          *"/mnt/mirage/runtime"*)
+            a=$(printf '%s' "$a" | sed "s#/mnt/mirage/runtime#$host_runtime#g") ;;
+        esac
+        rewritten="$rewritten$a$(printf '\001')"
+      done
+      # Split back on the sentinel so arguments keep their spaces.
+      OIFS=$IFS; IFS=$(printf '\001')
+      # shellcheck disable=SC2086
+      set -- $rewritten
+      IFS=$OIFS
+    fi
     if [ -n "$envs" ]; then
       exec env $envs "$@"
     fi
     exec "$@" ;;
   rm) exit 0 ;;
-  inspect) echo true ; exit 0 ;;
+  # `inspect --format` is either the ownership check (a Go template naming
+  # mirage.owner) or the running-state probe.
+  inspect)
+    if [ "$2" = "--format" ]; then
+      case "$3" in
+        *mirage.owner*) printf mirage ;;
+        *) echo true ;;
+      esac
+      exit 0
+    fi
+    echo true ; exit 0 ;;
   *) exit 0 ;;
 esac
 "#
-    .replace("__LOG__", &log.display().to_string());
+    .replace("__LOG__", &log.display().to_string())
+    .replace(
+        "__STATE__",
+        &log.parent().unwrap_or(Path::new("/tmp")).display().to_string(),
+    );
     std::fs::write(path, script).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
@@ -180,12 +230,23 @@ fn a_containerised_run_brings_up_executes_and_cleans_up() {
     let log = env.provider_log();
     assert!(log.contains("pull img:latest"), "missing pull:\n{log}");
     assert!(
-        log.contains("network create mirage-"),
+        log.contains("network create --label mirage.owner=mirage"),
         "missing network create:\n{log}"
+    );
+    // Ownership is a label, not a name. Teardown and `state purge` both
+    // check it before removing anything, so a container mirage did not
+    // create is never destroyed by a name collision.
+    assert!(
+        log.contains("--label mirage.session="),
+        "resources must record the session they belong to:\n{log}"
     );
     assert!(
         log.contains("run -d --name mirage-"),
         "missing container run:\n{log}"
+    );
+    assert!(
+        log.contains("--label mirage.owner=mirage"),
+        "node containers must be labelled as mirage's:\n{log}"
     );
     // The workload reaches the container through the provider's `exec`,
     // not through a second mirage process inside it.
@@ -412,6 +473,72 @@ fn destroying_a_containerised_session_kills_the_exec_process() {
     // The provider process mirage spawned is the exec's process group
     // leader, so killing that group must reach the workload the mock ran
     // underneath it.
+    assert_no_leaks(&tag);
+
+    // And the workload must have been signalled *through the provider*,
+    // not just locally. `podman exec` puts the workload in the
+    // container's own PID namespace and does not relay signals into it,
+    // so a host-side group kill reaches the client and leaves the real
+    // process running — invisible to mirage and still holding the
+    // emulated device. This mock shares a namespace with us, so only the
+    // recorded argv can tell the two apart.
+    let log = env.provider_log();
+    assert!(
+        log.lines()
+            .any(|l| l.starts_with("exec ") && l.contains("kill -")),
+        "teardown never asked the provider to signal inside the \
+         container, so a real containerised workload would have \
+         survived it:\n{log}"
+    );
+}
+
+#[test]
+fn signalling_a_containerised_exec_goes_through_the_provider() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+    env.base.start_session("cp", "csig");
+    let tag = marker("container-signal");
+
+    env.base.ok(&[
+        "exec",
+        "start",
+        "csig",
+        "--detach",
+        "--keep",
+        "--",
+        "/bin/sh",
+        "-c",
+        &tagged_sleep(&tag),
+    ]);
+    wait_for("the containerised workload to start", Duration::from_secs(15), || {
+        harness::count_processes(&tag) > 0
+    });
+
+    env.base
+        .ok(&["exec", "signal", "csig", "e-000000", "TERM"]);
+
+    // The pid the wrapper recorded is the workload's own, inside the
+    // container: `sh -c 'echo $$ > …; exec "$0" "$@"'` writes its pid and
+    // then `exec`s the workload into that same pid, so it names the
+    // process that has to die and not a wrapper that already exited.
+    let log = env.provider_log();
+    let signalled = log
+        .lines()
+        .find(|l| l.starts_with("exec ") && l.contains("kill -"))
+        .unwrap_or_else(|| panic!("no in-container signal was delivered:\n{log}"));
+    assert!(
+        signalled.contains(&format!("kill -{} ", libc::SIGTERM)),
+        "the requested signal must be the one forwarded: {signalled}"
+    );
+
+    wait_for("the signalled workload to exit", Duration::from_secs(15), || {
+        harness::count_processes(&tag) == 0
+    });
+
+    env.base.ok(&["session", "stop", "csig"]);
     assert_no_leaks(&tag);
 }
 

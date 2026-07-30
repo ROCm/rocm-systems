@@ -9,7 +9,9 @@
 //! destroyed must be able to rely on that.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use chrono::Utc;
 use mirage_core::common::MaybeRef;
@@ -74,6 +76,14 @@ pub struct Session {
     /// Runtime state, guarded together because teardown must observe a
     /// consistent view of "what exists to clean up".
     inner: Mutex<Inner>,
+    /// `true` while no `start_exec` call is between reserving an id and
+    /// registering the exec it produced.
+    ///
+    /// Spawning happens outside the lock (see [`Session::start_exec`]),
+    /// which opens a window in which processes exist but are in nobody's
+    /// map. Teardown waits for this before collecting what to kill, so
+    /// that window can never hide a workload from it.
+    quiescent: watch::Sender<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -93,6 +103,9 @@ struct Inner {
     /// spawned after teardown had already collected the list to kill, and
     /// would survive it.
     tearing_down: bool,
+    /// How many `start_exec` calls have reserved an id and not yet
+    /// registered their exec. See [`Session::quiescent`].
+    starting: usize,
 }
 
 impl Session {
@@ -119,6 +132,7 @@ impl Session {
             ctx,
             health,
             inner: Mutex::new(Inner::default()),
+            quiescent: watch::channel(true).0,
         }))
     }
 
@@ -233,7 +247,7 @@ impl Session {
     /// Returns an error if the session is not ready, if it is being torn
     /// down, or if the process grid cannot be described (an unresolvable
     /// topology).
-    pub fn start_exec(
+    pub async fn start_exec(
         &self,
         def: &ExecDef,
         replay_bytes: usize,
@@ -263,40 +277,109 @@ impl Session {
             )));
         }
 
-        let specs = self.build_specs(def)?;
+        // Reserve an id and register the intent to start, under the lock.
+        //
+        // The lock is released before anything is spawned. Holding it
+        // across `Exec::start` used to be how the teardown race was
+        // closed, but `Exec::start` forks and execs one process per rank
+        // — up to `MAX_WORLD_SIZE` of them — and doing that under a
+        // `std::sync::Mutex` on a runtime thread blocks the executor and
+        // every other operation on this session for the duration. Worse,
+        // the same lock is taken by `kill_now`, the synchronous backstop
+        // that must work from a panic handler.
+        //
+        // `starting` replaces it: teardown waits for the count to reach
+        // zero before collecting what to kill, so an exec spawned in this
+        // window is still guaranteed to be visible to it.
+        let id = {
+            let mut inner = self.lock();
+            if inner.tearing_down {
+                return Err(MirageError::SessionNotFound(format!(
+                    "{} (session is shutting down)",
+                    self.def.id
+                )));
+            }
 
-        let mut inner = self.lock();
-        if inner.tearing_down {
+            // Forget the oldest finished execs beyond the cap.
+            //
+            // The daemon is long-lived and each finished exec retains its
+            // output for replay, so a session that runs execs in a loop
+            // would otherwise grow without bound — a slow leak that only
+            // shows up after hours. Evicting here, as new execs arrive,
+            // keeps it deterministic: no timer, and no window in which an
+            // exec is dropped out from under a client that just asked for
+            // it.
+            //
+            // Only *finished* execs are candidates. A running exec is
+            // never evicted, however old.
+            Self::evict_finished(&mut inner, max_finished);
+
+            let id = ExecId::from_counter(inner.next_exec);
+            inner.next_exec += 1;
+            inner.starting += 1;
+            self.quiescent.send_replace(false);
+            id
+        };
+
+        // Everything from here to the re-lock runs without the lock held.
+        let started = self.spawn_exec(def, &id, replay_bytes);
+
+        let tearing_down = {
+            let mut inner = self.lock();
+            if let Ok(exec) = &started {
+                inner.execs.insert(id.clone(), exec.clone());
+            }
+            inner.starting -= 1;
+            if inner.starting == 0 {
+                self.quiescent.send_replace(true);
+            }
+            inner.tearing_down
+        };
+
+        let exec = started?;
+        if tearing_down {
+            // Teardown began while we were spawning. It waits for
+            // quiescence, so it will find this exec in the map and kill
+            // it — but the caller must not be handed an exec belonging to
+            // a session that is going away.
+            exec.terminate().await;
+            self.lock().execs.remove(&id);
             return Err(MirageError::SessionNotFound(format!(
                 "{} (session is shutting down)",
                 self.def.id
             )));
         }
-
-        // Forget the oldest finished execs beyond the cap.
-        //
-        // The daemon is long-lived and each finished exec retains its
-        // output for replay, so a session that runs execs in a loop would
-        // otherwise grow without bound — a slow leak that only shows up
-        // after hours. Evicting here, as new execs arrive, keeps it
-        // deterministic: no timer, and no window in which an exec is
-        // dropped out from under a client that just asked for it.
-        //
-        // Only *finished* execs are candidates. A running exec is never
-        // evicted, however old.
-        Self::evict_finished(&mut inner, max_finished);
-
-        let id = ExecId::from_counter(inner.next_exec);
-        inner.next_exec += 1;
-        // Start the exec while holding the lock. `Exec::start` spawns
-        // processes and returns immediately without awaiting, and doing it
-        // under the lock is what closes the race with teardown: either
-        // teardown sees this exec in the map and kills it, or it set
-        // `tearing_down` first and we refused above. A process cannot slip
-        // between the two.
-        let exec = Exec::start(id.clone(), def.clone(), specs, replay_bytes);
-        inner.execs.insert(id, exec.clone());
         Ok(exec)
+    }
+
+    /// Build the specs for `id` and spawn its processes.
+    ///
+    /// Split out so the caller can keep this off the critical section:
+    /// it materialises the pid-file directory, forks once per rank and
+    /// wires up the output pumps.
+    fn spawn_exec(&self, def: &ExecDef, id: &ExecId, replay_bytes: usize) -> Result<Arc<Exec>> {
+        let specs = self.build_specs(def, id)?;
+        Ok(Exec::start(id.clone(), def.clone(), specs, replay_bytes))
+    }
+
+    /// Resolve once no `start_exec` call is mid-spawn.
+    async fn await_quiescent(&self) {
+        // Bounded: a spawn that wedges must not make teardown unkillable,
+        // and the backstop sweep at the end of teardown still runs.
+        const QUIESCE: Duration = Duration::from_secs(10);
+        let mut rx = self.quiescent.subscribe();
+        // `wait_for` inspects the current value before suspending, so the
+        // common case — nothing in flight — returns without yielding.
+        if tokio::time::timeout(QUIESCE, rx.wait_for(|quiet| *quiet))
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                session = %self.def.id,
+                "an exec was still starting when teardown began; \
+                 proceeding without it"
+            );
+        }
     }
 
     /// Drop the oldest finished execs until at most `max_finished`
@@ -352,7 +435,7 @@ impl Session {
     /// strand the ones after it, because those are what release the
     /// resources that actually matter.
     pub async fn teardown(&self) {
-        let (execs, containers, emulator_daemon) = {
+        {
             let mut inner = self.lock();
             if inner.tearing_down {
                 // Another teardown is already in flight. Returning here
@@ -361,14 +444,28 @@ impl Session {
                 return;
             }
             inner.tearing_down = true;
+        }
+
+        self.set_phase(false, state::STOPPING, None);
+
+        // Let any `start_exec` that is mid-spawn finish registering.
+        //
+        // The flag above stops new ones, but a call that had already
+        // passed that check is spawning processes right now with the lock
+        // released. Collecting the exec list before it registers would
+        // leave those processes running with nothing left that knows
+        // about them — the precise leak this whole design exists to
+        // prevent.
+        self.await_quiescent().await;
+
+        let (execs, containers, emulator_daemon) = {
+            let mut inner = self.lock();
             (
                 inner.execs.values().cloned().collect::<Vec<_>>(),
                 inner.containers.take(),
                 inner.emulator_daemon.take(),
             )
         };
-
-        self.set_phase(false, state::STOPPING, None);
 
         // 2. Every exec, concurrently: with many execs, terminating them
         // in sequence would multiply the SIGTERM grace period by their
@@ -424,7 +521,7 @@ impl Session {
     }
 
     /// Build the per-process spawn specs for an exec.
-    fn build_specs(&self, def: &ExecDef) -> Result<Vec<SpawnSpec>> {
+    fn build_specs(&self, def: &ExecDef, exec_id: &ExecId) -> Result<Vec<SpawnSpec>> {
         let (injection, containers) = {
             let inner = self.lock();
             (inner.injection.clone(), inner.containers.clone())
@@ -432,6 +529,17 @@ impl Session {
 
         let node_count = resolve_node_count(&self.ctx.profile)?;
         let nproc = def.nproc_per_node.max(1);
+
+        // Materialise the directory the containers write their pid files
+        // into. The bind mount is read-write but the container cannot
+        // create the path itself: `sh` would have to `mkdir -p` before
+        // redirecting, and a redirect into a missing directory fails
+        // silently enough that the first sign of trouble would be a
+        // signal that went nowhere.
+        if containers.is_some() {
+            let dir = self.ctx.runtime_dir.join("exec").join(exec_id.as_str());
+            std::fs::create_dir_all(&dir).map_err(|e| MirageError::io(dir, e))?;
+        }
 
         // A terminal is allocated per process when the exec asked for one.
         // Only rank 0 is interactive in practice, but giving every rank a
@@ -531,8 +639,10 @@ impl Session {
                 specs.push(match &containers {
                     // Containerised: run the workload inside the node's
                     // container via the provider, as a direct child of the
-                    // daemon. The provider process is what we supervise,
-                    // and killing its group stops the exec.
+                    // daemon. The provider client is what we supervise;
+                    // the workload itself lives in the container's PID
+                    // namespace and is signalled through the provider
+                    // (see `ContainerProc`).
                     Some(state) => {
                         let container = state
                             .nodes
@@ -542,12 +652,15 @@ impl Session {
                             .unwrap_or_else(|| container_name(&self.def.id, node));
                         let engine = mirage_container::Engine::with_provider(&state.provider);
                         let env_pairs: Vec<(String, String)> = env.into_iter().collect();
+                        let pid_file = exec_pid_file(&self.ctx.runtime_dir, exec_id, global);
+                        let (command, rest) =
+                            pid_recording_command(&args.command, &args.args, exec_id, global);
                         let argv = engine.exec_command_line(
                             &container,
                             args.workdir.as_deref(),
                             &env_pairs,
-                            &args.command,
-                            &args.args,
+                            &command,
+                            &rest,
                             def.tty,
                         );
                         let (command, rest) = argv
@@ -567,6 +680,11 @@ impl Session {
                             // The provider CLI needs its own environment
                             // to locate its socket and configuration.
                             inherit_env: true,
+                            container: Some(crate::process::ContainerProc {
+                                provider: state.provider.clone(),
+                                container,
+                                pid_file,
+                            }),
                         }
                     }
                     None => SpawnSpec {
@@ -577,6 +695,9 @@ impl Session {
                         workdir: host_workdir,
                         stdio,
                         inherit_env: false,
+                        // The process we spawn *is* the workload, so
+                        // signalling its group reaches it directly.
+                        container: None,
                     },
                 });
             }
@@ -587,6 +708,56 @@ impl Session {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
+}
+
+/// Host path of the file rank `global` of `exec` records its
+/// in-container pid to.
+///
+/// It lives under the session scratch directory, which is already
+/// bind-mounted read-write into every node container at
+/// [`CONTAINER_RUNTIME_DIR`] — so the container writes it and the
+/// supervisor reads it off the host filesystem, with no provider round
+/// trip and nothing to clean up separately (teardown removes the whole
+/// directory).
+fn exec_pid_file(runtime_dir: &std::path::Path, exec: &ExecId, global: u32) -> PathBuf {
+    runtime_dir
+        .join("exec")
+        .join(exec.as_str())
+        .join(format!("{global}.pid"))
+}
+
+/// The in-container path matching [`exec_pid_file`].
+fn container_pid_file(exec: &ExecId, global: u32) -> String {
+    format!("{CONTAINER_RUNTIME_DIR}/exec/{}/{global}.pid", exec.as_str())
+}
+
+/// Wrap a workload command so it records its own in-container pid before
+/// becoming the workload.
+///
+/// Returns the command and arguments to hand the provider. The shell
+/// writes `$$`, then `exec`s the real program *into that same pid*, so
+/// the recorded number identifies the workload and not a wrapper that has
+/// since exited. Without it there is no way to name the workload from
+/// outside the container, and `podman exec` neither forwards signals to
+/// it nor reports its pid.
+///
+/// The program and its arguments are passed as `$0`/`$@` rather than
+/// interpolated into the script, so nothing about them is ever parsed by
+/// the shell — a command containing a space, a quote or a `;` is handed
+/// through byte-for-byte.
+fn pid_recording_command(
+    command: &str,
+    args: &[String],
+    exec: &ExecId,
+    global: u32,
+) -> (String, Vec<String>) {
+    // The path is built from a constant and an `ExecId` (`e-` plus
+    // digits), so it holds no shell metacharacters; it is quoted anyway.
+    let pid_file = container_pid_file(exec, global);
+    let script = format!("echo $$ > '{pid_file}' 2>/dev/null; exec \"$0\" \"$@\"");
+    let mut argv = vec!["-c".to_string(), script, command.to_string()];
+    argv.extend(args.iter().cloned());
+    ("/bin/sh".to_string(), argv)
 }
 
 /// Resolve how many nodes a profile's topology describes.
@@ -858,7 +1029,6 @@ mod tests {
 
     use super::*;
     use mirage_core::emulator::{EmulatorDef, ExecMode};
-    use std::path::PathBuf;
     use mirage_core::topology::TopologyDef;
 
     fn ctx(runtime_dir: PathBuf) -> SessionContext {

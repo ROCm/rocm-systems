@@ -410,7 +410,14 @@ fn write_mock_provider(path: &Path) {
 case "$1" in
   pull) exit 0 ;;
   image) [ "$2" = inspect ] && exit 1; exit 0 ;;
-  network) [ "$2" = inspect ] && exit 1; exit 0 ;;
+  network)
+    # `network inspect --format` is the ownership check teardown makes;
+    # plain `network inspect` is the existence probe.
+    if [ "$2" = inspect ]; then
+      [ "$3" = "--format" ] && { printf mirage; exit 0; }
+      exit 1
+    fi
+    exit 0 ;;
   run) echo "cid-0"; exit 0 ;;
   exec)
     shift
@@ -437,7 +444,17 @@ case "$1" in
     fi
     exec "$@" ;;
   rm) exit 0 ;;
-  inspect) echo true; exit 0 ;;
+  inspect)
+    # Either the ownership check (a Go template naming mirage.owner) or
+    # the running-state probe.
+    if [ "$2" = "--format" ]; then
+      case "$3" in
+        *mirage.owner*) printf mirage ;;
+        *) echo true ;;
+      esac
+      exit 0
+    fi
+    echo true; exit 0 ;;
   *) exit 0 ;;
 esac
 "#;

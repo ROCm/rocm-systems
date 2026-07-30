@@ -600,11 +600,13 @@ impl MirageCtl for SessionManager {
 
     async fn session_exec(&self, exec: &ExecDef) -> Result<ExecRef> {
         let session = self.get(&exec.session).await?;
-        let started = session.start_exec(
-            exec,
-            self.config.replay_bytes,
-            self.config.max_finished_execs,
-        )?;
+        let started = session
+            .start_exec(
+                exec,
+                self.config.replay_bytes,
+                self.config.max_finished_execs,
+            )
+            .await?;
         Ok(ExecRef {
             session: exec.session.clone(),
             exec: started.id.clone(),
@@ -696,7 +698,7 @@ impl MirageCtl for SessionManager {
     }
 
     async fn exec_signal(&self, exec: &ExecRef, sig: i32) -> Result<()> {
-        self.get_exec(exec).await?.signal(sig)
+        self.get_exec(exec).await?.signal(sig).await
     }
 
     async fn exec_remove(&self, exec: &ExecRef) -> Result<()> {

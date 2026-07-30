@@ -24,7 +24,7 @@ use tokio::sync::{Mutex as AsyncMutex, mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::output::OutputHub;
-use crate::process::{Exit, SpawnSpec, Spawned, signal_process_group_only, spawn};
+use crate::process::{ContainerProc, Exit, SpawnSpec, Spawned, signal_process_group_only, spawn};
 
 /// Depth of the channel carrying output from the pump tasks to the hub.
 ///
@@ -48,6 +48,13 @@ pub struct Exec {
     /// Live pids by global rank, for signal delivery. Entries are removed
     /// as processes are reaped so a signal can never reach a recycled pid.
     pids: Mutex<BTreeMap<u32, u32>>,
+    /// For a containerised exec, where each rank's workload really runs.
+    ///
+    /// The pids above belong to the provider's *client*; the workload is
+    /// in the container's own PID namespace, so a signal has to be
+    /// delivered through the provider instead. Fixed at start, because
+    /// the mapping does not change over the exec's life.
+    containers: BTreeMap<u32, ContainerProc>,
     /// Rank 0's input, whether a pipe or a terminal. Async because
     /// writing can block when the reader is slow, and blocking the
     /// runtime there would stall every other session the daemon owns.
@@ -99,12 +106,16 @@ impl Exec {
         let mut spawned: Vec<(u32, Spawned)> = Vec::with_capacity(specs.len());
         let mut failures: Vec<(u32, String)> = Vec::new();
         let mut pids = BTreeMap::new();
+        let mut containers = BTreeMap::new();
 
         for spec in &specs {
             match spawn(spec, tx.clone()) {
                 Ok(child) => {
                     status.started = true;
                     pids.insert(spec.node, child.pid());
+                    if let Some(container) = child.container() {
+                        containers.insert(spec.node, container.clone());
+                    }
                     status.nodes.insert(
                         spec.node,
                         NodeStatus {
@@ -156,6 +167,7 @@ impl Exec {
             hub: hub.clone(),
             status: Mutex::new(status),
             pids: Mutex::new(pids),
+            containers,
             stdin: AsyncMutex::new(stdin),
             cancel: CancellationToken::new(),
             forwarder: Mutex::new(None),
@@ -208,8 +220,15 @@ impl Exec {
     /// stop an exec. This exists so that "the process is definitely gone"
     /// is reachable even when "await teardown properly" is not.
     pub fn kill_now(&self) {
-        for pid in self.live_pids() {
-            signal_process_group_only(pid, Signal::SIGKILL);
+        for (node, pid) in self.lock_pids().iter() {
+            // Containerised: the pid is the provider's client, in our
+            // namespace, and killing it leaves the workload running
+            // inside the container. Push the signal through the provider
+            // too, without waiting — there is no runtime to wait on here.
+            if let Some(container) = self.containers.get(node) {
+                container.signal_now(Signal::SIGKILL);
+            }
+            signal_process_group_only(*pid, Signal::SIGKILL);
         }
     }
 
@@ -225,11 +244,32 @@ impl Exec {
     ///
     /// Returns an error if `sig` is not a valid signal number, so a typo
     /// is reported rather than silently dropped.
-    pub fn signal(&self, sig: i32) -> Result<()> {
+    pub async fn signal(&self, sig: i32) -> Result<()> {
         let signal = Signal::try_from(sig)
             .map_err(|_| MirageError::other(format!("invalid signal: {sig}")))?;
-        let pids: Vec<u32> = self.lock_pids().values().copied().collect();
-        for pid in pids {
+        let live: Vec<(u32, u32)> = self
+            .lock_pids()
+            .iter()
+            .map(|(node, pid)| (*node, *pid))
+            .collect();
+
+        // Containerised ranks first, and concurrently: each one is a
+        // `provider exec` round trip, and a job with many nodes would
+        // otherwise deliver a Ctrl-C to rank 15 seconds after rank 0.
+        let forwarded = live
+            .iter()
+            .filter_map(|(node, _)| self.containers.get(node))
+            .map(|container| container.signal(signal));
+        futures::future::join_all(forwarded).await;
+
+        for (node, pid) in live {
+            // A containerised rank has already been signalled through the
+            // provider. Signalling the client's group as well would kill
+            // the proxy out from under a workload that is handling the
+            // signal it was just sent.
+            if self.containers.contains_key(&node) {
+                continue;
+            }
             // The *group*, never the bare pid. A pid leaves this map only
             // after its process has been reaped, and the removal happens
             // a scheduling quantum after the reap — so a signal arriving
@@ -518,6 +558,7 @@ mod tests {
             workdir: None,
             stdio: crate::process::StdioMode::Pipes,
             inherit_env: false,
+            container: None,
         }
     }
 
@@ -690,7 +731,7 @@ mod tests {
     async fn signal_reaches_the_workload() {
         let exec = start(vec![spec(0, "sleep 300")]);
         tokio::time::sleep(Duration::from_millis(100)).await;
-        exec.signal(libc::SIGTERM).unwrap();
+        exec.signal(libc::SIGTERM).await.unwrap();
         let status = finish(&exec).await;
         assert_eq!(status.exit_code, Some(128 + libc::SIGTERM));
     }
@@ -698,7 +739,7 @@ mod tests {
     #[tokio::test]
     async fn an_invalid_signal_number_is_rejected() {
         let exec = start(vec![spec(0, "exit 0")]);
-        let err = exec.signal(9999).unwrap_err();
+        let err = exec.signal(9999).await.unwrap_err();
         assert!(err.to_string().contains("invalid signal"), "{err}");
         finish(&exec).await;
     }
@@ -709,7 +750,7 @@ mod tests {
         finish(&exec).await;
         // Every pid has been retired, so this must reach nothing at all
         // rather than an unrelated process that reused the number.
-        exec.signal(libc::SIGKILL).unwrap();
+        exec.signal(libc::SIGKILL).await.unwrap();
     }
 
     #[tokio::test]
@@ -725,6 +766,7 @@ mod tests {
                 workdir: None,
                 stdio: crate::process::StdioMode::Pipes,
                 inherit_env: false,
+                container: None,
             }],
             DEFAULT_REPLAY_BYTES,
         );
@@ -755,6 +797,7 @@ mod tests {
                     workdir: None,
                     stdio: crate::process::StdioMode::Pipes,
                     inherit_env: false,
+                    container: None,
                 },
             ],
             DEFAULT_REPLAY_BYTES,

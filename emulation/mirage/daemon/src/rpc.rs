@@ -75,8 +75,21 @@ impl ControlSocket {
     /// Returns [`BindError::AlreadyRunning`] if another daemon holds the
     /// lock, or [`BindError::Io`] if the socket cannot be created.
     pub fn bind(path: &Path, lock_path: &Path) -> Result<Self, BindError> {
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+
+        // Anyone who can connect to this socket can start a session,
+        // which means running arbitrary commands as this user. The
+        // default runtime directory is `$XDG_RUNTIME_DIR`, already
+        // `0700` — but the fallback when that is unset is
+        // `$TMPDIR/mirage-<uid>`, and `--socket` can point anywhere. A
+        // directory created with the process umask (typically `0755`) in
+        // a world-writable `/tmp` would leave the control plane open to
+        // every local user, so the mode is stated rather than inherited.
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(BindError::Io)?;
+            // Also narrow a directory that already existed: an earlier
+            // mirage, or a pre-created path, may have left it open.
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
         }
 
         let lock = std::fs::OpenOptions::new()
@@ -84,6 +97,7 @@ impl ControlSocket {
             .read(true)
             .write(true)
             .truncate(false)
+            .mode(0o600)
             .open(lock_path)
             .map_err(BindError::Io)?;
 
@@ -115,6 +129,14 @@ impl ControlSocket {
         }
 
         let listener = UnixListener::bind(path).map_err(BindError::Io)?;
+        // `bind` creates the socket with `0777 & ~umask` — `0755` under
+        // the usual umask, i.e. connectable by every local user. Linux
+        // does enforce permissions on `connect(2)` for Unix sockets, so
+        // this is the check that matters; narrow it immediately. The
+        // `0700` directory above is what closes the window between the
+        // two calls.
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(BindError::Io)?;
         let inode = socket_inode(path).unwrap_or(0);
         tracing::info!(path = %path.display(), "control socket bound");
         Ok(Self {
@@ -572,6 +594,33 @@ mod tests {
         assert!(
             !sock.exists(),
             "a clean exit must not leave a socket for clients to connect to"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_socket_and_its_directory_are_private_to_this_user() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        // Connecting to the control socket means being able to start a
+        // session, which means running commands as this user. With
+        // `XDG_RUNTIME_DIR` unset the runtime directory falls back under
+        // `/tmp`, so the mode cannot be left to the umask.
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("runtime");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+        let sock = nested.join("mirage.sock");
+        let lock = nested.join("mirage.lock");
+        let _bound = ControlSocket::bind(&sock, &lock).unwrap();
+
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&sock), 0o600, "the socket must not be world-connectable");
+        assert_eq!(mode(&lock), 0o600);
+        assert_eq!(
+            mode(&nested),
+            0o700,
+            "a pre-existing runtime directory must be narrowed, not trusted"
         );
     }
 

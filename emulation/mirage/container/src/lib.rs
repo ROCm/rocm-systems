@@ -251,6 +251,7 @@ impl Engine {
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
+        labels: &[(String, String)],
         command: &[String],
     ) -> Vec<String> {
         let mut argv = vec![
@@ -261,6 +262,14 @@ impl Engine {
             "--hostname".to_string(),
             name.to_string(),
         ];
+        // Stamp ownership on the container itself. The name is derived
+        // from the session id and is not proof of anything — teardown and
+        // orphan reclamation both check this label before removing
+        // anything, so a user's own `mirage-s1-node-0` is safe.
+        for (k, v) in labels {
+            argv.push("--label".to_string());
+            argv.push(format!("{k}={v}"));
+        }
         if host_gpus {
             // Run the GPU device nodes unconfined and grant the container
             // the supplementary groups that own `/dev/kfd` and
@@ -513,15 +522,17 @@ impl Engine {
     }
 
     /// Create the per-session network if it does not already exist.
-    pub fn ensure_network(&self, name: &str) -> Result<()> {
+    pub fn ensure_network(&self, name: &str, labels: &[(String, String)]) -> Result<()> {
         if self.network_exists(name) {
             return Ok(());
         }
-        self.checked(&[
-            "network".to_string(),
-            "create".to_string(),
-            name.to_string(),
-        ])
+        let mut argv = vec!["network".to_string(), "create".to_string()];
+        for (k, v) in labels {
+            argv.push("--label".to_string());
+            argv.push(format!("{k}={v}"));
+        }
+        argv.push(name.to_string());
+        self.checked(&argv)
     }
 
     /// Launch a detached node container and return its id (the trimmed
@@ -542,6 +553,7 @@ impl Engine {
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
+        labels: &[(String, String)],
         command: &[String],
     ) -> Result<String> {
         let argv = Self::run_argv(
@@ -555,6 +567,7 @@ impl Engine {
             devices,
             groups,
             env,
+            labels,
             command,
         );
         let out = self.output(&argv)?;
@@ -620,6 +633,11 @@ impl Engine {
         P: FnMut(BringUpPhase),
     {
         let network = mirage_core::container::network_name(session);
+        // Every resource this call creates carries mirage's ownership
+        // label plus the session it belongs to, so teardown can prove a
+        // resource is ours before removing it and `reclaim_orphans` can
+        // find what a crashed supervisor left behind.
+        let labels = mirage_core::container::owner_labels(session);
 
         // Pull the image unless it is already present locally; pulling a
         // large image is the slowest, most visible step, so report it.
@@ -662,7 +680,7 @@ impl Engine {
             progress(BringUpPhase::CreatingNetwork {
                 network: network.clone(),
             });
-            self.ensure_network(&network)?;
+            self.ensure_network(&network, &labels)?;
         }
 
         // When the emulator requested host GPU access, expose the host's
@@ -699,6 +717,7 @@ impl Engine {
                 &devices,
                 &groups,
                 &env,
+                &labels,
                 &command,
             ) {
                 Ok(cid) => {
@@ -825,6 +844,11 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
+    /// The ownership labels bring-up stamps on every resource.
+    fn labels() -> Vec<(String, String)> {
+        mirage_core::container::owner_labels(&mirage_core::session::SessionId::new("s").unwrap())
+    }
+
     fn mount(spec: &str) -> FileMount {
         FileMount::parse(spec).unwrap()
     }
@@ -880,6 +904,7 @@ mod tests {
             &devices,
             &groups,
             &env,
+            &labels(),
             &command,
         );
 
@@ -924,6 +949,7 @@ mod tests {
             &groups,
             &[],
             &[],
+            &[],
         );
         let joined = argv.join(" ");
         assert!(joined.contains("--security-opt seccomp=unconfined"));
@@ -949,6 +975,7 @@ mod tests {
             &groups,
             &[],
             &[],
+            &[],
         );
         let joined = argv.join(" ");
         assert!(!joined.contains("--group-add"));
@@ -965,6 +992,7 @@ mod tests {
             "img",
             None,
             false,
+            &[],
             &[],
             &[],
             &[],
@@ -1070,13 +1098,20 @@ mod tests {
         let provider = mock_provider(dir.path(), &log);
         let engine = Engine::with_provider(provider.to_string_lossy().to_string());
 
-        engine.ensure_network("mirage-s").unwrap();
+        engine.ensure_network("mirage-s", &labels()).unwrap();
         let recorded = std::fs::read_to_string(&log).unwrap();
         assert!(
             recorded.contains("network inspect mirage-s"),
             "{recorded:?}"
         );
-        assert!(recorded.contains("network create mirage-s"), "{recorded:?}");
+        // Labelled, so teardown can prove the network is mirage's before
+        // removing it and orphan reclamation can find it later.
+        assert!(
+            recorded.contains("network create --label mirage.owner=mirage")
+                && recorded.contains("--label mirage.session=s")
+                && recorded.contains(" mirage-s"),
+            "{recorded:?}"
+        );
     }
 
     #[test]
@@ -1097,6 +1132,7 @@ mod tests {
                 &[],
                 &[],
                 &[],
+                &labels(),
                 &["sleep".to_string(), "infinity".to_string()],
             )
             .unwrap();
@@ -1159,7 +1195,14 @@ mod tests {
 
         let recorded = std::fs::read_to_string(&log).unwrap();
         assert!(recorded.contains("pull img:latest"), "{recorded:?}");
-        assert!(recorded.contains("network create mirage-s"), "{recorded:?}");
+        // Labelled, so teardown can prove the network is mirage's before
+        // removing it and orphan reclamation can find it later.
+        assert!(
+            recorded.contains("network create --label mirage.owner=mirage")
+                && recorded.contains("--label mirage.session=s")
+                && recorded.contains(" mirage-s"),
+            "{recorded:?}"
+        );
         assert!(
             recorded.contains("run -d --name mirage-s-node-0"),
             "{recorded:?}"
