@@ -4245,7 +4245,17 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
     // The partition mode only matters when the sysfs value is usable; otherwise
     // we already fall back to the KFD total.
     if (sysfs_read_ok && *total != 0) {
-      get_dev_value_str(amd::smi::kDevComputePartition, dv_ind, &compute_partition_str);
+      rsmi_status_t cp_ret =
+          get_dev_value_str(amd::smi::kDevComputePartition, dv_ind, &compute_partition_str);
+      if (cp_ret != RSMI_STATUS_SUCCESS) {
+        // Read failure leaves the string empty -> treated as single-partition,
+        // so the size-based KFD preference still applies; log it for triage.
+        std::ostringstream cp_ss;
+        cp_ss << __PRETTY_FUNCTION__ << " | compute_partition read failed"
+              << " | Device #: " << std::to_string(dv_ind)
+              << " | ret = " << getRSMIStatusString(cp_ret);
+        LOG_DEBUG(cp_ss);
+      }
     }
     // Look up the KFD per-partition total non-fatally: unlike
     // GET_DEV_AND_KFDNODE_FROM_INDX, a missing node must not discard a valid
