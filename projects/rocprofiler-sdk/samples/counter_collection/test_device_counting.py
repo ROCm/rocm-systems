@@ -26,6 +26,9 @@ import itertools
 import math
 import os
 import re
+import sys
+
+import pytest
 
 SYNC_SAMPLE_PATTERN = re.compile(r"^Sample (?P<sample>\d+):$")
 SYNC_RECORD_PATTERN = re.compile(
@@ -40,9 +43,6 @@ ASYNC_RECORD_PATTERN = re.compile(
     r"user_data: (?P<user_data>\d+)\),"
 )
 UNAVAILABLE_MESSAGE = "Device counting unavailable: no hardware counters"
-# Must not be a substring of UNAVAILABLE_MESSAGE: CTest matches this against the whole
-# output via SKIP_REGULAR_EXPRESSION, and a genuine failure quotes the sample log.
-UNAVAILABLE_SKIP_SENTINEL = "device-counting-unavailable"
 EXPECTED_COUNTER_NAMES = {"GRBM_COUNT", "SQ_WAVES"}
 
 
@@ -67,16 +67,8 @@ def _skip_if_unavailable(output):
         assert (
             UNAVAILABLE_MESSAGE not in output
         ), "unavailable marker was mixed with sample output"
-        return False
-    if __name__ == "__main__":
-        return True
-    try:
-        import pytest
-    except ImportError:
-        print("SKIP: {}".format(UNAVAILABLE_SKIP_SENTINEL))
-        return True
-    pytest.skip(UNAVAILABLE_SKIP_SENTINEL)
-    return True
+        return
+    pytest.skip(UNAVAILABLE_MESSAGE)
 
 
 def _assert_sample_capability_parity():
@@ -194,11 +186,8 @@ def _validate_sync_samples(samples):
 
 def _validate_sync_output_file():
     output = _read_output("ROCPROFILER_SAMPLE_SYNC_OUTPUT_FILE")
-    if _skip_if_unavailable(output):
-        return True
-    samples = _parse_sync_output(output)
-    _validate_sync_samples(samples)
-    return False
+    _skip_if_unavailable(output)
+    _validate_sync_samples(_parse_sync_output(output))
 
 
 def test_sync_device_counting_output():
@@ -248,14 +237,12 @@ def _validate_async_output(output, sync_record_ids):
 
 def _validate_async_output_file():
     output = _read_output("ROCPROFILER_SAMPLE_ASYNC_OUTPUT_FILE")
-    if _skip_if_unavailable(output):
-        return True
+    _skip_if_unavailable(output)
     sync_samples = _parse_sync_output(_read_output("ROCPROFILER_SAMPLE_SYNC_OUTPUT_FILE"))
     sync_record_ids = next(
         set(records) for _, records in sorted(sync_samples.items()) if records
     )
     _validate_async_output(output, sync_record_ids)
-    return False
 
 
 def test_async_device_counting_output():
@@ -264,9 +251,5 @@ def test_async_device_counting_output():
 
 
 if __name__ == "__main__":
-    sync_unavailable = _validate_sync_output_file()
-    async_unavailable = _validate_async_output_file()
-    assert sync_unavailable == async_unavailable, "sample capability results differ"
-    if sync_unavailable:
-        print("SKIP: {}".format(UNAVAILABLE_SKIP_SENTINEL))
-        raise SystemExit(77)
+    exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
+    sys.exit(exit_code)

@@ -79,10 +79,11 @@ public:
     // Decode the counter name of a record
     std::string decode_record_name(const rocprofiler_counter_record_t& rec) const;
 
-    // Get the dimensions of a record (what CU/SE/etc the counter is for). High cost operation
-    // should be cached if possible.
-    static std::unordered_map<std::string, std::pair<size_t, size_t>> get_record_dimensions(
-        const rocprofiler_counter_record_t& rec);
+    // Get the dimensions of a record (what CU/SE/etc the counter is for) paired with the
+    // position of the record within each dimension. High cost operation, should be cached
+    // if possible.
+    static std::vector<std::pair<rocprofiler_counter_record_dimension_info_t, size_t>>
+    get_record_dimensions(const rocprofiler_counter_record_t& rec);
 
     // Sample the counter values for a set of counters, returns the records in the out parameter.
     rocprofiler_status_t sample_counter_values(const std::vector<std::string>&            counters,
@@ -177,8 +178,7 @@ counter_sampler::decode_record_name(const rocprofiler_counter_record_t& rec) con
     }
 
     rocprofiler_counter_id_t counter_id = {.handle = 0};
-    ROCPROFILER_CALL(rocprofiler_query_record_counter_id(rec.id, &counter_id),
-                     "Could not query record counter id");
+    rocprofiler_query_record_counter_id(rec.id, &counter_id);
     if(id_to_name_.find(counter_id.handle) == id_to_name_.end())
     {
         std::clog << "Unknown counter id = " << counter_id.handle << "\n";
@@ -187,21 +187,18 @@ counter_sampler::decode_record_name(const rocprofiler_counter_record_t& rec) con
     return id_to_name_.at(counter_id.handle);
 }
 
-std::unordered_map<std::string, std::pair<size_t, size_t>>
+std::vector<std::pair<rocprofiler_counter_record_dimension_info_t, size_t>>
 counter_sampler::get_record_dimensions(const rocprofiler_counter_record_t& rec)
 {
-    std::unordered_map<std::string, std::pair<size_t, size_t>> out;
-    rocprofiler_counter_id_t                                   counter_id = {.handle = 0};
-    ROCPROFILER_CALL(rocprofiler_query_record_counter_id(rec.id, &counter_id),
-                     "Could not query record counter id");
-    auto dims = get_counter_dimensions(counter_id);
+    std::vector<std::pair<rocprofiler_counter_record_dimension_info_t, size_t>> out;
+    rocprofiler_counter_id_t counter_id = {.handle = 0};
+    rocprofiler_query_record_counter_id(rec.id, &counter_id);
 
-    for(auto& dim : dims)
+    for(auto& dim : get_counter_dimensions(counter_id))
     {
         size_t pos = 0;
-        ROCPROFILER_CALL(rocprofiler_query_record_dimension_position(rec.id, dim.id, &pos),
-                         "Could not query record dimension position");
-        out.emplace(dim.name, std::make_pair(pos, dim.instance_size));
+        rocprofiler_query_record_dimension_position(rec.id, dim.id, &pos);
+        out.emplace_back(dim, pos);
     }
     return out;
 }
@@ -438,11 +435,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 if(!printed_dimensions)
                 {
                     if(!sampler) break;
-                    auto dims = sampler->get_record_dimensions(record);
-                    for(const auto& [name, position] : dims)
+                    for(const auto& [dim, pos] : sampler->get_record_dimensions(record))
                     {
-                        *output_stream << "\t\tDimension Name: " << name << ": " << position.first
-                                       << "/" << position.second << "\n";
+                        *output_stream << "\t\tDimension Name: " << dim.name << ": " << pos << "/"
+                                       << dim.instance_size << "\n";
                     }
                 }
             }

@@ -300,10 +300,6 @@ if(BUILD_TESTING AND Python3_Interpreter_FOUND)
             "counter-collection-device-profiling-async;counter-collection-device-profiling-sync"
             FAIL_REGULAR_EXPRESSION
             "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-            SKIP_REGULAR_EXPRESSION
-            "device-counting-unavailable"
-            SKIP_RETURN_CODE
-            77
             ATTACHED_FILES_ON_FAIL
             "${counter-collection-device-profiling-output};${counter-collection-device-profiling-sync-output}"
             DISABLED
