@@ -80,9 +80,9 @@
 #include <rocprofiler-sdk/ompt/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/enum_string.hpp>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
-#include <rocprofiler-sdk/cxx/enum_string.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -132,15 +132,15 @@ extern "C" {
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 }
- 
+
 extern "C" {
-    ROCPROFILER_API void
-    hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
-                          uint64_t                      lib_version,
-                          uint64_t                      lib_instance,
-                          void**                        tables,
-                          uint64_t                      num_tables,
-                          void*                         user_data);
+ROCPROFILER_API void
+hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
+                                    uint64_t                      lib_version,
+                                    uint64_t                      lib_instance,
+                                    void**                        tables,
+                                    uint64_t                      num_tables,
+                                    void*                         user_data);
 }
 
 namespace
@@ -1425,14 +1425,12 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_GPU_EVENTS)
             {
-                auto* record = static_cast<rocprofiler_buffer_tracing_gpu_event_record_t*>(
-                    header->payload);
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_gpu_event_record_t*>(header->payload);
 
-                auto stream_id = get_stream_id(record);
+                auto stream_id               = get_stream_id(record);
                 record->event_info.stream_id = stream_id;
-                tool::write_ring_buffer(
-                    *record,
-                    domain_type::GPU_EVENTS);
+                tool::write_ring_buffer(*record, domain_type::GPU_EVENTS);
             }
             else
             {
@@ -3191,9 +3189,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         "hip stream tracing configure failed");
 
     ROCPROFILER_CALL(
-        rocprofiler_at_intercept_table_registration(hip_gpu_event_registration_callback,
-                                                    ROCPROFILER_HIP_RUNTIME_TABLE,
-                                                    nullptr),
+        rocprofiler_at_intercept_table_registration(
+            hip_gpu_event_registration_callback, ROCPROFILER_HIP_RUNTIME_TABLE, nullptr),
         "runtime api registration");
 
     start_context(hip_stream_display_ctx, "hip stream");
@@ -3545,13 +3542,12 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     // function can warn if data was left unflushed, but nothing is written.
     if(skip_output) return;
 
-    // OMPT, rocSHMEM, hipFILE do not produce direct CSV/stats output. OMPT is rocpd-only (not
-    // emitted to JSON either), while rocSHMEM is emitted directly only to JSON and rocpd;
-    // both rely on `rocpd convert` for CSV/Perfetto/OTF2. The record count above is still
-    // tallied so that rocpd/JSON output is produced even when one of these is the only
-    // active trace domain.
+    // OMPT, rocSHMEM, hipFILE, and GPU Events do not produce direct CSV/stats output. They are
+    // emitted directly only to JSON and rocpd; all rely on `rocpd convert` for
+    // CSV/Perfetto/OTF2. The record count above is still tallied so that rocpd/JSON output
+    // is produced even when one of these is the only active trace domain.
     if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM &&
-                 DomainT != domain_type::HIPFILE)
+                 DomainT != domain_type::HIPFILE && DomainT != domain_type::GPU_EVENTS)
     {
         if(tool::get_config().stats || tool::get_config().summary_output)
         {
@@ -3582,7 +3578,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     auto hip_graph_output =
         rocprofiler::tool::hip_graph_buffered_output_t{tool::get_config().hip_graph_trace};
 
-    auto gpu_event_output = rocprofiler::tool::gpu_events_buffered_output_t{tool::get_config().gpu_events};
+    auto gpu_event_output =
+        rocprofiler::tool::gpu_events_buffered_output_t{tool::get_config().gpu_events};
 
     auto hsa_output = tool::hsa_buffered_output_t{tool::get_config().hsa_core_api_trace ||
                                                   tool::get_config().hsa_amd_ext_api_trace ||
@@ -3754,8 +3751,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                              rccl_output.get_generator(),
                              memory_allocation_output.get_generator(),
                              rocdecode_output.get_generator(),
-                             rocjpeg_output.get_generator(),
-                             gpu_event_output.get_generator());
+                             rocjpeg_output.get_generator());
     }
 
     if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
@@ -3796,7 +3792,6 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
         auto memory_allocation_elem_data = memory_allocation_output.load_all();
         auto rocdecode_elem_data         = rocdecode_output.load_all();
         auto rocjpeg_elem_data           = rocjpeg_output.load_all();
-        auto gpu_event_data              = gpu_event_output.load_all();
 
         tool::write_otf2(tool::get_config(),
                          *tool_metadata,
@@ -3811,8 +3806,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                          &rccl_elem_data,
                          &memory_allocation_elem_data,
                          &rocdecode_elem_data,
-                         &rocjpeg_elem_data,
-                         &gpu_event_data);
+                         &rocjpeg_elem_data);
     }
 
     if(tool::get_config().summary_output && outdata.num_output > 0 &&

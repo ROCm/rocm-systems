@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,10 +40,11 @@ namespace rocprofiler
 namespace gpu_events
 {
 profiling_time
-get_gpu_event_time(hsa_agent_t             _hsa_agent,
-                  hsa_signal_t            _signal,
-                  rocprofiler_kernel_id_t _kernel_id,
-                  std::optional<uint64_t> _baseline)  // NOLINT(performance-unnecessary-value-param)
+get_gpu_event_time(
+    hsa_agent_t             _hsa_agent,
+    hsa_signal_t            _signal,
+    rocprofiler_kernel_id_t _kernel_id,
+    std::optional<uint64_t> _baseline)  // NOLINT(performance-unnecessary-value-param)
 {
     auto ts                   = common::timestamp_ns();
     auto dispatch_time        = hsa_amd_profiling_dispatch_time_t{};

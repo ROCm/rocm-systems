@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,8 +43,8 @@ using profiling_time = tracing::profiling_time;
 // an issue with
 profiling_time
 get_gpu_event_time(hsa_agent_t             agent,
-                  hsa_signal_t            signal,
-                  rocprofiler_kernel_id_t kernel_id,
-                  std::optional<uint64_t> baseline = {});
-}  // namespace kernel_dispatch
+                   hsa_signal_t            signal,
+                   rocprofiler_kernel_id_t kernel_id,
+                   std::optional<uint64_t> baseline = {});
+}  // namespace gpu_events
 }  // namespace rocprofiler

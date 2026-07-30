@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/gpu_events/gpu_events.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
@@ -40,7 +41,6 @@
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
 #include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
-#include "lib/rocprofiler-sdk/gpu_events/gpu_events.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>

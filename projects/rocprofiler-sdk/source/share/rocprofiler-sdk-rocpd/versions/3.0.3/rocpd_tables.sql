@@ -1,4 +1,4 @@
--- RocPD schema version 3.0.4
+-- RocPD schema version 3.0.3
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (

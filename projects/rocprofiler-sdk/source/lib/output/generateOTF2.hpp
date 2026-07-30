@@ -48,9 +48,8 @@ write_otf2(const output_config&                                            cfg,
            std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*       rccl_api_data,
            std::deque<tool_buffer_tracing_memory_allocation_ext_record_t>* memory_allocation_data,
            std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>* rocdecode_api_data,
-           std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data,
-           std::deque<rocprofiler_buffer_tracing_gpu_event_record_t>*         gpu_event_data);
-// NOTE: OMPT and rocSHMEM are intentionally absent here. Their records are not emitted to
-// OTF2 directly; they are written to rocpd and exported to OTF2 via `rocpd convert`.
+           std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data);
+// NOTE: OMPT, rocSHMEM, and GPU Events are intentionally absent here. Their records are not
+// emitted to OTF2 directly; they are written to rocpd and exported to OTF2 via `rocpd convert`.
 }  // namespace tool
 }  // namespace rocprofiler

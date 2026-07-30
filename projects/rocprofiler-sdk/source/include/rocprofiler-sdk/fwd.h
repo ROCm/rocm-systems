@@ -539,21 +539,20 @@ typedef enum rocprofiler_pc_sampling_record_kind_t
     ROCPROFILER_PC_SAMPLING_RECORD_STOCHASTIC_V0_SAMPLE,  ///< ::rocprofiler_pc_sampling_record_stochastic_v0_t
     ROCPROFILER_PC_SAMPLING_RECORD_LAST,
 } rocprofiler_pc_sampling_record_kind_t;
- 
+
 /**
- * @brief Enumeration for distinguishing different event record kinds within the
- * ::ROCPROFILER_BUFFER_CATEGORY_GPU_EVENTS category
+ * @brief ROCProfiler GPU Event Tracing Operation Types
  */
-typedef enum rocprofiler_gpu_event_operation_t
+typedef enum rocprofiler_gpu_event_operation_t  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_GPU_EVENT_NONE              = 0,  ///< Unknown GPU event operation
-    ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE      = 1,  ///< Enqueue a GPU wait operation
-    ROCPROFILER_GPU_EVENT_WAIT_COMPLETE     = 2,  ///< Completion of a GPU wait operation
-    ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE    = 3,  ///< Enqueue a GPU record/signal operation
-    ROCPROFILER_GPU_EVENT_RECORD_COMPLETE   = 4,  ///< Completion of a GPU record/signal operation
+    ROCPROFILER_GPU_EVENT_NONE            = 0,  ///< Unknown GPU event operation
+    ROCPROFILER_GPU_EVENT_WAIT_ENQUEUE    = 1,  ///< Enqueue a GPU wait operation
+    ROCPROFILER_GPU_EVENT_WAIT_COMPLETE   = 2,  ///< Completion of a GPU wait operation
+    ROCPROFILER_GPU_EVENT_RECORD_ENQUEUE  = 3,  ///< Enqueue a GPU record/signal operation
+    ROCPROFILER_GPU_EVENT_RECORD_COMPLETE = 4,  ///< Completion of a GPU record/signal operation
     ROCPROFILER_GPU_EVENT_LAST,
 
-} rocprofiler_event_operation_t;
+} rocprofiler_gpu_event_operation_t;
 
 //--------------------------------------------------------------------------------------//
 //
@@ -950,13 +949,13 @@ typedef rocprofiler_counter_config_id_t rocprofiler_profile_config_id_t;
  */
 typedef struct rocprofiler_gpu_event_info_t
 {
-    uint64_t                  size;         ///< Size of this struct
-    uint64_t                  issue_id;     ///< Issue index for this command
-    rocprofiler_agent_id_t    agent_id;     ///< Agent ID where gpu event op is encoded
-    rocprofiler_queue_id_t    queue_id;     ///< Queue ID where gpu event packet is enqueued
-    rocprofiler_stream_id_t   stream_id;    ///< Stream ID where gpu event packet is enqueued
-    uint64_t                  event_id;     ///< Event ID being operated upon
-    uint8_t                   type_id;      ///< Type of operation
+    uint64_t                size;       ///< Size of this struct
+    uint64_t                issue_id;   ///< Issue index for this command
+    rocprofiler_agent_id_t  agent_id;   ///< Agent ID where gpu event op is encoded
+    rocprofiler_queue_id_t  queue_id;   ///< Queue ID where gpu event packet is enqueued
+    rocprofiler_stream_id_t stream_id;  ///< Stream ID where gpu event packet is enqueued
+    uint64_t                event_id;   ///< Event ID being operated upon
+    uint32_t                type_id;    ///< Type of operation
 } rocprofiler_gpu_event_info_t;
 
 /** @} */

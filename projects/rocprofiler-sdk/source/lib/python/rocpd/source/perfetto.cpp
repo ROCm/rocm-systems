@@ -181,6 +181,7 @@ write_perfetto(
     const tool::generator<types::kernel_dispatch>&   kernel_dispatch_gen,
     const tool::generator<types::memory_copies>&     memory_copy_gen,
     const tool::generator<types::graph_launch>&      graph_launch_gen,
+    const tool::generator<types::event_operation>&   event_operation_gen,
     const tool::generator<types::scratch_memory>&    scratch_memory_gen,
     const tool::generator<types::memory_allocation>& memory_allocation_gen,
     const tool::generator<types::counter>&           counter_collection_gen)
@@ -658,6 +659,48 @@ write_perfetto(
                                   itr.kernel_dispatch_count);
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::hip_api>::name, track, itr.end);
+            }
+            tracing_session->FlushBlocking();
+        }
+
+        for(auto ditr : event_operation_gen)
+        {
+            for(const auto& itr : event_operation_gen.get(ditr))
+            {
+                auto& track = thread_tracks.at(itr.tid);
+
+                auto name = itr.type == "WAIT" ? "Event-Wait" : "Event-Signal";
+
+                TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::gpu_events>::name,
+                                  ::perfetto::DynamicString(name),
+                                  track,
+                                  itr.start,
+                                  "begin_ns",
+                                  itr.start,
+                                  "end_ns",
+                                  itr.end,
+                                  "delta_ns",
+                                  (itr.end - itr.start),
+                                  "kind",
+                                  "GPU_EVENTS",
+                                  "tid",
+                                  itr.tid,
+                                  "agent",
+                                  itr.agent_abs_index,
+                                  "agent_type",
+                                  itr.agent_type,
+                                  "queue_id",
+                                  itr.queue_id,
+                                  "queue",
+                                  itr.queue_name,
+                                  "event_id",
+                                  itr.event_id,
+                                  "type_id",
+                                  itr.type_id,
+                                  "stream_id",
+                                  itr.stream_id);
+                TRACE_EVENT_END(
+                    sdk::perfetto_category<sdk::category::gpu_events>::name, track, itr.end);
             }
             tracing_session->FlushBlocking();
         }

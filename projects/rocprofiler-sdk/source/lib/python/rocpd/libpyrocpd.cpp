@@ -539,6 +539,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto graph_launches = rocpd::sql_generator<rocpd::types::graph_launch>{
                             conn, select_guid_nid_pid("graph_launches")};
 
+                        auto event_operations = rocpd::sql_generator<rocpd::types::event_operation>{
+                            conn, select_guid_nid_pid("event_operations")};
+
                         auto scratch_memory = rocpd::sql_generator<rocpd::types::scratch_memory>{
                             conn, select_guid_nid_pid("scratch_memory")};
 
@@ -578,6 +581,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       kernels,
                                                       memory_copies,
                                                       graph_launches,
+                                                      event_operations,
                                                       scratch_memory,
                                                       memory_allocations,
                                                       counters);

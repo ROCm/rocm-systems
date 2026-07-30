@@ -80,8 +80,7 @@ write_perfetto(
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_allocation_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
-    const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen,
-    const generator<rocprofiler_buffer_tracing_gpu_event_record_t>&         gpu_events_gen)
+    const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen)
 {
     namespace sdk = ::rocprofiler::sdk;
 
@@ -214,17 +213,6 @@ write_perfetto(
                 if(group_by_queue)
                 {
                     agent_queue_ids[itr.dispatch_info.agent_id].emplace(itr.dispatch_info.queue_id);
-                }
-            }
-
-        for(auto ditr : gpu_events_gen)
-            for(auto itr : gpu_events_gen.get(ditr))
-            {
-                tids.emplace(itr.thread_id);
-                agent_stream_ids.emplace(itr.event_info.stream_id);
-                if(group_by_queue)
-                {
-                    agent_queue_ids[itr.event_info.agent_id].emplace(itr.event_info.queue_id);
                 }
             }
     }
@@ -776,106 +764,6 @@ write_perfetto(
                             });
                         TRACE_EVENT_END(
                             sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
-                            *_track,
-                            current.end_timestamp);
-                        tracing_session->FlushBlocking();
-                    }
-                }
-            }
-        }
-
-        for(auto ditr : gpu_events_gen)
-        {
-            auto generator = gpu_events_gen.get(ditr);
-            // Group events on the same queue and agent. Temporary fix for firmware timestamp bug
-            // Can be removed once bug is resolved.
-            auto event_bins = std::unordered_map<
-                rocprofiler_agent_id_t,
-                std::unordered_map<
-                    rocprofiler_queue_id_t,
-                    std::vector<rocprofiler_buffer_tracing_gpu_event_record_t*>>>{};
-            for(auto& itr : generator)
-            {
-                const auto& info = itr.event_info;
-                event_bins[info.agent_id][info.queue_id].emplace_back(&itr);
-            }
-
-            for(const auto& aitr : event_bins)
-            {
-                for(auto qitr : aitr.second)
-                {
-                    // Sort kernels on the same queue and agent by timestamp
-                    std::sort(qitr.second.begin(),
-                              qitr.second.end(),
-                              [](const auto* lhs, const auto* rhs) {
-                                  return lhs->start_timestamp < rhs->start_timestamp;
-                              });
-
-                    // Loop over the kernels (qitr.second) and put them into perfetto.
-                    for(auto it = qitr.second.begin(); it != qitr.second.end(); ++it)
-                    {
-                        auto&                     current = **it;
-                        const auto&               info    = current.event_info;
-
-                        auto name = info.type_id == 1 ? "Event-Wait" : "Event-Signal";
-
-                        ::perfetto::Track* _track    = nullptr;
-                        auto               stream_id = (*it)->event_info.stream_id;
-                        if(group_by_queue)
-                        {
-                            _track = &agent_queue_tracks.at(info.agent_id).at(info.queue_id);
-                        }
-                        else
-                        {
-                            _track = &stream_tracks.at(stream_id);
-                        }
-
-                        if(demangled.find(name) == demangled.end())
-                        {
-                            demangled.emplace(name, common::cxx_demangle(name));
-                        }
-                        // Queue IDs are 1 higher than the track name. Subtracting 1 for consistency
-                        auto queue_id = info.queue_id.handle > 0 ? info.queue_id.handle - 1 : 0;
-
-                        TRACE_EVENT_BEGIN(
-                            sdk::perfetto_category<sdk::category::gpu_events>::name,
-                            ::perfetto::StaticString(name),
-                            *_track,
-                            current.start_timestamp,
-                            ::perfetto::Flow::ProcessScoped(current.correlation_id.internal),
-                            ::perfetto::Flow::ProcessScoped(info.event_id | 0x8000000000000000),
-                            "begin_ns",
-                            current.start_timestamp,
-                            "end_ns",
-                            current.end_timestamp,
-                            "delta_ns",
-                            (current.end_timestamp - current.start_timestamp),
-                            "kind",
-                            current.kind,
-                            "agent",
-                            tool_metadata
-                                .get_agent_index(agents_map.at(info.agent_id).id,
-                                                 ocfg.agent_index_value)
-                                .as_string("-"),
-                            "agent_type",
-                            tool_metadata
-                                .get_agent_index(agents_map.at(info.agent_id).id,
-                                                 ocfg.agent_index_value)
-                                .type,
-                            "corr_id",
-                            current.correlation_id.internal,
-                            "queue",
-                            queue_id,
-                            "tid",
-                            current.thread_id,
-                            "event_id",
-                            info.event_id,
-                            "type_id",
-                            info.type_id,
-                            "stream_ID",
-                            stream_id.handle);
-                        TRACE_EVENT_END(
-                            sdk::perfetto_category<sdk::category::gpu_events>::name,
                             *_track,
                             current.end_timestamp);
                         tracing_session->FlushBlocking();

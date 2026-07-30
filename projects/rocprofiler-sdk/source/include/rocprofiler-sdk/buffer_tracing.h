@@ -602,21 +602,21 @@ typedef struct rocprofiler_buffer_tracing_kfd_queue_record_t
     uint32_t                          pid;              ///< PID of the process as reported by KFD
     rocprofiler_agent_id_t            agent_id;         ///< Agent ID on which this event occurred
 } rocprofiler_buffer_tracing_kfd_queue_record_t;
- 
+
 /**
  * @brief ROCProfiler Buffer Queue GPU event record.
  */
 typedef struct rocprofiler_buffer_tracing_gpu_event_record_t
 {
-    uint64_t                                size;               ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t       kind;               ///< ::ROCPROFILER_BUFFER_TRACING_GPU_EVENTS
-    rocprofiler_event_operation_t           operation;          ///< @see rocprofiler_event_operation_t
-    rocprofiler_async_correlation_id_t      correlation_id;     ///< correlation ids for record
-    rocprofiler_thread_id_t                 thread_id;          ///< id for thread that encoded event op
-    rocprofiler_timestamp_t                 start_timestamp;    ///< start time in nanoseconds
-    rocprofiler_timestamp_t                 end_timestamp;      ///< end time in nanoseconds
-    rocprofiler_gpu_event_info_t            event_info;         ///< Extended info about the event operation
-    
+    uint64_t                           size;            ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t  kind;            ///< ::ROCPROFILER_BUFFER_TRACING_GPU_EVENTS
+    rocprofiler_gpu_event_operation_t  operation;       ///< @see rocprofiler_gpu_event_operation_t
+    rocprofiler_async_correlation_id_t correlation_id;  ///< correlation ids for record
+    rocprofiler_thread_id_t            thread_id;       ///< id for thread that encoded event op
+    rocprofiler_timestamp_t            start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t            end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_gpu_event_info_t       event_info;  ///< Extended info about the event operation
+
 } rocprofiler_buffer_tracing_gpu_event_record_t;
 
 /**

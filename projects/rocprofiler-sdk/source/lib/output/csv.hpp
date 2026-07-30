@@ -112,7 +112,6 @@ using pc_sampling_host_trap_csv_encoder    = csv_encoder<6>;
 using kernel_trace_with_stream_csv_encoder = csv_encoder<22>;
 using memory_copy_with_stream_csv_encoder  = csv_encoder<8>;
 using pc_sampling_stochastic_csv_encoder   = csv_encoder<10>;
-using gpu_events_csv_encoder               = csv_encoder<12>;
 }  // namespace csv
 }  // namespace tool
 }  // namespace rocprofiler

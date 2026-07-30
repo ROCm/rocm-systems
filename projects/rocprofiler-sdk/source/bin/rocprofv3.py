@@ -622,6 +622,12 @@ For attachment profiling of running processes:
         help="For collecting hipFILE Traces",
     )
 
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--gpu-event-trace",
+        help="For collecting GPU Event (wait/record) Traces",
+    )
+
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
 
     add_parser_bool_argument(
@@ -1684,6 +1690,7 @@ def run(app_args, args, **kwargs):
             "rocjpeg_trace",
             "rocshmem_trace",
             "hipfile_trace",
+            "gpu_event_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1702,6 +1709,7 @@ def run(app_args, args, **kwargs):
             "rocjpeg_trace",
             "rocshmem_trace",
             "hipfile_trace",
+            "gpu_event_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1760,6 +1768,7 @@ def run(app_args, args, **kwargs):
             ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
             ["rocshmem_trace", "ROCSHMEM_API_TRACE"],
             ["hipfile_trace", "HIPFILE_API_TRACE"],
+            ["gpu_event_trace", "GPU_EVENTS"],
             ["kernel_trace", "KERNEL_TRACE"],
             ["hip_graph_trace", "HIP_GRAPH_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],

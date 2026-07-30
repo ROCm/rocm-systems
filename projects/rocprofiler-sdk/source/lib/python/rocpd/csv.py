@@ -480,10 +480,38 @@ def write_region_csv(importData, config) -> None:
     write_sql_query_to_csv(importData, config, query, "regions")
 
 
+def write_event_operation_csv(importData, config) -> None:
+
+    agent_id = build_agent_id_string(config.agent_index_value)
+
+    query = f"""
+        SELECT
+            guid,
+            type AS Kind,
+            type_id AS Type_Id,
+            tid AS Thread_Id,
+            {agent_id} AS Agent_Id,
+            queue_id AS Queue_Id,
+            queue_name AS Queue_Name,
+            stream_id AS Stream_Id,
+            event_obj AS Event_Obj,
+            event_id AS Event_Id,
+            issue_id AS Issue_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp,
+            duration AS Duration
+        FROM "event_operations"
+        ORDER BY
+            guid ASC, start ASC, end DESC
+    """
+    write_sql_query_to_csv(importData, config, query, "gpu_events")
+
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
     write_counters_csv(importData, config)
+    write_event_operation_csv(importData, config)
     write_graph_launch_csv(importData, config)
     write_spm_counters_csv(importData, config)
     write_kernel_csv(importData, config)

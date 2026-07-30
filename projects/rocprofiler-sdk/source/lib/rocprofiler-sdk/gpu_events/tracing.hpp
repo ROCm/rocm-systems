@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,9 +54,11 @@ get_gpu_event_time(const queue_info_session_t& session, packet_data_t& packet_da
 void
 gpu_event_complete(queue_info_session_t& session, packet_data_t& packet_data, profiling_time);
 
-bool gpu_event_tracing(void);
+bool
+gpu_event_tracing();
 
-uint64_t get_gpu_event_id(void);
+uint64_t
+get_gpu_event_id();
 }  // namespace gpu_events
 }  // namespace rocprofiler
 
@@ -64,10 +66,9 @@ extern "C" {
 
 ROCPROFILER_API void
 hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
-                          uint64_t                      lib_version,
-                          uint64_t                      lib_instance,
-                          void**                        tables,
-                          uint64_t                      num_tables,
-                          void*                         user_data);
-
+                                    uint64_t                      lib_version,
+                                    uint64_t                      lib_instance,
+                                    void**                        tables,
+                                    uint64_t                      num_tables,
+                                    void*                         user_data);
 }

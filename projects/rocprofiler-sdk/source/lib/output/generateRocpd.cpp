@@ -1743,52 +1743,54 @@ write_rocpd(
         }
     };
 
-    auto insert_event_operation =
-        [&, node_id, this_pid]() {
-            auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_event_operation");
+    auto insert_event_operation = [&, node_id, this_pid]() {
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_event_operation");
 
-            for(auto pitr : gpu_event_gen)
+        for(auto pitr : gpu_event_gen)
+        {
+            auto _deferred = sql::deferred_transaction{db.conn};
+            for(auto itr : gpu_event_gen.get(pitr))
             {
-                auto _deferred = sql::deferred_transaction{db.conn};
-                for(auto itr : gpu_event_gen.get(pitr))
-                {
-                    // insert thread info if it doesn't already exist
-                    get_thread_id(itr.thread_id);
+                // insert thread info if it doesn't already exist
+                get_thread_id(itr.thread_id);
 
-                    auto kind = tool_metadata.buffer_names.at(itr.kind);
+                auto kind = tool_metadata.buffer_names.at(itr.kind);
 
-                    auto evt_id = create_event(
-                        db,
-                        {
-                            insert_value("category_id", string_entries.at(kind)),
-                            insert_value("stack_id", itr.correlation_id.internal),
-                            insert_value("parent_stack_id", itr.correlation_id.internal),
-                            insert_value("correlation_id", itr.correlation_id.external.value),
-                        });
+                auto evt_id = create_event(
+                    db,
+                    {
+                        insert_value("category_id", string_entries.at(kind)),
+                        insert_value("stack_id", itr.correlation_id.internal),
+                        insert_value("parent_stack_id", itr.correlation_id.internal),
+                        insert_value("correlation_id", itr.correlation_id.external.value),
+                    });
 
-                    auto type = itr.event_info.type_id == 1 ? std::string("WAIT") : std::string("SIGNAL");
+                auto type =
+                    itr.event_info.type_id == 1 ? std::string("WAIT") : std::string("SIGNAL");
 
-                    get_insert_statement(db,
-                        "rocpd_event_operation{{uuid}}",
-                        {
-                            insert_value("id", itr.event_info.issue_id),
-                            insert_value("nid", node_id),
-                            insert_value("pid", this_pid),
-                            insert_value("tid", itr.thread_id),
-                            insert_value("agent_id", tool_metadata.get_agent(itr.event_info.agent_id)->node_id),
-                            insert_value("event_obj", itr.event_info.event_id),
-                            insert_value("issue_id", itr.event_info.issue_id),
-                            insert_value("queue_id", get_queue_id(itr.event_info.queue_id)),
-                            insert_value("type", type),
-                            insert_value("stream_id", get_stream_id(itr.event_info.stream_id)),
-                            insert_value("type_id", itr.event_info.type_id),
-                            insert_value("start", itr.start_timestamp),
-                            insert_value("end", itr.end_timestamp),
-                            insert_value("event_id", evt_id),
-                        });
-                }
+                get_insert_statement(
+                    db,
+                    "rocpd_event_operation{{uuid}}",
+                    {
+                        insert_value("id", itr.event_info.issue_id),
+                        insert_value("nid", node_id),
+                        insert_value("pid", this_pid),
+                        insert_value("tid", itr.thread_id),
+                        insert_value("agent_id",
+                                     tool_metadata.get_agent(itr.event_info.agent_id)->node_id),
+                        insert_value("event_obj", itr.event_info.event_id),
+                        insert_value("issue_id", itr.event_info.issue_id),
+                        insert_value("queue_id", get_queue_id(itr.event_info.queue_id)),
+                        insert_value("type", type),
+                        insert_value("stream_id", get_stream_id(itr.event_info.stream_id)),
+                        insert_value("type_id", itr.event_info.type_id),
+                        insert_value("start", itr.start_timestamp),
+                        insert_value("end", itr.end_timestamp),
+                        insert_value("event_id", evt_id),
+                    });
             }
-        };
+        }
+    };
 
     auto insert_memory_copy_data =
         [&db, &tool_metadata, &string_entries, node_id, this_pid, &get_thread_id, &get_stream_id](

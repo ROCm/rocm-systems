@@ -571,40 +571,6 @@ FROM
     INNER JOIN `rocpd_info_thread` T ON T.id = G.tid
     AND T.guid = G.guid;
 
--- GPU event operation records
-CREATE VIEW IF NOT EXISTS
-    `event_operations` AS
-SELECT
-    EO.id,
-    EO.guid,
-    EO.nid,
-    P.pid,
-    T.tid,
-    A.absolute_index AS agent_abs_index,
-    A.logical_index AS agent_log_index,
-    A.type_index AS agent_type_index,
-    A.type AS agent_type,
-    EO.queue_id,
-    Q.name AS queue_name,
-    EO.type,
-    EO.start,
-    EO.end,
-    (EO.end - EO.start) AS duration,
-    EO.event_obj,
-    EO.event_id,
-    EO.type_id,
-    EO.issue_id,
-    EO.stream_id
-FROM
-    `rocpd_event_operation` EO
-    LEFT JOIN `rocpd_info_agent` A ON A.id = EO.agent_id
-    AND A.guid = EO.guid
-    LEFT JOIN `rocpd_info_queue` Q ON Q.id = EO.queue_id
-    AND Q.guid = EO.guid
-    INNER JOIN `rocpd_info_process` P ON P.id = EO.pid
-    AND P.guid = EO.guid
-    INNER JOIN `rocpd_info_thread` T ON T.id = EO.tid
-    AND T.guid = EO.guid;
 
 --
 --

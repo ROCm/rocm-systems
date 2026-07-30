@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@ namespace gpu_events
 {
 namespace
 {
-#define ROCPROFILER_GPU_EVENTS_INFO(CODE)                                                     \
+#define ROCPROFILER_GPU_EVENTS_INFO(CODE)                                                          \
     template <>                                                                                    \
     struct gpu_events_info<ROCPROFILER_##CODE>                                                     \
     {                                                                                              \
@@ -123,7 +123,7 @@ std::vector<const char*>
 get_names()
 {
     auto _data = std::vector<const char*>{};
-    _data.reserve(ROCPROFILER_KERNEL_DISPATCH_LAST);
+    _data.reserve(ROCPROFILER_GPU_EVENT_LAST);
     get_names(_data, std::make_index_sequence<ROCPROFILER_GPU_EVENT_LAST>{});
     return _data;
 }

@@ -67,6 +67,7 @@ def get_perfetto_category_name(category):
         "ROCDECODE_API_EXT": "rocdecode_api",
         "ROCSHMEM_API_EXT": "rocshmem_api",
         "HIPFILE_API_EXT": "hipfile_api",
+        "GPU_EVENTS": "gpu_events",
         "KFD_EVENT_PAGE_MIGRATE": "kfd_events",
         "KFD_EVENT_PAGE_FAULT": "kfd_events",
         "KFD_EVENT_QUEUE": "kfd_events",
@@ -207,6 +208,7 @@ def write_otf2(importData, config):
                             memory_unknown = defaultdict(list)
                             kernel_dispatches = defaultdict(list)
                             graph_launches = defaultdict(list)
+                            event_operations = defaultdict(list)
                             agents = {}
 
                             cursor = conn.cursor()
@@ -312,6 +314,28 @@ def write_otf2(importData, config):
                                         graph_exec_id,
                                         kernel_dispatch_count,
                                     )
+                                )
+
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                """SELECT tid, agent_id, queue_id, type,
+                                start, end, event_id
+                                FROM rocpd_event_operation WHERE guid = ? AND nid = ?
+                                AND pid = ? ORDER BY start ASC""",
+                                (guid, nid, pid),
+                            )
+                            for row in cursor:
+                                (
+                                    tid,
+                                    agent_id,
+                                    queue_id,
+                                    event_type,
+                                    start,
+                                    end,
+                                    event_id,
+                                ) = row
+                                event_operations[(tid, agent_id, queue_id)].append(
+                                    (start, end, event_type, event_id)
                                 )
 
                             cursor = conn.cursor()
@@ -479,6 +503,53 @@ def write_otf2(importData, config):
                                         )
                                     else:  # if event_type == "leave":
                                         graph_launch_writer.leave(timestamp, region)
+
+                            # Write GPU Event Operation Events
+                            for (
+                                tid,
+                                agent_id,
+                                queue_id,
+                            ), data in event_operations.items():
+                                agent_name, agent_location_group = agents.get(
+                                    agent_id, (f"Unknown Agent {agent_id}", None)
+                                )
+                                event_op_location = archive.definitions.location(
+                                    name=f"Thread {tid}, Event on {agent_name}, Queue {queue_id}",
+                                    type=LocationType.ACCELERATOR_STREAM,
+                                    group=(
+                                        agent_location_group
+                                        if agent_location_group
+                                        else cpu_location_group
+                                    ),
+                                )
+                                event_op_writer = otf2.writer.EventWriter(
+                                    archive, event_op_location
+                                )
+                                event_op_events = []
+                                for start, end, event_type, event_id in data:
+                                    region = archive.definitions.region(
+                                        name=event_type,
+                                        region_role=RegionRole.BARRIER,
+                                        paradigm=Paradigm.HIP,
+                                    )
+                                    attributes = {perfetto_category: "gpu_events"}
+                                    event_op_events.append(
+                                        (start, "enter", region, attributes)
+                                    )
+                                    event_op_events.append((end, "leave", region, None))
+                                event_op_events.sort(key=lambda x: x[0])
+                                for (
+                                    timestamp,
+                                    ev_type,
+                                    region,
+                                    attributes,
+                                ) in event_op_events:
+                                    if ev_type == "enter":
+                                        event_op_writer.enter(
+                                            timestamp, region, attributes=attributes
+                                        )
+                                    else:
+                                        event_op_writer.leave(timestamp, region)
 
                             # Write Memory Allocation Events
                             for (tid, agent_id), data in memory_allocations.items():

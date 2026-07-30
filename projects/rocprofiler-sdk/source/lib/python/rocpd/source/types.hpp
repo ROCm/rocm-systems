@@ -394,6 +394,30 @@ struct graph_launch
     uint64_t                corr_id               = 0;
 };
 
+struct event_operation
+{
+    uint64_t                id               = 0;
+    guid_t                  guid             = {};
+    pid_t                   nid              = 0;
+    pid_t                   pid              = 0;
+    pid_t                   tid              = 0;
+    uint64_t                agent_abs_index  = 0;
+    uint64_t                agent_log_index  = 0;
+    uint64_t                agent_type_index = 0;
+    std::string             agent_type       = {};
+    uint64_t                queue_id         = 0;
+    std::string             queue_name       = {};
+    std::string             type             = {};
+    rocprofiler_timestamp_t start            = 0;
+    rocprofiler_timestamp_t end              = 0;
+    uint64_t                duration         = 0;
+    uint64_t                event_obj        = 0;
+    uint64_t                event_id         = 0;
+    uint64_t                type_id          = 0;
+    uint64_t                issue_id         = 0;
+    uint64_t                stream_id        = 0;
+};
+
 struct scratch_memory
 {
     guid_t                  guid             = {};
@@ -886,6 +910,32 @@ load(ArchiveT& ar, rocpd::types::graph_launch& data)
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
     LOAD_DATA_FIELD(corr_id);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocpd::types::event_operation& data)
+{
+    LOAD_DATA_FIELD(id);
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(nid);
+    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(tid);
+    LOAD_DATA_FIELD(agent_abs_index);
+    LOAD_DATA_FIELD(agent_log_index);
+    LOAD_DATA_FIELD(agent_type_index);
+    LOAD_DATA_FIELD(agent_type);
+    LOAD_DATA_FIELD(queue_id);
+    LOAD_DATA_FIELD(queue_name);
+    LOAD_DATA_FIELD(type);
+    LOAD_DATA_FIELD(start);
+    LOAD_DATA_FIELD(end);
+    LOAD_DATA_FIELD(duration);
+    LOAD_DATA_FIELD(event_obj);
+    LOAD_DATA_FIELD(event_id);
+    LOAD_DATA_FIELD(type_id);
+    LOAD_DATA_FIELD(issue_id);
+    LOAD_DATA_FIELD(stream_id);
 }
 
 template <typename ArchiveT>

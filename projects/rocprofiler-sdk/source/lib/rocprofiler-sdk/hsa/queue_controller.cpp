@@ -685,9 +685,9 @@ enable_queue_intercept()
 
         bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
- 
+
         bool has_events_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS) ||
-                                  itr->is_tracing(ROCPROFILER_BUFFER_TRACING_GPU_EVENTS);
+                                    itr->is_tracing(ROCPROFILER_BUFFER_TRACING_GPU_EVENTS);
 
         // Keep interception active for HIP_GRAPH subscribers (drives kernel_dispatch_count).
         bool has_hip_graph_tracing = itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH);
@@ -707,7 +707,9 @@ context_needs_queue_interposition_tracing(const context::context* ctx)
     return ctx != nullptr && ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                                     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                                     ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
-                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                                    ROCPROFILER_CALLBACK_TRACING_GPU_EVENTS,
+                                                    ROCPROFILER_BUFFER_TRACING_GPU_EVENTS);
 }
 
 void
