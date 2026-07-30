@@ -485,12 +485,11 @@ pub struct RunArgs {
     /// can pin its own device.
     #[arg(long, visible_alias = "nproc_per_node")]
     nproc_per_node: Option<u32>,
-    /// Reuse an existing session by id.
-    #[arg(long, conflicts_with_all = ["keep_session"])]
-    session: Option<SessionId>,
-    /// Keep the session running after the exec finishes.
-    #[arg(long)]
-    keep_session: bool,
+    // No `--session` or `--keep-session`. A run *is* its session: it
+    // creates one, owns it, and destroys it on the way out, so there is
+    // neither an existing session to reuse nor a way to leave one behind.
+    // Both flags used to be declared here and silently ignored by
+    // `run_cmd`. Use `mirage exec` to join a run that is already up.
     /// Working directory.
     #[arg(long)]
     workdir: Option<String>,
@@ -1420,12 +1419,18 @@ async fn purge(all: bool) -> anyhow::Result<()> {
     // A live run is left alone deliberately. Killing someone else's
     // foreground command from a state-cleanup subcommand would be a
     // surprise, and the user can stop it with Ctrl-C in its own terminal.
-    let live = run::live_run_count();
-    if live > 0 {
+    // Only runs that *answer* count. `live_runs` lists socket files, and a
+    // file outlives a `SIGKILL`ed run — so counting those would make purge
+    // refuse to run in exactly the situation it exists for. Corpse sockets
+    // are unlinked on the way past.
+    let live = run::answering_runs().await;
+    if !live.is_empty() {
         anyhow::bail!(
-            "{live} `mirage run` process(es) are still running. \
+            "{} `mirage run` process(es) are still running ({}). \
              Stop them first: each one owns its session and cleans up \
-             when it exits."
+             when it exits.",
+            live.len(),
+            live.iter().map(SessionId::as_str).collect::<Vec<_>>().join(", "),
         );
     }
 
