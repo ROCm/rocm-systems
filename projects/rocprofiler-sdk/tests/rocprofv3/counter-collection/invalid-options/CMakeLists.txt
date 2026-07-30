@@ -43,9 +43,8 @@ set(_NOOP_APPLICATION ${CMAKE_COMMAND} -E true)
 # Conflict: --pmc on the command line + pmc_groups from an input file
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-cli-pmc-with-input-pmc-groups-will-fail
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --input
-        ${CMAKE_CURRENT_BINARY_DIR}/pmc_groups.json -- ${_NOOP_APPLICATION}
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --input
+            ${CMAKE_CURRENT_BINARY_DIR}/pmc_groups.json -- ${_NOOP_APPLICATION}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;counter-collection"
@@ -55,9 +54,8 @@ rocprofiler_add_integration_execute_test(
 # Conflict: SPM + pmc counter collection
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-spm-with-pmc-will-fail
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled --spm SQ_WAVES --pmc
-        SQ_WAVES -- ${_NOOP_APPLICATION}
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled --spm SQ_WAVES
+            --pmc SQ_WAVES -- ${_NOOP_APPLICATION}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;counter-collection"
@@ -68,9 +66,8 @@ rocprofiler_add_integration_execute_test(
 # Conflict: multi-pass counter collection + --collection-period
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-multipass-with-collection-period-will-fail
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --pmc GRBM_COUNT
-        --collection-period 0:1:1 -- ${_NOOP_APPLICATION}
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --pmc GRBM_COUNT
+            --collection-period 0:1:1 -- ${_NOOP_APPLICATION}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;counter-collection"
@@ -80,9 +77,8 @@ rocprofiler_add_integration_execute_test(
 # Conflict: multi-pass counter collection + attach mode
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-multipass-with-pid-will-fail
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --pmc GRBM_COUNT --pid
-        99999999 -- ${_NOOP_APPLICATION}
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --pmc GRBM_COUNT
+            --pid 99999999 -- ${_NOOP_APPLICATION}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;counter-collection"
