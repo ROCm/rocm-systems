@@ -4,101 +4,54 @@
 #pragma once
 
 /// @file
-/// This provides generic functionality for constraining data collection within
-/// a windows of time. E.g., delay, delay + duration, (delay + duration) * nrepeat
+/// Constrains data collection to configurable time windows.
+/// Each window is defined by a delay before collection begins and a
+/// duration for how long it runs. `spec::repeat` is parsed from
+/// ROCPROFSYS_TRACE_PERIODS but not yet consumed - only the first
+/// configured window is currently wired into a running time_window trigger;
+/// repeating/multi-window scheduling is not yet implemented.
 ///
-/// @todo Migrate delay/duration for sampling, process sampling, and causal profiling
-/// to use this
+/// The clock governing all windows is set once via
+/// ROCPROFSYS_TRACE_PERIOD_CLOCK_ID:
+///   "realtime" (default) — wall-clock time (std::chrono::steady_clock)
+///   "cputime"            — process CPU time (CLOCK_PROCESS_CPUTIME_ID)
 ///
+/// @todo Migrate delay/duration for process sampling and causal profiling
+///       to this model (sampling delay/duration already wired; causal deferred).
 
 #include "common/defines.h"
 
 #include <cstdint>
 #include <ctime>
-#include <functional>
-#include <set>
-#include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofsys
 {
 namespace constraint
 {
-struct spec;
-
-struct stages
-{
-    using functor_t = std::function<bool(const spec&)>;
-
-    stages();
-
-    stages(const stages&)                = default;
-    stages(stages&&) noexcept            = default;
-    stages& operator=(const stages&)     = default;
-    stages& operator=(stages&&) noexcept = default;
-
-    functor_t init    = [](const spec&) { return true; };
-    functor_t wait    = [](const spec&) { return true; };
-    functor_t start   = [](const spec&) { return true; };
-    functor_t collect = [](const spec&) { return true; };
-    functor_t stop    = [](const spec&) { return true; };
-};
-
-struct clock_identifier
-{
-    int              value    = -1;
-    std::string_view raw_name = {};
-    std::string      name     = {};
-
-    clock_identifier();
-    clock_identifier(std::string_view, int);
-
-    clock_identifier(const clock_identifier&)                = default;
-    clock_identifier(clock_identifier&&) noexcept            = default;
-    clock_identifier& operator=(const clock_identifier&)     = default;
-    clock_identifier& operator=(clock_identifier&&) noexcept = default;
-
-    std::string as_string() const;
-
-    bool operator<(const clock_identifier& _rhs) const;
-    bool operator==(const clock_identifier& _rhs) const;
-    bool operator==(int _rhs) const;
-    bool operator==(std::string _rhs) const;
-
-    friend std::ostream& operator<<(std::ostream& _os, const clock_identifier& _v)
-    {
-        return (_os << _v.as_string());
-    }
-};
-
 struct spec
 {
-    spec(int, double, double, std::uint64_t = 0, std::uint64_t = 1);
-    spec(clock_identifier, double, double, std::uint64_t = 0, std::uint64_t = 1);
-    spec(const std::string&, double, double, std::uint64_t = 0, std::uint64_t = 1);
-    spec(const std::string&);
-
-    spec(const spec&)                = default;
-    spec(spec&&) noexcept            = default;
-    spec& operator=(const spec&)     = default;
-    spec& operator=(spec&&) noexcept = default;
-
-    void operator()(const stages&) const;
-
-    double           delay    = 0.0;
-    double           duration = 0.0;
-    std::uint64_t    count    = 0;
-    std::uint64_t    repeat   = 1;
-    clock_identifier clock_id = {};
+    double        delay    = 0.0;
+    double        duration = 0.0;
+    std::uint64_t repeat   = 1;
 };
 
-const std::set<clock_identifier>&
-get_valid_clock_ids();
+[[nodiscard]] spec
+parse_trace_period_entry(std::string_view entry, double default_delay,
+                         double default_duration);
+
+[[nodiscard]] std::vector<spec>
+parse_trace_periods(std::string_view periods, double default_delay,
+                    double default_duration);
+
+[[nodiscard]] clockid_t
+parse_trace_period_clock_id(std::string_view clock_id_str);
 
 std::vector<spec>
 get_trace_specs();
 
-stages
-get_trace_stages();
+[[nodiscard]] clockid_t
+get_trace_period_clock_id();
 }  // namespace constraint
 }  // namespace rocprofsys
