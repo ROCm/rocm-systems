@@ -24,10 +24,9 @@ Profiling with ROCm Compute Profiler provides the following benefits:
 * :ref:`Automate counter collection <profiling-routine>`: ROCm Compute Profiler handles all
   of your profiling via pre-configured input files.
 
-* :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profiler can control
-  the output format of raw performance counter data produced by the underlying
-  :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend. Supported output formats are
-  ``csv`` and ``rocpd``. The default output format is ``rocpd``.
+* :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profiler writes
+  raw performance counter data produced by the underlying
+  :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend in ``rocpd`` format.
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
   process.
 
@@ -330,8 +329,8 @@ Examples:
     ├── roofline.csv
     └── sysinfo.csv
 
-The output files use the default ``rocpd`` format. See :ref:`profiling-output-format` for details
-on available output formats and when the final ``pmc_perf.csv`` is created.
+The output files use ``rocpd`` format. See :ref:`profiling-output-format` for
+details on when the final ``pmc_perf.csv`` is created.
 
 * Profiling with MPI at host ``amd-ryzen``:
 
@@ -383,20 +382,13 @@ on available output formats and when the final ``pmc_perf.csv`` is created.
 Profiling output format
 -----------------------
 
-Use the ``--format-rocprof-output <format>`` profile mode option to specify the output format
-of raw performance counter data produced by the underlying
-:doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend. The following formats are supported:
+Raw performance counter data produced by the underlying
+:doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend is written in ``rocpd``
+(SQLite) format:
 
-* ``csv`` format:
-   * Instructs ROCprofiler-SDK to write raw performance counter data in CSV format.
-   * Generates separate CSV files for each profiling run (``pmc_perf_0.csv``, ``pmc_perf_1.csv``, ``SQ_*.csv``, etc.) in the workload directory.
-   * These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
-
-* ``rocpd`` format (default):
-   * Instructs ROCprofiler-SDK to write raw performance counter data in rocpd (SQLite) format.
-   * The rocpd database files are converted to CSV files (``results_pmc_perf_0.csv``, ``results_pmc_perf_SQ_*.csv``, etc.) for each profiling run, after which the database files are removed.
-   * These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
-   * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
+* The rocpd database files are converted to CSV files (``results_pmc_perf_0.csv``, ``results_pmc_perf_SQ_*.csv``, etc.) for each profiling run, after which the database files are removed.
+* These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
+* Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 
 .. note::
 

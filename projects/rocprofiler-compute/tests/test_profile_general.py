@@ -657,14 +657,10 @@ def test_path_rocpd(
     binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
 ):
     workload_dir = common.get_output_dir()
-    options = ["--format-rocprof-output", "rocpd"]
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+    binary_handler_profile_rocprof_compute(config, workload_dir)
 
     # Validate profile outputs (results_*.csv for rocpd format)
     common.check_csv_files(workload_dir, num_devices, num_kernels)
-    assert common.check_file_pattern(
-        "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
-    )
 
     # Run analyze to create merged pmc_perf.csv
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
@@ -672,22 +668,6 @@ def test_path_rocpd(
 
     # Validate merged pmc_perf.csv content
     assert common.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.path
-def test_path_csv(
-    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
-):
-    workload_dir = common.get_output_dir()
-    options = ["--format-rocprof-output", "csv"]
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
-
-    file_dict = common.check_csv_files(workload_dir, num_devices, num_kernels)
-    assert sorted(list(file_dict.keys())) == sorted(["sysinfo.csv"])
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1063,15 +1043,12 @@ def test_roof_rocpd(
     skip_unsupported_roofline_soc()
 
     workload_dir = common.get_output_dir()
-    options = ["--device", "0", "--roof-only", "--format-rocprof-output", "rocpd"]
+    options = ["--device", "0", "--roof-only"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
     # Validate profile outputs
     common.check_csv_files(workload_dir, num_devices, num_kernels)
     assert (Path(workload_dir) / "roofline.csv").exists()
-    assert common.check_file_pattern(
-        "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
-    )
 
     # Run analyze to create merged pmc_perf.csv
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
@@ -1090,7 +1067,7 @@ def test_analyze_rocpd(
     skip_unsupported_roofline_soc()
 
     workload_dir = common.get_output_dir()
-    options = ["--device", "0", "--format-rocprof-output", "rocpd"]
+    options = ["--device", "0"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
     db_name = "test"
@@ -1156,8 +1133,7 @@ def test_save_csv(
 ):
     workload_dir = common.get_output_dir(param_id="profile")
     analysis_workload_dir = common.get_output_dir(param_id="analysis")
-    options = ["--format-rocprof-output", "rocpd"]
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+    binary_handler_profile_rocprof_compute(config, workload_dir)
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -2129,17 +2105,14 @@ def test_comprehensive_error_paths():
 
 
 @pytest.mark.live_attach_detach
-@pytest.mark.parametrize("profile_format", ["rocpd", "csv"])
 def test_live_attach_detach_block(
-    binary_handler_profile_rocprof_compute, profile_format
+    binary_handler_profile_rocprof_compute,
 ):
     options = [
         "--block",
         "3.1.1",
         "4.1.1",
         "5.1.1",
-        "--format-rocprof-output",
-        profile_format,
     ]
     workload_dir = common.get_output_dir()
 
