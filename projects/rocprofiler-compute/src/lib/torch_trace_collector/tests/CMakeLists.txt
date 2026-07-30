@@ -34,10 +34,14 @@ if(_openblas_dir)
 endif()
 list(JOIN _test_ld_paths ":" _test_ld_path)
 
-set_target_properties(
-    ${target}
-    PROPERTIES ROCPROF_TEST_LD_LIBRARY_PATH "${_test_ld_path}"
+# add_test() is issued from the top-level CMakeLists so the YAML category
+# labels, applied in that directory scope, can reach the test.
+set(TORCH_TRACE_COLLECTOR_TEST_LD_PATH
+    "${_test_ld_path}"
+    CACHE INTERNAL
+    "LD_LIBRARY_PATH entries required to run ${target}."
 )
+
 
 if(INSTALL_TESTS)
     install(

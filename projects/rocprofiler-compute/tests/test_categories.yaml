@@ -65,6 +65,7 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-torch-trace-collector
       - test-compression
       - test-torch-trace-collector
     therock_ci_exclude:
@@ -155,6 +156,7 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-torch-trace-collector
       - test-compression
       - test-torch-trace-collector
       - test_profile_torch_trace
@@ -249,6 +251,7 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-torch-trace-collector
       - test-compression
       - test-torch-trace-collector
       - test_profile_torch_trace
@@ -343,6 +346,7 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-torch-trace-collector
       - test-compression
       - test-torch-trace-collector
       - test_profile_torch_trace
