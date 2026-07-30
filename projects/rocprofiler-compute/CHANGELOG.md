@@ -7,17 +7,24 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added multi-process PC sampling across profile and analyze modes.
+  * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` file per process, and analyze mode combines those files into a single analysis.
+
 ### Changed
 
 * ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
 
 * Deprecated the `--join-type` profile mode option; it no longer has any effect and will be removed in a future release.
 
+* Changed PC sampling database output to include a process ID for each PC sampling dispatch.
+
 ### Removed
 
 * Removed the CSV profile output backend and the `--format-rocprof-output` profile mode option. Profiling now always uses the `rocpd` output format, which was already the default.
 
 * Removed analyze support for workloads produced by the CSV profile backend. Such workloads are now rejected with an error telling you to re-profile with a current release.
+
+* Removed analyze support for unprefixed or PID-less PC sampling result files; affected workloads must be re-profiled.
 
 ### Optimized
 
@@ -75,19 +82,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed CDNA memory chart CLI output to show the numbered `3. Memory Chart` header without repeating the default per-kernel normalization label.
 
 ### Upcoming changes
-
-#### Added
-
-* Added multi-process PC sampling support across profile and analyze modes.
-  * Profile mode writes PID-prefixed `<pid>_ps_file_results.json` files, keeping each process's results associated with its code-object data.
-  * Analyze mode combines all PID-scoped results into a unified PC sampling result.
-
-#### Changed
-
-* Changed PC sampling analysis database and dispatch CSV output to include a nullable `pid` field.
-  * Dispatch identity now includes the process ID, preserving dispatches that reuse the same kernel and dispatch ID in different processes.
-
-* Changed the analysis database schema version to `2.1.0` for PID-scoped dispatch records.
 
 ### Known issues
 
