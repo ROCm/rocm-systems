@@ -56,10 +56,6 @@ message("")
 # re-running cmake.
 file(GLOB_RECURSE unitSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
 file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
-if(NOT ENABLE_WSL_BACKEND)
-    list(FILTER unitSources EXCLUDE REGEX "/unit/wsl/")
-    list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
-endif()
 
 set(TEST "amdsmitst")
 
@@ -87,15 +83,6 @@ target_include_directories(
 
 # Absolute path to the committed mock CPER fixtures (unit/gpu/mock_cper).
 target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/gpu/mock_cper")
-
-if(ENABLE_WSL_BACKEND)
-    target_compile_definitions(${TEST} PRIVATE ENABLE_WSL_BACKEND)
-    target_include_directories(${TEST} PRIVATE ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
-    find_library(ROCDXG_LIB rocdxg)
-    if(ROCDXG_LIB)
-        target_link_libraries(${TEST} ${ROCDXG_LIB})
-    endif()
-endif()
 target_link_libraries(
     ${TEST}
     ${AMD_SMI_TARGET}
