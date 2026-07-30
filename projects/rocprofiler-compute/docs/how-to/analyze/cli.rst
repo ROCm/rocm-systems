@@ -598,14 +598,12 @@ format is ``stdout``.
    * NOTE: This option will disable output of analysis report to terminal.
 
 * ``csv`` format:
-   * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
    * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
    * This folder contains one CSV file per view defined in the :ref:`analysis database schema <analysis-database>`.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 
 * ``db`` format:
-   * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
    * Generate a file named ``rocprof_compute_<uuid>.db`` in the current working directory.
    * This is a SQLite database file containing all the data in the analysis report structured according to :ref:`analysis database schema <analysis-database>`.
    * This is useful for further programmatic analysis of analysis reports.

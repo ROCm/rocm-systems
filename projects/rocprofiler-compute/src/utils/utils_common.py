@@ -36,6 +36,7 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
+PROFILE_OUTPUT_FORMAT = "rocpd"
 
 # Shared suffix for the invalid --block error in the profile and analyze paths.
 INVALID_BLOCK_HINT = (

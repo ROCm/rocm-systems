@@ -382,12 +382,11 @@ def create_df_pmc(
     raw_data_dir: str,
     kernel_verbose: int,
     verbose: int,
-    config_dict: dict[str, Any],
 ) -> pd.DataFrame:
     """Load all raw pmc counters and join into one dataframe."""
     # Single responsibility: load counters into a DataFrame and return it.
     df = pd.read_csv(Path(raw_data_dir) / "pmc_perf.csv")
-    if config_dict.get("format_rocprof_output") == "rocpd":
+    if {"Counter_Name", "Counter_Value"}.issubset(df.columns):
         df = utils_analysis.process_rocpd_csv(df)
     kernel_name_shortener(df, kernel_verbose)
     return df

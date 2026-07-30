@@ -11,9 +11,17 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
 
+* Deprecated the `--join-type` profile mode option; it no longer has any effect and will be removed in a future release.
+
 ### Removed
 
+* Removed the CSV profile output backend and the `--format-rocprof-output` profile mode option. Profiling now always uses the `rocpd` output format, which was already the default.
+
+* Removed analyze support for workloads produced by the CSV profile backend. Such workloads are now rejected with an error telling you to re-profile with a current release.
+
 ### Optimized
+
+* Reduced profile-mode peak memory when writing counter data on large workloads.
 
 ### Resolved issues
 
