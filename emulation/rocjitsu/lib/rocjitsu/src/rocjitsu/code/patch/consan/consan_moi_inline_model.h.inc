@@ -2,7 +2,7 @@ struct alignas(8) ConSanMoiInlineExactShadowSlot {
   uint64_t packed_access = 0;
   uint64_t dispatch_id = 0;
   uint32_t version = 0;
-  uint32_t reserved = 0;
+  uint32_t byte_provenance = 0;
 };
 
 static_assert(sizeof(ConSanMoiInlineExactShadowSlot) == 24);

@@ -2595,9 +2595,9 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
       << "the stable full-token reader replaces unconditional legacy suppression disablement";
 
   // The access-time token reader runs inside the wave-coalesced address
-  // partition loop. scratch+7..scratch+10 are the loop's live saved address
-  // and packed current value, so token fields must use the diagnostic-only
-  // tail instead of corrupting the next address partition.
+  // partition loop. scratch+7..scratch+12 are the loop's live saved address,
+  // packed current value, and exact-byte provenance, so token fields must use
+  // the diagnostic-only tail instead of corrupting the next partition.
   for (const auto &[offset, destination] : std::array<std::pair<size_t, uint16_t>, 12>{
            {{offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key), temporary},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id), temporary},
@@ -2609,14 +2609,14 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) + sizeof(uint32_t),
              temporary},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
-             scratch + 12u},
+             scratch + 21u},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) +
                  sizeof(uint32_t),
-             scratch + 13u},
+             scratch + 22u},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
              scratch + 18u},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
-             scratch + 11u},
+             scratch + 14u},
             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version), temporary}}}) {
     EXPECT_TRUE(
         contains_subsequence(words, make_expected_offset_load_words(offset, destination, scratch)))

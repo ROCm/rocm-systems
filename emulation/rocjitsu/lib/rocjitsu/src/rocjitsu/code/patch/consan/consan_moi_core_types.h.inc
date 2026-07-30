@@ -392,12 +392,14 @@ enum class ConSanMoiReportLayoutFlag : uint32_t {
   VersionedInlineExactShadow = 1u << 0u,
   DispatchQualifiedInlineMetadata = 1u << 1u,
   InlineCausalSnapshots = 1u << 2u,
+  InlineExactByteProvenance = 1u << 3u,
 };
 
 inline constexpr uint32_t kConSanMoiReportKnownLayoutFlags =
     static_cast<uint32_t>(ConSanMoiReportLayoutFlag::VersionedInlineExactShadow) |
     static_cast<uint32_t>(ConSanMoiReportLayoutFlag::DispatchQualifiedInlineMetadata) |
-    static_cast<uint32_t>(ConSanMoiReportLayoutFlag::InlineCausalSnapshots);
+    static_cast<uint32_t>(ConSanMoiReportLayoutFlag::InlineCausalSnapshots) |
+    static_cast<uint32_t>(ConSanMoiReportLayoutFlag::InlineExactByteProvenance);
 
 [[nodiscard]] constexpr uint64_t
 consan_moi_default_auto_report_buffer_size(ConSanMoiEngine engine) {

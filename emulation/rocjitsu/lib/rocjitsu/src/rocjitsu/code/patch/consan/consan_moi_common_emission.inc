@@ -185,7 +185,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 
 [[nodiscard]] std::optional<ConSanMoiWorkgroupShadowLayout> common_moi_workgroup_shadow_layout(
     std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
-    const ConSanOptions &options, std::vector<std::string> &warnings, bool prefer_compact = false) {
+    const ConSanOptions &options, std::vector<std::string> &warnings) {
   std::optional<ConSanMoiWorkgroupShadowLayout> common;
   const uint32_t max_workgroup_lds_bytes = consan_moi_max_workgroup_lds_bytes(options, arch);
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
@@ -202,46 +202,15 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
           "ConSan MOI workgroup shadow requires fixed LDS that fits with its exact mirror");
       return std::nullopt;
     }
-    // RDNA4 LDS contents are not guaranteed to begin zeroed, and dispatch IDs
-    // are queue-local: concurrent processes can reuse both an LDS allocation
-    // and the same bounded generation. Clear a compact validity bitmap at
-    // entry and initialize exact cells on first use. If the bitmap does not
-    // fit, retain the full-width layout and clear its mirror eagerly.
-    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    // Exact-byte provenance uses the canonical full-width cell on every
+    // target. RDNA4 can avoid clearing that mirror eagerly when its packed
+    // validity bitmap also fits. Other targets retain the full eager layout;
+    // if that layout does not fit, the caller uses the semantically equivalent
+    // external exact-shadow table.
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) {
       if (auto lazy_layout = plan_consan_moi_lazy_workgroup_shadow(
               descriptor.group_segment_fixed_size, max_workgroup_lds_bytes)) {
         layout = lazy_layout;
-      }
-    }
-    // A near-capacity exact mirror is still useful when either its cells are
-    // compacted or its eager clear is replaced by a validity bitmap. Preserve
-    // exact local identity and select the representation requested by the
-    // object-wide planner.
-    constexpr uint32_t kGfx1250PreferredLocalShadowLimit = 48u * 1024u;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
-      // LDS is reusable storage whose initial contents are unspecified. Make
-      // CDNA validity explicit in each exact cell instead of depending on a
-      // workgroup-wide eager clear before the instrumented program starts.
-      layout = plan_consan_moi_generation_tagged_workgroup_shadow(
-          descriptor.group_segment_fixed_size, max_workgroup_lds_bytes);
-      if (!layout) {
-        warnings.emplace_back("ConSan MOI CDNA generation-tagged workgroup shadow does not fit in "
-                              "architectural LDS");
-        return std::nullopt;
-      }
-    } else if (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-               layout->required_group_segment_size > kGfx1250PreferredLocalShadowLimit) {
-      layout = consan_moi_prefer_generation_tagged_workgroup_shadow(
-                   descriptor.group_segment_fixed_size, prefer_compact)
-                   ? plan_consan_moi_generation_tagged_workgroup_shadow(
-                         descriptor.group_segment_fixed_size, max_workgroup_lds_bytes)
-                   : plan_consan_moi_compact_workgroup_shadow(descriptor.group_segment_fixed_size,
-                                                              max_workgroup_lds_bytes);
-      if (!layout) {
-        warnings.emplace_back(
-            "ConSan MOI gfx1250 generation-tagged/compact workgroup shadow does not fit in "
-            "architectural LDS");
-        return std::nullopt;
       }
     }
     const auto workitem_id_dimensions = moi_descriptor_workitem_id_dimensions(descriptor);

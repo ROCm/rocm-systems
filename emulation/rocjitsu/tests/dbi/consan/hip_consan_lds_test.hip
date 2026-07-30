@@ -38,6 +38,7 @@ int main(int argc, char **argv) {
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_dword v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED "flat_store_dword v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_byte v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_V_ADD_U32 "v_add_u32 v0, v0, %[offset]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B8 "flat_store_byte_d16_hi v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B16 "flat_store_short_d16_hi v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_B16 "flat_load_short_d16_hi %0, v[0:1]\n\t"
@@ -53,6 +54,7 @@ int main(int argc, char **argv) {
 #define RJ_CONSAN_TEST_FLAT_STORE_B32 "flat_store_b32 v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_B32_NAMED "flat_store_b32 v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 "flat_store_b8 v[0:1], %0\n\t"
+#define RJ_CONSAN_TEST_V_ADD_U32 "v_add_nc_u32 v0, v0, %[offset]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B8 "flat_store_d16_hi_b8 v[0:1], %[value]\n\t"
 #define RJ_CONSAN_TEST_FLAT_STORE_HIGH_B16 "flat_store_d16_hi_b16 v[0:1], %0\n\t"
 #define RJ_CONSAN_TEST_FLAT_LOAD_HIGH_B16 "flat_load_d16_hi_b16 %0, v[0:1]\n\t"
@@ -521,6 +523,65 @@ __device__ __forceinline__ void padded_flat_low_b8_store(uint32_t value) {
                : "s14", "s15", "v0", "v1", "memory");
 }
 
+__device__ __forceinline__ void padded_flat_low_b8_store_at(uint32_t byte_offset, uint32_t value) {
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t" RJ_CONSAN_TEST_V_ADD_U32
+                   RJ_CONSAN_TEST_FLAT_STORE_LOW_B8 RJ_CONSAN_TEST_NOP_CAVE
+               :
+               : [offset] "v"(byte_offset), "v"(value)
+               : "s14", "s15", "v0", "v1", "vcc", "memory");
+}
+
+__device__ __forceinline__ void padded_exact_byte_pair(bool adjacent) {
+  // CDNA cannot grow an ordinary VGPR allocation through the accumulator
+  // boundary. Keep one otherwise dead ordinary register declared so the
+  // production liveness planner has a legal instrumentation window on every
+  // supported target.
+  asm volatile("v_mov_b32 v20, 0" ::: "v20");
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  if (tid != 0 && tid != 64)
+    return;
+  const uint32_t byte_offset = adjacent && tid == 64 ? 1u : 0u;
+  padded_flat_low_b8_store_at(byte_offset, tid == 0 ? 0x11u : 0x22u);
+}
+
+__global__ __launch_bounds__(128) void padded_inline_exact_local_adjacent_bytes(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  padded_exact_byte_pair(/*adjacent=*/true);
+  __syncthreads();
+  if (threadIdx.x == 0)
+    out[0] = 0x1a11u;
+}
+
+__global__ __launch_bounds__(128) void padded_inline_exact_local_overlapping_byte(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  padded_exact_byte_pair(/*adjacent=*/false);
+  __syncthreads();
+  if (threadIdx.x == 0)
+    out[0] = 0x1a22u;
+}
+
+__global__ __launch_bounds__(128) void padded_inline_exact_external_adjacent_bytes(uint32_t *out) {
+  extern __shared__ uint32_t lds[];
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  padded_exact_byte_pair(/*adjacent=*/true);
+  __syncthreads();
+  if (threadIdx.x == 0)
+    out[0] = 0x1e11u;
+}
+
+__global__ __launch_bounds__(128) void padded_inline_exact_external_overlapping_byte(uint32_t *out) {
+  extern __shared__ uint32_t lds[];
+  asm volatile("" : : "v"(&lds[0]) : "memory");
+  padded_exact_byte_pair(/*adjacent=*/false);
+  __syncthreads();
+  if (threadIdx.x == 0)
+    out[0] = 0x1e22u;
+}
+
 __device__ __forceinline__ void padded_flat_high_b16_store(uint32_t value) {
   asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
                "v_mov_b32 v0, s14\n\t"
@@ -752,6 +813,58 @@ TEST(ConSanLdsTest, PaddedHighHalfD16FlatStoresProduceExpectedResults) {
   EXPECT_EQ(out[1], 0xAAAABEEFu);
   EXPECT_EQ(out[2], 1u);
   EXPECT_EQ(out[3], 0xAAAA55EFu);
+}
+
+TEST(ConSanLdsTest, InlineExactLocalAdjacentBytesStayIndependent) {
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
+  padded_inline_exact_local_adjacent_bytes<<<1, 128>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out, 0x1a11u);
+}
+
+TEST(ConSanLdsTest, InlineExactLocalOverlappingByteCompletes) {
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
+  padded_inline_exact_local_overlapping_byte<<<1, 128>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out, 0x1a22u);
+}
+
+TEST(ConSanLdsTest, InlineExactExternalAdjacentBytesStayIndependent) {
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
+  padded_inline_exact_external_adjacent_bytes<<<1, 128, sizeof(uint32_t)>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out, 0x1e11u);
+}
+
+TEST(ConSanLdsTest, InlineExactExternalOverlappingByteCompletes) {
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
+  padded_inline_exact_external_overlapping_byte<<<1, 128, sizeof(uint32_t)>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out, 0x1e22u);
 }
 
 TEST(ConSanLdsTest, PaddedRacyStoreCompletesOrTripsDbiTrap) {

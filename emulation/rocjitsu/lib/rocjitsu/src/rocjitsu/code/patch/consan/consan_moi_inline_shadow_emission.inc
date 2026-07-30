@@ -6,9 +6,14 @@
     bool special_state_already_saved = false,
     std::optional<uint16_t> diagnostic_lane_mask_sgpr = std::nullopt,
     bool capture_first_diagnostic_only = false, bool compact_local_shadow = false,
-    bool workgroup_local_shadow = false, bool generation_tagged_local_shadow = false) {
+    bool workgroup_local_shadow = false, bool generation_tagged_local_shadow = false,
+    std::optional<uint16_t> prior_byte_provenance_vgpr = std::nullopt,
+    std::optional<uint16_t> current_byte_provenance_vgpr = std::nullopt,
+    std::optional<uint16_t> relative_cell_index_vgpr = std::nullopt) {
   if (!options.moi_exec_save_sgpr || layout.diagnostic_capacity == 0)
     return true;
+  if (prior_byte_provenance_vgpr.has_value() != current_byte_provenance_vgpr.has_value())
+    return false;
 
   const uint16_t tmp_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
   const uint64_t report_base = *options.moi_report_buffer_address;
@@ -94,9 +99,35 @@
       return false;
   }
 
+  if (prior_byte_provenance_vgpr) {
+    const auto prior_byte_mask = instrumentation::build_v_and_b32_literal(
+        tmp_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, *prior_byte_provenance_vgpr, arch);
+    const auto current_byte_mask = instrumentation::build_v_and_b32_literal(
+        current_field_vgpr, consan_moi_exact_byte_cell::byte_mask_mask,
+        *current_byte_provenance_vgpr, arch);
+    const auto overlapping_bytes = instrumentation::build_v_and_b32(
+        current_field_vgpr, vector_source_vgpr(tmp_vgpr), current_field_vgpr, arch);
+    const auto overlap_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
+        scalar_positive_inline_u32(0u), current_field_vgpr, arch);
+    const auto narrow_overlap =
+        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kRdna4VccLo, arch);
+    if (!prior_byte_mask || !current_byte_mask || !overlapping_bytes || !overlap_nonzero ||
+        !narrow_overlap) {
+      return false;
+    }
+    words.insert(words.end(), prior_byte_mask->begin(), prior_byte_mask->end());
+    words.insert(words.end(), current_byte_mask->begin(), current_byte_mask->end());
+    words.push_back(*overlapping_bytes);
+    words.push_back(*overlap_nonzero);
+    words.push_back(*narrow_overlap);
+    if (!skip_diagnostic_if_empty())
+      return false;
+  }
+
   // Reject read/read traffic before extracting either owner or epoch. Preserve
-  // owner-before-epoch ordering for the remaining lanes: repeated accesses by
-  // one workitem are common and owner mismatch is required for every conflict.
+  // owner-before-epoch ordering for the remaining lanes: most repeated
+  // accesses by one workitem are ordered, while a same-site access from a
+  // different physical lane still represents a distinct participant.
   const auto current_kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
   if (current_kind != ConSanMoiShadowAccessKind::Write) {
     const auto prior_kind = instrumentation::build_v_and_b32_literal(
@@ -125,12 +156,77 @@
   }
   const auto owner_ne = instrumentation::build_v_cmp_ne_u32_vcc(
       vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
-  const auto narrow_conflict =
-      instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kRdna4VccLo, arch);
-  if (!owner_ne || !narrow_conflict)
+  if (!owner_ne)
     return false;
-  words.push_back(*owner_ne);
-  words.push_back(*narrow_conflict);
+  if (prior_byte_provenance_vgpr) {
+    const uint16_t candidate_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u);
+    const uint16_t different_owner_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
+    const uint16_t predicate_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
+    const auto save_candidates =
+        instrumentation::build_s_mov_b64(candidate_exec, kRdna4ExecLo, arch);
+    const auto narrow_different_owner =
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
+    const auto save_different_owner =
+        instrumentation::build_s_mov_b64(different_owner_exec, kRdna4ExecLo, arch);
+    const auto restore_candidates =
+        instrumentation::build_s_mov_b64(kRdna4ExecLo, candidate_exec, arch);
+    const auto owner_eq = instrumentation::build_v_cmp_eq_u32_vcc(
+        vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
+    const auto narrow_same_owner =
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
+    const auto prior_instruction = instrumentation::build_v_lshrrev_b32(
+        tmp_vgpr,
+        scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
+        old_value_hi_vgpr, arch);
+    const auto current_instruction = instrumentation::build_v_mov_b32_literal(
+        current_field_vgpr, static_cast<uint32_t>(candidate.text_offset), arch);
+    const auto same_instruction = instrumentation::build_v_cmp_eq_u32_vcc(
+        vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
+    const auto narrow_same_instruction =
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
+    const auto prior_lane = instrumentation::build_v_lshrrev_b32(
+        tmp_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+        *prior_byte_provenance_vgpr, arch);
+    const auto current_lane = instrumentation::build_v_lshrrev_b32(
+        current_field_vgpr,
+        scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+        *current_byte_provenance_vgpr, arch);
+    const auto different_lane = instrumentation::build_v_cmp_ne_u32_vcc(
+        vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
+    const auto narrow_different_lane =
+        instrumentation::build_s_and_saveexec_b64(predicate_exec, kRdna4VccLo, arch);
+    const auto union_conflicts =
+        instrumentation::build_s_xor_b64(kRdna4ExecLo, different_owner_exec, kRdna4ExecLo, arch);
+    if (!save_candidates || !narrow_different_owner || !save_different_owner ||
+        !restore_candidates || !owner_eq || !narrow_same_owner || !prior_instruction ||
+        !current_instruction || !same_instruction || !narrow_same_instruction || !prior_lane ||
+        !current_lane || !different_lane || !narrow_different_lane || !union_conflicts) {
+      return false;
+    }
+    words.push_back(*save_candidates);
+    words.push_back(*owner_ne);
+    words.push_back(*narrow_different_owner);
+    words.push_back(*save_different_owner);
+    words.push_back(*restore_candidates);
+    words.push_back(*owner_eq);
+    words.push_back(*narrow_same_owner);
+    words.push_back(*prior_instruction);
+    words.insert(words.end(), current_instruction->begin(), current_instruction->end());
+    words.push_back(*same_instruction);
+    words.push_back(*narrow_same_instruction);
+    words.push_back(*prior_lane);
+    words.push_back(*current_lane);
+    words.push_back(*different_lane);
+    words.push_back(*narrow_different_lane);
+    words.push_back(*union_conflicts);
+  } else {
+    const auto narrow_conflict =
+        instrumentation::build_s_and_saveexec_b64(predicate_exec_save_sgpr, kRdna4VccLo, arch);
+    if (!narrow_conflict)
+      return false;
+    words.push_back(*owner_ne);
+    words.push_back(*narrow_conflict);
+  }
   if (!skip_diagnostic_if_empty())
     return false;
 
@@ -162,17 +258,18 @@
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
     const uint16_t conflict_exec = static_cast<uint16_t>(exec_base + 2u);
     const uint16_t predicate_exec = static_cast<uint16_t>(exec_base + 6u);
-    // The wave-coalesced exact-shadow caller keeps +7:+10 live across this
-    // helper as its saved address and packed current value. A multi-address
-    // wave returns to the partition loop after token filtering, so borrowing
-    // those registers here corrupts the next partition's publication. Keep
-    // access-time token state in the cold diagnostic-only tail instead.
+    // The wave-coalesced exact-shadow caller keeps +7:+12 live across this
+    // helper as its saved address, packed current value, and exact-byte
+    // provenance. A multi-address wave returns to the partition loop after
+    // token filtering, so borrowing those registers here corrupts the next
+    // partition's publication. Keep access-time token state in the cold
+    // diagnostic-only tail instead.
     const uint16_t token_version = static_cast<uint16_t>(base + 15u);
     const uint16_t token_kind = static_cast<uint16_t>(base + 16u);
     const uint16_t token_epoch = static_cast<uint16_t>(base + 17u);
     const uint16_t source_version = static_cast<uint16_t>(base + 18u);
-    const uint16_t token_hash = static_cast<uint16_t>(base + 11u);
-    const uint16_t source_address = static_cast<uint16_t>(base + 12u);
+    const uint16_t token_hash = static_cast<uint16_t>(base + 14u);
+    const uint16_t source_address = static_cast<uint16_t>(base + 21u);
     const uint16_t prior_owner = static_cast<uint16_t>(base + 23u);
     const uint16_t consumer_owner =
         options.moi_owner_vgpr ? *options.moi_owner_vgpr : static_cast<uint16_t>(base + 24u);
@@ -434,9 +531,10 @@
   // low half of the compare-swap data tuple. CDNA3/4 require that tuple to
   // start at an even VGPR. The +2 temporary is dead after atomic-order
   // filtering as well as in the compact access-only path.
-  const uint16_t slot_vgpr = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
-                                 ? static_cast<uint16_t>(old_value_vgpr + 2u)
-                                 : current_field_vgpr;
+  const uint16_t slot_vgpr =
+      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
+          ? static_cast<uint16_t>(old_value_vgpr + (prior_byte_provenance_vgpr ? 6u : 2u))
+          : current_field_vgpr;
   const auto save_conflict_exec = instrumentation::build_s_mov_b64(
       static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4ExecLo, arch);
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
@@ -471,8 +569,8 @@
                                                  static_cast<uint32_t>(count_address >> 32u), arch);
     const uint32_t mov_claimed =
         build_v_mov_b32_e32(slot_vgpr, scalar_positive_inline_u32(1), arch);
-    const uint32_t mov_unclaimed =
-        build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(0), arch);
+    const uint32_t mov_unclaimed = build_v_mov_b32_e32(static_cast<uint16_t>(slot_vgpr + 1u),
+                                                       scalar_positive_inline_u32(0), arch);
     const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
         *options.scratch_vgpr, slot_vgpr, slot_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice,
         arch);
@@ -657,20 +755,118 @@
     }
   }
 
-  uint16_t diagnostic_offset_vgpr = lds_byte_offset_vgpr;
-  if (static_byte_offset != 0) {
-    if (!append_compute_effective_lds_byte_offset(words, current_value_vgpr, lds_byte_offset_vgpr,
-                                                  static_byte_offset, arch))
+  if (prior_byte_provenance_vgpr) {
+    if (static_byte_offset != 0u) {
+      if (!append_compute_effective_lds_byte_offset(words, current_value_vgpr, lds_byte_offset_vgpr,
+                                                    static_byte_offset, arch)) {
+        return false;
+      }
+    } else {
+      words.push_back(
+          build_v_mov_b32_e32(current_value_vgpr, vector_source_vgpr(lds_byte_offset_vgpr), arch));
+    }
+    const auto align_cell = instrumentation::build_v_and_b32_literal(
+        current_value_vgpr, ~(consan_moi_exact_shadow::granule_bytes - 1u), current_value_vgpr,
+        arch);
+    if (!align_cell)
       return false;
-    diagnostic_offset_vgpr = current_value_vgpr;
+    words.insert(words.end(), align_cell->begin(), align_cell->end());
+    if (relative_cell_index_vgpr) {
+      // CDNA materializes the scale literal in the supplied helper VGPR. The
+      // compact local path has already converted SLOT into a fixed diagnostic
+      // record address, so SLOT is dead while address_lo_vgpr must remain
+      // intact for all following field stores.
+      const uint16_t scale_literal_vgpr =
+          compact_local_diagnostic &&
+                  (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+              ? slot_vgpr
+              : address_lo_vgpr;
+      const auto scale_cell = instrumentation::build_v_mul_lo_u32_literal(
+          tmp_vgpr, scale_literal_vgpr, consan_moi_exact_shadow::granule_bytes,
+          *relative_cell_index_vgpr, arch);
+      const auto add_cell = instrumentation::build_v_add_u32(
+          current_value_vgpr, vector_source_vgpr(tmp_vgpr), current_value_vgpr, arch);
+      if (!scale_cell || !add_cell)
+        return false;
+      words.insert(words.end(), scale_cell->begin(), scale_cell->end());
+      words.insert(words.end(), add_cell->begin(), add_cell->end());
+    }
+
+    const auto store_exact_range = [&](uint16_t provenance_vgpr, size_t offset_field,
+                                       size_t count_field) {
+      if (!append_extract_exact_shadow_field(
+              words, current_field_vgpr, provenance_vgpr,
+              consan_moi_exact_byte_cell::byte_offset_shift,
+              consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_offset_bits), arch)) {
+        return false;
+      }
+      const auto add_start = instrumentation::build_v_add_u32(
+          current_field_vgpr, vector_source_vgpr(current_value_vgpr), current_field_vgpr, arch);
+      if (!add_start)
+        return false;
+      words.insert(words.end(), add_start->begin(), add_start->end());
+      if (!store_vgpr(offset_field, current_field_vgpr) ||
+          !append_extract_exact_shadow_field(
+              words, tmp_vgpr, provenance_vgpr,
+              consan_moi_exact_byte_cell::byte_end_minus_one_shift,
+              consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_end_minus_one_bits), arch)) {
+        return false;
+      }
+      const auto end = instrumentation::build_v_add_u32(tmp_vgpr, scalar_positive_inline_u32(1u),
+                                                        tmp_vgpr, arch);
+      if (!end ||
+          !append_extract_exact_shadow_field(
+              words, current_field_vgpr, provenance_vgpr,
+              consan_moi_exact_byte_cell::byte_offset_shift,
+              consan_moi_low_bit_mask(consan_moi_exact_byte_cell::byte_offset_bits), arch)) {
+        return false;
+      }
+      words.insert(words.end(), end->begin(), end->end());
+      // CDNA4 materializes this literal in the supplied helper VGPR. The
+      // compact local path keeps its diagnostic-record address in
+      // address_lo_vgpr, while the already-consumed atomic slot is dead here.
+      // The external path rebuilds its address for each field and still needs
+      // SLOT as the dynamic diagnostic index.
+      const uint16_t negative_start_literal_vgpr =
+          compact_local_diagnostic &&
+                  (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+              ? slot_vgpr
+              : address_lo_vgpr;
+      const auto negative_start = instrumentation::build_v_mul_lo_u32_literal(
+          current_field_vgpr, negative_start_literal_vgpr, std::numeric_limits<uint32_t>::max(),
+          current_field_vgpr, arch);
+      const auto count = instrumentation::build_v_add_u32(
+          tmp_vgpr, vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
+      if (!negative_start || !count)
+        return false;
+      words.insert(words.end(), negative_start->begin(), negative_start->end());
+      words.insert(words.end(), count->begin(), count->end());
+      return store_vgpr(count_field, tmp_vgpr);
+    };
+    if (!store_exact_range(*prior_byte_provenance_vgpr,
+                           offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset),
+                           offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count)) ||
+        !store_exact_range(*current_byte_provenance_vgpr,
+                           offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_offset),
+                           offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count))) {
+      return false;
+    }
+  } else {
+    uint16_t diagnostic_offset_vgpr = lds_byte_offset_vgpr;
+    if (static_byte_offset != 0) {
+      if (!append_compute_effective_lds_byte_offset(words, current_value_vgpr, lds_byte_offset_vgpr,
+                                                    static_byte_offset, arch))
+        return false;
+      diagnostic_offset_vgpr = current_value_vgpr;
+    }
+    if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset),
+                    diagnostic_offset_vgpr) ||
+        !store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count), byte_count) ||
+        !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_offset),
+                    diagnostic_offset_vgpr) ||
+        !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count), byte_count))
+      return false;
   }
-  if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset),
-                  diagnostic_offset_vgpr) ||
-      !store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count), byte_count) ||
-      !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_offset),
-                  diagnostic_offset_vgpr) ||
-      !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count), byte_count))
-    return false;
 
   const size_t restore_offset = words.size();
   for (const size_t branch_offset : empty_diagnostic_branches) {
@@ -789,8 +985,8 @@
                                           sizeof(uint32_t),
                                       prior_dispatch_high_vgpr, arch) ||
       !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                      offsetof(ConSanMoiInlineExactShadowSlot, reserved), tmp_vgpr,
-                                      arch) ||
+                                      offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance),
+                                      tmp_vgpr, arch) ||
       !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
                                       offsetof(ConSanMoiInlineExactShadowSlot, version),
                                       cas_expected_vgpr, arch)) {
@@ -844,10 +1040,87 @@
 
   // A nonempty ready predecessor must itself be structurally valid. Owner and
   // epoch zero are legal packed values; access kind, workgroup key, dispatch,
-  // and reserved state are the discriminants.
-  if (!require_not_equal_literal(ready_version_vgpr, 0) || !require_equal_literal(tmp_vgpr, 0)) {
+  // and exact-byte provenance are the discriminants.
+  if (!require_not_equal_literal(ready_version_vgpr, 0) ||
+      !require_not_equal_literal(tmp_vgpr, 0)) {
     return false;
   }
+  const auto provenance_reserved = instrumentation::build_v_and_b32_literal(
+      cas_new_vgpr, ~consan_moi_exact_byte_cell::packed_mask, tmp_vgpr, arch);
+  const auto provenance_mask = instrumentation::build_v_and_b32_literal(
+      cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch);
+  if (!provenance_reserved || !provenance_mask)
+    return false;
+  words.insert(words.end(), provenance_reserved->begin(), provenance_reserved->end());
+  if (!require_equal_literal(cas_new_vgpr, 0))
+    return false;
+  words.insert(words.end(), provenance_mask->begin(), provenance_mask->end());
+  for (const uint32_t invalid_mask : {0u, 0x5u, 0x9u, 0xau, 0xbu, 0xdu}) {
+    if (!require_not_equal_literal(cas_new_vgpr, invalid_mask))
+      return false;
+  }
+  const auto require_canonical_provenance_field = [&](uint32_t field_shift, uint32_t field_lookup) {
+    const auto mask = instrumentation::build_v_and_b32_literal(
+        cas_new_vgpr, consan_moi_exact_byte_cell::byte_mask_mask, tmp_vgpr, arch);
+    const auto scale_mask = instrumentation::build_v_lshlrev_b32(
+        cas_new_vgpr, scalar_positive_inline_u32(1u), cas_new_vgpr, arch);
+    const auto lookup =
+        instrumentation::build_v_mov_b32_literal(cas_expected_vgpr, field_lookup, arch);
+    const auto select_expected = instrumentation::build_v_lshrrev_b32(
+        cas_expected_vgpr, vector_source_vgpr(cas_new_vgpr), cas_expected_vgpr, arch);
+    const auto bound_expected =
+        instrumentation::build_v_and_b32_literal(cas_expected_vgpr, 0x3u, cas_expected_vgpr, arch);
+    const auto unpack_actual = instrumentation::build_v_lshrrev_b32(
+        cas_new_vgpr, scalar_positive_inline_u32(field_shift), tmp_vgpr, arch);
+    const auto bound_actual =
+        instrumentation::build_v_and_b32_literal(cas_new_vgpr, 0x3u, cas_new_vgpr, arch);
+    const auto matches = instrumentation::build_v_cmp_eq_u32_vcc(
+        vector_source_vgpr(cas_expected_vgpr), cas_new_vgpr, arch);
+    if (!mask || !scale_mask || !lookup || !select_expected || !bound_expected || !unpack_actual ||
+        !bound_actual || !matches) {
+      return false;
+    }
+    words.insert(words.end(), mask->begin(), mask->end());
+    words.push_back(*scale_mask);
+    words.insert(words.end(), lookup->begin(), lookup->end());
+    words.push_back(*select_expected);
+    words.insert(words.end(), bound_expected->begin(), bound_expected->end());
+    words.push_back(*unpack_actual);
+    words.insert(words.end(), bound_actual->begin(), bound_actual->end());
+    words.push_back(*matches);
+    return narrow_vcc();
+  };
+  if (!require_canonical_provenance_field(consan_moi_exact_byte_cell::byte_offset_shift,
+                                          consan_moi_exact_byte_cell::byte_offset_by_mask_lookup) ||
+      !require_canonical_provenance_field(
+          consan_moi_exact_byte_cell::byte_end_minus_one_shift,
+          consan_moi_exact_byte_cell::byte_end_minus_one_by_mask_lookup)) {
+    return false;
+  }
+  const auto provenance_lane = instrumentation::build_v_and_b32_literal(
+      cas_new_vgpr, consan_moi_exact_byte_cell::lane_plus_one_mask, tmp_vgpr, arch);
+  const auto unpack_provenance_lane = instrumentation::build_v_lshrrev_b32(
+      cas_new_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+      cas_new_vgpr, arch);
+  if (!provenance_lane || !unpack_provenance_lane)
+    return false;
+  words.insert(words.end(), provenance_lane->begin(), provenance_lane->end());
+  if (!require_not_equal_literal(cas_new_vgpr, 0))
+    return false;
+  words.push_back(*unpack_provenance_lane);
+  const auto zero_based_lane = instrumentation::build_v_add_u32_literal(
+      cas_new_vgpr, tmp_vgpr, std::numeric_limits<uint32_t>::max(), cas_new_vgpr, arch);
+  if (!zero_based_lane)
+    return false;
+  words.insert(words.end(), zero_based_lane->begin(), zero_based_lane->end());
+  const auto provenance_lane_in_range = instrumentation::build_v_cmp_gt_u32_vcc(
+      scalar_positive_inline_u32(consan_moi_exact_byte_cell::maximum_lane + 1u), cas_new_vgpr,
+      arch);
+  if (!provenance_lane_in_range)
+    return false;
+  words.push_back(*provenance_lane_in_range);
+  if (!narrow_vcc())
+    return false;
   const auto kind = instrumentation::build_v_and_b32_literal(
       tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask), old_value_vgpr,
       arch);
@@ -968,10 +1241,6 @@
     words.push_back(*decrement);
     words.push_back(*retries_remain);
     restore_slot_address();
-    words.push_back(
-        build_v_mov_b32_e32(current_low_vgpr, vector_source_vgpr(saved_current_low_vgpr), arch));
-    words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(current_low_vgpr + 1u),
-                                        vector_source_vgpr(saved_current_high_vgpr), arch));
     const auto retries_exhausted = instrumentation::build_s_cbranch_scc0(/*simm16=*/1, arch);
     if (!retries_exhausted)
       return false;
@@ -990,6 +1259,67 @@
     words.push_back(*retry);
     words.push_back(*restore_claimed);
   }
+
+  // Qualify the predecessor's complete dispatch identity while its payload
+  // registers are still live. The resulting scalar mask survives publication;
+  // the vector dispatch pair can then retain exact-byte provenance for the
+  // diagnostic path without growing the scratch window.
+  const auto save_claimed_publishers =
+      instrumentation::build_s_mov_b64(committed_exec_sgpr, kRdna4ExecLo, arch);
+  if (!save_claimed_publishers)
+    return false;
+  words.push_back(*save_claimed_publishers);
+  uint16_t dispatch_low_source = 0;
+  uint16_t dispatch_high_source = 0;
+  if (options.moi_dispatch_id_sgpr) {
+    dispatch_low_source = *options.moi_dispatch_id_sgpr;
+    dispatch_high_source = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u);
+  } else {
+    const auto low = instrumentation::build_v_mov_b32_literal(
+        tmp_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
+    if (!low)
+      return false;
+    words.insert(words.end(), low->begin(), low->end());
+    dispatch_low_source = vector_source_vgpr(tmp_vgpr);
+  }
+  const auto same_dispatch_low =
+      instrumentation::build_v_cmp_eq_u32_vcc(dispatch_low_source, prior_dispatch_low_vgpr, arch);
+  if (!same_dispatch_low)
+    return false;
+  words.push_back(*same_dispatch_low);
+  if (!narrow_vcc())
+    return false;
+  if (!options.moi_dispatch_id_sgpr) {
+    const auto high = instrumentation::build_v_mov_b32_literal(
+        tmp_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u), arch);
+    if (!high)
+      return false;
+    words.insert(words.end(), high->begin(), high->end());
+    dispatch_high_source = vector_source_vgpr(tmp_vgpr);
+  }
+  const auto same_dispatch_high =
+      instrumentation::build_v_cmp_eq_u32_vcc(dispatch_high_source, prior_dispatch_high_vgpr, arch);
+  const auto save_same_dispatch =
+      instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kRdna4ExecLo, arch);
+  const auto restore_claimed_publishers =
+      instrumentation::build_s_mov_b64(kRdna4ExecLo, committed_exec_sgpr, arch);
+  if (!same_dispatch_high || !save_same_dispatch || !restore_claimed_publishers)
+    return false;
+  words.push_back(*same_dispatch_high);
+  if (!narrow_vcc())
+    return false;
+  words.push_back(*save_same_dispatch);
+  words.push_back(*restore_claimed_publishers);
+
+  restore_slot_address();
+  if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
+                                      offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance),
+                                      prior_dispatch_low_vgpr, arch) ||
+      !append_moi_flat_load_wait(words, arch)) {
+    return false;
+  }
+  words.push_back(
+      build_v_mov_b32_e32(prior_dispatch_high_vgpr, vector_source_vgpr(current_low_vgpr), arch));
   restore_slot_address();
 
   if (!append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
@@ -999,6 +1329,11 @@
                                        offsetof(ConSanMoiInlineExactShadowSlot, packed_access) +
                                            sizeof(uint32_t),
                                        saved_current_high_vgpr, arch)) {
+    return false;
+  }
+  if (!append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
+                                       offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance),
+                                       current_low_vgpr, arch)) {
     return false;
   }
   if (options.moi_dispatch_id_sgpr) {
@@ -1026,16 +1361,9 @@
                                        static_cast<uint16_t>(current_low_vgpr + 1u), arch)) {
     return false;
   }
-  const auto zero = instrumentation::build_v_mov_b32_literal(tmp_vgpr, 0, arch);
   const auto store_drain = instrumentation::build_s_wait_flat_store0(arch);
-  if (!zero || !store_drain)
+  if (!store_drain)
     return false;
-  words.insert(words.end(), zero->begin(), zero->end());
-  if (!append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                       offsetof(ConSanMoiInlineExactShadowSlot, reserved), tmp_vgpr,
-                                       arch)) {
-    return false;
-  }
   words.push_back(*store_drain);
 
   const auto commit_new = instrumentation::build_v_add_u32(
@@ -1104,57 +1432,157 @@
       build_v_mov_b32_e32(current_low_vgpr, vector_source_vgpr(saved_current_low_vgpr), arch));
   words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(current_low_vgpr + 1u),
                                       vector_source_vgpr(saved_current_high_vgpr), arch));
+  const auto select_same_dispatch = instrumentation::build_s_and_b64(
+      kRdna4ExecLo, committed_exec_sgpr, low_dispatch_exec_sgpr, arch);
+  if (!select_same_dispatch)
+    return false;
+  words.push_back(*select_same_dispatch);
+  return true;
+}
 
-  uint16_t dispatch_low_source = 0;
-  uint16_t dispatch_high_source = 0;
-  if (options.moi_dispatch_id_sgpr) {
-    dispatch_low_source = *options.moi_dispatch_id_sgpr;
-    dispatch_high_source = static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u);
+// Build the target-neutral exact-byte provenance for one four-byte shadow
+// cell. The caller supplies the relative cell index when a wide access is
+// traversed by a runtime loop. MASK remains separate for wave partitioning;
+// PROVENANCE carries the redundant range endpoints used by diagnostics and
+// coherent snapshot validation. The representative lane is added only after
+// the caller elects the publishing lane.
+[[nodiscard]] bool append_exact_byte_cell_provenance_base(
+    std::vector<uint32_t> &words, rj_code_arch_t arch, uint16_t base_offset_vgpr,
+    uint32_t static_byte_offset, std::optional<uint16_t> relative_cell_index_vgpr,
+    uint32_t byte_count, uint16_t provenance_vgpr, uint16_t mask_vgpr, uint16_t high_vgpr,
+    uint16_t temporary_vgpr) {
+  if (byte_count == 0u)
+    return false;
+
+  if (static_byte_offset != 0u) {
+    const auto effective_start = instrumentation::build_v_add_u32_literal(
+        mask_vgpr, provenance_vgpr,
+        static_byte_offset & (consan_moi_exact_shadow::granule_bytes - 1u), base_offset_vgpr, arch);
+    if (!effective_start)
+      return false;
+    words.insert(words.end(), effective_start->begin(), effective_start->end());
   } else {
-    const auto low = instrumentation::build_v_mov_b32_literal(
-        tmp_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id), arch);
+    words.push_back(build_v_mov_b32_e32(mask_vgpr, vector_source_vgpr(base_offset_vgpr), arch));
+  }
+  const auto start = instrumentation::build_v_and_b32_literal(
+      mask_vgpr, consan_moi_exact_shadow::granule_bytes - 1u, mask_vgpr, arch);
+  const auto access_end = instrumentation::build_v_add_u32_literal(high_vgpr, temporary_vgpr,
+                                                                   byte_count, mask_vgpr, arch);
+  if (!start || !access_end)
+    return false;
+  words.insert(words.end(), start->begin(), start->end());
+  words.insert(words.end(), access_end->begin(), access_end->end());
+
+  if (relative_cell_index_vgpr) {
+    const auto negative_cell_bytes = instrumentation::build_v_mul_lo_u32_literal(
+        temporary_vgpr, provenance_vgpr, 0u - consan_moi_exact_shadow::granule_bytes,
+        *relative_cell_index_vgpr, arch);
+    if (!negative_cell_bytes)
+      return false;
+    words.insert(words.end(), negative_cell_bytes->begin(), negative_cell_bytes->end());
+    const auto remaining = instrumentation::build_v_add_u32(
+        high_vgpr, vector_source_vgpr(temporary_vgpr), high_vgpr, arch);
+    const auto low_shift = instrumentation::build_v_lshlrev_b32(
+        temporary_vgpr, scalar_positive_inline_u32(1u), *relative_cell_index_vgpr, arch);
+    if (!remaining || !low_shift)
+      return false;
+    words.insert(words.end(), remaining->begin(), remaining->end());
+    words.push_back(*low_shift);
+    const auto low = instrumentation::build_v_lshrrev_b32(
+        temporary_vgpr, vector_source_vgpr(temporary_vgpr), mask_vgpr, arch);
     if (!low)
       return false;
-    words.insert(words.end(), low->begin(), low->end());
-    dispatch_low_source = vector_source_vgpr(tmp_vgpr);
+    words.push_back(*low);
+  } else {
+    words.push_back(build_v_mov_b32_e32(temporary_vgpr, vector_source_vgpr(mask_vgpr), arch));
   }
-  const auto same_dispatch_low =
-      instrumentation::build_v_cmp_eq_u32_vcc(dispatch_low_source, prior_dispatch_low_vgpr, arch);
-  if (!same_dispatch_low)
+
+  const auto high = instrumentation::build_v_min_u32_literal(
+      high_vgpr, consan_moi_exact_shadow::granule_bytes, high_vgpr, arch);
+  if (!high)
     return false;
-  words.push_back(*same_dispatch_low);
-  if (!narrow_vcc())
+  words.insert(words.end(), high->begin(), high->end());
+
+  const auto one = instrumentation::build_v_mov_b32_literal(provenance_vgpr, 1u, arch);
+  const auto low_bits = instrumentation::build_v_lshlrev_b32(
+      provenance_vgpr, vector_source_vgpr(high_vgpr), provenance_vgpr, arch);
+  const auto low_bits_minus_one = instrumentation::build_v_add_u32_literal(
+      provenance_vgpr, mask_vgpr, std::numeric_limits<uint32_t>::max(), provenance_vgpr, arch);
+  const auto four_bits = instrumentation::build_v_mov_b32_literal(mask_vgpr, 0xfu, arch);
+  const auto high_bits = instrumentation::build_v_lshlrev_b32(
+      mask_vgpr, vector_source_vgpr(temporary_vgpr), mask_vgpr, arch);
+  const auto exact_mask = instrumentation::build_v_and_b32(
+      mask_vgpr, vector_source_vgpr(provenance_vgpr), mask_vgpr, arch);
+  if (!one || !low_bits || !low_bits_minus_one || !four_bits || !high_bits || !exact_mask)
     return false;
-  if (!options.moi_dispatch_id_sgpr) {
-    const auto high = instrumentation::build_v_mov_b32_literal(
-        tmp_vgpr, static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u), arch);
-    if (!high)
-      return false;
-    words.insert(words.end(), high->begin(), high->end());
-    dispatch_high_source = vector_source_vgpr(tmp_vgpr);
-  }
-  const auto same_dispatch_high =
-      instrumentation::build_v_cmp_eq_u32_vcc(dispatch_high_source, prior_dispatch_high_vgpr, arch);
-  if (!same_dispatch_high)
+  words.insert(words.end(), one->begin(), one->end());
+  words.push_back(*low_bits);
+  words.insert(words.end(), low_bits_minus_one->begin(), low_bits_minus_one->end());
+  words.insert(words.end(), four_bits->begin(), four_bits->end());
+  words.push_back(*high_bits);
+  words.push_back(*exact_mask);
+
+  const auto end_minus_one = instrumentation::build_v_add_u32_literal(
+      high_vgpr, provenance_vgpr, std::numeric_limits<uint32_t>::max(), high_vgpr, arch);
+  const auto pack_end = instrumentation::build_v_lshlrev_b32(
+      high_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::byte_end_minus_one_shift),
+      high_vgpr, arch);
+  const auto pack_start = instrumentation::build_v_lshlrev_b32(
+      temporary_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::byte_offset_shift),
+      temporary_vgpr, arch);
+  const auto pack_range = instrumentation::build_v_add_u32(
+      provenance_vgpr, vector_source_vgpr(high_vgpr), temporary_vgpr, arch);
+  const auto pack_mask = instrumentation::build_v_add_u32(
+      provenance_vgpr, vector_source_vgpr(mask_vgpr), provenance_vgpr, arch);
+  if (!end_minus_one || !pack_end || !pack_start || !pack_range || !pack_mask)
     return false;
-  words.push_back(*same_dispatch_high);
-  return narrow_vcc();
+  words.insert(words.end(), end_minus_one->begin(), end_minus_one->end());
+  words.push_back(*pack_end);
+  words.push_back(*pack_start);
+  words.insert(words.end(), pack_range->begin(), pack_range->end());
+  words.insert(words.end(), pack_mask->begin(), pack_mask->end());
+  return true;
+}
+
+[[nodiscard]] bool append_exact_byte_representative_lane(std::vector<uint32_t> &words,
+                                                         rj_code_arch_t arch,
+                                                         uint16_t provenance_vgpr,
+                                                         uint16_t lane_vgpr) {
+  const auto lane_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
+      lane_vgpr, kScalarInlineNegativeOneOperand, scalar_positive_inline_u32(0), arch);
+  const auto lane_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
+      lane_vgpr, kScalarInlineNegativeOneOperand, vector_source_vgpr(lane_vgpr), arch);
+  const auto lane_plus_one =
+      instrumentation::build_v_add_u32(lane_vgpr, scalar_positive_inline_u32(1u), lane_vgpr, arch);
+  const auto pack_lane = instrumentation::build_v_lshlrev_b32(
+      lane_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+      lane_vgpr, arch);
+  const auto add_lane = instrumentation::build_v_add_u32(
+      provenance_vgpr, vector_source_vgpr(lane_vgpr), provenance_vgpr, arch);
+  if (!lane_lo || !lane_hi || !lane_plus_one || !pack_lane || !add_lane)
+    return false;
+  words.insert(words.end(), lane_lo->begin(), lane_lo->end());
+  words.insert(words.end(), lane_hi->begin(), lane_hi->end());
+  words.insert(words.end(), lane_plus_one->begin(), lane_plus_one->end());
+  words.push_back(*pack_lane);
+  words.insert(words.end(), add_lane->begin(), add_lane->end());
+  return true;
 }
 
 // Partition the incoming wave by effective exact-shadow address. Each address
-// group with uniform metadata publishes through one representative lane. A
-// group whose owner/epoch/kind metadata is not uniform submits every lane to
-// the versioned transaction rather than selecting arbitrary metadata; one CAS
-// winner may publish and every loser poisons coverage. The loop removes at
-// least one lane on every iteration, so runtime work is bounded by the hardware
-// wave size while generated code size remains constant.
+// group with uniform metadata and exact byte coverage publishes through one
+// representative lane. A group whose metadata is not uniform submits every
+// lane to the versioned transaction rather than selecting arbitrary evidence;
+// one CAS winner may publish and every loser poisons coverage. The loop removes
+// at least one lane on every iteration, so runtime work is bounded by the
+// hardware wave size while generated code size remains constant.
 [[nodiscard]] bool append_wave_coalesced_exact_shadow_swap(
     std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanOptions &options,
     rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout, uint16_t address_lo_vgpr,
     uint16_t current_low_vgpr, uint16_t current_high_vgpr, uint16_t old_value_vgpr,
     uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t byte_count,
-    const VgprSpillSequence *spill, std::optional<uint16_t> spill_backed_lds_byte_offset_source,
-    std::vector<std::string> &errors) {
+    std::optional<uint16_t> relative_cell_index_vgpr, const VgprSpillSequence *spill,
+    std::optional<uint16_t> spill_backed_lds_byte_offset_source, std::vector<std::string> &errors) {
   if (!options.moi_exec_save_sgpr)
     return false;
 
@@ -1210,13 +1638,20 @@
       instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, current_low_vgpr, arch);
   const auto narrow_value =
       instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+  const auto read_mask =
+      instrumentation::build_v_readfirstlane_b32(value_key_sgpr, lane_rank_vgpr, arch);
+  const auto mask_equal =
+      instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, lane_rank_vgpr, arch);
+  const auto narrow_mask =
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
   const auto low_mask_equal =
       instrumentation::build_s_cmp_eq_u32(kRdna4ExecLo, group_exec_sgpr, arch);
   const auto high_mask_equal = instrumentation::build_s_cmp_eq_u32(
       static_cast<uint16_t>(kRdna4ExecLo + 1u), static_cast<uint16_t>(group_exec_sgpr + 1u), arch);
   if (!save_incoming_exec || !initialize_pending || !select_pending || !read_address ||
       !read_address_high || !read_value || !address_equal || !narrow_address || !save_group ||
-      !value_equal || !narrow_value || !low_mask_equal || !high_mask_equal)
+      !value_equal || !narrow_value || !read_mask || !mask_equal || !narrow_mask ||
+      !low_mask_equal || !high_mask_equal)
     return false;
 
   words.push_back(*save_incoming_exec);
@@ -1271,11 +1706,36 @@
   words.push_back(*value_equal);
   words.push_back(*narrow_value);
   words.push_back(*low_mask_equal);
-  const size_t low_fallback_branch = words.size();
+  const size_t low_value_fallback_branch = words.size();
   words.push_back(0);
   words.push_back(*high_mask_equal);
-  const size_t high_fallback_branch = words.size();
+  const size_t high_value_fallback_branch = words.size();
   words.push_back(0);
+  if (!append_exact_byte_cell_provenance_base(words, arch, lds_byte_offset_vgpr, static_byte_offset,
+                                              relative_cell_index_vgpr, byte_count,
+                                              current_low_vgpr, lane_rank_vgpr, current_high_vgpr,
+                                              static_cast<uint16_t>(*options.scratch_vgpr + 4u))) {
+    errors.emplace_back(
+        "ConSan MOI inline-shadow probe could not encode exact byte-cell provenance");
+    return false;
+  }
+  words.push_back(*read_mask);
+  words.push_back(*mask_equal);
+  words.push_back(*narrow_mask);
+  words.push_back(*low_mask_equal);
+  const size_t low_mask_fallback_branch = words.size();
+  words.push_back(0);
+  words.push_back(*high_mask_equal);
+  const size_t high_mask_fallback_branch = words.size();
+  words.push_back(0);
+  const auto common_mask_nonzero =
+      instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), lane_rank_vgpr, arch);
+  const auto narrow_common_nonzero =
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+  if (!common_mask_nonzero || !narrow_common_nonzero)
+    return false;
+  words.push_back(*common_mask_nonzero);
+  words.push_back(*narrow_common_nonzero);
 
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       lane_rank_vgpr, group_exec_sgpr, scalar_positive_inline_u32(0), arch);
@@ -1302,6 +1762,9 @@
   words.push_back(*first_lane);
   words.push_back(*narrow_first);
   words.push_back(*save_publishers);
+  if (!append_exact_byte_representative_lane(words, arch, current_low_vgpr, current_high_vgpr)) {
+    return false;
+  }
   if (!append_versioned_exact_shadow_transaction(words, options, arch, address_lo_vgpr,
                                                  current_low_vgpr, old_value_vgpr,
                                                  publisher_exec_sgpr, committed_exec_sgpr,
@@ -1316,6 +1779,15 @@
 
   const size_t fallback = words.size();
   words.push_back(*restore_group_exec);
+  if (!append_exact_byte_cell_provenance_base(words, arch, lds_byte_offset_vgpr, static_byte_offset,
+                                              relative_cell_index_vgpr, byte_count,
+                                              current_low_vgpr, lane_rank_vgpr, current_high_vgpr,
+                                              static_cast<uint16_t>(*options.scratch_vgpr + 4u))) {
+    errors.emplace_back(
+        "ConSan MOI inline-shadow fallback could not encode exact byte-cell provenance");
+    return false;
+  }
+  words.push_back(build_v_mov_b32_e32(current_high_vgpr, vector_source_vgpr(lane_rank_vgpr), arch));
   // Metadata-distinct lanes sharing one address cannot all retain the same
   // odd-version reservation concurrently. Publish one representative and
   // shrink group_exec to that lane; the outer pending-mask loop then revisits
@@ -1325,7 +1797,18 @@
   words.push_back(*first_lane);
   words.push_back(*narrow_first);
   words.push_back(*save_group);
+  const auto fallback_mask_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
+      scalar_positive_inline_u32(0u), current_high_vgpr, arch);
+  const auto narrow_fallback_nonzero =
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+  if (!fallback_mask_nonzero || !narrow_fallback_nonzero)
+    return false;
+  words.push_back(*fallback_mask_nonzero);
+  words.push_back(*narrow_fallback_nonzero);
   words.push_back(*save_publishers);
+  if (!append_exact_byte_representative_lane(words, arch, current_low_vgpr, current_high_vgpr)) {
+    return false;
+  }
   if (!append_versioned_exact_shadow_transaction(words, options, arch, address_lo_vgpr,
                                                  current_low_vgpr, old_value_vgpr,
                                                  publisher_exec_sgpr, committed_exec_sgpr,
@@ -1369,7 +1852,15 @@
           static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr, current_high_vgpr,
           lds_byte_offset_vgpr, static_byte_offset, byte_count,
           /*special_state_already_saved=*/true,
-          /*diagnostic_lane_mask_sgpr=*/publisher_exec_sgpr))
+          /*diagnostic_lane_mask_sgpr=*/publisher_exec_sgpr,
+          /*capture_first_diagnostic_only=*/false,
+          /*compact_local_shadow=*/false,
+          /*workgroup_local_shadow=*/false,
+          /*generation_tagged_local_shadow=*/false,
+          /*prior_byte_provenance_vgpr=*/
+          static_cast<uint16_t>(old_value_vgpr + 6u),
+          /*current_byte_provenance_vgpr=*/
+          static_cast<uint16_t>(old_value_vgpr + 7u), relative_cell_index_vgpr))
     return false;
 
   if (options.moi_partition_mask_debug) {
@@ -1423,19 +1914,27 @@
       return std::nullopt;
     return static_cast<int16_t>(delta);
   };
-  const auto low_delta = branch_offset(low_fallback_branch, fallback);
-  const auto high_delta = branch_offset(high_fallback_branch, fallback);
+  const auto low_value_delta = branch_offset(low_value_fallback_branch, fallback);
+  const auto high_value_delta = branch_offset(high_value_fallback_branch, fallback);
+  const auto low_mask_delta = branch_offset(low_mask_fallback_branch, fallback);
+  const auto high_mask_delta = branch_offset(high_mask_fallback_branch, fallback);
   const auto diagnostic_delta = branch_offset(common_branch, diagnostic);
   const auto loop_delta = branch_offset(loop_branch, loop);
-  if (!low_delta || !high_delta || !diagnostic_delta || !loop_delta)
+  if (!low_value_delta || !high_value_delta || !low_mask_delta || !high_mask_delta ||
+      !diagnostic_delta || !loop_delta)
     return false;
-  const auto low_branch = instrumentation::build_s_cbranch_scc0(*low_delta, arch);
-  const auto high_branch = instrumentation::build_s_cbranch_scc0(*high_delta, arch);
+  const auto low_value_branch = instrumentation::build_s_cbranch_scc0(*low_value_delta, arch);
+  const auto high_value_branch = instrumentation::build_s_cbranch_scc0(*high_value_delta, arch);
+  const auto low_mask_branch = instrumentation::build_s_cbranch_scc0(*low_mask_delta, arch);
+  const auto high_mask_branch = instrumentation::build_s_cbranch_scc0(*high_mask_delta, arch);
   const auto continue_loop = instrumentation::build_s_cbranch_execnz(*loop_delta, arch);
-  if (!low_branch || !high_branch || !continue_loop)
+  if (!low_value_branch || !high_value_branch || !low_mask_branch || !high_mask_branch ||
+      !continue_loop)
     return false;
-  words[low_fallback_branch] = *low_branch;
-  words[high_fallback_branch] = *high_branch;
+  words[low_value_fallback_branch] = *low_value_branch;
+  words[high_value_fallback_branch] = *high_value_branch;
+  words[low_mask_fallback_branch] = *low_mask_branch;
+  words[high_mask_fallback_branch] = *high_mask_branch;
   words[common_branch] = build_s_branch(*diagnostic_delta, arch);
   words[loop_branch] = *continue_loop;
   return true;
@@ -1614,12 +2113,13 @@
     uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t cell_index,
     uint32_t byte_count, uint16_t diagnostic_lds_byte_offset_vgpr,
     uint32_t diagnostic_static_byte_offset, uint32_t compact_cell_count,
-    std::vector<std::string> &errors) {
+    std::optional<uint16_t> relative_cell_index_vgpr, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr)
     return false;
-  if (compact_cell_count == 0u || compact_cell_count > 2u ||
-      (compact_cell_count > 1u && !workgroup_shadow.compact)) {
-    errors.emplace_back("ConSan MOI local publish has an invalid compact cell count");
+  if (compact_cell_count != 1u || workgroup_shadow.compact ||
+      consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow)) {
+    errors.emplace_back(
+        "ConSan MOI exact-byte local publish requires one full-width initialized cell");
     return false;
   }
 
@@ -1669,11 +2169,8 @@
       cell_index * (workgroup_shadow.compact ? sizeof(uint32_t) : sizeof(uint64_t));
   const auto local_address =
       instrumentation::build_v_add_u32_literal(address_vgpr, local_base, temporary_vgpr, arch);
-  const auto exchange = workgroup_shadow.compact && compact_cell_count == 1u
-                            ? instrumentation::build_ds_storexchg_rtn_b32(
-                                  old_value_vgpr, address_vgpr, current_low_vgpr, 0u, arch)
-                            : instrumentation::build_ds_storexchg_rtn_b64(
-                                  old_value_vgpr, address_vgpr, current_low_vgpr, 0u, arch);
+  const auto exchange = instrumentation::build_ds_storexchg_rtn_b64(old_value_vgpr, address_vgpr,
+                                                                    current_low_vgpr, 0u, arch);
   const auto restore_valid_workgroup =
       instrumentation::build_s_mov_b64(kRdna4ExecLo, valid_workgroup_exec_sgpr, arch);
   if (!cell || !capacity || !in_bounds || !shadow_byte_offset || !local_address || !exchange) {
@@ -1733,25 +2230,37 @@
                                                 saved_cell_vgpr, errors)) {
     return false;
   }
-  if (compact_cell_count == 2u) {
-    const auto next_cell = instrumentation::build_v_add_u32(
-        saved_cell_vgpr, scalar_positive_inline_u32(1u), saved_cell_vgpr, arch);
-    // ADDRESS is overwritten by local_address below, after the second lazy
-    // initialization check. It is therefore a dead literal temporary here.
-    const auto restore_first_cell = instrumentation::build_v_add_u32_literal(
-        saved_cell_vgpr, address_vgpr, std::numeric_limits<uint32_t>::max(), saved_cell_vgpr, arch);
-    if (!next_cell || !restore_first_cell) {
-      errors.emplace_back("ConSan MOI paired compact publish could not advance its cell");
-      return false;
-    }
-    words.insert(words.end(), next_cell->begin(), next_cell->end());
-    if (!append_workgroup_local_lazy_shadow_ready(words, options, arch, workgroup_shadow,
-                                                  saved_cell_vgpr, errors)) {
-      return false;
-    }
-    words.insert(words.end(), restore_first_cell->begin(), restore_first_cell->end());
-    words.push_back(
-        build_v_mov_b32_e32(current_high_vgpr, vector_source_vgpr(current_low_vgpr), arch));
+  const uint16_t provenance_temporary_vgpr = static_cast<uint16_t>(old_value_vgpr + 3u);
+  if (!append_exact_byte_cell_provenance_base(
+          words, arch, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset,
+          relative_cell_index_vgpr, byte_count, current_low_vgpr, current_high_vgpr,
+          provenance_temporary_vgpr, temporary_vgpr)) {
+    errors.emplace_back("ConSan MOI local publish could not encode exact byte-cell provenance");
+    return false;
+  }
+  const auto mask_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u),
+                                                                    current_high_vgpr, arch);
+  const auto narrow_nonzero =
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
+  if (!mask_nonzero || !narrow_nonzero)
+    return false;
+  words.push_back(*mask_nonzero);
+  words.push_back(*narrow_nonzero);
+  words.push_back(
+      build_v_mov_b32_e32(provenance_temporary_vgpr, vector_source_vgpr(current_low_vgpr), arch));
+  if (!append_exact_byte_representative_lane(words, arch, provenance_temporary_vgpr,
+                                             current_high_vgpr)) {
+    errors.emplace_back("ConSan MOI local publish could not encode its representative lane");
+    return false;
+  }
+  words.push_back(
+      build_v_mov_b32_e32(current_low_vgpr, vector_source_vgpr(saved_current_low_vgpr), arch));
+  words.push_back(
+      build_v_mov_b32_e32(current_high_vgpr, vector_source_vgpr(saved_current_high_vgpr), arch));
+  if (!append_add_exact_shadow_generation(words, current_low_vgpr, current_high_vgpr,
+                                          provenance_temporary_vgpr, temporary_vgpr, arch)) {
+    errors.emplace_back("ConSan MOI local publish could not embed exact byte-cell provenance");
+    return false;
   }
   words.push_back(build_v_mov_b32_e32(temporary_vgpr, vector_source_vgpr(saved_cell_vgpr), arch));
   words.push_back(*shadow_byte_offset);
@@ -1771,6 +2280,16 @@
         "ConSan MOI inline-shadow local publish could not restore special scalar state");
     return false;
   }
+  const uint16_t prior_byte_provenance_vgpr = static_cast<uint16_t>(old_value_vgpr + 2u);
+  const uint16_t current_byte_provenance_vgpr = static_cast<uint16_t>(old_value_vgpr + 3u);
+  if (!append_extract_exact_shadow_generation(words, prior_byte_provenance_vgpr, old_value_vgpr,
+                                              static_cast<uint16_t>(old_value_vgpr + 1u),
+                                              temporary_vgpr, arch) ||
+      !append_extract_exact_shadow_generation(words, current_byte_provenance_vgpr, current_low_vgpr,
+                                              current_high_vgpr, temporary_vgpr, arch)) {
+    errors.emplace_back("ConSan MOI local publish could not recover exact byte-cell provenance");
+    return false;
+  }
   if (!append_inline_shadow_diagnostic_words(
           words, candidate, options, arch, report_layout, old_value_vgpr,
           static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr, current_high_vgpr,
@@ -1778,31 +2297,13 @@
           /*special_state_already_saved=*/true,
           /*diagnostic_lane_mask_sgpr=*/std::nullopt,
           /*capture_first_diagnostic_only=*/true,
-          /*compact_local_shadow=*/workgroup_shadow.compact,
+          /*compact_local_shadow=*/false,
           /*workgroup_local_shadow=*/true,
-          consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow))) {
+          /*generation_tagged_local_shadow=*/false, prior_byte_provenance_vgpr,
+          current_byte_provenance_vgpr, relative_cell_index_vgpr)) {
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not encode conflict diagnostics");
     return false;
-  }
-  if (compact_cell_count == 2u) {
-    words.push_back(
-        build_v_mov_b32_e32(current_low_vgpr, vector_source_vgpr(saved_current_low_vgpr), arch));
-    if (!append_inline_shadow_diagnostic_words(
-            words, candidate, options, arch, report_layout,
-            static_cast<uint16_t>(old_value_vgpr + 1u), static_cast<uint16_t>(old_value_vgpr + 1u),
-            current_low_vgpr, current_high_vgpr, diagnostic_lds_byte_offset_vgpr,
-            diagnostic_static_byte_offset, byte_count,
-            /*special_state_already_saved=*/true,
-            /*diagnostic_lane_mask_sgpr=*/std::nullopt,
-            /*capture_first_diagnostic_only=*/true,
-            /*compact_local_shadow=*/true,
-            /*workgroup_local_shadow=*/true,
-            consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow))) {
-      errors.emplace_back(
-          "ConSan MOI paired compact publish could not encode its upper-cell diagnostic");
-      return false;
-    }
   }
 
   words.push_back(
@@ -2188,8 +2689,9 @@
       (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 1u : 0u));
 
   for (const ConSanMoiAccessRange &range : *access_ranges) {
-    const ConSanMoiLdsCellRange cell_range =
+    ConSanMoiLdsCellRange cell_range =
         consan_moi_lds_cell_range_for_bytes(range.static_byte_offset, range.byte_count);
+    cell_range.cell_count = consan_moi_maximum_cell_count_for_unaligned_bytes(range.byte_count);
     for (uint32_t cell_index = 0; cell_index < cell_range.cell_count; ++cell_index) {
       if (workgroup_shadow) {
         const bool use_compact_pairs = workgroup_shadow->compact && cell_range.cell_count > 1u &&
@@ -2203,7 +2705,7 @@
                   low_vgpr, high_vgpr, local_old_value_vgpr, *lds_byte_offset_vgpr,
                   range.static_byte_offset, /*cell_index=*/0u, range.byte_count,
                   *lds_byte_offset_vgpr, range.static_byte_offset, /*compact_cell_count=*/2u,
-                  errors)) {
+                  /*relative_cell_index_vgpr=*/std::nullopt, errors)) {
             errors.emplace_back(
                 "ConSan MOI inline-shadow probe could not encode paired local LDS shadow publish");
             return std::nullopt;
@@ -2239,7 +2741,8 @@
                   words, candidate, options, arch, layout, *workgroup_shadow, address_lo_vgpr,
                   low_vgpr, high_vgpr, local_old_value_vgpr, loop_offset_vgpr,
                   /*static_byte_offset=*/0u, /*cell_index=*/0u, range.byte_count,
-                  *lds_byte_offset_vgpr, range.static_byte_offset, cells_per_iteration, errors)) {
+                  *lds_byte_offset_vgpr, range.static_byte_offset, cells_per_iteration,
+                  loop_counter_vgpr, errors)) {
             errors.emplace_back(
                 "ConSan MOI inline-shadow probe could not encode looped local LDS shadow publish");
             return std::nullopt;
@@ -2300,7 +2803,8 @@
                        low_vgpr, high_vgpr, local_old_value_vgpr, *lds_byte_offset_vgpr,
                        range.static_byte_offset, cell_index, range.byte_count,
                        *lds_byte_offset_vgpr, range.static_byte_offset,
-                       /*compact_cell_count=*/1u, errors)) {
+                       /*compact_cell_count=*/1u,
+                       /*relative_cell_index_vgpr=*/std::nullopt, errors)) {
           errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode local LDS shadow publish");
           return std::nullopt;
@@ -2437,6 +2941,7 @@
       if (!append_wave_coalesced_exact_shadow_swap(
               words, candidate, options, arch, layout, address_lo_vgpr, low_vgpr, high_vgpr,
               old_value_vgpr, *lds_byte_offset_vgpr, range.static_byte_offset, range.byte_count,
+              loop_external_cells ? std::optional<uint16_t>(loop_counter_vgpr) : std::nullopt,
               spill, spill_backed_lds_byte_offset_source, errors)) {
         errors.emplace_back(
             "ConSan MOI inline-shadow probe could not encode versioned shadow publish");

@@ -3093,8 +3093,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       const uint32_t minimum_cell_count =
           candidate == result.moi_candidates.end()
               ? 0u
-              : (candidate->width_bits + consan_moi_exact_shadow::granule_bytes * 8u - 1u) /
-                    (consan_moi_exact_shadow::granule_bytes * 8u);
+              : consan_moi_maximum_cell_count_for_unaligned_bytes(candidate->width_bits / 8u);
       const size_t decoded_local_exchange_cell_count =
           patch.workgroup_shadow_compact
               ? decoded_local_exchange_b32_count + 2u * decoded_local_exchange_b64_count
@@ -3120,7 +3119,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       const std::array<uint32_t, 1> duplicate_compact_metadata = {
           build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 3u),
                               vector_source_vgpr(static_cast<uint16_t>(scratch + 2u)), arch)};
-      const uint16_t diagnostic_claim_offset = cdna ? 8u : 3u;
+      const uint16_t diagnostic_claim_offset = cdna ? 12u : 3u;
       const auto expected_first_diagnostic_claim = instrumentation::build_flat_atomic_cmpswap_b32(
           scratch, static_cast<uint16_t>(scratch + diagnostic_claim_offset),
           static_cast<uint16_t>(scratch + diagnostic_claim_offset),

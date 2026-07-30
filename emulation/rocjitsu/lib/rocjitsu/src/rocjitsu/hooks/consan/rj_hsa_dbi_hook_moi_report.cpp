@@ -648,6 +648,7 @@ private:
     struct ExactShadowEntry {
       uint32_t index = 0;
       rocjitsu::ConSanMoiExactShadowEntry entry;
+      rocjitsu::ConSanMoiExactByteCellProvenance byte_provenance;
       uint64_t dispatch_id = 0;
       uint32_t version = 0;
     };
@@ -657,15 +658,16 @@ private:
       const uint32_t version_before = slot.version;
       const uint64_t packed_access = slot.packed_access;
       const uint64_t dispatch_id = slot.dispatch_id;
-      const uint32_t reserved = slot.reserved;
+      const uint32_t byte_provenance = slot.byte_provenance;
       const uint32_t version_after = slot.version;
       const auto snapshot = rocjitsu::classify_consan_moi_inline_exact_snapshot(
-          {version_before, packed_access, dispatch_id, reserved, version_after});
+          {version_before, packed_access, dispatch_id, byte_provenance, version_after});
       switch (snapshot.state) {
       case rocjitsu::ConSanMoiInlineExactSnapshotState::Empty:
         break;
       case rocjitsu::ConSanMoiInlineExactSnapshotState::Stable:
-        visible_exact_shadow.push_back({i, snapshot.entry, snapshot.dispatch_id, snapshot.version});
+        visible_exact_shadow.push_back(
+            {i, snapshot.entry, snapshot.byte_provenance, snapshot.dispatch_id, snapshot.version});
         break;
       case rocjitsu::ConSanMoiInlineExactSnapshotState::Publishing:
         ++summary.exact_incomplete_snapshot_count;
@@ -678,10 +680,10 @@ private:
           log_message(kLogInfo,
                       "ConSan MOI first malformed exact snapshot reader=%llu index=%u "
                       "version_before=%u packed_access=0x%016llx dispatch_id=0x%016llx "
-                      "reserved=%u version_after=%u",
+                      "byte_provenance=0x%08x version_after=%u",
                       static_cast<unsigned long long>(entry.reader), i, version_before,
                       static_cast<unsigned long long>(packed_access),
-                      static_cast<unsigned long long>(dispatch_id), reserved, version_after);
+                      static_cast<unsigned long long>(dispatch_id), byte_provenance, version_after);
         }
         ++summary.exact_malformed_snapshot_count;
         break;
@@ -1505,11 +1507,14 @@ private:
       const ExactShadowEntry &shadow_entry = visible_exact_shadow[i];
       log_message(kLogInfo,
                   "ConSan MOI auto exact-shadow reader=%llu index=%u kind=%u owner=%u epoch=%u "
-                  "generation=%u inst=0x%x dispatch=0x%llx version=%u",
+                  "generation=%u inst=0x%x bytes=[%u,%u) lane=%u dispatch=0x%llx version=%u",
                   static_cast<unsigned long long>(entry.reader), shadow_entry.index,
                   static_cast<uint32_t>(shadow_entry.entry.kind), shadow_entry.entry.owner_id,
                   shadow_entry.entry.epoch, shadow_entry.entry.generation,
-                  shadow_entry.entry.instruction_offset,
+                  shadow_entry.entry.instruction_offset, shadow_entry.byte_provenance.byte_offset,
+                  shadow_entry.byte_provenance.byte_offset +
+                      shadow_entry.byte_provenance.byte_count,
+                  shadow_entry.byte_provenance.representative_lane,
                   static_cast<unsigned long long>(shadow_entry.dispatch_id), shadow_entry.version);
     }
     for (uint32_t i = 0; i < std::min<size_t>(visible_sampled.size(), 4u); ++i) {

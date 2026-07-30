@@ -180,7 +180,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   constexpr uint64_t access_relay_words = 20u;
   const bool has_function_candidate = std::ranges::any_of(
       candidates, [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
-  std::unordered_map<uint64_t, size_t> candidate_count_by_descriptor;
   std::unordered_set<uint64_t> dynamic_lds_descriptors;
   for (const AmdGpuKernelInfo &kernel : code_object.kernels()) {
     if (kernel.has_dynamic_lds)
@@ -195,14 +194,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   std::unordered_map<uint64_t, std::optional<ConSanMoiWorkgroupSources>>
       direct_workgroup_sources_by_descriptor;
   bool warned_dynamic_lds_external_shadow = false;
-  for (const ConSanMoiCandidate *candidate : candidates) {
-    // Direct-kernel compact tokens live in descriptor-local domains. Shared
-    // function candidates remain on the external table because one helper may
-    // have several owning descriptors and therefore no unambiguous local token
-    // domain; their presence must not disable compact state for direct sites.
-    if (candidate->in_kernel && candidate->kernel_descriptor_file_offset)
-      ++candidate_count_by_descriptor[*candidate->kernel_descriptor_file_offset];
-  }
   const bool has_branch_only_dynamic_assignment =
       std::ranges::any_of(options.moi_transient_sgpr_assignments,
                           [](const ConSanMoiTransientSgprAssignment &assignment) {
@@ -689,11 +680,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           next = 1u;
         next_compact_token = next;
       }
-      const bool compact_token_available =
-          direct_descriptor && next_compact_token != 0u &&
-          next_compact_token <= consan_moi_exact_shadow::max_compact_token &&
-          candidate_count_by_descriptor[*direct_descriptor] <=
-              consan_moi_exact_shadow::max_compact_token;
       const bool has_dynamic_lds_owner = std::ranges::any_of(
           resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
             return dynamic_lds_descriptors.contains(descriptor_offset);
@@ -703,13 +689,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           auto [cached, inserted] =
               direct_workgroup_shadow_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
           if (inserted) {
-            cached->second = common_moi_workgroup_shadow_layout(
-                bytes, *resources, arch, options, result.warnings, compact_token_available);
+            cached->second = common_moi_workgroup_shadow_layout(bytes, *resources, arch, options,
+                                                                result.warnings);
           }
           workgroup_shadow = cached->second;
         } else {
-          workgroup_shadow = common_moi_workgroup_shadow_layout(
-              bytes, *resources, arch, options, result.warnings, compact_token_available);
+          workgroup_shadow =
+              common_moi_workgroup_shadow_layout(bytes, *resources, arch, options, result.warnings);
         }
       }
       if (has_dynamic_lds_owner && !warned_dynamic_lds_external_shadow) {

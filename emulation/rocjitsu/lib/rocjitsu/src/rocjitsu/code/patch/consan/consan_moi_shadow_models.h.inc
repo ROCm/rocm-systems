@@ -83,6 +83,173 @@ inline constexpr uint32_t compact_diagnostic_token_tag = 0x80000000u;
 
 } // namespace consan_moi_exact_shadow
 
+namespace consan_moi_exact_byte_cell {
+
+inline constexpr uint32_t byte_mask_shift = 0;
+inline constexpr uint32_t byte_mask_bits = consan_moi_exact_shadow::granule_bytes;
+inline constexpr uint32_t byte_offset_shift = byte_mask_shift + byte_mask_bits;
+inline constexpr uint32_t byte_offset_bits = 2;
+inline constexpr uint32_t byte_end_minus_one_shift = byte_offset_shift + byte_offset_bits;
+inline constexpr uint32_t byte_end_minus_one_bits = 2;
+inline constexpr uint32_t lane_plus_one_shift = byte_end_minus_one_shift + byte_end_minus_one_bits;
+inline constexpr uint32_t lane_plus_one_bits = 7;
+inline constexpr uint32_t byte_mask_mask =
+    static_cast<uint32_t>(consan_moi_bit_field_mask(byte_mask_shift, byte_mask_bits));
+inline constexpr uint32_t byte_offset_mask =
+    static_cast<uint32_t>(consan_moi_bit_field_mask(byte_offset_shift, byte_offset_bits));
+inline constexpr uint32_t byte_end_minus_one_mask = static_cast<uint32_t>(
+    consan_moi_bit_field_mask(byte_end_minus_one_shift, byte_end_minus_one_bits));
+inline constexpr uint32_t lane_plus_one_mask =
+    static_cast<uint32_t>(consan_moi_bit_field_mask(lane_plus_one_shift, lane_plus_one_bits));
+inline constexpr uint32_t packed_mask =
+    byte_mask_mask | byte_offset_mask | byte_end_minus_one_mask | lane_plus_one_mask;
+inline constexpr uint32_t maximum_lane = 63;
+
+} // namespace consan_moi_exact_byte_cell
+
+struct ConSanMoiExactByteCellProvenance {
+  uint8_t byte_mask = 0;
+  uint8_t byte_offset = 0;
+  uint8_t byte_count = 0;
+  uint8_t representative_lane = 0;
+  bool valid = false;
+};
+
+[[nodiscard]] constexpr bool consan_moi_exact_byte_cell_mask_is_contiguous(uint32_t byte_mask) {
+  switch (byte_mask) {
+  case 0x1:
+  case 0x2:
+  case 0x3:
+  case 0x4:
+  case 0x6:
+  case 0x7:
+  case 0x8:
+  case 0xc:
+  case 0xe:
+  case 0xf:
+    return true;
+  default:
+    return false;
+  }
+}
+
+[[nodiscard]] constexpr ConSanMoiExactByteCellProvenance
+consan_moi_exact_byte_cell_provenance_from_mask(uint32_t byte_mask, uint32_t representative_lane) {
+  if (!consan_moi_exact_byte_cell_mask_is_contiguous(byte_mask) ||
+      representative_lane > consan_moi_exact_byte_cell::maximum_lane) {
+    return {};
+  }
+  uint32_t byte_offset = 0;
+  while ((byte_mask & (1u << byte_offset)) == 0u)
+    ++byte_offset;
+  uint32_t byte_count = 0;
+  while ((byte_mask & (1u << (byte_offset + byte_count))) != 0u)
+    ++byte_count;
+  return {
+      static_cast<uint8_t>(byte_mask),
+      static_cast<uint8_t>(byte_offset),
+      static_cast<uint8_t>(byte_count),
+      static_cast<uint8_t>(representative_lane),
+      true,
+  };
+}
+
+namespace consan_moi_exact_byte_cell {
+
+inline constexpr uint32_t byte_offset_by_mask_lookup = [] {
+  uint32_t lookup = 0;
+  for (uint32_t mask = 0; mask <= 0xfu; ++mask) {
+    const ConSanMoiExactByteCellProvenance provenance =
+        consan_moi_exact_byte_cell_provenance_from_mask(mask, 0u);
+    if (provenance.valid)
+      lookup |= static_cast<uint32_t>(provenance.byte_offset) << (2u * mask);
+  }
+  return lookup;
+}();
+
+inline constexpr uint32_t byte_end_minus_one_by_mask_lookup = [] {
+  uint32_t lookup = 0;
+  for (uint32_t mask = 0; mask <= 0xfu; ++mask) {
+    const ConSanMoiExactByteCellProvenance provenance =
+        consan_moi_exact_byte_cell_provenance_from_mask(mask, 0u);
+    if (provenance.valid) {
+      lookup |= static_cast<uint32_t>(provenance.byte_offset + provenance.byte_count - 1u)
+                << (2u * mask);
+    }
+  }
+  return lookup;
+}();
+
+} // namespace consan_moi_exact_byte_cell
+
+[[nodiscard]] constexpr uint32_t
+pack_consan_moi_exact_byte_cell_provenance(uint32_t byte_mask, uint32_t representative_lane) {
+  const ConSanMoiExactByteCellProvenance provenance =
+      consan_moi_exact_byte_cell_provenance_from_mask(byte_mask, representative_lane);
+  if (!provenance.valid)
+    return 0;
+  return byte_mask |
+         (static_cast<uint32_t>(provenance.byte_offset)
+          << consan_moi_exact_byte_cell::byte_offset_shift) |
+         (static_cast<uint32_t>(provenance.byte_offset + provenance.byte_count - 1u)
+          << consan_moi_exact_byte_cell::byte_end_minus_one_shift) |
+         ((representative_lane + 1u) << consan_moi_exact_byte_cell::lane_plus_one_shift);
+}
+
+[[nodiscard]] constexpr ConSanMoiExactByteCellProvenance
+decode_consan_moi_exact_byte_cell_provenance(uint32_t packed) {
+  const uint32_t byte_mask = (packed & consan_moi_exact_byte_cell::byte_mask_mask) >>
+                             consan_moi_exact_byte_cell::byte_mask_shift;
+  const uint32_t lane_plus_one = (packed & consan_moi_exact_byte_cell::lane_plus_one_mask) >>
+                                 consan_moi_exact_byte_cell::lane_plus_one_shift;
+  const uint32_t byte_offset = (packed & consan_moi_exact_byte_cell::byte_offset_mask) >>
+                               consan_moi_exact_byte_cell::byte_offset_shift;
+  const uint32_t byte_end = ((packed & consan_moi_exact_byte_cell::byte_end_minus_one_mask) >>
+                             consan_moi_exact_byte_cell::byte_end_minus_one_shift) +
+                            1u;
+  const bool valid = (packed & ~consan_moi_exact_byte_cell::packed_mask) == 0u &&
+                     consan_moi_exact_byte_cell_mask_is_contiguous(byte_mask) &&
+                     byte_offset < byte_end && byte_end <= consan_moi_exact_shadow::granule_bytes &&
+                     byte_mask == (((1u << (byte_end - byte_offset)) - 1u) << byte_offset) &&
+                     lane_plus_one >= 1u &&
+                     lane_plus_one <= consan_moi_exact_byte_cell::maximum_lane + 1u;
+  return {
+      static_cast<uint8_t>(byte_mask),
+      static_cast<uint8_t>(valid ? byte_offset : 0u),
+      static_cast<uint8_t>(valid ? byte_end - byte_offset : 0u),
+      static_cast<uint8_t>(valid ? lane_plus_one - 1u : 0u),
+      valid,
+  };
+}
+
+[[nodiscard]] constexpr uint32_t consan_moi_exact_byte_mask_for_cell(uint32_t access_byte_offset,
+                                                                     uint32_t access_byte_count,
+                                                                     uint32_t relative_cell_index) {
+  if (access_byte_count == 0u)
+    return 0u;
+  const uint32_t start = access_byte_offset & (consan_moi_exact_shadow::granule_bytes - 1u);
+  const uint64_t relative_cell_start =
+      static_cast<uint64_t>(relative_cell_index) * consan_moi_exact_shadow::granule_bytes;
+  const uint64_t relative_cell_end = relative_cell_start + consan_moi_exact_shadow::granule_bytes;
+  const uint64_t access_end = static_cast<uint64_t>(start) + access_byte_count;
+  const uint64_t overlap_start = std::max<uint64_t>(start, relative_cell_start);
+  const uint64_t overlap_end = std::min(access_end, relative_cell_end);
+  if (overlap_start >= overlap_end)
+    return 0u;
+  const uint32_t cell_offset = static_cast<uint32_t>(overlap_start - relative_cell_start);
+  const uint32_t cell_count = static_cast<uint32_t>(overlap_end - overlap_start);
+  return ((1u << cell_count) - 1u) << cell_offset;
+}
+
+[[nodiscard]] constexpr uint32_t
+consan_moi_maximum_cell_count_for_unaligned_bytes(uint32_t access_byte_count) {
+  if (access_byte_count == 0u)
+    return 0u;
+  return static_cast<uint32_t>((static_cast<uint64_t>(access_byte_count) +
+                                2u * consan_moi_exact_shadow::granule_bytes - 2u) /
+                               consan_moi_exact_shadow::granule_bytes);
+}
+
 enum class ConSanMoiInlineWorkgroupKeyShape : uint8_t {
   OneDimensional,
   TwoDimensional,
@@ -252,6 +419,24 @@ struct ConSanMoiExactShadowEntry {
   uint32_t instruction_offset = 0;
 };
 
+[[nodiscard]] constexpr bool
+consan_moi_exact_byte_cells_conflict(const ConSanMoiExactShadowEntry &current_access,
+                                     const ConSanMoiExactByteCellProvenance &current_byte,
+                                     const ConSanMoiExactShadowEntry &prior_access,
+                                     const ConSanMoiExactByteCellProvenance &prior_byte) {
+  if (!current_byte.valid || !prior_byte.valid ||
+      (current_byte.byte_mask & prior_byte.byte_mask) == 0u ||
+      current_access.epoch != prior_access.epoch ||
+      current_access.generation != prior_access.generation ||
+      !consan_moi_shadow_kind_conflicts(current_access.kind, prior_access.kind)) {
+    return false;
+  }
+  if (current_access.owner_id != prior_access.owner_id)
+    return true;
+  return current_access.instruction_offset == prior_access.instruction_offset &&
+         current_byte.representative_lane != prior_byte.representative_lane;
+}
+
 inline constexpr uint32_t kConSanMoiInlineExactInitialVersion = 0;
 inline constexpr uint32_t kConSanMoiInlineExactMaxReadyVersion =
     std::numeric_limits<uint32_t>::max() - 1u;
@@ -272,13 +457,14 @@ struct ConSanMoiInlineExactSnapshotWords {
   uint32_t version_before = 0;
   uint64_t packed_access = 0;
   uint64_t dispatch_id = 0;
-  uint32_t reserved = 0;
+  uint32_t byte_provenance = 0;
   uint32_t version_after = 0;
 };
 
 struct ConSanMoiInlineExactSnapshot {
   ConSanMoiInlineExactSnapshotState state = ConSanMoiInlineExactSnapshotState::Empty;
   ConSanMoiExactShadowEntry entry;
+  ConSanMoiExactByteCellProvenance byte_provenance;
   uint64_t dispatch_id = 0;
   uint32_t version = 0;
 };
@@ -326,37 +512,45 @@ classify_consan_moi_inline_exact_snapshot(const ConSanMoiInlineExactSnapshotWord
   if (words.version_before != words.version_after) {
     return {.state = ConSanMoiInlineExactSnapshotState::ChangedDuringRead,
             .entry = {},
+            .byte_provenance = {},
             .dispatch_id = 0,
             .version = 0};
   }
   if ((words.version_after & 1u) != 0) {
     return {.state = ConSanMoiInlineExactSnapshotState::Publishing,
             .entry = {},
+            .byte_provenance = {},
             .dispatch_id = 0,
             .version = words.version_after};
   }
   if (words.version_after == kConSanMoiInlineExactInitialVersion) {
-    if (words.packed_access == 0 && words.dispatch_id == 0 && words.reserved == 0)
+    if (words.packed_access == 0 && words.dispatch_id == 0 && words.byte_provenance == 0)
       return {.state = ConSanMoiInlineExactSnapshotState::Empty,
               .entry = {},
+              .byte_provenance = {},
               .dispatch_id = 0,
               .version = 0};
     return {.state = ConSanMoiInlineExactSnapshotState::Malformed,
             .entry = {},
+            .byte_provenance = {},
             .dispatch_id = 0,
             .version = 0};
   }
   const ConSanMoiExactShadowEntry entry = decode_consan_moi_exact_shadow_entry(words.packed_access);
-  if (words.reserved != 0 || words.packed_access == 0 || words.dispatch_id == 0 ||
+  const ConSanMoiExactByteCellProvenance byte_provenance =
+      decode_consan_moi_exact_byte_cell_provenance(words.byte_provenance);
+  if (!byte_provenance.valid || words.packed_access == 0 || words.dispatch_id == 0 ||
       entry.kind < ConSanMoiShadowAccessKind::Read ||
       entry.kind > ConSanMoiShadowAccessKind::Atomic || entry.generation == 0) {
     return {.state = ConSanMoiInlineExactSnapshotState::Malformed,
             .entry = {},
+            .byte_provenance = {},
             .dispatch_id = 0,
             .version = words.version_after};
   }
   return {.state = ConSanMoiInlineExactSnapshotState::Stable,
           .entry = entry,
+          .byte_provenance = byte_provenance,
           .dispatch_id = words.dispatch_id,
           .version = words.version_after};
 }

@@ -760,8 +760,9 @@ void set_sgpr_pair_from_hint(FlatPointerTracker &tracker, uint16_t index,
 }
 
 [[nodiscard]] bool is_vector_pointer_component_arithmetic(std::string_view mnemonic) {
-  return starts_with_any(mnemonic, {"v_add_co_u32", "v_add_co_ci_u32", "v_add_nc_u32",
-                                    "v_sub_co_u32", "v_sub_co_ci_u32", "v_sub_nc_u32"});
+  return starts_with_any(mnemonic,
+                         {"v_add_u32", "v_add_co_u32", "v_add_co_ci_u32", "v_add_nc_u32",
+                          "v_sub_u32", "v_sub_co_u32", "v_sub_co_ci_u32", "v_sub_nc_u32"});
 }
 
 [[nodiscard]] uint64_t scratch_component_key(uint32_t saddr, uint32_t ioffset) {

@@ -302,6 +302,18 @@ set(RJ_CONSAN_LDS_DYNAMIC_STACK_FULL_PRESSURE_FLAT_SPILL_TEST
 set(RJ_CONSAN_LDS_ZERO_EXEC_NATIVE_SCALAR_SPILL_TEST
     "ConSanLdsTest.ZeroExecNativeLdsSpillPreservesAllocatedScalars"
 )
+set(RJ_CONSAN_INLINE_EXACT_LOCAL_ADJACENT_TEST
+    "ConSanLdsTest.InlineExactLocalAdjacentBytesStayIndependent"
+)
+set(RJ_CONSAN_INLINE_EXACT_LOCAL_OVERLAP_TEST
+    "ConSanLdsTest.InlineExactLocalOverlappingByteCompletes"
+)
+set(RJ_CONSAN_INLINE_EXACT_EXTERNAL_ADJACENT_TEST
+    "ConSanLdsTest.InlineExactExternalAdjacentBytesStayIndependent"
+)
+set(RJ_CONSAN_INLINE_EXACT_EXTERNAL_OVERLAP_TEST
+    "ConSanLdsTest.InlineExactExternalOverlappingByteCompletes"
+)
 set(RJ_CONSAN_CDNA_MOI_FORCED_SPILL_RECORD_TEST
     "ConSanMoiCdnaTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
 )
@@ -374,6 +386,81 @@ function(rj_add_consan_address_group_sim_case prefix target filter config)
             "RJ_CONSAN_LOG=3"
             "RJ_CONSAN_MAX_PATCHES=1"
             "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+endfunction()
+
+function(rj_add_consan_inline_exact_byte_cases prefix target config)
+    set(_exact_common_environment
+        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+        "RJ_CONSAN_MODE=inline-shadow"
+        "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=67108864"
+        "RJ_CONSAN_FLAT_PROVENANCE=strict"
+        "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+        "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+        "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+        "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+        "RJ_CONSAN_LOG=3"
+        "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${prefix}.InlineExactLocalAdjacentClean"
+        TARGET ${target}
+        FILTER "${RJ_CONSAN_INLINE_EXACT_LOCAL_ADJACENT_TEST}"
+        CONFIG "${config}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "workgroup_shadow_bytes=[1-9][0-9]*"
+        FAIL_REGEX "RJ_CONSAN_MOI_(REQUIRE_RECORDS|FORBID_DIAGNOSTICS) requested"
+        ENVIRONMENT
+            ${_exact_common_environment}
+            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_inline_exact_local_adjacent_bytes"
+            "RJ_CONSAN_MAX_PATCHES=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${prefix}.InlineExactLocalOverlapReports"
+        TARGET ${target}
+        FILTER "${RJ_CONSAN_INLINE_EXACT_LOCAL_OVERLAP_TEST}"
+        CONFIG "${config}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "first_lds=\\[0,1\\) second_lds=\\[0,1\\)"
+        FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
+        ENVIRONMENT
+            ${_exact_common_environment}
+            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_inline_exact_local_overlapping_byte"
+            "RJ_CONSAN_MAX_PATCHES=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${prefix}.InlineExactExternalAdjacentClean"
+        TARGET ${target}
+        FILTER "${RJ_CONSAN_INLINE_EXACT_EXTERNAL_ADJACENT_TEST}"
+        CONFIG "${config}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "workgroup_shadow_bytes=0"
+        FAIL_REGEX "RJ_CONSAN_MOI_(REQUIRE_RECORDS|FORBID_DIAGNOSTICS) requested"
+        ENVIRONMENT
+            ${_exact_common_environment}
+            "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_inline_exact_external_adjacent_bytes"
+            "RJ_CONSAN_MAX_PATCHES=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${prefix}.InlineExactExternalOverlapReports"
+        TARGET ${target}
+        FILTER "${RJ_CONSAN_INLINE_EXACT_EXTERNAL_OVERLAP_TEST}"
+        CONFIG "${config}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX "first_lds=\\[0,1\\) second_lds=\\[0,1\\)"
+        FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
+        ENVIRONMENT
+            ${_exact_common_environment}
+            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_inline_exact_external_overlapping_byte"
+            "RJ_CONSAN_MAX_PATCHES=1"
     )
 endfunction()
 
@@ -514,7 +601,7 @@ function(rj_add_consan_common_sim_cases)
         TIMEOUT 60
         RUN_SERIAL
         PASS_REGEX
-            "ConSan proof patch[ -~]*kind=trampoline-moi-exact-shadow-store[ -~]*spilled_vgprs=[1-9][0-9]*.*ConSan MOI auto diagnostic[ -~]*backend=1 kind=1[ -~]*first_owner=0 second_owner=[1-9][0-9]*[ -~]*first_kind=2 second_kind=2[ -~]*second_lanes=0x[1-9a-fA-F][0-9a-fA-F]*[ -~]*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
+            "ConSan proof patch[ -~]*kind=trampoline-moi-exact-shadow-store[ -~]*spilled_vgprs=[1-9][0-9]*.*ConSan MOI auto diagnostic[ -~]*backend=1 kind=1[ -~]*first_owner=0 second_owner=0[ -~]*first_kind=2 second_kind=2[ -~]*second_lanes=0x[1-9a-fA-F][0-9a-fA-F]*[ -~]*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
         FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
@@ -588,6 +675,11 @@ function(rj_add_consan_common_sim_cases)
             "RJ_CONSAN_LOG=3"
             "RJ_CONSAN_MAX_PATCHES=1"
             "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_inline_exact_byte_cases(
+        "${_sim_PREFIX}"
+        ${_sim_LDS_TARGET}
+        "${_sim_CONFIG}"
     )
 endfunction()
 
@@ -1388,7 +1480,17 @@ function(rj_add_consan_hip_tests)
             "RJ_CONSAN_MAX_PATCHES=1"
             "RJ_CONSAN_REQUIRE_PATCH=1"
     )
+    rj_add_consan_inline_exact_byte_cases(
+        "ConSanGfx1201Sim"
+        hip_consan_lds_test
+        "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
+    )
     if(HAS_GFX1201_GPU)
+        rj_add_consan_inline_exact_byte_cases(
+            "ConSanGfx1201Physical"
+            hip_consan_lds_test
+            ""
+        )
         set(RJ_CONSAN_LDS_RACY_TEST
             "ConSanLdsTest.PaddedRacyStoreCompletesOrTripsDbiTrap"
         )
