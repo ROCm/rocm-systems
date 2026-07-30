@@ -25,8 +25,7 @@ make_agent_uid(const agent& agnt)
         {
             case agent_type::GPU: return "GPU";
             case agent_type::CPU: return "CPU";
-            case agent_type::NIC:
-                return std::nullopt;  // profiler-hub does not support NIC; treat as NULL
+            case agent_type::NIC: return "NIC";
             default: return std::nullopt;
         }
     };
