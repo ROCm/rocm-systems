@@ -75,8 +75,7 @@ static void pollCeCollEvents(struct context* ctx) {
         event->elapsedTime = (uint64_t)event->cpuDuration;
       }
 
-      // Decrement parent refCount when complete. ACQ_REL pairs with the acquire
-      // load in the CollApi allocator, which recycles a slot only at refCount==0.
+      // Decrement parent refCount when complete
       if (event->parent) {
         __atomic_sub_fetch(&event->parent->refCount, 1, __ATOMIC_ACQ_REL);
       }
@@ -85,9 +84,8 @@ static void pollCeCollEvents(struct context* ctx) {
       __atomic_fetch_add(&ctx->ceCollPoolBase, 1, __ATOMIC_RELAXED);
 
       *ceCollPtr = event->pollerNext;
-      // Release the slot only after unlinking, so the allocator cannot recycle a
-      // slot still reachable from ceCollHead. Reaches 0 once the child CeSync and
-      // CeBatch events, which point back at this slot, have retired too.
+      // Release only after unlinking, so the slot cannot be recycled while still
+      // reachable from ceCollHead.
       __atomic_sub_fetch(&event->base.refCount, 1, __ATOMIC_ACQ_REL);
       continue;
     }
@@ -128,8 +126,7 @@ static void pollCeSyncEvents(struct context* ctx) {
         event->elapsedTime = (uint64_t)event->cpuDuration;
       }
 
-      // Decrement parent refCount when complete. ACQ_REL pairs with the acquire
-      // load in the CeColl allocator.
+      // Decrement parent refCount when complete
       if (event->parent) {
         __atomic_sub_fetch(&event->parent->base.refCount, 1, __ATOMIC_ACQ_REL);
       }
@@ -138,7 +135,6 @@ static void pollCeSyncEvents(struct context* ctx) {
       __atomic_fetch_add(&ctx->ceSyncPoolBase, 1, __ATOMIC_RELAXED);
 
       *ceSyncPtr = event->pollerNext;
-      // Release the slot only after unlinking (see pollCeCollEvents).
       __atomic_sub_fetch(&event->base.refCount, 1, __ATOMIC_ACQ_REL);
       continue;
     }
@@ -179,8 +175,7 @@ static void pollCeBatchEvents(struct context* ctx) {
         event->elapsedTime = (uint64_t)event->cpuDuration;
       }
 
-      // Decrement parent refCount when complete. ACQ_REL pairs with the acquire
-      // load in the CeColl allocator.
+      // Decrement parent refCount when complete
       if (event->parent) {
         __atomic_sub_fetch(&event->parent->base.refCount, 1, __ATOMIC_ACQ_REL);
       }
@@ -189,7 +184,6 @@ static void pollCeBatchEvents(struct context* ctx) {
       __atomic_fetch_add(&ctx->ceBatchPoolBase, 1, __ATOMIC_RELAXED);
 
       *ceBatchPtr = event->pollerNext;
-      // Release the slot only after unlinking (see pollCeCollEvents).
       __atomic_sub_fetch(&event->base.refCount, 1, __ATOMIC_ACQ_REL);
       continue;
     }
@@ -279,8 +273,7 @@ void ceProfilerRegisterContext(struct context* ctx) {
   ctx->ceEvents.ceSyncHead = NULL;
   ctx->ceEvents.ceBatchHead = NULL;
 
-  // Block: a context that failed to register is never polled, yet its events
-  // still take ctx->ceEvents.mutex, which this path used to destroy.
+  // Must not be skipped: an unregistered context is never polled.
   pthread_mutex_lock(&ceProfilerCtxt.mutex);
 
   // Check if context with this commHash+rank already exists
@@ -313,8 +306,7 @@ void ceProfilerRegisterContext(struct context* ctx) {
 
 // Deregister context from CE poller
 void ceProfilerDeregisterContext(struct context* ctx) {
-  // Block: leaving a finalized context in the registry lets the poller walk it
-  // after it is freed.
+  // Must not be skipped: the poller would walk this context after it is freed.
   pthread_mutex_lock(&ceProfilerCtxt.mutex);
 
   for (int i = 0; i < ceProfilerCtxt.contextCount; i++) {
@@ -330,7 +322,7 @@ void ceProfilerDeregisterContext(struct context* ctx) {
 }
 
 void ceProfilerCleanupPendingEvents(struct context* ctx) {
-  // Block: skipping cleanup leaks the CUDA events still held by this context.
+  // Must not be skipped: it would leak this context's CUDA events.
   pthread_mutex_lock(&ctx->ceEvents.mutex);
 
   struct ceColl* ceColl = ctx->ceEvents.ceCollHead;
@@ -364,14 +356,17 @@ CeTimingMode_t ceProfilerGetTimingMode(void) {
 
 // Start CE Coll event
 ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncclProfilerEventDescr_v6_t* eDescr, double startTime) {
+  // Core reads the handle back to decide whether to stop this event and what to
+  // parent CeSync/CeBatch to, so a path that creates no event must leave it NULL.
+  *eHandle = NULL;
+  if (ctx->ceCollPoolSize <= 0) return ncclSuccess;
+
   struct ceColl* event;
   int ceCollId = __atomic_fetch_add(&ctx->ceCollPoolIndex, 1, __ATOMIC_RELAXED);
   event = &ctx->ceCollPool[ceCollId % ctx->ceCollPoolSize];
-  // Recycle the slot only if it is within the ring window AND its previous owner
-  // has fully retired it (refCount==0). CE events complete out of order, so the
-  // window only counts retirements and does not prove this slot is free; reusing
-  // one still linked in the poller list relinks it onto itself and spins the
-  // poller forever. Acquire pairs with the poller's ACQ_REL release after unlink.
+  // Recycle a slot only once its previous owner retired it (refCount==0). CE
+  // events complete out of order, so the ring window alone does not prove the
+  // slot is free, and reusing a linked one spins the poller forever.
   if ((ceCollId - __atomic_load_n(&ctx->ceCollPoolBase, __ATOMIC_RELAXED)) < ctx->ceCollPoolSize &&
       __atomic_load_n(&event->base.refCount, __ATOMIC_ACQUIRE) == 0) {
     event->parent = (struct collApi*)eDescr->parentObj;
@@ -419,9 +414,8 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
     // Record start event to stream
     cudaEventRecord(event->startEvent, event->stream);
 
-    // Link unconditionally: a skipped insert leaves the event unpolled, so its
-    // slot would never retire and the pool would leak it. The poller holds this
-    // mutex only for the length of one polling pass.
+    // Must not be skipped: an unlinked event is never polled, so its slot would
+    // never retire.
     pthread_mutex_lock(&ctx->ceEvents.mutex);
     event->pollerNext = ctx->ceEvents.ceCollHead;
     ctx->ceEvents.ceCollHead = event;
@@ -446,10 +440,14 @@ ncclResult_t ceProfilerStopCeCollEvent(void* eHandle) {
 
 // Start CE Sync event
 ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncclProfilerEventDescr_v6_t* eDescr, double startTime) {
+  *eHandle = NULL;
+  if (ctx->ceSyncPoolSize <= 0) return ncclSuccess;
+  if (eDescr->parentObj == NULL) return ncclSuccess;
+
   struct ceSync* event;
   int ceSyncId = __atomic_fetch_add(&ctx->ceSyncPoolIndex, 1, __ATOMIC_RELAXED);
   event = &ctx->ceSyncPool[ceSyncId % ctx->ceSyncPoolSize];
-  // Recycle only a fully-retired slot (refCount==0, acquire). See ceProfilerStartCeCollEvent.
+  // See ceProfilerStartCeCollEvent.
   if ((ceSyncId - __atomic_load_n(&ctx->ceSyncPoolBase, __ATOMIC_RELAXED)) < ctx->ceSyncPoolSize &&
       __atomic_load_n(&event->base.refCount, __ATOMIC_ACQUIRE) == 0) {
     event->parent = (struct ceColl*)eDescr->parentObj;
@@ -492,7 +490,6 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
     // Record start event to stream
     cudaEventRecord(event->startEvent, event->stream);
 
-    // Link unconditionally (see ceProfilerStartCeCollEvent).
     pthread_mutex_lock(&ctx->ceEvents.mutex);
     event->pollerNext = ctx->ceEvents.ceSyncHead;
     ctx->ceEvents.ceSyncHead = event;
@@ -517,10 +514,14 @@ ncclResult_t ceProfilerStopCeSyncEvent(void* eHandle) {
 
 // Start CE Batch event
 ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, ncclProfilerEventDescr_v6_t* eDescr, double startTime) {
+  *eHandle = NULL;
+  if (ctx->ceBatchPoolSize <= 0) return ncclSuccess;
+  if (eDescr->parentObj == NULL) return ncclSuccess;
+
   struct ceBatch* event;
   int ceBatchId = __atomic_fetch_add(&ctx->ceBatchPoolIndex, 1, __ATOMIC_RELAXED);
   event = &ctx->ceBatchPool[ceBatchId % ctx->ceBatchPoolSize];
-  // Recycle only a fully-retired slot (refCount==0, acquire). See ceProfilerStartCeCollEvent.
+  // See ceProfilerStartCeCollEvent.
   if ((ceBatchId - __atomic_load_n(&ctx->ceBatchPoolBase, __ATOMIC_RELAXED)) < ctx->ceBatchPoolSize &&
       __atomic_load_n(&event->base.refCount, __ATOMIC_ACQUIRE) == 0) {
     event->parent = (struct ceColl*)eDescr->parentObj;
@@ -563,7 +564,6 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
     // Record start event to stream
     cudaEventRecord(event->startEvent, event->stream);
 
-    // Link unconditionally (see ceProfilerStartCeCollEvent).
     pthread_mutex_lock(&ctx->ceEvents.mutex);
     event->pollerNext = ctx->ceEvents.ceBatchHead;
     ctx->ceEvents.ceBatchHead = event;
