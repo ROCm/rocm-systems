@@ -35,6 +35,91 @@ def _is_num(x: Any) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
+# Columns parsed from the RCCL specialized-kernel filename, in display order.
+# The symbol is paste("_", coll, algo, proto, redop, ty, acc, pipeline, unroll)
+# (see src/device/generate.py). The first five tokens are positional; the trailing
+# tokens are acc, pipeline, [ll128_variant], unroll. "acc" (accumulator) is only
+# ever 1 for AllReduce, "pipeline" is 0 for gfx950 builds, and unroll is always
+# the final token. Older LL128 codegen (AllGather/AllReduce/Broadcast) inserts one
+# extra {1,2} token before unroll, surfaced here as "ll128_variant".
+#   specialized_<collective>_<algorithm>_<protocol>_<op>_<datatype>_<acc>_<pipeline>_[<ll128_variant>_]<unroll>
+_PARSED_COLUMNS = (
+    "collective", "algorithm", "protocol", "reduction_op", "datatype",
+    "acc", "pipeline", "ll128_variant", "unroll",
+)
+
+
+def _maybe_int(s: str) -> Any:
+    return int(s) if isinstance(s, str) and s.isdigit() else s
+
+_COLLECTIVE_NAMES = {
+    "allgather": "AllGather",
+    "allreduce": "AllReduce",
+    "alltoallpivot": "AllToAllPivot",
+    "broadcast": "Broadcast",
+    "reduce": "Reduce",
+    "reducescatter": "ReduceScatter",
+    "sendrecv": "SendRecv",
+}
+_ALGO_NAMES = {"pat": "PAT", "ring": "Ring", "tree": "Tree"}
+_PROTO_NAMES = {"ll": "LL", "ll128": "LL128", "simple": "Simple"}
+_OP_NAMES = {
+    "sum": "Sum",
+    "prod": "Prod",
+    "minmax": "MinMax",
+    "premulsum": "PreMulSum",
+    "sumpostdiv": "SumPostDiv",
+}
+
+
+def _parse_filename(name: str) -> dict[str, Any]:
+    """Extract collective/algorithm/protocol/reduction_op/datatype from a filename.
+
+    Best-effort and positional: returns None for every field when the name does
+    not look like an RCCL specialized-kernel resource file.
+    """
+    empty = dict.fromkeys(_PARSED_COLUMNS, None)
+    stem = name
+    for suf in (".resources.json", ".json"):
+        if stem.endswith(suf):
+            stem = stem[: -len(suf)]
+            break
+    had_prefix = stem.startswith("specialized_")
+    if had_prefix:
+        stem = stem[len("specialized_"):]
+    toks = stem.split("_")
+    # Need the 5 positional fields plus at least one trailing token for unroll.
+    if len(toks) < 6:
+        return empty
+    collective, algo, proto, op, dtype = toks[:5]
+    # Guard against non-RCCL JSON files sharing the directory.
+    if not had_prefix and collective not in _COLLECTIVE_NAMES:
+        return empty
+    trailing = toks[5:]
+    acc = pipeline = variant = None
+    unroll = _maybe_int(trailing[-1]) if trailing else None
+    if len(trailing) >= 3:
+        # trailing == [acc, pipeline, (variant...), unroll]
+        acc = _maybe_int(trailing[0])
+        pipeline = _maybe_int(trailing[1])
+        mid = trailing[2:-1]
+        if len(mid) == 1:
+            variant = _maybe_int(mid[0])
+        elif mid:
+            variant = "_".join(mid)
+    return {
+        "collective": _COLLECTIVE_NAMES.get(collective, collective),
+        "algorithm": _ALGO_NAMES.get(algo, algo),
+        "protocol": _PROTO_NAMES.get(proto, proto),
+        "reduction_op": _OP_NAMES.get(op, op),
+        "datatype": dtype,
+        "acc": acc,
+        "pipeline": pipeline,
+        "ll128_variant": variant,
+        "unroll": unroll,
+    }
+
+
 def _format_cell_value(val: Any, max_len: int = 14) -> str:
     if val is None:
         return "—"
@@ -171,6 +256,279 @@ def _export_csv(
         w.writerow(["file", *keys])
         for name, d in zip(names, dlist):
             w.writerow([name] + [_csv_value(d.get(k)) for k in keys])
+
+
+def _rgb_to_hex(rgb: np.ndarray) -> str:
+    r, g, b = (int(round(float(c) * 255)) for c in rgb[:3])
+    r = min(255, max(0, r))
+    g = min(255, max(0, g))
+    b = min(255, max(0, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _html_escape(s: str) -> str:
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _export_html(
+    out_path: Path,
+    names: list[str],
+    keys: list[str],
+    data: np.ndarray,
+    dlist: list[dict[str, Any]],
+    cell_text: list[list[str]],
+) -> None:
+    """Write a self-contained, sortable HTML heatmap (per-column colormaps)."""
+    out_path = out_path.resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    n_r, n_c = data.shape
+    rgb = _build_rgba(data)
+
+    # A column sorts numerically only if every present value is a real number
+    # (string columns are colormapped via level indices, but should sort as text).
+    col_is_num: list[bool] = []
+    for k in keys:
+        vals = [d.get(k) for d in dlist]
+        col_is_num.append(all(v is None or _is_num(v) for v in vals))
+
+    # Header cells: click to sort. data-type drives numeric vs. text compare.
+    header_cells = ['<th class="filecol" data-type="text">file</th>']
+    for j, k in enumerate(keys):
+        dtype = "num" if col_is_num[j] else "text"
+        header_cells.append(
+            f'<th data-type="{dtype}">{_html_escape(k)}</th>'
+        )
+
+    body_rows: list[str] = []
+    for i in range(n_r):
+        cells = [
+            f'<td class="filecol" data-sort="{_html_escape(names[i])}">'
+            f"{_html_escape(names[i])}</td>"
+        ]
+        for j in range(n_c):
+            raw = data[i, j]
+            v = dlist[i].get(keys[j])
+            if np.isnan(raw):
+                bg = "#ffffff"
+                fg = "#8a8a8a"
+                sort_val = ""
+            else:
+                bg = _rgb_to_hex(rgb[i, j])
+                tc = _text_color_f(rgb[i, j])
+                fg = "#f5f5f5" if tc == "white" else "#202020"
+                # _csv_value renders numbers and strings faithfully; the header's
+                # data-type decides numeric vs. alphabetical comparison in JS.
+                sort_val = _csv_value(v)
+            label = cell_text[i][j]
+            disp = "" if label == "—" else _html_escape(label)
+            cells.append(
+                f'<td data-sort="{_html_escape(str(sort_val))}" '
+                f'style="background:{bg};color:{fg}">{disp}</td>'
+            )
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+
+    thead = "<tr>" + "".join(header_cells) + "</tr>"
+    tbody = "\n".join(body_rows)
+    title = f"RCCL device resource fields ({n_r} × {n_c})"
+
+    # One checkbox per column (nth-child is 1-based; the file column is first).
+    all_cols = ["file", *keys]
+    toggles = [
+        f'<label><input type="checkbox" data-col="{idx + 1}" checked>'
+        f"{_html_escape(c)}</label>"
+        for idx, c in enumerate(all_cols)
+    ]
+    coltoggles = "".join(toggles)
+
+    html = _HTML_TEMPLATE.format(
+        title=_html_escape(title),
+        thead=thead,
+        tbody=tbody,
+        coltoggles=coltoggles,
+        n_rows=n_r,
+        n_cols=n_c,
+    )
+    with out_path.open("w", encoding="utf-8") as f:
+        f.write(html)
+
+
+_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+  :root {{ color-scheme: light; }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif; color: #1a1a1a; background: #fafafa;
+  }}
+  header {{
+    padding: 12px 16px; background: #fff; border-bottom: 1px solid #e2e2e2;
+    position: sticky; top: 0; z-index: 30;
+  }}
+  header h1 {{ font-size: 15px; margin: 0 0 6px; font-weight: 600; }}
+  .controls {{ display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
+  .controls input {{
+    padding: 5px 9px; border: 1px solid #cfcfcf; border-radius: 6px;
+    font-size: 13px; min-width: 240px;
+  }}
+  .controls .hint {{ font-size: 12px; color: #777; }}
+  .coltoggles {{
+    display: flex; gap: 4px 12px; align-items: center; flex-wrap: wrap;
+    margin-top: 8px; font-size: 12px; color: #333;
+  }}
+  .coltoggles .ttl {{ font-weight: 600; color: #555; }}
+  .coltoggles label {{
+    display: inline-flex; gap: 4px; align-items: center; cursor: pointer;
+    white-space: nowrap; user-select: none;
+  }}
+  .coltoggles label input {{ margin: 0; cursor: pointer; }}
+  .coltoggles button {{
+    font-size: 12px; padding: 2px 8px; border: 1px solid #cfcfcf;
+    border-radius: 6px; background: #f4f4f4; cursor: pointer;
+  }}
+  .coltoggles button:hover {{ background: #e9e9e9; }}
+  .table-wrap {{ overflow: auto; max-height: calc(100vh - 132px); }}
+  table {{ border-collapse: collapse; font-size: 11px; }}
+  th, td {{
+    padding: 3px 7px; text-align: right; white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    border-right: 1px solid rgba(255,255,255,0.55);
+  }}
+  thead th {{
+    position: sticky; top: 0; z-index: 20; background: #2b2b2b; color: #fff;
+    cursor: pointer; user-select: none; text-align: right; font-weight: 600;
+    border-right: 1px solid #444; padding-right: 18px;
+  }}
+  thead th:hover {{ background: #3d3d3d; }}
+  thead th {{ position: sticky; }}
+  thead th.sorted-asc::after {{ content: " \\25B2"; position: absolute; right: 5px; }}
+  thead th.sorted-desc::after {{ content: " \\25BC"; position: absolute; right: 5px; }}
+  .filecol {{
+    text-align: left; position: sticky; left: 0; z-index: 10;
+    max-width: 360px; overflow: hidden; text-overflow: ellipsis;
+  }}
+  thead th.filecol {{ z-index: 25; background: #1f1f1f; }}
+  tbody td.filecol {{ background: #f3f3f3; color: #222; border-right: 1px solid #ddd; }}
+  tbody tr:hover td {{ filter: brightness(0.92); }}
+  tbody tr.hidden {{ display: none; }}
+</style>
+</head>
+<body>
+<header>
+  <h1>{title}</h1>
+  <div class="controls">
+    <input id="filter" type="search" placeholder="Filter rows (matches file name)…">
+    <span class="hint">{n_rows} rows × {n_cols} fields · click a column header to sort</span>
+  </div>
+  <div class="coltoggles" id="coltoggles">
+    <span class="ttl">Columns:</span>
+    <button type="button" id="col-all">show all</button>
+    <button type="button" id="col-none">hide all</button>
+    {coltoggles}
+  </div>
+</header>
+<div class="table-wrap">
+  <table id="grid">
+    <thead>{thead}</thead>
+    <tbody>
+{tbody}
+    </tbody>
+  </table>
+</div>
+<script>
+(function () {{
+  const table = document.getElementById("grid");
+  const tbody = table.tBodies[0];
+  const headers = Array.from(table.tHead.rows[0].cells);
+  let sortCol = -1, sortDir = 1;
+
+  function cellSortValue(row, idx, type) {{
+    const td = row.cells[idx];
+    const v = td.getAttribute("data-sort");
+    if (type === "num") {{
+      if (v === "" || v === null) return NaN;
+      const f = parseFloat(v);
+      return isNaN(f) ? NaN : f;
+    }}
+    return (v === null ? td.textContent : v).toLowerCase();
+  }}
+
+  function sortBy(idx) {{
+    const type = headers[idx].getAttribute("data-type");
+    if (sortCol === idx) {{ sortDir = -sortDir; }} else {{ sortCol = idx; sortDir = 1; }}
+    const rows = Array.from(tbody.rows);
+    rows.sort((a, b) => {{
+      let va = cellSortValue(a, idx, type);
+      let vb = cellSortValue(b, idx, type);
+      if (type === "num") {{
+        const na = isNaN(va), nb = isNaN(vb);
+        if (na && nb) return 0;
+        if (na) return 1;          // blanks always last
+        if (nb) return -1;
+        return (va - vb) * sortDir;
+      }}
+      if (va < vb) return -1 * sortDir;
+      if (va > vb) return 1 * sortDir;
+      return 0;
+    }});
+    const frag = document.createDocumentFragment();
+    rows.forEach(r => frag.appendChild(r));
+    tbody.appendChild(frag);
+    headers.forEach((h, k) => {{
+      h.classList.remove("sorted-asc", "sorted-desc");
+      if (k === idx) h.classList.add(sortDir === 1 ? "sorted-asc" : "sorted-desc");
+    }});
+  }}
+
+  headers.forEach((h, idx) => h.addEventListener("click", () => sortBy(idx)));
+
+  const filter = document.getElementById("filter");
+  filter.addEventListener("input", () => {{
+    const q = filter.value.trim().toLowerCase();
+    for (const row of tbody.rows) {{
+      const name = row.cells[0].textContent.toLowerCase();
+      row.classList.toggle("hidden", q !== "" && !name.includes(q));
+    }}
+  }});
+
+  // Per-column show/hide via a single injected stylesheet (fast for big tables).
+  const colStyle = document.createElement("style");
+  document.head.appendChild(colStyle);
+  const boxes = Array.from(
+    document.querySelectorAll('#coltoggles input[type="checkbox"]')
+  );
+  function applyCols() {{
+    const rules = boxes
+      .filter(b => !b.checked)
+      .map(b => {{
+        const n = b.getAttribute("data-col");
+        return `#grid th:nth-child(${{n}}),#grid td:nth-child(${{n}}){{display:none}}`;
+      }});
+    colStyle.textContent = rules.join("");
+  }}
+  boxes.forEach(b => b.addEventListener("change", applyCols));
+  document.getElementById("col-all").addEventListener("click", () => {{
+    boxes.forEach(b => {{ b.checked = true; }});
+    applyCols();
+  }});
+  document.getElementById("col-none").addEventListener("click", () => {{
+    boxes.forEach(b => {{ b.checked = false; }});
+    applyCols();
+  }});
+}})();
+</script>
+</body>
+</html>
+"""
 
 
 def _shorten_filename(name: str, head: int = 28, tail: int = 20) -> str:
@@ -366,6 +724,27 @@ def main() -> None:
         help="Do not write a CSV file.",
     )
     ap.add_argument(
+        "--html",
+        type=Path,
+        nargs="?",
+        const=True,
+        default=None,
+        metavar="PATH",
+        help="Write an interactive, sortable HTML heatmap. With no value, uses the "
+        "same basename as --output with .html.",
+    )
+    ap.add_argument(
+        "--no-pdf",
+        action="store_true",
+        help="Skip PDF rendering (useful with --html for a fast HTML-only run).",
+    )
+    ap.add_argument(
+        "--no-parse-filename",
+        action="store_true",
+        help="Do not add collective/algorithm/protocol/reduction_op/datatype "
+        "columns parsed from the resource filename.",
+    )
+    ap.add_argument(
         "--y-stride",
         type=int,
         default=1,
@@ -387,9 +766,21 @@ def main() -> None:
         out = Path(__file__).resolve().parent / "resource_fields_heatmap.pdf"
 
     entries = _load_dir(in_dir)
-    keys = _union_keys(entries)
-    dlist = [d for _, d in entries]
+    json_keys = _union_keys(entries)
     names = [n for n, _ in entries]
+    dlist = [dict(d) for _, d in entries]
+
+    parsed_cols: list[str] = []
+    if not args.no_parse_filename:
+        present = dict.fromkeys(_PARSED_COLUMNS, False)
+        for name, d in zip(names, dlist):
+            for k, v in _parse_filename(name).items():
+                if v is not None:
+                    d[k] = v
+                    present[k] = True
+        parsed_cols = [k for k in _PARSED_COLUMNS if present[k]]
+
+    keys = parsed_cols + json_keys
     arr = np.full((len(entries), len(keys)), np.nan, dtype=np.float64)
     for j, k in enumerate(keys):
         arr[:, j] = _column_array(dlist, k)
@@ -401,15 +792,27 @@ def main() -> None:
         csv_path = args.csv if args.csv is not None else out.with_suffix(".csv")
         _export_csv(csv_path, names, keys, dlist)
 
-    n_pages = _render_pdf(
-        names, keys, arr, cell_text, out, args.y_stride, args.rows_per_page
-    )
-    line = (
-        f"Wrote {out} ({len(names)} x {len(keys)}), {n_pages} page(s), "
-        f"y-stride {args.y_stride}"
-    )
+    html_path: Path | None = None
+    if args.html is not None:
+        html_path = (
+            out.with_suffix(".html") if args.html is True else Path(args.html)
+        )
+        _export_html(html_path, names, keys, arr, dlist, cell_text)
+
+    if args.no_pdf:
+        line = f"Wrote {len(names)} x {len(keys)} grid"
+    else:
+        n_pages = _render_pdf(
+            names, keys, arr, cell_text, out, args.y_stride, args.rows_per_page
+        )
+        line = (
+            f"Wrote {out} ({len(names)} x {len(keys)}), {n_pages} page(s), "
+            f"y-stride {args.y_stride}"
+        )
     if csv_path is not None:
         line += f"; CSV: {csv_path}"
+    if html_path is not None:
+        line += f"; HTML: {html_path}"
     print(line)
 
 
