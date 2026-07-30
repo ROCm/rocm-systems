@@ -766,6 +766,25 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     devices_by_isa[device->devices()[0]->isa().isaName()].push_back(device);
   }
 
+  std::vector<int> registered_device_ids;
+  registered_device_ids.reserve(devices.size());
+  std::vector<void*> loaded_code_objects;
+  loaded_code_objects.reserve(devices_by_isa.size());
+
+  // Device and kpack code object cleanup method for error cases
+  auto rollback_kpack_state = [&]() {
+    for (int device_id : registered_device_ids) {
+      if (dev_programs_[device_id] != nullptr) {
+        dev_programs_[device_id]->release();
+        dev_programs_[device_id] = nullptr;
+      }
+    }
+    for (void* code_object : loaded_code_objects) {
+      code_obj_allocations_.erase(code_object);
+      kpack_free_code_object(code_object);
+    }
+  };
+
   for (const auto& [device_name, matching_devices] : devices_by_isa) {
     std::vector<std::string> arch_list;
     // Architecture names
@@ -803,29 +822,48 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
                                static_cast<uint32_t>(params.bundle_index), arch_ptrs.data(),
                                arch_ptrs.size(), &code_object, &code_object_size);
 
-    if (err != KPACK_SUCCESS) {
-      LogPrintfWarning("Could not load kpack object for %s, err: %d",
-                     device_name.c_str(), err);
+    if (err == KPACK_ERROR_ARCHIVE_NOT_FOUND || err == KPACK_ERROR_ARCH_NOT_FOUND) {
+      LogPrintfWarning(
+          "Could not load device type specific kpack object for ISA %s, err: %d, host binary: %s",
+          device_name.c_str(), err, params.binary_path.c_str());
       continue;
     }
+    if (err != KPACK_SUCCESS) {
+      LogPrintfError(
+          "Failed to load device type specific kpack object for ISA %s, err: %d, "
+          "host binary: %s",
+          device_name.c_str(), err, params.binary_path.c_str());
+      rollback_kpack_state();
+      return hipErrorInvalidImage;
+    }
+
+    loaded_code_objects.push_back(code_object);
+    code_obj_allocations_.insert(code_object);
 
     // Add device type specific kpack code object buffer for each similar type of device.
     // The kpack buffer is shared by devices with the same ISA and is not
     // backed by a file on disk, so no fd is passed.
     for (auto device : matching_devices) {
+      registered_device_ids.push_back(device->deviceId());
       hipError_t hip_err =
           AddDevProgram(device, code_object, code_object_size, amd::Os::FDescInit());
       if (hip_err != hipSuccess) {
         LogPrintfError(
-            "Could not add kpack object for %s, device id: %d, err: %d",
+            "Could not add device type specific kpack object for %s, device id: %d, err: %d",
             device_name.c_str(), device->deviceId(), hip_err);
-        kpack_free_code_object(code_object);
+        rollback_kpack_state();
         return hip_err;
       }
     }
+  }
 
-    // Track allocation for cleanup in destructor
-    code_obj_allocations_.insert(code_object);
+  if (loaded_code_objects.empty()) {
+    // Return an error if no device-specific kpack code object was found for any device.
+    LogPrintfError(
+        "Could not find device type specific kpack code objects for any available device from "
+        "binary: %s",
+        params.binary_path.c_str());
+    return hipErrorInvalidKernelFile;
   }
 
   return hipSuccess;
