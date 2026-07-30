@@ -31,19 +31,26 @@ public:
   using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
   static constexpr uint32_t LINE_SIZE = CacheStore::LINE_SIZE;
 
-  explicit L1VectorCache(L2Cache *l2 = nullptr) : l2_(l2) {}
+  explicit L1VectorCache(L2Cache *l2 = nullptr);
+  ~L1VectorCache();
 
-  void set_l2(L2Cache *l2) { l2_ = l2; }
-  void set_memory(GpuMemory *mem) { memory_ = mem; }
+  L1VectorCache(const L1VectorCache &) = delete;
+  L1VectorCache &operator=(const L1VectorCache &) = delete;
+  L1VectorCache(L1VectorCache &&) = delete;
+  L1VectorCache &operator=(L1VectorCache &&) = delete;
+
+  void set_l2(L2Cache *l2);
+  void set_memory(GpuMemory *mem);
   void load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
-            uint8_t *dst, Mtype mtype, bool non_temporal, bool request_l1_bypass,
+            uint8_t *dst, Mtype mtype, bool non_temporal, bool request_l1_bypass, uint32_t wf_size,
             uint32_t vmid = 0);
 
   void store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
-             const uint8_t *src, Mtype mtype, bool non_temporal, uint32_t vmid = 0);
+             const uint8_t *src, Mtype mtype, bool non_temporal, uint32_t wf_size,
+             uint32_t vmid = 0);
 
-  void invalidate(uint64_t addr, uint32_t vmid = 0) { cache_.invalidate(addr, vmid); }
-  void invalidate_all() { cache_.invalidate_all(); }
+  void invalidate(uint64_t addr, uint32_t vmid = 0);
+  void invalidate_all();
   void flush_all();
 
   uint64_t store_count() const { return store_count_; }
@@ -51,6 +58,8 @@ public:
   uint64_t store_l2_writes() const { return store_l2_writes_; }
 
 private:
+  void invalidate_all_locked();
+  void synchronize_epoch_locked();
   void read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, bool non_temporal,
                   bool request_l1_bypass, uint32_t vmid);
   void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, bool non_temporal,
@@ -60,6 +69,7 @@ private:
   CacheStore cache_;
   L2Cache *l2_;
   GpuMemory *memory_ = nullptr;
+  uint64_t coherence_epoch_ = 0;
   uint64_t store_count_ = 0;
   uint64_t store_active_count_ = 0;
   uint64_t store_l2_writes_ = 0;

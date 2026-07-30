@@ -15,6 +15,28 @@
 
 namespace hip {
 
+namespace {
+template <typename Container, typename Value>
+void EraseIfPresent(Container& container, const Value& value) {
+  const auto it = std::find(container.begin(), container.end(), value);
+  if (it != container.end()) {
+    container.erase(it);
+  }
+}
+
+void EraseCaptureTracking(Stream* stream) {
+  if (stream->GetCaptureMode() == hipStreamCaptureModeGlobal) {
+    amd::ScopedLock lock(g_captureStreamsLock);
+    EraseIfPresent(g_captureStreams, stream);
+  }
+  {
+    amd::ScopedLock lock(g_streamSetLock);
+    EraseIfPresent(g_allCapturingStreams, stream);
+  }
+  EraseIfPresent(tls.capture_streams_, stream);
+}
+}  // namespace
+
 // ================================================================================================
 Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
                const std::vector<uint32_t>& cuMask, hipStreamCaptureStatus captureStatus)
@@ -31,7 +53,7 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
 }
 
 // ================================================================================================
-hipError_t Stream::EndCapture() {
+hipError_t Stream::EndCapture(bool preserveInvalidated) {
   // Detach all captured events from this stream.
   {
     std::scoped_lock lock(lock_);
@@ -42,12 +64,14 @@ hipError_t Stream::EndCapture() {
   }
   // Recursively end capture on all parallel (forked) streams.
   for (auto stream : parallelCaptureStreams_) {
-    [[maybe_unused]] const auto err = reinterpret_cast<hip::Stream*>(stream)->EndCapture();
+    [[maybe_unused]] const auto err =
+        reinterpret_cast<hip::Stream*>(stream)->EndCapture(preserveInvalidated);
     assert(err == hipSuccess);
   }
 
   // Reset all capture state to defaults.
-  captureStatus_ = hipStreamCaptureStatusNone;
+  captureStatus_ = preserveInvalidated ? hipStreamCaptureStatusInvalidated
+                                       : hipStreamCaptureStatusNone;
   pCaptureGraph_ = nullptr;
   originStream_ = false;
   parentStream_ = nullptr;
@@ -71,16 +95,26 @@ void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
 // ================================================================================================
 void Stream::Detach() {
   // Invoked by ~ExecutionCtx() on every stream the destroyed ctx still owns.
-  // If this stream is currently driving an active capture, invalidate the
-  // capture on this stream and on every forked parallel branch so that the
-  // user observes hipStreamCaptureStatusInvalidated on subsequent
-  // hipStreamGetCaptureInfo / EndCapture calls.
-  if (captureStatus_ == hipStreamCaptureStatusActive) {
+  // If this stream still participates in a capture, hipStreamEndCapture's
+  // invalidated cleanup is about to become unreachable through the API.
+  if (captureStatus_ == hipStreamCaptureStatusActive ||
+      captureStatus_ == hipStreamCaptureStatusInvalidated) {
     captureStatus_ = hipStreamCaptureStatusInvalidated;
-    for (auto s : parallelCaptureStreams_) {
-      reinterpret_cast<hip::Stream*>(s)->SetCaptureStatus(
-          hipStreamCaptureStatusInvalidated);
+
+    if (parentStream_ != nullptr) {
+      reinterpret_cast<hip::Stream*>(parentStream_)->EraseParallelCaptureStream(
+          reinterpret_cast<hipStream_t>(this));
+      ClearCaptureGraph();
     }
+
+    if (originStream_) {
+      EraseCaptureTracking(this);
+      ReleaseCaptureGraph();
+    }
+
+    // Keep the invalidated status visible on the detached origin and every
+    // fork while clearing all graph, event, and parent/child bookkeeping.
+    (void)EndCapture(/*preserveInvalidated=*/true);
   }
   detached_.store(true, std::memory_order_release);
 }

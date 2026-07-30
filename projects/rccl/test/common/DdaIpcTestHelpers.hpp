@@ -9,7 +9,7 @@
 #include <cstring>
 
 #include "comm.h"
-#include "ipc_init_detail.h"
+#include "dda_init_detail.h"
 
 namespace RcclUnitTesting
 {
@@ -27,8 +27,8 @@ struct DdaIpcMockComm
         std::memset(&comm, 0, sizeof(comm));
         comm.bootstrap           = &bootstrapPlaceholder;
         comm.nNodes              = 1;
-        comm.nRanks              = nccl_dda_ipc_detail::kDdaNranks;
-        comm.ddaIpcScratchBytes  = DDA_IPC_BUFFER_SIZE;
+        comm.nRanks              = nccl_dda_detail::kDdaNranks;
+        comm.ddaScratchBytes  = DDA_IPC_BUFFER_SIZE;
         setIpcResourcesPresent(true);
     }
 
@@ -38,16 +38,16 @@ struct DdaIpcMockComm
         {
             comm.ddaIpcMemHandler =
                 reinterpret_cast<ncclIpcMemHandler*>(0x1);
-            comm.ddaIpcScratch       = reinterpret_cast<void*>(0x2);
-            comm.ddaIpcPeerPtrsDev   = reinterpret_cast<void*>(0x3);
+            comm.ddaScratch       = reinterpret_cast<void*>(0x2);
+            comm.ddaPeerPtrsDev   = reinterpret_cast<void*>(0x3);
             comm.ddaIpcBarrierState  =
-                reinterpret_cast<nccl_dda_ipc_detail::DdaIpcBarrierState*>(0x4);
+                reinterpret_cast<nccl_dda_detail::DdaIpcBarrierState*>(0x4);
         }
         else
         {
             comm.ddaIpcMemHandler   = nullptr;
-            comm.ddaIpcScratch      = nullptr;
-            comm.ddaIpcPeerPtrsDev  = nullptr;
+            comm.ddaScratch      = nullptr;
+            comm.ddaPeerPtrsDev  = nullptr;
             comm.ddaIpcBarrierState = nullptr;
         }
     }

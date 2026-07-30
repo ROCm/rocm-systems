@@ -1,7 +1,7 @@
 """
 Main script to policy-check PRs and report results in a comment. This is the
 core of the bot's logic: it loads policy.yml, validates the pull request
-(branch name, title, description, forbidden files, unit tests), waits for the
+(title, description, forbidden files, unit tests), waits for the
 required CI checks, posts a single results-table comment, and manages the
 "Not ready to Review" label.
 """
@@ -57,7 +57,7 @@ CAN_MUTATE_PR = _env_flag("MUTATE_PR")
 #   • Unit Test failures, and
 #   • the JIRA/ISSUE ID reference part of the description (detected separately
 #     in main() via `jira_issue_failed`).
-# All other failures (Branch Name, title format, description length/checklist,
+# All other failures (title format, description length/checklist,
 # Forbidden Files, PR Size, pre-commit, …) do NOT add the label.
 LABEL_TRIGGER_CHECKS = {
     "Unit Test",
@@ -66,13 +66,11 @@ LABEL_TRIGGER_CHECKS = {
 # Fixed display order for rows in the results table (by check name). Any row
 # whose name is not listed here is appended after these, in its original order.
 TABLE_ORDER = [
-    "Branch Name",
     "PR Title/Description",
     "Forbidden Files",
     "Unit Test",
     "pre-commit",
     "Draft PR",
-    "PR Size",
     "Feature Flag",
     "Code Coverage",
     "therock-pr-bot",
@@ -99,8 +97,6 @@ class CheckResult:
 
 @dataclass(frozen=True)
 class Policy:
-    branch_patterns: List[re.Pattern[str]]
-    title_patterns: List[re.Pattern[str]]
     title_min_length: int
     title_max_length: int
     description_min_length: int
@@ -108,9 +104,6 @@ class Policy:
     description_checklist_patterns: List[re.Pattern[str]]
     block_draft: bool
     forbidden_title_patterns: List[re.Pattern[str]]
-    max_files_changed: int
-    max_total_changes: int
-    max_single_file_changes: int
     forbidden_paths: List[str]
     unit_test_code_extensions: List[str]
     unit_test_patterns: List[str]
@@ -135,13 +128,8 @@ def load_policy(policy_path: Path) -> Policy:
     diff = raw.get("diff", {}) or {}
     checks = raw.get("checks", {}) or {}
 
-    patterns_raw = pr.get("branch_name_patterns", []) or []
-    branch_patterns = [re.compile(str(p)) for p in patterns_raw]
-
     # PR title rules now live under the nested `title:` mapping.
     title_cfg = pr.get("title", {}) or {}
-    title_patterns_raw = title_cfg.get("pattern", []) or []
-    title_patterns = [re.compile(str(p)) for p in title_patterns_raw]
     title_min_length = int(title_cfg.get("title_min_length", 0) or 0)
     title_max_length = int(title_cfg.get("title_max_length", 0) or 0)
 
@@ -161,11 +149,6 @@ def load_policy(policy_path: Path) -> Policy:
     block_draft = bool(pr.get("block_draft", False))
     forbidden_title_raw = pr.get("forbidden_title_patterns", []) or []
     forbidden_title_patterns = [re.compile(str(p)) for p in forbidden_title_raw]
-
-    # PR "reviewable shape" limits live under the diff: section.
-    max_files_changed = int(diff.get("max_files_changed", 0) or 0)
-    max_total_changes = int(diff.get("max_total_changes", 0) or 0)
-    max_single_file_changes = int(diff.get("max_single_file_changes", 0) or 0)
 
     forbidden_paths = [str(p) for p in (diff.get("forbidden_paths", []) or [])]
 
@@ -193,8 +176,6 @@ def load_policy(policy_path: Path) -> Policy:
         )
 
     return Policy(
-        branch_patterns=branch_patterns,
-        title_patterns=title_patterns,
         title_min_length=title_min_length,
         title_max_length=title_max_length,
         description_min_length=description_min_length,
@@ -202,9 +183,6 @@ def load_policy(policy_path: Path) -> Policy:
         description_checklist_patterns=description_checklist_patterns,
         block_draft=block_draft,
         forbidden_title_patterns=forbidden_title_patterns,
-        max_files_changed=max_files_changed,
-        max_total_changes=max_total_changes,
-        max_single_file_changes=max_single_file_changes,
         forbidden_paths=forbidden_paths,
         unit_test_code_extensions=unit_test_code_extensions,
         unit_test_patterns=unit_test_patterns,
@@ -304,39 +282,11 @@ def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str
     return runs if isinstance(runs, list) else []
 
 
-def ensure_branch_name(policy: Policy, branch_name: str, errors: List[str]) -> None:
-    """Validate the branch name against the allowed patterns.
-
-    Appends a descriptive message to `errors` if the name matches none of
-    `policy.branch_patterns`.
-    """
-    if not policy.branch_patterns:
-        return
-    if any(p.match(branch_name) for p in policy.branch_patterns):
-        return
-
-    allowed = "\n".join([f"- `{p.pattern}`" for p in policy.branch_patterns])
-    errors.append(
-        "Branch name does not match allowed patterns.\n"
-        f"Branch: `{branch_name}`\n"
-        "Allowed patterns:\n"
-        f"{allowed}"
-    )
-
-
-def _short(value: str, limit: int = 80) -> str:
-    """Truncate a value for display so one long field can't bloat the table."""
-    value = (value or "").strip()
-    if len(value) <= limit:
-        return value
-    return value[:limit] + "…"
-
-
 def ensure_pr_title(policy: Policy, title: str, errors: List[str]) -> None:
-    """Validate the PR title (length, Conventional Commits style, forbidden words).
+    """Validate the PR title (length and forbidden words).
 
-    Appends a structured Error/Expected/Desired-format message to `errors` for
-    each rule that fails.
+    Appends a structured Error/Expected message to `errors` for each rule that
+    fails.
     """
     title = (title or "").strip()
     fmt = "**Desired format:** `type(optional-scope): short description`"
@@ -352,15 +302,6 @@ def ensure_pr_title(policy: Policy, title: str, errors: List[str]) -> None:
         errors.append(
             f"**Error:** Title is too long ({len(title)} characters).\n"
             f"**Expected:** at most {policy.title_max_length} characters.\n"
-            f"{fmt}"
-        )
-
-    if policy.title_patterns and not any(
-        p.search(title) for p in policy.title_patterns
-    ):
-        errors.append(
-            "**Error:** Title does not follow Conventional Commits style.\n"
-            "**Expected:** start with a valid type (feat, fix, docs, …).\n"
             f"{fmt}"
         )
 
@@ -389,13 +330,23 @@ def ensure_pr_not_draft(policy: Policy, is_draft: bool, errors: List[str]) -> No
         )
 
 
+def _strip_markdown_comments(text: str) -> str:
+    """Remove HTML comment blocks from Markdown text."""
+    # Note: using re.DOTALL to match _any_ character, including newlines so this
+    # can handle multiline comments.
+    return re.sub(r"<!--.*?(?:-->|$)", "", text, flags=re.DOTALL)
+
+
 def ensure_pr_description(policy: Policy, body: str, errors: List[str]) -> None:
     """Validate the PR description (minimum length, JIRA/ISSUE reference, checklist).
 
     Appends a structured message to `errors` if the body is too short, does
     not contain a recognised tracking reference, or has an unticked checklist item.
     """
-    body = (body or "").strip()
+    # Strip comments so we only check the visible text against the policies.
+    # This lets pull request templates use examples that _would_ pass the check.
+    body = _strip_markdown_comments(body or "").strip()
+
     if policy.description_min_length and len(body) < policy.description_min_length:
         errors.append(
             f"**Error:** PR description is too short ({len(body)} characters).\n"
@@ -416,9 +367,13 @@ def ensure_pr_description(policy: Policy, body: str, errors: List[str]) -> None:
             "• `JIRA ID : TESTAUTO-6039`\n"
             "• `JIRA ID - #330`\n"
             "• `JIRA ID #330`\n"
+            "• `JIRA ID` (on separate line)\n"
+            "  `ROCM-25757`\n"
             "• `ISSUE ID : TESTUTO-3334`\n"
             "• `ISSUE ID #3334`\n"
             "• `ISSUE ID - TESTAUTO-3433`\n"
+            "• `ISSUE ID` (on separate line)\n"
+            "  `AIRUNTIME-2352`\n"
             "• `ISSUE ID : https://github.com/<org_name>/<repo_name>/issues/1234`\n"
             "• `Closes #10`\n"
             "• `Fixes octo-org/octo-repo#100`\n"
@@ -451,6 +406,24 @@ def _matches_forbidden(filename: str, pattern: str) -> bool:
     # Allow '**/<x>' patterns to also match root-level files (e.g. '.env').
     if pattern.startswith("**/") and fnmatch.fnmatch(filename, pattern[3:]):
         return True
+    return False
+
+
+def _is_test_file(filename: str, patterns: Iterable[str]) -> bool:
+    """Return True if `filename` is recognised as a test file.
+
+    Patterns that contain a '/' are treated as FULL-PATH globs (e.g.
+    '**/test/gtest/**' matches any file under a test/gtest/ directory).
+    Patterns without a '/' are matched against the BASENAME only
+    (e.g. 'test_*', '*_test.*').
+    """
+    base = Path(filename).name
+    for pat in patterns:
+        if "/" in pat:
+            if _matches_forbidden(filename, pat):
+                return True
+        elif fnmatch.fnmatch(base, pat):
+            return True
     return False
 
 
@@ -513,7 +486,7 @@ def ensure_unit_tests(
         ext = Path(filename).suffix.lower()
 
         # A test file satisfies the requirement.
-        if any(fnmatch.fnmatch(base, pat) for pat in policy.unit_test_patterns):
+        if _is_test_file(filename, policy.unit_test_patterns):
             has_test = True
             continue
 
@@ -551,56 +524,11 @@ def pr_has_code_files(policy: Policy, pr_files: Iterable[Dict[str, Any]]) -> boo
             continue
         base = Path(filename).name
         ext = Path(filename).suffix.lower()
-        if any(fnmatch.fnmatch(base, pat) for pat in policy.unit_test_patterns):
+        if _is_test_file(filename, policy.unit_test_patterns):
             continue
         if ext in policy.unit_test_code_extensions:
             return True
     return False
-
-
-def ensure_pr_reviewable(
-    policy: Policy, pr_files: List[Dict[str, Any]], errors: List[str]
-) -> None:
-    """Keep PRs small enough to review: file count, total churn, per-file churn."""
-    if not (
-        policy.max_files_changed
-        or policy.max_total_changes
-        or policy.max_single_file_changes
-    ):
-        return
-
-    num_files = len(pr_files)
-    total_changes = 0
-
-    for f in pr_files:
-        additions = int(f.get("additions") or 0)
-        deletions = int(f.get("deletions") or 0)
-        changes = int(f.get("changes") or (additions + deletions))
-        total_changes += changes
-
-        filename = Path(str(f.get("filename") or "")).as_posix()
-        if policy.max_single_file_changes and changes > policy.max_single_file_changes:
-            errors.append(
-                "**Error:** A single file changes too much to review easily.\n"
-                f"**Expected:** at most {policy.max_single_file_changes} changes "
-                "in one file.\n"
-                f"**Current:** `{filename}` has {changes} changes"
-            )
-
-    if policy.max_files_changed and num_files > policy.max_files_changed:
-        errors.append(
-            "**Error:** Too many files changed in one PR.\n"
-            f"**Expected:** at most {policy.max_files_changed} files.\n"
-            f"**Current:** {num_files} files changed"
-        )
-
-    if policy.max_total_changes and total_changes > policy.max_total_changes:
-        errors.append(
-            "**Error:** Total diff is too large to review easily.\n"
-            f"**Expected:** at most {policy.max_total_changes} total "
-            "additions + deletions.\n"
-            f"**Current:** {total_changes} total changes"
-        )
 
 
 def summarize_required_checks(
@@ -953,7 +881,6 @@ def build_bump_pr_results(policy: Policy) -> List[CheckResult]:
     """All-pass table rows for an automated dependency bump PR."""
     bump_note = "Bump PR — check auto-approved (automated dependency update)"
     rows: List[CheckResult] = [
-        CheckResult("Branch Name", "🌿", True, [], note=bump_note),
         CheckResult("PR Title/Description", "📝", True, [], note=bump_note),
         CheckResult("Draft PR", "🚫", True, [], note=bump_note),
         CheckResult("Forbidden Files", "⛔", True, [], note=bump_note),
@@ -1034,7 +961,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     policy = load_policy(policy_path)
 
     pr = get_pr(owner=owner, repo=repo, pr_number=pr_number, token=token)  # type: ignore[arg-type]
-    branch_name = str((pr.get("head") or {}).get("ref") or "")
     title = str(pr.get("title") or "")
     body = str(pr.get("body") or "")
 
@@ -1044,7 +970,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if is_bump_pr(policy, author):
         marker = "<!-- therock-pr-bot-policy-check -->"
         note = (
-            f"> 🤖 **Bump PR detected** (author `@{author}`). All policy checks "
+            f"🤖 **Bump PR detected** (author `@{author}`). All policy checks "
             "are auto-approved for automated dependency bumps."
         )
         upsert_comment(
@@ -1053,9 +979,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             pr_number,
             token,  # type: ignore[arg-type]
             marker,
-            build_policy_table_comment(
-                build_bump_pr_results(policy), marker, ready=True, note=note
-            ),
+            note,
         )
         remove_label(owner, repo, pr_number, token, NOT_READY_LABEL)  # type: ignore[arg-type]
         update_comment_if_exists(
@@ -1076,12 +1000,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Each check appends its failure messages to `check_errors`; an empty list
     # means the check passed. We reset it before every check.
-    # NOTE: all policies — including branch name — are enforced for BOTH
-    # same-repo PRs and fork PRs. `pull_request_target` gives us write access
-    # for forks, so there is no reason to skip any check.
+    # NOTE: all policies are enforced for BOTH same-repo PRs and fork PRs.
+    # `pull_request_target` gives us secret access (required for posting PR
+    # comments) for forks, so there is no reason to skip the policy checks.
     check_errors: List[str] = []
-    ensure_branch_name(policy, branch_name, check_errors)
-    results.append(CheckResult("Branch Name", "🌿", not check_errors, check_errors))
 
     check_errors = []
     ensure_pr_title(policy, title, check_errors)
@@ -1138,8 +1060,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # Add "Not ready to Review" ONLY when Unit Test fails OR the JIRA/ISSUE
         # ID reference is missing from the description. All other failures
-        # (title format, description length/checklist, branch name, forbidden
-        # files, PR size, pre-commit) do NOT add the label.
+        # (title format, description length/checklist, forbidden files,
+        # PR size, pre-commit) do NOT add the label.
         should_label = jira_issue_failed or any(
             not r.passed and r.name in LABEL_TRIGGER_CHECKS for r in results
         )

@@ -38,7 +38,7 @@ When run with `--help`, it reports the available subcommands:
 ~$ amd-smi --help
 usage: amd-smi [-h] [--rocm-smi]  ...
 
-AMD System Management Interface | Version: 26.5.0 | ROCm version: 7.14.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 27.0.0 | ROCm version: 7.14.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -726,6 +726,10 @@ Reset options for specified devices.
 * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
   GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
 
+* On systems where GPUs share an upstream PCIe switch, resetting one GPU may trigger a
+  Secondary Bus Reset (SBR) on the upstream switch port, affecting all GPUs behind the same
+  switch, independent of XGMI hive membership.
+
 * Any process with an open `/dev/kfd` handle will be terminated when a GPU reset occurs,
   even if that process is not using the GPU being reset. GPU isolation techniques using the
   environment variables `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` do not
@@ -1032,29 +1036,29 @@ information, GPU status, and running processes.
 ```bash
 ~$ amd-smi
 +------------------------------------------------------------------------------+
-| AMD-SMI          26.2.1                                                      |
-| amdgpu Version:  6.14.4                                                      |
-| ROCm Version:    7.2.0                                                       |
-| Platform:        Linux Baremetal                                             |
+| AMD-SMI            27.0.0                                                    |
+| amdgpu Version:    6.19.4                                                    |
+| ROCm Version:      7.14.0                                                    |
+| Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
 | BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |
 | GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |
 |=====================================+========================================|
-| 0000:01:00.0 ...nstinct MI300A] (0) | 0 %     47 °C   0            110/550 W |
-|   0       0       0       SPX/NPS1  | 0 %     0 %                14/96432 MB |
+| 0000:01:00.0    AMD Instinct MI300A | 0 %      27 °C   0                49 W |
+|   0       0       0        SPX/NPS1 | 6 %        N/A            25/385728 MB |
 |-------------------------------------+----------------------------------------|
-| 0001:01:00.0 ...nstinct MI300A] (1) | 0 %     46 °C   0            106/550 W |
-|   1       1       1       SPX/NPS1  | 0 %     0 %                14/96432 MB |
+| 0001:01:00.0    AMD Instinct MI300A | 0 %      29 °C   0                42 W |
+|   1       1       1        SPX/NPS1 | 2 %        N/A            25/385728 MB |
 |-------------------------------------+----------------------------------------|
-| 0002:01:00.0 ...nstinct MI300A] (2) | 0 %     43 °C   0            109/550 W |
-|   2       2       2       SPX/NPS1  | 0 %     0 %                14/96432 MB |
+| 0002:01:00.0    AMD Instinct MI300A | 0 %      30 °C   0                33 W |
+|   2       2       2        SPX/NPS1 | 2 %        N/A            25/385728 MB |
 |-------------------------------------+----------------------------------------|
-| 0003:01:00.0 ...nstinct MI300A] (3) | 0 %     44 °C   0            107/550 W |
-|   3       3       3       SPX/NPS1  | 0 %     0 %                14/96432 MB |
+| 0003:01:00.0    AMD Instinct MI300A | 0 %      26 °C   0                40 W |
+|   3       3       3        SPX/NPS1 | 2 %        N/A            25/385728 MB |
 +-------------------------------------+----------------------------------------+
 +------------------------------------------------------------------------------+
 | Processes:                                                                   |
-|  GPU      PID  Process Name       GTT_MEM  VRAM_MEM  MEM_USAGE  CU %  SDMA   |
+|  GPU      PID  Process Name     GTT_MEM  VRAM_MEM  MEM_USAGE   CU %     SDMA |
 |==============================================================================|
 |  No running processes found                                                  |
 +------------------------------------------------------------------------------+
@@ -1095,16 +1099,16 @@ the original concise output format.
 
 ```bash
 ~$ amd-smi --rocm-smi
-================================= ROCm System Management Interface =================================
-============================================ Concise Info ==========================================
-Device  Node  IDs         Temp      Power    Partitions          SCLK     MCLK     Fan   Perf   PwrCap  VRAM%  GPU%
-            (DID,  GUID)  (Edge)    (Avg)    (Mem, Compute, ID)
-====================================================================================================
-0       1     29856,  63046  47.0°C  110.0W   NPS1, SPX, 0        210Mhz   1300Mhz  0%    auto   550.0W  0%     0%
-1       2     29856,  23175  46.0°C  106.0W   NPS1, SPX, 0        210Mhz   1300Mhz  0%    auto   550.0W  0%     0%
-2       3     29856,  50522  43.0°C  109.0W   NPS1, SPX, 0        210Mhz   1300Mhz  0%    auto   550.0W  0%     0%
-3       4     29856,  11373  44.0°C  107.0W   NPS1, SPX, 0        210Mhz   1300Mhz  0%    auto   550.0W  0%     0%
-================================== End of ROCm SMI Log =============================================
+========================================== ROCm System Management Interface ==========================================
+==================================================== Concise Info ====================================================
+Device  Node  IDs              Temp        Power  Partitions          SCLK   MCLK    Fan  Perf  PwrCap  VRAM%  GPU%  
+              (DID,     GUID)  (Junction)  (Avg)  (Mem, Compute, ID)                                                 
+======================================================================================================================
+0       7     0x74a0,   XXXXX  27.0°C      49.0W  NPS1, SPX, 0        44Mhz  900Mhz  0%   auto  550.0W  0%     2%    
+1       7     0x74a0,   XXXXX  29.0°C      42.0W  NPS1, SPX, 0        42Mhz  900Mhz  0%   auto  550.0W  0%     1%    
+2       7     0x74a0,   XXXXX  30.0°C      33.0W  NPS1, SPX, 0        42Mhz  900Mhz  0%   auto  550.0W  0%     1%    
+3       7     0x74a0,   XXXXX  26.0°C      40.0W  NPS1, SPX, 0        35Mhz  900Mhz  0%   auto  550.0W  0%     1%    
+================================================ End of ROCm SMI Log =================================================
 ```
 
 ```{note}
@@ -1145,7 +1149,7 @@ The following block is example output from the `amd-smi static` command without 
 ~$ amd-smi static
 CPU: 0
     SMU:
-        FW_VERSION: 85.90.0
+        FW_VERSION: 85.103.0
     INTERFACE_VERSION:
         PROTO VERSION: 6
 ...
@@ -1163,10 +1167,12 @@ GPU: 0
         OAM_ID: 0
         NUM_COMPUTE_UNITS: 228
         TARGET_GRAPHICS_VERSION: gfx942
+        FLAGS: 17
     BUS:
         BDF: 0000:01:00.0
         MAX_PCIE_WIDTH: 16
         MAX_PCIE_SPEED: 32 GT/s
+        PCIE_LEVELS: N/A
         PCIE_INTERFACE_VERSION: Gen 5
         SLOT_TYPE: PCIE
     IFWI:
@@ -1175,18 +1181,26 @@ GPU: 0
         PART_NUMBER: N/A
         VERSION: N/A
     LIMIT:
-        MAX_POWER: 550 W
-        MIN_POWER: 0 W
-        SOCKET_POWER: 550 W
+        PPT0:
+            MAX_POWER_LIMIT: 550 W
+            MIN_POWER_LIMIT: 0 W
+            SOCKET_POWER_LIMIT: 0 W
+        PPT1:
+            MAX_POWER_LIMIT: N/A
+            MIN_POWER_LIMIT: N/A
+            SOCKET_POWER_LIMIT: N/A
         SLOWDOWN_EDGE_TEMPERATURE: N/A
         SLOWDOWN_HOTSPOT_TEMPERATURE: 100 °C
         SLOWDOWN_VRAM_TEMPERATURE: 105 °C
         SHUTDOWN_EDGE_TEMPERATURE: N/A
         SHUTDOWN_HOTSPOT_TEMPERATURE: 110 °C
         SHUTDOWN_VRAM_TEMPERATURE: 115 °C
+        PTL_STATE: N/A
+        PTL_FORMAT: N/A
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.14.4
+        VERSION: 6.19.4
+        OS_KERNEL_VERSION: 5.15.0-generic
     BOARD:
         MODEL_NUMBER: N/A
         PRODUCT_SERIAL: N/A
@@ -1196,6 +1210,7 @@ GPU: 0
     RAS:
         EEPROM_VERSION: 0x30000
         BAD_PAGE_THRESHOLD: N/A
+        BAD_PAGE_THRESHOLD_EXCEEDED: N/A
         PARITY_SCHEMA: DISABLED
         SINGLE_BIT_SCHEMA: DISABLED
         DOUBLE_BIT_SCHEMA: DISABLED
@@ -1220,23 +1235,33 @@ GPU: 0
             JPEG: DISABLED
             IH: DISABLED
             MPIO: DISABLED
-    PARTITION:
-        ACCELERATOR_PARTITION: SPX
-        MEMORY_PARTITION: NPS1
-        PARTITION_ID: 0
-        COMPUTE_PARTITION_MEM_ALLOC_MODE: CAPPING
     SOC_PSTATE: N/A
     XGMI_PLPD: N/A
+    PROFILE: AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported
     PROCESS_ISOLATION: Disabled
     NUMA:
         NODE: 0
         AFFINITY: 0
-        CPU AFFINITY:
-                0xffffff
-                0xffffff00000000
-                0x0
-        SOCKET AFFINITY:
-                0
+        CPU_AFFINITY:
+            CPU_LIST_0:
+                BITMASK: 0000000000FFFFFF
+                CPU_CORES_AFFINITY: 0-23
+            CPU_LIST_1:
+                BITMASK: 00FFFFFF00000000
+                CPU_CORES_AFFINITY: 96-119
+            CPU_LIST_2:
+                BITMASK: 0000000000000000
+                CPU_CORES_AFFINITY: N/A
+        SOCKET_AFFINITY:
+            CPU_LIST_0:
+                BITMASK: 0000000000FFFFFF
+                CPU_CORES_AFFINITY: 0-23
+            CPU_LIST_1:
+                BITMASK: 00FFFFFF00000000
+                CPU_CORES_AFFINITY: 96-119
+            CPU_LIST_2:
+                BITMASK: 0000000000000000
+                CPU_CORES_AFFINITY: N/A
     VRAM:
         TYPE: HBM
         VENDOR: UNKNOWN
@@ -1286,51 +1311,48 @@ GPU: 0
             CACHE_LEVEL: 3
             MAX_NUM_CU_SHARED: 228
             NUM_CACHE_INSTANCE: 1
+    MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
     CLOCK:
         SYS:
-            CURRENT LEVEL: 1
+            CURRENT_LEVEL: 0
             FREQUENCY_LEVELS:
-                LEVEL 0: 500 MHz
-                LEVEL 1: 207 MHz
+                LEVEL 0: 44 MHz
+                LEVEL 1: 500 MHz
                 LEVEL 2: 2100 MHz
         MEM:
-            CURRENT LEVEL: 3
+            CURRENT_LEVEL: 0
             FREQUENCY_LEVELS:
                 LEVEL 0: 900 MHz
                 LEVEL 1: 1100 MHz
                 LEVEL 2: 1200 MHz
                 LEVEL 3: 1300 MHz
         DF:
-            CURRENT LEVEL: 3
+            CURRENT_LEVEL: 0
             FREQUENCY_LEVELS:
                 LEVEL 0: 1200 MHz
                 LEVEL 1: 1600 MHz
                 LEVEL 2: 1900 MHz
                 LEVEL 3: 2000 MHz
         SOC:
-            CURRENT LEVEL: 0
+            CURRENT_LEVEL: 0
             FREQUENCY_LEVELS:
-                LEVEL 0: 43 MHz
+                LEVEL 0: 27 MHz
                 LEVEL 1: 800 MHz
                 LEVEL 2: 1000 MHz
                 LEVEL 3: 1143 MHz
         DCEF: N/A
         VCLK0:
-            CURRENT LEVEL: 0
+            CURRENT_LEVEL: 0
             FREQUENCY_LEVELS:
-                LEVEL 0: 54 MHz
-        VCLK1:
-            CURRENT LEVEL: 0
-            FREQUENCY_LEVELS:
-                LEVEL 0: 54 MHz
+                LEVEL 0: 0 MHz
+                LEVEL 1: 914 MHz
+        VCLK1: N/A
         DCLK0:
-            CURRENT LEVEL: 0
+            CURRENT_LEVEL: 0
             FREQUENCY_LEVELS:
-                LEVEL 0: 45 MHz
-        DCLK1:
-            CURRENT LEVEL: 0
-            FREQUENCY_LEVELS:
-                LEVEL 0: 45 MHz
+                LEVEL 0: 7 MHz
+                LEVEL 1: 711 MHz
+        DCLK1: N/A
 ...
 ```
 
@@ -1398,11 +1420,33 @@ metrics are enabled.
 
 ```bash
 ~$ amd-smi monitor
-GPU  XCP    POWER    GPU_T    MEM_T   GFX_CLK    GFX%    MEM%    ENC%    DEC%   VRAM_USED   VRAM_TOTAL
-  0    0    110 W    47 °C    39 °C   210 MHz     0 %     0 %   N/A      0 %      14 MB     96432 MB
-  1    0    106 W    46 °C    38 °C   210 MHz     0 %     0 %   N/A      0 %      14 MB     96432 MB
-  2    0    109 W    43 °C    37 °C   210 MHz     0 %     0 %   N/A      0 %      14 MB     96432 MB
-  3    0    107 W    44 °C    38 °C   210 MHz     0 %     0 %   N/A      0 %      14 MB     96432 MB
+GPU  XCP  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%       GTT_USAGE
+  0    0   49 W   27 °C   29 °C    43 MHz    2 %    0 %    N/A    0 %    0.0/376.7 GB
+  1    0   42 W   29 °C   30 °C    47 MHz    2 %    0 %    N/A    0 %    0.0/376.7 GB
+  2    0   33 W   30 °C   31 °C    49 MHz    2 %    0 %    N/A    0 %    0.0/376.7 GB
+  3    0   40 W   26 °C   28 °C    40 MHz    2 %    0 %    N/A    0 %    0.0/376.7 GB
+```
+
+The final memory column is chosen dynamically per device. On APUs (such as the
+MI300A above), the tool reports the larger of the VRAM and GTT pools, so the
+column header reads `GTT_USAGE`. On discrete GPUs it reports the dedicated VRAM
+pool, so the header reads `VRAM_USAGE`. The example below is from a discrete
+MI300X in `CPX`/`NPS4` mode; only the primary XCP of each partition reports
+per-engine sensors, while the other XCPs share the physical device and report
+`N/A` for those fields:
+
+```bash
+~$ amd-smi monitor
+GPU  XCP  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%      VRAM_USAGE
+  0    0  183 W   49 °C   48 °C  1427 MHz    0 %    0 %    N/A    0 %    0.3/192.0 GB
+  1    1    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+  2    2    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+  3    3    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+  4    0  182 W   50 °C   46 °C  1423 MHz    0 %    0 %    N/A    0 %    0.3/192.0 GB
+  5    1    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+  6    2    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+  7    3    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+...
 ```
 
 You can select specific metrics to monitor:
