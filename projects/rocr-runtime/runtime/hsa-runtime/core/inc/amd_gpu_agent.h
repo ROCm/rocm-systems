@@ -1086,6 +1086,14 @@ class GpuAgent : public GpuAgentInt {
   // structure for stochastic sampling
   pcs_data_t pcs_stochastic_data_;
 
+  // Serializes PM4 submit-and-wait sequences on queues_[QueuePCSampling].
+  // AqlQueue::ExecutePM4 stages commands in a single per-queue indirect buffer that it
+  // reuses as soon as it returns, so only one asynchronous PM4 submission may be in
+  // flight on that queue at a time. The per-XCC flush threads and PcSamplingFlush all
+  // share the queue, as do the hosttrap and stochastic sessions.
+  // Lock order: host_buffer_mutex -> pcs_pm4_mutex_.
+  std::mutex pcs_pm4_mutex_;
+
   /// @brief XGMI CPU<->GPU
   bool xgmi_cpu_gpu_;
   /// @brief Is PCIe large BAR enabled.
