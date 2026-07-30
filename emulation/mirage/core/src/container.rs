@@ -318,14 +318,24 @@ pub fn reclaim_orphans(provider: &str, live: &[SessionId]) -> Vec<String> {
 /// resource without the label is never even named here.
 fn labelled(provider: &str, verb: &[&str]) -> Vec<(String, String)> {
     let filter = format!("label={LABEL_OWNER}={LABEL_OWNER_VALUE}");
-    let template = format!("{{{{.Name}}}}\t{{{{index .Labels {LABEL_SESSION:?}}}}}");
+    // `{{.ID}}` only, and the session label read back per resource with
+    // `inspect`.
+    //
+    // The listing verbs are where the two providers' Go templates diverge:
+    // `podman ps` exposes `.Name` and a `.Labels` *map*, while `docker ps`
+    // exposes `.Names` and renders `.Labels` as a comma-joined *string* —
+    // so `{{index .Labels "…"}}` makes docker exit non-zero, `labelled`
+    // returns nothing, and `reclaim_orphans` silently reclaims nothing at
+    // all on a docker host. `.ID` is common to both listing verbs, and
+    // `inspect` (which already backs `container_is_ours`) exposes the
+    // labels as a map on both.
     let Ok(out) = retrying_etxtbsy(|| {
         Command::new(provider)
             .args(verb)
             .arg("--filter")
             .arg(&filter)
             .arg("--format")
-            .arg(&template)
+            .arg("{{.ID}}")
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()
@@ -335,15 +345,23 @@ fn labelled(provider: &str, verb: &[&str]) -> Vec<(String, String)> {
     if !out.status.success() {
         return Vec::new();
     }
+    let network = verb.first() == Some(&"network");
     String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|line| {
-            let (name, session) = line.split_once('\t')?;
-            let (name, session) = (name.trim(), session.trim());
-            if name.is_empty() || session.is_empty() || session == "<no value>" {
+            let id = line.trim();
+            if id.is_empty() {
                 return None;
             }
-            Some((name.to_string(), session.to_string()))
+            let session = if network {
+                network_label(provider, id, LABEL_SESSION)?
+            } else {
+                container_label(provider, id, LABEL_SESSION)?
+            };
+            if session.is_empty() || session == "<no value>" {
+                return None;
+            }
+            Some((id.to_string(), session))
         })
         .collect()
 }
@@ -371,14 +389,36 @@ fn run_quiet(provider: &str, args: &[&str]) {
     }
 }
 
-/// Run a provider command, retrying while the binary reports `ETXTBSY`.
+/// Whether a spawn failure is worth trying again.
 ///
-/// `ETXTBSY` means the executable was still open for writing when we
-/// tried to exec it — transient, and never seen with a real
-/// podman/docker install, but routine for a freshly-written wrapper
-/// script. Giving up on it silently skips whatever the command was going
-/// to do, which for an ownership probe means concluding "not ours" about
-/// a container that *is* ours and then declining to remove it.
+/// All three of these say "not right now" rather than "not ever":
+///
+/// * `ExecutableFileBusy` — the executable was still open for writing
+///   when we tried to exec it. Never seen with a real podman/docker
+///   install, routine for a freshly-written wrapper script.
+/// * `WouldBlock` (`EAGAIN`) — `fork` hit the process or thread limit.
+/// * `OutOfMemory` (`ENOMEM`) — the kernel could not set up the new
+///   process right now.
+///
+/// The last two are what a heavily loaded machine produces, and they are
+/// worth retrying here for the same reason as the first: giving up
+/// silently skips whatever the command was going to do, which for an
+/// ownership probe means concluding "not ours" about a container that
+/// *is* ours and then declining to remove it. A leak is a much worse
+/// outcome than a few milliseconds of backoff.
+fn worth_retrying(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::ExecutableFileBusy
+            | std::io::ErrorKind::WouldBlock
+            | std::io::ErrorKind::OutOfMemory
+    )
+}
+
+/// Run a provider command, retrying transient spawn failures.
+///
+/// See [`worth_retrying`] for which failures are treated as transient and
+/// why the bias is towards retrying.
 fn retrying_etxtbsy<F>(mut run: F) -> std::io::Result<std::process::Output>
 where
     F: FnMut() -> std::io::Result<std::process::Output>,
@@ -389,10 +429,7 @@ where
     let mut attempts = 0;
     loop {
         match run() {
-            Err(e)
-                if e.kind() == std::io::ErrorKind::ExecutableFileBusy
-                    && attempts < MAX_ATTEMPTS =>
-            {
+            Err(e) if worth_retrying(&e) && attempts < MAX_ATTEMPTS => {
                 attempts += 1;
                 std::thread::sleep(BACKOFF);
             }
@@ -561,15 +598,23 @@ mod tests {
         let provider = dir.path().join("mock-provider.sh");
         // `ps`/`network ls` report one live session and one orphan; the
         // owner filter is applied by the engine, so everything listed is
-        // already ours.
+        // already ours. The listing yields ids only — the session label is
+        // read back per resource with `inspect`, which is the one shape
+        // both podman and docker agree on.
         std::fs::write(
             &provider,
             format!(
                 "#!/bin/sh\n\
                  echo \"$@\" >> {log}\n\
+                 for a in \"$@\"; do last=$a; done\n\
                  case \"$1 $2\" in\n\
-                 \"ps --all\") printf 'mirage-live-node-0\\tlive\\nmirage-dead-node-0\\tdead\\n' ;;\n\
-                 \"network ls\") printf 'mirage-dead\\tdead\\n' ;;\n\
+                 \"ps --all\") printf 'mirage-live-node-0\\nmirage-dead-node-0\\n' ;;\n\
+                 \"network ls\") printf 'mirage-dead\\n' ;;\n\
+                 \"inspect --format\"|\"network inspect\")\n\
+                 case \"$last\" in\n\
+                 mirage-live-node-0) echo live ;;\n\
+                 mirage-dead-node-0|mirage-dead) echo dead ;;\n\
+                 esac ;;\n\
                  esac\n\
                  exit 0\n",
                 log = log.display(),

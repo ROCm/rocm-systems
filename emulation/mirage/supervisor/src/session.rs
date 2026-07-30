@@ -97,6 +97,17 @@ struct Inner {
     /// How many `start_exec` calls have reserved an id and not yet
     /// registered their exec. See [`Session::quiescent`].
     starting: usize,
+    /// Rendezvous port for a non-containerised session, chosen on the
+    /// first [`Session::describe`] and then fixed.
+    ///
+    /// It has to be fixed. `describe` is called once per exec *and* once
+    /// per `Describe` request off the control socket, so re-picking here
+    /// would hand `mirage run`'s ranks one `MASTER_PORT` and a
+    /// `mirage exec` in another terminal a different one — and the two
+    /// halves of the job would never find each other. A containerised
+    /// session already gets this right by recording the port in its
+    /// [`ContainerState`] at bring-up.
+    head_port: Option<u16>,
 }
 
 impl Session {
@@ -188,10 +199,29 @@ impl Session {
     /// Holding the clients here is what ties the containers' lifetime to
     /// the session's: they are killed by [`Session::teardown`], and by
     /// their own `Drop` if the process dies some other way.
-    pub fn set_containers(&self, state: ContainerState, clients: Vec<NodeClient>) {
+    ///
+    /// Returns `None` on success. If teardown has already run nothing is
+    /// recorded and the arguments are handed straight back, because the
+    /// caller is now the only thing that knows these containers exist.
+    ///
+    /// Bring-up happens on a blocking thread and can finish *after*
+    /// `teardown` has collected what to kill — a `wait_ready` timeout or a
+    /// Ctrl-C during a slow pull is enough. Storing the containers then
+    /// would hand them to a session nobody will ever tear down again, and
+    /// they would outlive the run holding their ports and devices.
+    #[must_use = "containers refused by a session that is tearing down must be removed by the caller"]
+    pub fn set_containers(
+        &self,
+        state: ContainerState,
+        clients: Vec<NodeClient>,
+    ) -> Option<(ContainerState, Vec<NodeClient>)> {
         let mut inner = self.lock();
+        if inner.tearing_down {
+            return Some((state, clients));
+        }
         inner.containers = Some(state);
         inner.container_clients = clients;
+        None
     }
 
     /// Whether every container backing this session is still running.
@@ -369,15 +399,23 @@ impl Session {
     ///
     /// Returns an error if the topology cannot be resolved.
     pub fn describe(&self) -> Result<SessionDescription> {
-        let (injection, containers) = {
-            let inner = self.lock();
-            (inner.injection.clone(), inner.containers.clone())
+        let (injection, containers, head_port) = {
+            let mut inner = self.lock();
+            // Chosen once and remembered, so every caller — this run's own
+            // exec and any `mirage exec` in another terminal — rendezvous
+            // on the same port.
+            let head_port = *inner.head_port.get_or_insert_with(pick_head_port);
+            (
+                inner.injection.clone(),
+                inner.containers.clone(),
+                head_port,
+            )
         };
         let node_count = resolve_node_count(&self.ctx.profile)?;
 
         let (head_addr, head_port) = match &containers {
             Some(state) => (container_name(&self.def.id, 0), state.head_port),
-            None => ("127.0.0.1".to_string(), pick_head_port()),
+            None => ("127.0.0.1".to_string(), head_port),
         };
 
         // The emulator's environment was computed against the host

@@ -17,6 +17,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
 use mirage_core::proto::{Request, Response, codec};
@@ -96,11 +97,29 @@ impl ControlSocket {
     /// finishing, and dropping this future stops serving. Each connection
     /// is handled on its own task so a slow client cannot block the next.
     pub async fn serve(&self, run: Arc<Run>) {
+        // Back off after a failed accept rather than retrying immediately.
+        // Some accept errors are transient (`ECONNABORTED`), but others
+        // are not: at the process's fd limit — which a wide
+        // `--nproc-per-node` grid with captured stdio can reach — `accept`
+        // returns `EMFILE` the instant it is called, and a bare `continue`
+        // turns that into a task spinning a core flat out, starving the
+        // runtime threads that are supervising the workload and emitting
+        // an unbounded stream of warnings.
+        const MAX_BACKOFF: Duration = Duration::from_secs(1);
+        let mut backoff = Duration::from_millis(5);
+
         loop {
             let (stream, _) = match self.listener.accept().await {
-                Ok(accepted) => accepted,
+                Ok(accepted) => {
+                    backoff = Duration::from_millis(5);
+                    accepted
+                }
                 Err(e) => {
-                    tracing::warn!("control socket accept failed: {e}");
+                    tracing::warn!(
+                        "control socket accept failed, retrying in {backoff:?}: {e}"
+                    );
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
                     continue;
                 }
             };

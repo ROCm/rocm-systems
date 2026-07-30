@@ -32,6 +32,18 @@ fn prefix(node: u32) -> String {
     format!("[{node}] ")
 }
 
+/// Longest run of bytes held while waiting for a newline, per rank and
+/// stream.
+///
+/// A workload is not obliged to ever write one. A progress bar redraws
+/// with `\r`, a binary blob has none at all, and `tqdm` — which a great
+/// many of the workloads this runs will use — emits megabytes without a
+/// single `\n`. Buffering until the stream ends would then grow one `Vec`
+/// per rank at pipe speed for the whole life of the job, so past this
+/// point the partial line is emitted as-is. A wrapped line is a far
+/// better outcome than a supervisor holding gigabytes of a progress bar.
+const MAX_PARTIAL_LINE: usize = 1024 * 1024;
+
 /// Drain `rx`, writing every chunk to this process's stdout and stderr
 /// with its rank prefixed.
 ///
@@ -46,9 +58,13 @@ pub async fn print_labelled(mut rx: mpsc::Receiver<OutputChunk>) {
         buf.extend_from_slice(&chunk.data);
 
         // Emit only up to the last newline; whatever follows is a partial
-        // line and waits for the rest of itself.
-        let Some(end) = buf.iter().rposition(|b| *b == b'\n') else {
-            continue;
+        // line and waits for the rest of itself — unless it has waited
+        // long enough to be a memory leak, in which case it goes out
+        // unterminated rather than growing without bound.
+        let end = match buf.iter().rposition(|b| *b == b'\n') {
+            Some(end) => end,
+            None if buf.len() >= MAX_PARTIAL_LINE => buf.len() - 1,
+            None => continue,
         };
         let complete: Vec<u8> = buf.drain(..=end).collect();
         write_lines(chunk.node, chunk.stream, &complete);

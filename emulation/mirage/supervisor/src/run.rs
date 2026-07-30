@@ -401,7 +401,25 @@ impl Run {
         let (containers, clients) = result;
         // The clients are the containers' lifetime: the session holds
         // them so that dropping the session stops the containers.
-        session.set_containers(containers, clients);
+        //
+        // Unless teardown got there first, which it can: all of the above
+        // ran on a blocking thread, and a `wait_ready` timeout or a Ctrl-C
+        // tears the session down without waiting for it. The session hands
+        // the containers back in that case and they are ours to remove —
+        // nothing else knows they exist.
+        if let Some((containers, mut clients)) = session.set_containers(containers, clients) {
+            tracing::warn!(
+                session = %session.id(),
+                "container bring-up finished after teardown; removing what it created"
+            );
+            let _ = tokio::task::spawn_blocking(move || {
+                for client in &mut clients {
+                    client.kill();
+                }
+                mirage_core::container::teardown(&containers);
+            })
+            .await;
+        }
         Ok(())
     }
 }
