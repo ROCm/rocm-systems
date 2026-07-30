@@ -443,9 +443,10 @@ TEST(RjDbtTranslate, Smoke) {
                                          << stdout_text;
   EXPECT_TRUE(stderr_text.empty()) << stderr_text;
 
-  const std::array<std::string_view, 5> expected = {
-      "rj_dbt_translate: ok", "source_words: bf8cc07f", "source: s_waitcnt",
-      "target_words:",        "target: s_wait",
+  const std::array<std::string_view, 6> expected = {
+      "rj_dbt_translate: ok",   "source_code_object_id: fnv1a64:",
+      "source_words: bf8cc07f", "source: s_waitcnt",
+      "target_words:",          "target: s_wait",
   };
   for (const std::string_view needle : expected) {
     EXPECT_TRUE(contains(stdout_text, needle))
