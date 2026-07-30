@@ -497,19 +497,11 @@ public:
   virtual uint8_t *raw_vgpr_data(uint32_t base) = 0;
 
   /// @brief Read a VGPR lane directly from physical storage.
-  /// @details This deliberately bypasses plugin observation. It is for VM
-  /// completion and internal destination-preservation merges, where retained
-  /// destination bytes are storage state rather than instruction-visible
-  /// source operands.
+  /// @details This deliberately bypasses plugin observation and is reserved
+  /// for VM storage operations. Instruction code receives
+  /// `InstructionComputeUnitView`, which does not expose this API.
   uint32_t read_vgpr_storage(uint32_t reg_idx, uint32_t lane) const {
     return reinterpret_cast<const uint32_t *>(raw_vgpr_data(reg_idx))[lane];
-  }
-
-  /// @brief Write a VGPR lane directly to physical storage.
-  /// @details This deliberately bypasses plugin observation and is reserved
-  /// for VM completion and internal destination-preservation merges.
-  void write_vgpr_storage(uint32_t reg_idx, uint32_t lane, uint32_t value) {
-    reinterpret_cast<uint32_t *>(raw_vgpr_data(reg_idx))[lane] = value;
   }
 
   /// @brief Number of physical VGPR registers in one allocation block.

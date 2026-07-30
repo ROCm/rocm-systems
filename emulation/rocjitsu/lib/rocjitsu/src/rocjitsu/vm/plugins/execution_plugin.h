@@ -111,10 +111,6 @@ public:
   /// @param physical_reg Physical register index in the VGPR file.
   /// @param lane_mask Bit mask of lanes read by the instruction.
   /// @param byte_mask Sub-dword byte mask (kFullByteMask = full dword).
-  /// @warning DPP and partial SDWA source staging can conservatively report
-  /// lanes or bytes beyond the architectural source effect. Precision-sensitive
-  /// plugins must classify and ignore those instructions; suppression is not
-  /// automatic. See the rocjitsu README and plugins documentation.
   virtual void onAmdgpuReadVgprLanes(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
                                      uint64_t /*lane_mask*/,
                                      uint8_t /*byte_mask*/ = kFullByteMask) {}
@@ -123,12 +119,8 @@ public:
   /// Memory pipeline completions write raw VGPR storage and do not fire this
   /// hook; this is for instruction-level destination writes.
   ///
-  /// @warning Precise write observation is not yet supported for DPP
-  /// instructions or sub-dword SDWA destinations using `UNUSED_PRESERVE`.
-  /// Plugins that require exact register hazards must classify and ignore
-  /// callbacks from those instructions rather than consuming their conservative
-  /// lane or byte masks. Suppression is not automatic. See the rocjitsu README
-  /// and plugins documentation.
+  /// Internal storage operations do not produce additional architectural
+  /// callbacks.
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.
   /// @param physical_reg Physical register index in the VGPR file.
   /// @param lane_mask Bit mask of lanes written by the instruction.

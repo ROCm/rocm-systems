@@ -944,6 +944,12 @@ class Parser:
             inst_name_node = xs.get_node(inst_node, xs.INST_NAME)
             inst_encs_node = xs.get_node(inst_node, xs.INST_ENCODINGS)
             inst_name = inst_name_node.text
+            available_encodings = frozenset(
+                xs.get_node_text(xs.get_node(inst_enc_node, xs.ENCODING_NAME))
+                for inst_enc_node in inst_encs_node
+                if xs.get_node_text(xs.get_node(inst_enc_node, xs.ENCODING_NAME))
+                not in self.profile.skip_encodings
+            )
             for inst_enc_node in inst_encs_node:
                 enc_name_node = xs.get_node(inst_enc_node, xs.ENCODING_NAME)
                 enc_cond_node = xs.get_node(inst_enc_node, xs.ENCODING_COND)
@@ -1010,7 +1016,12 @@ class Parser:
                     enc_name in self.isa_spec.alt_encs_with_implied_literal
                 )
                 inst = Instruction(
-                    inst_name, enc_name, opcode, opnds, is_implied_literal
+                    inst_name,
+                    enc_name,
+                    opcode,
+                    opnds,
+                    is_implied_literal,
+                    available_encodings,
                 )
 
                 # Implied-literal instructions go to the parent encoding's
