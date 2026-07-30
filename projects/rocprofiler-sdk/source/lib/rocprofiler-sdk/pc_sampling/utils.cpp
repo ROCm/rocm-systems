@@ -73,7 +73,7 @@ get_matching_hsa_pcs_units(rocprofiler_pc_sampling_unit_t unit)
 size_t get_hsa_pcs_buffer_size(uint32_t /*gfx_target_version*/)
 {
     // Use bigger buffer to reduce number of dropped samples on actual silicon
-    return 64 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 4MB
+    return 16 * 64 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 4MB
 }
 }  // namespace utils
 }  // namespace pc_sampling

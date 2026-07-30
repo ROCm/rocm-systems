@@ -91,7 +91,7 @@ instructions_with_types = [
     ("s_sendmsg", "MESSAGE"),  # MESSAGE (specific)
     ("s_barrier", "BARRIER"),  # BARRIER (specific)
     ("s_swappc", "JUMP"),  # JUMP (specific)
-    ("s_setpc", "JUMP"),  # JUMP
+    ("s_set_pc", "JUMP"),  # JUMP
     ("s_branch", "BRANCH"),  # BRANCH
     ("s_cbranch", "BRANCH"),  # BRANCH (conditional)
     ("s_wakeup", "S_WAKEUP"),  # NO_INST type, but goes through the brmsg arbiter.

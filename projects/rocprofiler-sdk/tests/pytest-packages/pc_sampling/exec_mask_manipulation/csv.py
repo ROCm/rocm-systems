@@ -82,11 +82,27 @@ def validate_instruction_decoding(
             )
 
 
-def validate_instruction_comment(df):
+def validate_instruction_comment(df, allow_missing_comment_instructions=None):
     # Instruction comment must always be present, since the testing application
-    # is built with debug symbols.
+    # is built with debug symbols. Some architectures (e.g. gfx1250) emit
+    # instructions (e.g. "global_wb", "global_prefetch") ahead of the first
+    # line-mapped instruction, and a "s_get_pc_i64" / "s_add_co_u32" /
+    # "s_add_co_ci_u32" / "s_set_pc_i64" return sequence after the last one,
+    # that have no corresponding source line, so their comment is
+    # legitimately empty; callers can exempt those via
+    # allow_missing_comment_instructions.
+    df_to_check = df
+    if allow_missing_comment_instructions:
+        exempt = df["Instruction"].apply(
+            lambda inst: any(
+                inst.startswith(prefix) for prefix in allow_missing_comment_instructions
+            )
+        )
+        df_to_check = df[~exempt]
+
     assert (
-        (df["Instruction_Comment"] != "") & (df["Instruction_Comment"] != "nullptr")
+        (df_to_check["Instruction_Comment"] != "")
+        & (df_to_check["Instruction_Comment"] != "nullptr")
     ).all()
 
 
@@ -149,10 +165,14 @@ def validate_exec_mask_based_on_correlation_id(df):
     ).all(), "Exec_Mask does not match expected mask derived from Correlation_Id for all samples"
 
 
-def exec_mask_manipulation_validate_csv(df, all_sampled=False):
+def exec_mask_manipulation_validate_csv(
+    df, all_sampled=False, allow_missing_comment_instructions=None
+):
     assert not df.empty
 
-    validate_instruction_comment(df)
+    validate_instruction_comment(
+        df, allow_missing_comment_instructions=allow_missing_comment_instructions
+    )
     validate_instruction_correlation_id_relation(df)
 
     # Validate samples with non-zero correlation IDs (and with decoded instructions)

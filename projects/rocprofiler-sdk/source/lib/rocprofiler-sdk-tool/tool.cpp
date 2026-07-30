@@ -1033,6 +1033,11 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             auto* obj_data = static_cast<tool::rocprofiler_code_object_info_t*>(record.payload);
 
+            fprintf(stderr,
+                    "[rocprofv3] code_object_id=%lu storage_type=%d\n",
+                    obj_data->code_object_id,
+                    static_cast<int>(obj_data->storage_type));
+
             CHECK_NOTNULL(tool_metadata)->add_code_object(*obj_data);
             if(tool::get_config().pc_sampling_host_trap ||
                tool::get_config().pc_sampling_stochastic)
@@ -1055,7 +1060,9 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             }
 
             if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
-               tool::get_config().advanced_thread_trace)
+               (tool::get_config().advanced_thread_trace ||
+                tool::get_config().pc_sampling_host_trap ||
+                tool::get_config().pc_sampling_stochastic))
             {
                 const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
                 auto        filename      = fmt::format("{}_code_object_id_{}",
@@ -1081,7 +1088,9 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     obj_data);
             }
             else if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE &&
-                    tool::get_config().advanced_thread_trace)
+                    (tool::get_config().advanced_thread_trace ||
+                     tool::get_config().pc_sampling_host_trap ||
+                     tool::get_config().pc_sampling_stochastic))
             {
                 const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
                 auto        filename      = fmt::format("{}_code_object_id_{}",

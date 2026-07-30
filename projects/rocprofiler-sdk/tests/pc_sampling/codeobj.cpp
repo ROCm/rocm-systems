@@ -210,7 +210,18 @@ codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
             info << "code object unload :: ";
         }
 
+        auto storage_type_name = [](rocprofiler_code_object_storage_type_t _type) {
+            switch(_type)
+            {
+                case ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_NONE: return "NONE";
+                case ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE: return "FILE";
+                case ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY: return "MEMORY";
+                default: return "UNKNOWN";
+            }
+        };
+
         info << "code_object_id=" << data->code_object_id
+             << ", storage_type=" << storage_type_name(data->storage_type)
              << ", rocp_agent=" << data->rocp_agent.handle << ", uri=" << data->uri
              << ", load_base=" << as_hex(data->load_base) << ", load_size=" << data->load_size
              << ", load_delta=" << as_hex(data->load_delta);

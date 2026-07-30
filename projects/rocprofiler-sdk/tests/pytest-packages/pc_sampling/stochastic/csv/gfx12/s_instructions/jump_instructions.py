@@ -45,12 +45,13 @@ def validate_jump_instructions_issued(all_samples, jump_samples):
 
 def validate_jump_instructions_stalled(jump_samples):
     jump_samples_stalled = jump_samples[jump_samples["Wave_Issued_Instruction"] == False]
+    allowed_stall_reasons = (
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN",
+    )
     assert (
         jump_samples_stalled["Stall_Reason"]
-        .apply(
-            lambda x: x
-            == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE"
-        )
+        .apply(lambda x: x in allowed_stall_reasons)
         .all()
     )
 

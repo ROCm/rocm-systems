@@ -106,8 +106,8 @@ instructions_with_types = [
     ),  # WAITCNT (specific) - GFX12 uses s_wait_loadcnt, s_wait_storecnt, etc.
     ("s_sendmsg", "MESSAGE"),  # MESSAGE (specific)
     ("s_barrier", "BARRIER"),  # BARRIER (specific)
-    ("s_swappc", "JUMP"),  # JUMP (specific)
-    ("s_setpc", "JUMP"),  # JUMP
+    ("s_swap_pc", "JUMP"),  # JUMP (specific)
+    ("s_set_pc", "JUMP"),  # JUMP
     ("s_branch", "BRANCH"),  # BRANCH
     ("s_cbranch", "BRANCH"),  # BRANCH (conditional)
     ("s_wakeup", "S_WAKEUP"),  # NO_INST type, but goes through the brmsg arbiter.
