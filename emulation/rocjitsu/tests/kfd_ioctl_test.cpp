@@ -1262,6 +1262,56 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotClampsCopyToCallerCapacity) 
   server.join();
 }
 
+// Daemon mode must reach the same verdict as the local path when the caller
+// supplies no snapshot buffer: the failure propagates, the caller's null
+// pointer is restored rather than left holding whatever the reply echoed, and
+// the returned tail goes nowhere. The second half covers a daemon that reports
+// success anyway -- there is still nothing to write through, and the copy-back
+// must not dereference the null pointer.
+TEST(RemoteDriverDbgSnapshotTest, NullSnapshotBufferIsNeverWrittenThrough) {
+  constexpr uint32_t kNumDevices = 2;
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  constexpr size_t kTail = static_cast<size_t>(kNumDevices) * kEntryBytes;
+  constexpr uint64_t kEchoedGarbagePtr = 0xDEADBEEFull;
+  constexpr uint8_t kPoison = 0xCD;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  // A reply that both echoes a bogus snapshot_buf_ptr and carries a full tail,
+  // so a copy-back would have somewhere to go and something to send.
+  const IoctlReplyPatch patch = [&](const rocjitsu::RpcHeader &, kfd_ioctl_dbg_trap_args &echoed) {
+    echoed.device_snapshot.snapshot_buf_ptr = kEchoedGarbagePtr;
+    echoed.device_snapshot.num_devices = kNumDevices;
+    echoed.device_snapshot.entry_size = kEntryBytes;
+  };
+
+  for (const int daemon_result : {-EFAULT, 0}) {
+    SCOPED_TRACE(daemon_result);
+
+    int sv[2];
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+    std::jthread server([&, server_fd = sv[1]] {
+      const CloseOnScopeExit closer{server_fd};
+      serve_one_ioctl_reply(server_fd, daemon_result, arg_struct_size, kTail, kPoison, patch);
+    });
+
+    rocjitsu::RemoteDriver rd(sv[0]);
+
+    kfd_ioctl_dbg_trap_args snap{};
+    snap.pid = 4242;
+    snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+    snap.device_snapshot.num_devices = kNumDevices;
+    snap.device_snapshot.entry_size = kEntryBytes;
+    snap.device_snapshot.snapshot_buf_ptr = 0;
+
+    EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), daemon_result);
+    EXPECT_EQ(snap.device_snapshot.snapshot_buf_ptr, 0u)
+        << "the reply's snapshot_buf_ptr leaked into the caller's args";
+
+    server.join();
+  }
+}
+
 // Reply patch modelling a daemon that enumerates fewer GPUs than the caller
 // asked for: report the true device total and the driver's clamped entry size.
 IoctlReplyPatch snapshot_outputs(uint32_t out_num_devices, uint32_t out_entry_size) {
@@ -1608,6 +1658,51 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   EXPECT_EQ(entry.array_count * entry.num_xcc / entry.simd_arrays_per_engine,
             simulated_shader_engines);
   EXPECT_EQ(entry.num_xcc, soc_->num_xcds());
+}
+
+// Asking for entries without supplying somewhere to put them is the failure
+// amdkfd reports from copy_to_user(): -EFAULT, with the device total still
+// filled in. The count-only probe (num_devices = 0) legitimately passes a null
+// pointer and must keep succeeding, so the two cases are distinguished by the
+// requested count, not by the pointer alone.
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotRejectsUnwritableBuffer) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  kfd_ioctl_dbg_trap_args null_buf{};
+  null_buf.pid = static_cast<uint32_t>(getpid());
+  null_buf.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  // Ask for more devices than exist, at a wider stride than the struct, so the
+  // outputs below differ from the inputs and the assertions can tell "written
+  // back" apart from "left as the caller set them".
+  null_buf.device_snapshot.num_devices = 2;
+  null_buf.device_snapshot.entry_size = sizeof(kfd_dbg_device_info_entry) + 16;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &null_buf), -EFAULT);
+  EXPECT_EQ(null_buf.device_snapshot.snapshot_buf_ptr, 0u);
+  // The outputs are still authoritative: rocdbgapi reads the device total back
+  // even from the call it sized wrong.
+  EXPECT_EQ(null_buf.device_snapshot.num_devices, 1u);
+  EXPECT_EQ(null_buf.device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry));
+
+  // A zero stride is the same failure by a different route -- there is no
+  // entry size to write at -- and must not touch the buffer the caller did
+  // provide.
+  constexpr uint8_t kSentinel = 0xAB;
+  std::array<uint8_t, sizeof(kfd_dbg_device_info_entry)> buffer{};
+  buffer.fill(kSentinel);
+  kfd_ioctl_dbg_trap_args zero_stride{};
+  zero_stride.pid = static_cast<uint32_t>(getpid());
+  zero_stride.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  zero_stride.device_snapshot.num_devices = 1;
+  zero_stride.device_snapshot.entry_size = 0;
+  zero_stride.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(buffer.data());
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &zero_stride), -EFAULT);
+  EXPECT_TRUE(std::all_of(buffer.begin(), buffer.end(), [](uint8_t byte) {
+    return byte == kSentinel;
+  })) << "rejected snapshot mutated caller memory";
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStride) {

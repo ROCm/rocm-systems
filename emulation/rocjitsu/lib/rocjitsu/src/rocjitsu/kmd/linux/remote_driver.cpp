@@ -642,6 +642,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           // pointer.
           if (resp->result != 0)
             break;
+          // A caller that supplied no buffer has nowhere to receive entries.
+          // The daemon cannot reproduce the driver's -EFAULT here: it rewrites
+          // snapshot_buf_ptr to its own inline tail before replaying the ioctl
+          // (rj_vm.cpp, reconstruct_embedded_pointers), so SimulatedKfd never
+          // sees the null and reports success. Drop the entries rather than
+          // memcpy through a null pointer.
+          if (saved_dbg_snapshot_ptr == 0)
+            break;
           // Replay the driver's write pattern instead of bulk-copying the tail.
           // amdkfd fills min(num_devices(IN), device total) entries, writing
           // entry_size(OUT) bytes at entry_size(IN) stride, and leaves the rest
