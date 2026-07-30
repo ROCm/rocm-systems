@@ -41,7 +41,6 @@ ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks);
 ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink);
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected);
-ncclResult_t ncclCheckMultiRank(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeCommCPU(struct ncclComm* comm);
 
 // Query topology
@@ -109,8 +108,9 @@ ncclResult_t ncclTopoGetNetCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetNvsCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev);
 ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm* comm, int* localGinDevs, int* localGinCount);
+ncclResult_t ncclTopoGetLocalRmaDevs(struct ncclComm* comm, int* localRmaDevs, int* localRmaCount);
 ncclResult_t ncclTopoGetLocalGpu(struct ncclTopoSystem* system, int64_t netId, int* gpuIndex);
-ncclResult_t getLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int* count, float* bw);
+ncclResult_t ncclTopoGetLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int* count, float* bw);
 
 enum netDevsPolicy {
   NETDEVS_POLICY_AUTO = 0x0,
@@ -120,10 +120,13 @@ enum netDevsPolicy {
 };
 ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum);
 
-// Allows for up to 32 NICs per node on GB200-NVL72
+// [RCCL] Kept at 64 (not upstream's 640): ncclTopoGraph's RCCL-specific treeBase array is
+// O(NCCL_TOPO_MAX_NODES^2), so 640 would blow sizeof(ncclComm) up to ~17.6 MiB. TODO: decouple.
 #define NCCL_TOPO_MAX_NODES 64
 ncclResult_t ncclTopoGetLocal(struct ncclTopoSystem* system, int type, int index, int resultType,
                               int locals[NCCL_TOPO_MAX_NODES], int* localCount, int* pathType);
+ncclResult_t ncclTopoGetDevNodes(struct ncclTopoSystem* system, int64_t baseId, struct ncclTopoNode** nodes,
+                                 int* nNodes);
 
 // Local (myself)
 #define PATH_LOC 0
@@ -146,7 +149,8 @@ ncclResult_t ncclTopoGetLocal(struct ncclTopoSystem* system, int type, int index
 // Connection between a GPU and a NIC using the C2C connection to the CPU and the PCIe connection to the NIC
 #define PATH_P2C 6
 
-// Connection between a GPU and a NIC using an intermediate GPU. Used to enable rail-local, aggregated network send/recv operations.
+// Connection between a GPU and a NIC using an intermediate GPU. Used to enable rail-local, aggregated network
+// send/recv operations.
 #define PATH_PXN 7
 
 // Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)

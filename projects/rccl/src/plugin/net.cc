@@ -146,21 +146,22 @@ ncclResult_t ncclNetCheckDeviceVersion(struct ncclComm* comm, ncclNet_t* net, in
 
   NCCLCHECK(net->getProperties(dev, &props));
   ncclNetDeviceType type = props.netDeviceType;
-  if (type) switch (type) {
-    case NCCL_NET_DEVICE_UNPACK:
-      if (props.netDeviceVersion == NCCL_NET_DEVICE_UNPACK_VERSION) {
-        INFO(NCCL_INIT, "Using NCCL_NET_DEVICE_UNPACK net plugin version %d", props.netDeviceVersion);
-        return ncclSuccess;
-      } else {
-        WARN(
-          "NCCL_DEVICE_UNPACK plugin has incompatible version %d, this NCCL build is compatible with %d, not using it",
-          props.netDeviceVersion, NCCL_NET_DEVICE_UNPACK_VERSION);
-        return ncclInternalError;
-      }
-    default:
-      WARN("Unknown device code index %d", type);
+  switch (type) {
+  case NCCL_NET_DEVICE_HOST:
+    break;
+  case NCCL_NET_DEVICE_UNPACK:
+    if (props.netDeviceVersion == NCCL_NET_DEVICE_UNPACK_VERSION) {
+      INFO(NCCL_INIT, "Using NCCL_NET_DEVICE_UNPACK net plugin version %d", props.netDeviceVersion);
+      return ncclSuccess;
+    } else {
+      WARN("NCCL_DEVICE_UNPACK plugin has incompatible version %d, this NCCL build is compatible with %d, not using it",
+           props.netDeviceVersion, NCCL_NET_DEVICE_UNPACK_VERSION);
       return ncclInternalError;
     }
+  default:
+    WARN("Unknown device code index %d", type);
+    return ncclInternalError;
+  }
 
   return ncclSuccess;
 }
@@ -400,7 +401,7 @@ ncclResult_t ncclNetGetDevCount(int netPluginIndex, int* nPhysDevs, int* nVirtDe
   *nVirtDevs = netPluginLibs[netPluginIndex].netVirtDevs;
   return ncclSuccess;
 fail:
-  WARN("%s: trying to access the number of devices of an uninitialized netPlugin[%d]", __func__, netPluginIndex);
+  WARN("trying to access the number of devices of an uninitialized netPlugin[%d]", netPluginIndex);
   return ncclInternalError;
 }
 
@@ -413,7 +414,7 @@ ncclResult_t ncclCollNetGetDevCount(int netPluginIndex, int* nPhysDevs, int* nVi
   *nVirtDevs = netPluginLibs[netPluginIndex].collNetVirtDevs;
   return ncclSuccess;
 fail:
-  WARN("%s: trying to access the number of devices of an uninitialized netPlugin[%d]", __func__, netPluginIndex);
+  WARN("trying to access the number of devices of an uninitialized netPlugin[%d]", netPluginIndex);
   return ncclInternalError;
 }
 

@@ -62,9 +62,10 @@ struct ncclSymkDevComm {
   struct ncclDevComm devComm;
   struct ncclLLA2AHandle lsaLLA2A;
   struct ncclGinOutboxHandle ginOutbox;
-  ncclGinCounter_t ginCounterPerBlock;
   struct ncclGinInboxA2AHandle ginInboxRail;
   struct ncclGinSyncHandle ginSyncHandle;
+  ncclDevResourceHandle rsGinAccumBuf;
+  uint32_t rsGinAccumBytesPerBlock;
 };
 
 struct ncclSymkState {

@@ -3054,7 +3054,7 @@ TEST_F(GinMPIDeviceTests, RailConnection_Create) {
   reqs.ginSignalCount      = 1;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
-  EXPECT_TRUE(devComm.ginIsRailed) << "devComm should report railed GIN";
+  EXPECT_TRUE(devComm.ginConnectionsRailed) << "devComm should report railed GIN";
   (void)ncclDevCommDestroy(comm, &devComm);
 }
 

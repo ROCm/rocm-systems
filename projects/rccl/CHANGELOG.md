@@ -2,6 +2,16 @@
 
 Full documentation for RCCL is available at [https://rccl.readthedocs.io](https://rccl.readthedocs.io)
 
+## RCCL 2.30.7 for ROCm 7.15.0 (Unreleased)
+
+### Added
+* Compatibility with NCCL 2.30.7.
+
+### Changed
+* Adapted the device-initiated GIN backends (Anvil SDMA and rocSHMEM GDA) to the NCCL 2.30.7 GIN API v14: added the new `getGinProperties` host op, dropped the data-path ops (`iput`/`iputSignal`/`iget`/`iflush`/`test`) that moved out of GIN under the GIN/RMA split, switched `createContext` to `ncclGinConfig_v14_t`, updated the device dispatch signatures, and matched the GIN type renumbering (`ROCSHMEM_GDA` and `ANVIL_SDMA` shifted after the new `GIN_GPI` type). The plugins now use the generic (unversioned) `ncclGin_t` / `ncclGinConfig_t` / `ncclGinProperties_t` typedefs so future ABI bumps do not require touching call sites.
+* Updated the ROCSHMEM GIN plugin registration to the v14 layout (corrected struct field names and the conditional that previously only compiled without ROCSHMEM GIN).
+* Adapted the InfiniBand transports (`net_ib` and `net_ib_cast`) to the v14 GIN/RMA split: the host/proxy backend is now registered as an `ncclRma_t` vtable (`RMA_IB_PROXY`) that owns the `iput`/`iputSignal`/`iget`/`iflush`/`test` data-path ops, with GIN layered on top through the generic `ncclGinProxy`.
+
 ## RCCL 2.30.4 for ROCm 7.14.0
 
 ### Added

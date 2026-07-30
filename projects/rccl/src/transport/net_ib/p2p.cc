@@ -431,7 +431,6 @@ isendFail:
 
 ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* req, int slot) {
   ncclIbQp* ctsQp = NULL;
-  ;
   NCCLCHECK(ncclIbRecvCommGetQpForCts(comm, req->id, &ctsQp));
 
   struct ibv_send_wr wr;
@@ -752,7 +751,8 @@ static inline ncclResult_t ncclIbRequestRetrieveFromCompletion(struct ncclIbNetC
           __func__, wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len);
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
     *req = recvComm->recvReqs[be32toh(wc->imm_data) % NET_IB_MAX_REQUESTS];
-  } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
+  } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) {
+    // Flush request completion
     NCCLCHECK(ncclIbRequestRetrieveAsIndex(base->reqs, (wc->wr_id - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET), req));
   } else if (!base->isSend) {
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
@@ -843,6 +843,7 @@ static ncclResult_t ncclIbLogCompletionWithError(struct ncclIbNetCommBase* commB
   WARN("NET/IB: Got completion from peer %s with status=%s(%d) opcode=%s(%d) vendor_err=%u %s%s%s%s hca %s", sockStr,
        ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->vendor_err,
        localGidStr ? " localGid " : "", localGidString, remoteGidStr ? " remoteGids" : "", remoteGidString, hcaName);
+  printIbWcStatusHint(wc->status);
   return ncclSuccess;
 }
 

@@ -892,6 +892,9 @@ ib_recv_dev_list:
     if (comm->base.resiliency) {
       IbCastResiliencyDataCqSizeGet(comm->base.resiliency, i, &cqSize);
     }
+    if (IbCastDevs[ibDevN].maxCqe > 0) {
+      cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
+    }
     NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &comm->devs[i].base, &comm->base.stats, cqSize), ret, fail);
     comm->ar = comm->ar && IbCastDevs[ibDevN].ar; // ADAPTIVE_ROUTING - if all merged devs have it enabled
     if (comm->base.resiliency) {
@@ -1491,6 +1494,9 @@ ib_recv:
     ibDevN = rComm->base.vProps.devs[i];
     if (rComm->base.resiliency) {
       IbCastResiliencyDataCqSizeGet(rComm->base.resiliency, i, &cqSize);
+    }
+    if (IbCastDevs[ibDevN].maxCqe > 0) {
+      cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
     }
     NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &rCommDev->base, &rComm->base.stats, cqSize), ret, fail);
     if (rComm->base.resiliency) {

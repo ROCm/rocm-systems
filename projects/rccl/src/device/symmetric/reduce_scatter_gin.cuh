@@ -64,48 +64,37 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
   // Zero the AMD software warp-span barrier slots before any coop sync (no-op on NVIDIA).
   ncclCoopNamedBarrierInit();
 
-  // Construct outbox only for stage=0 when lsa peers exist.
+  // Construct outbox only for stage=0. The LSA path uses both scratch buffers and
+  // requests; the rail-only path uses only the request FIFO.
   alignas(ncclGinOutboxSession<ncclCoopWarpSpan>) char outbox_storage[sizeof(ncclGinOutboxSession<ncclCoopWarpSpan>)];
   ncclGinOutboxSession<ncclCoopWarpSpan>& outbox =
-    stage == 0 && lsa.nRanks != 1 ?
+    stage == 0 ?
       *::new (&outbox_storage) ncclGinOutboxSession<ncclCoopWarpSpan>{coopStage, gin, handler.ginOutbox, blockIdx.x} :
       reinterpret_cast<ncclGinOutboxSession<ncclCoopWarpSpan>&>(outbox_storage);
-
-  __shared__ int totalSends;
-  if (stage == 0 && !roleIsWorker && lsa.nRanks == 1) {
-    if (coopRole.thread_rank() == 0) {
-      totalSends = 0;
-      // When pure rail we use a counter to track sends. We could leave them untracked
-      // and end with a flush but by using a counter we can reuse same postSends code
-      // for the rail-only and hybrid (lsa!=1) cases.
-      gin.resetCounter(handler.ginCounterPerBlock + blockIdx.x);
-    }
-    coopRole.sync();
-  }
 
   ncclGinInboxA2ASession<ncclCoopCta> inbox{cta, gin, rail, handler.ginInboxRail, blockIdx.x};
 
   ncclLsaBarrierSession<ncclCoopCta> lsaBar{cta, handler.comm, ncclTeamTagLsa(), blockIdx.x, multimem};
-  lsaBar.sync(cta, cuda::memory_order_relaxed);
+  lsaBar.sync(cta, cuda::memory_order_acquire);
 
-  int maxChunkElts = args->maxDynamicSmem / sizeof(AccT);
+  AccT* accum = (AccT*)((char*)ncclGetResourceBufferLocalPointer(handler.comm, handler.rsGinAccumBuf) +
+                        size_t(blockIdx.x) * handler.rsGinAccumBytesPerBlock);
+  int maxChunkEltsCap = handler.rsGinAccumBytesPerBlock / sizeof(AccT);
 
   handler.template forEachWorkNoFusion<T>([&] __device__(size_t nElts, size_t nAllElts, ncclSymPtr<T> input,
                                                          ncclSymPtr<T> output) {
-    AccT* accum;
-    ncclSymkSmemPartition(&accum, maxChunkElts);
-
+    int maxChunkElts = maxChunkEltsCap;
     int chunkBytes_log2 = log2Up(nElts) + log2Up(sizeof(T));
 
-      // Chunk size should not be larger than what host dictates and 1/2 of
-      // total capacity so we enjoy some pipeline overlap. This is a soft constraint
-      // because chunks which are too big can always be partially used.
+    // Chunk size should not be larger than what host dictates and 1/2 of
+    // total capacity so we enjoy some pipeline overlap. This is a soft constraint
+    // because chunks which are too big can always be partially used.
     int maxChunkBytes_log2 = min(log2Up(maxChunkElts) + log2Up(sizeof(T)), handler.ginInboxRail.size_log2 - 1);
     chunkBytes_log2 = min(chunkBytes_log2, maxChunkBytes_log2);
 
-      // Chunk size must not be so small that the chunk count exceeds either the
-      // per peer number or total number. This is a hard constraint imposed
-      // by inbox credit logic so we enforce after the max chunk size.
+    // Chunk size must not be so small that the chunk count exceeds either the
+    // per peer number or total number. This is a hard constraint imposed
+    // by inbox credit logic so we enforce after the max chunk size.
     int minChunkBytes_log2 =
       handler.ginInboxRail.size_log2 -
       min(log2Down(rail.nRanks - 1) + ncclGinScratchMaxBufsPerPeer_log2, ncclGinScratchMaxBufs_log2);
@@ -120,7 +109,7 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
       size_t loopElts = nElts;
       ncclSymPtr<T> loopInput = input;
       ncclSymPtr<T> loopOutput = output;
-#pragma unroll 1
+      NVCC_PRAGMA_UNROLL_DISABLED
       while (loopElts != 0) {
         int nChunkElts = min(loopElts, (size_t)maxChunkElts);
         int nSteps = min(rail.nRanks - 1, 1 << (nBufs_log2 - 1));
@@ -139,44 +128,31 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
       }
     };
 
-    if (stage == 0) { // !!! Pipeline Stage 0 !!!
+    if (stage == 0) {
+      // !!! Pipeline Stage 0 !!!
       inbox.apportion(cta, /*subcoop=*/coopStage, /*subcoopIsNonTrivial=*/false, nBufs_log2);
       if (lsa.nRanks != 1) {
         outbox.apportion(coopStage, /*subcoop=*/coopRole, /*subcoopIsNonTrivial=*/roleIsWorker, nBufs_log2,
                          /*deferSync=*/true);
+      } else {
+        assert(rail.nRanks - 1 <= (1 << ncclGinScratchMaxBufs_log2));
+        outbox.apportionRequests(coopStage, log2Up(rail.nRanks - 1));
       }
 
-        // Generalize worker and non-worker logic with compile time BoolTag to differentiate.
+      // Generalize worker and non-worker logic with compile time BoolTag to differentiate.
       auto stage0_impl = [&](/*BoolTag<roleIsWorker>*/ auto roleIsWorker_tag) {
-          // Shadow runtime value with compile time value.
+        // Shadow runtime value with compile time value.
         constexpr bool roleIsWorker = roleIsWorker_tag.value;
         skeleton(
-            /*initFn*/
+          /*initFn*/
           [&] __device__(int nChunkElts, ncclSymPtr<T> inPtr) -> void {
-            if (!roleIsWorker) {
-              if (coopRole.thread_rank() == 0) {
-#if defined(__HIP_PLATFORM_AMD__)
-                  // Portable replacement for upstream's NVPTX red.shared.add asm (no amdgcn equiv).
-                atomicAdd(&totalSends, rail.nRanks - 1);
-#else
-                  // totalSends += rail.nRanks-1;
-#if __CUDA_ARCH__ >= 700
-                asm volatile(
-                  "red.relaxed.shared.add.s32 [%0],%1;" ::"r"((uint32_t)__cvta_generic_to_shared(&totalSends)),
-                  "r"(rail.nRanks - 1)
-                  : "memory");
-#else
-                __trap();
-#endif
-#endif
-              }
-            } else {
-                // outbox.apportion() was told to defer sync so that we don't sync
-                // the whole stage. We sync just this warp.
+            if (roleIsWorker) {
+              // outbox.apportion() was told to defer sync so that we don't sync
+              // the whole stage. We sync just this warp.
               coopRole.sync();
             }
           },
-            /*stepFn=*/
+          /*stepFn=*/
           [&] __device__(int step0, int nSteps, int nChunkElts, ncclSymPtr<T> inPtr) -> void {
             auto getInputOffset = [&] __device__(int step) -> size_t {
               int peer = inbox.getSendPeer(step, /*step_lt_nPeers=*/true);
@@ -184,13 +160,14 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
               return dstWorld * nAllElts;
             };
 
-            if (lsa.nRanks != 1) { // No need to process data when we can send from input buf.
+            if (lsa.nRanks != 1) {
+              // No need to process data when we can send from input buf.
               if (roleIsWorker) {
-                  // Wait for outbox bufs to free up. Since outbox advances with each call of this
-                  // function we always index starting at 0.
+                // Wait for outbox bufs to free up. Since outbox advances with each call of this
+                // function we always index starting at 0.
                 outbox.waitBufs(coopRole, 0, nSteps);
                 coopRole.sync();
-                  // Make `outbox.getBufPtr()` as cheap as possible within reduction loop.
+                // Make `outbox.getBufPtr()` as cheap as possible within reduction loop.
                 auto outbox_getBufPtr = outbox.make_getBufPtr(0);
                 reduceLsaBatch(
                   coopRole, /*nBatch=*/nSteps, nChunkElts,
@@ -206,59 +183,55 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
             if (!roleIsWorker) {
               inbox.postSends(
                 coopRole, step0, nSteps,
-                  /*getPtr*/
+                /*getPtr*/
                 [&] __device__(int i, int peer) {
                   return lsa.nRanks == 1 ? inPtr + getInputOffset(step0 + i) : (ncclSymPtr<T>)outbox.getBuf(i);
                 },
                 /*getEltCount*/ [&] __device__(int i, int peer) { return nChunkElts; },
-                  /*getCompletion*/
-                [&] __device__(int i, int peer) {
-                  return ncclGin_CounterInc{lsa.nRanks == 1 ? handler.ginCounterPerBlock + blockIdx.x :
-                                                              outbox.getCounter(i)};
-                });
+                /*getCompletion*/ [&] __device__(int i, int peer) { return ncclGin_None{}; },
+                /*afterPost=*/[&] __device__(int i, int peer) { outbox.recordRequest(rail, peer, i); });
             }
 
-            if (lsa.nRanks != 1) {
-                // We advance outbox with every iteration because it is only guaranteed
-                // to have `nSteps` buffers. If we advanced it after the step loop it
-                // would need rail.nRanks-1 buffers.
-              outbox.advance(coopStage, nSteps);
-            }
+            // The LSA path advances scratch/request slots in lockstep across
+            // worker and poster roles. The rail-only path has only the poster
+            // role and advances the request FIFO after overwriting the batch.
+            if (lsa.nRanks != 1 || !roleIsWorker) outbox.advance(coopStage, nSteps);
           },
           /*finishFn=*/nop);
       };
 
-        // Instantiate stage0_impl specialized to each case of roleIsWorker.
+      // Instantiate stage0_impl specialized to each case of roleIsWorker.
       if (!roleIsWorker) stage0_impl(BoolTag</*roleIsWorker=*/false>());
       else stage0_impl(BoolTag</*roleIsWorker=*/true>());
 
-    } else { // !!! Pipeline Stage 1 !!!
+    } else {
+      // !!! Pipeline Stage 1 !!!
 
-        // Generalize worker and non-worker logic with compile time BoolTag to differentiate.
+      // Generalize worker and non-worker logic with compile time BoolTag to differentiate.
       auto stage1_impl = [&] __device__(/*BoolTag<roleIsWorker>*/ auto roleIsWorker_tag) -> void {
         constexpr bool roleIsWorker = roleIsWorker_tag.value;
         inbox.apportion(cta, /*subcoop=*/coopRole, /*subcoopIsNonTrivial=*/!roleIsWorker, nBufs_log2);
         coopStage.sync();
 
         skeleton(
-            /*initFn*/
+          /*initFn*/
           [&] __device__(int nChunkElts, ncclSymPtr<T> inPtr) -> void {
             if (roleIsWorker) {
               reduceLsa(coopRole, nChunkElts,
-                        /*dstMem=*/SMemTag(), /*dstAlignMin=*/16, /*dstPtr=*/accum,
+                        /*dstMem=*/GMemTemporalTag(), /*dstAlignMin=*/16, /*dstPtr=*/accum,
                         /*srcRedUc=*/red, /*srcRedMc=*/mmRed,
                         /*srcPtr=*/inPtr + world.rank * nAllElts, handler.comm, multimemTag);
             }
           },
-            /*stepFn*/
+          /*stepFn*/
           [&] __device__(int step0, int nSteps, int nChunkElts, ncclSymPtr<T> inPtr) -> void {
             if (roleIsWorker) {
               inbox.waitRecvs(coopRole, step0, nSteps);
               coopRole.sync();
-                // Make `inbox.getBufPtr()` as cheap as possible within reduction loop.
+              // Make `inbox.getBufPtr()` as cheap as possible within reduction loop.
               auto inbox_getBufPtr = inbox.make_getBufPtr(step0);
               reduce(coopRole, red, /*inPlace=*/true, nChunkElts,
-                     /*dstMem=*/SMemTag(), /*dstAlignMin=*/16, /*dst=*/accum,
+                     /*dstMem=*/GMemTemporalTag(), /*dstAlignMin=*/16, /*dst=*/accum,
                      /*nSrcs=*/nSteps, /*srcPtrCommonMask=*/16 - 1, /*srcPtrMasked=*/0,
                      /*getSrc=*/[&] __device__(int s) -> T* { return (T*)inbox_getBufPtr(s); });
             }
@@ -267,35 +240,31 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
               inbox.finishRecvs(coopRole, step0, nSteps);
             }
           },
-            /*finishFn*/
+          /*finishFn*/
           [&] __device__(int nChunkElts, ncclSymPtr<T> outPtr) -> void {
             if (roleIsWorker) {
               copy(coopRole, nChunkElts,
                    /*dstMem=*/GMemTag(), /*dst=*/outPtr.localPtr(),
-                   /*srcMem=*/SMemTag(), /*src=*/accum, [&] __device__(auto x) { return applyPostOp(red, x); });
+                   /*srcMem=*/GMemTemporalTag(), /*src=*/accum, [&] __device__(auto x) { return applyPostOp(red, x); });
               coopRole.sync(); // prevent initFn from trampling accum
             }
           });
       };
 
-        // Instantiate stage1_impl specialized to each case of roleIsWorker.
+      // Instantiate stage1_impl specialized to each case of roleIsWorker.
       if (!roleIsWorker) stage1_impl(BoolTag</*roleIsWorker=*/false>());
       else stage1_impl(BoolTag</*roleIsWorker=*/true>());
     }
   });
 
   if (stage == 0) {
-    if (lsa.nRanks == 1) {
-      if (!roleIsWorker && coopRole.thread_rank() == 0) {
-        gin.waitCounter(ncclCoopThread(), handler.ginCounterPerBlock + blockIdx.x, totalSends, 32);
-      }
-    } else {
+    if (lsa.nRanks == 1) outbox.waitRecentRequests(coopRole);
 #if defined(__HIP_PLATFORM_AMD__)
-      outbox.~ncclGinOutboxSession<ncclCoopWarpSpan>();
+    // [RCCL] clang rejects the `obj.template ~T<...>()` pseudo-destructor spelling.
+    outbox.~ncclGinOutboxSession<ncclCoopWarpSpan>();
 #else
-      outbox.template ~ncclGinOutboxSession<ncclCoopWarpSpan>();
+    outbox.template ~ncclGinOutboxSession<ncclCoopWarpSpan>();
 #endif
-    }
   }
 
   lsaBar.sync(cta, cuda::memory_order_relaxed);

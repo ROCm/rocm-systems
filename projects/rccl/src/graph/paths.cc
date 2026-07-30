@@ -75,14 +75,28 @@ static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclT
         // - the remNode is a GPU and the link type is PATH_LOC, or
         // - NVB is enabled and remNode is a DEV and link type is NVLink and the path isn't too long for NVB;
         // else, discard the path.
-
         int pathMaxLength = (baseNode->type == GPU) ? 2 : 1;
         ncclTopoNode* baseDevNode = (baseNode->type == GPU) ? baseNode->gpu.parent : baseNode;
         if (node != baseDevNode && node->type == DEV && (link->type != LINK_LOC || remNode->type != GPU) &&
             (ncclParamNvbDisable() || link->type != LINK_NVL || remNode->type != DEV || path->count > pathMaxLength))
           continue;
 
-        if ((remPath->bw == 0 || remPath->count > path->count) && remPath->bw < bw) {
+        // Start with path type = link type. PATH and LINK types are supposed to match.
+        // Don't consider LINK_NET as we only care about the NIC->GPU path.
+        int newType = link->type == LINK_NET ? LINK_LOC : link->type;
+        // Differentiate between one and multiple PCI switches
+        if (node->type == PCI && remNode->type == PCI) newType = PATH_PXB;
+        // Consider a path going through the CPU as PATH_PHB
+        if (link->type == LINK_PCI && (node->type == CPU || link->remNode->type == CPU)) newType = PATH_PHB;
+        // Set 1 hop NVLink as NVB.
+        if (node->type == DEV && path->type == PATH_NVL && newType == PATH_NVL && path->count == pathMaxLength)
+          newType = PATH_NVB;
+        newType = std::max(path->type, newType);
+
+        // Update if better path type, OR same type with higher bw, OR same type/bw with strickly fewer hops.
+        // Note: path->count +1 to account for the existing path + current candidate, see remPath->count update.
+        if (newType < remPath->type || (newType == remPath->type && remPath->bw < bw) ||
+            (newType == remPath->type && remPath->bw == bw && remPath->count > (path->count + 1))) {
           // Find reverse link
           for (int l = 0; l < remNode->nlinks; l++) {
             if (remNode->links[l].remNode == node && remNode->links[l].type == link->type) {
@@ -99,27 +113,14 @@ static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclT
           for (int i = 0; i < path->count; i++) remPath->list[i + 1] = path->list[i];
           remPath->count = path->count + 1;
           remPath->bw = bw;
-
-          // Start with path type = link type. PATH and LINK types are supposed to match.
-          // Don't consider LINK_NET as we only care about the NIC->GPU path.
-          int type = link->type == LINK_NET ? LINK_LOC : link->type;
-          // Differentiate between one and multiple PCI switches
-          if (node->type == PCI && remNode->type == PCI) type = PATH_PXB;
-          // Consider a path going through the CPU as PATH_PHB
-          if (link->type == LINK_PCI && (node->type == CPU || link->remNode->type == CPU)) type = PATH_PHB;
-          // Set 1 hop NVLink as NVB
-          // if (node->type == GPU && path->type == PATH_NVL && type == PATH_NVL && remPath->count > 1) type = PATH_NVB;
-
-          remPath->type = std::max(path->type, type);
+          remPath->type = newType;
 
           // Add to the list for the next iteration if not already in the list
-          // Disallow GPUs as intermediate steps for now
-          if (remNode->type != GPU) {
-            int i;
-            for (i = 0; i < nextNodeList.count; i++)
-              if (nextNodeList.list[i] == remNode) break;
-            if (i == nextNodeList.count) nextNodeList.list[nextNodeList.count++] = remNode;
+          int i;
+          for (i = 0; i < nextNodeList.count; i++) {
+            if (nextNodeList.list[i] == remNode) break;
           }
+          if (i == nextNodeList.count) nextNodeList.list[nextNodeList.count++] = remNode;
         }
       }
     }
@@ -177,6 +178,9 @@ ncclResult_t ncclTopoPrintPaths(struct ncclTopoSystem* system) {
   }
   for (int i = 0; i < system->nodes[GIN].count; i++) {
     printNodePaths(system, system->nodes[GIN].nodes + i);
+  }
+  for (int i = 0; i < system->nodes[RMA].count; i++) {
+    printNodePaths(system, system->nodes[RMA].nodes + i);
   }
   return ncclSuccess;
 }
@@ -489,6 +493,7 @@ const char* ncclTopoGdrModeStr[ncclTopoGdrModeNum] = {"Disabled", "Default", "PC
 
 // On C2C platforms use GDRDMA on NICs which are connected to the CPUs
 NCCL_PARAM(NetGdrC2c, "NET_GDR_C2C", 1);
+NCCL_PARAM(NetGdrMloPart, "NET_GDR_MLOPART", 0);
 
 ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t netId, int read,
                               enum ncclTopoGdrMode* gdrMode) {
@@ -509,8 +514,10 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
   // Check that both the NIC and GPUs support it
   if (net->net.gdrSupport == 0) return ncclSuccess;
   if (gpu->gpu.gdrSupport == 0) return ncclSuccess;
+  if (gpu->gpu.mloPart != NCCL_TOPO_UNDEF && !ncclParamNetGdrMloPart()) return ncclSuccess;
 
-  if (read) { // For reads (sends) only enable under certain conditions
+  if (read) {
+    // For reads (sends) only enable under certain conditions
     int gdrReadParam = ncclParamNetGdrRead();
     if (gdrReadParam == 0) return ncclSuccess;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -857,6 +864,11 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
     NCCLCHECK(ncclTopoSetPaths(system->nodes[GIN].nodes + n, system));
   }
 
+  // Set direct paths to RMA devices.
+  for (int n = 0; n < system->nodes[RMA].count; n++) {
+    NCCLCHECK(ncclTopoSetPaths(system->nodes[RMA].nodes + n, system));
+  }
+
   // Set direct paths to NVSwitches.
   for (int n = 0; n < system->nodes[NVS].count; n++) {
     NCCLCHECK(ncclTopoSetPaths(system->nodes[NVS].nodes + n, system));
@@ -924,7 +936,7 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
 
 #if !defined(TOPO_EXPL)
   char strValue[1024];
-  NCCLCHECK(ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue));
+  NCCLCHECK(ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue)));
   if (strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
 #endif
     int arch, vendor, model;
@@ -967,11 +979,12 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
               /* and (3) is on the same node as us */
               NCCL_TOPO_ID_SYSTEM_ID(peerNode->id) == NCCL_TOPO_ID_SYSTEM_ID(gpu->id) &&
               /* and (4) has either higher bw to that NIC or avoid going through the CPU (path.type is > PATH_PXN)*/
-              (peerNode->paths[NET][n].bw > gpu->paths[NET][n].bw || gpu->paths[NET][n].type > PATH_PXN))
+              (peerNode->paths[NET][n].bw > gpu->paths[NET][n].bw || gpu->paths[NET][n].type > PATH_PXN)) {
             // We can use that GPU as relay to communicate with that NIC.
             // Only enabling it in the GPU->NIC direction for now to favor
             // receiving locally and sending remotely (consistent with net.cc)
             NCCLCHECK(addInterStep(system, GPU, localGpuIndex, GPU, g, NET, n));
+          }
         }
       }
       if (gpu->paths[NET] != NULL && gpu->paths[NET][n].type < PATH_PHB) {
@@ -1164,6 +1177,7 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
                       2) *
                    std::max(1, (int)(path->bw / nvlBw));
     } else {
+      // PCIe connection
       *nChannels = 2;
     }
   } else {
@@ -1195,7 +1209,7 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
     if (nNetChannels == NCCL_CONFIG_UNDEF_INT) {
       float netBw = 0.0;
       int netCount = 0;
-      NCCLCHECK(getLocalNetCountByBw(system, g, &netCount, &netBw));
+      NCCLCHECK(ncclTopoGetLocalNetCountByBw(system, g, &netCount, &netBw));
       // We use at least 1 channel per NIC, and more if needed to meet the bw requirement.
       nNetChannels = 2;
       if (netCount > 0) nNetChannels = std::max(netCount, divUp((int)netBw, (int)ncclParamP2pPerChannelNetBw()));
@@ -1374,7 +1388,7 @@ ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* directNvlink) {
   int maxPath;
   NCCLCHECK(ncclTopoGetGpuMaxPath(system, GPU, &maxPath));
-  *directNvlink = maxPath == PATH_NVL;
+  *directNvlink = maxPath <= PATH_NVL;
   return ncclSuccess;
 }
 

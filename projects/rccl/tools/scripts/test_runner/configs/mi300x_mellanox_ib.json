@@ -999,6 +999,7 @@
       "timeout": 120,
       "env_variables": {
         "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL,NET,TUNING,ENV",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
       "tests": [
@@ -1398,6 +1399,7 @@
       "extends": "cast_base",
       "timeout": 300,
       "env_variables": {
+        "RCCL_INJECT_FAULTS":                 "1",
         "NCCL_IB_SPLIT_DATA_ON_QPS":          "1",
         "NCCL_IB_QPS_PER_CONNECTION":         "4",
         "RCCL_IB_QP_SCHED_WRR_ENABLE":       "1",
@@ -1476,6 +1478,9 @@
       "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 60,
+      "env_variables": {
+        "RCCL_INJECT_FAULTS": "1"
+      },
       "description": "Pure-unit coverage of the ops-overload fault mechanism: a fake ibv_context drives the inner ncclIbOpsFault* guards and shim error paths directly. Single-rank (runs under the MPI launcher but uses no MPI communication, no RDMA, no hardware).",
       "tests": [
         {
@@ -3026,7 +3031,7 @@
           "command_args": "-o all",
           "env_variables": {
             "NCCL_OOB_NET_ENABLE": "1",
-            "NCCL_OOB_NET_IFNAME": "eth0",
+            "NCCL_OOB_NET_IFNAME": "mlx5_0",
             "NCCL_UID_STAGGER_RATE": "5000",
             "NCCL_UID_STAGGER_THRESHOLD": "128"
           }

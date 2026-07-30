@@ -54,6 +54,10 @@ extern char ncclLastError[];
       ncclDebugLog(NCCL_LOG_INFO, (unsigned long)(FLAGS), __func__, __LINE__, __VA_ARGS__); \
   } while (0)
 
+#define INFO_LOC_FN(FLAGS, file, line, fn, fmt, ...) \
+  INFO((FLAGS), "%s:%d (%s) " fmt, (file), (line), (fn), ##__VA_ARGS__)
+#define INFO_LOC(FLAGS, fmt, ...) INFO_LOC_FN((FLAGS), __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+
 #define TRACE_CALL(...) \
   do { \
     int level = COMPILER_ATOMIC_LOAD(&ncclDebugLevel, std::memory_order_acquire); \
@@ -64,8 +68,13 @@ extern char ncclLastError[];
 
 #ifdef ENABLE_TRACE
 #define TRACE(FLAGS, ...) ncclDebugLog(NCCL_LOG_TRACE, (FLAGS), __func__, __LINE__, __VA_ARGS__)
+#define TRACE_LOC_FN(FLAGS, file, line, fn, fmt, ...) \
+  TRACE((FLAGS), "%s:%d (%s) " fmt, (file), (line), (fn), ##__VA_ARGS__)
+#define TRACE_LOC(FLAGS, fmt, ...) TRACE_LOC_FN((FLAGS), __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 #else
 #define TRACE(...)
+#define TRACE_LOC_FN(FLAGS, file, line, fn, fmt, ...)
+#define TRACE_LOC(FLAGS, fmt, ...)
 #endif
 
 void ncclSetThreadName(std::thread& thread, const char* fmt, ...);

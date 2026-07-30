@@ -39,7 +39,8 @@ std::thread ncclIbPortRecoveryAsyncThread;
 // Reference count of active resiliency contexts using port recovery
 static std::atomic<int> ncclIbPortRecoveryRefCount(0);
 
-// Flag indicating the recovery thread is active - cleared by ncclIbPortRecoveryThreadStop() to signal the async thread to exit
+// Flag indicating the recovery thread is active - cleared by ncclIbPortRecoveryThreadStop() to signal the async
+// thread to exit
 static std::atomic<bool> ncclIbPortRecoveryThreadActive(false);
 
 // Mutex protecting shared state between the async recovery thread and callers:
@@ -222,7 +223,7 @@ static inline ncclResult_t ncclIbPortRecoveryContextInit(struct ncclIbResiliency
   if (!outRecoveryCtx) return ncclInternalError;
   ncclIbPortRecoveryContext* recoveryCtx = (ncclIbPortRecoveryContext*)malloc(sizeof(ncclIbPortRecoveryContext));
   if (!recoveryCtx) {
-    WARN("NET/IB: %s: Failed to allocate failure queue node (comm=%p)", __func__, resCtx->baseComm);
+    WARN("NET/IB: Failed to allocate failure queue node (comm=%p)", resCtx->baseComm);
     *outRecoveryCtx = NULL;
     return ncclInternalError;
   }
@@ -367,7 +368,6 @@ ncclResult_t ncclIbPortRecoverySenderQpsToRts(struct ncclIbResiliency* resCtx, s
   ncclIbQpInfo* remQpInfo = NULL;
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
     int localDevIndex = localQpIndex % sendComm->base.vProps.ndevs;
-    ;
     ncclIbSendCommDev* sendCommDev = &sendComm->devs[localDevIndex];
     ncclIbDev* ibDev = &ncclIbDevs[sendCommDev->base.ibDevN];
     localQp = &resCtx->portRecoveryQps[localQpIndex];
@@ -387,6 +387,7 @@ ncclResult_t ncclIbPortRecoverySenderQpsToRts(struct ncclIbResiliency* resCtx, s
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
     rtrAttr->localIbPort = remDevInfo->ib_port;
+    rtrAttr->localPortFlags = ibDev->portAttr.flags;
     rtrAttr->localGid = sendCommDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = sendCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(ncclIbQpRtr(localQp));
@@ -444,6 +445,7 @@ ncclResult_t ncclIbPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
     rtrAttr->localIbPort = remDevInfo->ib_port;
+    rtrAttr->localPortFlags = ibDev->portAttr.flags;
     rtrAttr->localGid = recvCommDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = recvCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(ncclIbQpRtr(localQp));
