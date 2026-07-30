@@ -468,6 +468,31 @@ async fn the_emulator_injection_survives_clear_env_vars() {
     run.destroy().await;
 }
 
+#[tokio::test]
+async fn every_description_of_a_session_names_the_same_rendezvous() {
+    // `describe` is called once per exec by the run itself and once per
+    // `Describe` request off the control socket. If it chose a fresh
+    // rendezvous port each time, `mirage run`'s ranks and a `mirage exec`
+    // in another terminal would be handed different MASTER_PORTs and the
+    // two halves of a distributed job would never find each other —
+    // silently, as a hang rather than an error.
+    let run = start(2).await;
+    let first = run.describe().unwrap();
+    let second = run.describe().unwrap();
+    assert_eq!(
+        first.head_port, second.head_port,
+        "two descriptions of one session must agree on the rendezvous port"
+    );
+    assert_ne!(first.head_port, 0, "a usable port must actually be chosen");
+
+    // And the specs built from them agree, which is what the workload
+    // actually sees.
+    let a = mirage_supervisor::build_specs(&first, &def(&run, "true", true), &ExecId::new("x-a").unwrap()).unwrap();
+    let b = mirage_supervisor::build_specs(&second, &def(&run, "true", true), &ExecId::new("x-b").unwrap()).unwrap();
+    assert_eq!(a[1].env.get("MASTER_PORT"), b[1].env.get("MASTER_PORT"));
+    run.destroy().await;
+}
+
 /// Whether `pid` still exists. `kill(pid, 0)` is the standard probe.
 fn process_alive(pid: u32) -> bool {
     nix::sys::signal::kill(

@@ -177,10 +177,17 @@ impl Env {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        // Snapshot the sockets that already exist, so `await_ready` can
+        // tell *this* run's socket from one lying around. A run killed
+        // with SIGKILL leaves its socket behind — that is the whole point
+        // of the reclaim path — and picking it up here would hand the
+        // test a dead run's session id for a live run.
+        let existing = self.live_runs().into_iter().collect();
         let child = cmd.spawn().expect("spawning `mirage run`");
         Run {
             child: Some(child),
             socket_dir: self.run_socket_dir(),
+            existing,
         }
     }
 }
@@ -189,15 +196,21 @@ impl Env {
 pub struct Run {
     child: Option<std::process::Child>,
     socket_dir: PathBuf,
+    /// Session ids that already had a socket when this run was spawned.
+    existing: std::collections::HashSet<String>,
 }
 
 impl Run {
     /// Wait until this run is serving its socket, and return its session
     /// id.
     ///
-    /// The socket appearing is the signal that the session is *ready*:
-    /// `mirage run` binds it only after bring-up succeeds, so a test that
-    /// gets an id here can exec into the session immediately.
+    /// Readiness is a completed `Describe` round-trip, not the socket
+    /// file appearing. `mirage run` binds the socket *before* bring-up —
+    /// so that a run in the middle of a long image pull is visible to
+    /// `mirage state purge` and is not mistaken for an orphan — but only
+    /// starts answering once the session is healthy. Waiting for the file
+    /// would hand a test a session that has no containers and no emulator
+    /// environment yet, and every assertion after it would race bring-up.
     pub fn await_ready(&mut self, timeout: Duration) -> String {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
@@ -210,7 +223,13 @@ impl Run {
                 && let Some(id) = entries
                     .flatten()
                     .filter(|e| e.path().extension().is_some_and(|x| x == "sock"))
-                    .find_map(|e| Some(e.path().file_stem()?.to_str()?.to_string()))
+                    .filter_map(|e| Some(e.path().file_stem()?.to_str()?.to_string()))
+                    // Skip inside the iterator, not after it: a corpse
+                    // socket sorts arbitrarily among the others, so
+                    // rejecting only the first entry found would still
+                    // return one.
+                    .find(|id| !self.existing.contains(id))
+                && describes_itself(&self.socket_dir.join(format!("{id}.sock")))
             {
                 return id;
             }
@@ -392,6 +411,48 @@ pub fn short_runtime_dir() -> PathBuf {
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     ))
+}
+
+/// Whether the run serving `socket` answers a `Describe`.
+///
+/// The real protocol, spoken by hand: a 4-byte big-endian length prefix
+/// followed by JSON. Answering at all means bring-up finished, because
+/// `mirage run` binds its socket before serving it and only begins to
+/// serve once the session is healthy.
+fn describes_itself(socket: &Path) -> bool {
+    use std::io::{Read as _, Write as _};
+    use std::os::unix::net::UnixStream;
+
+    let Ok(mut stream) = UnixStream::connect(socket) else {
+        return false;
+    };
+    // Short timeouts: this is polled in a loop, and a run that is still
+    // pulling an image accepts the connection (the listener is bound) but
+    // will not answer until it is ready.
+    let brief = Duration::from_millis(250);
+    let _ = stream.set_read_timeout(Some(brief));
+    let _ = stream.set_write_timeout(Some(brief));
+
+    // `Request::Describe` is a unit variant, so serde renders it as the
+    // bare JSON string `"Describe"`.
+    let body = b"\"Describe\"";
+    let mut frame = (body.len() as u32).to_be_bytes().to_vec();
+    frame.extend_from_slice(body);
+    if stream.write_all(&frame).is_err() {
+        return false;
+    }
+
+    let mut len = [0u8; 4];
+    if stream.read_exact(&mut len).is_err() {
+        return false;
+    }
+    let mut payload = vec![0u8; u32::from_be_bytes(len) as usize];
+    if stream.read_exact(&mut payload).is_err() {
+        return false;
+    }
+    // `Response::Description` on success, `Response::Error` while the
+    // session cannot describe itself yet.
+    String::from_utf8_lossy(&payload).contains("Description")
 }
 
 /// Whether a pid is still in the process table.
