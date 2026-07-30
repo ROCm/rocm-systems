@@ -469,6 +469,7 @@ def _build_pc_sampling_partial_frame(
     tool_data: dict[str, Any],
     kernel_name: Optional[str] = None,
 ) -> pd.DataFrame:
+    """Build one process's enriched sampling frame for an optional kernel."""
     kernel_context = f"kernel '{kernel_name}'" if kernel_name else "all kernels"
     pc_samples = tool_data["buffer_records"][
         "pc_sample_host_trap" if method == "host_trap" else "pc_sample_stochastic"
@@ -519,6 +520,7 @@ def _format_pc_sampling_display_frame(
     sorting_type: str,
     num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
+    """Return aggregated sampling rows in their requested display layout."""
     # Project stall_reason as a descending list[(reason, count)].
     df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
     df["source_line"] = df["source_line"].apply(_trim_source_line)
@@ -553,6 +555,7 @@ def _load_pc_sampling_data_from_records(
     kernel_name: Optional[str] = None,
     num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
+    """Return one display frame derived from every process's sampling records."""
     process_frames = []
     for tool_data in tool_data_records:
         frame = _build_pc_sampling_partial_frame(method, tool_data, kernel_name)
@@ -581,6 +584,7 @@ def _combine_pc_sampling_partial_frames(
     method: str,
     sorting_type: str,
 ) -> pd.DataFrame:
+    """Aggregate equivalent sampling display rows across process frames."""
     ordered_frames = []
     for record_order, frame in enumerate(process_frames):
         if sorting_type == "count":
@@ -653,6 +657,7 @@ def _merge_stall_reason_dict_rows(
 def _merge_stall_reason_rows(
     stall_reason_rows: pd.Series,
 ) -> list[tuple[str, int]]:
+    """Sum stall-reason counts across nullable row representations."""
     merged_reasons: dict[str, int] = {}
     for stall_reasons in stall_reason_rows:
         if not stall_reasons:

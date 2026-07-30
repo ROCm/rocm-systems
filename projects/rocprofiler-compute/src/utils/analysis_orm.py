@@ -529,6 +529,7 @@ class Database:
 
     @staticmethod
     def _build_pc_sampling_base_cte() -> CTE:
+        """Build the raw sampling CTE keyed by instruction ownership."""
         return (
             select(
                 CodeObjectStore.workload_id.label("workload_id"),
@@ -554,6 +555,7 @@ class Database:
 
     @staticmethod
     def _build_pc_sampling_totals_cte(pc_sample_base: CTE) -> CTE:
+        """Aggregate sample totals by the complete display identity."""
         pc_sample_identity = Database._pc_sampling_identity_columns(pc_sample_base)
         return (
             select(
@@ -568,6 +570,7 @@ class Database:
 
     @staticmethod
     def _build_pc_sampling_stall_reason_json_cte(pc_sample_base: CTE) -> CTE:
+        """Aggregate stall-reason counts into JSON per display identity."""
         pc_sample_identity = Database._pc_sampling_identity_columns(pc_sample_base)
         pc_sample_stall_reason_totals = (
             select(
@@ -610,6 +613,7 @@ class Database:
         pc_sample_totals: CTE,
         pc_sample_stall_reason_json: CTE,
     ) -> ColumnElement[bool]:
+        """Match totals to stall reasons using null-safe display identity."""
         return and_(
             *(
                 pc_sample_totals.c[column_name].is_not_distinct_from(

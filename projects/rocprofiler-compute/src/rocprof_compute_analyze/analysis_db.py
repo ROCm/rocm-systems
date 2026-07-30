@@ -1025,6 +1025,7 @@ class db_analysis(OmniAnalyze_Base):
         workload_obj: orm.Workload,
         kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> None:
+        """Register process-scoped kernels for dispatched sampling symbols."""
         tool_data_records = self._pc_sampling_tool_data_per_workload.get(
             workload_path, []
         )
@@ -1071,6 +1072,7 @@ class db_analysis(OmniAnalyze_Base):
         tool_data: dict[str, Any],
         kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> dict[tuple[Any, str], orm.Kernel]:
+        """Map process-local ELF symbols to their dispatched kernel objects."""
         pid: int = tool_data["metadata"]["pid"]
         dispatched_kernel_ids = {
             dispatch_record["dispatch_info"]["kernel_id"]
@@ -1093,6 +1095,7 @@ class db_analysis(OmniAnalyze_Base):
     def _build_pc_sampling_dispatch_data(
         tool_data_records: list[dict[str, Any]],
     ) -> pd.DataFrame:
+        """Convert combined sampling traces to the database dispatch schema."""
         columns = [
             "dispatch_id",
             "pid",

@@ -214,6 +214,7 @@ def make_display_row_tool_data(
     offset: int = 0x10,
     sample_count: int = 1,
 ) -> dict:
+    """Build one process-scoped display row from caller-controlled metadata."""
     inst_index = 1 if instruction is None else 0
     instructions = ["unused"] if instruction is None else [instruction]
     comments = (
@@ -1491,6 +1492,7 @@ def test_load_pc_sampling_results_single_record_requires_process_id(
     tmp_path: Path,
     metadata: dict,
 ) -> None:
+    """Require a concrete metadata PID for every result record."""
     tool_data = make_tool_data()
     tool_data["metadata"] = metadata
     result_path = tmp_path / "42_ps_file_results.json"
@@ -1505,6 +1507,7 @@ def test_load_pc_sampling_results_single_record_requires_process_id(
 def test_load_pc_sampling_results_rejects_duplicate_process_ids(
     tmp_path: Path,
 ) -> None:
+    """Reject result records that share the same metadata PID."""
     write_results_json(tmp_path / "101_ps_file_results.json", pid=101)
     write_results_json(tmp_path / "202_ps_file_results.json", pid=101)
 

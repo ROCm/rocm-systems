@@ -99,6 +99,7 @@ def add_pc_sampling_state(
     stall_reasons: dict[str, int] | None = None,
     code_object_id: int = 5,
 ) -> PCSampleState:
+    """Insert one sampled instruction state with optional stall-reason children."""
     code_object = CodeObjectStore(
         code_object_id=code_object_id,
         pid=pid,
@@ -134,6 +135,7 @@ def add_pc_sampling_state(
 
 
 def fetch_pc_sampling_rows(session: Session) -> list[dict[str, object]]:
+    """Fetch sampling view rows with decoded stall-reason JSON."""
     selected_columns = ", ".join(PC_SAMPLING_VIEW_COLUMNS)
     rows = session.execute(
         text(
@@ -202,6 +204,7 @@ def test_kernel_view_aggregates(db_session):
 
 
 def test_duplicate_dispatch_id_under_same_kernel_rejected(db_session):
+    """Reject duplicate dispatch identities within one kernel."""
     workload = Workload(name="w", sub_name="s")
     db_session.add(workload)
     kernel = Kernel(kernel_name="k", workload=workload)
@@ -213,6 +216,7 @@ def test_duplicate_dispatch_id_under_same_kernel_rejected(db_session):
 
 
 def test_duplicate_instruction_identity_under_same_parents_rejected(db_session):
+    """Reject duplicate instruction identities under the same parents."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="k", workload=workload)
     code_object = CodeObjectStore(
@@ -244,6 +248,7 @@ def test_duplicate_instruction_identity_under_same_parents_rejected(db_session):
 
 
 def test_duplicate_code_object_identity_within_process_rejected(db_session):
+    """Reject duplicate code-object IDs within one process and workload."""
     workload = Workload(name="w", sub_name="s")
     db_session.add_all([
         CodeObjectStore(code_object_id=5, pid=42, workload=workload),
@@ -257,6 +262,7 @@ def test_duplicate_code_object_identity_within_process_rejected(db_session):
 def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
     db_session,
 ):
+    """Allow equal child identities under distinct ownership chains."""
     workload = Workload(name="w", sub_name="s")
     first_kernel = Kernel(kernel_name="k", workload=workload)
     second_kernel = Kernel(kernel_name="k", workload=workload)

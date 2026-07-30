@@ -878,6 +878,7 @@ def make_pc_sampling_tool_data():
 
 
 def make_colliding_pc_sampling_tool_data(process_id: int, sample_count: int):
+    """Build process-local sampling data that reuses shared display identities."""
     tool_data = make_pc_sampling_tool_data()
     shared_sample = tool_data["buffer_records"]["pc_sample_stochastic"][0]
     tool_data["metadata"]["pid"] = process_id
@@ -894,6 +895,7 @@ def make_colliding_pc_sampling_tool_data(process_id: int, sample_count: int):
 
 
 def make_pc_sampling_only_database_analyzer(workload_path, tool_data_records):
+    """Build a database analyzer configured for sampling-only records."""
     analyzer = db_analysis(
         SimpleNamespace(output_name=None, output_format="database"),
         {},
@@ -919,6 +921,7 @@ def make_counter_backed_database_analyzer(
     filter_blocks,
     tool_data_records,
 ):
+    """Build a counter-backed analyzer with optional sampling records."""
     analyzer = db_analysis(
         SimpleNamespace(output_name=None, output_format="database"),
         {},
@@ -952,6 +955,7 @@ def make_counter_backed_database_analyzer(
 
 
 def run_analysis_with_existing_database(analyzer):
+    """Run analysis while preserving the test's existing database session."""
     with ExitStack() as patch_stack:
         patch_stack.enter_context(patch.object(orm.Database, "init"))
         patch_stack.enter_context(patch.object(orm.Database, "create_views"))
@@ -966,6 +970,7 @@ def run_analysis_with_existing_database(analyzer):
 
 
 def run_analysis_with_materialized_views(analyzer):
+    """Run analysis while materializing views in the existing test database."""
     with ExitStack() as patch_stack:
         patch_stack.enter_context(patch.object(orm.Database, "init"))
         patch_stack.enter_context(patch.object(orm.Database, "write"))
@@ -1039,6 +1044,7 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
 def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
     db_session,
 ):
+    """Keep colliding code-object IDs isolated by process ID."""
     workload_path = "/fake/workload"
     workload = orm.Workload(name="w", sub_name="s")
     db_session.add(workload)
@@ -1090,6 +1096,7 @@ def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
 
 
 def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
+    """Assign distinct database identities to each process's sampling data."""
     workload_path = "/fake/workload"
     tool_data_records = [
         make_colliding_pc_sampling_tool_data(42, 1),
@@ -1207,6 +1214,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
 def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
     db_session,
 ):
+    """Preserve process-scoped ownership through materialized database views."""
     workload_path = "/fake/workload"
     analyzer = make_pc_sampling_only_database_analyzer(
         workload_path,
@@ -1387,6 +1395,7 @@ def test_run_analysis_materialized_views_keep_pid_scoped_pc_sampling_origins(
 def test_run_analysis_exports_existing_csv_surface_for_pid_scoped_pc_sampling(
     tmp_path,
 ):
+    """Keep process-scoped rows distinct without changing the CSV schema."""
     try:
         orm.Database.init(":memory:")
         database_session = orm.Database.get_session()
@@ -1472,6 +1481,7 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
     db_session,
     tmp_path,
 ):
+    """Keep counter and process-scoped PC sampling ownership separate."""
     workload_path = str(tmp_path)
     first_tool_data = make_colliding_pc_sampling_tool_data(42, 1)
     second_tool_data = make_colliding_pc_sampling_tool_data(99, 2)
@@ -1628,6 +1638,7 @@ def test_run_analysis_does_not_register_filtered_pc_sampling_symbols(
     db_session,
     tmp_path,
 ):
+    """Exclude sampled symbols whose kernels were filtered from dispatches."""
     workload_path = str(tmp_path)
     analyzer = make_counter_backed_database_analyzer(
         workload_path,
