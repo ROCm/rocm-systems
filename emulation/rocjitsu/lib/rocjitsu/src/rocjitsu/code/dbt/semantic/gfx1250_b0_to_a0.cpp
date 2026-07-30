@@ -1064,9 +1064,9 @@ ExpandResult expand_gfx1250_bare_f8f6f4_wmma(const Instruction &inst, uint32_t, 
 /// reuse hints are cleared: the target instruction family differs, and a
 /// preceding source instruction may itself expand to more than one operation.
 ///
-/// The source opcode has no matrix-format or OPSEL modifiers. Those encoding
-/// fields are therefore ignored rather than copied into the target's format
-/// selectors. Matrix reuse hints are also deliberately cleared because the
+/// The source opcode does not encode matrix formats in OPSEL/OPSEL_HI. Rebuild
+/// the target format selectors from the source opcode rather than copying those
+/// fields. The defined matrix reuse hints are deliberately cleared because the
 /// target belongs to a different instruction family. Only the defined C
 /// absolute and negate bits are transferred.
 ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_t,
