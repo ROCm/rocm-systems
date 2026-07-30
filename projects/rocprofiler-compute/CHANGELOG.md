@@ -36,6 +36,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added support for GPU metrics on gfx1153 hardware.
 
+* Roofline on gfx1153 hardware is not currently supported.
+
 ### Changed
 
 * Split Python version requirements by mode. Profile mode now runs on Python 3.8+ (standard library only). Analyze mode requires Python 3.9+ and exits with a clear message on older interpreters instead of failing with an import error.
