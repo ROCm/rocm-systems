@@ -8,22 +8,25 @@
 Execution contexts
 *******************************************************************************
 
-By default, every kernel you launch uses the device's primary execution context,
-which the HIP runtime manages implicitly. In that primary context, kernels
-launched by the process compete for the GPU resources available to the process.
-The runtime decides which compute units (CUs) a kernel runs on, and kernels that
-run at the same time share the available pool of CUs and work queues.
+In the HIP runtime, an execution context is the scheduling domain used for GPU
+work submitted by a process. An execution context is either the device's primary
+context, which the HIP runtime manages implicitly, or a resource-partitioned
+context that you create with :cpp:func:`hipGreenCtxCreate`.
 
-In the HIP runtime, an execution context is either the device's primary context
-or a resource-partitioned context that you create with
-:cpp:func:`hipGreenCtxCreate`. A resource-partitioned execution context lets you
-define a fixed slice of the available GPU resources and bind work to it. Any
-kernel launched on a stream that belongs to that context is confined to the
-context's CU resources, regardless of the kernel launch configuration.
+By default, every kernel you launch uses the device's primary execution context.
+In the primary context, kernels launched by the process compete for the GPU
+resources available to the process. The runtime decides which compute units
+(CUs) a kernel runs on, and kernels that run at the same time share the available
+pool of CUs and work queues.
 
-You set up execution contexts entirely on the host. The kernel source does not
-change, and kernels are launched with the usual HIP launch syntax. This feature
-is analogous to CUDA green contexts.
+A resource-partitioned execution context lets you define a fixed slice of the
+available GPU resources and bind work to it. Any kernel launched on a stream that
+belongs to that context is confined to the context's CU resources, regardless of
+the kernel launch configuration.
+
+You set up resource-partitioned execution contexts entirely on the host. The
+kernel source does not change, and kernels are launched with the usual HIP
+launch syntax. This feature is analogous to CUDA green contexts.
 
 .. note::
 
@@ -71,10 +74,13 @@ If a kernel has more thread blocks than the context's CUs can run at once, the
 extra thread blocks wait and are scheduled onto the same CU partition as earlier
 thread blocks retire.
 
-Execution contexts are most useful when an application has multiple classes of
-work that need different resource allocations. They are less useful when the
-application runs one kernel at a time, or when all kernels have the same priority
-and maximum total throughput is the only goal.
+Execution contexts are useful when an application is intentionally designed to
+assign different classes of GPU work to different resource partitions. They are
+not a per-kernel launch option or an automatic scheduling behavior. To use them
+effectively, the application must create the CU partitions, build execution
+contexts from those partitions, create streams on those contexts, and launch each
+workload on the appropriate stream. Select and tune the partition sizes based on
+measured workload behavior.
 
 Benefits of execution contexts
 ===============================================================================
