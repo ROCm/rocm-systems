@@ -764,8 +764,8 @@ def test_att_no_intercept_target_kernel(att_no_intercept_out_dir_path):
     )
 
 
-def test_counter_collection_with_att(json_data):
-    data = json_data["rocprofiler-sdk-tool"]
+def test_counter_collection_with_att(att_pmc_json_data):
+    data = att_pmc_json_data["rocprofiler-sdk-tool"]
     assert data["strings"]["att_filenames"]
     counter_names = {
         counter["id"]["handle"]: counter["name"] for counter in data["counters"]

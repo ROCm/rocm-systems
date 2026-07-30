@@ -214,7 +214,8 @@ rocprofiler_add_integration_validate_test(
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-plus-pmc
     DISCOVERY_ARGS -k test_counter_collection_with_att
-    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/cmd_input/out_results.json
+    ARGS --att-pmc-input
+         ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/cmd_input/out_results.json
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
 # Check for conflict PMC + activity
