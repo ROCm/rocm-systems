@@ -132,4 +132,146 @@ TEST(AmdSmiFabricLayout, TrailingFieldsAreNotShifted)
     EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, accel_state), 240u);
 }
 
+// ---------------------------------------------------------------------------
+// Both amdsmi_fabric_info_t shapes
+//
+// amd_smi 27.0 flattened the struct, so RCCL has to read a version and a v1
+// payload out of either shape. Only one of them exists in any given build, so
+// stand both up as mocks here: that is the only way to compile and exercise the
+// branch the installed header does not select.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+union MockFabricPayload
+{
+    amdsmi_fabric_info_v1_t v1;
+};
+
+// Pre-27: version and payload sit inside fabric_info, where the union carries
+// the fabric_version name.
+struct MockNestedFabricVer
+{
+    uint32_t          version;
+    MockFabricPayload fabric_version;
+};
+
+struct MockNestedFabricInfo
+{
+    amdsmi_bdf_t        bdf;
+    MockNestedFabricVer fabric_info;
+    uint32_t            reserved[15];
+};
+
+// 27.0 and later: version hoisted to the top level, payload reachable directly.
+struct MockFlatFabricInfo
+{
+    amdsmi_bdf_t      bdf;
+    uint32_t          fabric_version;
+    MockFabricPayload fabric_info;
+    uint32_t          reserved[15];
+};
+
+// A top-level fabric_version that is not the version number, which is what the
+// name means in the nested shape. Detection keys on the type, not the name.
+struct MockHoistedUnionFabricInfo
+{
+    amdsmi_bdf_t      bdf;
+    MockFabricPayload fabric_version;
+};
+} // namespace
+
+TEST(AmdSmiFabricLayoutCompat, DetectsEachShape)
+{
+    EXPECT_FALSE(amdSmiFabricInfoIsFlat<MockNestedFabricInfo>::value);
+    EXPECT_TRUE(amdSmiFabricInfoIsFlat<MockFlatFabricInfo>::value);
+    EXPECT_FALSE(amdSmiFabricInfoIsFlat<MockHoistedUnionFabricInfo>::value);
+}
+
+TEST(AmdSmiFabricLayoutCompat, ReadsVersionFromNestedShape)
+{
+    MockNestedFabricInfo info{};
+    info.fabric_info.version = kAmdSmiFabricVersionUnreported;
+
+    EXPECT_EQ(amdSmiFabricInfoVersion(info), kAmdSmiFabricVersionUnreported);
+    EXPECT_TRUE(amdSmiFabricVersionUsable(amdSmiFabricInfoVersion(info)));
+}
+
+TEST(AmdSmiFabricLayoutCompat, ReadsVersionFromFlatShape)
+{
+    MockFlatFabricInfo info{};
+    info.fabric_version = kAmdSmiFabricVersionUnreported;
+
+    EXPECT_EQ(amdSmiFabricInfoVersion(info), kAmdSmiFabricVersionUnreported);
+    EXPECT_TRUE(amdSmiFabricVersionUsable(amdSmiFabricInfoVersion(info)));
+}
+
+TEST(AmdSmiFabricLayoutCompat, ReadsPayloadFromNestedShape)
+{
+    MockNestedFabricInfo info{};
+    info.fabric_info.fabric_version.v1.fabric_type  = AMDSMI_FABRIC_TYPE_UALOE;
+    info.fabric_info.fabric_version.v1.accel_state  = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY;
+    info.fabric_info.fabric_version.v1.accelerator_id = 3;
+
+    const amdsmi_fabric_info_v1_t* v1 = amdSmiFabricInfoV1(info);
+    ASSERT_NE(v1, nullptr);
+    EXPECT_EQ(v1->accelerator_id, 3u);
+    EXPECT_TRUE(amdSmiFabricStateUsable(v1->fabric_type, v1->accel_state));
+}
+
+TEST(AmdSmiFabricLayoutCompat, ReadsPayloadFromFlatShape)
+{
+    MockFlatFabricInfo info{};
+    info.fabric_info.v1.fabric_type    = AMDSMI_FABRIC_TYPE_UALOE;
+    info.fabric_info.v1.accel_state    = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY;
+    info.fabric_info.v1.accelerator_id = 3;
+
+    const amdsmi_fabric_info_v1_t* v1 = amdSmiFabricInfoV1(info);
+    ASSERT_NE(v1, nullptr);
+    EXPECT_EQ(v1->accelerator_id, 3u);
+    EXPECT_TRUE(amdSmiFabricStateUsable(v1->fabric_type, v1->accel_state));
+}
+
+// The rename did not move anything, which is why one set of ABI asserts covers
+// both headers. If a future layout change breaks this, the accessors are no
+// longer enough on their own.
+TEST(AmdSmiFabricLayoutCompat, BothShapesShareOneAbi)
+{
+    EXPECT_EQ(sizeof(MockNestedFabricInfo), sizeof(MockFlatFabricInfo));
+    EXPECT_EQ(sizeof(MockFlatFabricInfo), sizeof(amdsmi_fabric_info_t));
+
+    EXPECT_EQ(offsetof(MockNestedFabricInfo, fabric_info) + offsetof(MockNestedFabricVer, version),
+              offsetof(MockFlatFabricInfo, fabric_version));
+    EXPECT_EQ(offsetof(MockNestedFabricInfo, fabric_info) + offsetof(MockNestedFabricVer, fabric_version),
+              offsetof(MockFlatFabricInfo, fabric_info));
+    EXPECT_EQ(offsetof(MockNestedFabricInfo, reserved), offsetof(MockFlatFabricInfo, reserved));
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry name call convention
+//
+// amdsmi_fabric_telem_id_to_string swapped its return value for an out-parameter
+// in 27.0, and we reach it through dlopen, so the version the loaded runtime
+// reports decides how it may be called.
+// ---------------------------------------------------------------------------
+
+TEST(AmdSmiFabricTelemAbi, PreflattenRuntimeUsesReturnValue)
+{
+    EXPECT_FALSE(amdSmiTelemIdUsesOutParam(26));
+}
+
+TEST(AmdSmiFabricTelemAbi, FlattenedRuntimeUsesOutParam)
+{
+    EXPECT_TRUE(amdSmiTelemIdUsesOutParam(kAmdSmiTelemOutParamMajor));
+    EXPECT_TRUE(amdSmiTelemIdUsesOutParam(kAmdSmiTelemOutParamMajor + 1));
+}
+
+// Guessing wrong is not symmetric: the out-parameter form called on an older
+// runtime just leaves the name unwritten, while the older form called on a newer
+// runtime hands it an uninitialized pointer to write through.
+TEST(AmdSmiFabricTelemAbi, UnknownVersionTakesTheSaferConvention)
+{
+    EXPECT_TRUE(amdSmiTelemIdUsesOutParam(kAmdSmiLibVersionUnknown));
+}
+
 } // namespace RcclUnitTesting

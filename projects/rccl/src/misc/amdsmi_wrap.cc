@@ -134,6 +134,13 @@ thread_local bool threadFabricInitialized = false;
 ncclResult_t fabricInitResult = ncclSuccess;
 ncclResult_t amdSmiInitResult = ncclSuccess;
 std::atomic<bool> amdSmiInitCalled{false}; // Track if amd_smi_init has been called
+
+// Major version of the loaded amd_smi, as it reports itself. Selects the telemetry
+// name call convention; see amdSmiTelemIdUsesOutParam().
+std::atomic<uint32_t> amdSmiLibMajor{kAmdSmiLibVersionUnknown};
+
+// Signature amdsmi_fabric_telem_id_to_string had before amd_smi 27.0
+using AmdSmiTelemIdToStringLegacyFn = const char* (*)(uint64_t);
 } // namespace
 
 /*************************************************************************
@@ -241,6 +248,8 @@ ncclResult_t amd_smi_init() {
     AMDSMITRY(amdsmi_get_lib_version, &version);
     INFO(NCCL_INIT, "amdsmi_lib: version %u.%u.%u (build %s)", version.major, version.minor, version.release,
          version.build);
+    // Retained because the telemetry name call convention depends on it
+    amdSmiLibMajor.store(version.major, std::memory_order_release);
   } else {
     // initialize alternate rsmi
     ARSMICHECK(ARSMI_init());
@@ -641,14 +650,14 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
         devInfo->fabricSupported = false;
         continue;
       }
-      const uint32_t fabricVersion = fabricInfo.fabric_version;
+      const uint32_t fabricVersion = amdSmiFabricInfoVersion(fabricInfo);
       if (!amdSmiFabricVersionUsable(fabricVersion)) {
         WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u", fabricVersion, d,
              AMDSMI_FABRIC_INFO_CURRENT_VERSION);
         devInfo->fabricSupported = false;
         continue;
       }
-      const amdsmi_fabric_info_v1_t* v1 = &fabricInfo.fabric_info.v1;
+      const amdsmi_fabric_info_v1_t* v1 = amdSmiFabricInfoV1(fabricInfo);
       devInfo->fabricSupported = amdSmiFabricStateUsable(v1->fabric_type, v1->accel_state);
       devInfo->fabricType = v1->fabric_type;
       devInfo->state = v1->accel_state;
@@ -760,6 +769,13 @@ ncclResult_t amd_smi_freeFabricTelemetry(uint32_t deviceIndex, amdsmi_fabric_tel
 const char* amd_smi_fabricTelemIdToString(uint64_t telemId) {
   if (pfn_amdsmi_fabric_telem_id_to_string == nullptr) {
     return ARSMI_fabric_telem_id_to_string(telemId);
+  }
+  if (!amdSmiTelemIdUsesOutParam(amdSmiLibMajor.load(std::memory_order_acquire))) {
+    // dlsym gave us an address, not a prototype: on a pre-27 runtime the symbol has
+    // to be called through its own signature or the extra argument is read as one.
+    auto legacyFn = reinterpret_cast<AmdSmiTelemIdToStringLegacyFn>(pfn_amdsmi_fabric_telem_id_to_string);
+    const char* legacyName = legacyFn(telemId);
+    return legacyName == nullptr ? "UNKNOWN" : legacyName;
   }
   const char* telemName = nullptr;
   amdsmi_status_t ret = pfn_amdsmi_fabric_telem_id_to_string(telemId, &telemName);

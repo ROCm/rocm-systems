@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
+#include <type_traits>
+#include <utility>
 
 #include "nccl.h"
 #include "device.h"
@@ -499,10 +501,69 @@ inline bool amdSmiFabricVersionUsable(uint32_t version) {
 
 // Fabric is usable only over a link type we drive, and only once the accelerator has
 // reached a state where its vPoD can carry traffic.
+//
+// AMDSMI_FABRIC_TYPE_UALLINK is deprecated in favour of the correctly spelled
+// AMDSMI_FABRIC_TYPE_UALINK, but only the former exists in amd_smi before 27.0 and
+// the latter is an alias for it after, so the old name is the one that compiles
+// against every header we support.
 inline bool amdSmiFabricStateUsable(amdsmi_fabric_type_t type, amdsmi_fabric_accelerator_vpod_state_t state) {
   return (type == AMDSMI_FABRIC_TYPE_UALOE || type == AMDSMI_FABRIC_TYPE_UALLINK) &&
-         (state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
-          state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
+         (state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE || state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
+}
+
+/*************************************************************************
+ * amdsmi_fabric_info_t layout compatibility
+ *
+ * amd_smi 27.0 flattened this struct. The version moved from a nested
+ * fabric_info.version to a top-level fabric_version, and the payload from
+ * fabric_info.fabric_version.v1 to fabric_info.v1 -- note that fabric_version
+ * names different things either side of the change. Field offsets did not move
+ * (version at byte 8, v1 at 12), so this is a source-level rename only and the
+ * ABI guard above holds for both.
+ *
+ * Detect the shape rather than test a version macro, so a header that carries
+ * the change under any version still resolves correctly. Only the flattened
+ * layout has a top-level integral fabric_version; in the nested layout that name
+ * exists solely inside fabric_info, as a union.
+ ************************************************************************/
+template <typename T, typename = void>
+struct amdSmiFabricInfoIsFlat : std::false_type {};
+
+template <typename T>
+struct amdSmiFabricInfoIsFlat<T, std::void_t<decltype(std::declval<const T&>().fabric_version)>>
+  : std::is_integral<std::decay_t<decltype(std::declval<const T&>().fabric_version)>> {};
+
+// Templates so that if constexpr discards the branch that does not compile against
+// the header in use; in a non-template function both branches are type-checked.
+template <typename FabricInfoT>
+inline uint32_t amdSmiFabricInfoVersion(const FabricInfoT& info) {
+  if constexpr (amdSmiFabricInfoIsFlat<FabricInfoT>::value) {
+    return info.fabric_version;
+  } else {
+    return info.fabric_info.version;
+  }
+}
+
+template <typename FabricInfoT>
+inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info) {
+  if constexpr (amdSmiFabricInfoIsFlat<FabricInfoT>::value) {
+    return &info.fabric_info.v1;
+  } else {
+    return &info.fabric_info.fabric_version.v1;
+  }
+}
+
+// amd_smi 27.0 also changed amdsmi_fabric_telem_id_to_string from returning the name
+// to writing it through an out-parameter. The two are not call-compatible and we reach
+// it through dlopen, so the choice has to follow the version the loaded runtime
+// reports. An unknown version must assume the out-parameter form: calling a 27+
+// implementation the old way leaves it writing through an uninitialized pointer,
+// whereas calling an older one the new way merely leaves the name unwritten.
+constexpr uint32_t kAmdSmiLibVersionUnknown = 0;
+constexpr uint32_t kAmdSmiTelemOutParamMajor = 27;
+
+inline bool amdSmiTelemIdUsesOutParam(uint32_t libMajor) {
+  return libMajor == kAmdSmiLibVersionUnknown || libMajor >= kAmdSmiTelemOutParamMajor;
 }
 
 struct amdsmiFabricDeviceInfo {
