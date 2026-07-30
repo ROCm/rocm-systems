@@ -13,7 +13,7 @@ namespace amdgpu {
 
 uint32_t clamp_xcd_partition_count(std::span<SoC *> socs, uint32_t requested_partitions) {
   uint32_t num_xcds = 0;
-  for (auto *soc : socs) {
+  for (SoC *soc : socs) {
     if (soc)
       num_xcds += soc->num_xcds();
   }
