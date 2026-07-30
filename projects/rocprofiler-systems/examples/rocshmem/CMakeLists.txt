@@ -47,7 +47,7 @@ if(rocshmem_VERSION AND rocshmem_VERSION VERSION_LESS 3.6.0)
     message(
         ${_MSG_TYPE}
         "rocshmem-test skipped: rocSHMEM ${rocshmem_VERSION} lacks the host-stream APIs "
-        "this example requires (e.g. rocshmem_putmem_on_stream); rocSHMEM >= 3.6.0 is needed."
+        "that this example requires (e.g. rocshmem_putmem_on_stream); rocSHMEM >= 3.6.0 is needed."
     )
     return()
 endif()
