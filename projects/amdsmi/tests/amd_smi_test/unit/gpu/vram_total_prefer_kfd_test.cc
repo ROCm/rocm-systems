@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "rocm_smi/rocm_smi_vram.h"
 
@@ -100,3 +101,50 @@ TEST(GpuUnit, VramTotalDiscreteKeepsSysfs) {
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "SPX", kfd_smaller));
   EXPECT_FALSE(amd::smi::vram_total_prefer_kfd(true, kSampleVramTotal, "", kfd_smaller));
 }
+
+namespace {
+
+// KFD heap types (HSA_HEAPTYPE_*): only FB_PUBLIC counts as user-visible VRAM.
+constexpr uint32_t kHeapSystem = 0;
+constexpr uint32_t kHeapFbPublic = 1;
+constexpr uint32_t kHeapFbPrivate = 2;
+constexpr uint32_t kHeapGpuScratch = 5;
+constexpr uint64_t kGiB = 1024ULL * 1024 * 1024;
+
+}  // namespace
+
+// A single FB_PUBLIC bank (the MI300X GPU-node layout observed on hardware) is
+// returned unchanged.
+TEST(GpuUnit, SumPublicVramSingleFbPublicBank) {
+  EXPECT_EQ(amd::smi::sum_public_vram_bytes({{kHeapFbPublic, 94ULL * kGiB}}), 94ULL * kGiB);
+}
+
+// Private, scratch, and other non-public heaps are excluded so a discrete GPU
+// that enumerates them does not over-report its VRAM total.
+TEST(GpuUnit, SumPublicVramExcludesNonPublicHeaps) {
+  const std::vector<amd::smi::KfdMemBank> banks = {
+      {kHeapFbPublic, 32ULL * kGiB},
+      {kHeapFbPrivate, 4ULL * kGiB},
+      {kHeapGpuScratch, 1ULL * kGiB},
+  };
+  EXPECT_EQ(amd::smi::sum_public_vram_bytes(banks), 32ULL * kGiB);
+}
+
+// Multiple FB_PUBLIC banks are summed.
+TEST(GpuUnit, SumPublicVramSumsMultiplePublicBanks) {
+  const std::vector<amd::smi::KfdMemBank> banks = {
+      {kHeapFbPublic, 16ULL * kGiB},
+      {kHeapFbPublic, 16ULL * kGiB},
+  };
+  EXPECT_EQ(amd::smi::sum_public_vram_bytes(banks), 32ULL * kGiB);
+}
+
+// A node with no FB_PUBLIC heap falls back to summing every bank, preserving the
+// pre-filter total for APU/edge nodes that report memory under another heap type.
+TEST(GpuUnit, SumPublicVramFallsBackWhenNoPublicHeap) {
+  const std::vector<amd::smi::KfdMemBank> banks = {{kHeapSystem, 110ULL * kGiB}};
+  EXPECT_EQ(amd::smi::sum_public_vram_bytes(banks), 110ULL * kGiB);
+}
+
+// No banks at all yields zero.
+TEST(GpuUnit, SumPublicVramEmptyIsZero) { EXPECT_EQ(amd::smi::sum_public_vram_bytes({}), 0ULL); }

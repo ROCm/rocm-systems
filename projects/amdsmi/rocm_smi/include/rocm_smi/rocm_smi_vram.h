@@ -25,8 +25,23 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace amd::smi {
+
+// A single KFD memory bank parsed from
+// /sys/class/kfd/kfd/topology/nodes/<n>/mem_banks/<b>/properties.
+struct KfdMemBank {
+  uint32_t heap_type;
+  uint64_t size_in_bytes;
+};
+
+// Sum only the public-framebuffer banks (HSA_HEAPTYPE_FB_PUBLIC). Private,
+// GDS/LDS, and scratch heaps are not user-visible VRAM and would over-report the
+// total on discrete GPUs that enumerate them. Falls back to summing every bank
+// when none is FB_PUBLIC, so a node that exposes its framebuffer under another
+// heap type still yields a non-zero total.
+uint64_t sum_public_vram_bytes(const std::vector<KfdMemBank>& banks);
 
 // Decide whether the KFD topology total (mem_banks) should override the sysfs
 // mem_info_vram_total when reporting RSMI_MEM_TYPE_VRAM; returns true when the

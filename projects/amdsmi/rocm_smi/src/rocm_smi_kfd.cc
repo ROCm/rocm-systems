@@ -34,6 +34,7 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi/rocm_smi_vram.h"
 
 namespace amd::smi {
 
@@ -1225,6 +1226,25 @@ int KFDNode::get_io_link_bandwidth(uint32_t node_to, uint64_t* max_bandwidth,
 
   return 0;
 }
+// KFD heap type enumerating the public framebuffer (HSA_HEAPTYPE_FB_PUBLIC).
+constexpr uint32_t kKfdHeapTypeFbPublic = 1;
+
+uint64_t sum_public_vram_bytes(const std::vector<KfdMemBank>& banks) {
+  uint64_t public_total = 0;
+  uint64_t all_total = 0;
+  bool saw_public = false;
+  for (const auto& bank : banks) {
+    all_total += bank.size_in_bytes;
+    if (bank.heap_type == kKfdHeapTypeFbPublic) {
+      public_total += bank.size_in_bytes;
+      saw_public = true;
+    }
+  }
+  // Fall back to every bank when the node exposes no FB_PUBLIC heap, preserving
+  // the pre-filter total for APU/edge nodes that report memory differently.
+  return saw_public ? public_total : all_total;
+}
+
 // /sys/class/kfd/kfd/topology/nodes/*/mem_banks/*/properties
 // size_in_bytes 68702699520
 int KFDNode::get_total_memory(uint64_t* total) {
@@ -1254,46 +1274,44 @@ int KFDNode::get_total_memory(uint64_t* total) {
   if (kfd_node_dir == nullptr) {
     return errno;
   }
-  auto dentry = readdir(kfd_node_dir);
-  while (dentry != nullptr && subDirCount > 0) {
-    ss << __PRETTY_FUNCTION__ << " | [inside loop] Within " << f_path
-       << " has subdirectory count = " << std::to_string(subDirCount);
-    LOG_DEBUG(ss);
-    if (dentry->d_name[0] == '.') {
-      dentry = readdir(kfd_node_dir);
+
+  // Collect every mem_bank's (heap_type, size). Advancing the iterator once per
+  // entry (instead of the old subDirCount guard, which re-read the first bank on
+  // multi-bank nodes) lets sum_public_vram_bytes keep only the public framebuffer.
+  const std::string heap_type_property = "heap_type ";
+  const std::string size_in_bytes_property = "size_in_bytes ";
+  std::vector<KfdMemBank> banks;
+  for (auto* dentry = readdir(kfd_node_dir); dentry != nullptr; dentry = readdir(kfd_node_dir)) {
+    if (dentry->d_name[0] == '.' || !is_number(dentry->d_name)) {
       continue;
     }
-
-    if (!is_number(dentry->d_name)) {
-      dentry = readdir(kfd_node_dir);
-      continue;
-    }
-
-    // read "size_in_bytes 68702699520" line
-    const std::string size_in_bytes_property = "size_in_bytes ";
-    std::string memory_bank_file = f_path + "/" + dentry->d_name + "/properties";
-    std::ifstream fs(memory_bank_file);
+    std::ifstream fs(f_path + "/" + dentry->d_name + "/properties");
     if (!fs) {
-      dentry = readdir(kfd_node_dir);
       continue;
     }
+    KfdMemBank bank{std::numeric_limits<uint32_t>::max(), 0};
+    bool have_size = false;
     std::string line;
     while (std::getline(fs, line)) {
-      if (line.substr(0, size_in_bytes_property.length()) == size_in_bytes_property) {
-        auto bytes = line.substr(size_in_bytes_property.length());
-        // stoull() wraps a negative string to a huge value instead of throwing.
-        if (bytes.find('-') != std::string::npos) break;
-        try {
-          *total += std::stoull(bytes);
-          break;
-        } catch (...) {
-          dentry = readdir(kfd_node_dir);
-          continue;
+      try {
+        if (line.compare(0, heap_type_property.size(), heap_type_property) == 0) {
+          bank.heap_type =
+              static_cast<uint32_t>(std::stoul(line.substr(heap_type_property.size())));
+        } else if (line.compare(0, size_in_bytes_property.size(), size_in_bytes_property) == 0) {
+          auto bytes = line.substr(size_in_bytes_property.size());
+          // stoull() wraps a negative string to a huge value instead of throwing.
+          if (bytes.find('-') != std::string::npos) continue;
+          bank.size_in_bytes = std::stoull(bytes);
+          have_size = true;
         }
+      } catch (...) {
+        // Skip an unparsable property line; the bank keeps its defaults.
       }
-    }  // end loop for lines in property file
-    subDirCount--;
-  }  // end loop for mem_bank directory
+    }
+    if (have_size) {
+      banks.push_back(bank);
+    }
+  }
 
   if (closedir(kfd_node_dir)) {
     std::string err_str = "Failed to close KFD node directory ";
@@ -1302,6 +1320,8 @@ int KFDNode::get_total_memory(uint64_t* total) {
     perror(err_str.c_str());
     return 1;
   }
+
+  *total = sum_public_vram_bytes(banks);
   total_memory_ = *total;
   return 0;
 }
