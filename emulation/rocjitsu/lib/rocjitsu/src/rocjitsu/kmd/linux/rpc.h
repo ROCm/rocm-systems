@@ -51,6 +51,13 @@ struct RpcHeader {
 /// @brief RPC protocol version. Increment when making breaking changes.
 inline constexpr uint32_t kRpcProtocolVersion = 3;
 
+/// @brief Largest payload the daemon accepts after an RpcHeader.
+/// @details The daemon rejects — and disconnects — any client whose header
+/// declares more than this, so senders must size their payload against the
+/// same bound. Covers the RpcIoctlRequest, the ioctl args, and any inlined
+/// pointer array.
+inline constexpr uint32_t kMaxPayloadBytes = 16 * 1024 * 1024;
+
 /// @brief Fixed-size GPU metadata sent during daemon handshake.
 using RpcGpuInfo = ::rj_vm_gpu_info_t;
 

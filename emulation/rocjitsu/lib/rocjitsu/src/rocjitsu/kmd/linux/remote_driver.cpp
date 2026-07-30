@@ -111,6 +111,37 @@ Sysfs::GpuInfo gpu_info_from_rpc(const RpcGpuInfo &src) {
   return gpu;
 }
 
+/// @brief Clamp a DBG_TRAP device-snapshot request to a transmittable size.
+///
+/// @details The snapshot buffer is pure ioctl output, so the request carries an
+/// inline tail of @p num_devices * @p entry_size zero bytes purely to reserve
+/// room for the daemon's reply. num_devices is caller-controlled, and callers
+/// are entitled to oversize it: the uapi contract is that KFD fills only the
+/// devices that exist and reports the true total back, so libhsakmt's
+/// hsaKmtDbgGetDeviceDataCtx() just passes UINT32_MAX. Taken literally that
+/// reserves UINT32_MAX * 120 bytes (~480 GiB); the resize throws std::bad_alloc
+/// out of an interposed ioctl() and takes the process down.
+///
+/// Clamping the transmitted count keeps the ioctl's semantics rather than
+/// failing a request the kernel would have served: the daemon still reports the
+/// true device total in num_devices(OUT), and the ceiling is the transport's
+/// own capacity, so it cannot drop an entry the daemon could have returned —
+/// a reply for more devices than this would exceed @ref kMaxPayloadBytes and be
+/// rejected regardless.
+///
+/// @returns the device count to transmit, whose tail is guaranteed to fit
+/// within @ref kMaxPayloadBytes alongside @p arg_size bytes of ioctl args.
+uint32_t clamp_snapshot_devices(uint32_t num_devices, uint32_t entry_size, size_t arg_size) {
+  if (entry_size == 0 || num_devices == 0)
+    return 0;
+
+  const size_t overhead = sizeof(RpcIoctlRequest) + arg_size;
+  if (overhead >= kMaxPayloadBytes)
+    return 0;
+  const size_t max_entries = (kMaxPayloadBytes - overhead) / entry_size;
+  return static_cast<uint32_t>(std::min<size_t>(num_devices, max_entries));
+}
+
 } // namespace
 
 RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t length,
@@ -461,10 +492,18 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         inline_size =
             std::min(static_cast<size_t>(dbg->enable.rinfo_size), sizeof(kfd_runtime_info));
         break;
-      case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
-        inline_size =
-            static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
+      case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT: {
+        // Rewrite the transmitted count, not just the tail length: the daemon
+        // recomputes num_devices * entry_size and disconnects any client whose
+        // payload does not match it exactly (validate_ioctl_payload). Only the
+        // serialized copy is edited — the caller's args keep the original
+        // request until the reply overwrites them with the true device total.
+        const uint32_t devices = clamp_snapshot_devices(dbg->device_snapshot.num_devices,
+                                                        dbg->device_snapshot.entry_size, arg_size);
+        dbg->device_snapshot.num_devices = devices;
+        inline_size = static_cast<size_t>(devices) * dbg->device_snapshot.entry_size;
         break;
+      }
       default:
         break;
       }

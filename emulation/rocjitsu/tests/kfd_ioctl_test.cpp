@@ -29,6 +29,7 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -1258,6 +1259,90 @@ void serve_one_snapshot_reply(int server_fd, uint32_t out_num_devices, uint32_t 
   resp.payload_bytes = static_cast<uint32_t>(out.size());
   rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
   rocjitsu::rpc_send_exact(server_fd, out.data(), out.size());
+}
+
+// libhsakmt's hsaKmtDbgGetDeviceDataCtx() asks for UINT32_MAX devices and lets
+// the driver report the real total. Serialized literally that reserves
+// UINT32_MAX * sizeof(kfd_dbg_device_info_entry) (~480 GiB) and kills the
+// process on std::bad_alloc. The request must be clamped to what the transport
+// can carry, and the reply must still land in the caller's buffer.
+TEST(RemoteDriverDbgSnapshotTest, OversizedSnapshotRequestIsClampedToPayloadLimit) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  constexpr uint32_t kActualDevices = 1;
+  constexpr size_t kGuard = 32;
+  constexpr uint8_t kSentinel = 0xAB;
+  constexpr uint8_t kPoison = 0xCD;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kEntryBytes + kGuard, kSentinel);
+  std::atomic<uint32_t> observed_payload_bytes{0};
+  std::atomic<uint32_t> observed_num_devices{0};
+
+  std::jthread server([&, server_fd = sv[1]] {
+    rocjitsu::RpcHeader hdr{};
+    int in_fds[1] = {-1};
+    size_t num_in = 1;
+    if (rocjitsu::rpc_recv_msg(server_fd, &hdr, sizeof(hdr), in_fds, &num_in) <= 0)
+      return;
+    if (in_fds[0] >= 0)
+      ::close(in_fds[0]);
+    observed_payload_bytes = hdr.payload_bytes;
+    std::vector<uint8_t> req(hdr.payload_bytes);
+    if (!rocjitsu::rpc_recv_exact(server_fd, req.data(), hdr.payload_bytes))
+      return;
+
+    kfd_ioctl_dbg_trap_args echoed{};
+    std::memcpy(&echoed, req.data() + sizeof(rocjitsu::RpcIoctlRequest), sizeof(echoed));
+    observed_num_devices = echoed.device_snapshot.num_devices;
+
+    // Report the true device total and return only the entries that exist —
+    // exactly what a daemon with one GPU does.
+    echoed.device_snapshot.num_devices = kActualDevices;
+    echoed.device_snapshot.entry_size = kEntryBytes;
+    std::vector<uint8_t> out(arg_struct_size + kEntryBytes);
+    std::memcpy(out.data(), &echoed, sizeof(echoed));
+    std::memset(out.data() + arg_struct_size, kPoison, kEntryBytes);
+
+    rocjitsu::RpcHeader resp{};
+    resp.opcode = rocjitsu::RPC_IOCTL;
+    resp.request_id = hdr.request_id;
+    resp.result = 0;
+    resp.payload_bytes = static_cast<uint32_t>(out.size());
+    rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
+    rocjitsu::rpc_send_exact(server_fd, out.data(), out.size());
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = std::numeric_limits<uint32_t>::max();
+  snap.device_snapshot.entry_size = kEntryBytes;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  server.join();
+
+  EXPECT_LE(observed_payload_bytes.load(), rocjitsu::kMaxPayloadBytes)
+      << "request exceeded the payload limit the daemon enforces";
+  EXPECT_LT(observed_num_devices.load(), std::numeric_limits<uint32_t>::max())
+      << "UINT32_MAX device count was transmitted verbatim";
+  // The clamp is the transport's capacity, so it must still comfortably exceed
+  // any device count a daemon could enumerate.
+  EXPECT_GT(observed_num_devices.load(), 1000u);
+
+  EXPECT_EQ(snap.device_snapshot.num_devices, kActualDevices) << "true device total not reported";
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + kEntryBytes, [](uint8_t b) {
+    return b == kPoison;
+  })) << "the enumerated entry did not reach the caller";
+  EXPECT_TRUE(std::all_of(caller_buf.begin() + kEntryBytes, caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "copy-back wrote past the entries the daemon returned";
 }
 
 // Daemon mode must reproduce the driver's strided write, not overwrite the
