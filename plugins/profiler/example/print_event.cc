@@ -402,19 +402,20 @@ void printEvent(FILE* fh, void* handle) {
   if (type == ncclProfileGroupApi) {
     struct groupApi* g = (struct groupApi*) handle;
     printGroupApiEventHeader(fh, g);
+    // Other comms' children are dumped by their own context.
     struct kernelLaunch* kernelLaunchHead = profilerQueueHead(&g->kernelLaunchEvents);
     while (kernelLaunchHead != NULL) {
-      printEvent(fh, kernelLaunchHead);
+      if (kernelLaunchHead->ctx == g->ctx) printEvent(fh, kernelLaunchHead);
       kernelLaunchHead = kernelLaunchHead->next;
     }
     struct collApi* collApiHead = profilerQueueHead(&g->collApiEvents);
     while (collApiHead != NULL) {
-      printEvent(fh, collApiHead);
+      if (collApiHead->ctx == g->ctx) printEvent(fh, collApiHead);
       collApiHead = collApiHead->next;
     }
     struct p2pApi* p2pApiHead = profilerQueueHead(&g->p2pApiEvents);
     while (p2pApiHead != NULL) {
-      printEvent(fh, p2pApiHead);
+      if (p2pApiHead->ctx == g->ctx) printEvent(fh, p2pApiHead);
       p2pApiHead = p2pApiHead->next;
     }
     printGroupApiEventTrailer(fh, g);

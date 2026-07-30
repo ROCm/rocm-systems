@@ -228,6 +228,7 @@ struct p2pApi {
 struct kernelLaunch {
   uint64_t type;
   struct groupApi* parent;
+  struct context* ctx;              // profiler context
   cudaStream_t stream;
   int kernelLaunchId;
   double startTs;
