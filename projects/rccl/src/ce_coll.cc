@@ -226,8 +226,6 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
   uint32_t currentSeq = ++comm->ceColl.ceSeqNum;
 
-  // Source pointer is either the constant graph sync value or the sequence number
-  void* srcPtr = capturing ? (void*)&GRAPH_SYNC_VALUE : (void*)&currentSeq;
   // Wait value is either the constant graph sync value or the sequence number
   uint32_t waitValue = capturing ? GRAPH_SYNC_VALUE : currentSeq;
 
@@ -237,8 +235,18 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
   NCCLCHECKGOTO(ncclDevrGetLsaTeamPtrMC(comm, comm->ceColl.ceSyncWin, offset, ncclTeamLsa(comm), &mcDstPtr), ret, fail);
 
-  // Write our own ready/complete flag to the multi-cast address
-  CUDACHECKGOTO(cudaMemcpyAsync(mcDstPtr, srcPtr, sizeof(uint32_t), cudaMemcpyHostToDevice, stream), ret, fail);
+  // Store the updated sequence number in the device buffer on-stream. During graph capture the
+  // constant GRAPH_SYNC_VALUE slot (index 1) seeded at init is used instead.
+  if (!capturing) {
+    CUDACHECKGOTO(hipStreamWriteValue32(stream, (void*)comm->ceColl.ceSeqNumDev, currentSeq, 0), ret, fail);
+  }
+
+  // Write our own ready/complete flag to the multi-cast address from the device-resident buffer.
+  // Copying from device memory (instead of host stack memory) avoids implicit synchronization and
+  // guarantees correct flag values during graph capture/replay.
+  CUDACHECKGOTO(cudaMemcpyAsync(mcDstPtr, comm->ceColl.ceSeqNumDev + capturing, sizeof(uint32_t),
+                                cudaMemcpyDeviceToDevice, stream),
+                ret, fail);
 
   // Add local wait operations for every other rank
   for (int r = 0; r < comm->nRanks; ++r) {
