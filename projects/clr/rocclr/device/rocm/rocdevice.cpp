@@ -3343,7 +3343,7 @@ int Device::SharedHwQueueRefCount(hsa_queue_t* queue, amd::CommandQueue::Priorit
 // ================================================================================================
 bool Device::SharedQueueAnyOrderDecision(hsa_queue_t* queue, uint64_t my_slot, uint64_t my_prev_slot,
                                          bool eligible_to_clear, bool treat_as_first) {
-  constexpr uint64_t kNone = std::numeric_limits<uint64_t>::max();
+  constexpr uint64_t kNone = ~static_cast<uint64_t>(0);
   amd::ScopedLock l(shared_queue_barrier_lock_);
   auto it = shared_queue_barrier_index_.find(queue);
   const uint64_t largest = (it != shared_queue_barrier_index_.end()) ? it->second : kNone;
@@ -3715,6 +3715,8 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
     } else {
       ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
               queue->base_address);
+      // Drop any barrier-slot state for this queue before its pointer is freed.
+      SharedQueueResetBarrier(queue);
       Hsa::queue_destroy(queue);
     }
   }
@@ -3735,6 +3737,8 @@ void Device::DrainDeferredQueueDestroys() {
   }
   for (hsa_queue_t* queue : pending) {
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting deferred hardware queue %p", queue->base_address);
+    // Drop any barrier-slot state for this queue before its pointer is freed.
+    SharedQueueResetBarrier(queue);
     Hsa::queue_destroy(queue);
   }
 }

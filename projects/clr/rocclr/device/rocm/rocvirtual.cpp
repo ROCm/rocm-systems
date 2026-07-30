@@ -4912,27 +4912,27 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     // Pass the header accordingly
     auto aqlHeaderWithOrder = aqlHeader_;
 
-  if (vcmd != nullptr) {
-    // Explicit per-dispatch opt-in (hipExtAnyOrderLaunch): user relaxes in-stream ordering, so the
-    // head barrier is cleared unconditionally here. Handled independently of the shared-queue tracker.
-    if (vcmd->getAnyOrderLaunchFlag()) {
-      constexpr uint32_t kAqlHeaderMask = ~(1 << HSA_PACKET_HEADER_BARRIER);
-      aqlHeaderWithOrder &= kAqlHeaderMask;
-    }
+    if (vcmd != nullptr) {
+      // Explicit per-dispatch opt-in (hipExtAnyOrderLaunch): user relaxes in-stream ordering, so the
+      // head barrier is cleared unconditionally here. Handled independently of the shared-queue tracker.
+      if (vcmd->getAnyOrderLaunchFlag()) {
+        constexpr uint32_t kAqlHeaderMask = ~(1 << HSA_PACKET_HEADER_BARRIER);
+        aqlHeaderWithOrder &= kAqlHeaderMask;
+      }
 
-    // Decide the barrier bit per packet at the write point (skip explicit-flag and graph capture).
-    // Track on every eligible dispatch (even sole-tenant) so a later dispatch sees its true
-    // predecessor; refCount>1 gates only the clear, not the tracking.
-    sharedAnyOrderActive_ = DEBUG_HIP_SHARED_QUEUE_ANYORDER != 0 && !dedicated_queue_ &&
-        !isGraphCapture && !vcmd->getAnyOrderLaunchFlag();
-    // Clear only when the ring is shared (refCount>1) and independent (no event wait, not coop).
-    sharedAnyOrderEligible_ = vcmd->eventWaitList().empty() && !vcmd->cooperativeGroups() &&
-        roc_device_.SharedHwQueueRefCount(gpu_queue_, priority_) > 1;
+      // Decide the barrier bit per packet at the write point (skip explicit-flag and graph capture).
+      // Track on every eligible dispatch (even sole-tenant) so a later dispatch sees its true
+      // predecessor; refCount>1 gates only the clear, not the tracking.
+      sharedAnyOrderActive_ = DEBUG_HIP_SHARED_QUEUE_ANYORDER != 0 && !dedicated_queue_ &&
+          !isGraphCapture && !vcmd->getAnyOrderLaunchFlag();
+      // Clear only when the ring is shared (refCount>1) and independent (no event wait, not coop).
+      sharedAnyOrderEligible_ = vcmd->eventWaitList().empty() && !vcmd->cooperativeGroups() &&
+          roc_device_.SharedHwQueueRefCount(gpu_queue_, priority_) > 1;
 
-    if (vcmd->getCommandEntryScope() == amd::Device::kCacheStateSystem) {
-      addSystemScope_ = true;
+      if (vcmd->getCommandEntryScope() == amd::Device::kCacheStateSystem) {
+        addSystemScope_ = true;
+      }
     }
-  }
 
   // Copy scheduler's AQL packet for possible relaunch from the scheduler itself
     if (aql_packet != nullptr) {
