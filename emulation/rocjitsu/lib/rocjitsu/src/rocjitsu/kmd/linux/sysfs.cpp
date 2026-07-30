@@ -12,6 +12,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
+#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <csignal>
@@ -290,6 +291,13 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 
   uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
 
+  // array_count is the one geometry property KFD reports per node rather than
+  // per XCC: node_show() emits node_props.array_count * NUM_XCC, while
+  // simd_arrays_per_engine and cu_per_simd_array stay per-XCC. The DBG_TRAP
+  // device snapshot passes the unscaled value through instead (kfd_debug.c),
+  // which is why the two paths report different numbers for the same property.
+  const uint32_t node_array_count = gpu.num_shader_engines * std::max(1u, gpu.num_xcc);
+
   std::ostringstream props;
   props << "cpu_cores_count 0\n"
         << "simd_count " << gpu.simd_count << "\n"
@@ -304,7 +312,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "gds_size_in_kb 0\n"
         << "num_gws 64\n"
         << "wave_front_size " << gpu.wave_front_size << "\n"
-        << "array_count " << gpu.num_shader_engines << "\n"
+        << "array_count " << node_array_count << "\n"
         << "simd_arrays_per_engine " << gpu.num_shader_arrays_per_engine << "\n"
         << "cu_per_simd_array " << gpu.num_cu_per_sh << "\n"
         << "simd_per_cu " << gpu.simd_per_cu << "\n"

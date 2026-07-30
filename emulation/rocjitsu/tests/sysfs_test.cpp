@@ -12,6 +12,7 @@
 #include "rocjitsu/kmd/linux/sysfs.h"
 
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -206,6 +207,36 @@ TEST(SysfsTopologyDebugCapabilityTest, DefaultDebugPropMatchesHardware) {
 // advertise that GPU's exact capability/capability2/debug_prop, i.e. the values
 // captured from its physical KFD sysfs. The configs carry these as explicit
 // overrides (see configs/*.json), which sysfs emits verbatim.
+// KFD reports array_count per node, not per XCC: node_show() emits
+// node_props.array_count * NUM_XCC while simd_arrays_per_engine and
+// cu_per_simd_array stay per-XCC. gfx942_cdna3_kmd models MI300X, whose
+// captured sysfs reads array_count 32 / simd_arrays_per_engine 1 /
+// cu_per_simd_array 10 at num_xcc 8, so the generated topology must match it
+// exactly — a debugger divides these back out to recover shader engines.
+TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
+  const std::string config_dir = CONFIG_DIR;
+  auto loaded =
+      config::load_config(config_dir + "/gfx942_cdna3_kmd.json", rocjitsu::kEmbeddedSchema);
+  ASSERT_TRUE(loaded.device.present);
+  const uint32_t num_xcc = loaded.soc()->num_xcds();
+  ASSERT_EQ(num_xcc, 8u);
+
+  Sysfs sysfs;
+  std::string topology_dir = sysfs.generate(gpu_info_from_config(loaded.device, num_xcc));
+  ASSERT_FALSE(topology_dir.empty());
+
+  auto props = read_properties(topology_dir + "/nodes/1/properties");
+  EXPECT_EQ(props["array_count"], 32u);
+  EXPECT_EQ(props["simd_arrays_per_engine"], 1u);
+  EXPECT_EQ(props["cu_per_simd_array"], 10u);
+  EXPECT_EQ(props["num_xcc"], num_xcc);
+
+  // What libhsakmt derives from those: NumShaderBanks = array_count /
+  // simd_arrays_per_engine, i.e. the node's total shader engines.
+  EXPECT_EQ(props["array_count"] / props["simd_arrays_per_engine"],
+            num_xcc * loaded.soc()->xcd(0)->num_shader_engines());
+}
+
 TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   const std::string config_dir = CONFIG_DIR;
   // Configs whose device matches a captured real-hardware topology dump.

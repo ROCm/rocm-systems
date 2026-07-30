@@ -1592,6 +1592,17 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   EXPECT_NE(entry.max_waves_per_simd, 0u);
   EXPECT_NE(entry.array_count, 0u);
   EXPECT_NE(entry.simd_arrays_per_engine, 0u);
+
+  // The snapshot reports shader arrays per XCC, as amdkfd does. rocdbgapi turns
+  // that back into shader engines and uses the result for CWSR and scratch
+  // addressing, so it has to agree with the SoC the simulator actually runs —
+  // non-zero is not enough.
+  uint32_t simulated_shader_engines = 0;
+  for (uint32_t i = 0; i < soc_->num_xcds(); ++i)
+    simulated_shader_engines += soc_->xcd(i)->num_shader_engines();
+  EXPECT_EQ(entry.array_count * entry.num_xcc / entry.simd_arrays_per_engine,
+            simulated_shader_engines);
+  EXPECT_EQ(entry.num_xcc, soc_->num_xcds());
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStride) {
