@@ -8,6 +8,7 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
@@ -413,10 +414,10 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint64_t saved_dbg_rinfo_ptr = 0;
   uint32_t saved_dbg_rinfo_size = 0;
   uint64_t saved_dbg_snapshot_ptr = 0;
-  size_t saved_dbg_snapshot_cap = 0;
   // The response overwrites num_devices/entry_size with the daemon's outputs,
   // so the request's own count and stride have to be kept to reproduce the
-  // driver's strided write on copy-back.
+  // driver's strided write on copy-back. Together they are also the caller's
+  // declared buffer capacity.
   uint32_t saved_dbg_snapshot_devices = 0;
   uint32_t saved_dbg_snapshot_stride = 0;
   if (has_embedded_pointers(request)) {
@@ -444,8 +445,6 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
         saved_dbg_snapshot_devices = dbg->device_snapshot.num_devices;
         saved_dbg_snapshot_stride = dbg->device_snapshot.entry_size;
-        saved_dbg_snapshot_cap =
-            static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
         break;
       default:
         break;
@@ -566,6 +565,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
   auto *resp = reinterpret_cast<RpcHeader *>(resp_header_buf);
 
+  // kMaxPayloadBytes bounds both directions of the protocol; the daemon
+  // enforces it on receive. Enforce it here too so a desynced or corrupted
+  // reply header cannot make an interposed ioctl() attempt a multi-GiB
+  // allocation and throw std::bad_alloc out of a C entry point.
+  if (resp->payload_bytes > kMaxPayloadBytes)
+    return -1;
+
   if (resp->payload_bytes > 0) {
     std::vector<uint8_t> payload(resp->payload_bytes);
     if (!rpc_recv_exact(sock_, payload.data(), resp->payload_bytes))
@@ -666,18 +672,21 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           // what SimulatedKfd writes on the local path. It would also trust
           // num_devices(IN) as a real allocation size, which callers are
           // entitled to oversize.
+          //
+          // num_devices(IN) is the caller's declared capacity in entries, so
+          // capping the loop at it is the same bound the driver applies; the
+          // per-entry `extra` test additionally refuses to read past the tail
+          // the daemon actually sent.
+          if (saved_dbg_snapshot_stride == 0)
+            break;
           const uint32_t entries =
               std::min(saved_dbg_snapshot_devices, dbg->device_snapshot.num_devices);
           const size_t stride = saved_dbg_snapshot_stride;
-          if (stride == 0)
-            break;
           const size_t written = std::min<size_t>(dbg->device_snapshot.entry_size, stride);
           auto *snapshot_out = reinterpret_cast<uint8_t *>(saved_dbg_snapshot_ptr);
           for (uint32_t i = 0; i < entries; ++i) {
             const size_t offset = static_cast<size_t>(i) * stride;
-            // Bound every entry separately: the last one must fit in both the
-            // caller's buffer and the tail the daemon actually returned.
-            if (offset + written > saved_dbg_snapshot_cap || offset + written > extra)
+            if (offset + written > extra)
               break;
             std::memcpy(snapshot_out + offset, payload.data() + arg_size + offset, written);
           }
