@@ -15,11 +15,15 @@ from utils import schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
+    console_error,
     console_log,
     console_warning,
     demarcate,
 )
-from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
+from utils.utils_common import (
+    canonical_config_arch,
+    normalize_filter_to_str_list,
+)
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -289,7 +293,6 @@ def create_df_pmc(
     raw_data_dir: str,
     kernel_verbose: int,
     verbose: int,
-    config_dict: dict[str, Any],
 ) -> pd.DataFrame:
     """
     Load all raw pmc counters and join into one df.
@@ -300,8 +303,15 @@ def create_df_pmc(
 
     df = pd.read_csv(pmc_perf_path)
 
-    if config_dict.get("format_rocprof_output") == "rocpd":
-        df = utils_analysis.process_rocpd_csv(df)
+    # rocpd pmc_perf.csv is long: one row per counter per dispatch. Anything
+    # else was written by a removed backend and is no longer supported.
+    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
+        console_error(
+            "analysis",
+            f"{pmc_perf_path} is not in the supported rocpd format. "
+            "Please re-profile this workload with a current release.",
+        )
+    df = utils_analysis.process_rocpd_csv(df)
 
     # Demangle original KernelNames
     # Skip for Standalone Roofline with -1 to keep full kernel names

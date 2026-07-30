@@ -83,7 +83,7 @@ WORKLOADS_BY_ARCH = {
 
 # All workloads exit 0 except these.
 # dispatch_6_8 and dispatch_7 exit 1 on MI100/MI200: rocprofiler-sdk applies
-# the dispatch filter at collection time, so no pmc data is written
+# the dispatch filter at collection time, so no pmc data is written.
 EXIT_CODES = {
     ("MI100", "dispatch_6_8"): 1,
     ("MI100", "dispatch_7"): 1,

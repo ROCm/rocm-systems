@@ -26,7 +26,6 @@ from utils.analysis_orm import Database
 from utils.file_io import load_pc_sampling_results, process_pc_sampling_kernel_trace
 from utils.logger import (
     console_debug,
-    console_error,
     console_warning,
     demarcate,
 )
@@ -92,11 +91,6 @@ class db_analysis(OmniAnalyze_Base):
     def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to analysis."""
         super().pre_processing()
-        if self._profiling_config.get("format_rocprof_output") != "rocpd":
-            console_error(
-                "Creation of analysis database is only supported "
-                "for profiling data with rocpd output format."
-            )
 
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
         self._pc_sampling_tool_data_per_workload = (

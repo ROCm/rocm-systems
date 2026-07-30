@@ -13,6 +13,7 @@ from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
 from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
+from utils.utils_common import PROFILE_OUTPUT_FORMAT
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
     NoScriptInCommandError,
@@ -312,7 +313,6 @@ def test_attach_library_resolution_with_fallback():
     args = argparse.Namespace(
         remaining="-- /bin/true",
         rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
-        format_rocprof_output="csv",
         output_directory=str(output_dir),
         iteration_multiplexing=None,
         attach_pid=12345,
@@ -359,13 +359,47 @@ def test_attach_library_resolution_with_fallback():
     common.clean_output_dir(True, str(output_dir))
 
 
+def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypatch):
+    """get_profiler_options appends the profiler libs to the user's LD_PRELOAD
+    and sets counter-collection mode from whether a native tool is present."""
+    args = argparse.Namespace(
+        remaining="my_app --flag",
+        rocprofiler_sdk_tool_path="sdk_tool",
+        output_directory=str(tmp_path / "workload"),
+        iteration_multiplexing=None,
+        attach_pid=None,
+        attach_duration_msec=None,
+        kokkos_trace=False,
+        kernel=None,
+        dispatch=None,
+        torch_trace=False,
+    )
+    profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+
+    # User LD_PRELOAD preserved first, profiler libs appended in order; a native
+    # tool means the SDK does not collect counters itself.
+    monkeypatch.setenv("LD_PRELOAD", "user_lib")
+    options = profiler.get_profiler_options(native_tool_path="native_tool")
+    assert options["LD_PRELOAD"] == "user_lib:sdk_tool:native_tool"
+    assert options["ROCPROF_COUNTER_COLLECTION"] == "0"
+    assert options["ROCPROF_KERNEL_TRACE"] == "1"
+    assert options["ROCPROF_OUTPUT_FORMAT"] == PROFILE_OUTPUT_FORMAT
+    assert options["ROCPROF_OUTPUT_PATH"] == f"{tmp_path / 'workload'}/out/pmc_1"
+    assert options["APP_CMD"] == ["my_app", "--flag"]
+
+    # No user LD_PRELOAD and no native tool: only the SDK lib, SDK collects.
+    monkeypatch.delenv("LD_PRELOAD", raising=False)
+    options = profiler.get_profiler_options()
+    assert options["LD_PRELOAD"] == "sdk_tool"
+    assert options["ROCPROF_COUNTER_COLLECTION"] == "1"
+
+
 def test_rocprofv3_live_attach_uses_sync_output():
     """Unit test: rocprofv3 live attach requests synchronous output generation."""
     args = _make_sanitize_args(
         ["/bin/true"],
         attach_pid="12345",
         attach_duration_msec="500",
-        format_rocprof_output="csv",
         kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
@@ -405,7 +439,6 @@ def test_sdk_pc_sampling_options(
     args = _make_sanitize_args(
         ["/bin/true"],
         rocprofiler_sdk_tool_path="/opt/sdk/tool.so",
-        format_rocprof_output="csv",
         output_directory=str(tmp_path),
         pc_sampling_method=method,
         pc_sampling_interval=1000,
@@ -508,7 +541,6 @@ def _make_rpc_args(
         roof_only=False,
         bench_only=False,
         no_roof=False,
-        format_rocprof_output="csv",
         name="unit-test",
         output_directory="/tmp/unit-test",
     )
