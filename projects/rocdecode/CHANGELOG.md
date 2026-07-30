@@ -2,12 +2,12 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## (Unreleased) rocDecode 1.9.0
+## (Unreleased) rocDecode 2.0.0
 
 ### Added
 
 * Invalid video size handling for AVC/HEVC.
-* Windows support (experimental): hardware-accelerated video decoding on Windows via the vaon12 backend (Mesa's VA-API on D3D12 translation layer). Supports H.264, HEVC, AV1, and VP9. Requires HIP from TheRock for Windows and the vaon12 NuGet package.
+* Windows support (experimental): hardware-accelerated video decoding on Windows via the vaon12 backend (Mesa's VA-API on D3D12 translation layer). Supports H.264, HEVC, AV1, and VP9. Requires HIP from TheRock for Windows and the vaon12 package.
 
 ### Resolved issues
 
