@@ -38,7 +38,7 @@ jobs:
     # Skipped when artifact_run_id is provided (reuse mode). Downstream jobs
     # use `!cancelled()` in their `if:` so they still run when this is skipped.
     if: ${{ inputs.artifact_run_id == '' }}
-    runs-on: aws-linux-scale-rocm-medium-dev
+    runs-on: aws-linux-scale-rocm-prod
     permissions:
       id-token: write
     container:
