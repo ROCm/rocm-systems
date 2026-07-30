@@ -23,7 +23,6 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base  # noqa: E402
 from utils import file_io, parser  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_analysis import impute_counters_iteration_multiplex  # noqa: E402
-from utils.utils_common import validate_profiling_format  # noqa: E402
 
 
 class Colors:
@@ -194,7 +193,6 @@ class Analyzer(OmniAnalyze_Base):
 
         # Read profiling config
         self._profiling_config = file_io.load_profiling_config(args.path[0][0])
-        validate_profiling_format(self._profiling_config, args.path[0][0])
 
         # initalize runs
         self._runs = self.initalize_runs()

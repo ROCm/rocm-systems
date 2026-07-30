@@ -177,9 +177,9 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
     assert "Counter_Name" not in df.columns
 
 
-def test_create_df_pmc_passes_through_wide_pmc_perf(tmp_path) -> None:
-    """A pre-rocpd workload ships an already-wide pmc_perf.csv, which must be
-    read as-is rather than run through the rocpd pivot."""
+def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
+    """A wide pmc_perf.csv was written by a removed backend; analyze only
+    supports the rocpd long format, so it is rejected with a re-profile error."""
     wide_csv = (
         "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
         "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
@@ -188,11 +188,8 @@ def test_create_df_pmc_passes_through_wide_pmc_perf(tmp_path) -> None:
     )
     (tmp_path / "pmc_perf.csv").write_text(wide_csv)
 
-    df = create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0)
-
-    assert len(df) == 1
-    assert df["SQ_WAVES"].iloc[0] == 4
-    assert df["SQ_BUSY_CYCLES"].iloc[0] == 100
+    with pytest.raises(SystemExit):
+        create_df_pmc(str(tmp_path), kernel_verbose=0, verbose=0)
 
 
 def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:

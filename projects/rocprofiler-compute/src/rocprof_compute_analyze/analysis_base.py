@@ -35,7 +35,6 @@ from utils.utils_common import (
     get_uuid,
     is_only_pc_sampling,
     load_panel_configs,
-    validate_profiling_format,
     validate_roofline_csv,
 )
 
@@ -308,10 +307,6 @@ class OmniAnalyze_Base:
                 console_error("analysis", "You cannot provide the same path twice.")
             seen_paths.add(dir_info[0])
 
-            validate_profiling_format(
-                file_io.load_profiling_config(dir_info[0]), dir_info[0]
-            )
-
         self._profiling_config: dict[str, Any] = file_io.load_profiling_config(
             args.path[0][0]
         )
@@ -396,6 +391,13 @@ class OmniAnalyze_Base:
                     if header is None:
                         console_warning(f"Skipping empty {file}")
                         continue
+                    if "Counter_Name" not in header:
+                        output_file.unlink(missing_ok=True)
+                        console_error(
+                            f"{file} is not in the supported rocpd format. "
+                            "Please re-profile this workload with a current "
+                            "release."
+                        )
                     # Write header only once
                     if writer is None:
                         writer = csv.writer(outfile)

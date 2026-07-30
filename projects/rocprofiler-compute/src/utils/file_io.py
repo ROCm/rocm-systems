@@ -15,6 +15,7 @@ from utils import schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
+    console_error,
     console_log,
     console_warning,
     demarcate,
@@ -302,10 +303,15 @@ def create_df_pmc(
 
     df = pd.read_csv(pmc_perf_path)
 
-    # rocpd emits one row per counter per dispatch; pivot those to one row per
-    # dispatch. Anything else is already one row per dispatch.
-    if {"Counter_Name", "Counter_Value"}.issubset(df.columns):
-        df = utils_analysis.process_rocpd_csv(df)
+    # rocpd pmc_perf.csv is long: one row per counter per dispatch. Anything
+    # else was written by a removed backend and is no longer supported.
+    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
+        console_error(
+            "analysis",
+            f"{pmc_perf_path} is not in the supported rocpd format. "
+            "Please re-profile this workload with a current release.",
+        )
+    df = utils_analysis.process_rocpd_csv(df)
 
     # Demangle original KernelNames
     # Skip for Standalone Roofline with -1 to keep full kernel names

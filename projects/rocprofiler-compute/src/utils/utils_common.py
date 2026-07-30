@@ -49,23 +49,6 @@ def is_gfx115x(gpu_arch: Optional[str]) -> bool:
     return bool(gpu_arch and gpu_arch.startswith("gfx115"))
 
 
-def validate_profiling_format(
-    profiling_config: dict[str, Any], workload_path: Optional[str] = None
-) -> None:
-    """Reject workloads produced by a removed profile backend."""
-    output_format = profiling_config.get("format_rocprof_output")
-    if output_format is None or output_format == PROFILE_OUTPUT_FORMAT:
-        return
-    workload = f"{workload_path}: " if workload_path else ""
-    console_error(
-        "analysis",
-        f"{workload}unsupported profiling output format (format_rocprof_output: "
-        f"{output_format!r}). Analyze only supports workloads profiled "
-        f"with the {PROFILE_OUTPUT_FORMAT!r} output format. Legacy "
-        "CSV-backend workloads are no longer supported.",
-    )
-
-
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
     """Map GPU architectures to the shared analysis-config directory name."""
     if gpu_arch is None:

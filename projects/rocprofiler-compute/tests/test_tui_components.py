@@ -560,26 +560,3 @@ class TestDataStructureIntegration:
             kernel_name = kernel_data["Kernel_Name"]
             selected_data = kernel_to_df_dict.get(kernel_name)
             assert selected_data is not None, f"Missing data for {kernel_name}"
-
-
-# =============================================================================
-# Legacy workload rejection
-# =============================================================================
-
-
-class TestLegacyWorkloadRejection:
-    """The TUI does not go through OmniAnalyze_Base.sanitize, so it validates the
-    profiling format itself."""
-
-    def test_pre_processing_rejects_legacy_csv_workload(self, tmp_path) -> None:
-        """A workload written by the removed CSV backend is refused before the
-        TUI reads any counter data."""
-        from rocprof_compute_tui.analysis_tui import tui_analysis
-
-        (tmp_path / "profiling_config.yaml").write_text("format_rocprof_output: csv\n")
-
-        inst = tui_analysis.__new__(tui_analysis)
-        inst.path = str(tmp_path)
-
-        with pytest.raises(SystemExit):
-            inst.pre_processing()

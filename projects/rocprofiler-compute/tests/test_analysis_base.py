@@ -3,15 +3,11 @@
 
 """Unit tests for src/rocprof_compute_analyze/analysis_base.py."""
 
-import logging
-from types import SimpleNamespace
-
 import common
 import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils.utils_common import validate_profiling_format
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
@@ -91,58 +87,19 @@ def test_concat_result_csvs_errors_when_only_headers(tmp_path, monkeypatch) -> N
     assert not (tmp_path / "pmc_perf.csv").exists()
 
 
-@pytest.mark.parametrize(
-    "profiling_config",
-    [
-        pytest.param({"format_rocprof_output": "rocpd"}, id="rocpd"),
-        # Predates the format key: an already-joined wide pmc_perf.csv, which
-        # analyze still reads.
-        pytest.param({}, id="key_absent"),
-    ],
-)
-def test_validate_profiling_format_accepts(profiling_config) -> None:
-    """rocpd workloads and pre-key workloads are both analyzable."""
-    validate_profiling_format(profiling_config)
-
-
-@pytest.mark.parametrize("output_format", ["csv", "json"])
-def test_validate_profiling_format_rejects_removed_backend(output_format) -> None:
-    """A workload that declares a format other than rocpd was written by a
-    backend whose per-counter CSVs analyze no longer merges, so it is rejected
-    rather than silently misread."""
-    with pytest.raises(SystemExit):
-        validate_profiling_format(
-            {"format_rocprof_output": output_format}, "/workloads/legacy"
-        )
-
-
-def test_validate_profiling_format_error_names_the_workload(caplog) -> None:
-    """The rejection points at the offending directory."""
-    with pytest.raises(SystemExit), caplog.at_level(logging.ERROR):
-        validate_profiling_format(
-            {"format_rocprof_output": "csv"}, "/workloads/legacy/MI200"
-        )
-
-    assert "/workloads/legacy/MI200" in caplog.text
-    assert "csv" in caplog.text
-
-
-def test_sanitize_rejects_legacy_workload_in_every_analyze_mode(
-    tmp_path, monkeypatch
-) -> None:
-    """Every analyze mode routes through OmniAnalyze_Base.sanitize, so a legacy
-    CSV workload is refused before any mode-specific processing runs."""
-    (tmp_path / "profiling_config.yaml").write_text("format_rocprof_output: csv\n")
+def test_concat_result_csvs_rejects_wide_legacy_results(tmp_path, monkeypatch) -> None:
+    """Legacy CSV-backend results_*.csv are wide (no Counter_Name column); concat
+    must reject them and tell the user to re-profile rather than build a
+    pmc_perf.csv analyze would misread."""
+    common.patch_console(monkeypatch, MODULE, "debug", "warning")
+    (tmp_path / "results_pmc_perf_0.csv").write_text(
+        "GPU_ID,Kernel_Name,Dispatch_ID,SQ_WAVES\n0,kernel_a,0,10\n"
+    )
 
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    args = SimpleNamespace(
-        path=[[str(tmp_path)]],
-        tui=False,
-        output_name=None,
-        output_format="txt",
-        subpath=None,
-    )
-    monkeypatch.setattr(inst, "get_args", lambda: args, raising=False)
-
     with pytest.raises(SystemExit):
-        inst.sanitize()
+        inst.concat_result_csvs(
+            sorted(tmp_path.glob("results_*.csv")), tmp_path / "pmc_perf.csv"
+        )
+
+    assert not (tmp_path / "pmc_perf.csv").exists()
