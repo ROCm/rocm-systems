@@ -35,6 +35,24 @@
 #include <sys/prctl.h>
 #include <sys/utsname.h>
 
+// Syscall numbers for pidfd_open (Linux 5.3+) and pidfd_getfd (Linux 5.6+).
+// Older kernel headers may not define these; provide the x86-64 values as a
+// fallback so the code compiles — the runtime kernel check will gate their use.
+#ifndef __NR_pidfd_open
+#  if defined(__x86_64__)
+#    define __NR_pidfd_open 434
+#  elif defined(__aarch64__)
+#    define __NR_pidfd_open 434
+#  endif
+#endif
+#ifndef __NR_pidfd_getfd
+#  if defined(__x86_64__)
+#    define __NR_pidfd_getfd 438
+#  elif defined(__aarch64__)
+#    define __NR_pidfd_getfd 438
+#  endif
+#endif
+
 namespace rocshmem {
 
 // Static member definitions
