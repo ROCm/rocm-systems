@@ -275,7 +275,9 @@ depends on the device and its mode.
     or streams created outside an execution context from using the same CUs. To
     isolate workloads, split the available CU resource into disjoint partitions
     and launch each workload only on streams associated with its assigned
-    execution context.
+    execution context. The :ref:`execution_context_example` demonstrates this
+    pattern with separate contexts for a background kernel and a
+    latency-sensitive kernel.
 
 Work queue configuration resource
 -------------------------------------------------------------------------------
@@ -593,7 +595,7 @@ A concurrency limit of four tells the driver you expect up to four concurrent
 stream-ordered workloads, and it assigns work queues to respect that where it
 can.
 
-Step 3: Build a descriptor
+Step 3: Bundle resources into a descriptor
 -------------------------------------------------------------------------------
 
 Gather the resources for the context into a descriptor with
@@ -619,7 +621,8 @@ The call requires that:
 - Every resource belongs to the same device.
 - CU resources combined together come from the same split call and share the same
   ``coscheduledSmCount``, unless they are remainders.
-- At most one work queue configuration or work queue resource is present.
+- Work queue configuration is optional. If included, the descriptor can contain
+  either one work queue configuration resource or one work queue resource.
 
 Step 4: Create the context
 -------------------------------------------------------------------------------
@@ -651,13 +654,14 @@ To confirm what the context received, call
 :cpp:func:`hipExecutionCtxGetDevResource` on it for each resource type.
 
 You can create several contexts by repeating these steps. Usually each context
-uses a disjoint set of CUs, but you can also let two contexts share some CUs by
-including the same resource in both descriptors. Overlapping CUs can improve
-utilization when strict isolation is not required. For example, two contexts can
-share a small CU subset so that a background workload can use those CUs when the
-latency-sensitive workload is idle. When both contexts are active, however, the
-shared CUs can become a source of interference. Use overlapping partitions
-deliberately and validate the behavior with your workload.
+uses a disjoint set of CUs, which gives the clearest isolation between workloads.
+You can also deliberately include the same CU resource in more than one
+descriptor, creating an overlapping region. This can improve utilization when
+one workload is bursty: for example, a background context can use a small shared
+CU group while a latency-sensitive context is idle, while the latency-sensitive
+context still has its own private CUs when it becomes active. When both contexts
+are active, the shared CUs can become a source of interference, so use
+overlapping partitions only when that trade-off is acceptable.
 
 Running work on a context
 ===============================================================================
@@ -769,6 +773,8 @@ SM granularity, while HIP aligns partitions to the granularity reported by
 ``smCoscheduledAlignment``, which is typically 2 CUs in WGP mode. Query this
 value and size partitions accordingly instead of porting fixed SM counts
 directly.
+
+.. _execution_context_example:
 
 Example: reserving CUs for a critical kernel
 ===============================================================================
