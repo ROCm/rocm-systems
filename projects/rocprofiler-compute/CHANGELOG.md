@@ -16,7 +16,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Deprecated the `--join-type` profile mode option; it no longer has any effect and will be removed in a future release.
 
-* Changed PC sampling database output to include a process ID for each PC sampling dispatch.
 
 ### Removed
 
