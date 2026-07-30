@@ -460,7 +460,7 @@ public:
   /// @param[in] nodes nodes to be used can be null
   /// @return HSA_STATUS_SUCCESS if the driver successfully makes the memory
   virtual hsa_status_t MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
-                                          const HsaMemMapFlags* mem_flags = nullptr,
+                                          const HsaMemFlags* mem_flags = nullptr,
                                           uint32_t num_nodes = 0,
                                           const uint32_t* nodes = nullptr) const = 0;
 

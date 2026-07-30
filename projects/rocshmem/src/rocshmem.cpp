@@ -116,7 +116,11 @@ static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
     if (envstr.find("ipc") != std::string::npos) {
       if (IPCBackend::backend_can_run(comm, bootstrap) != ROCSHMEM_SUCCESS) {
         LOG_ERROR_EXIT("ROCSHMEM_BACKEND=ipc requested but IPC backend cannot run.\n"
-                       "  Most likely cause is that PEs are distributed across more than one node.\n"
+                       "  The IPC peer group does not cover every PE.\n"
+                       "  Without the fabric heap allocator, that means the PEs span more than one node.\n"
+                       "  With USE_HEAP_DEVICE_VMM_FABRIC, it means they span more than one fabric pod,\n"
+                       "  or pod detection failed on at least one PE.\n"
+                       "  The preceding 'IPC admission' log line reports the detected group size.\n"
                        "  ");
       }
       return BackendType::IPC_BACKEND;

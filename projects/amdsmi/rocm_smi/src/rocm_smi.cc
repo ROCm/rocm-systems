@@ -3456,7 +3456,8 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
       return RSMI_STATUS_NOT_SUPPORTED;
     }
 
-    *temperature = static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
+    // Multiple by 1000 to convert from Centigrade to mCentigrade
+    *temperature = static_cast<int64_t>(val_ui16) * 1000;
 
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Success "
@@ -3794,45 +3795,6 @@ rsmi_status_t rsmi_dev_gpu_reset(uint32_t dv_ind) {
      << getRSMIStatusString(ret, false);
   LOG_INFO(ss);
   return ret;
-
-  CATCH
-}
-
-rsmi_status_t rsmi_dev_amdgpu_driver_reload(void) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-  // TODO(amdsmi_team): technically, we should block for all devices
-  // As this is a global operation, we can use a mutex to ensure
-  // that only one thread is trying to restart the driver at a time.
-  uint32_t dv_ind = 0;  // Default to first device
-  DEVICE_MUTEX
-  GET_DEV_FROM_INDX
-
-  rsmi_status_t restartRet = dev->restartAMDGpuDriver();
-
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-  if (restartRet != RSMI_STATUS_SUCCESS) {
-    if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-         << " | Fail - restart AMD GPU detected"
-         << " | Device #: " << dv_ind << " | Type: AMDGPU Driver Reload"
-         << " | Cause: AMDGPU Driver Reload failed "
-         << " | Returning = " << getRSMIStatusString(restartRet, false);
-      LOG_ERROR(ss);
-    }
-    return restartRet;
-  }
-
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Success - if restart completed successfully"
-       << " | Device #: " << dv_ind << " | Type: AMDGPU Driver Reload"
-       << " | Returning = " << getRSMIStatusString(restartRet, false);
-    LOG_INFO(ss);
-  }
-  return restartRet;
 
   CATCH
 }
