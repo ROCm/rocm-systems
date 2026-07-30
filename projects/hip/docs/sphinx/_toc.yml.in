@@ -99,10 +99,9 @@ subtrees:
       - file: reference/hip_runtime_api/global_defines_enums_structs_files
         subtrees:
         - entries:
-          - file: doxygen/html/group___global_defs
-          - file: doxygen/html/group___driver_types
-          - file: doxygen/html/annotated
-          - file: doxygen/html/files
+          - file: reference/hip_runtime_api/global_defines
+          - file: reference/hip_runtime_api/driver_types
+          - file: reference/hip_runtime_api/data_structures
   - file: reference/math_api
   - file: reference/complex_math_api
   - file: reference/env_variables
