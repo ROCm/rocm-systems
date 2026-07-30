@@ -34,6 +34,8 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
+#include "lib/aqlprofile/aqlprofile.hpp"
+
 #define CHECK_HSA(x)                                                                               \
     {                                                                                              \
         auto _status = (x);                                                                        \
@@ -167,6 +169,8 @@ QueueCreateInterceptor(hsa_agent_t        agent,
 extern "C" __attribute__((visibility("default"))) bool
 OnLoad(HsaApiTable* table, uint64_t, uint64_t, const char* const*)
 {
+    rocprofiler::aqlprofile::hsa_rsrc_factory_init(table);
+
     hsa_queue_create_fn = table->core_->hsa_queue_create_fn;
     // Install the Queue intercept
     table->core_->hsa_queue_create_fn = QueueCreateInterceptor;

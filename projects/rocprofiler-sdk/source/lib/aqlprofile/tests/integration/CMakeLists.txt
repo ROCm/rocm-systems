@@ -44,7 +44,7 @@ set(_v2_common_libs
     rocprofiler-sdk::rocprofiler-sdk-amd-comgr
     rocprofiler-sdk::rocprofiler-sdk-drm)
 
-# HSA-tool shared library: loaded via LD_PRELOAD, hooks hsa_queue_create to enable
+# HSA-tool shared library: loaded via HSA_TOOLS_LIB, hooks hsa_queue_create to enable
 # aqlprofile profiling on the queue (uses the in-tree v1 get_info).
 add_library(aqlprofile-v2-intercept SHARED)
 target_sources(aqlprofile-v2-intercept PRIVATE intercept.cpp)
@@ -80,7 +80,7 @@ set_tests_properties(
     tests.integration.aqlprofile.v2
     PROPERTIES
         ENVIRONMENT
-        "LD_PRELOAD=$<TARGET_FILE:aqlprofile-v2-intercept>;LD_LIBRARY_PATH=${_v2_ld_library_path}"
+        "HSA_TOOLS_LIB=$<TARGET_FILE:aqlprofile-v2-intercept>;LD_LIBRARY_PATH=${_v2_ld_library_path}"
         WORKING_DIRECTORY
         ${CMAKE_CURRENT_BINARY_DIR}
         LABELS
