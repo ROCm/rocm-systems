@@ -384,6 +384,11 @@ class Device : public NullDevice {
   //! Get the CPU agent with the least NUMA distance to this GPU
   const hsa_agent_t& getCpuAgent() const { return cpu_agent_info_->agent; }
 
+  //! Maps an HSA agent to a stable global index shared across all devices. GPU agents
+  //! occupy [0, numGpuAgents); CPU agents occupy [numGpuAgents, numGpuAgents + numCpuAgents).
+  //! Returns -1 if the agent is not one of the enumerated agents.
+  static int agentGlobalIndex(hsa_agent_t agent);
+
   //! Get the CPU agent that is in a 'index' NUMA node
   const hsa_agent_t getCpuAgent(int index) const {
     if ((index < 0) || (index >= cpu_agents_.size())) {
