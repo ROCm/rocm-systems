@@ -132,18 +132,20 @@ drain_pipes(const uint8_t*           records_base,
     const uint32_t region_slots = region_record_count;
     if(region_slots == 0 || (region_slots & (region_slots - 1)) != 0) return 0;
 
-    // First drain: sync each pipe's read cursor to the current wptr so we do not
-    // replay pre-existing records.
+    // First drain: start each pipe at the ring origin. The session buffer is
+    // freshly allocated, so every written record belongs to this session and
+    // should be consumed; the scan below only reads slots [rptr, wptr), never
+    // past the producer, so unwritten slots are never touched. If the ring
+    // already wrapped before this first drain, the overrun recovery below
+    // advances past the slots the producer has physically overwritten.
     if(!state.rptr_init)
     {
         for(uint32_t p = 0; p < npipes; ++p)
         {
-            uint64_t w    = __atomic_load_n(&wptr_arr[p], __ATOMIC_ACQUIRE);
-            state.rptr[p] = w;
-            __atomic_store_n(&rptr_arr[p], w, __ATOMIC_RELEASE);
+            state.rptr[p] = 0;
+            __atomic_store_n(&rptr_arr[p], 0, __ATOMIC_RELEASE);
         }
         state.rptr_init = true;
-        return 0;
     }
 
     auto read_rec = [&](uint32_t region, uint64_t idx) {
