@@ -368,8 +368,11 @@ stop_context(rocprofiler_context_id_t idx)
         const context* _expected = itr.load(std::memory_order_acquire);
         if(_expected && _expected->context_idx == idx.handle)
         {
-            // Stop queue-interposed services while the context is still in the active list so
-            // write_hook can coordinate serialized->unserialized transitions during drain.
+            // Stop queue-interposed services before clearing the active slot so
+            // disable_serialization() always runs before dispatches stop being instrumented.
+            // Clearing the slot first opens the opposite window, in which write_hook sees no
+            // active context and a dispatch is submitted without serializer packets while the
+            // serializer is still enabled.
             if(_expected->dispatch_counter_collection)
             {
                 rocprofiler::counters::stop_context(const_cast<context*>(_expected));
