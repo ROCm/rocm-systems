@@ -82,6 +82,61 @@ This includes the ROCm runtime and system dependencies.
 
             sudo zypper install amdrocm-decode-devel
 
+.. _install-build-utilities:
+
+Locating build utilities and samples
+====================================
+
+Building applications against rocDecode, or building and running the samples and
+CTest-based tests, requires the utility sources, CMake helper modules, and sample
+sources that are installed to ``$ROCM_PATH/share/rocdecode/``:
+
+* ``share/rocdecode/utils/`` - utility classes and HIP kernels shared by the samples
+  (for example, ``RocVideoDecoder`` and ``VideoDemuxer``)
+* ``share/rocdecode/cmake/`` - ``FindFFmpeg``, ``FindLibva``, and ``FindLibdrm_amdgpu``
+  helper modules
+* ``share/rocdecode/samples/`` - sample application sources
+* ``share/rocdecode/video/`` and ``share/rocdecode/frames/`` - test media and reference frames
+* ``share/rocdecode/test/`` - CTest definitions and test scripts
+
+The rocDecode runtime library and development headers come with a standard ROCm
+Core SDK install (the ``amdrocm-core-sdk`` meta package). However, the
+``share/rocdecode/`` files listed above do **not** ship with the Core SDK or the
+development package. When installing with a package manager, they are provided by
+the ``amdrocm-decode-test`` package. Install it if you need the utility sources,
+CMake modules, or samples to build against rocDecode (for example, when building
+rocAL). The ``amdrocm-decode`` package names apply to ROCm 7.13 and later; earlier
+ROCm releases use different package naming.
+
+.. tab-set::
+
+   .. tab-item:: Debian-based distros
+
+      .. code-block:: bash
+
+         sudo apt install amdrocm-decode-test
+
+   .. tab-item:: RHEL-based distros
+
+      .. code-block:: bash
+
+         sudo dnf install amdrocm-decode-test
+
+   .. tab-item:: SLES
+
+      .. code-block:: bash
+
+         sudo zypper install amdrocm-decode-test
+
+.. note::
+
+   In the generic (``.tar.zst``) artifacts published by TheRock, these
+   ``share/rocdecode/`` files are packaged in the ``rocdecode-test`` artifact
+   (for example, ``rocdecode_test_generic``) rather than the
+   ``rocdecode-dev`` artifact. If you obtain rocDecode from those artifacts,
+   install or extract the ``rocdecode-test`` artifact in addition to
+   ``rocdecode-dev``.
+
 .. _install-nightly:
 
 Install a nightly build
