@@ -8,6 +8,8 @@
 #include "common.h"
 #include "graph/xml.h"
 
+#include <dirent.h>
+
 // Detect whether GDR can work on a given NIC with the current CUDA device
 // Returns :
 // ncclSuccess : GDR works
@@ -32,26 +34,26 @@ static void ibGdrSupportInitOnce() {
   }
 
   if (ncclIbGdrModuleLoaded == 0) {
-    // Check for `memory_peers` directory containing `amdkfd/version`
-    // This `memory_peers` directory is created by NIC-GPU driver interaction
-    // On Linux kernel 5.15.0 (e.g. Ubuntu 22.04), `memory_peers` is created under `/sys/kernel/mm/`
-    // However, on newer kernels like Ubuntu 24.04.1 (Linux kernel 6.8.0) or Ubuntu 22.04.4 HWE (Linux kernel 6.5.0),
-    // this `memory_peers` directory is either not created (go to else-if condition)
-    // or created under a different path like `/sys/kernel/` or `/sys/` (depending on your ib_peer_mem module)
-    const char* memory_peers_paths[] = {"/sys/kernel/mm/memory_peers/amdkfd/version",
-                                        "/sys/kernel/memory_peers/amdkfd/version", "/sys/memory_peers/amdkfd/version",
-                                        NULL};
-    int i = 0;
+    // A peer-memory client registers itself as a named subdirectory of `memory_peers` (e.g. `amdkfd`),
+    // so any subdirectory means a client is loaded. Probing for the `ib_register_peer_memory_client`
+    // symbol instead gives false positives: many kernels export it with no client registered.
+    // `memory_peers` is created under `/sys/kernel/mm/` on Linux kernel 5.15.0 (e.g. Ubuntu 22.04), but on
+    // newer kernels it may be absent or live under `/sys/kernel/` or `/sys/`, depending on the ib_peer_mem module
+    const char* memory_peers_paths[] = {"/sys/kernel/mm/memory_peers", "/sys/kernel/memory_peers",
+                                        "/sys/memory_peers", NULL};
 
-    while (memory_peers_paths[i]) {
-      if (access(memory_peers_paths[i], F_OK) == 0) {
+    for (int i = 0; memory_peers_paths[i] && ncclIbGdrModuleLoaded == 0; ++i) {
+      DIR* dir = opendir(memory_peers_paths[i]);
+      if (dir == NULL) continue;
+      struct dirent* entry;
+      while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) continue;
         ncclIbGdrModuleLoaded = 1;
-        INFO(NCCL_INIT, "Found %s", memory_peers_paths[i]);
+        INFO(NCCL_INIT, "Found peer memory client %s/%s", memory_peers_paths[i], entry->d_name);
         break;
-      } else {
-        ncclIbGdrModuleLoaded = 0;
       }
-      ++i;
+      closedir(dir);
     }
 
     char strValue[MAX_STR_LEN];
@@ -60,27 +62,6 @@ static void ibGdrSupportInitOnce() {
       int roMode = ncclParamIbPciRelaxedOrdering();
       (void)ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue);
       if (strcmp(strValue, "1") == 0 && roMode == 0) ncclIbGdrModuleLoaded = 0;
-    }
-
-    if (ncclIbGdrModuleLoaded == 0) {
-      // Check for `ib_register_peer_memory_client` symbol in `/proc/kallsyms`
-      // if your system uses native OS ib_peer module
-      char buf[256];
-      FILE* fp = NULL;
-      fp = fopen("/proc/kallsyms", "r");
-
-      if (fp == NULL) {
-        INFO(NCCL_INIT, "Could not open /proc/kallsyms");
-      } else {
-        while (fgets(buf, sizeof(buf), fp) != NULL) {
-          if (strstr(buf, "t ib_register_peer_memory_client") != NULL ||
-              strstr(buf, "T ib_register_peer_memory_client") != NULL) {
-            ncclIbGdrModuleLoaded = 1;
-            INFO(NCCL_INIT, "Found ib_register_peer_memory_client in /proc/kallsyms");
-            break;
-          }
-        }
-      }
     }
   }
 #else
