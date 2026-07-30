@@ -826,7 +826,6 @@ class OmniSoC_Base:
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
         # Roofline can be skipped via --no-roof
         # Roofline not supported on MI 100
-        # Roofline not supported on Strix Halo
         # If --filter-blocks is provided, roofline block (block 4) should be mentioned
         if (
             self.get_args().no_roof
