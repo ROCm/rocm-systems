@@ -9,6 +9,7 @@ set(control_sources
 
 set(control_headers
     ${CMAKE_CURRENT_LIST_DIR}/clock.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/clocks/posix.hpp
     ${CMAKE_CURRENT_LIST_DIR}/clocks/steady.hpp
     ${CMAKE_CURRENT_LIST_DIR}/session.hpp
     ${CMAKE_CURRENT_LIST_DIR}/triggers/roctx.hpp
@@ -19,3 +20,7 @@ target_sources(
     rocprofiler-systems-core-library
     PRIVATE ${control_sources} ${control_headers}
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
