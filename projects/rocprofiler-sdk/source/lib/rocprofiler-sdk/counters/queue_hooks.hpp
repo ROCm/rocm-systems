@@ -51,8 +51,9 @@ write_hook(const hsa::Queue&                                        queue,
            bool&                                                    is_serialized);
 
 // Explicit replacement for the dispatch-counter completion callback. Iterates
-// active dispatch_counter_collection contexts and calls each callback's
-// completed_cb.
+// registered dispatch_counter_collection contexts (not only active ones) and calls
+// each callback's completed_cb; completed_cb self-filters via packet_return_map so
+// in-flight dispatches still complete after stop_context.
 void
 signal_completion_hook(const hsa::Queue&                           queue,
                        const hsa::rocprofiler_packet&              kernel_packet,

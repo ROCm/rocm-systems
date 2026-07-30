@@ -182,9 +182,11 @@ stop_context(const context::context* ctx)
 
     if(controller)
     {
+        // Drain in-flight dispatches while the context remains in the active list (see
+        // context::stop_context ordering). Completions are routed via registered contexts in
+        // counters::signal_completion_hook.
+        hsa::queue_controller_sync();
         controller->disable_serialization();
-        // No per-queue callback to remove; counters::write_hook no-ops once
-        // dispatch_counter_collection is disabled above.
     }
 
     callback_thread_stop();
