@@ -203,8 +203,13 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return file_offset <= limit && size <= limit - file_offset;
 }
 
-void apply_kernel_descriptor_resource_translation(KD &desc, const KdTranslation &translation,
-                                                  rj_code_arch_t target_arch) {
+/// @brief Write the translated resource fields into a descriptor.
+///
+/// @returns False when the request cannot be encoded without changing what the
+/// kernel body may use, which the caller must surface as a failed translation.
+[[nodiscard]] bool apply_kernel_descriptor_resource_translation(KD &desc,
+                                                                const KdTranslation &translation,
+                                                                rj_code_arch_t target_arch) {
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                   translation.target_vgpr_granulated);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
@@ -241,10 +246,59 @@ void apply_kernel_descriptor_resource_translation(KD &desc, const KdTranslation 
   }
 
   if (target_uses_gfx10_plus_mode_bits(target_arch)) {
-    desc.compute_pgm_rsrc3 = 0;
-    if (const uint32_t inst_pref = target_default_inst_pref_size(target_arch); inst_pref != 0) {
-      AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
-                      inst_pref);
+    // RSRC3 is not one register; its layout differs per family. A source whose
+    // layout does not match the target's must be rebuilt -- a GFX9/CDNA source
+    // encodes ACCUM_OFFSET here, GFX10 has no INST_PREF_SIZE at all, and GFX11
+    // disagrees with GFX12 on that field's width and on bits 10:11. When the
+    // layouts do match, the word is the producing compiler's own
+    // configuration -- INST_PREF_SIZE (its sizing of the instruction preload),
+    // and on GFX12+ also GLG_EN, NAMED_BAR_CNT, ENABLE_DYNAMIC_VGPR, TCP_SPLIT
+    // and ENABLE_DIDT_THROTTLE. None of those are DBT's to invent, and none of
+    // them change meaning across a revision translation, so carry the word over
+    // verbatim.
+    //
+    // Rebuilding it instead was a source of real corruption: it discarded
+    // NAMED_BAR_CNT (set by 27 of 1036 kernels in the gfx1250 Gluon suites) and,
+    // because INST_PREF_SIZE widens from 6 bits on GFX11 to 8 on GFX12+,
+    // truncated any preload above 63 units -- 25% of those same kernels.
+    const Rsrc3Layout target_layout = rsrc3_layout(target_arch);
+    if (!rsrc3_carries_verbatim(translation.source_arch, target_arch)) {
+      desc.compute_pgm_rsrc3 = 0;
+      if (const uint32_t inst_pref = target_default_inst_pref_size(target_arch); inst_pref != 0) {
+        // The field is 6 bits on GFX11 and 8 on GFX12+; write it through the
+        // target's own definition rather than assuming the narrower one.
+        if (target_layout == Rsrc3Layout::Gfx120 || target_layout == Rsrc3Layout::Gfx125) {
+          AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE,
+                          inst_pref);
+        } else {
+          AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
+                          inst_pref);
+        }
+      }
+    } else if (rsrc3_layout_has_shared_vgpr_count(target_layout)) {
+      // SHARED_VGPR_COUNT is the one carried field this function invalidates by
+      // its own edits: it rewrites both the wave size and the RSRC1 VGPR
+      // allocation that the field is constrained against. Per LLVM the count
+      // must be 0 for wave32, and for wave64 must satisfy
+      // (compute_pgm_rsrc1.vgprs + 1) * 4 + shared_vgpr_count * 8 <= 256.
+      //
+      // The count describes registers the unchanged kernel body uses, so a
+      // smaller descriptor does not make the body need fewer of them. Clamping
+      // the field to fit would therefore hand the target an allocation the body
+      // overruns; refuse instead, the way LLVM refuses the same overcommit.
+      // Resource planning reserves these blocks before choosing the allocation,
+      // so reaching this point means the request was inconsistent.
+      const uint32_t shared = AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
+                                              kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT);
+      if (shared != 0) {
+        if (translation.target_wave_size == 32)
+          return false;
+        const uint32_t granulated = AMDHSA_BITS_GET(
+            desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+        const uint32_t arch_vgprs = (granulated + 1u) * 4u;
+        if (arch_vgprs + rsrc3_shared_vgpr_reserved_registers(shared) > 256u)
+          return false;
+      }
     }
   } else if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
     // On GFX90A/GFX942/GFX950, AccVGPRs are placed by ACCUM_OFFSET rather than
@@ -316,6 +370,7 @@ void apply_kernel_descriptor_resource_translation(KD &desc, const KdTranslation 
     desc.kernel_code_properties = 0;
     desc.kernarg_preload = 0;
   }
+  return true;
 }
 
 [[nodiscard]] bool set_kernel_entry_from_vaddr(KD &desc, uint64_t descriptor_vaddr,
@@ -1244,7 +1299,8 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
 
   KD desc;
   std::memcpy(&desc, image_.data() + translation.descriptor_file_offset, sizeof(desc));
-  apply_kernel_descriptor_resource_translation(desc, translation, target_arch);
+  if (!apply_kernel_descriptor_resource_translation(desc, translation, target_arch))
+    return false;
 
   std::memcpy(image_.data() + translation.descriptor_file_offset, &desc, sizeof(desc));
   if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
@@ -1307,7 +1363,8 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
     static_assert(sizeof(KD) == 64, "sidecar descriptor snapshot size mismatch");
     KD desc{};
     std::memcpy(&desc, translation.source_descriptor_bytes.data(), sizeof(desc));
-    apply_kernel_descriptor_resource_translation(desc, translation, target_arch);
+    if (!apply_kernel_descriptor_resource_translation(desc, translation, target_arch))
+      return std::nullopt;
     if (!set_kernel_entry_from_vaddr(desc, descriptor_vaddr, text_vaddr_,
                                      translation.target_entry_text_offset))
       return std::nullopt;
