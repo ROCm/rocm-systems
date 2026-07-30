@@ -2506,6 +2506,55 @@ template <typename Traits> void generated_vop1_dpp64_preserves_masked_destinatio
   }
 }
 
+void rdna4_generated_vop1_64_preserves_inactive_destination() {
+  amdgpu::GpuMemory mem("rdna4_vop1_f64_exec_mask_mem");
+  amdgpu::L2Cache l2("rdna4_vop1_f64_exec_mask_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_vop1_f64_exec_mask_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  constexpr uint64_t kExec = 0x55555555ULL;
+  wf->set_exec(kExec);
+
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDst = 8;
+  constexpr uint64_t kOldDstBase = 0xA5A500005A5A0000ULL;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint64_t old_dst = kOldDstBase + lane;
+    cu->write_vgpr(vbase + kSrc, lane, 100u + lane);
+    cu->write_vgpr(vbase + kDst, lane, static_cast<uint32_t>(old_dst));
+    cu->write_vgpr(vbase + kDst + 1, lane, static_cast<uint32_t>(old_dst >> 32));
+  }
+
+  rdna4::Vop1MachineInst raw{};
+  raw.src0 = 256 + kSrc;
+  raw.vdst = kDst;
+
+  rdna4::VCvtF64I32Vop1 inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const uint64_t expected = (kExec & (1ULL << lane))
+                                  ? std::bit_cast<uint64_t>(static_cast<double>(100u + lane))
+                                  : kOldDstBase + lane;
+    EXPECT_EQ(cu->read_vgpr(vbase + kDst, lane), static_cast<uint32_t>(expected))
+        << "low dword, lane " << lane;
+    EXPECT_EQ(cu->read_vgpr(vbase + kDst + 1, lane), static_cast<uint32_t>(expected >> 32))
+        << "high dword, lane " << lane;
+  }
+}
+
 template <typename Traits> void wave32_generated_vop1_dpp16_fetch_inactive_uses_fi() {
   SCOPED_TRACE(Traits::name);
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp16_fi_mem");
@@ -3098,6 +3147,10 @@ TEST(DppPermuteTest, CdnaGeneratedVop1Dpp64PreservesMaskedDestination) {
   generated_vop1_dpp64_preserves_masked_destination<Cdna2DppTraits>();
   generated_vop1_dpp64_preserves_masked_destination<Cdna3DppTraits>();
   generated_vop1_dpp64_preserves_masked_destination<Cdna4DppTraits>();
+}
+
+TEST(DppPermuteTest, Rdna4GeneratedVop1F64PreservesInactiveDestination) {
+  rdna4_generated_vop1_64_preserves_inactive_destination();
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1DppWriteMaskHonorsBoundCtrl) {
