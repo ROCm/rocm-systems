@@ -66,9 +66,6 @@ class IGPUBackend {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
   virtual amdsmi_status_t GetVbiosInfo(amdsmi_vbios_info_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t GetProcessList(std::vector<amdsmi_proc_info_t>*) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
   virtual amdsmi_status_t GetUuid(unsigned int*, char*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
   virtual amdsmi_status_t GetGpuCacheInfo(amdsmi_gpu_cache_info_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;

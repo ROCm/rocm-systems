@@ -56,6 +56,10 @@ message("")
 # re-running cmake.
 file(GLOB_RECURSE unitSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
 file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
+if(NOT ENABLE_WSL_BACKEND)
+    list(FILTER unitSources EXCLUDE REGEX "/unit/wsl/")
+    list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
+endif()
 
 set(TEST "amdsmitst")
 

@@ -68,7 +68,6 @@ class WSLGPUBackend : public IGPUBackend {
   amdsmi_status_t GetPcieInfo(amdsmi_pcie_info_t*) override;
   amdsmi_status_t GetDriverInfo(amdsmi_driver_info_t*) override;
   amdsmi_status_t GetVbiosInfo(amdsmi_vbios_info_t*) override;
-  amdsmi_status_t GetProcessList(std::vector<amdsmi_proc_info_t>*) override;
   amdsmi_status_t GetUuid(unsigned int*, char*) override;
   amdsmi_status_t GetGpuCacheInfo(amdsmi_gpu_cache_info_t*) override;
   amdsmi_status_t GetFwInfo(amdsmi_fw_info_t*) override;

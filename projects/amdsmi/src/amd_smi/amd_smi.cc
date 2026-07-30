@@ -5416,23 +5416,7 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
   }
 
 #ifdef ENABLE_WSL_BACKEND
-  if (auto* b = gpu_device->backend()) {
-    std::vector<amdsmi_proc_info_t> processes;
-    status_code = b->GetProcessList(&processes);
-    if (status_code != AMDSMI_STATUS_SUCCESS) return status_code;
-
-    if ((*max_processes == 0) || processes.empty()) {
-      *max_processes = static_cast<uint32_t>(processes.size());
-      return AMDSMI_STATUS_SUCCESS;
-    }
-    if (!list) return AMDSMI_STATUS_INVAL;
-
-    const uint32_t capacity = *max_processes;
-    *max_processes = static_cast<uint32_t>(processes.size());
-    const uint32_t copy_count = std::min(capacity, static_cast<uint32_t>(processes.size()));
-    for (uint32_t i = 0; i < copy_count; ++i) list[i] = processes[i];
-    return capacity >= processes.size() ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
-  }
+  if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
   // Get the list of compute processes running on the GPU
@@ -5516,15 +5500,6 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
     if (r != AMDSMI_STATUS_SUCCESS) continue;
 
     uint32_t gpu_index = gpu_device->get_gpu_id();
-#ifdef ENABLE_WSL_BACKEND
-    if (auto* b = gpu_device->backend()) {
-      std::vector<amdsmi_proc_info_t> processes;
-      amdsmi_status_t proc_r = b->GetProcessList(&processes);
-      if (proc_r != AMDSMI_STATUS_SUCCESS) return proc_r;
-      for (auto& proc_info : processes) merge_proc_into_pid_map(pid_map, gpu_index, proc_info);
-      continue;
-    }
-#endif
     auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
     for (auto& [pid, proc_info] : compute_process_list)
       merge_proc_into_pid_map(pid_map, gpu_index, proc_info);

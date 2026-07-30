@@ -734,13 +734,6 @@ amdsmi_status_t WSLGPUBackend::GetGpuMetricsInfo(amdsmi_gpu_metrics_t* info) {
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t WSLGPUBackend::GetProcessList(std::vector<amdsmi_proc_info_t>* processes) {
-  // D3DKMTEnumProcesses returns Windows host PIDs; /proc/<pid>/exe won't resolve
-  // them in the WSL2 guest. Process enumeration is not supported on WSL.
-  (void)processes;
-  return AMDSMI_STATUS_NOT_SUPPORTED;
-}
-
 amdsmi_status_t WSLGPUBackend::GetUuid(unsigned int* uuid_length, char* uuid) {
   if (uuid_length == nullptr || uuid == nullptr || *uuid_length < AMDSMI_GPU_UUID_SIZE)
     return AMDSMI_STATUS_INVAL;

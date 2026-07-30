@@ -35,6 +35,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <sys/stat.h>
 
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/rocdxg_smi.h"
@@ -43,11 +44,15 @@ namespace {
 
 // ---------------------------------------------------------------------------
 // Suite fixture: opens KFD and enumerates GPU nodes at suite startup.
-// Live tests call RequireGpu() to skip when no GPU is found.
+// Live tests call RequireGpu() to skip when no WSL GPU is present.
 // ---------------------------------------------------------------------------
 class WslFunctionalReadOnly : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
+    struct stat st {};
+    if (stat("/dev/dxg", &st) != 0) return;  // not WSL2
+    wsl_present_ = true;
+
     HSAKMT_STATUS r = hsaKmtOpenKFD();
     if (r != HSAKMT_STATUS_SUCCESS && r != HSAKMT_STATUS_KERNEL_ALREADY_OPENED) return;
     kfd_opened_ = true;
@@ -79,16 +84,23 @@ class WslFunctionalReadOnly : public ::testing::Test {
     }
   }
 
-  // Call at the start of live tests that require an actual GPU.
-  void RequireGpu() {
-    if (!gpu_ok_) GTEST_SKIP() << "No WSL GPU available (no node with NumFComputeCores > 0)";
-  }
+  // Call at the start of live tests that require an actual WSL GPU.
+  // Uses GTEST_SKIP_ directly so the macro's `return` exits the test body.
+#define RequireGpu()                                                         \
+  do {                                                                       \
+    if (!wsl_present_)                                                       \
+      GTEST_SKIP() << "No /dev/dxg — not running under WSL2";              \
+    if (!gpu_ok_)                                                             \
+      GTEST_SKIP() << "No WSL GPU available (no node with NumFComputeCores > 0)"; \
+  } while (0)
 
+  static bool wsl_present_;
   static bool kfd_opened_;
   static bool gpu_ok_;
   static uint32_t node_id_;
 };
 
+bool WslFunctionalReadOnly::wsl_present_ = false;
 bool WslFunctionalReadOnly::kfd_opened_ = false;
 bool WslFunctionalReadOnly::gpu_ok_ = false;
 uint32_t WslFunctionalReadOnly::node_id_ = 0;
