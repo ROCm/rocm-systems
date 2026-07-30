@@ -746,8 +746,12 @@ bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
          (rcclParamWarpSpeedAutoMode() != 0) && comm-> cuCount > 128; // Only use in SPX mode, 256 CU on gfx950
 }
 
+bool rcclWarpSpeedChannelCountSupported(struct ncclComm* comm) {
+  return comm->nChannels <= (MAXCHANNELS) / 2;
+}
+
 ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskColl* info) {
-  if (info->useWarpSpeed && comm->nChannels > (MAXCHANNELS) / 2) {
+  if (info->useWarpSpeed && !rcclWarpSpeedChannelCountSupported(comm)) {
     WARN("WarpSpeed does not support more than %d channels. Current number of channels is %d. To avoid hang, run with "
          "RCCL_WARP_SPEED_AUTO=0",
          MAXCHANNELS / 2, comm->nChannels);
@@ -785,8 +789,16 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
       if (!unrollFactorSet) comm->unroll = NCCL_UNROLL_2;
     }
     if (rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) {
-      info->nWarps = 4;
-      info->useWarpSpeed = true;
+      // Skip WarpSpeed when the comm exceeds its channel limit (e.g. RCCL_ENABLE_INTRANET=1 drives
+      // nChannels to MAXCHANNELS) instead of failing. Force-enable still errors below.
+      if (!rcclWarpSpeedChannelCountSupported(comm)) {
+        if (comm->rank == 0)
+          INFO(NCCL_TUNING, "RCCL WarpSpeed auto-disabled: %d channels exceeds max %d supported",
+               comm->nChannels, MAXCHANNELS / 2);
+      } else {
+        info->nWarps = 4;
+        info->useWarpSpeed = true;
+      }
     }
   }
   NCCLCHECK(validChannelsForWarpSpeed(comm, info));
