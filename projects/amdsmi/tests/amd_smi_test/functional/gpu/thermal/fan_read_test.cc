@@ -22,10 +22,10 @@
 #include "fan_read.h"
 
 #include <gtest/gtest.h>
+#include <sys/stat.h>
 
 #include <cstdint>
 #include <iostream>
-#include <sys/stat.h>
 
 #include "amd_smi/amdsmi.h"
 #include "test_common.h"
@@ -115,7 +115,7 @@ void TestFanRead::Run(void) {
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_gpu_fan_rpms(processor_handles_[i], 0, &val_i64);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
-      struct stat dxg_st {};
+      struct stat dxg_st{};
       bool on_wsl = (stat("/dev/dxg", &dxg_st) == 0);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED && on_wsl) {
         // fan_rpms goes through rsmi_wrapper which returns NOT_SUPPORTED on WSL;

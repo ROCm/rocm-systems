@@ -32,10 +32,10 @@
 #if defined(ENABLE_WSL_BACKEND)
 
 #include <gtest/gtest.h>
+#include <sys/stat.h>
 
 #include <cstdint>
 #include <cstring>
-#include <sys/stat.h>
 
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/rocdxg_smi.h"
@@ -49,7 +49,7 @@ namespace {
 class WslFunctionalReadOnly : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
-    struct stat st {};
+    struct stat st{};
     if (stat("/dev/dxg", &st) != 0) return;  // not WSL2
     wsl_present_ = true;
 
@@ -86,12 +86,10 @@ class WslFunctionalReadOnly : public ::testing::Test {
 
   // Call at the start of live tests that require an actual WSL GPU.
   // Uses GTEST_SKIP_ directly so the macro's `return` exits the test body.
-#define RequireGpu()                                                         \
-  do {                                                                       \
-    if (!wsl_present_)                                                       \
-      GTEST_SKIP() << "No /dev/dxg — not running under WSL2";              \
-    if (!gpu_ok_)                                                             \
-      GTEST_SKIP() << "No WSL GPU available (no node with NumFComputeCores > 0)"; \
+#define RequireGpu()                                                                          \
+  do {                                                                                        \
+    if (!wsl_present_) GTEST_SKIP() << "No /dev/dxg — not running under WSL2";                \
+    if (!gpu_ok_) GTEST_SKIP() << "No WSL GPU available (no node with NumFComputeCores > 0)"; \
   } while (0)
 
   static bool wsl_present_;
