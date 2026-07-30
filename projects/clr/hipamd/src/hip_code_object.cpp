@@ -282,12 +282,6 @@ hipError_t DynCO::populateDynGlobalFuncs() {
   return hipSuccess;
 }
 
-// Static Code Object
-void StatCO::DeferredInitManagedVarState::ReleaseCommands() {
-  completion.reset();
-  copies.clear();
-}
-
 StatCO::StatCO(const PlatformState& owner) : owner_(owner) {}
 
 StatCO::~StatCO() {
@@ -494,8 +488,6 @@ void StatCO::RemoveAllFatBinaries() {
   }
   managedVars_.clear();
 
-  // <REVIEW HELPER> Clearing the state map invokes its RAII cleanup, replacing
-  // separate marker/copy/error-map loops that could get out of sync.
   deferredInitManagedVarStates_.clear();
 
   // Delete all registered functions and clear the container
@@ -642,111 +634,72 @@ void StatCO::ResizeForDevices(size_t device_count) {
   }
 }
 
-// <REVIEW HELPER> Submission is isolated here because it must retain every exact
-// copy command and publish the state only after the whole batch is queued. This
-// helper is private and is called only while InitManagedVarDevicePtr holds
-// sclock_; it deliberately does not acquire the mutex again.
 hipError_t StatCO::QueueManagedVarInitialization(int deviceId,
                                                  DeferredInitManagedVarState& state) {
+  auto fail = [&state](hipError_t error) {
+    state.phase = DeferredInitManagedVarState::Phase::Failed;
+    state.terminalError = error;
+    return error;
+  };
+
   if (managedVars_.empty()) {
-    state.initialized = true;
+    state.phase = DeferredInitManagedVarState::Phase::Completed;
     return hipSuccess;
   }
 
   hip::Stream* stream = g_devices.at(deviceId)->NullStream();
   if (stream == nullptr) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
-    return hipErrorInvalidResourceHandle;
+    return fail(hipErrorInvalidResourceHandle);
   }
 
-  std::vector<CommandHandle> initCopyCmds;
   for (auto& [_, managedVars] : managedVars_) {
     for (Var* var : managedVars) {
       FatBinaryInfo** module = var->ModuleInfo();
       if (*module == nullptr) {
-        // <REVIEW HELPER> DigestFatBinary also takes sclock_. This is why
-        // sclock_ remains a recursive_mutex: lazy module loading can re-enter
-        // the same lock while the first-touch state transition is serialized.
+        // Lazy module loading re-enters sclock_ through DigestFatBinary.
         std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
       }
 
       hipError_t result = var->AllocateManagedVarPtr();
       if (result != hipSuccess) {
-        return result;
+        return fail(result);
       }
 
       amd::Memory* mem = nullptr;
       result = var->GetStatDeviceVar(&mem, deviceId);
       if (result != hipSuccess) {
-        return result;
+        return fail(result);
       }
 
-      // <REVIEW HELPER> This must stay host-asynchronous. A synchronous copy was
-      // tried originally, but deadlocked when a callback blocked the null stream.
-      MemcpyCommandResult copyResult = ihipMemcpyWithCommand(
-          reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(), mem->getSize(),
-          hipMemcpyHostToDevice, *stream, /*isHostAsync=*/true, /*isGPUAsync=*/true);
-      if (copyResult.status != hipSuccess) {
-        return copyResult.status;
-      }
-      if (copyResult.command != nullptr) {
-        // Sampling the stream's last command here races with unrelated
-        // null-stream work, so keep the exact submitted copy.
-        initCopyCmds.push_back(std::move(copyResult.command));
+      // A host-synchronous copy can deadlock when a callback blocks the null stream.
+      result = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
+                          mem->getSize(), hipMemcpyHostToDevice, *stream,
+                          /*isHostAsync=*/true, /*isGPUAsync=*/true);
+      if (result != hipSuccess) {
+        return fail(result);
       }
     }
   }
 
-  state.copies = std::move(initCopyCmds);
-  // <REVIEW HELPER> The marker gives other streams a device-side dependency
-  // without blocking the calling host thread.
   state.completion.reset(new amd::Marker(*stream, kMarkerDisableFlush));
+  if (state.completion == nullptr) {
+    return fail(hipErrorOutOfMemory);
+  }
   state.completion->enqueue();
-  state.initialized = true;
+  state.phase = DeferredInitManagedVarState::Phase::InProgress;
   return hipSuccess;
 }
 
-// <REVIEW HELPER> Status inspection is deferred until the trailing marker is
-// terminal; waiting on each earlier in-order copy is therefore nonblocking.
-// The marker alone cannot report failures from earlier in-order copies, which
-// is why the exact copy commands must also be retained and inspected.
-hipError_t StatCO::FinalizeManagedVarInitialization(int deviceId,
-                                                    DeferredInitManagedVarState& state) {
-  if (state.completion == nullptr || state.completion->status() > CL_COMPLETE) {
-    return hipSuccess;
+void StatCO::UpdateManagedVarInitialization(DeferredInitManagedVarState& state) {
+  if (state.phase == DeferredInitManagedVarState::Phase::InProgress &&
+      state.completion->status() <= CL_COMPLETE) {
+    state.completion.reset();
+    state.phase = DeferredInitManagedVarState::Phase::Completed;
   }
-
-  cl_int failureStatus = CL_SUCCESS;
-  for (const CommandHandle& copyCmd : state.copies) {
-    if (!copyCmd->awaitCompletion() && failureStatus == CL_SUCCESS) {
-      failureStatus = copyCmd->status();
-    }
-  }
-  if (failureStatus == CL_SUCCESS && state.completion->status() < CL_COMPLETE) {
-    failureStatus = state.completion->status();
-  }
-  state.ReleaseCommands();
-
-  if (failureStatus == CL_SUCCESS) {
-    return hipSuccess;
-  }
-
-  const bool isGPUInError = amd::Device::IsGPUInError();
-  const cl_int effectiveStatus = isGPUInError ? amd::Device::GetGPUError() : failureStatus;
-  const hipError_t initError = ConvertCLErrorIntoHIPError(effectiveStatus);
-  ClPrint(amd::LOG_ERROR, amd::LOG_API,
-          "Deferred managed variable initialization failed on device %d: command status %d, "
-          "effective status %d%s",
-          deviceId, failureStatus, effectiveStatus, isGPUInError ? " (GPU error)" : "");
-  state.terminalError = initError;
-  return initError;
 }
 
-// <REVIEW HELPER> Nonblocking and per-thread streams do not serialize with the
-// null stream, so enqueue a device-side wait instead of synchronizing the host.
-// No marker is needed for the null stream itself because queue order already
-// places the operation after its initialization copies. The Marker constructor
-// retains state.completion through its wait list until the wait marker finishes.
+// Nonblocking and per-thread streams need an explicit dependency on null-stream initialization.
 void StatCO::OrderStreamAfterManagedVarInitialization(int deviceId, hip::Stream* orderStream,
                                                       const DeferredInitManagedVarState& state) {
   if (state.completion == nullptr || orderStream == nullptr ||
@@ -763,14 +716,19 @@ void StatCO::OrderStreamAfterManagedVarInitialization(int deviceId, hip::Stream*
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId, hip::Stream* orderStream) {
   std::scoped_lock lock(sclock_);
   DeferredInitManagedVarState& state = deferredInitManagedVarStates_[deviceId];
-  if (state.terminalError != hipSuccess) {
+  using Phase = DeferredInitManagedVarState::Phase;
+
+  if (state.phase == Phase::Failed) {
     return state.terminalError;
-  }
-  if (!state.initialized) {
+  } else if (state.phase == Phase::NotStarted) {
     IHIP_RETURN_ONFAIL(QueueManagedVarInitialization(deviceId, state));
+  } else if (state.phase == Phase::InProgress) {
+    UpdateManagedVarInitialization(state);
   }
-  IHIP_RETURN_ONFAIL(FinalizeManagedVarInitialization(deviceId, state));
-  OrderStreamAfterManagedVarInitialization(deviceId, orderStream, state);
+
+  if (state.phase == Phase::InProgress) {
+    OrderStreamAfterManagedVarInitialization(deviceId, orderStream, state);
+  }
   return hipSuccess;
 }
 

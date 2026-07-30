@@ -323,8 +323,6 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior) {
   HipTest::BlockingContext b_context{nullptr};
   hipStream_t kernel_stream{nullptr};
 
-  // <REVIEW HELPER> block_stream now reports callback-enqueue failures instead
-  // of letting the test continue with a stream that was never blocked.
   HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
@@ -378,8 +376,6 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior) {
   HipTest::BlockingContext b_context{nullptr};
   hipStream_t kernel_stream{nullptr};
 
-  // <REVIEW HELPER> Validate blocker setup so this remains a deadlock regression,
-  // not a false pass after callback-enqueue failure.
   HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
@@ -511,39 +507,51 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyAsync_CrossCurrentDeviceStream) {
 HIP_TEST_CASE(Unit_hipManagedKeyword_NonBlockingStreamOrdering) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
-  // <REVIEW HELPER> StreamGuard guarantees destruction on every assertion path;
-  // the original manual destroy leaked the stream when an assertion aborted.
-  StreamGuard nb_stream(Streams::withFlags, hipStreamNonBlocking);
-  // <REVIEW HELPER> Warm callback dispatch before measuring ordering so startup
-  // latency cannot masquerade as the stream being correctly blocked.
-  HipTest::StreamCallbackLatch warmup_latch(nb_stream.stream());
-  HIP_CHECK(warmup_latch.enqueue());
-  REQUIRE(warmup_latch.wait_for(std::chrono::seconds(5)));
+  StreamGuard first_stream(Streams::withFlags, hipStreamNonBlocking);
+  StreamGuard second_stream(Streams::withFlags, hipStreamNonBlocking);
+  LinearAllocGuard<int> device_result(LinearAllocs::hipMalloc, sizeof(int));
 
-  HipTest::StreamCallbackLatch completion_latch(nb_stream.stream());
+  // Warm callback dispatch so startup latency cannot look like stream blocking.
+  HipTest::StreamCallbackLatch first_warmup(first_stream.stream());
+  HipTest::StreamCallbackLatch second_warmup(second_stream.stream());
+  HIP_CHECK(first_warmup.enqueue());
+  HIP_CHECK(second_warmup.enqueue());
+  REQUIRE(first_warmup.wait_for(std::chrono::seconds(5)));
+  REQUIRE(second_warmup.wait_for(std::chrono::seconds(5)));
+
+  HipTest::StreamCallbackLatch first_completion(first_stream.stream());
+  HipTest::StreamCallbackLatch second_completion(second_stream.stream());
   HipTest::BlockingContext b_context{nullptr};
-  // <REVIEW HELPER> A checked blocker makes the null-stream dependency
-  // deterministic and guarantees failure-safe unblocking through RAII.
   HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   constexpr int kSentinel = 0x5151;
-  WriteManagedNonBlocking<<<dim3(kNumBlocks), dim3(kBlockSize), 0, nb_stream.stream()>>>(kSentinel);
+  WriteManagedNonBlocking<<<dim3(kNumBlocks), dim3(kBlockSize), 0, first_stream.stream()>>>(
+      kSentinel);
+  HIP_CHECK(hipGetLastError());
+  ReadManagedInitialized<<<1, 1, 0, second_stream.stream()>>>(device_result.ptr());
   HIP_CHECK(hipGetLastError());
 
-  // <REVIEW HELPER> Without the explicit initialization dependency, the warmed
-  // nonblocking stream reaches this callback while the null stream is blocked.
-  // A bounded latch replaced immediate query/unblock, which could pass by race.
-  HIP_CHECK(completion_latch.enqueue());
-  const bool completed_while_blocked =
-      completion_latch.wait_for(std::chrono::milliseconds(500));
+  // Both first-touch callers must reuse the same blocked initialization marker.
+  HIP_CHECK(first_completion.enqueue());
+  HIP_CHECK(second_completion.enqueue());
+  const bool first_completed_while_blocked =
+      first_completion.wait_for(std::chrono::milliseconds(500));
+  const bool second_completed_while_blocked =
+      second_completion.wait_for(std::chrono::milliseconds(500));
 
-  // <REVIEW HELPER> Release and synchronize before assertions so even a failing
-  // mutation cannot leave the process with a permanently blocked null stream.
   b_context.unblock_stream();
-  HIP_CHECK(hipStreamSynchronize(nb_stream.stream()));
-  REQUIRE_FALSE(completed_while_blocked);
-  REQUIRE(completion_latch.complete());
+  HIP_CHECK(hipStreamSynchronize(first_stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(second_stream.stream()));
+  REQUIRE_FALSE(first_completed_while_blocked);
+  REQUIRE_FALSE(second_completed_while_blocked);
+  REQUIRE(first_completion.complete());
+  REQUIRE(second_completion.complete());
+
+  int initialized_value = 0;
+  HIP_CHECK(hipMemcpy(&initialized_value, device_result.ptr(), sizeof(initialized_value),
+                      hipMemcpyDeviceToHost));
+  REQUIRE(initialized_value == 1);
 
   for (int i = 0; i < kN; ++i) {
     INFO("Index " << i);

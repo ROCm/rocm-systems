@@ -797,16 +797,8 @@ namespace hip {
   };
   using CommandHandle = std::unique_ptr<amd::Command, CommandReleaser>;
 
-  struct MemcpyCommandResult {
-    hipError_t status;
-    CommandHandle command;
-  };
-
   hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                         hip::Stream& stream, bool isHostAsync = false, bool isGPUAsync = true);
-  MemcpyCommandResult ihipMemcpyWithCommand(void* dst, const void* src, size_t sizeBytes,
-                                            hipMemcpyKind kind, hip::Stream& stream,
-                                            bool isHostAsync, bool isGPUAsync);
   hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream = nullptr,
                           bool isAsync = false);
 

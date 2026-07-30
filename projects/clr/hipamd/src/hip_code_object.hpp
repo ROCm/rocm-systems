@@ -211,26 +211,19 @@ class StatCO : public CodeObject {
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
 
   struct DeferredInitManagedVarState {
-    void ReleaseCommands();
+    enum class Phase { NotStarted, InProgress, Completed, Failed };
 
-    bool initialized = false;
+    Phase phase = Phase::NotStarted;
     CommandHandle completion;
-    std::vector<CommandHandle> copies;
-    //! <REVIEW HELPER> Asynchronous initialization errors are replayed until
-    //! teardown so later operations cannot use uninitialized managed symbols.
     hipError_t terminalError = hipSuccess;
   };
 
-  // <REVIEW HELPER> These helpers separate submission, completion/error
-  // processing, and cross-stream ordering; the public entry point only
-  // coordinates the state machine.
   hipError_t QueueManagedVarInitialization(int deviceId, DeferredInitManagedVarState& state);
-  hipError_t FinalizeManagedVarInitialization(int deviceId, DeferredInitManagedVarState& state);
+  void UpdateManagedVarInitialization(DeferredInitManagedVarState& state);
   void OrderStreamAfterManagedVarInitialization(int deviceId, hip::Stream* orderStream,
                                                 const DeferredInitManagedVarState& state);
 
-  //! <REVIEW HELPER> One state-machine instance per device prevents duplicate
-  //! initialization while sclock_ serializes first-touch callers.
+  //! One state-machine instance per device prevents duplicate initialization.
   std::unordered_map<int, DeferredInitManagedVarState> deferredInitManagedVarStates_;
 };
 

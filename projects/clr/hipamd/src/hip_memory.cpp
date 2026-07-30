@@ -716,14 +716,8 @@ void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, hip::Stream& s
 }
 
 // ================================================================================================
-// retainedCommand transfers ownership of the submitted copy command when the
-// caller must inspect its asynchronous completion status later.
 static hipError_t ihipMemcpyImpl(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                                 hip::Stream& stream, bool isHostAsync, bool isGPUAsync,
-                                 CommandHandle* retainedCommand) {
-  if (retainedCommand != nullptr) {
-    retainedCommand->reset();
-  }
+                                 hip::Stream& stream, bool isHostAsync, bool isGPUAsync) {
   if (sizeBytes == 0) {
     // Skip if nothing needs writing.
     return hipSuccess;
@@ -826,28 +820,14 @@ static hipError_t ihipMemcpyImpl(void* dst, const void* src, size_t sizeBytes, h
       }
     }
   }
-  if (retainedCommand != nullptr) {
-    retainedCommand->reset(command);
-  } else {
-    command->release();
-  }
+  command->release();
   return hipSuccess;
 }
 
 // ================================================================================================
 hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                       hip::Stream& stream, bool isHostAsync, bool isGPUAsync) {
-  return ihipMemcpyImpl(dst, src, sizeBytes, kind, stream, isHostAsync, isGPUAsync, nullptr);
-}
-
-// ================================================================================================
-MemcpyCommandResult ihipMemcpyWithCommand(void* dst, const void* src, size_t sizeBytes,
-                                          hipMemcpyKind kind, hip::Stream& stream,
-                                          bool isHostAsync, bool isGPUAsync) {
-  CommandHandle command;
-  hipError_t status =
-      ihipMemcpyImpl(dst, src, sizeBytes, kind, stream, isHostAsync, isGPUAsync, &command);
-  return {status, std::move(command)};
+  return ihipMemcpyImpl(dst, src, sizeBytes, kind, stream, isHostAsync, isGPUAsync);
 }
 
 // ================================================================================================
