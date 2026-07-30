@@ -1,0 +1,40 @@
+[package]
+name = "mirage_sys"
+version.workspace = true
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+nix = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+# `mirage_sys` exists to hold the workspace's only `unsafe`, so that
+# every other crate can keep `unsafe_code = "forbid"`. The workspace lint
+# table forbids it, and `forbid` cannot be relaxed by a later `allow`, so
+# this crate carries an equivalent table of its own instead of inheriting
+# with `workspace = true`. Everything else matches the workspace policy —
+# including `undocumented_unsafe_blocks`, which is *denied* here: the
+# crate is small enough that every block can afford its own argument, and
+# a crate that exists to concentrate unsafe should be the last place a
+# bare `unsafe` goes unexplained.
+[lints.rust]
+unused_must_use = "deny"
+unused_qualifications = "warn"
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+mem_forget = "deny"
+undocumented_unsafe_blocks = "deny"

@@ -9,6 +9,7 @@ path = "src/lib.rs"
 [dependencies]
 mirage_core = { workspace = true }
 mirage_container = { workspace = true }
+mirage_sys = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }

@@ -60,6 +60,7 @@ members = [
     "rocjitsu",
     "rocjitsu_sys",
     "supervisor",
+    "sys",
 ]
 
 # Fields shared by every crate in the workspace. Members inherit them with
@@ -71,12 +72,19 @@ version = "0.2.0"
 # Workspace lint policy
 # =============================================================================
 #
-# Every crate opts in with `[lints] workspace = true`. The one exception is
-# `rocjitsu_sys`, which is the FFI binding layer to `librocjitsu.so` and
-# therefore *must* be able to write `unsafe`; it carries its own equivalent
-# `[lints]` table with `unsafe_code` allowed. Because `forbid` cannot be
-# relaxed by a later `allow`, that crate deliberately does not inherit this
-# table rather than trying to override it.
+# Every crate opts in with `[lints] workspace = true`. There are exactly
+# two exceptions, and both are crates whose entire job is to contain
+# `unsafe` so that nothing else has to:
+#
+#   * `rocjitsu_sys` — the FFI binding layer to `librocjitsu.so`.
+#   * `mirage_sys`   — the post-fork operations that cannot be expressed
+#                      safely (today: `PR_SET_PDEATHSIG`).
+#
+# Both carry their own equivalent `[lints]` table with `unsafe_code`
+# allowed. Because `forbid` cannot be relaxed by a later `allow`, they
+# deliberately do not inherit this table rather than trying to override
+# it. Keeping the exceptions to crates named for the purpose is what makes
+# "where is the unsafe?" answerable by reading the workspace members.
 #
 # `unwrap_used` / `expect_used` are denied in production code. Test modules
 # opt out locally with an inner
@@ -140,3 +148,4 @@ mirage_rocjitsu = { path = "rocjitsu" }
 mirage_hotswap = { path = "hotswap" }
 mirage_container = { path = "container" }
 rocjitsu_sys = { path = "rocjitsu_sys" }
+mirage_sys = { path = "sys" }

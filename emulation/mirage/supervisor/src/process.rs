@@ -31,9 +31,15 @@
 //!    ends; the confirmation is what makes "the session is destroyed" a
 //!    statement about the process table rather than about intent.
 //!
-//! As a backstop, children are also spawned with `kill_on_drop(true)`:
-//! if a supervising task is cancelled abruptly, tokio kills the child
-//! rather than orphaning it.
+//! Two backstops sit under that, for the cases where the escalation
+//! above never gets to run:
+//!
+//! * `kill_on_drop(true)` — if a supervising task is cancelled abruptly,
+//!   tokio kills the child rather than orphaning it.
+//! * `PR_SET_PDEATHSIG` (via [`mirage_sys::die_with_parent`]) — if mirage
+//!   itself is `SIGKILL`ed or OOM-killed, *no* code of ours runs, and the
+//!   kernel is the only party left that can enforce the rule. It sends
+//!   the child `SIGKILL` when its parent goes away.
 //!
 //! # Standard streams
 //!
@@ -437,6 +443,15 @@ pub fn spawn(spec: &SpawnSpec, output: mpsc::Sender<OutputChunk>) -> Result<Spaw
         // `wait`/`terminate`, do not orphan the child.
         .kill_on_drop(true);
 
+    // Second backstop, for the case the first one cannot reach:
+    // `SIGKILL`. Everything above is enforced by mirage running — a
+    // signal it sends, a `Drop` it runs. `kill -9`, and the OOM killer
+    // picking mirage during a large emulated job, leave no code of ours
+    // to run at all, and the workload would be reparented to init still
+    // holding the emulated device. Asking the kernel to do it is the only
+    // way to close that, and is why `mirage_sys` exists.
+    mirage_sys::die_with_parent(&mut cmd);
+
     if !spec.inherit_env {
         cmd.env_clear();
     }
@@ -450,6 +465,33 @@ pub fn spawn(spec: &SpawnSpec, output: mpsc::Sender<OutputChunk>) -> Result<Spaw
     // `id()` only returns `None` after the child has been waited on,
     // which cannot have happened yet.
     let pid = child.id().unwrap_or(0);
+
+    // Put the child in its own process group from *this* side too.
+    //
+    // `process_group(0)` above asks the child to do it, and the child
+    // does — but only once it is scheduled, somewhere between `fork` and
+    // `exec`. Until then `kill(-pid)` does not reach it, and the failure
+    // is silent in the worst possible way: the call does not error, it
+    // signals *whatever other group happens to be numbered `pid`*. Pids
+    // are handed out sequentially and every shell job is a group leader,
+    // so on a busy machine that group frequently exists. The signal goes
+    // somewhere else entirely and the workload sails on, which is how a
+    // `terminate` can return having killed nothing.
+    //
+    // `setpgid` is idempotent and either end may call it, so doing it
+    // here as well closes the window: by the time `spawn` returns, the
+    // group exists and contains this child. `EACCES` means the child has
+    // already exec'd — it beat us to it, which is the outcome we wanted —
+    // and `ESRCH` means it is already gone.
+    if let Ok(raw) = i32::try_from(pid)
+        && raw > 0
+    {
+        let child_pid = Pid::from_raw(raw);
+        match nix::unistd::setpgid(child_pid, child_pid) {
+            Ok(()) | Err(nix::errno::Errno::EACCES | nix::errno::Errno::ESRCH) => {}
+            Err(e) => tracing::debug!(pid, "could not confirm the child's process group: {e}"),
+        }
+    }
 
     // Only a captured child has pipes to pump; an inheriting one writes
     // to the terminal without mirage ever seeing the bytes.
@@ -484,17 +526,44 @@ fn resolved_env(spec: &SpawnSpec) -> Vec<(std::ffi::OsString, std::ffi::OsString
                 env.push(((*key).into(), value));
             }
         }
-        // A terminal program needs `TERM` to be *something*. The
-        // allowlist copies it when the caller has one, but a run from
-        // cron, a CI runner or a bare `sh` has none — and then `bash`
-        // gets an unset `TERM`: no prompt colours, and `clear`, `less`
-        // and anything ncurses failing outright with "TERM environment
-        // variable not set". Naming a default costs nothing.
-        if std::env::var_os("TERM").is_none() {
-            env.push(("TERM".into(), "xterm-256color".into()));
-        }
+    }
+    // A terminal program needs `TERM` to be *something*. The caller
+    // usually has one and it arrives either by inheritance or through the
+    // allowlist above — but a run from cron, a CI runner or a bare `sh`
+    // has none, and then `bash` gets an unset `TERM`: no prompt colours,
+    // and `clear`, `less` and anything ncurses failing outright with
+    // "TERM environment variable not set". Naming a default costs
+    // nothing.
+    //
+    // Outside the `inherit_env` check on purpose. It used to sit inside
+    // it, which was equivalent while every direct workload cleared its
+    // environment; once inheriting became the default that left the
+    // fallback applying only under `--clear-env-vars`, i.e. never on the
+    // path that actually needed it.
+    if std::env::var_os("TERM").is_none() {
+        env.push(("TERM".into(), "xterm-256color".into()));
     }
     for (k, v) in &spec.env {
+        // `LD_PRELOAD` is the one variable that must not simply overwrite
+        // what the caller exported. `spec.env`'s value is the emulator's
+        // interposer (already merged with any `--env LD_PRELOAD` by
+        // `build_specs`), and a workload that loses the interposer runs
+        // unemulated and still exits 0 — so the interposer goes first and
+        // the caller's preload is appended rather than dropped. Both have
+        // to load, which is what the CLI documentation promises.
+        //
+        // Only when inheriting: under `--clear-env-vars` the caller's
+        // environment is deliberately not in play.
+        if spec.inherit_env
+            && k == "LD_PRELOAD"
+            && let Some(inherited) = std::env::var_os("LD_PRELOAD").filter(|v| !v.is_empty())
+        {
+            let mut combined = std::ffi::OsString::from(v);
+            combined.push(":");
+            combined.push(&inherited);
+            env.push((k.into(), combined));
+            continue;
+        }
         env.push((k.into(), v.into()));
     }
     env
