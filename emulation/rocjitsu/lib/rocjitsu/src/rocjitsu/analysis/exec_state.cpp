@@ -11,6 +11,7 @@
 #include <deque>
 #include <optional>
 #include <stdexcept>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -182,15 +183,16 @@ enum class Combinator { Other, Copy, Or };
 } // namespace
 
 ExecMaskAnalysis::ExecMaskAnalysis(KernelBlockScope blocks, uint8_t wave_size,
-                                   std::span<const ScopedCfgEdge> extra_edges)
+                                   std::span<const ScopedCfgEdge> extra_edges,
+                                   std::span<const BasicBlock *const> entry_blocks)
     : wave_size_(wave_size) {
   if (wave_size != 32 && wave_size != 64)
     throw std::invalid_argument("ExecMaskAnalysis: wave_size must be 32 or 64");
-  analyze(blocks, extra_edges);
+  analyze(blocks, extra_edges, entry_blocks);
 }
 
-void ExecMaskAnalysis::analyze(KernelBlockScope blocks,
-                               std::span<const ScopedCfgEdge> extra_edges) {
+void ExecMaskAnalysis::analyze(KernelBlockScope blocks, std::span<const ScopedCfgEdge> extra_edges,
+                               std::span<const BasicBlock *const> entry_blocks) {
   states_.assign(blocks.size(), BlockExec{});
   for (size_t i = 0; i < blocks.size(); ++i) {
     if (blocks[i] != nullptr)
@@ -224,15 +226,29 @@ void ExecMaskAnalysis::analyze(KernelBlockScope blocks,
   for (const ScopedCfgEdge &edge : extra_edges)
     add_edge(edge.from, edge.to);
 
-  // A block is an entry when no in-scope predecessor reaches it (scoped edges
-  // included). Entries are pinned to `Unknown`; interior blocks start
-  // optimistically `Full` so the forward `must` meet can pull them down to
-  // `Unknown` to a fixpoint.
+  // A block is an entry when it is a caller-supplied kernel entry or has no
+  // in-scope predecessor (scoped edges included). Entries are pinned to
+  // `Unknown`; interior blocks start optimistically `Full` so the forward `must`
+  // meet can pull them down to `Unknown` to a fixpoint. A real entry may be a
+  // loop header with a backedge, so predecessor count alone cannot find it --
+  // hence the explicit entry_blocks. Over-marking a block as entry only loses
+  // precision, never soundness.
+  std::unordered_set<const BasicBlock *> entry_set(entry_blocks.begin(), entry_blocks.end());
   for (size_t i = 0; i < blocks.size(); ++i) {
     if (blocks[i] == nullptr)
       continue;
-    // consider entry to be scope leader and blocks with no predecessors in scope
-    states_[i].is_entry = (predecessors[i].empty() || i == 0);
+    states_[i].is_entry = predecessors[i].empty() || entry_set.contains(blocks[i]);
+  }
+  // Fallback when no entry was supplied and none was found (e.g. a fully cyclic
+  // scope): seed the scope leader so the meet has at least one `Unknown` source.
+  if (entry_blocks.empty() &&
+      std::ranges::none_of(states_, [](const BlockExec &s) { return s.is_entry; })) {
+    for (size_t i = 0; i < blocks.size(); ++i) {
+      if (blocks[i] != nullptr) {
+        states_[i].is_entry = true;
+        break;
+      }
+    }
   }
 
   const auto rpo = reverse_post_order(blocks);

@@ -20,6 +20,7 @@
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/lds_virtualization.h"
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
+#include "rocjitsu/code/dbt/scoped_cfg_edges.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -663,162 +664,6 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
                                               entry_set, own_entries)});
   }
   return scopes;
-}
-
-/// @brief Return whether an instruction is a scalar set-PC through one SGPR pair.
-///
-/// @details Return-like scalar control flow is left as an indirect branch in the
-/// translated instruction stream, so DBT must validate that the block terminator
-/// reads the call edge's saved return SGPR. This helper intentionally checks the
-/// raw SOP1 source field instead of broader instruction semantics: only the exact
-/// `s_setpc_b64`/`s_set_pc_i64 s[return:return+1]` form is a scoped call return.
-[[nodiscard]] bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
-  const std::string_view mnemonic = inst.mnemonic();
-  if (inst.size() != sizeof(uint32_t) || (mnemonic != "s_setpc_b64" && mnemonic != "s_set_pc_i64"))
-    return false;
-  return static_cast<uint16_t>(word & 0xffu) == ssrc0;
-}
-
-/// @brief Find return blocks inside one context-sensitive call target.
-///
-/// @details Call-like scalar control flow is not represented as a normal CFG
-/// edge from the callee back to every possible continuation. The same helper
-/// block can be entered by multiple kernels or multiple call sites, and the
-/// correct continuation is the one selected by the return SGPR written at that
-/// call site. This walk therefore stays inside @p allowed_blocks and mirrors
-/// call-return classification: nested callees are visited with their own return
-/// SGPR as a stopping condition, while their continuations retain the enclosing
-/// condition. This exposes paths that return directly through an enclosing pair
-/// without mistaking a nested callee's normal return for the enclosing return.
-/// The caller then pairs each reported return with the specific continuation
-/// from the call edge being analyzed.
-[[nodiscard]] std::vector<BasicBlock *>
-function_return_blocks(BasicBlock &callee, uint16_t return_sreg, std::span<const uint8_t> text,
-                       const std::unordered_set<BasicBlock *> &allowed_blocks) {
-  struct WalkPoint {
-    BasicBlock *block = nullptr;
-    std::optional<uint16_t> terminal_return_sreg;
-  };
-
-  std::vector<BasicBlock *> returns;
-  std::unordered_set<BasicBlock *> return_set;
-  std::vector<WalkPoint> stack{{.block = &callee, .terminal_return_sreg = std::nullopt}};
-  std::set<std::pair<BasicBlock *, std::optional<uint16_t>>> visited;
-
-  while (!stack.empty()) {
-    const WalkPoint point = stack.back();
-    stack.pop_back();
-    BasicBlock *block = point.block;
-    assert(block != nullptr && "return-block walk stack should contain only decoded blocks");
-    if (!allowed_blocks.contains(block) ||
-        !visited.insert({block, point.terminal_return_sreg}).second)
-      continue;
-
-    const Instruction *term = block->terminator();
-    assert(term != nullptr && "decoded BasicBlock should contain at least one instruction");
-    if (point.terminal_return_sreg && s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()),
-                                                        *point.terminal_return_sreg)) {
-      continue;
-    }
-    if (s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()), return_sreg)) {
-      if (return_set.insert(block).second)
-        returns.push_back(block);
-      continue;
-    }
-
-    for (BasicBlock *succ : block->successors()) {
-      assert(succ != nullptr && "BasicBlock successors should never be null");
-      stack.push_back({.block = succ, .terminal_return_sreg = point.terminal_return_sreg});
-    }
-    for (const BasicBlock::CallEdge &call : block->call_edges()) {
-      assert(call.callee != nullptr && "BasicBlock call edges should always have a callee");
-      assert(call.continuation != nullptr &&
-             "BasicBlock call edges should always have a continuation");
-      stack.push_back({.block = call.callee, .terminal_return_sreg = call.return_sreg});
-      stack.push_back(
-          {.block = call.continuation, .terminal_return_sreg = point.terminal_return_sreg});
-    }
-  }
-
-  return returns;
-}
-
-/// @brief Collect validated return-like terminators for one kernel scope.
-///
-/// @details Binary translation rejects unresolved indirect branches after CFG
-/// construction, but a call-return `s_setpc_b64` is intentionally left as an
-/// indirect instruction in the emitted code: its dynamic target is the return PC
-/// saved by the matching `s_call_b64` or `s_swappc_b64`. To avoid accepting an
-/// arbitrary `s_setpc_b64`, this helper only marks return offsets that are
-/// reachable from a `BasicBlock::CallEdge` whose callee and continuation both
-/// belong to the current kernel-local scope.
-[[nodiscard]] std::unordered_set<uint64_t>
-scoped_call_return_offsets(std::span<BasicBlock *const> blocks, std::span<const uint8_t> text) {
-  std::unordered_set<BasicBlock *> allowed_blocks;
-  allowed_blocks.reserve(blocks.size());
-  for (BasicBlock *block : blocks) {
-    assert(block != nullptr && "kernel scope should contain only decoded blocks");
-    allowed_blocks.insert(block);
-  }
-
-  std::unordered_set<uint64_t> returns;
-  for (BasicBlock *block : blocks) {
-    assert(block != nullptr && "kernel scope should contain only decoded blocks");
-    for (const BasicBlock::CallEdge &call : block->call_edges()) {
-      assert(call.callee != nullptr && "BasicBlock call edges should always have a callee");
-      assert(call.continuation != nullptr &&
-             "BasicBlock call edges should always have a continuation");
-      if (!allowed_blocks.contains(call.callee) || !allowed_blocks.contains(call.continuation))
-        continue;
-
-      for (BasicBlock *return_block :
-           function_return_blocks(*call.callee, call.return_sreg, text, allowed_blocks)) {
-        const Instruction *term = return_block->terminator();
-        assert(term != nullptr && "function_return_blocks returns non-empty decoded blocks");
-        returns.insert(term->src_loc());
-      }
-    }
-  }
-  return returns;
-}
-
-/// @brief Materialize context-sensitive call edges for liveness.
-///
-/// @details `BasicBlock` deliberately separates call edges from ordinary CFG
-/// successors. The translator still needs liveness to see the effects of a
-/// call: values live into the callee are used by the callee, and values live
-/// after the call continuation must be live at each validated return block.
-/// This helper converts each scoped call edge into temporary analysis edges
-/// `caller -> callee` and `return -> continuation` without mutating the CFG or
-/// creating cross-kernel return edges.
-[[nodiscard]] std::vector<ScopedCfgEdge>
-scoped_call_liveness_edges(std::span<BasicBlock *const> blocks, std::span<const uint8_t> text) {
-  std::unordered_set<BasicBlock *> allowed_blocks;
-  allowed_blocks.reserve(blocks.size());
-  for (BasicBlock *block : blocks) {
-    assert(block != nullptr && "kernel scope should contain only decoded blocks");
-    allowed_blocks.insert(block);
-  }
-
-  std::vector<ScopedCfgEdge> edges;
-  for (BasicBlock *block : blocks) {
-    assert(block != nullptr && "kernel scope should contain only decoded blocks");
-    for (const BasicBlock::CallEdge &call : block->call_edges()) {
-      assert(call.callee != nullptr && "BasicBlock call edges should always have a callee");
-      assert(call.continuation != nullptr &&
-             "BasicBlock call edges should always have a continuation");
-      if (!allowed_blocks.contains(call.callee) || !allowed_blocks.contains(call.continuation))
-        continue;
-
-      edges.push_back({.from = block, .to = call.callee});
-      for (BasicBlock *return_block :
-           function_return_blocks(*call.callee, call.return_sreg, text, allowed_blocks)) {
-        edges.push_back({.from = return_block, .to = call.continuation});
-      }
-    }
-  }
-
-  return edges;
 }
 
 /// @brief Commit translated text, descriptor plans, and runtime metadata to one ELF image.
@@ -1749,8 +1594,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
     if (scope_requires_liveness) {
       const auto liveness_edges = scoped_call_liveness_edges(KernelBlockScope(scope.blocks), text);
+      const BasicBlock *const entry_blocks[] = {scope.entry};
       const ExecMaskAnalysis exec(KernelBlockScope(scope.blocks),
-                                  scope.translation->guest_wavefront_size, liveness_edges);
+                                  scope.translation->guest_wavefront_size, liveness_edges,
+                                  entry_blocks);
       liveness =
           LivenessAnalysis(KernelBlockScope(scope.blocks), exec, liveness_options, liveness_edges);
     }

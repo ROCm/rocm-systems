@@ -33,8 +33,9 @@ enum class ExecState : uint8_t {
 ///
 /// @details Scope semantics match LivenessAnalysis: only the supplied blocks
 /// participate, edges leaving the scope are ignored, and the same scoped
-/// call/return `extra_edges` are folded in. Blocks with no in-scope predecessor
-/// (and the scope leader) are entries, seeded with `Unknown`.
+/// call/return `extra_edges` are folded in. Entries are seeded with `Unknown`:
+/// the caller-supplied `entry_blocks`, plus any block with no in-scope
+/// predecessor.
 class ExecMaskAnalysis {
 public:
   /// @brief Compute EXEC state for one kernel's block set.
@@ -47,15 +48,22 @@ public:
   ///        site into the callee and from a return into the continuation, so the
   ///        two analyses agree on which blocks are entries and how EXEC reaches
   ///        them.
+  /// @param entry_blocks Real kernel entry blocks, pinned to `Unknown`. A
+  ///        hardware entry can be a loop header with an in-scope backedge, so it
+  ///        is not recognizable by predecessor count alone; pinning it stops the
+  ///        forward meet from deriving `Full` there. Empty falls back to the
+  ///        scope leader.
   explicit ExecMaskAnalysis(KernelBlockScope blocks, uint8_t wave_size = 0,
-                            std::span<const ScopedCfgEdge> extra_edges = {});
+                            std::span<const ScopedCfgEdge> extra_edges = {},
+                            std::span<const BasicBlock *const> entry_blocks = {});
 
   /// @brief EXEC state immediately before @p inst executes.
   /// @returns `ExecState::Unknown` if @p inst was not part of this analysis.
   [[nodiscard]] ExecState before(const Instruction &inst) const;
 
 private:
-  void analyze(KernelBlockScope blocks, std::span<const ScopedCfgEdge> extra_edges);
+  void analyze(KernelBlockScope blocks, std::span<const ScopedCfgEdge> extra_edges,
+               std::span<const BasicBlock *const> entry_blocks);
 
   struct BlockExec {
     ExecState in = ExecState::Full;

@@ -321,10 +321,11 @@ uint8_t AmdGpuCodeObject::kernel_wavefront_size(rj_code_arch_t arch) const {
     return 64;
 
   // RDNA opts into Wave32 via ENABLE_WAVEFRONT_SIZE32; a clear bit means Wave64.
-  // Fall back to 64 unless every readable kernel is Wave32.
+  // Return Wave32 only when every kernel is provably Wave32.
   bool saw_kernel = false;
   bool all_wave32 = true;
   for (const auto &[name, kd_vaddr] : kd_offsets_) {
+    bool readable = false;
     for (const auto &section : all_sections()) {
       const uint64_t base = section->vaddr();
       if (base == 0 || kd_vaddr < base)
@@ -338,10 +339,48 @@ uint8_t AmdGpuCodeObject::kernel_wavefront_size(rj_code_arch_t arch) const {
                                           kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
       saw_kernel = true;
       all_wave32 = all_wave32 && wave32;
+      readable = true;
+      break;
+    }
+    // An unreadable descriptor could be Wave64; fall back conservatively so a
+    // readable Wave32 kernel can't mislabel it and license unsound EXEC kills.
+    if (!readable)
+      return 64;
+  }
+  return (saw_kernel && all_wave32) ? 32 : 64;
+}
+
+std::vector<uint64_t> AmdGpuCodeObject::kernel_entry_text_offsets() const {
+  namespace kd = rocr::llvm::amdhsa;
+  using KD = kd::kernel_descriptor_t;
+
+  std::vector<uint64_t> offsets;
+  for (const auto &[name, kd_vaddr] : kd_offsets_) {
+    for (const auto &section : all_sections()) {
+      const uint64_t base = section->vaddr();
+      if (base == 0 || kd_vaddr < base)
+        continue;
+      const uint64_t off = kd_vaddr - base;
+      if (off + sizeof(KD) > section->size())
+        continue;
+      KD desc;
+      std::memcpy(&desc, section->data() + off, sizeof(desc));
+      const int64_t entry_vaddr =
+          static_cast<int64_t>(kd_vaddr) + desc.kernel_code_entry_byte_offset;
+      if (entry_vaddr < 0)
+        break;
+      for (const Section *text : text_sections()) {
+        const uint64_t tbase = text->vaddr();
+        if (static_cast<uint64_t>(entry_vaddr) >= tbase &&
+            static_cast<uint64_t>(entry_vaddr) < tbase + text->size()) {
+          offsets.push_back(static_cast<uint64_t>(entry_vaddr) - tbase);
+          break;
+        }
+      }
       break;
     }
   }
-  return (saw_kernel && all_wave32) ? 32 : 64;
+  return offsets;
 }
 
 } // namespace rocjitsu

@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/dbt/scoped_cfg_edges.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
@@ -23,6 +24,7 @@
 #include <array>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -530,8 +532,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   liveness_scope.reserve(blocks_.size());
   for (const auto &block : blocks_)
     liveness_scope.push_back(block.get());
-  const ExecMaskAnalysis exec{KernelBlockScope(liveness_scope), obj_.kernel_wavefront_size(arch_)};
-  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope), exec};
+  const std::span<const uint8_t> original_text = patcher.text_bytes();
+  const auto liveness_edges =
+      scoped_call_liveness_edges(KernelBlockScope(liveness_scope), original_text);
+  const auto entry_offsets = obj_.kernel_entry_text_offsets();
+  const std::unordered_set<uint64_t> entry_offset_set(entry_offsets.begin(), entry_offsets.end());
+  std::vector<const BasicBlock *> entry_blocks;
+  for (BasicBlock *block : liveness_scope) {
+    if (block != nullptr && entry_offset_set.contains(block->start_offset()))
+      entry_blocks.push_back(block);
+  }
+  const ExecMaskAnalysis exec{KernelBlockScope(liveness_scope), obj_.kernel_wavefront_size(arch_),
+                              liveness_edges, entry_blocks};
+  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope), exec, {}, liveness_edges};
 
   // Lay out the appended region as [probe bodies][trampolines]. Each distinct
   // probe body is copied once, ahead of the trampolines that call into it, so a

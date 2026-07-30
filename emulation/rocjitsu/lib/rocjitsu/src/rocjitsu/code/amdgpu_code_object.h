@@ -77,9 +77,17 @@ public:
   /// @brief Wavefront size (32 or 64) shared by this object's kernels.
   ///
   /// @details CDNA is always Wave64; RDNA opts into Wave32 via the descriptor's
-  /// `ENABLE_WAVEFRONT_SIZE32` bit. Returns 64 when kernels disagree or none is
-  /// readable (the safe value for whole-object EXEC-mask analysis).
+  /// `ENABLE_WAVEFRONT_SIZE32` bit. Returns 64 (the safe value for whole-object
+  /// EXEC-mask analysis) unless every kernel descriptor is readable and Wave32.
   [[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t arch) const;
+
+  /// @brief Text-section-relative entry offset of each readable kernel.
+  ///
+  /// @details Decodes each descriptor's `kernel_code_entry_byte_offset` and maps
+  /// it to an offset within the containing .text section, matching
+  /// BasicBlock::start_offset(). Lets whole-object analyses pin the real kernel
+  /// entries even when an entry is a loop header with a backedge.
+  [[nodiscard]] std::vector<uint64_t> kernel_entry_text_offsets() const;
 
 private:
   void load_sections();

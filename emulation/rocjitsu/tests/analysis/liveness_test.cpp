@@ -3467,6 +3467,31 @@ TEST(ExecMaskAnalysis, EntryIsUnknownAllOnesIsFullNarrowingIsUnknown) {
   EXPECT_EQ(exec.before(*insts[3]), ExecState::Unknown); // after narrowing write
 }
 
+TEST(ExecMaskAnalysis, LoopHeaderEntryWithBackedgeIsPinnedUnknown) {
+  // block0 @0: End -- a predecessor-less natural entry, so the scope-leader
+  // fallback does not fire. block1 @4: a self-looping "kernel entry" that writes
+  // EXEC all-ones and conditionally branches back to itself; its only in-scope
+  // predecessor is that backedge. Without pinning it, the forward meet carries
+  // the backedge's Full state into the header and wrongly derives Full there.
+  auto blocks = build_test_blocks({TestOpcode::End, TestOpcode::WriteExecFull,
+                                   TestOpcode::CBranchBackToUseSgpr4, TestOpcode::End});
+  auto scope = block_scope(blocks);
+  BasicBlock *header = block_starting_at(blocks, 4);
+  ASSERT_NE(header, nullptr);
+  ASSERT_TRUE(has_predecessor(*header, header)) << "header must have its own backedge";
+  const Instruction &header_first = *insts_of(*header).front();
+  EXPECT_TRUE(header_first.mnemonic().starts_with("test_write_exec_full"));
+
+  // Without pinning, the backedge makes the header wrongly Full.
+  ExecMaskAnalysis unpinned{KernelBlockScope(scope), 64};
+  EXPECT_EQ(unpinned.before(header_first), ExecState::Full);
+
+  // Pinning the real entry keeps it Unknown, as at any kernel entry.
+  const BasicBlock *const entries[] = {header};
+  ExecMaskAnalysis pinned{KernelBlockScope(scope), 64, /*extra_edges=*/{}, entries};
+  EXPECT_EQ(pinned.before(header_first), ExecState::Unknown);
+}
+
 TEST(ExecMaskAnalysis, OrWithAllOnesConstantIsFull) {
   // exec = exec | -1 -> all-ones regardless of the prior EXEC (RESULT_OR with an
   // all-ones source operand).
