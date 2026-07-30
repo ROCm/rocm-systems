@@ -45,7 +45,7 @@ from sqlalchemy.sql.selectable import CTE
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.1.0"
+SCHEMA_VERSION = "2.0.0"
 
 
 Base = declarative_base()
