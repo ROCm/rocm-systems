@@ -12,6 +12,7 @@
 #include "rocjitsu/kmd/linux/sysfs.h"
 
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -203,10 +204,37 @@ TEST(SysfsTopologyDebugCapabilityTest, DefaultDebugPropMatchesHardware) {
   }
 }
 
-// Loading a shipped config for a real GPU must make the synthetic topology
-// advertise that GPU's exact capability/capability2/debug_prop, i.e. the values
-// captured from its physical KFD sysfs. The configs carry these as explicit
-// overrides (see configs/*.json), which sysfs emits verbatim.
+// The address-watch register count is the one capability field a debugger acts
+// on numerically rather than as a flag: rocdbgapi recovers it as 1<<TOTALBITS
+// (os_driver_kfd.cpp) and refuses to insert more watchpoints than that. Every
+// captured dump reads TOTALBITS 2 for the driver's num_of_watch_points = 4, so
+// the derived topology must too -- packing the count itself would claim sixteen
+// registers the simulated ASIC does not have.
+TEST(SysfsTopologyDebugCapabilityTest, DefaultWatchPointCountMatchesHardware) {
+  for (const auto &e : kDebugCapExpectations) {
+    if (e.capability == 0)
+      continue; // no captured real-hardware reference for this GFXIP
+    SCOPED_TRACE(e.name);
+
+    Sysfs sysfs;
+    std::string topology_dir = sysfs.generate(make_gpu_info(e.gfx_target_version));
+    ASSERT_FALSE(topology_dir.empty());
+
+    auto props = read_properties(topology_dir + "/nodes/1/properties");
+    ASSERT_TRUE(props.count("capability"));
+    const auto cap = static_cast<uint32_t>(props["capability"]);
+
+    EXPECT_TRUE(cap & HSA_CAP_WATCH_POINTS_SUPPORTED);
+    EXPECT_TRUE(e.capability & HSA_CAP_WATCH_POINTS_SUPPORTED);
+
+    const uint32_t total_bits =
+        (cap & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) >> HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT;
+    EXPECT_EQ(total_bits, (e.capability & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) >>
+                              HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT);
+    EXPECT_EQ(1u << total_bits, kmd::kNumWatchPoints);
+  }
+}
+
 // KFD reports array_count per node, not per XCC: node_show() emits
 // node_props.array_count * NUM_XCC while simd_arrays_per_engine and
 // cu_per_simd_array stay per-XCC. gfx942_cdna3_kmd models MI300X, whose
@@ -226,6 +254,11 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
   ASSERT_FALSE(topology_dir.empty());
 
   auto props = read_properties(topology_dir + "/nodes/1/properties");
+  ASSERT_TRUE(props.count("array_count"));
+  // Fatal: the derivation below divides by this, and operator[] would silently
+  // insert a zero for a renamed or dropped property.
+  ASSERT_TRUE(props.count("simd_arrays_per_engine"));
+  ASSERT_NE(props["simd_arrays_per_engine"], 0u);
   EXPECT_EQ(props["array_count"], 32u);
   EXPECT_EQ(props["simd_arrays_per_engine"], 1u);
   EXPECT_EQ(props["cu_per_simd_array"], 10u);
@@ -237,6 +270,10 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
             num_xcc * loaded.soc()->xcd(0)->num_shader_engines());
 }
 
+// Loading a shipped config for a real GPU must make the synthetic topology
+// advertise that GPU's exact capability/capability2/debug_prop, i.e. the values
+// captured from its physical KFD sysfs. The configs carry these as explicit
+// overrides (see configs/*.json), which sysfs emits verbatim.
 TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   const std::string config_dir = CONFIG_DIR;
   // Configs whose device matches a captured real-hardware topology dump.

@@ -63,10 +63,32 @@ struct DebugTopology {
   uint64_t debug_prop = 0;
 };
 
+/// @brief Number of hardware address-watch registers (TCP_WATCH0..3) the
+/// simulated debug ASICs expose, matching the driver's @c num_of_watch_points
+/// (drivers/gpu/drm/amd/amdkfd/kfd_device.c).
+inline constexpr uint32_t kNumWatchPoints = 4;
+
+/// @brief Value the driver packs into @c HSA_CAP_WATCH_POINTS_TOTALBITS.
+///
+/// @details The field holds ilog2(num_watch_points), not the count itself:
+/// rocdbgapi recovers the register count as @c 1<<TOTALBITS (see
+/// os_driver_kfd.cpp, kfd_topology_snapshot()). Advertising the count directly
+/// would claim 16 registers and make rocdbgapi program watchpoints that do not
+/// exist.
+inline constexpr uint32_t kWatchPointsTotalBits = 2;
+static_assert((1u << kWatchPointsTotalBits) == kNumWatchPoints,
+              "TOTALBITS must be ilog2(kNumWatchPoints)");
+
 /// @brief Non-debug capability bits advertised for simulated data-center GPUs.
+///
+/// @details The address-watch bits are deliberately not here: they are a
+/// debugger-relevant capability, so debug_topology_for() contributes them
+/// alongside the other bits rocdbgapi reads out of the DBG_TRAP device
+/// snapshot. Note that both this word and the derived debug bits are dropped
+/// when a config supplies its own @c capability (see effective_topology_for),
+/// so an overriding config must carry the watch bits in its captured value.
 inline constexpr uint32_t default_non_debug_capability() {
-  return HSA_CAP_ATS_PRESENT | HSA_CAP_QUEUE_IDLE_EVENT | HSA_CAP_WATCH_POINTS_SUPPORTED |
-         ((4u << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) |
+  return HSA_CAP_ATS_PRESENT | HSA_CAP_QUEUE_IDLE_EVENT |
          ((HSA_CAP_DOORBELL_TYPE_2_0 << HSA_CAP_DOORBELL_TYPE_TOTALBITS_SHIFT) &
           HSA_CAP_DOORBELL_TYPE_TOTALBITS_MASK) |
          HSA_CAP_AQL_QUEUE_DOUBLE_MAP | HSA_CAP_MEM_EDCSUPPORTED | HSA_CAP_RASEVENTNOTIFY |
@@ -93,6 +115,14 @@ inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
   topo.capability = HSA_CAP_TRAP_DEBUG_SUPPORT |
                     HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED |
                     HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED;
+
+  // Every debug-capable ASIC the simulator models carries the four hardware
+  // address-watch registers, so advertise them here rather than alongside the
+  // generic non-debug bits: rocdbgapi reads this out of the device snapshot to
+  // decide how many data watchpoints it may insert.
+  topo.capability |= HSA_CAP_WATCH_POINTS_SUPPORTED |
+                     ((kWatchPointsTotalBits << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) &
+                      HSA_CAP_WATCH_POINTS_TOTALBITS_MASK);
 
   // kfd_dbg_has_ttmps_always_setup(): dispatch info (ttmps) is always valid
   // except on gfx9.4.2 (Aldebaran) below gfx11, and on gfx11 only with modern
