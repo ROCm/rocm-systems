@@ -7,7 +7,6 @@
 #include "amdsmi_wrap.h"
 
 #include <cstddef>
-#include <cstring>
 #include <gtest/gtest.h>
 
 namespace RcclUnitTesting
@@ -116,21 +115,42 @@ TEST(AmdSmiFabricState, PayloadFromSysfsBackedDeviceIsUsable)
 //
 // The library writes these structs through dlopen using its own layout, so a
 // declaration that disagrees overflows the caller's object and shifts the
-// fields we read. amdsmi_wrap.h pins this at compile time; assert the field
-// offsets too, since those are what a short local_accelerators[] would move.
+// fields we read. amd_smi has resized local_accelerators[] within a release
+// series -- 8 entries up to 2026-06-24 and 16 after, both reporting 26.5 -- so
+// these track the header's own bound rather than one build's byte counts.
 // ---------------------------------------------------------------------------
 
-TEST(AmdSmiFabricLayout, MatchesShippedLibraryAbi)
+TEST(AmdSmiFabricLayout, OnlyLocalAcceleratorsVariesInSize)
 {
-    EXPECT_EQ(sizeof(amdsmi_fabric_info_v1_t), 244u);
-    EXPECT_EQ(sizeof(amdsmi_fabric_info_t), 320u);
-    EXPECT_EQ(offsetof(amdsmi_fabric_info_t, reserved), 256u);
+    EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, addr_mode),
+              offsetof(amdsmi_fabric_info_v1_t, local_accelerators) +
+                AMDSMI_FABRIC_MAX_LOCAL_GPUS * sizeof(uint32_t));
+    EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, accel_state),
+              offsetof(amdsmi_fabric_info_v1_t, addr_mode) + sizeof(amdsmi_fabric_npa_address_mode_t));
 }
 
-TEST(AmdSmiFabricLayout, TrailingFieldsAreNotShifted)
+TEST(AmdSmiFabricLayout, NothingFollowsTheFieldsWeRead)
 {
-    EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, addr_mode), 236u);
-    EXPECT_EQ(offsetof(amdsmi_fabric_info_v1_t, accel_state), 240u);
+    EXPECT_EQ(sizeof(amdsmi_fabric_info_v1_t),
+              offsetof(amdsmi_fabric_info_v1_t, accel_state) + sizeof(amdsmi_fabric_accelerator_vpod_state_t));
+}
+
+TEST(AmdSmiFabricLayout, PayloadStaysClearOfReserved)
+{
+    EXPECT_LE(kAmdSmiFabricPayloadOffset + sizeof(amdsmi_fabric_info_v1_t),
+              offsetof(amdsmi_fabric_info_t, reserved));
+}
+
+// The header rccl compiles against is the one whose layout the loaded library
+// writes, since rccl dlopens the SONAME built from AMDSMI_LIB_VERSION_MAJOR.
+// Confirm the accessor agrees with where the payload actually sits, which is
+// what would break if a future layout moved it.
+TEST(AmdSmiFabricLayout, AccessorFindsThePayloadWhereExpected)
+{
+    amdsmi_fabric_info_t info{};
+    const auto* v1 = amdSmiFabricInfoV1(info);
+    EXPECT_EQ(reinterpret_cast<const uint8_t*>(v1) - reinterpret_cast<const uint8_t*>(&info),
+              static_cast<ptrdiff_t>(kAmdSmiFabricPayloadOffset));
 }
 
 // ---------------------------------------------------------------------------
@@ -246,54 +266,6 @@ TEST(AmdSmiFabricLayoutCompat, BothShapesShareOneAbi)
     EXPECT_EQ(offsetof(MockNestedFabricInfo, fabric_info) + offsetof(MockNestedFabricVer, fabric_version),
               offsetof(MockFlatFabricInfo, fabric_info));
     EXPECT_EQ(offsetof(MockNestedFabricInfo, reserved), offsetof(MockFlatFabricInfo, reserved));
-}
-
-// ---------------------------------------------------------------------------
-// accel_state runtime offset
-//
-// local_accelerators[] in amdsmi_fabric_info_v1_t grew from 8 to 16 entries in
-// 27.0, moving accel_state 32 bytes later. We compile against the 16-entry
-// layout but reach the library through dlopen, so a <=26.x runtime writes
-// accel_state 32 bytes before where our struct places it. The accessor has to
-// follow the loaded runtime's major version, not our compiled offset.
-// ---------------------------------------------------------------------------
-
-// Offset accel_state occupies in the older 8-entry layout, derived from our
-// compiled 16-entry struct so the test tracks the real field automatically.
-static size_t Pre27AccelStateOffset()
-{
-    return offsetof(amdsmi_fabric_info_v1_t, accel_state) -
-           static_cast<size_t>(AMDSMI_FABRIC_MAX_LOCAL_GPUS - kAmdSmiFabricLocalGpusPre27) * sizeof(uint32_t);
-}
-
-TEST(AmdSmiFabricAccelState, ReadsCurrentLayoutForModernRuntime)
-{
-    amdsmi_fabric_info_v1_t v1{};
-    v1.accel_state = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE;
-    EXPECT_EQ(amdSmiFabricAccelState(v1, kAmdSmiFabricLocal16Major), AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE);
-}
-
-TEST(AmdSmiFabricAccelState, UnknownRuntimeUsesCurrentLayout)
-{
-    amdsmi_fabric_info_v1_t v1{};
-    v1.accel_state = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY;
-    EXPECT_EQ(amdSmiFabricAccelState(v1, kAmdSmiLibVersionUnknown), AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
-}
-
-TEST(AmdSmiFabricAccelState, ReadsShiftedOffsetForPre27Runtime)
-{
-    // Emulate what a 26.x library writes into our 16-entry buffer: accel_state
-    // lands 32 bytes earlier, and the tail of local_accelerators[] where our
-    // compiled field sits is left as some other value.
-    amdsmi_fabric_info_v1_t v1{};
-    const auto pre27State = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE;
-    std::memcpy(reinterpret_cast<uint8_t*>(&v1) + Pre27AccelStateOffset(), &pre27State, sizeof(pre27State));
-    v1.accel_state = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR; // decoy at the 16-entry offset
-
-    EXPECT_EQ(amdSmiFabricAccelState(v1, 26), AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE);
-    // And the modern read would have picked up the decoy, proving the offset matters.
-    EXPECT_EQ(amdSmiFabricAccelState(v1, kAmdSmiFabricLocal16Major),
-              AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR);
 }
 
 // ---------------------------------------------------------------------------

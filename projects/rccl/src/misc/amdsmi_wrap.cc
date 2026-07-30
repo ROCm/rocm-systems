@@ -658,13 +658,9 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
         continue;
       }
       const amdsmi_fabric_info_v1_t* v1 = amdSmiFabricInfoV1(fabricInfo);
-      // accel_state sits after local_accelerators[], whose length changed
-      // between amd_smi versions, so read it at the loaded runtime's offset.
-      const amdsmi_fabric_accelerator_vpod_state_t accelState =
-        amdSmiFabricAccelState(*v1, amdSmiLibMajor.load(std::memory_order_acquire));
-      devInfo->fabricSupported = amdSmiFabricStateUsable(v1->fabric_type, accelState);
+      devInfo->fabricSupported = amdSmiFabricStateUsable(v1->fabric_type, v1->accel_state);
       devInfo->fabricType = v1->fabric_type;
-      devInfo->state = accelState;
+      devInfo->state = v1->accel_state;
       devInfo->acceleratorId = v1->accelerator_id;
       devInfo->bandwidth = v1->bandwidth;
       devInfo->latency = v1->latency;

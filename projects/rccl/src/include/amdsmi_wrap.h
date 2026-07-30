@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <ctime>
 #include <type_traits>
 #include <utility>
@@ -474,11 +473,32 @@ amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char**
  * smaller the library writes past the end of the caller's object, and any
  * shift moves the fields we read. Neither shows up as a compiler diagnostic,
  * so pin the layout here: a mismatch must be a deliberate update, not a
- * silent memory bug. Values measured against amdsmi 26.5.0 (ROCm 7.15).
+ * silent memory bug.
+ *
+ * amd_smi has resized local_accelerators[] within a release series (8 entries
+ * up to 2026-06-24, 16 after, both reporting 26.5), so absolute byte counts
+ * would only describe one build and fail every other. Pin the invariants our
+ * field reads actually depend on instead, expressed against the header's own
+ * bound: local_accelerators[] is the sole variable-length member, nothing is
+ * appended past the last field we read, and the payload stays clear of
+ * reserved. The library and header always come from the same package -- rccl
+ * dlopens the SONAME built from AMDSMI_LIB_VERSION_MAJOR -- so a layout the
+ * header describes is the layout the loaded library writes.
  ************************************************************************/
-static_assert(sizeof(amdsmi_fabric_info_v1_t) == 244, "amdsmi fabric v1 payload layout changed");
-static_assert(sizeof(amdsmi_fabric_info_t) == 320, "amdsmi fabric info struct size changed");
-static_assert(offsetof(amdsmi_fabric_info_t, reserved) == 256, "amdsmi fabric payload region moved");
+
+// The v1 payload starts after the bdf and the version word in both layouts:
+// pre-27 nests them as fabric_info.{version, fabric_version}, 27+ hoists the
+// version to a top-level fabric_version and leaves fabric_info as the union.
+constexpr size_t kAmdSmiFabricPayloadOffset = sizeof(amdsmi_bdf_t) + sizeof(uint32_t);
+
+static_assert(offsetof(amdsmi_fabric_info_v1_t, addr_mode) ==
+                offsetof(amdsmi_fabric_info_v1_t, local_accelerators) + AMDSMI_FABRIC_MAX_LOCAL_GPUS * sizeof(uint32_t),
+              "amdsmi fabric v1: fields after local_accelerators[] moved independently of its bound");
+static_assert(sizeof(amdsmi_fabric_info_v1_t) ==
+                offsetof(amdsmi_fabric_info_v1_t, accel_state) + sizeof(amdsmi_fabric_accelerator_vpod_state_t),
+              "amdsmi fabric v1: a field was appended after accel_state");
+static_assert(kAmdSmiFabricPayloadOffset + sizeof(amdsmi_fabric_info_v1_t) <= offsetof(amdsmi_fabric_info_t, reserved),
+              "amdsmi fabric: v1 payload overruns into reserved");
 
 /*************************************************************************
  * AMD SMI Fabric Info Cache
@@ -513,32 +533,8 @@ inline bool amdSmiFabricStateUsable(amdsmi_fabric_type_t type, amdsmi_fabric_acc
 }
 
 // Major version the loaded amd_smi reports as itself, or this sentinel when it
-// has not been read yet. Shared by the fabric-struct and telemetry compatibility
-// paths below, both of which follow the loaded runtime's major version.
+// has not been read yet.
 constexpr uint32_t kAmdSmiLibVersionUnknown = 0;
-
-// local_accelerators[] in amdsmi_fabric_info_v1_t grew from 8 (<=26.x) to 16
-// (27+). The two fields after it -- addr_mode and accel_state -- therefore sit
-// 32 bytes later in the 27+ layout. We compile against the 16-entry layout, but
-// reach the library through dlopen, and a <=26.x runtime (which does populate
-// this struct) writes accel_state at the 8-entry offset. Reading it straight
-// out of our struct would pick up 32 bytes of local_accelerators tail instead.
-// Follow the loaded runtime's major version, the same way the telemetry call
-// convention does; everything rccl reads before local_accelerators is at a
-// stable offset and needs no adjustment.
-constexpr uint32_t kAmdSmiFabricLocal16Major = 27;
-constexpr uint32_t kAmdSmiFabricLocalGpusPre27 = 8;
-
-inline amdsmi_fabric_accelerator_vpod_state_t amdSmiFabricAccelState(const amdsmi_fabric_info_v1_t& v1,
-                                                                     uint32_t libMajor) {
-  size_t offset = offsetof(amdsmi_fabric_info_v1_t, accel_state);
-  if (libMajor != kAmdSmiLibVersionUnknown && libMajor < kAmdSmiFabricLocal16Major) {
-    offset -= static_cast<size_t>(AMDSMI_FABRIC_MAX_LOCAL_GPUS - kAmdSmiFabricLocalGpusPre27) * sizeof(uint32_t);
-  }
-  amdsmi_fabric_accelerator_vpod_state_t state{};
-  std::memcpy(&state, reinterpret_cast<const uint8_t*>(&v1) + offset, sizeof(state));
-  return state;
-}
 
 /*************************************************************************
  * amdsmi_fabric_info_t layout compatibility
