@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>

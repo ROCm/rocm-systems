@@ -6419,10 +6419,8 @@ TEST(ConSanMoi, ExactByteConflictModelDistinguishesAdjacentAndOverlappingGroups)
   EXPECT_FALSE(consan_moi_exact_byte_accesses_conflict(current, prior));
 }
 
-TEST(ConSanMoi, InlineReferenceExactByteShadowReportsSameEpochConflicts) {
-  std::array<uint64_t, 1> shadow{};
-  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*access_capacity=*/2,
-                                       ConSanMoiEngine::InlineShadow);
+TEST(ConSanMoi, SparseExactByteShadowReportsSameEpochConflicts) {
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*maximum_access_count=*/2);
   const ConSanMoiExactByteAccess writer{
       /*generation=*/7,
       /*owner_id=*/1,
@@ -6444,30 +6442,23 @@ TEST(ConSanMoi, InlineReferenceExactByteShadowReportsSameEpochConflicts) {
       /*lane_mask=*/0x2,
   };
 
-  const auto first = model.access(writer, {}, shadow);
+  const auto first = model.access(writer);
   EXPECT_FALSE(first.conflict);
-  EXPECT_NE(shadow[0], 0u);
 
-  const auto second = model.access(reader, {}, shadow);
+  const auto second = model.access(reader);
   EXPECT_TRUE(second.conflict);
-  EXPECT_FALSE(second.metadata_full);
-  EXPECT_EQ(second.diagnostic.kind, static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict));
-  EXPECT_EQ(second.diagnostic.backend, static_cast<uint32_t>(ConSanMoiEngine::InlineShadow));
-  EXPECT_EQ(second.diagnostic.generation, 7u);
-  EXPECT_EQ(second.diagnostic.epoch, 3u);
-  EXPECT_EQ(second.diagnostic.first_owner_id, 1u);
-  EXPECT_EQ(second.diagnostic.second_owner_id, 2u);
-  EXPECT_EQ(second.diagnostic.second_lane_mask, 0x2u);
-  EXPECT_EQ(second.diagnostic.first_instruction_offset, 0x10u);
-  EXPECT_EQ(second.diagnostic.second_instruction_offset, 0x20u);
-  EXPECT_EQ(second.diagnostic.second_access_kind,
-            static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read));
+  EXPECT_FALSE(second.capacity_exhausted);
+  ASSERT_TRUE(second.prior);
+  EXPECT_EQ(second.prior->generation, 7u);
+  EXPECT_EQ(second.prior->epoch, 3u);
+  EXPECT_EQ(second.prior->owner_id, 1u);
+  EXPECT_EQ(second.prior->lane_mask, 0x1u);
+  EXPECT_EQ(second.prior->instruction_offset, 0x10u);
+  EXPECT_EQ(second.prior->kind, ConSanMoiShadowAccessKind::Write);
 }
 
-TEST(ConSanMoi, InlineReferenceExactByteShadowTreatsDifferentEpochAsOrdered) {
-  std::array<uint64_t, 1> shadow{};
-  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*access_capacity=*/2,
-                                       ConSanMoiEngine::InlineShadow);
+TEST(ConSanMoi, SparseExactByteShadowTreatsDifferentEpochAsOrdered) {
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*maximum_access_count=*/2);
   ConSanMoiExactByteAccess writer{
       /*generation=*/7,
       /*owner_id=*/1,
@@ -6485,19 +6476,14 @@ TEST(ConSanMoi, InlineReferenceExactByteShadowTreatsDifferentEpochAsOrdered) {
   reader.instruction_offset = 0x20;
   reader.lane_mask = 0x2;
 
-  EXPECT_FALSE(model.access(writer, {}, shadow).conflict);
-  const auto second = model.access(reader, {}, shadow);
+  EXPECT_FALSE(model.access(writer).conflict);
+  const auto second = model.access(reader);
   EXPECT_FALSE(second.conflict);
-  const ConSanMoiExactShadowEntry updated = decode_consan_moi_exact_shadow_entry(shadow[0]);
-  EXPECT_EQ(updated.kind, ConSanMoiShadowAccessKind::Read);
-  EXPECT_EQ(updated.owner_id, 2u);
-  EXPECT_EQ(updated.epoch, 4u);
+  EXPECT_FALSE(second.capacity_exhausted);
 }
 
-TEST(ConSanMoi, InlineReferenceExactByteShadowReportsMetadataFullForOutOfRangeAccess) {
-  std::array<uint64_t, 1> shadow{};
-  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*access_capacity=*/1,
-                                       ConSanMoiEngine::InlineShadow);
+TEST(ConSanMoi, SparseExactByteShadowRejectsOutOfRangeAccess) {
+  ConSanMoiSparseExactByteShadow model(/*byte_capacity=*/4, /*maximum_access_count=*/1);
   const ConSanMoiExactByteAccess access{
       /*generation=*/9,
       /*owner_id=*/3,
@@ -6509,14 +6495,11 @@ TEST(ConSanMoi, InlineReferenceExactByteShadowReportsMetadataFullForOutOfRangeAc
       /*lane_mask=*/0x4,
   };
 
-  const auto result = model.access(access, {}, shadow);
+  const auto result = model.access(access);
 
-  EXPECT_TRUE(result.conflict);
-  EXPECT_TRUE(result.metadata_full);
-  EXPECT_EQ(result.diagnostic.kind, static_cast<uint32_t>(ConSanMoiDiagnosticKind::MetadataFull));
-  EXPECT_EQ(result.diagnostic.second_owner_id, 3u);
-  EXPECT_EQ(result.diagnostic.second_instruction_offset, 0x30u);
-  EXPECT_EQ(shadow[0], 0u);
+  EXPECT_FALSE(result.conflict);
+  EXPECT_TRUE(result.capacity_exhausted);
+  EXPECT_FALSE(result.prior);
 }
 
 TEST(ConSanMoi, RecordReplaySeparatesExactShadowByWorkgroup) {

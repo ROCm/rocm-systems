@@ -32,7 +32,6 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <exception>
 #include <limits>
-#include <map>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -812,40 +811,19 @@ ConSanMoiAtomicSyncResult consan_moi_record_replay_atomic_acquire(
 }
 
 ConSanMoiSparseExactByteShadow::ConSanMoiSparseExactByteShadow(uint64_t byte_capacity,
-                                                               uint32_t access_capacity,
-                                                               ConSanMoiEngine backend)
-    : byte_capacity_(byte_capacity), access_capacity_(access_capacity), backend_(backend) {}
+                                                               uint32_t maximum_access_count)
+    : byte_capacity_(byte_capacity), maximum_access_count_(maximum_access_count) {}
 
 ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
     const ConSanMoiExactByteAccess &current,
-    std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens,
-    std::span<uint64_t> exported_exact_shadow_entries) {
+    std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens) {
   ConSanMoiExactByteAccessResult result;
   if (current.lds_byte_count == 0 || consan_moi_shadow_kind_is_empty(current.kind))
     return result;
 
   const uint64_t byte_end = static_cast<uint64_t>(current.lds_byte_offset) + current.lds_byte_count;
-  const uint64_t start_cell = current.lds_byte_offset >> consan_moi_exact_shadow::granule_shift;
-  const uint64_t end_cell = (byte_end + consan_moi_exact_shadow::granule_bytes - 1u) >>
-                            consan_moi_exact_shadow::granule_shift;
-  const bool export_too_small =
-      !exported_exact_shadow_entries.empty() && end_cell > exported_exact_shadow_entries.size();
-  const auto make_metadata_full = [&]() {
-    result.metadata_full = true;
-    result.conflict = true;
-    result.diagnostic.kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::MetadataFull);
-    result.diagnostic.backend = static_cast<uint32_t>(backend_);
-    result.diagnostic.generation = current.generation;
-    result.diagnostic.epoch = current.epoch;
-    result.diagnostic.second_owner_id = current.owner_id;
-    result.diagnostic.second_lane_mask = current.lane_mask;
-    result.diagnostic.second_instruction_offset = current.instruction_offset;
-    result.diagnostic.second_lds_byte_offset = current.lds_byte_offset;
-    result.diagnostic.second_lds_byte_count = current.lds_byte_count;
-    result.diagnostic.second_access_kind = static_cast<uint32_t>(current.kind);
-  };
-  if (byte_end > byte_capacity_ || export_too_small) {
-    make_metadata_full();
+  if (byte_end > byte_capacity_) {
+    result.capacity_exhausted = true;
     return result;
   }
 
@@ -868,7 +846,7 @@ ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
       continue;
     const uint32_t prior_index = overlap->second.provenance_index;
     if (prior_index == 0 || prior_index > provenance_.size()) {
-      make_metadata_full();
+      result.capacity_exhausted = true;
       return result;
     }
     const ConSanMoiExactByteAccess &prior = provenance_[prior_index - 1u];
@@ -885,27 +863,12 @@ ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
       continue;
 
     result.conflict = true;
-    result.diagnostic.kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict);
-    result.diagnostic.backend = static_cast<uint32_t>(backend_);
-    result.diagnostic.generation = current.generation;
-    result.diagnostic.epoch = current.epoch;
-    result.diagnostic.first_owner_id = prior.owner_id;
-    result.diagnostic.second_owner_id = current.owner_id;
-    result.diagnostic.first_lane_mask = prior.lane_mask;
-    result.diagnostic.second_lane_mask = current.lane_mask;
-    result.diagnostic.first_instruction_offset = prior.instruction_offset;
-    result.diagnostic.second_instruction_offset = current.instruction_offset;
-    result.diagnostic.first_lds_byte_offset = prior.lds_byte_offset;
-    result.diagnostic.first_lds_byte_count = prior.lds_byte_count;
-    result.diagnostic.second_lds_byte_offset = current.lds_byte_offset;
-    result.diagnostic.second_lds_byte_count = current.lds_byte_count;
-    result.diagnostic.first_access_kind = static_cast<uint32_t>(prior.kind);
-    result.diagnostic.second_access_kind = static_cast<uint32_t>(current.kind);
+    result.prior = prior;
     return result;
   }
 
-  if (provenance_.size() >= access_capacity_) {
-    make_metadata_full();
+  if (provenance_.size() >= maximum_access_count_) {
+    result.capacity_exhausted = true;
     return result;
   }
   provenance_.push_back(current);
@@ -916,8 +879,8 @@ ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
     if (prior_interval->second.end > current.lds_byte_offset)
       replace_begin = prior_interval;
   }
-  std::optional<std::pair<uint32_t, Interval>> left_remainder;
-  std::optional<std::pair<uint32_t, Interval>> right_remainder;
+  std::optional<std::pair<uint64_t, Interval>> left_remainder;
+  std::optional<std::pair<uint64_t, Interval>> right_remainder;
   auto replace_end = replace_begin;
   for (; replace_end != intervals_.end() && replace_end->first < byte_end; ++replace_end) {
     if (replace_end->second.end <= current.lds_byte_offset)
@@ -928,25 +891,16 @@ ConSanMoiExactByteAccessResult ConSanMoiSparseExactByteShadow::access(
                     Interval{current.lds_byte_offset, replace_end->second.provenance_index}};
     }
     if (replace_end->second.end > byte_end) {
-      right_remainder =
-          std::pair{static_cast<uint32_t>(byte_end),
-                    Interval{replace_end->second.end, replace_end->second.provenance_index}};
+      right_remainder = std::pair{
+          byte_end, Interval{replace_end->second.end, replace_end->second.provenance_index}};
     }
   }
   intervals_.erase(replace_begin, replace_end);
   if (left_remainder)
-    intervals_.insert(*left_remainder);
-  intervals_.emplace(current.lds_byte_offset, Interval{byte_end, provenance_index});
+    intervals_.insert_or_assign(left_remainder->first, left_remainder->second);
+  intervals_.insert_or_assign(current.lds_byte_offset, Interval{byte_end, provenance_index});
   if (right_remainder)
-    intervals_.insert(*right_remainder);
-
-  const uint64_t packed = pack_consan_moi_exact_shadow_entry(
-      current.kind, current.owner_id, current.epoch, static_cast<uint32_t>(current.generation),
-      current.instruction_offset);
-  for (uint64_t cell = start_cell; cell < end_cell && !exported_exact_shadow_entries.empty();
-       ++cell) {
-    exported_exact_shadow_entries[cell] = packed;
-  }
+    intervals_.insert_or_assign(right_remainder->first, right_remainder->second);
   return result;
 }
 
@@ -1040,7 +994,7 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     };
 
     ReplayWorkgroupState(uint64_t exact_byte_capacity, uint32_t access_capacity)
-        : exact_byte_shadow(exact_byte_capacity, access_capacity, ConSanMoiEngine::RecordReplay) {}
+        : exact_byte_shadow(exact_byte_capacity, access_capacity) {}
 
     uint64_t generation = 0;
     uint32_t workgroup_x = 0;
@@ -1101,6 +1055,21 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     diagnostic.second_lds_byte_count = second.lds_byte_count;
     diagnostic.first_access_kind = static_cast<uint32_t>(first.kind);
     diagnostic.second_access_kind = static_cast<uint32_t>(second.kind);
+    return diagnostic;
+  };
+
+  const auto make_metadata_full_diagnostic = [](const ConSanMoiExactByteAccess &access) {
+    ConSanMoiDiagnosticRecord diagnostic;
+    diagnostic.kind = static_cast<uint32_t>(ConSanMoiDiagnosticKind::MetadataFull);
+    diagnostic.backend = static_cast<uint32_t>(ConSanMoiEngine::RecordReplay);
+    diagnostic.generation = access.generation;
+    diagnostic.epoch = access.epoch;
+    diagnostic.second_owner_id = access.owner_id;
+    diagnostic.second_lane_mask = access.lane_mask;
+    diagnostic.second_instruction_offset = access.instruction_offset;
+    diagnostic.second_lds_byte_offset = access.lds_byte_offset;
+    diagnostic.second_lds_byte_count = access.lds_byte_count;
+    diagnostic.second_access_kind = static_cast<uint32_t>(access.kind);
     return diagnostic;
   };
 
@@ -1392,16 +1361,41 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
         lds_byte_count,
         record.instruction_offset,
         record.lane_mask,
+        // Unflagged lane masks summarize a wave access. They do not identify
+        // separable address groups that could race with one another.
         (record.flags & kConSanMoiAccessRecordFlagExactAddressGroupMask) != 0u,
     };
-    const ConSanMoiExactByteAccessResult access_result = state.exact_byte_shadow.access(
-        access, state.acquired_epoch_tokens, state.exported_exact_shadow_entries);
+    const ConSanMoiExactByteAccessResult access_result =
+        state.exact_byte_shadow.access(access, state.acquired_epoch_tokens);
     ++replay.processed_access_count;
-    replay.metadata_full |= access_result.metadata_full;
-    if (access_result.conflict) {
+    if (access_result.capacity_exhausted) {
+      replay.metadata_full = true;
       replay.conflict = true;
-      append_diagnostic(state, access_result.diagnostic, record.event_index);
+      append_diagnostic(state, make_metadata_full_diagnostic(access), record.event_index);
       continue;
+    }
+    if (access_result.conflict) {
+      if (!access_result.prior) {
+        replay.metadata_full = true;
+        replay.conflict = true;
+        append_diagnostic(state, make_metadata_full_diagnostic(access), record.event_index);
+        continue;
+      }
+      replay.conflict = true;
+      append_diagnostic(state, make_access_conflict_diagnostic(*access_result.prior, access),
+                        record.event_index);
+      continue;
+    }
+    const uint64_t packed = pack_consan_moi_exact_shadow_entry(
+        access.kind, access.owner_id, access.epoch, static_cast<uint32_t>(access.generation),
+        access.instruction_offset);
+    const uint64_t byte_end = static_cast<uint64_t>(access.lds_byte_offset) + access.lds_byte_count;
+    const uint64_t start_cell = access.lds_byte_offset >> consan_moi_exact_shadow::granule_shift;
+    const uint64_t end_cell = (byte_end + consan_moi_exact_shadow::granule_bytes - 1u) >>
+                              consan_moi_exact_shadow::granule_shift;
+    for (uint64_t cell = start_cell;
+         cell < end_cell && cell < state.exported_exact_shadow_entries.size(); ++cell) {
+      state.exported_exact_shadow_entries[cell] = packed;
     }
     const std::optional<ConSanMoiDiagnosticRecord> intra_wave =
         (record.flags & kConSanMoiAccessRecordFlagExactAddressGroupMask) != 0u

@@ -11,9 +11,9 @@ struct ConSanMoiExactByteAccess {
 };
 
 struct ConSanMoiExactByteAccessResult {
-  bool metadata_full = false;
+  bool capacity_exhausted = false;
   bool conflict = false;
-  ConSanMoiDiagnosticRecord diagnostic;
+  std::optional<ConSanMoiExactByteAccess> prior;
 };
 
 struct ConSanMoiRecordReplayResult {

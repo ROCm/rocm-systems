@@ -361,6 +361,8 @@ classify_consan_moi_inline_exact_snapshot(const ConSanMoiInlineExactSnapshotWord
           .version = words.version_after};
 }
 
+/// Host reference for the packed-cell conflict checks emitted by Inline
+/// Shadow. The device path performs the equivalent field comparisons.
 [[nodiscard]] constexpr bool
 consan_moi_exact_shadow_entries_conflict(const ConSanMoiExactShadowEntry &current,
                                          const ConSanMoiExactShadowEntry &prior) {
@@ -391,7 +393,7 @@ consan_moi_exact_byte_overlap(const ConSanMoiExactByteAccess &first,
   };
 }
 
-/// Target-neutral conflict contract shared by exact-byte backend models.
+/// Target-neutral conflict contract for exact-byte provenance.
 /// Different sites in one wave are program ordered. Distinct exact address
 /// groups from one site are concurrent lane groups and conflict on overlap.
 [[nodiscard]] constexpr bool
@@ -409,23 +411,17 @@ consan_moi_exact_byte_accesses_conflict(const ConSanMoiExactByteAccess &current,
          current.lane_mask != prior.lane_mask;
 }
 
-/// Bounded sparse byte-range provenance for backend reference models. Storage
-/// scales with admitted accesses and interval boundaries, not the LDS extent
-/// multiplied by the number of workgroups.
+/// Bounded sparse byte-range provenance for host-side Record/Replay detection.
+/// Storage scales with admitted accesses and interval boundaries, not the LDS
+/// extent multiplied by the number of workgroups. maximum_access_count is a
+/// structural input bound, not a second runtime policy budget.
 class ConSanMoiSparseExactByteShadow {
 public:
-  explicit ConSanMoiSparseExactByteShadow(uint64_t byte_capacity, uint32_t access_capacity,
-                                          ConSanMoiEngine backend);
+  explicit ConSanMoiSparseExactByteShadow(uint64_t byte_capacity, uint32_t maximum_access_count);
 
   [[nodiscard]] ConSanMoiExactByteAccessResult
   access(const ConSanMoiExactByteAccess &current,
-         std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens = {},
-         std::span<uint64_t> exported_exact_shadow_entries = {});
-
-  [[nodiscard]] uint64_t byte_capacity() const { return byte_capacity_; }
-  [[nodiscard]] uint32_t access_capacity() const { return access_capacity_; }
-  [[nodiscard]] size_t provenance_count() const { return provenance_.size(); }
-  [[nodiscard]] size_t interval_count() const { return intervals_.size(); }
+         std::span<const ConSanMoiAcquiredEpochToken> acquired_epoch_tokens = {});
 
 private:
   struct Interval {
@@ -434,9 +430,8 @@ private:
   };
 
   uint64_t byte_capacity_ = 0;
-  uint32_t access_capacity_ = 0;
-  ConSanMoiEngine backend_ = ConSanMoiEngine::RecordReplay;
-  std::map<uint32_t, Interval> intervals_;
+  uint32_t maximum_access_count_ = 0;
+  std::map<uint64_t, Interval> intervals_;
   std::vector<ConSanMoiExactByteAccess> provenance_;
 };
 
