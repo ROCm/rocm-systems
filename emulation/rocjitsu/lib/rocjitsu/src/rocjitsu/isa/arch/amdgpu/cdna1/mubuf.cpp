@@ -501,6 +501,12 @@ BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+void BufferLoadFormatD16XyzMubuf::implicit_uses(RegisterSet &uses) const {
+  Mubuf::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
+}
+
 void BufferLoadFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);

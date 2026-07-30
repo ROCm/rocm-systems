@@ -2765,22 +2765,20 @@ class CodeGenerator:
         )
 
     def _d16_load_reads_dst(self, inst: Instruction) -> bool:
-        """Return True for a D16(_HI) load that preserves half of vdst.
+        """Return True for a D16(_HI) load whose last dst register is partial.
 
-        These write one 16-bit half of vdst and keep the other, so they read
-        the old value -- a partial def for a single element (num_elems == 1);
-        multi-component FORMAT loads fill whole registers and preserve nothing.
-        The read is modelled as an implicit use (via implicit_uses) instead of a
-        source operand, keeping vdst out of the printed operand list.
+        The last register is partial when the written bytes (num_elems *
+        elem_size) do not fill whole 32-bit registers (e.g. ushort_d16, or
+        format_d16_xyz).
         """
         if not self.semantics:
             return False
         sem = self.semantics.instructions.get(inst.name)
-        if not sem:
+        if not sem or sem.num_elems is None or sem.elem_size is None:
             return False
         return (
             (sem.d16_hi or sem.d16_lo)
-            and sem.num_elems == 1
+            and (sem.num_elems * sem.elem_size) % 4 != 0
             and sem.semantic_class in self._D16_LOAD_CLASSES
         )
 
@@ -6653,6 +6651,10 @@ class CodeGenerator:
                     # name the dest 'vdata' and are sized as a full 32-bit
                     # register, so _partial_def_outputs does not catch them).
                     d16_implicit_use_opnd = None
+                    # Offset (in 32-bit registers) of the one partially-written
+                    # register within the destination: only the last register of
+                    # an odd-count FORMAT load (e.g. format_d16_xyz) is partial.
+                    d16_partial_reg_offset = 0
                     if self._d16_load_reads_dst(inst):
                         # FLAT/GLOBAL/SCRATCH/DS name the dest 'vdst'; MUBUF/MTBUF
                         # (buffer/tbuffer) name it 'vdata'.
@@ -6664,6 +6666,10 @@ class CodeGenerator:
                             ),
                             None,
                         )
+                        d16_sem = self.semantics.instructions.get(inst.name)
+                        d16_total_bytes = d16_sem.num_elems * d16_sem.elem_size
+                        d16_vgpr_count = (d16_total_bytes + 3) // 4  # round up
+                        d16_partial_reg_offset = d16_vgpr_count - 1
                     # These gfx1250-only WMMA source-format fields derive the
                     # src0/src1 operand sizes from the instruction shape.
                     gfx1250_f8f6f4_shape = self._gfx1250_f8f6f4_wmma_shape(inst)
@@ -8108,13 +8114,24 @@ class CodeGenerator:
                                 )
                             )
                     elif d16_implicit_use_opnd:
+                        # Single-register loads read the whole destination; a
+                        # multi-register FORMAT load only reads its last (partial)
+                        # register, so expand just that one.
+                        if d16_partial_reg_offset:
+                            d16_expand = (
+                                f'    uses.expand(RegisterRef{{r->cls, '
+                                f'static_cast<uint16_t>(r->index + '
+                                f'{d16_partial_reg_offset}), 1}});\n'
+                            )
+                        else:
+                            d16_expand = '    uses.expand(*r);\n'
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::implicit_uses'
                                 f'(RegisterSet &uses) const {{\n'
                                 f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
                                 f'  if (auto r = {d16_implicit_use_opnd}.to_register_ref())\n'
-                                f'    uses.expand(*r);\n'
+                                f'{d16_expand}'
                                 f'}}'
                             )
                         )

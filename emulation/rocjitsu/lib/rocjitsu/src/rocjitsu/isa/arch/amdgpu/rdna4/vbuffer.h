@@ -129,6 +129,7 @@ class BufferLoadD16FormatXyzVbuffer : public Vbuffer {
 public:
   BufferLoadD16FormatXyzVbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;

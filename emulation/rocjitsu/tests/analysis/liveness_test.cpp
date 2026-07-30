@@ -3896,6 +3896,31 @@ TEST(GeneratedInstDefUse, D16BufferLoadReadsDestination) {
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
+// Odd-count FORMAT D16 load: xyz packs 3 halfwords into two VGPRs. The first
+// (v5) is fully written (x|y); only the last (v6) holds one 16-bit half (z) and
+// preserves its upper 16 bits, so only v6 is read.
+TEST(GeneratedInstDefUse, D16FormatXyzLoadReadsOnlyLastDestination) {
+  auto inst = decode_rdna4({0xC4028000U, 0x00000005U}); // buffer_load_d16_format_xyz, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "buffer_load_d16_format_xyz");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 2}));  // writes v5:v6
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));  // last reg partial
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1})); // first reg fully written
+}
+
+// Even-count FORMAT D16 load: xyzw fills two whole VGPRs and preserves nothing.
+TEST(GeneratedInstDefUse, D16FormatXyzwLoadDoesNotReadDestination) {
+  auto inst = decode_rdna4({0xC402C000U, 0x00000005U}); // buffer_load_d16_format_xyzw, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "buffer_load_d16_format_xyzw");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 2}));
+}
+
 TEST(GeneratedInstDefUse, D16DsLoadReadsDestination) {
   auto inst = decode_rdna4({0xDA880000U, 0x05000000U}); // ds_load_u8_d16, vdst=5
   ASSERT_NE(inst, nullptr);
