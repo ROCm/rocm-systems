@@ -80,7 +80,7 @@ class TestTraceTimeWindow(RocprofsysTest):
     def test_delay(self, mode, time_window_env):
         env = time_window_env.copy()
         env.update(
-            {"ROCPROFSYS_TRACE_DELAY": "0.75", "ROCPROFSYS_TRACE_DURATION": "0.75"}
+            {"ROCPROFSYS_TRACE_DELAY": "0.75", "ROCPROFSYS_TRACE_DURATION": "0.85"}
         )
         result = self.run_test(
             mode,

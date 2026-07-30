@@ -10,11 +10,6 @@
 
 namespace rocprofsys::control::clocks
 {
-/// Production clock backed by std::chrono::steady_clock. sleep_until uses
-/// std::condition_variable::wait_until so interrupt() can wake any waiter
-/// (used during shutdown to cancel a sleeping time_window trigger).
-///
-/// Satisfies the clock concept (see core/control/clock.hpp).
 class steady
 {
 public:
