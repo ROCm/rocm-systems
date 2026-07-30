@@ -1615,8 +1615,7 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
         this->release();
         return status;
       }
-      topoOrder_[i]->EnqueueCommands(launch_stream);
-      status = topoOrder_[i]->GetEnqueueStatus();
+      status = topoOrder_[i]->EnqueueCommands(launch_stream);
       if (status != hipSuccess) {
         this->release();
         return status;
@@ -2774,8 +2773,7 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       node->SetStream(stream);
       status = node->CreateCommand(node->GetQueue());
       if (status != hipSuccess) return status;
-      node->EnqueueCommands(stream);
-      status = node->GetEnqueueStatus();
+      status = node->EnqueueCommands(stream);
       if (status != hipSuccess) return status;
     }
   }
@@ -2920,8 +2918,7 @@ hipError_t Graph::RunOneNode(Node node) {
       node->UpdateEventWaitLists(waitList);
     }
     // Start the execution
-    node->EnqueueCommands(node->GetQueue());
-    status = node->GetEnqueueStatus();
+    status = node->EnqueueCommands(node->GetQueue());
     if (status != hipSuccess) {
       releaseWaitOrderCommands();
       return status;
@@ -3140,8 +3137,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
         this->release();
         return status;
       }
-      topoOrder_[i]->EnqueueCommands(launch_stream);
-      status = topoOrder_[i]->GetEnqueueStatus();
+      status = topoOrder_[i]->EnqueueCommands(launch_stream);
       if (status != hipSuccess) {
         this->release();
         return status;
