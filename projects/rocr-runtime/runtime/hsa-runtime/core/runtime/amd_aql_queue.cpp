@@ -1595,6 +1595,9 @@ void AqlQueue::SetProfiling(bool enabled) {
 // If in_signal is provided, then ExecutePM4 will return and caller may wait for in_signal
 // Note: On gfx8, there is no completion signal support, so ExecutePM4 will block even if
 // in_signal is provided, and it is still valid to check in_signal after ExecutePM4 returns.
+// Note: cmd_data is staged in pm4_ib_buf_, a single indirect buffer per queue that is reused
+// by the next call. When in_signal is provided the caller must wait on it before issuing
+// another PM4 on this queue, otherwise the in-flight command stream is overwritten.
 void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
                           hsa_fence_scope_t releaseFence, hsa_signal_t* in_signal) {
   // pm4_ib_buf_ is a shared resource, so mutually exclude here.
