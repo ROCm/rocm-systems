@@ -259,15 +259,15 @@ void RdcMetricFetcherImpl::get_afid(uint32_t gpu_index, rdc_field_value* value) 
     if (hdr == nullptr) {
       continue;
     }
-    uint64_t afids[MAX_NUMBER_OF_AFIDS_PER_RECORD] = {0};
-    uint32_t num_afids = MAX_NUMBER_OF_AFIDS_PER_RECORD;
+    uint64_t afids[AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD] = {0};
+    uint32_t num_afids = AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD;
     amdsmi_status_t afid_err = amdsmi_get_afids_from_cper(reinterpret_cast<char*>(hdr),
                                                           hdr->record_length, afids, &num_afids);
     if (afid_err != AMDSMI_STATUS_SUCCESS) {
       continue;
     }
-    if (num_afids > MAX_NUMBER_OF_AFIDS_PER_RECORD) {
-      num_afids = MAX_NUMBER_OF_AFIDS_PER_RECORD;
+    if (num_afids > AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD) {
+      num_afids = AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD;
     }
     const char* sev = severity_str(hdr->error_severity);
     for (uint32_t a = 0; a < num_afids; ++a) {
