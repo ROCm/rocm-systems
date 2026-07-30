@@ -352,9 +352,11 @@ ncclResult_t ncclTuningCostModelInit(struct ncclComm* comm) {
     int algo, proto, symKernelId;
     NCCLCHECK(ncclTuningExpandId(i, &algo, &proto, &symKernelId, nullptr));
     for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
-      // First check if LL128 is functional on the platform
-      if (proto == NCCL_PROTO_LL128 && !isLL128Enabled(comm->minCompCap, comm->maxCompCap, comm->graphs[algo].typeInter,
-                                                       comm->graphs[algo].typeIntra, comm->nRanks, f, algo)) {
+      // Disable LL128 when 1) it is not supported on the platform, and 2) user did not explicitly request it.
+      // protoEnable[..] == 2 indicates that user did not set NCCL_PROTO=LL128 explicitly.
+      if (proto == NCCL_PROTO_LL128 && protoEnable[f * NCCL_NUM_PROTOCOLS + proto] == 2 &&
+          !isLL128Enabled(comm->minCompCap, comm->maxCompCap, comm->graphs[algo].typeInter,
+                          comm->graphs[algo].typeIntra, comm->nRanks, f, algo)) {
         comm->tuningContext.enabled[i][f] = 0;
       }
       //  Check the user env vars only for functions that have a forced configuration and not already disabled.
