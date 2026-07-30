@@ -279,10 +279,9 @@ void ceProfilerRegisterContext(struct context* ctx) {
   ctx->ceEvents.ceSyncHead = NULL;
   ctx->ceEvents.ceBatchHead = NULL;
 
-  if (pthread_mutex_trylock(&ceProfilerCtxt.mutex) != 0) {
-    pthread_mutex_destroy(&ctx->ceEvents.mutex);
-    return;
-  }
+  // Block: a context that failed to register is never polled, yet its events
+  // still take ctx->ceEvents.mutex, which this path used to destroy.
+  pthread_mutex_lock(&ceProfilerCtxt.mutex);
 
   // Check if context with this commHash+rank already exists
   for (int i = 0; i < ceProfilerCtxt.contextCount; i++) {
@@ -295,7 +294,7 @@ void ceProfilerRegisterContext(struct context* ctx) {
   }
 
   // Resize registry if needed
-  if (ceProfilerCtxt.contextCount > ceProfilerCtxt.contextCapacity) {
+  if (ceProfilerCtxt.contextCount >= ceProfilerCtxt.contextCapacity) {
     int newCapacity = ceProfilerCtxt.contextCapacity * 2;
     struct context** newRegistry = (struct context**)calloc(newCapacity, sizeof(struct context*));
     if (newRegistry) {
@@ -314,9 +313,9 @@ void ceProfilerRegisterContext(struct context* ctx) {
 
 // Deregister context from CE poller
 void ceProfilerDeregisterContext(struct context* ctx) {
-  if (pthread_mutex_trylock(&ceProfilerCtxt.mutex) != 0) {
-    return;
-  }
+  // Block: leaving a finalized context in the registry lets the poller walk it
+  // after it is freed.
+  pthread_mutex_lock(&ceProfilerCtxt.mutex);
 
   for (int i = 0; i < ceProfilerCtxt.contextCount; i++) {
     if (ceProfilerCtxt.contextRegistry[i] &&
@@ -331,9 +330,8 @@ void ceProfilerDeregisterContext(struct context* ctx) {
 }
 
 void ceProfilerCleanupPendingEvents(struct context* ctx) {
-  if (pthread_mutex_trylock(&ctx->ceEvents.mutex) != 0) {
-    return;
-  }
+  // Block: skipping cleanup leaks the CUDA events still held by this context.
+  pthread_mutex_lock(&ctx->ceEvents.mutex);
 
   struct ceColl* ceColl = ctx->ceEvents.ceCollHead;
   while (ceColl) {
