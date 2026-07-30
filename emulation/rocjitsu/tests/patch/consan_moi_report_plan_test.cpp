@@ -107,7 +107,7 @@ TEST(ConSanMoiAutoReportPlan, RecordReplayUsesIndependentExactRegionCounts) {
   EXPECT_EQ(plan.layout.record_replay_access_owner_bank_count,
             kConSanMoiRecordReplayMaximumOwnerBankCount);
   EXPECT_EQ(plan.layout.record_replay_logical_access_range_count, 3u);
-  EXPECT_EQ(plan.layout.access_record_capacity, 2048u);
+  EXPECT_EQ(plan.layout.access_record_capacity, 131072u);
   EXPECT_EQ(plan.layout.barrier_record_capacity, 5u);
   EXPECT_EQ(plan.layout.atomic_record_capacity, 7u);
   EXPECT_EQ(plan.layout.fence_record_capacity, 11u);
@@ -136,7 +136,7 @@ TEST(ConSanMoiAutoReportPlan, RecordReplayUsesIndependentExactRegionCounts) {
 
 TEST(ConSanMoiAutoReportPlan, RecordReplayAccessTableMakesTheSizingIncreaseExplicit) {
   constexpr uint64_t kHistoricalAccessRecordBytes = 64u;
-  constexpr uint64_t kFormerlyFittingLogicalRanges = 120000u;
+  constexpr uint64_t kFormerlyFittingLogicalRanges = 4096u;
   constexpr uint64_t kBankCount =
       static_cast<uint64_t>(kConSanMoiRecordReplayMaximumDispatchBankCount) *
       kConSanMoiRecordReplayMaximumOwnerBankCount;
@@ -154,7 +154,8 @@ TEST(ConSanMoiAutoReportPlan, RecordReplayAccessTableMakesTheSizingIncreaseExpli
   EXPECT_EQ(plan.outcome, ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity);
   EXPECT_EQ(plan.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
   const uint64_t expected_access_capacity = std::bit_ceil(
-      kFormerlyFittingLogicalRanges * kBankCount * kConSanMoiRecordReplayHashTableHeadroom);
+      kFormerlyFittingLogicalRanges * kBankCount *
+      kConSanMoiRecordReplayMaximumAddressGroupsPerWave * kConSanMoiRecordReplayHashTableHeadroom);
   EXPECT_EQ(plan.layout.access_record_capacity, expected_access_capacity);
   EXPECT_EQ(plan.required_bytes,
             sizeof(ConSanMoiReportHeader) +

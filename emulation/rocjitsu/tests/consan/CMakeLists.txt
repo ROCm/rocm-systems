@@ -323,6 +323,9 @@ set(RJ_CONSAN_CDNA_MOI_ATOMIC_TEST
 set(RJ_CONSAN_CDNA_MOI_DYNAMIC_STACK_TEST
     "ConSanMoiCdnaTest.DynamicStackInlineSpillPreservesPrivateValues"
 )
+set(RJ_CONSAN_CDNA_MOI_ADDRESS_GROUP_TEST
+    "ConSanMoiCdnaTest.SecondAddressGroupReportsExactLaneConflict"
+)
 set(RJ_CONSAN_LDS_MOI_BARRIER_RECORD_TEST
     "ConSanMoiHipTest.BarrierRecordOrdersTwoWaveAccesses"
 )
@@ -344,6 +347,35 @@ set(RJ_CONSAN_MOI_SHARED_ATOMIC_HELPER_TEST
 set(RJ_CONSAN_MOI_DYNAMIC_PRIVATE_STACK_TEST
     "ConSanMoiHipTest.DynamicPrivateStackPreservesOutput"
 )
+set(RJ_CONSAN_MOI_ADDRESS_GROUP_TEST
+    "ConSanMoiHipTest.SecondAddressGroupReportsExactLaneConflict"
+)
+
+function(rj_add_consan_address_group_sim_case prefix target filter config)
+    rj_add_consan_hip_case(
+        NAME "${prefix}.MoiSecondAddressGroupRace"
+        TARGET ${target}
+        FILTER "${filter}"
+        CONFIG "${config}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX
+            "first_lds=\\[4,8\\) second_lds=\\[4,8\\).*first_lane_mask=0x2 second_lane_mask=0x4"
+        FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
+        ENVIRONMENT
+            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+            "RJ_CONSAN_MODE=record-replay"
+            "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+            "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+            "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+            "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+            "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=moi_second_address_group_race_for_instrumentation"
+            "RJ_CONSAN_LOG=3"
+            "RJ_CONSAN_MAX_PATCHES=1"
+            "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+endfunction()
 
 function(rj_add_consan_common_sim_cases)
     set(_one_value_args
@@ -589,6 +621,12 @@ function(rj_add_consan_cdna_sim_cases)
         SHARED_KERNEL "moi_cdna_shared_lds_helper_for_instrumentation"
         SHARED_INIT_OWNER_EPOCH 1
     )
+    rj_add_consan_address_group_sim_case(
+        "${_sim_PREFIX}"
+        ${_sim_MOI_TARGET}
+        "${RJ_CONSAN_CDNA_MOI_ADDRESS_GROUP_TEST}"
+        "${_sim_CONFIG}"
+    )
 
     # CDNA's focused MOI fixture has spill-specific inline, synchronization,
     # atomic, and dynamic-stack cases; keep those family-specific below.
@@ -769,6 +807,12 @@ function(rj_add_consan_gfx1250_sim_cases)
         ACCESS_KERNEL "moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation"
         SHARED_KERNEL "moi_shared_noinline_lds_helper_for_instrumentation"
         SHARED_INIT_OWNER_EPOCH 0
+    )
+    rj_add_consan_address_group_sim_case(
+        "${_sim_PREFIX}"
+        ${_sim_MOI_TARGET}
+        "${RJ_CONSAN_MOI_ADDRESS_GROUP_TEST}"
+        "${_sim_CONFIG}"
     )
     rj_add_consan_rdna4_b96_cases(
         PREFIX "${_sim_PREFIX}"
@@ -1050,6 +1094,9 @@ function(rj_add_consan_hip_tests)
     set(_rj_consan_moi_abi_header
         "${_rj_consan_include_dir}/rocjitsu/code/patch/consan/consan_moi_abi.h"
     )
+    set(_rj_consan_moi_hip_fixture_headers
+        "${_rj_consan_moi_abi_header};${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/hip_consan_address_group_test.h"
+    )
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX942)
         # Keep a native gfx942 code object available on every host so CDNA3
         # ConSan can be exercised through the RocJITsu simulator.
@@ -1063,7 +1110,7 @@ function(rj_add_consan_hip_tests)
                 ARCH gfx942
                 SOURCE dbi/consan/hip_consan_moi_cdna_test.hip
                 INCLUDE_DIRS "${_rj_consan_include_dir}"
-                EXTRA_DEPENDS "${_rj_consan_moi_abi_header}"
+                EXTRA_DEPENDS "${_rj_consan_moi_hip_fixture_headers}"
         )
         add_dependencies(hip_consan_lds_gfx942_test_target rocjitsu_dbi_hooks)
         add_dependencies(hip_consan_moi_gfx942_test_target rocjitsu_dbi_hooks)
@@ -1090,7 +1137,7 @@ function(rj_add_consan_hip_tests)
                 ARCH gfx950
                 SOURCE dbi/consan/hip_consan_moi_cdna_test.hip
                 INCLUDE_DIRS "${_rj_consan_include_dir}"
-                EXTRA_DEPENDS "${_rj_consan_moi_abi_header}"
+                EXTRA_DEPENDS "${_rj_consan_moi_hip_fixture_headers}"
         )
         add_dependencies(hip_consan_lds_gfx950_test_target rocjitsu_dbi_hooks)
         add_dependencies(hip_consan_moi_gfx950_test_target rocjitsu_dbi_hooks)
@@ -1263,7 +1310,7 @@ function(rj_add_consan_hip_tests)
                 ARCH gfx1250
                 SOURCE dbi/consan/hip_consan_moi_test.hip
                 INCLUDE_DIRS "${_rj_consan_include_dir}"
-                EXTRA_DEPENDS "${_rj_consan_moi_abi_header}"
+                EXTRA_DEPENDS "${_rj_consan_moi_hip_fixture_headers}"
         )
         add_dependencies(hip_consan_lds_gfx1250_test_target rocjitsu_dbi_hooks)
         add_dependencies(hip_consan_moi_gfx1250_test_target rocjitsu_dbi_hooks)
@@ -1291,7 +1338,7 @@ function(rj_add_consan_hip_tests)
             ARCH gfx1201
             SOURCE dbi/consan/hip_consan_moi_test.hip
             INCLUDE_DIRS "${_rj_consan_include_dir}"
-            EXTRA_DEPENDS "${_rj_consan_moi_abi_header}"
+            EXTRA_DEPENDS "${_rj_consan_moi_hip_fixture_headers}"
     )
     add_dependencies(hip_consan_moi_test_target rocjitsu_dbi_hooks)
     # Deliberately ill-formed GPU synchronization. The gtests are disabled

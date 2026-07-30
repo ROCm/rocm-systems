@@ -1369,6 +1369,7 @@ TEST(ConSanMoi, RecordReplayMultiLaneWriteReportsExactSameWaveConflict) {
   record.lds_byte_count = 2;
   record.start_cell = 1;
   record.cell_count = 1;
+  record.flags = kConSanMoiAccessRecordFlagExactAddressGroupMask;
 
   std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
   std::array<uint64_t, 2> shadow{};
@@ -1407,12 +1408,13 @@ TEST(ConSanMoi, RecordReplayDistinctSameWaveGroupsConflictOnlyOnByteOverlap) {
       record.access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
       record.lds_byte_count = 2;
       record.cell_count = 1;
+      record.flags = kConSanMoiAccessRecordFlagExactAddressGroupMask;
     }
     records[0].lane_mask = 0x1;
     records[0].instruction_offset = 0x40;
     records[0].lds_byte_offset = 0;
     records[1].lane_mask = second_mask;
-    records[1].instruction_offset = 0x48;
+    records[1].instruction_offset = 0x40;
     records[1].lds_byte_offset = second_offset;
 
     std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
@@ -1441,6 +1443,174 @@ TEST(ConSanMoi, RecordReplayDistinctSameWaveGroupsConflictOnlyOnByteOverlap) {
   const auto [same_group, also_ignored] = replay_ranges(/*second_offset=*/0, /*second_mask=*/0x1);
   (void)also_ignored;
   EXPECT_FALSE(same_group.conflict);
+}
+
+TEST(ConSanMoi, RecordReplaySameWaveDifferentSitesAreProgramOrdered) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/2,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 2;
+
+  std::array<ConSanMoiAccessRecord, 2> records{};
+  for (ConSanMoiAccessRecord &record : records) {
+    record.wave_id = 3;
+    record.access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    record.lds_byte_count = 4;
+    record.cell_count = 1;
+    record.flags = kConSanMoiAccessRecordFlagExactAddressGroupMask;
+  }
+  records[0].lane_mask = 0x1;
+  records[0].instruction_offset = 0x40;
+  records[1].lane_mask = 0x4;
+  records[1].instruction_offset = 0x48;
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 1> shadow{};
+  const ConSanMoiRecordReplayResult replay =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+
+  EXPECT_FALSE(replay.conflict);
+  EXPECT_EQ(replay.emitted_diagnostic_count, 0u);
+}
+
+TEST(ConSanMoi, RecordReplayDirectWaveMaskDoesNotInventAnIntraWaveConflict) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/1,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 1;
+
+  ConSanMoiAccessRecord record{};
+  record.wave_id = 3;
+  record.lane_mask = std::numeric_limits<uint64_t>::max();
+  record.instruction_offset = 0x40;
+  record.access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+  record.lds_byte_count = 4;
+  record.cell_count = 1;
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 1> shadow{};
+  const ConSanMoiRecordReplayResult replay = consan_moi_record_replay_access_records(
+      header, std::span<const ConSanMoiAccessRecord>(&record, 1), diagnostics, shadow);
+
+  EXPECT_FALSE(replay.conflict);
+  EXPECT_EQ(replay.emitted_diagnostic_count, 0u);
+}
+
+TEST(ConSanMoi, RecordReplayExactMultiLaneReadWriteReportsIntraWaveConflict) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/1,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/1,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 1;
+
+  ConSanMoiAccessRecord record{};
+  record.wave_id = 3;
+  record.lane_mask = 0x3;
+  record.instruction_offset = 0x40;
+  record.access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::ReadWrite);
+  record.lds_byte_count = 4;
+  record.cell_count = 1;
+  record.flags = kConSanMoiAccessRecordFlagExactAddressGroupMask;
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::array<uint64_t, 1> shadow{};
+  const ConSanMoiRecordReplayResult replay = consan_moi_record_replay_access_records(
+      header, std::span<const ConSanMoiAccessRecord>(&record, 1), diagnostics, shadow);
+
+  EXPECT_TRUE(replay.conflict);
+  ASSERT_EQ(replay.emitted_diagnostic_count, 1u);
+  EXPECT_EQ(diagnostics[0].first_access_kind,
+            static_cast<uint32_t>(ConSanMoiShadowAccessKind::ReadWrite));
+  EXPECT_EQ(diagnostics[0].second_access_kind,
+            static_cast<uint32_t>(ConSanMoiShadowAccessKind::ReadWrite));
+}
+
+TEST(ConSanMoi, RecordReplayDeduplicatesByDiagnosticKindAndExactOverlap) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/7,
+      /*diagnostic_capacity=*/4, /*exact_shadow_entry_capacity=*/5,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = 7;
+
+  std::array<ConSanMoiAccessRecord, 7> records{};
+  for (ConSanMoiAccessRecord &record : records) {
+    record.access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    record.lds_byte_count = 4;
+    record.cell_count = 1;
+    record.lane_mask = 1;
+  }
+  records[0].wave_id = 1;
+  records[0].instruction_offset = 0x10;
+  records[1].wave_id = 2;
+  records[1].instruction_offset = 0x20;
+
+  records[2] = records[0];
+  records[2].lds_byte_offset = 16;
+  records[2].start_cell = 4;
+  records[3] = records[1];
+  records[3].lds_byte_offset = 16;
+  records[3].start_cell = 4;
+
+  records[4] = records[0];
+  records[4].instruction_offset = 0x30;
+  records[4].lds_byte_offset = 4096;
+  records[4].start_cell = 1024;
+  records[5] = records[0];
+  records[5].instruction_offset = 0;
+  records[6] = records[1];
+  records[6].instruction_offset = 0x30;
+
+  std::array<ConSanMoiDiagnosticRecord, 4> diagnostics{};
+  std::array<uint64_t, 5> shadow{};
+  const ConSanMoiRecordReplayResult replay =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+
+  EXPECT_TRUE(replay.conflict);
+  EXPECT_TRUE(replay.metadata_full);
+  ASSERT_EQ(replay.emitted_diagnostic_count, 4u);
+  EXPECT_EQ(diagnostics[0].kind, static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict));
+  EXPECT_EQ(diagnostics[0].first_lds_byte_offset, 0u);
+  EXPECT_EQ(diagnostics[1].kind, static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict));
+  EXPECT_EQ(diagnostics[1].first_lds_byte_offset, 16u);
+  EXPECT_EQ(diagnostics[2].kind, static_cast<uint32_t>(ConSanMoiDiagnosticKind::MetadataFull));
+  EXPECT_EQ(diagnostics[3].kind, static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict));
+}
+
+TEST(ConSanMoi, RecordReplaySparseProvenanceDoesNotScaleByWorkgroupLdsExtent) {
+  constexpr uint32_t kWorkgroupCount = 1024;
+  constexpr uint32_t kLdsBytes = 160u * 1024u;
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/7, /*dispatch_id=*/11, /*access_record_capacity=*/kWorkgroupCount,
+      /*diagnostic_capacity=*/1,
+      /*exact_shadow_entry_capacity=*/kLdsBytes / consan_moi_exact_shadow::granule_bytes,
+      /*sampled_watchpoint_capacity=*/0);
+  header.access_record_count = kWorkgroupCount;
+
+  std::vector<ConSanMoiAccessRecord> records(kWorkgroupCount);
+  for (uint32_t workgroup = 0; workgroup < kWorkgroupCount; ++workgroup) {
+    ConSanMoiAccessRecord &record = records[workgroup];
+    record.workgroup_x = workgroup;
+    record.wave_id = 1;
+    record.lane_mask = 1;
+    record.instruction_offset = 0x10;
+    record.access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    record.lds_byte_offset = kLdsBytes - sizeof(uint32_t);
+    record.lds_byte_count = sizeof(uint32_t);
+    record.start_cell = kLdsBytes / consan_moi_exact_shadow::granule_bytes - 1u;
+    record.cell_count = 1;
+  }
+
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+  std::vector<uint64_t> shadow(kLdsBytes / consan_moi_exact_shadow::granule_bytes);
+  const ConSanMoiRecordReplayResult replay =
+      consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
+
+  EXPECT_FALSE(replay.conflict);
+  EXPECT_FALSE(replay.metadata_full);
+  EXPECT_EQ(replay.processed_access_count, kWorkgroupCount);
+  EXPECT_NE(shadow.back(), 0u);
 }
 
 TEST(ConSanMoi, RecordReplayCollapsedWorkgroupIdentityCreatesCrossLdsConflict) {
@@ -1937,11 +2107,11 @@ TEST(ConSanMoi, RecordReplaySkipsOnlyCompletelyUnpublishedStaticSlots) {
   EXPECT_EQ(partial_site.unsupported_access_count, 1u);
 
   records[2] = {};
-  records[2].reserved = 1;
-  const ConSanMoiRecordReplayResult partial_reserved =
+  records[2].flags = 2;
+  const ConSanMoiRecordReplayResult partial_flags =
       consan_moi_record_replay_access_records(header, records, diagnostics, shadow);
-  EXPECT_EQ(partial_reserved.processed_access_count, 3u);
-  EXPECT_EQ(partial_reserved.unsupported_access_count, 1u);
+  EXPECT_EQ(partial_flags.processed_access_count, 3u);
+  EXPECT_EQ(partial_flags.unsupported_access_count, 1u);
 }
 
 TEST(ConSanMoi, RecordReplayReportsDroppedBarrierRecords) {

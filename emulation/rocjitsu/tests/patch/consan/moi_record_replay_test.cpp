@@ -796,8 +796,10 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
               save_address_group && rank_address_group_lo && rank_address_group_hi &&
               narrow_representative && remove_address_group && select_remaining &&
               restore_original && combine_address_identity && loop_branch);
-  EXPECT_NE(std::ranges::find(access_words, *save_original_exec), access_words.end());
-  EXPECT_NE(std::ranges::find(access_words, *read_address), access_words.end());
+  const auto save_original_exec_position = std::ranges::find(access_words, *save_original_exec);
+  ASSERT_NE(save_original_exec_position, access_words.end());
+  const auto read_address_position = std::ranges::find(access_words, *read_address);
+  ASSERT_NE(read_address_position, access_words.end());
   EXPECT_NE(std::ranges::find(access_words, *select_address), access_words.end());
   EXPECT_NE(std::ranges::find(access_words, *narrow_address), access_words.end());
   EXPECT_NE(std::ranges::find(access_words, *save_address_group), access_words.end());
@@ -812,7 +814,18 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
     return (word & 0xffff0000u) == (*loop_branch & 0xffff0000u) &&
            static_cast<int16_t>(word & 0xffffu) < 0;
   });
-  EXPECT_NE(backward_group_branch, access_words.end());
+  ASSERT_NE(backward_group_branch, access_words.end());
+  EXPECT_EQ(std::ranges::count_if(access_words,
+                                  [&](uint32_t word) {
+                                    return (word & 0xffff0000u) == (*loop_branch & 0xffff0000u) &&
+                                           static_cast<int16_t>(word & 0xffffu) < 0;
+                                  }),
+            1u);
+  const int64_t loop_head = std::distance(access_words.begin(), read_address_position);
+  const int64_t branch_index = std::distance(access_words.begin(), backward_group_branch);
+  const int64_t branch_target =
+      branch_index + 1 + static_cast<int16_t>(*backward_group_branch & 0xffffu);
+  EXPECT_EQ(branch_target, loop_head);
   EXPECT_TRUE(contains_subsequence(
       access_words, make_expected_scalar_offset_store_words(
                         offsetof(ConSanMoiAccessRecord, lane_mask), address_group_exec, scratch)));
@@ -820,10 +833,15 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
       access_words, make_expected_scalar_offset_store_words(
                         offsetof(ConSanMoiAccessRecord, lane_mask) + sizeof(uint32_t),
                         static_cast<uint16_t>(address_group_exec + 1u), scratch)));
+  EXPECT_TRUE(contains_subsequence(
+      access_words,
+      make_expected_literal_offset_store_words(offsetof(ConSanMoiAccessRecord, flags),
+                                               kConSanMoiAccessRecordFlagExactAddressGroupMask,
+                                               scratch, static_cast<uint16_t>(scratch + 2u))));
   EXPECT_EQ(report_plan.layout.record_replay_dispatch_token_capacity,
             kConSanMoiRecordReplayMaximumDispatchTokenCount);
   EXPECT_EQ(report_plan.layout.record_replay_logical_access_range_count, 2u);
-  EXPECT_EQ(report_plan.layout.access_record_capacity, 1024u);
+  EXPECT_EQ(report_plan.layout.access_record_capacity, 65536u);
 }
 
 TEST(ConSanMoi, AutoRecordReplayCapturesDispatchIdentityInPersistentVgprsAtScalarPressure) {
@@ -895,6 +913,58 @@ TEST(ConSanMoi, AutoRecordReplayCapturesDispatchIdentityInPersistentVgprsAtScala
       4u;
   EXPECT_GE(allocated_vgprs, static_cast<uint32_t>(*result.resolved_moi_dispatch_id_vgpr) + 2u);
   EXPECT_GT(allocated_vgprs, 4u);
+}
+
+TEST(ConSanMoi, AutoRecordReplaySpillsWideAddressGroupStateAtScalarPressure) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+    SCOPED_TRACE(arch);
+    constexpr std::array<uint16_t, 4> kRouterState = {0u, 1u, 4u, 6u};
+    std::vector<uint32_t> words = {
+        0xD8340000u,
+        0x00000000u, // ds_store_b32 v0, v0
+    };
+    for (uint16_t sgpr = 0; sgpr < 106u; ++sgpr) {
+      if (std::ranges::find(kRouterState, sgpr) == kRouterState.end())
+        words.push_back(build_s_mov_b32(/*M0=*/125u, sgpr, arch));
+    }
+    words.push_back(build_s_endpgm(arch));
+
+    const std::vector<uint8_t> bytes =
+        arch == ROCJITSU_CODE_ARCH_GFX1250
+            ? make_gfx1250_code_object(words, "auto_record_replay_scalar_spill",
+                                       kRdna4Wave64AllVgprsGranulated, /*wave32=*/true)
+            : make_rdna4_lds_code_object(words, "auto_record_replay_scalar_spill",
+                                         kRdna4Wave64AllVgprsGranulated);
+    const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
+        {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
+    ASSERT_TRUE(report_plan.complete());
+    const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
+    ASSERT_TRUE(layout_override);
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+    options.scratch_vgpr = 8;
+    options.moi_owner_vgpr = 40;
+    options.moi_epoch_vgpr = 41;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = report_plan.required_bytes;
+    options.moi_report_layout = *layout_override;
+    options.moi_track_barriers = false;
+    options.moi_track_atomics = false;
+    options.max_patches = 1;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+    EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+    const auto access_patch = std::ranges::find(
+        result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+    ASSERT_NE(access_patch, result.patches.end());
+    constexpr uint32_t kAddressGroupScalarBytes = 14u * sizeof(uint32_t);
+    EXPECT_EQ(access_patch->required_private_segment_size, kAddressGroupScalarBytes);
+    EXPECT_TRUE(result.final_validation_passed);
+  }
 }
 
 TEST(ConSanMoi, RejectsAmbiguousOrInvalidPersistentDispatchVgprOverrides) {
@@ -3981,8 +4051,10 @@ TEST(ConSanMoi, AutoReportInventoryReservesRecordReplaySyncHeadroom) {
 TEST(ConSanMoi, AutoReportInventoryAdaptsRecordReplayGridAndEventHeadroomForFatObjects) {
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::RecordReplay;
-  inventory.access_range_count = 47428u;
-  inventory.diagnostic_count = 47428u;
+  // Retain a large static inventory while accounting for the worst case of
+  // one distinct dynamic address group per lane.
+  inventory.access_range_count = 741u;
+  inventory.diagnostic_count = 741u;
   inventory.barrier_event_count = 10000u;
   inventory.record_replay_bank_count_adaptive = true;
 
@@ -3999,6 +4071,10 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsRecordReplayGridAndEventHeadroomForFatO
             inventory.record_replay_access_owner_bank_count);
   EXPECT_EQ(fitted.record_replay_access_dispatch_bank_count,
             fitted.record_replay_access_owner_bank_count);
+  EXPECT_EQ(fitted.diagnostic_count, fitted.access_range_count *
+                                         fitted.record_replay_access_dispatch_bank_count *
+                                         fitted.record_replay_access_owner_bank_count *
+                                         kConSanMoiRecordReplayMaximumAddressGroupsPerWave);
   EXPECT_LE(plan.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
 
   auto exact = inventory;

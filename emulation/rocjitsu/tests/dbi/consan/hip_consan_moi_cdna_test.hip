@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include "hip_consan_address_group_test.h"
 #include "rocjitsu/code/patch/consan/consan_moi_abi.h"
 
 #define HIP_ASSERT(call)                                                                           \
@@ -135,8 +136,8 @@ __launch_bounds__(64) void moi_cdna_forced_spill_test_kernel_for_instrumentation
     out[output_base + i] = values[i];
 }
 
-__attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
-    64) void moi_cdna_barrier_forced_spill_kernel_for_instrumentation(uint32_t *out) {
+__attribute__((amdgpu_num_vgpr(256))) __global__
+__launch_bounds__(64) void moi_cdna_barrier_forced_spill_kernel_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
@@ -165,7 +166,7 @@ __attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
 
 __attribute__((amdgpu_num_vgpr(256))) __global__ __launch_bounds__(
     64) void moi_cdna_atomic_forced_spill_kernel_for_instrumentation(uint32_t *atomic_value,
-                                                                      uint32_t *out) {
+                                                                     uint32_t *out) {
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   uint32_t values[8] = {
       0xa1000000u ^ tid, 0xa2000000u ^ tid, 0xa3000000u ^ tid, 0xa4000000u ^ tid,
@@ -220,7 +221,7 @@ __global__ __launch_bounds__(
 }
 
 __device__ __noinline__ uint32_t moi_cdna_shared_lds_helper_for_instrumentation(uint32_t lds_addr,
-                                                                                 uint32_t value) {
+                                                                                uint32_t value) {
   asm volatile("ds_write_b32 %0, %1\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE
                :
                : "v"(lds_addr), "v"(value)
@@ -287,6 +288,24 @@ TEST(ConSanMoiCdnaTest, ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord
   EXPECT_EQ(record.access_kind, 2u);
   EXPECT_EQ(record.lds_byte_count, sizeof(uint32_t));
   EXPECT_EQ(record.cell_count, 1u);
+}
+
+TEST(ConSanMoiCdnaTest, SecondAddressGroupReportsExactLaneConflict) {
+  hipDeviceProp_t properties{};
+  HIP_ASSERT(hipGetDeviceProperties(&properties, 0));
+  ASSERT_TRUE(properties.warpSize == 32 || properties.warpSize == 64);
+
+  uint32_t *out_device = nullptr;
+  HIP_ASSERT(hipMalloc(&out_device, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(out_device, 0xff, sizeof(uint32_t)));
+  moi_second_address_group_race_for_instrumentation<<<1, properties.warpSize>>>(out_device);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  uint32_t out = UINT32_MAX;
+  HIP_ASSERT(hipMemcpy(&out, out_device, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(out_device));
+  EXPECT_EQ(out, 0u);
 }
 
 TEST(ConSanMoiCdnaTest, BarrierForcedSpillPreservesLiveVgprsAndWritesRecords) {
@@ -363,7 +382,7 @@ TEST(ConSanMoiCdnaTest, AtomicForcedSpillPreservesLiveVgprsAndWritesRecord) {
   ReportEnvGuard report_env;
   ASSERT_TRUE(set_moi_report_buffer_env(report_device, kReportBytes));
   moi_cdna_atomic_forced_spill_kernel_for_instrumentation<<<1, kThreads>>>(atomic_device,
-                                                                            out_device);
+                                                                           out_device);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 

@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include "hip_consan_address_group_test.h"
 #include "rocjitsu/code/patch/consan/consan_moi_abi.h"
 
 int main(int argc, char **argv) {
@@ -689,8 +690,9 @@ __global__ __launch_bounds__(64) void moi_two_wave_lds_accesses(uint32_t *out) {
   }
 }
 
-__device__ __noinline__ void moi_native_b96_aliasing_access_for_instrumentation(
-    uint32_t lds_addr, uint32_t *out, bool barrier_ordered) {
+__device__ __noinline__ void
+moi_native_b96_aliasing_access_for_instrumentation(uint32_t lds_addr, uint32_t *out,
+                                                   bool barrier_ordered) {
   constexpr uint32_t kNew0 = 0x13579BDFu;
   constexpr uint32_t kNew1 = 0x2468ACE0u;
   constexpr uint32_t kNew2 = 0xA5A55A5Au;
@@ -716,8 +718,7 @@ __device__ __noinline__ void moi_native_b96_aliasing_access_for_instrumentation(
     // Deliberately alias the address and destination at v4. The ConSan
     // trampoline must snapshot the address before executing this load.
     asm volatile("v_mov_b32 v4, %3\n\t"
-                 "ds_load_b96 v[4:6], v4\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE
-                 "s_wait_loadcnt 0\n\t"
+                 "ds_load_b96 v[4:6], v4\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE "s_wait_loadcnt 0\n\t"
                  "v_mov_b32 %0, v4\n\t"
                  "v_mov_b32 %1, v5\n\t"
                  "v_mov_b32 %2, v6\n\t"
@@ -1402,8 +1403,7 @@ TEST(ConSanMoiHipTest, NativeB96RacyAliasingLoadCompletesWithValidTupleWords) {
   constexpr std::array old_values = {0x01020304u, 0x11223344u, 0x55667788u};
   constexpr std::array new_values = {0x13579BDFu, 0x2468ACE0u, 0xA5A55A5Au};
   std::array<uint32_t, 3> out{};
-  ASSERT_NO_FATAL_FAILURE(
-      run_native_b96_aliasing_load(/*barrier_ordered=*/false, out));
+  ASSERT_NO_FATAL_FAILURE(run_native_b96_aliasing_load(/*barrier_ordered=*/false, out));
   for (size_t i = 0; i < out.size(); ++i)
     EXPECT_TRUE(out[i] == old_values[i] || out[i] == new_values[i]) << "word=" << i;
 }
@@ -1411,8 +1411,7 @@ TEST(ConSanMoiHipTest, NativeB96RacyAliasingLoadCompletesWithValidTupleWords) {
 TEST(ConSanMoiHipTest, NativeB96BarrierOrderedAliasingLoadPreservesOutput) {
   constexpr std::array expected = {0x13579BDFu, 0x2468ACE0u, 0xA5A55A5Au};
   std::array<uint32_t, 3> out{};
-  ASSERT_NO_FATAL_FAILURE(
-      run_native_b96_aliasing_load(/*barrier_ordered=*/true, out));
+  ASSERT_NO_FATAL_FAILURE(run_native_b96_aliasing_load(/*barrier_ordered=*/true, out));
   EXPECT_EQ(out, expected);
 }
 
@@ -1489,6 +1488,24 @@ TEST(ConSanMoiHipTest, TwoWaveAccessesRunWithAutoReportBuffer) {
   free_device_ptr(d_out);
 }
 
+TEST(ConSanMoiHipTest, SecondAddressGroupReportsExactLaneConflict) {
+  hipDeviceProp_t properties{};
+  HIP_ASSERT(hipGetDeviceProperties(&properties, 0));
+  ASSERT_TRUE(properties.warpSize == 32 || properties.warpSize == 64);
+
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_out, 0xff, sizeof(uint32_t)));
+  moi_second_address_group_race_for_instrumentation<<<1, properties.warpSize>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  uint32_t out = std::numeric_limits<uint32_t>::max();
+  HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out, 0u);
+}
+
 TEST(ConSanMoiHipTest, RepeatedDispatchesRetainAutomaticRecords) {
   constexpr uint32_t kDispatchCount = 4u;
   uint32_t *d_out = nullptr;
@@ -1500,7 +1517,7 @@ TEST(ConSanMoiHipTest, RepeatedDispatchesRetainAutomaticRecords) {
     HIP_ASSERT(hipGetLastError());
     const hipError_t sync = hipDeviceSynchronize();
     ASSERT_EQ(sync, hipSuccess) << "dispatch " << dispatch
-                               << " HIP error: " << hipGetErrorString(sync);
+                                << " HIP error: " << hipGetErrorString(sync);
   }
 
   free_device_ptr(d_out);

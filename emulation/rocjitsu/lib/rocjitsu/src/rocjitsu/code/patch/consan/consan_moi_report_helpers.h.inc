@@ -528,25 +528,24 @@ consan_moi_report_layout_has_required_capacities(const ConSanMoiReportBufferLayo
            (layout.inline_exact_dispatch_bank_count &
             (layout.inline_exact_dispatch_bank_count - 1u)) == 0u &&
            (!track_atomics || layout.inline_atomic_release_capacity != 0);
-  const bool dispatch_table_valid =
-      (layout.record_replay_dispatch_token_capacity == 0u &&
-       layout.record_replay_access_dispatch_bank_count == 1u) ||
-      (layout.record_replay_dispatch_token_capacity != 0u &&
-       layout.record_replay_dispatch_token_capacity <=
-           kConSanMoiRecordReplayMaximumDispatchTokenCount &&
-       (layout.record_replay_dispatch_token_capacity &
-        (layout.record_replay_dispatch_token_capacity - 1u)) == 0u);
+  const bool dispatch_table_valid = (layout.record_replay_dispatch_token_capacity == 0u &&
+                                     layout.record_replay_access_dispatch_bank_count == 1u) ||
+                                    (layout.record_replay_dispatch_token_capacity != 0u &&
+                                     layout.record_replay_dispatch_token_capacity <=
+                                         kConSanMoiRecordReplayMaximumDispatchTokenCount &&
+                                     (layout.record_replay_dispatch_token_capacity &
+                                      (layout.record_replay_dispatch_token_capacity - 1u)) == 0u);
   const uint64_t anticipated_identity_count =
       static_cast<uint64_t>(layout.record_replay_logical_access_range_count) *
       layout.record_replay_access_dispatch_bank_count *
-      layout.record_replay_access_owner_bank_count;
+      layout.record_replay_access_owner_bank_count *
+      kConSanMoiRecordReplayMaximumAddressGroupsPerWave;
   const bool access_table_valid =
       layout.record_replay_dispatch_token_capacity == 0u ||
       (layout.record_replay_logical_access_range_count != 0u &&
        anticipated_identity_count <= layout.access_record_capacity &&
        (layout.access_record_capacity & (layout.access_record_capacity - 1u)) == 0u);
-  return layout.access_record_capacity != 0 && dispatch_table_valid &&
-         access_table_valid &&
+  return layout.access_record_capacity != 0 && dispatch_table_valid && access_table_valid &&
          layout.record_replay_access_dispatch_bank_count != 0 &&
          (layout.record_replay_access_dispatch_bank_count &
           (layout.record_replay_access_dispatch_bank_count - 1u)) == 0u &&

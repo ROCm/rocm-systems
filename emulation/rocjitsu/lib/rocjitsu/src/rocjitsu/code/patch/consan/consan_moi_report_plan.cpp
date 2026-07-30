@@ -219,10 +219,14 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
           ? util::checked_mul(*dispatch_records,
                               static_cast<uint64_t>(layout.record_replay_access_owner_bank_count))
           : std::nullopt;
+  const auto address_group_records =
+      owner_records ? util::checked_mul(*owner_records,
+                                        uint64_t{kConSanMoiRecordReplayMaximumAddressGroupsPerWave})
+                    : std::nullopt;
   const auto hash_records =
-      owner_records
-          ? util::checked_mul(*owner_records, uint64_t{kConSanMoiRecordReplayHashTableHeadroom})
-          : std::nullopt;
+      address_group_records ? util::checked_mul(*address_group_records,
+                                                uint64_t{kConSanMoiRecordReplayHashTableHeadroom})
+                            : std::nullopt;
   if (!hash_records) {
     plan.reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
     return false;
@@ -427,17 +431,31 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
   const uint64_t static_barriers = inventory.barrier_event_count;
   const uint64_t static_atomics = inventory.atomic_event_count;
   const uint64_t static_fences = inventory.fence_event_count;
+  const uint64_t static_diagnostics = inventory.diagnostic_count;
   const auto expanded_count = [](uint64_t count, uint64_t headroom) {
     return util::saturating_mul(count, headroom);
+  };
+  const auto expanded_candidate = [&](uint64_t headroom) {
+    ConSanMoiAutoReportInventory candidate = inventory;
+    candidate.barrier_event_count = expanded_count(static_barriers, headroom);
+    candidate.atomic_event_count = expanded_count(static_atomics, headroom);
+    candidate.fence_event_count = expanded_count(static_fences, headroom);
+    if (candidate.record_replay_bank_count_adaptive) {
+      uint64_t diagnostic_count = util::saturating_mul(
+          candidate.access_range_count, candidate.record_replay_access_dispatch_bank_count);
+      diagnostic_count =
+          util::saturating_mul(diagnostic_count, candidate.record_replay_access_owner_bank_count);
+      diagnostic_count = util::saturating_mul(
+          diagnostic_count, uint64_t{kConSanMoiRecordReplayMaximumAddressGroupsPerWave});
+      candidate.diagnostic_count = std::max(static_diagnostics, diagnostic_count);
+    }
+    return candidate;
   };
 
   for (;;) {
     uint64_t headroom = kConSanMoiRecordReplayDynamicEventHeadroom;
     for (;;) {
-      ConSanMoiAutoReportInventory candidate = inventory;
-      candidate.barrier_event_count = expanded_count(static_barriers, headroom);
-      candidate.atomic_event_count = expanded_count(static_atomics, headroom);
-      candidate.fence_event_count = expanded_count(static_fences, headroom);
+      ConSanMoiAutoReportInventory candidate = expanded_candidate(headroom);
       const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(candidate);
       if (plan.complete())
         return candidate;
@@ -453,11 +471,7 @@ fit_consan_moi_record_replay_auto_report_inventory(ConSanMoiAutoReportInventory 
     if (!inventory.record_replay_bank_count_adaptive ||
         (inventory.record_replay_access_dispatch_bank_count == 1u &&
          inventory.record_replay_access_owner_bank_count == 1u)) {
-      ConSanMoiAutoReportInventory candidate = inventory;
-      candidate.barrier_event_count = static_barriers;
-      candidate.atomic_event_count = static_atomics;
-      candidate.fence_event_count = static_fences;
-      return candidate;
+      return expanded_candidate(1u);
     }
     inventory.record_replay_access_dispatch_bank_count =
         std::max<uint64_t>(inventory.record_replay_access_dispatch_bank_count / 2u, 1u);
@@ -540,8 +554,13 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
     const auto minimum_access_capacity = util::checked_mul(
         static_cast<uint64_t>(override_layout.record_replay_logical_access_range_count),
         bank_count);
-    if (!minimum_access_capacity ||
-        *minimum_access_capacity > override_layout.access_record_capacity)
+    const auto grouped_access_capacity =
+        minimum_access_capacity
+            ? util::checked_mul(*minimum_access_capacity,
+                                uint64_t{kConSanMoiRecordReplayMaximumAddressGroupsPerWave})
+            : std::nullopt;
+    if (!grouped_access_capacity ||
+        *grouped_access_capacity > override_layout.access_record_capacity)
       return {};
     inventory.access_range_count = override_layout.record_replay_logical_access_range_count;
     inventory.record_replay_dispatch_token_capacity =

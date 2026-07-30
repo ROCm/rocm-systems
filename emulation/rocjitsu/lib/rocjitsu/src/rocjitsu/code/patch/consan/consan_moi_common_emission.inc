@@ -1140,12 +1140,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const uint16_t owner_bank_vgpr = static_cast<uint16_t>(record_address_vgpr + 7u);
   const uint16_t bank_probe_count_vgpr = static_cast<uint16_t>(record_address_vgpr + 8u);
   const uint16_t identity_claim_hash_vgpr = static_cast<uint16_t>(record_address_vgpr + 9u);
-  const uint16_t original_exec_sgpr =
-      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u);
-  const uint16_t address_key_sgpr =
-      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u);
-  const uint16_t address_group_exec_sgpr =
-      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u);
+  const uint16_t original_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u);
+  const uint16_t address_key_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u);
+  const uint16_t address_group_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u);
   const std::optional<uint16_t> spilled_lds_byte_offset_vgpr =
       !materialize_flat_offset && !save_clobbered_address && spill != nullptr &&
               options.moi_spill_overlaps_guest_operands &&
@@ -1165,7 +1162,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       access_bank_count > std::numeric_limits<uint32_t>::max() ||
       (automatic_banked_capture &&
        (layout.record_replay_logical_access_range_count == 0u ||
-        static_cast<uint64_t>(layout.record_replay_logical_access_range_count) * access_bank_count >
+        static_cast<uint64_t>(layout.record_replay_logical_access_range_count) * access_bank_count *
+                kConSanMoiRecordReplayMaximumAddressGroupsPerWave >
             access_record_capacity ||
         (access_record_capacity & (access_record_capacity - 1u)) != 0u ||
         layout.record_replay_dispatch_token_capacity >
@@ -1255,9 +1253,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         words, *spill, record_compare_high_vgpr, *spilled_lds_byte_offset_vgpr, arch);
     if (reload == consan_detail::MoiSpilledVgprReloadResult::Appended)
       return true;
-    errors.emplace_back(
-        "ConSan MOI first-light probe could not recover its spilled LDS address: " +
-        std::string(consan_detail::moi_spilled_vgpr_reload_result_name(reload)));
+    errors.emplace_back("ConSan MOI first-light probe could not recover its spilled LDS address: " +
+                        std::string(consan_detail::moi_spilled_vgpr_reload_result_name(reload)));
     return false;
   };
   if (!options.moi_exec_save_sgpr || !append_save_moi_special_state(words, options, arch)) {
@@ -1283,6 +1280,32 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       return std::nullopt;
     }
     words.push_back(*save_original_exec);
+
+    // Saturation is a monotonic report-wide latch. Read it once before the
+    // distinct-address loop; a group that saturates during this probe still
+    // exits through the in-loop saturation paths below.
+    if (!record.materialize_address(base) ||
+        !record.load(offsetof(ConSanMoiReportHeader, flags), record_value_vgpr)) {
+      errors.emplace_back("ConSan MOI first-light probe could not read report saturation");
+      return std::nullopt;
+    }
+    const auto saturation_read_wait = instrumentation::build_s_wait_flat_load0(arch);
+    const auto select_saturation = instrumentation::build_v_and_b32_literal(
+        record_compare_vgpr, kConSanMoiReportFlagRecordReplayBankSaturated, record_value_vgpr,
+        arch);
+    const auto already_saturated = instrumentation::build_v_cmp_ne_u32_vcc(
+        scalar_positive_inline_u32(0), record_compare_vgpr, arch);
+    if (!saturation_read_wait || !select_saturation || !already_saturated) {
+      errors.emplace_back("ConSan MOI first-light probe could not test report saturation");
+      return std::nullopt;
+    }
+    words.push_back(*saturation_read_wait);
+    words.insert(words.end(), select_saturation->begin(), select_saturation->end());
+    words.push_back(*already_saturated);
+    if (!sequence.emit_branch(restore_exec_label, InstructionSequence::BranchKind::VccNonzero)) {
+      return fail("ConSan MOI first-light probe could not branch around a saturated report");
+    }
+
     address_group_loop = words.size();
     if (!reload_spilled_lds_byte_offset()) {
       errors.emplace_back(
@@ -1304,8 +1327,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         vector_source_vgpr(record_value_vgpr), arch);
     const auto first_in_group = instrumentation::build_v_cmp_eq_u32_vcc(
         scalar_positive_inline_u32(0), record_value_vgpr, arch);
-    const auto narrow_representative = instrumentation::build_s_and_saveexec_b64(
-        address_group_exec_sgpr, kRdna4VccLo, arch);
+    const auto narrow_representative =
+        instrumentation::build_s_and_saveexec_b64(address_group_exec_sgpr, kRdna4VccLo, arch);
     if (!read_address || !select_address || !narrow_group || !save_address_group || !lane_rank_lo ||
         !lane_rank_hi || !first_in_group || !narrow_representative) {
       errors.emplace_back(
@@ -1330,8 +1353,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto lane_rank_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
         record_value_vgpr, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u),
         vector_source_vgpr(record_value_vgpr), arch);
-    const auto first_active = instrumentation::build_v_cmp_eq_u32_vcc(
-        scalar_positive_inline_u32(0), record_value_vgpr, arch);
+    const auto first_active = instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
+                                                                      record_value_vgpr, arch);
     const auto narrow_first =
         instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
     if (!save_incoming_exec || !lane_rank_lo || !lane_rank_hi || !first_active || !narrow_first) {
@@ -1361,32 +1384,6 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto dispatch_bank_ready_label = sequence.make_label();
     const auto dispatch_saturated_label = sequence.make_label();
     const auto dispatch_token_ready_label = sequence.make_label();
-
-    // Once either bounded table reports saturation, this report can no longer
-    // provide complete replay evidence. A cheap flag read keeps every later
-    // access from repeating the bounded probe walk for the rest of the
-    // dispatch lifetime.
-    if (!record.materialize_address(base) ||
-        !record.load(offsetof(ConSanMoiReportHeader, flags), record_value_vgpr)) {
-      errors.emplace_back("ConSan MOI first-light probe could not read report saturation");
-      return std::nullopt;
-    }
-    const auto saturation_read_wait = instrumentation::build_s_wait_flat_load0(arch);
-    const auto select_saturation = instrumentation::build_v_and_b32_literal(
-        record_compare_vgpr, kConSanMoiReportFlagRecordReplayBankSaturated, record_value_vgpr,
-        arch);
-    const auto already_saturated = instrumentation::build_v_cmp_ne_u32_vcc(
-        scalar_positive_inline_u32(0), record_compare_vgpr, arch);
-    if (!saturation_read_wait || !select_saturation || !already_saturated) {
-      errors.emplace_back("ConSan MOI first-light probe could not test report saturation");
-      return std::nullopt;
-    }
-    words.push_back(*saturation_read_wait);
-    words.insert(words.end(), select_saturation->begin(), select_saturation->end());
-    words.push_back(*already_saturated);
-    if (!sequence.emit_branch(restore_exec_label, InstructionSequence::BranchKind::VccNonzero)) {
-      return fail("ConSan MOI first-light probe could not branch around a saturated report");
-    }
 
     if (!append_claim_token(record_value_vgpr, record_value_high_vgpr, record_compare_vgpr)) {
       errors.emplace_back("ConSan MOI first-light probe could not form its dispatch claim");
@@ -1775,7 +1772,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
          !record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), *options.moi_epoch_vgpr)) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, instruction_offset),
                               static_cast<uint32_t>(candidate.text_offset)) ||
-        !record.store_literal(offsetof(ConSanMoiAccessRecord, site_token), site_token)) {
+        !record.store_literal(offsetof(ConSanMoiAccessRecord, site_token), site_token) ||
+        !record.store_literal(
+            offsetof(ConSanMoiAccessRecord, flags),
+            automatic_banked_capture ? kConSanMoiAccessRecordFlagExactAddressGroupMask : 0u)) {
       errors.emplace_back("ConSan MOI first-light probe could not encode record stores");
       return std::nullopt;
     }
@@ -2120,8 +2120,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         const auto materialize_static_offset = instrumentation::build_v_mov_b32_literal(
             record_compare_high_vgpr, range.static_byte_offset, arch);
         const auto add_static_offset = instrumentation::build_v_add_u32(
-            record_compare_vgpr, vector_source_vgpr(record_compare_vgpr),
-            record_compare_high_vgpr, arch);
+            record_compare_vgpr, vector_source_vgpr(record_compare_vgpr), record_compare_high_vgpr,
+            arch);
         if (!materialize_static_offset || !add_static_offset) {
           errors.emplace_back(
               "ConSan MOI first-light probe could not qualify its retained address group");
@@ -2225,13 +2225,11 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       return std::nullopt;
     }
     const auto remove_group = instrumentation::build_s_xor_b64(
-        *options.moi_exec_save_sgpr, *options.moi_exec_save_sgpr,
-        address_group_exec_sgpr, arch);
+        *options.moi_exec_save_sgpr, *options.moi_exec_save_sgpr, address_group_exec_sgpr, arch);
     const auto select_remaining =
         instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
     if (!remove_group || !select_remaining) {
-      errors.emplace_back(
-          "ConSan MOI first-light probe could not advance its address-group loop");
+      errors.emplace_back("ConSan MOI first-light probe could not advance its address-group loop");
       return std::nullopt;
     }
     words.push_back(*remove_group);
@@ -2241,8 +2239,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     words.push_back(build_s_nop(0, arch));
     words.push_back(build_s_nop(0, arch));
     words.push_back(*select_remaining);
-    const int64_t loop_delta = static_cast<int64_t>(*address_group_loop) -
-                               static_cast<int64_t>(words.size() + 1u);
+    const int64_t loop_delta =
+        static_cast<int64_t>(*address_group_loop) - static_cast<int64_t>(words.size() + 1u);
     if (loop_delta < std::numeric_limits<int16_t>::min() ||
         loop_delta > std::numeric_limits<int16_t>::max()) {
       errors.emplace_back("ConSan MOI first-light address-group loop is out of branch reach");
@@ -2260,8 +2258,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
 
   const uint16_t restore_exec_sgpr =
       automatic_banked_capture ? original_exec_sgpr : *options.moi_exec_save_sgpr;
-  const auto restore_exec =
-      instrumentation::build_s_mov_b64(kRdna4ExecLo, restore_exec_sgpr, arch);
+  const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, restore_exec_sgpr, arch);
   if (!restore_exec) {
     errors.emplace_back("ConSan MOI first-light probe could not restore EXEC");
     return std::nullopt;

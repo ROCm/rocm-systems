@@ -108,7 +108,7 @@ struct alignas(8) ConSanMoiReportHeader {
 struct alignas(8) ConSanMoiAccessRecord {
   /// Internal publication identity. Record/Replay atomically claims a bounded
   /// identity-table slot with a compact fingerprint derived from the hardware
-  /// dispatch ID, workgroup, wave, and effective LDS byte address. The bounded
+  /// dispatch ID, workgroup, wave, and dynamic LDS byte address. The bounded
   /// slot selection additionally includes the static site. Zero remains the
   /// unpublished sentinel; any identity whose fingerprint maps to zero fails
   /// closed through the report saturation flag. access_kind is the atomic
@@ -134,8 +134,16 @@ struct alignas(8) ConSanMoiAccessRecord {
   /// Automatic Record/Replay includes it in the report-wide access-table key;
   /// direct layouts leave it zero.
   uint32_t site_token = 0;
-  uint32_t reserved = 0;
+  /// Capture semantics for fields whose meaning differs by producer. Automatic
+  /// address-group capture sets ExactAddressGroupMask after narrowing EXEC to
+  /// lanes with the recorded dynamic LDS address. Direct layouts retain zero
+  /// and lane_mask remains their historical incoming wave EXEC.
+  uint32_t flags = 0;
 };
+
+inline constexpr uint32_t kConSanMoiAccessRecordFlagExactAddressGroupMask = 1u << 0u;
+inline constexpr uint32_t kConSanMoiAccessRecordKnownFlags =
+    kConSanMoiAccessRecordFlagExactAddressGroupMask;
 
 struct alignas(8) ConSanMoiBarrierRecord {
   uint64_t generation = 0;
