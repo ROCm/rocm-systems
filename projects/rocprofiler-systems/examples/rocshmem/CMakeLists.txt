@@ -41,6 +41,17 @@ if(NOT TARGET roc::rocshmem)
     return()
 endif()
 
+# rocshmem.cpp exercises the full set of host-stream APIs introduced in rocSHMEM 3.6.0.
+# Older releases (shipped with ROCm 7.2.x) only declare rocshmem_barrier_all_on_stream, so skip.
+if(rocshmem_VERSION AND rocshmem_VERSION VERSION_LESS 3.6.0)
+    message(
+        ${_MSG_TYPE}
+        "rocshmem-test skipped: rocSHMEM ${rocshmem_VERSION} lacks the host-stream APIs "
+        "this example requires (e.g. rocshmem_putmem_on_stream); rocSHMEM >= 3.6.0 is needed."
+    )
+    return()
+endif()
+
 # rocSHMEM's cmake config omits find_dependency(rocprofiler-register) despite
 # roc::rocshmem carrying it as a transitive link dependency.  Ensure the
 # imported target exists so the linker receives a library path rather than the
