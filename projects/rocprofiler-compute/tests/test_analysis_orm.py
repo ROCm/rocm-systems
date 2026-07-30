@@ -90,7 +90,6 @@ def add_pc_sampling_state(
     *,
     workload: Workload,
     kernel: Kernel,
-    pid: int,
     offset: int | None = 0x10,
     instruction: str | None = "v_mov",
     source: str | None = "/s/a.cpp:1",
@@ -101,7 +100,6 @@ def add_pc_sampling_state(
     code_object_id: int = 5,
 ) -> PCSampleState:
     code_object = CodeObjectStore(
-        pid=pid,
         code_object_id=code_object_id,
         load_base=0x1000,
         workload=workload,
@@ -202,55 +200,95 @@ def test_kernel_view_aggregates(db_session):
 # =============================================================================
 
 
-def test_duplicate_kernel_rejected(db_session):
-    """A second kernel with the same (workload_id, kernel_name) is rejected."""
-    workload = Workload(name="w", sub_name="s")
-    db_session.add(workload)
-    db_session.add(Kernel(kernel_name="k", workload=workload))
-    db_session.add(Kernel(kernel_name="k", workload=workload))
-    with pytest.raises(IntegrityError):
-        db_session.commit()
-
-
-def test_duplicate_dispatch_rejected(db_session):
-    """A duplicate (kernel_uuid, pid, dispatch_id) is rejected."""
+def test_duplicate_dispatch_id_under_same_kernel_rejected(db_session):
     workload = Workload(name="w", sub_name="s")
     db_session.add(workload)
     kernel = Kernel(kernel_name="k", workload=workload)
     db_session.add(kernel)
-    db_session.add(Dispatch(dispatch_id=0, pid=101, kernel=kernel))
-    db_session.add(Dispatch(dispatch_id=0, pid=101, kernel=kernel))
+    db_session.add(Dispatch(dispatch_id=0, pid=42, kernel=kernel))
+    db_session.add(Dispatch(dispatch_id=0, pid=42, kernel=kernel))
     with pytest.raises(IntegrityError):
         db_session.commit()
 
 
-def test_dispatch_id_can_repeat_across_processes(db_session):
-    """Process-local dispatch IDs remain distinct and aggregate together."""
+def test_duplicate_instruction_identity_under_same_parents_rejected(db_session):
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="k", workload=workload)
+    code_object = CodeObjectStore(
+        code_object_id=5,
+        load_base=0x1000,
+        workload=workload,
+    )
+    db_session.add(Dispatch(dispatch_id=0, pid=42, kernel=kernel))
     db_session.add_all([
-        Dispatch(
-            dispatch_id=0,
-            pid=101,
-            start_timestamp=10,
-            end_timestamp=20,
+        InstructionLine(
+            code_object_offset=0x10,
+            comment="/s/a.cpp:1",
+            instruction="v_mov",
+            code_object_store=code_object,
             kernel=kernel,
         ),
-        Dispatch(
-            dispatch_id=0,
-            pid=202,
-            start_timestamp=30,
-            end_timestamp=50,
+        InstructionLine(
+            code_object_offset=0x10,
+            comment="/s/a.cpp:1",
+            instruction="v_mov",
+            code_object_store=code_object,
             kernel=kernel,
         ),
     ])
-    Database.create_views()
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_equal_identities_under_distinct_parent_chains_get_distinct_uuids(
+    db_session,
+):
+    workload = Workload(name="w", sub_name="s")
+    first_kernel = Kernel(kernel_name="k", workload=workload)
+    second_kernel = Kernel(kernel_name="k", workload=workload)
+    first_dispatch = Dispatch(dispatch_id=0, pid=42, kernel=first_kernel)
+    second_dispatch = Dispatch(dispatch_id=0, pid=99, kernel=second_kernel)
+    first_code_object = CodeObjectStore(
+        code_object_id=5,
+        load_base=0x1000,
+        workload=workload,
+    )
+    second_code_object = CodeObjectStore(
+        code_object_id=5,
+        load_base=0x1000,
+        workload=workload,
+    )
+    first_instruction = InstructionLine(
+        code_object_offset=0x10,
+        comment="/s/a.cpp:1",
+        instruction="v_mov",
+        code_object_store=first_code_object,
+        kernel=first_kernel,
+    )
+    second_instruction = InstructionLine(
+        code_object_offset=0x10,
+        comment="/s/a.cpp:1",
+        instruction="v_mov",
+        code_object_store=second_code_object,
+        kernel=second_kernel,
+    )
+    db_session.add_all([
+        first_dispatch,
+        second_dispatch,
+        first_instruction,
+        second_instruction,
+    ])
     db_session.commit()
 
-    row = db_session.execute(
-        text("SELECT dispatch_count, duration_ns_sum FROM compute_kernel_view")
-    ).one()
-    assert row == (2, 30)
+    assert first_kernel.kernel_uuid != second_kernel.kernel_uuid
+    assert first_dispatch.dispatch_uuid != second_dispatch.dispatch_uuid
+    assert first_code_object.code_object_uuid != second_code_object.code_object_uuid
+    assert first_instruction.instruction_uuid != second_instruction.instruction_uuid
+    assert first_instruction.kernel is first_dispatch.kernel
+    assert second_instruction.kernel is second_dispatch.kernel
+    assert first_instruction.code_object_store is first_code_object
+    assert second_instruction.code_object_store is second_code_object
 
 
 def test_duplicate_stall_reason_lookup_rejected(db_session):
@@ -304,7 +342,6 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
         db_session,
         workload=workload,
         kernel=kernel,
-        pid=1,
         stall_reasons={"WAITCNT": 2},
     )
     Database.create_views()
@@ -326,15 +363,14 @@ def test_pc_sampling_view_flattens_normalized_tables(db_session):
     ]
 
 
-def test_pc_sampling_view_aggregates_matching_states_across_processes(db_session):
-    """Matching states across processes aggregate all counts and stall reasons."""
+def test_pc_sampling_view_aggregates_matching_states_within_kernel_uuid(db_session):
+    """Matching states for one kernel UUID aggregate counts and stall reasons."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
         db_session,
         workload=workload,
         kernel=kernel,
-        pid=101,
         total_count=8,
         issue_count=2,
         stall_count=6,
@@ -344,7 +380,6 @@ def test_pc_sampling_view_aggregates_matching_states_across_processes(db_session
         db_session,
         workload=workload,
         kernel=kernel,
-        pid=202,
         total_count=9,
         issue_count=3,
         stall_count=6,
@@ -391,7 +426,6 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
         db_session,
         workload=workload,
         kernel=kernel,
-        pid=101,
         total_count=3,
         issue_count=3,
         stall_count=0,
@@ -401,7 +435,6 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
         db_session,
         workload=workload,
         kernel=kernel,
-        pid=202,
         total_count=5,
         issue_count=5,
         stall_count=0,
@@ -418,16 +451,15 @@ def test_pc_sampling_view_keeps_display_identity_fields_separate(
     }
 
 
-def test_pc_sampling_view_keeps_different_kernels_separate(db_session):
-    """Matching states for different kernels remain separate view rows."""
+def test_pc_sampling_view_keeps_same_name_kernel_uuids_separate(db_session):
+    """Matching states for same-name kernel UUIDs remain separate view rows."""
     workload = Workload(name="w", sub_name="s")
-    first_kernel = Kernel(kernel_name="first", workload=workload)
-    second_kernel = Kernel(kernel_name="second", workload=workload)
+    first_kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    second_kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
         db_session,
         workload=workload,
         kernel=first_kernel,
-        pid=101,
         total_count=3,
         issue_count=3,
         stall_count=0,
@@ -436,7 +468,6 @@ def test_pc_sampling_view_keeps_different_kernels_separate(db_session):
         db_session,
         workload=workload,
         kernel=second_kernel,
-        pid=202,
         total_count=5,
         issue_count=5,
         stall_count=0,
@@ -446,9 +477,9 @@ def test_pc_sampling_view_keeps_different_kernels_separate(db_session):
 
     rows = fetch_pc_sampling_rows(db_session)
 
-    assert {(row["kernel_name"], row["count"]) for row in rows} == {
-        ("first", 3),
-        ("second", 5),
+    assert {(row["kernel_uuid"], row["count"]) for row in rows} == {
+        (first_kernel.kernel_uuid, 3),
+        (second_kernel.kernel_uuid, 5),
     }
 
 
@@ -462,7 +493,6 @@ def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
         db_session,
         workload=first_workload,
         kernel=first_kernel,
-        pid=101,
         total_count=3,
         issue_count=3,
         stall_count=0,
@@ -471,7 +501,6 @@ def test_pc_sampling_view_keeps_different_workloads_separate(db_session):
         db_session,
         workload=second_workload,
         kernel=second_kernel,
-        pid=202,
         total_count=5,
         issue_count=5,
         stall_count=0,
@@ -495,7 +524,6 @@ def test_pc_sampling_view_aggregates_host_trap_states_with_null_counts(db_sessio
         db_session,
         workload=workload,
         kernel=kernel,
-        pid=101,
         total_count=3,
         issue_count=None,
         stall_count=None,
@@ -504,7 +532,6 @@ def test_pc_sampling_view_aggregates_host_trap_states_with_null_counts(db_sessio
         db_session,
         workload=workload,
         kernel=kernel,
-        pid=202,
         total_count=5,
         issue_count=None,
         stall_count=None,
@@ -538,7 +565,6 @@ def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
         db_session,
         workload=workload,
         kernel=kernel,
-        pid=101,
         total_count=3,
         issue_count=1,
         stall_count=2,
@@ -549,7 +575,6 @@ def test_pc_sampling_view_attaches_reasons_with_nullable_identity(
         db_session,
         workload=workload,
         kernel=kernel,
-        pid=202,
         total_count=5,
         issue_count=1,
         stall_count=4,
