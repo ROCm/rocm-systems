@@ -22,8 +22,12 @@
 
 #pragma once
 
+#include "util/bit.h"
+
 #include <compare>
 #include <cstdint>
+#include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -150,14 +154,20 @@ struct KernelResourceRequirements {
   /// @details Persistent semantic spill slots hold values across multiple
   /// replacement sequences. They are allocated before the reusable temp window
   /// so later per-instruction spills cannot overwrite them.
-  [[nodiscard]] uint32_t reserve_persistent_semantic_spill_dwords(uint32_t dwords) {
-    constexpr uint32_t kSpillAlignment = 16;
-    const uint32_t base =
-        (semantic_spill_persistent_end + kSpillAlignment - 1u) & ~(kSpillAlignment - 1u);
-    const uint32_t required = base + dwords * 4u;
-    semantic_spill_persistent_end = required;
-    require_private_segment_bytes(required);
-    return base;
+  ///
+  /// @returns The per-lane byte offset of the reserved slots, or std::nullopt if
+  /// aligning/extending the private segment would exceed the 32-bit private-size
+  /// field. The private segment is initialized from the guest descriptor's
+  /// private size, which can be near UINT32_MAX, so unchecked 32-bit arithmetic
+  /// here could wrap to a low offset and corrupt guest scratch. Callers must
+  /// treat nullopt as a kernel translation failure.
+  [[nodiscard]] std::optional<uint32_t> reserve_persistent_semantic_spill_dwords(uint32_t dwords) {
+    const auto reservation = semantic_spill_reservation(dwords);
+    if (!reservation)
+      return std::nullopt;
+    semantic_spill_persistent_end = reservation->second;
+    require_private_segment_bytes(reservation->second);
+    return reservation->first;
   }
 
   /// @brief Reserve @p dwords reusable 32-bit per-lane spill slots.
@@ -169,12 +179,33 @@ struct KernelResourceRequirements {
   /// persistent virtual registers, so every lowering site in the kernel can
   /// reuse the same slot range. Descriptor recomputation later raises
   /// private_segment_fixed_size to cover the largest reservation.
-  [[nodiscard]] uint32_t reserve_semantic_spill_dwords(uint32_t dwords) {
-    constexpr uint32_t kSpillAlignment = 16;
-    const uint32_t base =
-        (semantic_spill_persistent_end + kSpillAlignment - 1u) & ~(kSpillAlignment - 1u);
-    require_private_segment_bytes(base + dwords * 4u);
-    return base;
+  ///
+  /// @returns The per-lane byte offset of the reserved slots, or std::nullopt on
+  /// 32-bit overflow (see reserve_persistent_semantic_spill_dwords). Unlike the
+  /// persistent variant this does not advance semantic_spill_persistent_end.
+  [[nodiscard]] std::optional<uint32_t> reserve_semantic_spill_dwords(uint32_t dwords) {
+    const auto reservation = semantic_spill_reservation(dwords);
+    if (!reservation)
+      return std::nullopt;
+    require_private_segment_bytes(reservation->second);
+    return reservation->first;
+  }
+
+private:
+  /// @brief Compute the aligned base and one-past-end for a spill reservation.
+  ///
+  /// @returns {base_byte_offset, end_byte_offset} using checked 64-bit math, or
+  /// std::nullopt if either would exceed the 32-bit private-size field.
+  [[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>>
+  semantic_spill_reservation(uint32_t dwords) const {
+    constexpr uint64_t kSpillAlignment = 16;
+    constexpr uint64_t kMax = std::numeric_limits<uint32_t>::max();
+    const uint64_t base =
+        util::align_up(static_cast<uint64_t>(semantic_spill_persistent_end), kSpillAlignment);
+    const uint64_t end = base + static_cast<uint64_t>(dwords) * 4u;
+    if (base > kMax || end > kMax)
+      return std::nullopt;
+    return std::pair<uint32_t, uint32_t>{static_cast<uint32_t>(base), static_cast<uint32_t>(end)};
   }
 };
 
@@ -389,6 +420,7 @@ struct TranslationRule {
   ExpandFn expand_fn;             ///< Expansion generator (for Expand).
   const LaneLayout *guest_layout; ///< Source matrix layout (for matrix Expand).
   const LaneLayout *host_layout;  ///< Target matrix layout (for matrix Expand).
+  bool requires_liveness = true;  ///< Conservative default; tables opt out after auditing.
 
   constexpr auto operator<=>(const TranslationRule &rhs) const {
     if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)

@@ -65,11 +65,11 @@ std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
 /// compact, monotonic text range; helper/trampoline code can be far away from
 /// the first PC observed for the dispatch.
 struct DisasmCache {
-  void record(uint64_t pc, const Instruction &inst) { record(pc, inst.disassemble()); }
-
-  void record(uint64_t pc, std::string disasm) {
+  void record(uint64_t pc, const Instruction &inst) {
     std::lock_guard<std::mutex> lock(mutex_);
-    entries_.try_emplace(pc, std::move(disasm));
+    if (entries_.contains(pc))
+      return;
+    entries_.emplace(pc, inst.disassemble());
   }
 
   std::unordered_map<uint64_t, std::string> to_map() const {
@@ -90,7 +90,9 @@ struct RaceWavefrontState : WavefrontState {
 
 class RaceDetectorPlugin : public ExecutionPlugin {
 public:
-  RaceDetectorPlugin();
+  /// @param config_json Plugin configuration object as a JSON string (unused;
+  ///        this plugin takes no configuration). May be null.
+  explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;

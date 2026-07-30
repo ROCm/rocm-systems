@@ -225,10 +225,10 @@ typedef enum {
 
 //! Major version should be changed for every header change that breaks ABI
 //! Such as adding/deleting APIs, changing names, fields of structures, etc.
-#define AMDSMI_LIB_VERSION_MAJOR 26
+#define AMDSMI_LIB_VERSION_MAJOR 27
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 5
+#define AMDSMI_LIB_VERSION_MINOR 0
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
@@ -4710,6 +4710,30 @@ amdsmi_status_t amdsmi_set_gpu_fan_speed(amdsmi_processor_handle processor_handl
  */
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* gpu_busy_percent);
+
+/**
+ *  @brief Get VCN busy percent from vcn_busy_percent sysfs file
+ *
+ *  @ingroup tagClkPowerPerfQuery
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle, this function returns VCN busy
+ *  percentage.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[out] vcn_busy_percent vcn busy percentage (0-100)
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS on success
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED if the device does not support this query
+ *  @retval ::AMDSMI_STATUS_INVAL if the input parameters are invalid
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA if data read from the sysfs file is not in the expected
+ * format or empty
+ *  @return ::amdsmi_status_t
+ */
+amdsmi_status_t amdsmi_get_vcn_busy_percent(amdsmi_processor_handle processor_handle,
+                                            uint32_t* vcn_busy_percent);
 
 /**
  *  @brief Get coarse grain utilization counter of the specified device

@@ -63,6 +63,7 @@ struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)]
 enum TopCmd {
     /// Run the per-session host process (used internally by `mirage
     /// session start` and `mirage run`; rarely invoked directly).

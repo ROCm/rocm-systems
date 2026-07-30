@@ -23,24 +23,16 @@ namespace {
 constexpr uint64_t kKernargPreloadSkipBytes = 256;
 constexpr uint64_t kDirectBranchIslandSpacingBytes = 64 * 1024;
 constexpr uint16_t kDirectBranchIslandPoolSlots = 16;
-/// @brief TrapID used when a loadable skipped-kernel stub is actually dispatched.
-///
-/// @details AMDGPU `s_trap` exposes only the low 8 bits of SIMM16 as TrapID and
-/// does not carry a printable message. Keep the human-readable reason in the
-/// load-time `KernelSkipped` diagnostic and use this nonzero marker only to
-/// distinguish rocjitsu skipped-kernel traps from guest code traps if tooling
-/// surfaces the immediate.
-constexpr uint16_t kSkippedKernelTrapId = 0x52;
 /// @brief Source-distance cutoff for reserving a long direct-branch window.
 ///
-/// @details Most scalar branches target neighboring blocks and still fit after
-/// semantic expansion. Reserving the 7-dword long-branch sequence for every
-/// branch bloats translated kernels with NOPs. Use a conservative source
-/// distance estimate below the hardware SOPP range so near-limit source
-/// branches get a long window before translation expansion can push them out of
-/// range.
-constexpr uint64_t kLongDirectBranchSourceDistanceThresholdBytes = 32 * 1024;
-
+/// @details The largest current gfx1250 semantic replacement grows a 16-byte
+/// Scale16 WMMA to at most 272 bytes (17x, including VGPR-MSB mode changes).
+/// Four KiB of maximally dense expansion remains comfortably below the 128 KiB
+/// signed SOPP reach after accounting for branch windows and island pools,
+/// while genuinely close branches keep compact slots. The production NVFP4
+/// branch which exposed this limit spans 5,568 bytes and is conservatively
+/// assigned a long window by this threshold.
+constexpr uint64_t kLongDirectBranchSourceDistanceThresholdBytes = 4 * 1024;
 } // namespace
 
 [[nodiscard]] TextRelocationResult relocation_ok() { return {}; }
@@ -177,7 +169,7 @@ void write_words_at(std::vector<uint8_t> &dst, uint64_t offset, std::span<const 
 }
 
 bool kernarg_preload_launch_window_fits(const KernelEntryLayoutPlan &translation) {
-  return !translation.has_kernarg_preload ||
+  return !translation.has_kernarg_preload_firmware_skip ||
          kernel_entry_stub_bytes(translation) <= kKernargPreloadSkipBytes;
 }
 
@@ -216,16 +208,14 @@ KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
 
   // Keep skipped symbols loadable without placing guest ISA bytes in the
   // target ELF. HIP and ROCR may cache or query every descriptor in a module
-  // even when the application dispatches only a subset of kernels. Trap first
-  // so dispatching the skipped kernel fails instead of silently doing no work;
-  // keep a defensive endpgm after the trap in case a trap handler resumes.
-  const uint32_t trap = build_s_trap(arch, kSkippedKernelTrapId);
+  // even when the application dispatches only a subset of kernels. End the
+  // wave immediately if one is dispatched: a trap can abort or wedge its HSA
+  // queue, while the mandatory load-time diagnostic loudly reports that this
+  // no-op body cannot produce valid kernel outputs.
   const uint32_t endpgm = build_s_endpgm(arch);
-  append_words(text, std::span<const uint32_t>(&trap, 1));
   append_words(text, std::span<const uint32_t>(&endpgm, 1));
-  if (plan.has_kernarg_preload) {
-    append_nop_padding(text, kKernargPreloadSkipBytes - 2 * sizeof(uint32_t), arch);
-    append_words(text, std::span<const uint32_t>(&trap, 1));
+  if (plan.has_kernarg_preload_firmware_skip) {
+    append_nop_padding(text, kKernargPreloadSkipBytes - sizeof(uint32_t), arch);
     append_words(text, std::span<const uint32_t>(&endpgm, 1));
   }
 
@@ -244,8 +234,9 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   layout.target_body_entry = *body_entry;
 
   std::optional<uint64_t> preload_body_entry;
-  if (layout.entry_plan.has_kernarg_preload) {
-    const uint64_t source_preload_entry = layout.entry_plan.kernarg_preload_entry_text_offset;
+  if (layout.entry_plan.has_kernarg_preload_firmware_skip) {
+    const uint64_t source_preload_entry =
+        layout.entry_plan.kernarg_preload_firmware_entry_text_offset;
     preload_body_entry = target_for_source_offset(layout, source_preload_entry);
     if (!preload_body_entry) {
       return kernel_text_append_error(
@@ -263,7 +254,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
 
   const bool has_descriptor_prologue = !layout.entry_plan.prologue_words.empty();
   uint64_t target_delta = 0;
-  if (layout.entry_plan.has_kernarg_preload) {
+  if (layout.entry_plan.has_kernarg_preload_firmware_skip) {
     // Kernarg-preload kernels have two hardware-visible entries separated by
     // exactly 256 bytes. Reserve that launch window before appending the body;
     // the stubs are written after the body offsets have been rebased.
@@ -302,7 +293,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   rebase_kernel_text_layout(layout, target_delta);
   translated_text.insert(translated_text.end(), kernel_text.begin(), kernel_text.end());
 
-  if (layout.entry_plan.has_kernarg_preload) {
+  if (layout.entry_plan.has_kernarg_preload_firmware_skip) {
     assert(preload_body_entry && "preload body entry was checked before rebase");
     if (!write_launch_stub(translated_text, layout.entry_plan, layout.target_entry,
                            layout.target_body_entry, arch)) {
@@ -314,7 +305,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
                            layout.target_entry + kKernargPreloadSkipBytes,
                            *preload_body_entry + target_delta, arch)) {
       return kernel_text_append_error(
-          layout.entry_plan.kernarg_preload_entry_text_offset,
+          layout.entry_plan.kernarg_preload_firmware_entry_text_offset,
           "kernarg preload firmware launch branch cannot encode target body",
           TextLayoutFailureCategory::ResourceLimit);
     }
@@ -412,6 +403,8 @@ uint64_t direct_branch_patch_window_bytes(const Instruction &inst, uint64_t sour
   const bool speculate_long_branch =
       absolute_branch_distance(source_inst_offset, source_target_offset) >
       kLongDirectBranchSourceDistanceThresholdBytes;
+  const bool invertible_conditional =
+      (inst.flags() & COND_BRANCH) != 0 && conditional_branch_can_invert(inst.mnemonic());
   if (can_use_long_direct_branches && speculate_long_branch)
     return kMaxDirectBranchTransferWords * sizeof(uint32_t);
 
@@ -420,15 +413,10 @@ uint64_t direct_branch_patch_window_bytes(const Instruction &inst, uint64_t sour
   // branch into the island chain. Keep this policy beside the actual patcher
   // support check so the translator only reserves windows the patch layer owns.
   //
-  // Known limitation (fail-closed, not a miscompile): a NEAR conditional branch
-  // gets only this two-word window. If translation expansion later pushes it out
-  // of SOPP range and the island pool cannot reach it, the long-branch sequence
-  // for a conditional (invert + getpc + builder + setpc, up to ~7 words) will not
-  // fit and append_long_direct_branch_sequence reports relocation_error, so the
-  // kernel is skipped rather than mis-branched. Widening this window for
-  // invertible conditionals when a long-branch SGPR is available would lift the
-  // limitation for large kernels; today the conservative window is kept.
-  if ((inst.flags() & COND_BRANCH) != 0 && conditional_branch_can_invert(inst.mnemonic()))
+  // A source-near branch can still move out of SOPP range when many instructions
+  // in the intervening region expand. The long-window threshold above leaves
+  // enough headroom for the largest current Scale16 WMMA expansion.
+  if (invertible_conditional)
     return 2 * sizeof(uint32_t);
 
   return inst.size();
@@ -471,10 +459,16 @@ void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelT
     return std::nullopt;
 
   // The supported conditional SOPP opcodes are encoded in adjacent false/true
-  // pairs on AMDGPU targets handled by this patcher. Flip the low opcode bit
-  // while preserving the translated ISA's SOPP opcode numbering.
+  // pairs, but the first opcode in each pair is odd. XORing the low bit would
+  // therefore cross pair boundaries (and turns gfx1250 s_cbranch_execnz opcode
+  // 38 into invalid opcode 39). Move explicitly to the adjacent inverse while
+  // preserving the translated ISA's SOPP opcode numbering.
   const uint32_t op = (translated_word >> 16) & 0x7fu;
-  return build_sopp_encoding(arch, op ^ 1u, static_cast<uint16_t>(*skip));
+  const std::string_view mnemonic = inst.mnemonic();
+  const bool invert_to_next =
+      mnemonic == "s_cbranch_scc0" || mnemonic == "s_cbranch_vccz" || mnemonic == "s_cbranch_execz";
+  return build_sopp_encoding(arch, invert_to_next ? op + 1u : op - 1u,
+                             static_cast<uint16_t>(*skip));
 }
 
 [[nodiscard]] std::optional<uint16_t> direct_call_return_sgpr(const Instruction &inst,
