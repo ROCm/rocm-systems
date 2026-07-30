@@ -28,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <chrono>
@@ -539,6 +540,85 @@ TEST_P(IsaTest, RegisterAccess) {
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 100u);
   EXPECT_EQ(cu->read_vgpr(vb + 1, 63), 200u);
   EXPECT_EQ(cu->read_vgpr(vb + 1, 1), 0u);
+}
+
+TEST(ResidentWaveHardwareIdTest, SGetregDistinguishesEveryResidentWaveOnSupportedFamilies) {
+  struct Target {
+    std::string_view arch;
+    uint32_t getreg;
+    uint32_t workgroup_size;
+    uint32_t vgprs;
+    std::array<uint32_t, 8> expected_first_eight;
+  };
+  const std::array targets = {
+      Target{"cdna3", 0xB8822804u, 256u, 256u, {0u, 16u, 32u, 48u, 1u, 17u, 33u, 49u}},
+      Target{"cdna4", 0xB8822804u, 256u, 256u, {0u, 16u, 32u, 48u, 1u, 17u, 33u, 49u}},
+      Target{"rdna4", 0xB8824817u, 128u, 32u, {0u, 512u, 1u, 513u, 2u, 514u, 3u, 515u}},
+      Target{"gfx1250", 0xB8824817u, 128u, 32u, {0u, 256u, 512u, 768u, 1u, 257u, 513u, 769u}},
+  };
+  for (const Target &target : targets) {
+    SCOPED_TRACE(target.arch);
+    const std::array code = {target.getreg, SOPP_S_ENDPGM};
+    VmFixture f(target.arch, /*num_cus=*/1, /*num_wf_slots=*/32,
+                /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    auto *snap = f.capture_halts();
+    const uint64_t kernel = f.write_kernel(0x1000, code.data(), sizeof(code), 104, target.vgprs);
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel, 4u * target.workgroup_size, target.workgroup_size);
+    step_until_halted(*f.engine, {f.cu()});
+
+    ASSERT_EQ(snap->snapshots().size(), 16u);
+    std::vector<uint32_t> resident_ids;
+    resident_ids.reserve(snap->snapshots().size());
+    for (uint32_t wf_id = 0; wf_id < snap->snapshots().size(); ++wf_id) {
+      const auto *wf = snap->by_wf_id(wf_id);
+      ASSERT_NE(wf, nullptr);
+      resident_ids.push_back(wf->sgpr(2));
+      if (wf_id < target.expected_first_eight.size()) {
+        EXPECT_EQ(wf->sgpr(2), target.expected_first_eight[wf_id]);
+      }
+    }
+    std::ranges::sort(resident_ids);
+    EXPECT_EQ(std::adjacent_find(resident_ids.begin(), resident_ids.end()), resident_ids.end())
+        << "every simultaneously resident wave must have a distinct hardware ID";
+  }
+}
+
+TEST(ResidentWaveHardwareIdTest, Gfx12RegisterPairCarriesMultiCuAndDispatchIdentity) {
+  constexpr uint32_t kReadFullHwId1 = 0xB882F817u;
+  constexpr uint32_t kReadFullHwId2 = 0xB883F818u;
+  const std::array code = {kReadFullHwId1, kReadFullHwId2, SOPP_S_ENDPGM};
+
+  for (std::string_view arch : {"rdna4", "gfx1250"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, /*num_cus=*/2, /*num_wf_slots=*/10,
+                /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+    auto *snap = f.capture_halts();
+    const uint64_t kernel = f.write_kernel(0x1000, code.data(), sizeof(code), 104, 32);
+
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel, /*grid_size_x=*/64, /*workgroup_size_x=*/32);
+    step_until_halted(*f.engine, {f.cu(0), f.cu(1)});
+
+    const auto cu0 = snap->for_cu(f.cu(0));
+    const auto cu1 = snap->for_cu(f.cu(1));
+    ASSERT_EQ(cu0.size(), 1u);
+    ASSERT_EQ(cu1.size(), 1u);
+    EXPECT_NE(cu0.front()->sgpr(2), cu1.front()->sgpr(2));
+    EXPECT_EQ(cu0.front()->sgpr(2), 0u);
+    EXPECT_EQ(cu1.front()->sgpr(2), arch == "rdna4" ? 0x100u : 0x400u);
+    EXPECT_EQ(cu0.front()->sgpr(3), 0x00000001u);
+    EXPECT_EQ(cu1.front()->sgpr(3), 0x00010001u);
+  }
+}
+
+TEST(ResidentWaveHardwareIdTest, ConfigurationRejectsUnencodableResidentWaveCount) {
+  EXPECT_THROW((void)VmFixture("cdna3", /*num_cus=*/1, /*num_wf_slots=*/65), std::invalid_argument);
+  EXPECT_THROW((void)VmFixture("cdna4", /*num_cus=*/1, /*num_wf_slots=*/65), std::invalid_argument);
+  EXPECT_THROW((void)VmFixture("rdna4", /*num_cus=*/1, /*num_wf_slots=*/65), std::invalid_argument);
+  EXPECT_THROW((void)VmFixture("gfx1250", /*num_cus=*/1, /*num_wf_slots=*/129),
+               std::invalid_argument);
 }
 
 TEST(RdnaDispatchTest, PackedTidHonorsRequestedComponents) {

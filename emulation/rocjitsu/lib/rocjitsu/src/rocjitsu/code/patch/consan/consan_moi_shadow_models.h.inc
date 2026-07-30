@@ -428,10 +428,10 @@ consan_moi_exact_byte_cells_conflict(const ConSanMoiExactShadowEntry &current_ac
                                      const ConSanMoiExactByteCellProvenance &prior_byte) {
   // Specification model for the emitted Inline predicate. Exact address
   // grouping and byte-mask partitioning happen before publication, so they do
-  // not need separate flags here. When owners match, the owner must be
-  // wave-unique within the comparison scope and representative_lane is the
-  // wave-relative workitem discriminator. Multidimensional workitem identity
-  // requires a stronger owner source before this last rule is fully general.
+  // not need separate flags here. The owner is a normalized resident-wave
+  // identity that is unique within the workgroup's execution domain, while
+  // representative_lane is the wave-relative workitem discriminator. Their
+  // pair is independent of the launch dimensionality.
   if (!current_byte.valid || !prior_byte.valid ||
       (current_byte.byte_mask & prior_byte.byte_mask) == 0u ||
       current_access.epoch != prior_access.epoch ||

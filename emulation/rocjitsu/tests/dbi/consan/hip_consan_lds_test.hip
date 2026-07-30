@@ -266,6 +266,47 @@ __global__ __launch_bounds__(64) void padded_lds_store(uint32_t *out, uint32_t r
   }
 }
 
+__device__ __forceinline__ void padded_native_lds_store(uint32_t lds_addr, uint32_t value) {
+  asm volatile(RJ_CONSAN_TEST_DS_STORE_B32 RJ_CONSAN_TEST_NOP_CAVE
+               :
+               : "v"(lds_addr), "v"(value)
+               : "memory");
+}
+
+__global__ __launch_bounds__(128) void padded_2d_cross_wave_lds_store(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t linear_tid =
+      static_cast<uint32_t>(threadIdx.x) +
+      static_cast<uint32_t>(blockDim.x) * static_cast<uint32_t>(threadIdx.y);
+  const uint32_t second_wave_y = warpSize / static_cast<uint32_t>(blockDim.x);
+  if (threadIdx.x == 0 && (threadIdx.y == 0 || threadIdx.y == second_wave_y)) {
+    const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
+    padded_native_lds_store(lds_addr, 0x2D000000u | linear_tid);
+  }
+
+  __syncthreads();
+  if (linear_tid == 0)
+    out[0] = 0x2D000000u;
+}
+
+__global__ __launch_bounds__(128) void padded_3d_cross_wave_lds_store(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t plane_size = static_cast<uint32_t>(blockDim.x) * static_cast<uint32_t>(blockDim.y);
+  const uint32_t linear_tid =
+      static_cast<uint32_t>(threadIdx.x) +
+      static_cast<uint32_t>(blockDim.x) * static_cast<uint32_t>(threadIdx.y) +
+      plane_size * static_cast<uint32_t>(threadIdx.z);
+  const uint32_t second_wave_z = warpSize / plane_size;
+  if (threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 0 || threadIdx.z == second_wave_z)) {
+    const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
+    padded_native_lds_store(lds_addr, 0x3D000000u | linear_tid);
+  }
+
+  __syncthreads();
+  if (linear_tid == 0)
+    out[0] = 0x3D000000u;
+}
+
 __device__ __forceinline__ void padded_flat_lds_store(uint32_t value) {
   asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
                "v_mov_b32 v0, s14\n\t"
@@ -726,6 +767,33 @@ TEST(ConSanLdsTest, PaddedCrossWaveFlatLdsStoreCompletes) {
   HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
   free_device_ptr(d_out);
   EXPECT_EQ(out, 0xF1A7005Au);
+}
+
+template <typename Launch>
+void run_multidimensional_cross_wave_store(Launch &&launch, uint32_t value_prefix) {
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(*d_out)));
+  HIP_ASSERT(hipMemset(d_out, 0, sizeof(*d_out)));
+
+  launch(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  EXPECT_EQ(out & 0xFF000000u, value_prefix);
+}
+
+TEST(ConSanLdsTest, PaddedTwoDimensionalCrossWaveStoreCompletes) {
+  run_multidimensional_cross_wave_store(
+      [](uint32_t *out) { padded_2d_cross_wave_lds_store<<<1, dim3(8, 16)>>>(out); }, 0x2D000000u);
+}
+
+TEST(ConSanLdsTest, PaddedThreeDimensionalCrossWaveStoreCompletes) {
+  run_multidimensional_cross_wave_store(
+      [](uint32_t *out) { padded_3d_cross_wave_lds_store<<<1, dim3(4, 4, 8)>>>(out); },
+      0x3D000000u);
 }
 
 TEST(ConSanLdsTest, ZeroExecFlatSpillPreservesLiveScalarPair) {

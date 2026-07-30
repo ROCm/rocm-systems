@@ -196,7 +196,10 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
   EXPECT_EQ(std::count(rewritten_words.begin(), rewritten_words.end(), *restore_guest_exec), 1);
   // Claim/publication/counters and the exact duplicate-identity loads all wait
   // before consuming returned device memory.
-  EXPECT_EQ(std::count(rewritten_words.begin(), rewritten_words.end(), 0xBFC00000u), 16);
+  const auto global_load_wait =
+      instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(global_load_wait);
+  EXPECT_EQ(std::count(rewritten_words.begin(), rewritten_words.end(), *global_load_wait), 16);
   const uint64_t causal_window = *options.moi_report_buffer_address + sizeof(ConSanMoiReportHeader);
   const auto causal_window_address = build_v_mov_b32_e64_literal(
       8, static_cast<uint32_t>(causal_window), ROCJITSU_CODE_ARCH_RDNA4);
@@ -446,7 +449,7 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
         << "expected=" << testing::PrintToString(*materialize)
         << " words=" << testing::PrintToString(rewritten_words);
   }
-  EXPECT_GE(std::count(rewritten_words.begin(), rewritten_words.end(), 0xbf8c0070u), 1);
+  EXPECT_GE(std::count(rewritten_words.begin(), rewritten_words.end(), 0xbf8c0f70u), 1);
   EXPECT_TRUE(
       contains_subsequence(rewritten_words, std::array<uint32_t, 2>{text_words[0], text_words[1]}));
 }
@@ -676,7 +679,7 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   ASSERT_TRUE(commit);
   EXPECT_EQ(*claim, *commit);
   EXPECT_EQ(count_subsequence(trampoline, *claim), 2u);
-  const auto payload_wait = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto payload_wait = instrumentation::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(payload_wait);
   EXPECT_NE(std::find(trampoline.begin(), trampoline.end(), *payload_wait), trampoline.end());
   EXPECT_EQ(count_subsequence(
@@ -2385,6 +2388,7 @@ TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
       });
 
       ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+      options.moi_owner_source = ConSanMoiOwnerSource::Automatic;
       options.moi_runtime_sample_stride = sample_stride;
       options.moi_report_buffer_address = 0x123456780000ull;
       options.moi_report_buffer_size = direct_sampled_report_bytes(2);

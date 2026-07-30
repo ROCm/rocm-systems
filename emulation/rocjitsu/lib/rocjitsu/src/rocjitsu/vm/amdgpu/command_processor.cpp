@@ -954,6 +954,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_lds_base(lds_base);
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
+      wf->set_queue_id(entry.queue_id);
       wf->set_process_id(entry.process_id);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
       wf->set_cluster_info(entry.cluster_rank_for_flat_wg_id(global_wg_id), entry.cluster_size());

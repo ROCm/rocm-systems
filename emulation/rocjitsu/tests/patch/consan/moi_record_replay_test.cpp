@@ -26,7 +26,12 @@ std::vector<uint32_t> make_expected_fetch_add_one_words(uint64_t address, uint16
   words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
   words.insert(words.end(), mov_one->begin(), mov_one->end());
   words.insert(words.end(), atomic_add->begin(), atomic_add->end());
-  words.push_back(0xBFC00000u);
+  const auto wait = instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto store_wait = instrumentation::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4);
+  if (!wait || !store_wait)
+    return {};
+  words.push_back(*wait);
+  words.push_back(*store_wait);
   return words;
 }
 
@@ -3425,7 +3430,7 @@ TEST(ConSanMoi, Cdna4StaticRecordReplayRestoresOverlappingStoreOperandsBeforeGue
         build_v_mov_b32_e32(/*vdst=*/15, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_CDNA4));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
   std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
-      text_words, "record_replay_store_operand_overlap", /*vgpr_granulated=*/1u);
+      text_words, "record_replay_store_operand_overlap", /*vgpr_granulated=*/2u);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     // Bound ordinary VGPRs to v0..v15. Every aligned ten-VGPR window intersects
     // address v6 or payload v10, forcing the overlap-safe spill path.
@@ -3520,8 +3525,8 @@ TEST(ConSanMoi, Cdna4StaticRecordReplayRestoresOverlappingLoadOperandsBeforeGues
     text_words.push_back(
         build_v_mov_b32_e32(/*vdst=*/7, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_CDNA4));
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
-  std::vector<uint8_t> bytes =
-      make_cdna4_lds_code_object(text_words, "record_replay_load_operand_overlap");
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "record_replay_load_operand_overlap", /*vgpr_granulated=*/1u);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
   });
@@ -3854,6 +3859,7 @@ TEST(ConSanMoi, FirstLightProbeCapturesOwnerFromWorkitemIdAtEntryWhenOwnerVgprIs
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
       text_words, "lds_probe", kRdna4Wave64AllVgprsGranulated, /*wave32=*/true);
   ConSanOptions options = moi_options();
+  options.moi_owner_source = ConSanMoiOwnerSource::Automatic;
   options.scratch_vgpr = 8;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
@@ -4198,9 +4204,9 @@ TEST(ConSanMoi, FirstLightRecordLinearizesBeforeDisplacedTwoAddressLoad) {
   ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
   // Include the complete hardware workgroup identity while keeping the two-range
   // Record/Replay probe within a tightly bounded append-cave footprint.
-  EXPECT_LE(patch.trampoline_size, 2112u)
+  EXPECT_LE(patch.trampoline_size, 2144u)
       << "two-range dispatch/workgroup-qualified Record/Replay probes must remain within the "
-         "2112-byte append-cave budget";
+         "2144-byte append-cave budget including complete returning-atomic waits";
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -4245,7 +4251,7 @@ TEST(ConSanMoi, DynamicAccessRecordProbeLowersTwoAddressNativeLdsSites) {
   ASSERT_NE(prologue, result.patches.end());
 
   const std::vector<uint32_t> rewritten_words = record_access_patch_words(result, *access, 0x100u);
-  const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto wait_store = instrumentation::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_exec =
       build_s_mov_b64(/*sdst=*/126, *options.moi_exec_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_store);
@@ -4309,7 +4315,7 @@ TEST(ConSanMoi, DynamicAccessRecordProbeDrainsTerminalAppendedCaveBeforeEndpgm) 
               patched.text_sections().front()->size());
   EXPECT_EQ(actual_words[2], build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
 
-  const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto wait_store = instrumentation::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_exec =
       build_s_mov_b64(/*sdst=*/126, *options.moi_exec_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_store);
@@ -7284,8 +7290,10 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
                     sizeof(uint32_t));
   EXPECT_TRUE(std::equal(original_atomic->begin(), original_atomic->end(), guest_atomic_begin));
   EXPECT_EQ(trampoline_words.back() >> 23u, kSoppEncodingPrefix);
+  const auto flat_load_wait = instrumentation::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(flat_load_wait);
   const std::array<uint32_t, 4> post_atomic_wait = {(*original_atomic)[0], (*original_atomic)[1],
-                                                    (*original_atomic)[2], 0xBFC00000u};
+                                                    (*original_atomic)[2], *flat_load_wait};
   EXPECT_FALSE(contains_subsequence(trampoline_words, post_atomic_wait));
 
   const uint64_t base = *options.moi_report_buffer_address;
@@ -8201,7 +8209,8 @@ TEST(ConSanMoi, AtomicRecordKeepsAcquireResultBeforeReporting) {
   ASSERT_TRUE(original_acquire);
   ASSERT_GE(words.size(), original_acquire->size() + 2u);
   EXPECT_TRUE(std::equal(original_acquire->begin(), original_acquire->end(), words.begin()));
-  EXPECT_EQ(words[original_acquire->size()], 0xBFC00000u);
+  EXPECT_EQ(words[original_acquire->size()],
+            *instrumentation::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST(ConSanMoi, AtomicRecordKeepsReturningReleaseAtEndOfProbe) {

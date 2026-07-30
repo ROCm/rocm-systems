@@ -3044,6 +3044,8 @@ class CodeGenerator:
         profile = self.isa_spec.profile
         mode_id = profile.hwreg_mode_id
         status_id = profile.hwreg_status_id
+        hw_id1_id = profile.hwreg_hw_id1_id
+        hw_id2_id = profile.hwreg_hw_id2_id
         wave_sched_id = profile.hwreg_wave_sched_mode_id
         ib_sts2_id = profile.hwreg_ib_sts2_id
         constexprs = []
@@ -3052,8 +3054,8 @@ class CodeGenerator:
         constexprs.append(f'constexpr uint32_t HW_REG_STATUS = {status_id};')
         constexprs.extend(
             [
-                'constexpr uint32_t HW_REG_HW_ID1 = 4;',
-                'constexpr uint32_t HW_REG_HW_ID2 = 5;',
+                f'constexpr uint32_t HW_REG_HW_ID1 = {hw_id1_id};',
+                f'constexpr uint32_t HW_REG_HW_ID2 = {hw_id2_id};',
                 'constexpr uint32_t HW_REG_GPR_ALLOC = 6;',
                 'constexpr uint32_t HW_REG_VGPR_ALLOC = 7;',
             ]
@@ -3086,10 +3088,10 @@ class CodeGenerator:
                 '    reg_val = wf.status_raw();\n'
                 '    return true;',
                 '  case HW_REG_HW_ID1:\n'
-                '    reg_val = static_cast<uint32_t>(wf.cu().id());\n'
+                '    reg_val = wf.hw_id1_raw();\n'
                 '    return true;',
                 '  case HW_REG_HW_ID2:\n'
-                '    reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);\n'
+                '    reg_val = wf.hw_id2_raw();\n'
                 '    return true;',
                 '  case HW_REG_GPR_ALLOC:\n'
                 '    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);\n'

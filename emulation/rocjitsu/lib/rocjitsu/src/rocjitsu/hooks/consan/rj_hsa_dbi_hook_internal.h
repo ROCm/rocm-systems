@@ -56,7 +56,7 @@ struct HookConfig {
   HookPolicy policy = HookPolicy::Default;
   std::optional<rocjitsu::ConSanFlavor> flavor;
   rocjitsu::ConSanMoiEngine moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
-  rocjitsu::ConSanMoiOwnerSource moi_owner_source = rocjitsu::ConSanMoiOwnerSource::WorkitemId;
+  rocjitsu::ConSanMoiOwnerSource moi_owner_source = rocjitsu::ConSanMoiOwnerSource::Automatic;
   rocjitsu::ConSanFlatProvenanceMode flat_provenance_mode =
       rocjitsu::ConSanFlatProvenanceMode::Likely;
   bool fail_closed = false;
@@ -634,6 +634,8 @@ patched_image_growth_limit_value(const rocjitsu::ConSanPatchedImageGrowthLimit &
 
 [[nodiscard]] inline const char *owner_source_name(rocjitsu::ConSanMoiOwnerSource source) {
   switch (source) {
+  case rocjitsu::ConSanMoiOwnerSource::Automatic:
+    return "automatic";
   case rocjitsu::ConSanMoiOwnerSource::WorkitemId:
     return "workitem_id";
   case rocjitsu::ConSanMoiOwnerSource::HwId:

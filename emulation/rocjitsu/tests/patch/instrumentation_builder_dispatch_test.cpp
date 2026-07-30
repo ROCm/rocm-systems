@@ -11,6 +11,14 @@ namespace {
 namespace ib = instrumentation;
 
 TEST(InstrumentationBuilderDispatch, ScalarControlSelectsTargetBackend) {
+  const auto legacy_hw_id = build_hwreg_imm(/*reg_id=*/4, /*offset=*/0, /*size_bits=*/6);
+  const auto gfx12_hw_id = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
+  ASSERT_TRUE(legacy_hw_id);
+  ASSERT_TRUE(gfx12_hw_id);
+  EXPECT_EQ(ib::build_s_getreg_b32(20, *legacy_hw_id, ROCJITSU_CODE_ARCH_CDNA3), 0xb8942804u);
+  EXPECT_EQ(ib::build_s_getreg_b32(20, *legacy_hw_id, ROCJITSU_CODE_ARCH_CDNA4), 0xb8942804u);
+  EXPECT_EQ(ib::build_s_getreg_b32(20, *gfx12_hw_id, ROCJITSU_CODE_ARCH_RDNA4), 0xb8944817u);
+  EXPECT_EQ(ib::build_s_getreg_b32(20, *gfx12_hw_id, ROCJITSU_CODE_ARCH_GFX1250), 0xb8944817u);
   EXPECT_EQ(ib::build_s_mov_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA3), 0xbe940116u);
   EXPECT_EQ(ib::build_s_mov_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA4), 0xbe940116u);
   EXPECT_EQ(ib::build_s_mov_b64(20, 22, ROCJITSU_CODE_ARCH_RDNA4), 0xbe940116u);
@@ -42,14 +50,25 @@ TEST(InstrumentationBuilderDispatch, VectorAndWaitSemanticsSelectTargetBackend) 
             0x26140702u);
   EXPECT_EQ(ib::build_v_cmp_eq_u32_vcc(vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA4),
             0x7d940702u);
+  EXPECT_EQ(ib::build_v_writelane_b32(10, 20, 3, ROCJITSU_CODE_ARCH_CDNA3),
+            (std::array<uint32_t, 2>{0xd28a000au, 0x00010614u}));
+  EXPECT_EQ(ib::build_v_readlane_b32(20, 10, 3, ROCJITSU_CODE_ARCH_CDNA4),
+            (std::array<uint32_t, 2>{0xd2890014u, 0x0001070au}));
   EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0070u);
   EXPECT_EQ(ib::build_s_wait_flat_store0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0070u);
+  EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0f70u);
+  EXPECT_EQ(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0f70u);
   EXPECT_EQ(ib::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8cc07fu);
   EXPECT_EQ(ib::build_s_wait_scalar_load0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8cc07fu);
-  EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_CDNA3), 0xbf8c0f70u);
+  EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_CDNA3), 0xbf8c0070u);
+  EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_CDNA3), 0xbf8c0f70u);
   EXPECT_EQ(ib::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA3), 0xbf8cc07fu);
-  EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc00000u);
-  EXPECT_EQ(ib::build_s_wait_flat_store0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc10000u);
+  EXPECT_EQ(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc80000u);
+  EXPECT_EQ(ib::build_s_wait_flat_store0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc90000u);
+  EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc00000u);
+  EXPECT_EQ(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc10000u);
+  EXPECT_EQ(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_GFX1250), 0xbfc00000u);
+  EXPECT_EQ(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_GFX1250), 0xbfc10000u);
   EXPECT_EQ(ib::build_s_wait_lds0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc60000u);
   EXPECT_EQ(ib::build_s_wait_scalar_load0(ROCJITSU_CODE_ARCH_RDNA4), 0xbfc70000u);
   EXPECT_EQ(ib::build_salu_dependency_delay(ROCJITSU_CODE_ARCH_CDNA4), 0xbf800000u);
@@ -57,14 +76,52 @@ TEST(InstrumentationBuilderDispatch, VectorAndWaitSemanticsSelectTargetBackend) 
   EXPECT_EQ(ib::build_s_trap(2, ROCJITSU_CODE_ARCH_CDNA4), 0xbf920002u);
 }
 
+TEST(InstrumentationBuilderDispatch, SaluToValuDependencyWaitSelectsTargetBackend) {
+  const auto cdna3 = instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_CDNA3);
+  const auto cdna4 = instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto rdna4 = instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto gfx1250 =
+      instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(cdna3);
+  ASSERT_TRUE(cdna4);
+  ASSERT_TRUE(rdna4);
+  ASSERT_TRUE(gfx1250);
+  EXPECT_EQ(*cdna3, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(*cdna4, *build_cdna4_salu_dependency_delay(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(*rdna4, *build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(*gfx1250, *build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_GFX1250));
+}
+
+TEST(InstrumentationBuilderDispatch, ValuToSaluDependencyWaitSelectsTargetBackend) {
+  const auto cdna3 = instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_CDNA3);
+  const auto cdna4 = instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto rdna4 = instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto gfx1250 =
+      instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(cdna3);
+  ASSERT_TRUE(cdna4);
+  ASSERT_TRUE(rdna4);
+  ASSERT_TRUE(gfx1250);
+  EXPECT_EQ(*cdna3, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(*cdna4, *build_cdna4_salu_dependency_delay(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(*rdna4, *build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(*gfx1250, *build_s_wait_alu_va_sdst0(ROCJITSU_CODE_ARCH_GFX1250));
+}
+
 TEST(InstrumentationBuilderDispatch, UnsupportedArchitectureFailsClosed) {
   EXPECT_FALSE(ib::is_admitted_arch(ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_s_mov_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_FALSE(ib::build_s_getreg_b32(20, 0x2804u, ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_FALSE(ib::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_s_and_saveexec_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(
       ib::build_v_lshrrev_b32(10, scalar_positive_inline_u32(3), 3, ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_v_min_u32(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_FALSE(ib::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_CDNA2));
+  EXPECT_FALSE(ib::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_s_wait_scalar_load0(ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_salu_dependency_delay(ROCJITSU_CODE_ARCH_CDNA2));
   EXPECT_FALSE(ib::build_s_trap(2, ROCJITSU_CODE_ARCH_CDNA2));

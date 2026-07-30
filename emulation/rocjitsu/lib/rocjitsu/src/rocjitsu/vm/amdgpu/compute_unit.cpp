@@ -24,10 +24,28 @@
 #include <cassert>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+namespace {
+
+[[nodiscard]] std::optional<uint32_t> resident_wave_id_capacity(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return 64u;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 128u;
+  default:
+    return std::nullopt;
+  }
+}
+
+} // namespace
 
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size)
@@ -60,6 +78,11 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
                                                          GpuMemory *memory, L2Cache *l2,
                                                          simdojo::ExecMode exec_mode) {
+  if (const auto capacity = resident_wave_id_capacity(config.arch);
+      capacity && config.num_wf_slots > *capacity) {
+    throw std::invalid_argument("ComputeUnit num_wf_slots exceeds the resident-wave hardware ID "
+                                "capacity for this architecture");
+  }
   // Helper: instantiate the ISA-specific CU for the given execution mode.
 #define ROCJITSU_CU_CASE(ARCH_ENUM, ISA_TYPE)                                                      \
   case ARCH_ENUM:                                                                                  \

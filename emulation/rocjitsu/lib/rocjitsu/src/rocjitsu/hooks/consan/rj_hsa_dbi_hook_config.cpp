@@ -336,10 +336,14 @@ namespace rocjitsu::consan_hook {
 [[nodiscard]] bool parse_moi_owner_source_env(rocjitsu::ConSanMoiOwnerSource *out) {
   const char *value = std::getenv("RJ_CONSAN_MOI_OWNER_SOURCE");
   if (value == nullptr || *value == '\0') {
-    *out = rocjitsu::ConSanMoiOwnerSource::WorkitemId;
+    *out = rocjitsu::ConSanMoiOwnerSource::Automatic;
     return true;
   }
   const std::string_view mode(value);
+  if (mode == "automatic" || mode == "auto") {
+    *out = rocjitsu::ConSanMoiOwnerSource::Automatic;
+    return true;
+  }
   if (mode == "workitem_id" || mode == "workitem") {
     *out = rocjitsu::ConSanMoiOwnerSource::WorkitemId;
     return true;
@@ -351,7 +355,7 @@ namespace rocjitsu::consan_hook {
 
   std::fprintf(stderr,
                "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_OWNER_SOURCE='%s'; "
-               "expected workitem_id|hw_id\n",
+               "expected automatic|workitem_id|hw_id\n",
                value);
   return false;
 }

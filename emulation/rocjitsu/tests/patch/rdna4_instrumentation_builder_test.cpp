@@ -213,7 +213,6 @@ TEST(InstructionBuilder, BuildSGetregB32) {
   EXPECT_FALSE(build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/0));
   EXPECT_FALSE(build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/33));
   EXPECT_FALSE(build_s_getreg_b32(/*sdst=*/128, *hwreg, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_s_getreg_b32(/*sdst=*/20, *hwreg, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildVMbcntLaneIdSequence) {

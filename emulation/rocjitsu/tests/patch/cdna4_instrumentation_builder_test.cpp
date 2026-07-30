@@ -124,14 +124,19 @@ TEST(Cdna4InstrumentationBuilder, VectorArithmeticMatchesLlvmAndDecoder) {
 TEST(Cdna4InstrumentationBuilder, VectorIdentityMatchesLlvmAndDecoder) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto readfirst = build_cdna4_v_readfirstlane_b32(20, 8, kArch);
+  const auto writelane = build_cdna4_v_writelane_b32(10, 20, 3, kArch);
+  const auto readlane = build_cdna4_v_readlane_b32(20, 10, 3, kArch);
   const auto mbcnt_lo =
       build_cdna4_v_mbcnt_lo_u32_b32(13, 0xc1, scalar_positive_inline_u32(0), kArch);
   const auto mbcnt_hi = build_cdna4_v_mbcnt_hi_u32_b32(13, 0xc1, vector_source_vgpr(13), kArch);
   const auto cmp_eq = build_cdna4_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), 3, kArch);
   const auto cmp_ne = build_cdna4_v_cmp_ne_u32_vcc(vector_source_vgpr(2), 3, kArch);
   const auto cmp_gt = build_cdna4_v_cmp_gt_u32_vcc(scalar_positive_inline_u32(7), 3, kArch);
-  ASSERT_TRUE(readfirst && mbcnt_lo && mbcnt_hi && cmp_eq && cmp_ne && cmp_gt);
+  ASSERT_TRUE(readfirst && writelane && readlane && mbcnt_lo && mbcnt_hi && cmp_eq && cmp_ne &&
+              cmp_gt);
   EXPECT_EQ(*readfirst, 0x7e280508u);
+  EXPECT_EQ(*writelane, (std::array<uint32_t, 2>{0xd28a000au, 0x00010614u}));
+  EXPECT_EQ(*readlane, (std::array<uint32_t, 2>{0xd2890014u, 0x0001070au}));
   EXPECT_EQ(*mbcnt_lo, (std::array<uint32_t, 2>{0xd28c000du, 0x000100c1u}));
   EXPECT_EQ(*mbcnt_hi, (std::array<uint32_t, 2>{0xd28d000du, 0x00021ac1u}));
   EXPECT_EQ(*cmp_eq, 0x7d940680u);
@@ -141,8 +146,10 @@ TEST(Cdna4InstrumentationBuilder, VectorIdentityMatchesLlvmAndDecoder) {
   auto decoder = Decoder::create(kArch);
   ASSERT_NE(decoder, nullptr);
   for (const auto &[words, mnemonic] :
-       std::array<std::pair<const uint32_t *, std::string_view>, 6>{{
+       std::array<std::pair<const uint32_t *, std::string_view>, 8>{{
            {&*readfirst, "v_readfirstlane_b32_e32"},
+           {writelane->data(), "v_writelane_b32"},
+           {readlane->data(), "v_readlane_b32"},
            {mbcnt_lo->data(), "v_mbcnt_lo_u32_b32"},
            {mbcnt_hi->data(), "v_mbcnt_hi_u32_b32"},
            {&*cmp_eq, "v_cmp_eq_u32_e32"},

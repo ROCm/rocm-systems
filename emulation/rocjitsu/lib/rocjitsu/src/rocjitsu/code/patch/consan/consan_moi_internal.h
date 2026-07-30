@@ -172,8 +172,8 @@ inline_shadow_loop_counter_vgpr(uint16_t scratch_vgpr, bool has_exec_save, bool 
   return static_cast<uint16_t>(old_value_vgpr + 10u);
 }
 
-/// Return the offset/counter scratch reserved when one access spans multiple
-/// exact-shadow cells.
+/// Return the offset/counter scratch reserved when a wide access spans enough
+/// exact-shadow cells to make a compact runtime loop preferable to unrolling.
 [[nodiscard]] constexpr uint16_t inline_shadow_loop_scratch_count(uint32_t width_bits,
                                                                   uint32_t granule_bytes) {
   return width_bits > granule_bytes * 8u ? 2u : 0u;

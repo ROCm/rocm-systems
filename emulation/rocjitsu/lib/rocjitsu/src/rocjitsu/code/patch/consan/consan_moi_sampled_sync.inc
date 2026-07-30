@@ -434,7 +434,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   words.insert(words.end(), sentinel->begin(), sentinel->end());
   words.insert(words.end(), zero->begin(), zero->end());
   words.insert(words.end(), claim->begin(), claim->end());
-  if (!append_moi_flat_load_wait(words, arch))
+  if (!append_moi_global_atomic_wait(words, arch))
     return std::nullopt;
   const auto claimed =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
@@ -472,7 +472,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata body stores");
     return std::nullopt;
   }
-  const auto wait_store = instrumentation::build_s_wait_flat_store0(arch);
+  const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
   const auto final_value =
       instrumentation::build_v_mov_b32_literal(value, encoded.packed.descriptor, arch);
   const auto final_expected = instrumentation::build_v_mov_b32_literal(
@@ -493,7 +493,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     return std::nullopt;
   }
   words.insert(words.end(), commit->begin(), commit->end());
-  if (!append_moi_flat_load_wait(words, arch))
+  if (!append_moi_global_atomic_wait(words, arch))
     return std::nullopt;
   const auto committed =
       instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
@@ -2350,11 +2350,14 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
     const auto narrow_exec =
         instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
-    if (!save_active_exec || !mbcnt_lo || !mbcnt_hi || !first_active_lane || !narrow_exec) {
+    const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
+    if (!save_active_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active_lane ||
+        !narrow_exec) {
       errors.emplace_back("ConSan MOI dynamic fence record could not select a wave publisher");
       return std::nullopt;
     }
     words.push_back(*save_active_exec);
+    words.push_back(*saved_exec_wait);
     words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
     words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
     words.push_back(*first_active_lane);
@@ -2439,7 +2442,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       errors.emplace_back("ConSan MOI dynamic fence record could not encode record stores");
       return std::nullopt;
     }
-    const auto wait_store = instrumentation::build_s_wait_flat_store0(arch);
+    const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
     const auto restore_exec =
         instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
     if (!wait_store || !restore_exec ||

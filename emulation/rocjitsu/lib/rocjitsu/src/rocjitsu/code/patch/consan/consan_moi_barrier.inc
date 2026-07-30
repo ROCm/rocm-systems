@@ -344,10 +344,12 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
         instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kRdna4VccLo, arch);
     const auto restore_exec =
         instrumentation::build_s_mov_b64(kRdna4ExecLo, active_exec_sgpr, arch);
-    if (!save_active_exec || !mbcnt_lo || !mbcnt_hi || !first_active || !narrow_first ||
-        !restore_exec)
+    const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
+    if (!save_active_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active ||
+        !narrow_first || !restore_exec)
       return false;
     words.push_back(*save_active_exec);
+    words.push_back(*saved_exec_wait);
     words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
     words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
     words.push_back(*first_active);

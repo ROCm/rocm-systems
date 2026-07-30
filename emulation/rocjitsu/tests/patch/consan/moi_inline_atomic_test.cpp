@@ -89,7 +89,9 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
       /*vaddr=*/2, /*vsrc=*/4, /*vdst=*/5, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
   const auto wait = build_cdna4_s_wait_flat0(ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_TRUE(atomic && wait);
+  const auto instrumentation_wait =
+      instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(atomic && wait && instrumentation_wait);
   std::vector<uint32_t> text_words;
   text_words.insert(text_words.end(), release.begin(), release.end());
   text_words.push_back(*wait);
@@ -145,9 +147,9 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
   EXPECT_EQ(count_subsequence(cave_words, *acquired_token_transaction), 15u);
   const auto expect_unified_atomic_wait = [&](const auto &transaction) {
     std::vector<uint32_t> drained(transaction.begin(), transaction.end());
-    drained.push_back(*wait);
+    drained.push_back(*instrumentation_wait);
     EXPECT_EQ(count_subsequence(cave_words, drained), count_subsequence(cave_words, transaction));
-    drained.push_back(*wait);
+    drained.push_back(*instrumentation_wait);
     EXPECT_EQ(count_subsequence(cave_words, drained), 0u)
         << "CDNA4 uses one unified FLAT wait, not a second store-side wait";
   };
@@ -277,7 +279,7 @@ TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
   const auto acquire_version = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       scratch_vgpr, value_vgpr, value_vgpr, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto acquire_wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto acquire_wait = instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(acquire_version);
   ASSERT_TRUE(acquire_wait);
   std::vector<uint32_t> acquire_valid = {
@@ -2207,13 +2209,19 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
                          release_words.begin() + release_guest_word));
   EXPECT_TRUE(std::equal(original_acquire->begin(), original_acquire->end(),
                          acquire_words.begin() + acquire_guest_word));
-  const auto wait_loadcnt0 = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto wait_loadcnt0 = instrumentation::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_loadcnt0);
   EXPECT_EQ(release_words[release_guest_word + original_release->size()], *wait_loadcnt0);
-  const auto wait_storecnt0 = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto wait_storecnt0 = instrumentation::build_s_wait_flat_store0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_storecnt0);
   EXPECT_EQ(release_words[release_guest_word + original_release->size() + 1u], *wait_storecnt0);
-  EXPECT_EQ(acquire_words[acquire_guest_word + original_acquire->size()], 0xBFC00000u);
+  EXPECT_EQ(acquire_words[acquire_guest_word + original_acquire->size()], *wait_loadcnt0);
+  const auto wait_global_load0 =
+      instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto wait_global_store0 =
+      instrumentation::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(wait_global_load0);
+  ASSERT_TRUE(wait_global_store0);
   EXPECT_GT(*release_patch_it->relocated_guest_instruction_offset,
             release_patch_it->trampoline_offset);
   EXPECT_GT(*acquire_patch_it->relocated_guest_instruction_offset,
@@ -2289,8 +2297,8 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
       << "release publication must use odd claim then even commit CAS";
   std::vector<uint32_t> drained_release_transaction(release_claim_and_commit->begin(),
                                                     release_claim_and_commit->end());
-  drained_release_transaction.push_back(*wait_loadcnt0);
-  drained_release_transaction.push_back(*wait_storecnt0);
+  drained_release_transaction.push_back(*wait_global_load0);
+  drained_release_transaction.push_back(*wait_global_store0);
   EXPECT_EQ(count_subsequence(release_words, drained_release_transaction), 2u)
       << "every gfx12 release claim and commit must drain both sides of the returning CAS";
   const uint16_t release_retry_count_sgpr = 100u;
@@ -2321,7 +2329,7 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
       build_v_mov_b32_e32(/*vdst=*/10, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4)};
   coherent_version_load_words.insert(coherent_version_load_words.end(),
                                      coherent_version_load->begin(), coherent_version_load->end());
-  coherent_version_load_words.push_back(*wait_loadcnt0);
+  coherent_version_load_words.push_back(*wait_global_load0);
   EXPECT_TRUE(contains_subsequence(acquire_words, coherent_version_load_words));
   EXPECT_TRUE(contains_subsequence(
       acquire_words,
@@ -2563,7 +2571,10 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   const auto count_unsupported = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       scratch, temporary, temporary, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_RDNA4);
-  const auto unsupported_wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto unsupported_wait =
+      instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto unsupported_store_wait =
+      instrumentation::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_valid_exec = build_s_mov_b64(kRdna4ExecLo, exec, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(save_valid_exec);
   ASSERT_TRUE(select_unsupported);
@@ -2572,6 +2583,7 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   ASSERT_TRUE(unsupported_one);
   ASSERT_TRUE(count_unsupported);
   ASSERT_TRUE(unsupported_wait);
+  ASSERT_TRUE(unsupported_store_wait);
   ASSERT_TRUE(restore_valid_exec);
   std::vector<uint32_t> expected_unsupported_accounting = {*save_valid_exec, *select_unsupported};
   expected_unsupported_accounting.insert(expected_unsupported_accounting.end(),
@@ -2585,6 +2597,7 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   expected_unsupported_accounting.insert(expected_unsupported_accounting.end(),
                                          count_unsupported->begin(), count_unsupported->end());
   expected_unsupported_accounting.push_back(*unsupported_wait);
+  expected_unsupported_accounting.push_back(*unsupported_store_wait);
   expected_unsupported_accounting.push_back(*restore_valid_exec);
   EXPECT_TRUE(contains_subsequence(words, expected_unsupported_accounting));
 
@@ -2629,7 +2642,8 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
   const auto coherent_token_version_reread = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/scratch, /*vsrc=*/scratch + 14u, /*vdst=*/scratch + 14u,
       /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto token_version_wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_version_wait =
+      instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(coherent_token_version_load);
   ASSERT_TRUE(coherent_token_version_reread);
   ASSERT_TRUE(token_version_wait);
@@ -2643,8 +2657,8 @@ TEST(ConSanMoi, InlineShadowExactConflictUsesStableFullAcquiredToken) {
     expected.push_back(*token_version_wait);
     EXPECT_TRUE(contains_subsequence(words, expected))
         << "acquired-token version snapshots must use coherent device-scope loads";
-    EXPECT_EQ(count_subsequence(words, expected), 2u)
-        << "both possible happens-before directions require a stable token snapshot";
+    EXPECT_EQ(count_subsequence(words, expected), 4u)
+        << "both possible cells and both happens-before directions require stable token snapshots";
   }
 
   const auto authorize_stable_access_token =
@@ -2818,8 +2832,9 @@ TEST(ConSanMoi, InlineAtomicRetainsDisplacedVglobalAcquireAndPublishesToken) {
   const auto token_transaction_cas = build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(
       /*vaddr=*/12, /*vsrc=*/31, /*vdst=*/31, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto token_load_wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
-  const auto token_store_wait = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_load_wait = instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto token_store_wait =
+      instrumentation::build_s_wait_global_store0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(token_transaction_cas);
   ASSERT_TRUE(token_load_wait);
   ASSERT_TRUE(token_store_wait);
@@ -3577,7 +3592,7 @@ TEST(ConSanMoi, InlineAtomicPersistentDispatchIdCoversEveryAcquireReleaseCompari
       const auto load = instrumentation::build_flat_load_b32(
           address, value, ROCJITSU_CODE_ARCH_RDNA4,
           static_cast<uint32_t>(comparison.field_offset + (high_word ? sizeof(uint32_t) : 0u)));
-      const auto wait = instrumentation::build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4);
+      const auto wait = instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
       const auto compare =
           instrumentation::build_v_cmp_eq_u32_vcc(expected_sgpr, value, ROCJITSU_CODE_ARCH_RDNA4);
       ASSERT_TRUE(load && wait && compare);

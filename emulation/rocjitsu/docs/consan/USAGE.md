@@ -309,14 +309,19 @@ overrides, not ordinary setup:
 - `RJ_CONSAN_MOI_OWNER_VGPR`
 - `RJ_CONSAN_MOI_EPOCH_VGPR`
 - `RJ_CONSAN_MOI_OWNER_SGPR`
-- `RJ_CONSAN_MOI_OWNER_SOURCE=workitem_id|hw_id` (defaults to `workitem_id`)
+- `RJ_CONSAN_MOI_OWNER_SOURCE=automatic|auto|workitem_id|hw_id` (defaults to
+  `automatic`; resolves to resident-wave `hw_id` for Inline Shadow and to
+  entry-captured `workitem_id` for Record/Replay and Sampled)
 - `RJ_CONSAN_MOI_INIT_OWNER_EPOCH`
 
 Overrides remain subject to ownership, alignment, liveness, overlap, and
 descriptor checks. They cannot force an unsafe plan. For Record/Replay,
 `RJ_CONSAN_MOI_OWNER_VGPR` and `RJ_CONSAN_MOI_EPOCH_VGPR` are one paired
 override: setting only one is rejected as unsupported instead of silently
-dropping instrumentation. See
+dropping instrumentation. Inline Shadow rejects an explicit `workitem_id`
+owner because `workitem_id_x` alone cannot distinguish resident waves in
+arbitrary multidimensional workgroups. Its `hw_id` path is supported on
+gfx942, gfx950, gfx1201, and gfx1250. See
 [SPILLING.md](SPILLING.md).
 
 ## Malformed-input guard

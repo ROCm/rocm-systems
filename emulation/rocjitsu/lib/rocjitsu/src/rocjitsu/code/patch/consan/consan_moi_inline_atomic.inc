@@ -550,11 +550,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
   const auto save_exec =
       instrumentation::build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
-  if (!save_active_exec || !mbcnt_lo || !mbcnt_hi || !first_active_lane || !save_exec) {
+  const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
+  if (!save_active_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active_lane ||
+      !save_exec) {
     errors.emplace_back("ConSan MOI atomic record patch could not select a wave publisher");
     return std::nullopt;
   }
   words.push_back(*save_active_exec);
+  words.push_back(*saved_exec_wait);
   words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
   words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
   words.push_back(*first_active_lane);
@@ -681,7 +684,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return std::nullopt;
   }
 
-  const auto wait_store = instrumentation::build_s_wait_flat_store0(arch);
+  const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
   const auto restore_exec =
       instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
   if (!wait_store || !restore_exec) {
@@ -1085,9 +1088,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto empty = instrumentation::build_v_mov_b32_literal(expected, 0u, arch);
   const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
       base, value, value, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  const auto claim_wait = instrumentation::build_s_wait_flat_load0(arch);
-  if (!sequence.emit_all(pending_lo, pending_hi, publishing, empty, claim, claim_wait))
+  if (!sequence.emit_all(pending_lo, pending_hi, publishing, empty, claim) ||
+      !append_moi_global_atomic_wait(words, arch)) {
     return std::nullopt;
+  }
   const auto claimed =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
   const auto narrow_claimed =
@@ -1165,7 +1169,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   }
 
-  const auto wait_store = instrumentation::build_s_wait_flat_store0(arch);
+  const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
   const auto ready = instrumentation::build_v_mov_b32_literal(value, 2u, arch);
   const auto expected_publishing = instrumentation::build_v_mov_b32_literal(expected, 1u, arch);
   const auto commit_lo =
@@ -1174,10 +1178,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       static_cast<uint16_t>(base + 1u), static_cast<uint32_t>(pending_address >> 32u), arch);
   const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(
       base, value, value, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  const auto commit_wait = instrumentation::build_s_wait_flat_load0(arch);
-  if (!sequence.emit_all(wait_store, ready, expected_publishing, commit_lo, commit_hi, commit,
-                         commit_wait))
+  if (!sequence.emit_all(wait_store, ready, expected_publishing, commit_lo, commit_hi, commit) ||
+      !append_moi_global_atomic_wait(words, arch)) {
     return std::nullopt;
+  }
   const auto committed =
       instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
   const auto narrow_committed =
@@ -1540,9 +1544,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     const auto zero = instrumentation::build_v_mov_b32_literal(expected, 0, arch);
     const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
                                                                       kRdna4ScopeDevice, arch);
-    const auto claim_wait = instrumentation::build_s_wait_flat_load0(arch);
-    if (!sequence.emit_all(descriptor_lo, descriptor_hi, sentinel, zero, claim, claim_wait))
+    if (!sequence.emit_all(descriptor_lo, descriptor_hi, sentinel, zero, claim) ||
+        !append_moi_global_atomic_wait(words, arch)) {
       return false;
+    }
     const auto claimed =
         instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
     const auto narrow_claimed =
@@ -1564,7 +1569,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
             words, metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
             *options.moi_epoch_vgpr, base, arch))
       return false;
-    const auto wait = instrumentation::build_s_wait_flat_store0(arch);
+    const auto wait = instrumentation::build_s_wait_global_store0(arch);
     const auto final_value = instrumentation::build_v_mov_b32_literal(value, descriptor, arch);
     const auto final_expected = instrumentation::build_v_mov_b32_literal(
         expected, kConSanMoiSampledSyncPublishingDescriptor, arch);
@@ -1580,10 +1585,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
         arch);
     const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
                                                                        kRdna4ScopeDevice, arch);
-    const auto commit_wait = instrumentation::build_s_wait_flat_load0(arch);
-    if (!sequence.emit_all(wait, final_value, final_expected, final_lo, final_hi, commit,
-                           commit_wait))
+    if (!sequence.emit_all(wait, final_value, final_expected, final_lo, final_hi, commit) ||
+        !append_moi_global_atomic_wait(words, arch)) {
       return false;
+    }
     const auto committed =
         instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
     const auto narrow_committed =

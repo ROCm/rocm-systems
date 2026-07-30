@@ -2352,6 +2352,9 @@ def test_gfx1250_helper_blocks_emit_hwreg_and_scaled_wmma_hooks():
 
     hwreg = codegen._emit_hwreg_helpers()
     assert 'HW_REG_WAVE_SCHED_MODE = 26' in hwreg
+    assert 'HW_REG_HW_ID1 = 23' in hwreg
+    assert 'HW_REG_HW_ID2 = 24' in hwreg
+    assert 'wf.hw_id1_raw()' in hwreg
     assert 'wf.wave_sched_mode_raw()' in hwreg
     assert 'wf.set_wave_sched_mode_raw' in hwreg
     assert '[[maybe_unused]] bool read_hwreg' in hwreg

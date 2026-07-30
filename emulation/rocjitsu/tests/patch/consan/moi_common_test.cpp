@@ -1279,13 +1279,15 @@ TEST(ConSanMoi, Cdna4SharedInlineExecSaveAvoidsEveryOwnerPhysicalVcc) {
     // 32 decoded SGPRs place physical VCC at s26:s27.
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 3u);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 8u);
+    // The fixture has no accumulator operands; keep its boundary empty at the
+    // end of the 64-register unified allocation.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 15u);
   });
   mutate_kernel_descriptor(bytes, "shared_owner_1", [](KD &descriptor) {
     // 48 decoded SGPRs place physical VCC at s42:s43.
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 5u);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 8u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 15u);
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
@@ -1635,7 +1637,7 @@ TEST(ConSanMoi, SharedHelperRejectsAssignmentLiveInAnyOwnerScope) {
   EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
 }
 
-TEST(ConSanMoi, SharedPrivateOwnerRejectsIncompatibleWaveSizes) {
+TEST(ConSanMoi, SharedPrivateOwnerSupportsMixedWaveSizesWithResidentWaveIdentity) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.first_wave32 = true;
   fixture.second_wave32 = false;
@@ -1662,13 +1664,13 @@ TEST(ConSanMoi, SharedPrivateOwnerRejectsIncompatibleWaveSizes) {
 
   const auto result = try_patch_consan(bytes, options);
 
-  EXPECT_TRUE(result.errors.empty());
-  EXPECT_FALSE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("incompatible owner wave sizes") != std::string::npos;
-  }));
+  EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 TEST(ConSanMoi, InventorySkipsUnknownFlatSites) {
@@ -1882,6 +1884,17 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
   const auto verify_entry = [&](uint64_t entry_offset) {
     const char *text = patched.text_sections().front()->data();
     uint64_t cursor = entry_offset;
+    ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
+    ASSERT_TRUE(prologue->entry_scalar_backup_sgpr_base);
+    EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 1u);
+    const auto owner_backup = instrumentation::build_v_writelane_b32(
+        *prologue->entry_scalar_backup_vgpr, *prologue->entry_scalar_backup_sgpr_base,
+        /*lane=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(owner_backup);
+    std::array<uint32_t, 2> encoded_owner_backup{};
+    std::memcpy(encoded_owner_backup.data(), text + cursor, sizeof(encoded_owner_backup));
+    EXPECT_EQ(encoded_owner_backup, *owner_backup);
+    cursor += sizeof(encoded_owner_backup);
     const auto expect_write = [&](uint32_t expected) {
       uint32_t word = 0;
       std::memcpy(&word, text + cursor, sizeof(word));
@@ -1949,8 +1962,11 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
             4u);
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-  const auto owner_init = build_v_lshrrev_b32_e32(
-      *result.resolved_moi_owner_vgpr, scalar_positive_inline_u32(6), 0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(result.resolved_moi_owner_sgpr);
+  const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
+  ASSERT_TRUE(hwreg);
+  const auto owner_init =
+      build_s_getreg_b32(*result.resolved_moi_owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_init);
   EXPECT_NE(std::ranges::find(prologue_words, *owner_init), prologue_words.end());
 }
@@ -2706,7 +2722,7 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
-  EXPECT_EQ(result.patches.front().trampoline_size, 5u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().trampoline_size, 6u * sizeof(uint32_t));
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -2732,11 +2748,13 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
   std::vector<uint32_t> expected_prologue_words;
   expected_prologue_words.push_back(*get_hw_id);
   expected_prologue_words.push_back(build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
+  expected_prologue_words.push_back(
+      *instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4));
   expected_prologue_words.push_back(build_v_mov_b32_e32(11, /*src0=*/20, ROCJITSU_CODE_ARCH_RDNA4));
   expected_prologue_words.push_back(
       build_v_mov_b32_e32(12, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
   const auto branch =
-      compute_sopp_branch_simm16(kExpectedPrologueOffset + 4u * sizeof(uint32_t), 0);
+      compute_sopp_branch_simm16(kExpectedPrologueOffset + 5u * sizeof(uint32_t), 0);
   ASSERT_TRUE(branch);
   expected_prologue_words.push_back(build_s_branch(*branch, ROCJITSU_CODE_ARCH_RDNA4));
 
@@ -2787,22 +2805,14 @@ TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {
   ASSERT_TRUE(hwreg);
   const uint16_t owner_sgpr = *result.resolved_moi_owner_sgpr;
   const auto get_hw_id = build_s_getreg_b32(owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto is_owner_zero = instrumentation::build_s_cmp_eq_u32(
-      owner_sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-  constexpr uint16_t kUnusedWaveId = 1u << 5;
-  const auto replace_owner_zero = instrumentation::build_s_cselect_b32(
-      owner_sgpr, scalar_positive_inline_u32(kUnusedWaveId), owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(get_hw_id);
-  ASSERT_TRUE(is_owner_zero);
-  ASSERT_TRUE(replace_owner_zero);
-  const auto wait_owner = build_s_wait_alu_sa_sdst0(ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(wait_owner);
   const std::array<uint32_t, 7> expected_prefix = {
       *get_hw_id,
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
-      *is_owner_zero,
-      *replace_owner_zero,
-      *wait_owner,
+      build_s_add_u32(owner_sgpr, owner_sgpr, scalar_positive_inline_u32(1),
+                      ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      *instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4),
       build_v_mov_b32_e32(*result.resolved_moi_owner_vgpr, owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
       build_v_mov_b32_e32(12, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
   };

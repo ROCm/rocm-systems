@@ -37,6 +37,10 @@ TEST(Cdna3InstrumentationBuilder, ScalarAndVectorEncodingsMatchLlvm) {
   EXPECT_EQ(build_cdna3_v_cmp_ne_u16_vcc(scalar_positive_inline_u32(0), 3, kArch), 0x7d5a0680u);
   EXPECT_EQ(build_cdna3_v_cmp_gt_u32_vcc(scalar_positive_inline_u32(0), 3, kArch), 0x7d980680u);
   EXPECT_EQ(build_cdna3_v_readfirstlane_b32(20, 8, kArch), 0x7e280508u);
+  EXPECT_EQ(build_cdna3_v_writelane_b32(10, 20, 3, kArch),
+            (std::array<uint32_t, 2>{0xd28a000au, 0x00010614u}));
+  EXPECT_EQ(build_cdna3_v_readlane_b32(20, 10, 3, kArch),
+            (std::array<uint32_t, 2>{0xd2890014u, 0x0001070au}));
   EXPECT_EQ(build_cdna3_v_mbcnt_lo_u32_b32(10, /*-1 inline constant=*/193u,
                                            scalar_positive_inline_u32(0), kArch),
             (std::array<uint32_t, 2>{0xd28c000au, 0x000100c1u}));

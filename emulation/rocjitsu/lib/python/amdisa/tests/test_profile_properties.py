@@ -619,6 +619,8 @@ class TestGfx1250Profile:
     def test_hwreg_ids(self):
         assert self.p.hwreg_mode_id == 1
         assert self.p.hwreg_status_id == 2
+        assert self.p.hwreg_hw_id1_id == 23
+        assert self.p.hwreg_hw_id2_id == 24
         assert self.p.hwreg_ib_sts2_id == 28
 
     def test_detect_profile_uses_filename_override(self, tmp_path):

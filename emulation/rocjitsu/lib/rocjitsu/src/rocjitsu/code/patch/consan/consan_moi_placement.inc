@@ -567,6 +567,14 @@ record_replay_persistent_workgroup_sources(const ConSanOptions &options, rj_code
   return std::min<uint32_t>(allocated, kMaxVgprs);
 }
 
+[[nodiscard]] uint32_t moi_descriptor_unified_vgpr_allocation_count(const KD &desc,
+                                                                    rj_code_arch_t arch) {
+  const uint32_t granularity = moi_descriptor_vgpr_granularity(desc, arch);
+  const uint32_t granulated =
+      AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+  return (granulated + 1u) * granularity;
+}
+
 [[nodiscard]] uint32_t moi_descriptor_sgpr_allocation_count(const KD &desc, rj_code_arch_t arch) {
   const uint32_t granulated = AMDHSA_BITS_GET(
       desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
@@ -602,6 +610,36 @@ struct MoiSgprRange {
                                                        rj_code_arch_t arch) {
   if (required_count == 0 || required_count > kMaxVgprs)
     return false;
+
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    const uint32_t encoded_accum_offset =
+        AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+    if (encoded_accum_offset != 0u) {
+      constexpr uint32_t kAccvgprOffsetGranularity = 4u;
+      const uint32_t accvgpr_base = (encoded_accum_offset + 1u) * kAccvgprOffsetGranularity;
+      if (required_count <= accvgpr_base)
+        return true;
+
+      const uint32_t unified_count = moi_descriptor_unified_vgpr_allocation_count(desc, arch);
+      // Instrumentation may move only an empty accumulator boundary. Moving
+      // live accumulator storage would require relocating guest register
+      // contents and rewriting every accumulator operand.
+      if (unified_count > accvgpr_base)
+        return false;
+      const uint32_t granularity = moi_descriptor_vgpr_granularity(desc, arch);
+      const uint32_t new_unified_count = util::align_up(required_count, granularity);
+      const uint32_t new_accvgpr_base = new_unified_count;
+      if (new_accvgpr_base > kMaxVgprs ||
+          new_accvgpr_base % kAccvgprOffsetGranularity != 0u ||
+          new_unified_count / granularity > 64u)
+        return false;
+      AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                      ((new_accvgpr_base / kAccvgprOffsetGranularity) - 1u));
+      AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                      ((new_unified_count / granularity) - 1u));
+      return true;
+    }
+  }
 
   if (required_count <= moi_descriptor_vgpr_allocation_count(desc, arch))
     return true;
@@ -719,6 +757,12 @@ struct MoiSgprRange {
 }
 
 [[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options, rj_code_arch_t arch);
+
+[[nodiscard]] bool moi_inline_uses_planned_owner_sgpr(const ConSanOptions &options) {
+  return options.moi_engine == ConSanMoiEngine::InlineShadow &&
+         options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
+         (!options.moi_owner_sgpr || options.automatic_moi_owner_sgpr);
+}
 
 [[nodiscard]] bool validate_inline_shadow_exec_save_sgpr(const ConSanOptions &options,
                                                          rj_code_arch_t arch,
@@ -963,6 +1007,7 @@ struct MoiKernelResourceContext {
   uint16_t current_vgpr_count = 0;
   uint16_t max_referenced_vgpr_count = 0;
   uint16_t ordinary_vgpr_limit = kMaxVgprs;
+  bool can_move_empty_cdna_accvgpr_boundary = false;
   uint16_t current_sgpr_count = 0;
   uint16_t max_referenced_sgpr_count = 0;
   uint32_t original_private_segment_size = 0;
@@ -1054,6 +1099,7 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
     }
     if (selected &&
         (selected->exec_save_sgpr != assignment->exec_save_sgpr ||
+         selected->owner_sgpr != assignment->owner_sgpr ||
          selected->dispatch_id_sgpr != assignment->dispatch_id_sgpr ||
          selected->spill_backed != assignment->spill_backed ||
          selected->indirect_pc_sgpr != assignment->indirect_pc_sgpr ||
@@ -1076,6 +1122,7 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
   if (saw_unassigned_owner)
     return false;
   options.moi_exec_save_sgpr = selected->exec_save_sgpr;
+  options.moi_owner_sgpr = selected->owner_sgpr;
   // A component assignment replaces the object-wide scalar ABI. Its exact
   // persistent outputs are represented by the fields copied below, so the
   // broad object-wide persistence marker must not reject a spill-backed
@@ -1546,8 +1593,11 @@ struct MoiResourcePlanningState {
         // the hard upper bound for ordinary instrumentation VGPRs. Encoded
         // zero remains ambiguous for kernels without an accumulator bank.
         if (encoded_accum_offset != 0u) {
-          stored.ordinary_vgpr_limit = static_cast<uint16_t>(
-              std::min<uint32_t>(kMaxVgprs, (encoded_accum_offset + 1u) * 4u));
+          const uint32_t accvgpr_base =
+              std::min<uint32_t>(kMaxVgprs, (encoded_accum_offset + 1u) * 4u);
+          stored.ordinary_vgpr_limit = static_cast<uint16_t>(accvgpr_base);
+          stored.can_move_empty_cdna_accvgpr_boundary =
+              moi_descriptor_unified_vgpr_allocation_count(descriptor, arch) <= accvgpr_base;
         }
       }
       stored.current_sgpr_count =
@@ -2074,11 +2124,14 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   plan.ordinary_vgpr_limit = kMaxVgprs;
   plan.current_sgpr_count = kMaxSgprs;
   plan.sgpr_reference_coverage_complete = true;
+  bool every_owner_can_move_empty_cdna_accvgpr_boundary =
+      state.arch == ROCJITSU_CODE_ARCH_CDNA3 || state.arch == ROCJITSU_CODE_ARCH_CDNA4;
   RegisterSet live_before_all_owners;
   bool descriptors_valid = true;
   for (MoiKernelResourceContext *owner : owners) {
     plan.current_vgpr_count = std::min(plan.current_vgpr_count, owner->current_vgpr_count);
     plan.ordinary_vgpr_limit = std::min(plan.ordinary_vgpr_limit, owner->ordinary_vgpr_limit);
+    every_owner_can_move_empty_cdna_accvgpr_boundary &= owner->can_move_empty_cdna_accvgpr_boundary;
     plan.max_referenced_vgpr_count =
         std::max(plan.max_referenced_vgpr_count, owner->max_referenced_vgpr_count);
     plan.current_sgpr_count = std::min(plan.current_sgpr_count, owner->current_sgpr_count);
@@ -2130,7 +2183,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
       state.arch == ROCJITSU_CODE_ARCH_CDNA3 || state.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u : 1u;
   request.current_allocation_count = std::min(plan.current_vgpr_count, plan.ordinary_vgpr_limit);
   request.max_referenced_count = plan.max_referenced_vgpr_count;
-  request.architecture_limit = plan.ordinary_vgpr_limit;
+  request.architecture_limit =
+      every_owner_can_move_empty_cdna_accvgpr_boundary ? kMaxVgprs : plan.ordinary_vgpr_limit;
   request.explicit_base = options.scratch_vgpr;
   request.force_spill = options.force_vgpr_spill || require_spill;
   request.forbidden = anchor_def_use.defs | anchor_def_use.uses;
@@ -2364,8 +2418,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
       // from the initial plan, the outer recovery, then its nested attempts.
       std::vector<ConSanResourcePlanAlternative> alternatives;
       alternatives.reserve(initial_alternatives.size() + 1u + nested_alternatives.size());
-      alternatives.insert(alternatives.end(),
-                          std::make_move_iterator(initial_alternatives.begin()),
+      alternatives.insert(alternatives.end(), std::make_move_iterator(initial_alternatives.begin()),
                           std::make_move_iterator(initial_alternatives.end()));
       alternatives.push_back(alternative);
       alternatives.insert(alternatives.end(), std::make_move_iterator(nested_alternatives.begin()),
@@ -3242,6 +3295,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       options.moi_transient_sgpr_assignments.push_back(
           {.descriptor_file_offset = owner,
            .exec_save_sgpr = *selected,
+           .owner_sgpr = moi_inline_uses_planned_owner_sgpr(options)
+                             ? std::optional<uint16_t>(*selected)
+                             : options.moi_owner_sgpr,
            .dispatch_id_sgpr = dispatch_id_sgpr,
            .spill_backed = spill_backed,
            .indirect_pc_sgpr = spill_pc,
@@ -3705,6 +3761,8 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   const rj_code_arch_t arch = state.arch;
   if (options.moi_owner_source != ConSanMoiOwnerSource::HwId || options.moi_owner_sgpr)
     return false;
+  if (options.moi_engine == ConSanMoiEngine::InlineShadow)
+    return false;
 
   const auto plan_contexts = resolve_moi_resource_plan_scalar_owner_contexts(state, result);
   if (!plan_contexts.planning_state_valid || plan_contexts.unresolved_owner) {
@@ -3745,6 +3803,35 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
 
   result.warnings.emplace_back("ConSan MOI could not place a fresh automatic hw_id owner SGPR");
   return false;
+}
+
+[[nodiscard]] bool configure_inline_moi_owner_sgpr(ConSanOptions &options, ConSanResult &result) {
+  if (!moi_inline_uses_planned_owner_sgpr(options) || options.automatic_moi_owner_sgpr)
+    return false;
+  if (!options.moi_exec_save_sgpr) {
+    result.warnings.emplace_back(
+        "ConSan MOI could not place its Inline resident-wave owner in a transient scalar window");
+    return false;
+  }
+  options.moi_owner_sgpr = *options.moi_exec_save_sgpr;
+  options.automatic_moi_owner_sgpr = true;
+  std::optional<uint16_t> resolved_owner = options.moi_owner_sgpr;
+  if (!options.moi_transient_sgpr_assignments.empty()) {
+    resolved_owner = options.moi_transient_sgpr_assignments.front().owner_sgpr;
+    for (const ConSanMoiTransientSgprAssignment &assignment :
+         options.moi_transient_sgpr_assignments) {
+      if (!resolved_owner || assignment.owner_sgpr != resolved_owner) {
+        resolved_owner.reset();
+        break;
+      }
+    }
+  }
+  result.resolved_moi_owner_sgpr = resolved_owner;
+  result.moi_owner_sgpr_automatic = true;
+  result.resolved_moi_transient_sgpr_assignments = options.moi_transient_sgpr_assignments;
+  result.warnings.emplace_back(
+      "ConSan MOI assigned its Inline resident-wave owner inside the saved scalar window");
+  return true;
 }
 
 [[nodiscard]] bool

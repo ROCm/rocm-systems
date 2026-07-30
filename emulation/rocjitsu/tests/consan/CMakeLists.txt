@@ -284,6 +284,12 @@ set(RJ_CONSAN_LDS_CLEAN_TEST "ConSanLdsTest.PaddedCleanStoreCompletes")
 set(RJ_CONSAN_LDS_FLAT_RACY_TEST
     "ConSanLdsTest.PaddedCrossWaveFlatLdsStoreCompletes"
 )
+set(RJ_CONSAN_LDS_2D_RACY_TEST
+    "ConSanLdsTest.PaddedTwoDimensionalCrossWaveStoreCompletes"
+)
+set(RJ_CONSAN_LDS_3D_RACY_TEST
+    "ConSanLdsTest.PaddedThreeDimensionalCrossWaveStoreCompletes"
+)
 set(RJ_CONSAN_LDS_HIGH_D16_TEST
     "ConSanLdsTest.PaddedHighHalfD16FlatLoadsProduceExpectedResults"
 )
@@ -396,6 +402,22 @@ function(rj_add_consan_address_group_sim_case prefix target filter config)
 endfunction()
 
 function(rj_add_consan_inline_exact_byte_cases prefix target config)
+    set(_unequal_high_byte_owner_pair
+        "first_owner=[1-9][0-9]* second_owner=[1-9][0-9]*.*(first_lds=\\[3,4\\) second_lds=\\[2,4\\)|first_lds=\\[2,4\\) second_lds=\\[3,4\\))"
+    )
+    if(prefix MATCHES "Gfx(942|950)Sim$")
+        set(_unequal_high_byte_owner_pair
+            "(first_owner=1 second_owner=17.*first_lds=\\[3,4\\) second_lds=\\[2,4\\)|first_owner=17 second_owner=1.*first_lds=\\[2,4\\) second_lds=\\[3,4\\))"
+        )
+    elseif(prefix MATCHES "Gfx1250Sim$")
+        set(_unequal_high_byte_owner_pair
+            "(first_owner=1 second_owner=513.*first_lds=\\[3,4\\) second_lds=\\[2,4\\)|first_owner=513 second_owner=1.*first_lds=\\[2,4\\) second_lds=\\[3,4\\))"
+        )
+    elseif(prefix MATCHES "Gfx1201Sim$")
+        set(_unequal_high_byte_owner_pair
+            "(first_owner=257 second_owner=258.*first_lds=\\[3,4\\) second_lds=\\[2,4\\)|first_owner=258 second_owner=257.*first_lds=\\[2,4\\) second_lds=\\[3,4\\))"
+        )
+    endif()
     set(_exact_common_environment
         "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
         "RJ_CONSAN_MODE=inline-shadow"
@@ -491,13 +513,75 @@ function(rj_add_consan_inline_exact_byte_cases prefix target config)
         TIMEOUT 60
         RUN_SERIAL
         PASS_REGEX
-            "(first_owner=1 second_owner=[23].*first_lds=\\[3,4\\) second_lds=\\[2,4\\)|first_owner=[23] second_owner=1.*first_lds=\\[2,4\\) second_lds=\\[3,4\\))"
+            "${_unequal_high_byte_owner_pair}"
         FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
         ENVIRONMENT
             ${_exact_common_environment}
             "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
             "RJ_CONSAN_TEST_KERNEL_FILTER=padded_inline_exact_external_unequal_high_byte_overlap"
             "RJ_CONSAN_MAX_PATCHES=2"
+    )
+endfunction()
+
+function(rj_add_consan_inline_multidimensional_cases prefix target config)
+    set(_multidimensional_owner_pair
+        "first_owner=[1-9][0-9]* second_owner=[1-9][0-9]*"
+    )
+    if(prefix MATCHES "Gfx(942|950)Sim$")
+        set(_multidimensional_owner_pair
+            "(first_owner=1 second_owner=17|first_owner=17 second_owner=1)"
+        )
+    elseif(prefix MATCHES "Gfx1250Sim$")
+        set(_multidimensional_owner_pair
+            "(first_owner=1 second_owner=257|first_owner=257 second_owner=1)"
+        )
+    elseif(prefix MATCHES "Gfx1201Sim$")
+        set(_multidimensional_owner_pair
+            "(first_owner=257 second_owner=769|first_owner=769 second_owner=257)"
+        )
+    endif()
+    set(_multidimensional_common_environment
+        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+        "RJ_CONSAN_MODE=inline-shadow"
+        "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=1048576"
+        "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+        "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+        "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+        "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
+        "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+        "RJ_CONSAN_LOG=3"
+        "RJ_CONSAN_MAX_PATCHES=1"
+        "RJ_CONSAN_REQUIRE_PATCH=1"
+    )
+    rj_add_consan_hip_case(
+        NAME "${prefix}.InlineTwoDimensionalCrossWaveRace"
+        TARGET ${target}
+        FILTER "${RJ_CONSAN_LDS_2D_RACY_TEST}"
+        CONFIG "${config}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX
+            "${_multidimensional_owner_pair}.*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
+        FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
+        ENVIRONMENT
+            ${_multidimensional_common_environment}
+            "RJ_CONSAN_MOI_OWNER_SOURCE=automatic"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_2d_cross_wave_lds_store"
+    )
+    rj_add_consan_hip_case(
+        NAME "${prefix}.InlineThreeDimensionalCrossWaveRace"
+        TARGET ${target}
+        FILTER "${RJ_CONSAN_LDS_3D_RACY_TEST}"
+        CONFIG "${config}"
+        TIMEOUT 60
+        RUN_SERIAL
+        PASS_REGEX
+            "${_multidimensional_owner_pair}.*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
+        FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
+        ENVIRONMENT
+            ${_multidimensional_common_environment}
+            "RJ_CONSAN_MOI_OWNER_SOURCE=auto"
+            "RJ_CONSAN_TEST_KERNEL_FILTER=padded_3d_cross_wave_lds_store"
     )
 endfunction()
 
@@ -638,7 +722,7 @@ function(rj_add_consan_common_sim_cases)
         TIMEOUT 60
         RUN_SERIAL
         PASS_REGEX
-            "ConSan proof patch[ -~]*kind=trampoline-moi-exact-shadow-store[ -~]*spilled_vgprs=[1-9][0-9]*.*ConSan MOI auto diagnostic[ -~]*backend=1 kind=1[ -~]*first_owner=0 second_owner=0[ -~]*first_kind=2 second_kind=2[ -~]*second_lanes=0x[1-9a-fA-F][0-9a-fA-F]*[ -~]*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
+            "ConSan proof patch[ -~]*kind=trampoline-moi-exact-shadow-store[ -~]*spilled_vgprs=[1-9][0-9]*.*ConSan MOI auto diagnostic[ -~]*backend=1 kind=1[ -~]*first_owner=[1-9][0-9]* second_owner=[1-9][0-9]*[ -~]*first_kind=2 second_kind=2[ -~]*second_lanes=0x[1-9a-fA-F][0-9a-fA-F]*[ -~]*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
         FAIL_REGEX "RJ_CONSAN_MOI_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
         ENVIRONMENT
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
@@ -714,6 +798,11 @@ function(rj_add_consan_common_sim_cases)
             "RJ_CONSAN_REQUIRE_PATCH=1"
     )
     rj_add_consan_inline_exact_byte_cases(
+        "${_sim_PREFIX}"
+        ${_sim_LDS_TARGET}
+        "${_sim_CONFIG}"
+    )
+    rj_add_consan_inline_multidimensional_cases(
         "${_sim_PREFIX}"
         ${_sim_LDS_TARGET}
         "${_sim_CONFIG}"
@@ -1522,8 +1611,18 @@ function(rj_add_consan_hip_tests)
         hip_consan_lds_test
         "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
     )
+    rj_add_consan_inline_multidimensional_cases(
+        "ConSanGfx1201Sim"
+        hip_consan_lds_test
+        "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
+    )
     if(HAS_GFX1201_GPU)
         rj_add_consan_inline_exact_byte_cases(
+            "ConSanGfx1201Physical"
+            hip_consan_lds_test
+            ""
+        )
+        rj_add_consan_inline_multidimensional_cases(
             "ConSanGfx1201Physical"
             hip_consan_lds_test
             ""

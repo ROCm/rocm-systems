@@ -866,11 +866,13 @@ Important current simplifications:
   byte-precise masks are not represented.
 - Direct-kernel owner, epoch, scratch VGPRs, and SGPR temporaries are automatic;
   explicit register variables remain debug overrides.
-- Entry-captured `workitem_id` is the ordinary owner source. Inline Shadow
-  prefers persistent descriptor-backed owner/epoch VGPRs because owner state
-  is consumed at every hot access; private scratch is the capacity fallback.
-- `hw_id` remains an expert owner source. It is wave-uniform and automatically
-  receives a fresh scalar temporary when the kernel has capacity.
+- Automatic owner selection uses entry-captured `workitem_id` for
+  Record/Replay and Sampled. Inline Shadow instead uses a resident-wave
+  hardware ID because `workitem_id_x` aliases waves in multidimensional
+  workgroups.
+- Inline Shadow's hardware owner is wave-uniform on gfx942, gfx950, gfx1201,
+  and gfx1250. ConSan automatically assigns and preserves its scalar
+  temporary; an explicit scalar remains a debug override.
 - Atomic ordering metadata is finite and direct-mapped; exhausted contention
   retries or a simultaneous collision between distinct objects makes the
   dynamic-completeness verdict false.
@@ -989,11 +991,14 @@ ordinary MOI owner source all follow this rule. SuperCollider is deliberately
 different: it duplicates one instruction at a site and compares the immediate
 result there; it carries no dispatch-wide identity from one probe to another.
 
-The ordinary owner source for every MOI engine is
-`RJ_CONSAN_MOI_OWNER_SOURCE=workitem_id`. ConSan captures it at kernel entry,
-before `v0` becomes reusable guest state, and derives the current estimate as
-`workitem_id_x >> log2(wavefront_size)`. Inline Shadow stores the result in its
-automatically allocated persistent owner state when possible.
+The ordinary owner source is `RJ_CONSAN_MOI_OWNER_SOURCE=automatic` (the
+`auto` spelling is equivalent). Record/Replay and Sampled resolve it to
+`workitem_id`: ConSan captures that value at kernel entry, before `v0` becomes
+reusable guest state, and derives the current estimate as
+`workitem_id_x >> log2(wavefront_size)`. Inline Shadow resolves automatic
+ownership to a one-based resident-wave hardware ID and derives it at each
+probe. CDNA3/CDNA4 use the legacy `HW_ID` resident-wave fields; RDNA4 and
+gfx1250 use `HW_ID1`.
 
 Expert/debug alternatives are:
 
@@ -1001,20 +1006,20 @@ Expert/debug alternatives are:
   `RJ_CONSAN_MOI_EPOCH_VGPR` (Record/Replay rejects either one in isolation);
 - explicit prologue initialization through
   `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1`; and
-- `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id`, which uses RDNA4 `HW_ID1` low bits. An
-  explicit `RJ_CONSAN_MOI_OWNER_SGPR` remains a debug override.
+- `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id`, which selects the target-appropriate
+  resident-wave hardware register. An explicit `RJ_CONSAN_MOI_OWNER_SGPR`
+  remains a debug override.
 
-The `workitem_id` estimate is adequate when captured at entry for current 1D
-two-wave controls. It is not a complete owner derivation for arbitrary 2D/3D
-local invocation layouts, and `v0` cannot be treated as workitem identity after
-entry because it is ordinary guest state by then.
+The `workitem_id` estimate is retained for the event-based engines. It is not a
+complete Inline Shadow owner derivation for arbitrary 2D/3D local invocation
+layouts, and `v0` cannot be treated as workitem identity after entry because it
+is ordinary guest state by then. Inline Shadow therefore rejects an explicit
+`workitem_id` owner source.
 
-The `hw_id` source is useful for targeted experiments because it is
-wave-uniform and does not depend on local invocation dimensionality. It is not
-the ordinary Inline Shadow operating point: deriving it in every hot probe is
-materially more expensive than entry-initialized persistent state. Its
-temporary is chosen above all guest scalar references and descriptor-backed;
-full-SGPR kernels fail visibly rather than borrowing an unproven register.
+The `hw_id` source is wave-uniform and does not depend on local invocation
+dimensionality, so it is the ordinary Inline Shadow operating point. Its
+temporary is selected from a liveness-proven transient window or protected by
+the Inline spill contract; ConSan never borrows a hardcoded preserved range.
 
 Current boundary and direction:
 

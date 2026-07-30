@@ -325,6 +325,16 @@ class IsaProfile(ABC):
         return 1
 
     @property
+    def hwreg_hw_id1_id(self) -> int:
+        """GFX9 hardware-register ID for HW_ID1 in generated getreg code."""
+        return 4
+
+    @property
+    def hwreg_hw_id2_id(self) -> int:
+        """GFX9 hardware-register ID for HW_ID2 in generated getreg code."""
+        return 5
+
+    @property
     def hwreg_ib_sts2_id(self) -> int | None:
         """Hardware-register ID for IB_STS2, when exposed by the target."""
         return None
@@ -1466,6 +1476,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
+
+    @property
+    def hwreg_hw_id1_id(self) -> int:
+        return 23
+
+    @property
+    def hwreg_hw_id2_id(self) -> int:
+        return 24
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:

@@ -23,8 +23,8 @@ namespace gfx1250 {
 namespace {
 constexpr uint32_t HW_REG_MODE = 1;
 constexpr uint32_t HW_REG_STATUS = 2;
-constexpr uint32_t HW_REG_HW_ID1 = 4;
-constexpr uint32_t HW_REG_HW_ID2 = 5;
+constexpr uint32_t HW_REG_HW_ID1 = 23;
+constexpr uint32_t HW_REG_HW_ID2 = 24;
 constexpr uint32_t HW_REG_GPR_ALLOC = 6;
 constexpr uint32_t HW_REG_VGPR_ALLOC = 7;
 constexpr uint32_t HW_REG_WAVE_SCHED_MODE = 26;
@@ -48,10 +48,10 @@ constexpr uint32_t HW_REG_IB_STS2_WG_IN_CLUSTER_MASK = 0xFu;
     reg_val = wf.status_raw();
     return true;
   case HW_REG_HW_ID1:
-    reg_val = static_cast<uint32_t>(wf.cu().id());
+    reg_val = wf.hw_id1_raw();
     return true;
   case HW_REG_HW_ID2:
-    reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);
+    reg_val = wf.hw_id2_raw();
     return true;
   case HW_REG_GPR_ALLOC:
     reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);

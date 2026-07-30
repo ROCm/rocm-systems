@@ -1940,7 +1940,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   words.insert(words.end(), zero_low->begin(), zero_low->end());
   words.insert(words.end(), zero_high->begin(), zero_high->end());
   words.insert(words.end(), atomic_snapshot->begin(), atomic_snapshot->end());
-  if (!append_moi_flat_load_wait(words, arch))
+  if (!append_moi_global_atomic_wait(words, arch))
     return false;
   words.push_back(*save_vcc);
 
@@ -2453,7 +2453,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   words.insert(words.end(), claim_new->begin(), claim_new->end());
   words.insert(words.end(), claim_compare->begin(), claim_compare->end());
   words.insert(words.end(), claim->begin(), claim->end());
-  if (!append_moi_flat_load_wait(words, arch))
+  if (!append_moi_global_atomic_wait(words, arch))
     return std::nullopt;
   words.push_back(*claimed);
   if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::VccZero))
@@ -2565,7 +2565,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     return std::nullopt;
   }
   words.insert(words.end(), atomic_publish->begin(), atomic_publish->end());
-  if (!append_moi_flat_load_wait(words, arch))
+  if (!append_moi_global_atomic_wait(words, arch))
     return std::nullopt;
   if (!append_sampled_banked_address(words, causal_window_address,
                                      sizeof(ConSanMoiSampledCausalWindow), window_bank_count,

@@ -14,14 +14,17 @@ inline constexpr uint16_t kTtmpRdna4GridX = 9;
 inline constexpr uint16_t kTtmpGfx1250ClusterWorkgroupId = 6;
 inline constexpr uint32_t kMaxVgprs = kConSanOrdinaryVgprLimit;
 inline constexpr uint32_t kMaxSgprs = 106;
+inline constexpr uint16_t kLegacyHwRegHwId = 4;
+inline constexpr uint16_t kLegacyHwIdResidentWaveBits = 6;
+inline constexpr uint16_t kLegacyMaxResidentWaveOwner =
+    (1u << kLegacyHwIdResidentWaveBits) - 1u;
 inline constexpr uint16_t kGfx12HwRegHwId1 = 23;
-inline constexpr uint16_t kGfx12HwIdOwnerBits = 10;
-inline constexpr uint16_t kGfx12HwIdWaveIdBits = 5;
-inline constexpr uint16_t kGfx12HwIdSimdIdOffset = 8;
-inline constexpr uint16_t kGfx12InlineOwnerZeroReplacement = 1u << kGfx12HwIdWaveIdBits;
-static_assert(kGfx12InlineOwnerZeroReplacement < (1u << kGfx12HwIdSimdIdOffset));
-static_assert(kGfx12InlineOwnerZeroReplacement < (1u << kGfx12HwIdOwnerBits));
-static_assert(kGfx12InlineOwnerZeroReplacement <= consan_moi_exact_shadow::max_owner);
+inline constexpr uint16_t kGfx12HwIdResidentWaveBits = 10;
+inline constexpr uint16_t kGfx12HwIdWaveMask = 0x1f;
+inline constexpr uint16_t kGfx12HwIdSimdMask = 0x300;
+inline constexpr uint16_t kGfx12MaxResidentWaveOwner = kGfx12HwIdWaveMask | kGfx12HwIdSimdMask;
+static_assert(kLegacyMaxResidentWaveOwner + 1u <= consan_moi_exact_shadow::max_owner);
+static_assert(kGfx12MaxResidentWaveOwner + 1u <= consan_moi_exact_shadow::max_owner);
 inline constexpr uint8_t kRdna4ScopeDevice = 2;
 inline constexpr uint32_t kRdna4VectorFlatNoSaddr = static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
 inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(gfx1250::OPR_SREG_NULL);
@@ -52,21 +55,30 @@ inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(gfx1
   words.push_back(*wait);
   return true;
 }
-[[nodiscard]] bool append_moi_flat_atomic_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
-  if (!append_moi_flat_load_wait(words, arch))
+[[nodiscard]] bool append_moi_global_load_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
+  const auto wait = instrumentation::build_s_wait_global_load0(arch);
+  if (!wait)
     return false;
-  // Returning FLAT atomics have both a result dependency and a memory-side
-  // effect on gfx12. LOADCNT makes the returned value consumable; STORECNT
-  // makes the update visible before a later LDS shadow publication can expose
-  // causally ordered work to another wave. CDNA's unified wait already drains
-  // both sides.
+  words.push_back(*wait);
+  return true;
+}
+[[nodiscard]] bool append_moi_global_store_wait(std::vector<uint32_t> &words,
+                                                rj_code_arch_t arch) {
+  const auto wait = instrumentation::build_s_wait_global_store0(arch);
+  if (!wait)
+    return false;
+  words.push_back(*wait);
+  return true;
+}
+[[nodiscard]] bool append_moi_global_atomic_wait(std::vector<uint32_t> &words,
+                                                rj_code_arch_t arch) {
+  if (!append_moi_global_load_wait(words, arch))
+    return false;
+  // Returning global atomics have both a result dependency and a memory-side
+  // effect on gfx12. CDNA's unified VM counter drains both sides.
   if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
     return true;
-  const auto store_wait = instrumentation::build_s_wait_flat_store0(arch);
-  if (!store_wait)
-    return false;
-  words.push_back(*store_wait);
-  return true;
+  return append_moi_global_store_wait(words, arch);
 }
 [[nodiscard]] bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
   const auto wait = instrumentation::build_s_wait_lds0(arch);
@@ -861,7 +873,7 @@ find_first_light_access_record_candidates(const ConSanResult &result,
                                                   uint16_t destination_vgpr, rj_code_arch_t arch) {
   const auto load =
       instrumentation::build_flat_load_b32(address_vgpr, destination_vgpr, arch, byte_offset);
-  const auto wait = instrumentation::build_s_wait_flat_load0(arch);
+  const auto wait = instrumentation::build_s_wait_global_load0(arch);
   InstructionSequence sequence(words);
   return sequence.emit_all(load, wait);
 }
@@ -1071,10 +1083,11 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
   const auto mov_one = instrumentation::build_v_mov_b32_literal(value_vgpr, 1u, arch);
   const auto atomic_add = instrumentation::build_flat_atomic_add_u32(
       address_lo_vgpr, value_vgpr, value_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  const auto wait = instrumentation::build_s_wait_flat_load0(arch);
   InstructionSequence sequence(words);
-  if (!sequence.emit_all(mov_address_lo, mov_address_hi, mov_one, atomic_add, wait))
+  if (!sequence.emit_all(mov_address_lo, mov_address_hi, mov_one, atomic_add) ||
+      !append_moi_global_atomic_wait(words, arch)) {
     return false;
+  }
   return append_store_u32_vgpr(words, event_index_address, value_vgpr, scratch_vgpr, arch);
 }
 
@@ -1092,9 +1105,9 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
   const auto atomic_add = instrumentation::build_flat_atomic_add_u32(
       address_lo_vgpr, result_vgpr, result_vgpr,
       /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  const auto wait = instrumentation::build_s_wait_flat_load0(arch);
   InstructionSequence sequence(words);
-  return sequence.emit_all(mov_address_lo, mov_address_hi, mov_one, atomic_add, wait);
+  return sequence.emit_all(mov_address_lo, mov_address_hi, mov_one, atomic_add) &&
+         append_moi_global_atomic_wait(words, arch);
 }
 
 [[nodiscard]] bool append_atomic_or_u32_literal(std::vector<uint32_t> &words, uint64_t address,
@@ -1109,9 +1122,9 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
   const auto atomic_or = instrumentation::build_flat_atomic_or_u32(
       scratch_vgpr, static_cast<uint16_t>(scratch_vgpr + 2u),
       static_cast<uint16_t>(scratch_vgpr + 2u), /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  const auto wait = instrumentation::build_s_wait_flat_load0(arch);
   InstructionSequence sequence(words);
-  return sequence.emit_all(mov_address_lo, mov_address_hi, mov_value, atomic_or, wait);
+  return sequence.emit_all(mov_address_lo, mov_address_hi, mov_value, atomic_or) &&
+         append_moi_global_atomic_wait(words, arch);
 }
 
 [[nodiscard]] bool append_atomic_load_u32(std::vector<uint32_t> &words, uint16_t address_vgpr,
@@ -1119,9 +1132,8 @@ moi_report_dispatch_id_source_permitted(const ConSanMoiReportDispatchIdWordSourc
   const auto atomic_load = instrumentation::build_flat_atomic_add_u32(
       address_vgpr, result_vgpr, result_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
   const uint32_t zero = build_v_mov_b32_e32(result_vgpr, scalar_positive_inline_u32(0), arch);
-  const auto wait = instrumentation::build_s_wait_flat_load0(arch);
   InstructionSequence sequence(words);
-  return sequence.emit_all(zero, atomic_load, wait);
+  return sequence.emit_all(zero, atomic_load) && append_moi_global_atomic_wait(words, arch);
 }
 
 // Publish only enough aggregate evidence to prove that the workgroup-local
@@ -1146,7 +1158,7 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), result_vgpr, arch);
   const auto select_unpublished =
       instrumentation::build_s_and_saveexec_b64(exec_save_sgpr, kRdna4VccLo, arch);
-  const auto wait = instrumentation::build_s_wait_flat_load0(arch);
+  const auto wait = instrumentation::build_s_wait_global_load0(arch);
   InstructionSequence sequence(words);
   if (!sequence.emit_all(mov_address_lo, mov_address_hi, load, wait, is_zero, select_unpublished))
     return false;

@@ -460,6 +460,12 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     result.errors.emplace_back("ConSan MOI inventory has an invalid warning boundary");
 
   ConSanOptions effective_options = options;
+  if (effective_options.moi_owner_source == ConSanMoiOwnerSource::Automatic) {
+    effective_options.moi_owner_source =
+        effective_options.moi_engine == ConSanMoiEngine::InlineShadow
+            ? ConSanMoiOwnerSource::HwId
+            : ConSanMoiOwnerSource::WorkitemId;
+  }
   result.outcome =
       result.errors.empty() ? ConSanTransformOutcome::Unchanged : ConSanTransformOutcome::Invalid;
   result.flavor = ConSanFlavor::Moi;
@@ -498,6 +504,12 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.access_plans.clear();
   result.composite_proof.reset();
   result.patches.clear();
+  if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
+      effective_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+    result.errors.emplace_back(
+        "ConSan MOI Inline Shadow requires resident-wave ownership; workitem_id_x is not exact "
+        "for multidimensional workgroups");
+  }
   if (!result.errors.empty())
     return result;
   for (const ConSanKernelInfo &kernel : result.kernels)
@@ -716,6 +728,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         configure_automatic_moi_exec_save_sgprs(effective_options, result, resource_planning_state);
   }
   if (exec_planning_changed)
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+  if (configure_inline_moi_owner_sgpr(effective_options, result))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (configure_gfx1250_record_replay_dispatch_id_overrides(effective_options, result,
                                                             resource_planning_state))

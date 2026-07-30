@@ -28,8 +28,8 @@ struct MoiEntryScalarBackup {
                                                   const MoiEntryScalarBackup &backup, bool restore,
                                                   rj_code_arch_t arch,
                                                   std::vector<std::string> &errors) {
-  if (!is_rdna4_family_arch(arch) || backup.vgpr >= kMaxVgprs || backup.sgpr_count == 0u ||
-      backup.sgpr_count > 64u ||
+  if (!instrumentation::is_admitted_arch(arch) || backup.vgpr >= kMaxVgprs ||
+      backup.sgpr_count == 0u || backup.sgpr_count > 64u ||
       static_cast<uint32_t>(backup.sgpr_base) + backup.sgpr_count > moi_ordinary_sgpr_limit(arch)) {
     errors.emplace_back("ConSan MOI entry scalar backup has an invalid register layout");
     return false;
@@ -46,7 +46,7 @@ struct MoiEntryScalarBackup {
     words.insert(words.end(), encoded->begin(), encoded->end());
   }
   if (restore) {
-    const auto wait = instrumentation::build_s_wait_alu_va_sdst0(arch);
+    const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
     if (!wait) {
       errors.emplace_back(
           "ConSan MOI entry scalar backup could not encode its restore dependency wait");
@@ -400,6 +400,32 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       std::min<uint32_t>((*required_workgroup_size)[0], kMaximumInlineLanes));
 }
 
+[[nodiscard]] bool append_moi_entry_workitem_coordinate(std::vector<uint32_t> &words,
+                                                        uint16_t destination_vgpr,
+                                                        uint8_t dimension, rj_code_arch_t arch) {
+  constexpr uint32_t kPackedCoordinateMask = 0x3ffu;
+  constexpr uint16_t kPackedCoordinateBits = 10u;
+  if (dimension > 2u)
+    return false;
+
+  if (dimension != 0u) {
+    const auto shift = instrumentation::build_v_lshrrev_b32(
+        destination_vgpr,
+        scalar_positive_inline_u32(static_cast<uint16_t>(dimension * kPackedCoordinateBits)),
+        kRdna4WorkitemIdX, arch);
+    if (!shift)
+      return false;
+    words.push_back(*shift);
+  }
+  const auto mask = instrumentation::build_v_and_b32_literal(
+      destination_vgpr, kPackedCoordinateMask,
+      dimension == 0u ? kRdna4WorkitemIdX : destination_vgpr, arch);
+  if (!mask)
+    return false;
+  words.insert(words.end(), mask->begin(), mask->end());
+  return true;
+}
+
 [[nodiscard]] bool append_moi_parallel_workgroup_shadow_initialization(
     std::vector<uint32_t> &words, const ConSanMoiWorkgroupShadowLayout &layout,
     uint16_t address_vgpr, uint16_t zero_vgpr, bool has_quad_zero_tuple,
@@ -432,15 +458,23 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       saved_scc, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
   const auto save_vcc = instrumentation::build_s_mov_b64(vcc_save, kRdna4VccLo, arch);
   const auto save_exec = instrumentation::build_s_mov_b64(exec_save, kRdna4ExecLo, arch);
+  std::vector<uint32_t> extract_initialization_x;
+  const bool valid_initialization_x =
+      append_moi_entry_workitem_coordinate(extract_initialization_x, end_vgpr,
+                                           /*dimension=*/0u, arch);
   const auto select_initialization_x_lanes = instrumentation::build_v_cmp_gt_u32_vcc(
-      scalar_positive_inline_u32(layout.initialization_lanes), /*workitem_id_x=*/0u, arch);
+      scalar_positive_inline_u32(layout.initialization_lanes), end_vgpr, arch);
   const auto narrow_initialization_x_lanes =
       instrumentation::build_s_and_saveexec_b64(selected_exec, kRdna4VccLo, arch);
+  std::array<std::vector<uint32_t>, 2> extract_outer_coordinate;
   std::array<std::optional<uint32_t>, 2> select_zero_outer_coordinate;
   std::array<std::optional<uint32_t>, 2> narrow_zero_outer_coordinate;
+  bool valid_outer_extraction = true;
   for (uint8_t dimension = 1u; dimension < layout.workitem_id_dimensions; ++dimension) {
+    valid_outer_extraction &= append_moi_entry_workitem_coordinate(
+        extract_outer_coordinate[dimension - 1u], address_vgpr, dimension, arch);
     select_zero_outer_coordinate[dimension - 1u] =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u), dimension, arch);
+        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u), address_vgpr, arch);
     narrow_zero_outer_coordinate[dimension - 1u] =
         instrumentation::build_s_and_saveexec_b64(selected_exec, kRdna4VccLo, arch);
   }
@@ -452,7 +486,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   const uint32_t scale_stride =
       build_s_lshl_b32(stride, stride, scalar_positive_inline_u32(store_shift), arch);
   const auto scale_x = instrumentation::build_v_lshlrev_b32(
-      end_vgpr, scalar_positive_inline_u32(store_shift), /*workitem_id_x=*/0u, arch);
+      end_vgpr, scalar_positive_inline_u32(store_shift), end_vgpr, arch);
   const auto address =
       instrumentation::build_v_add_u32_literal(address_vgpr, initialization_base, end_vgpr, arch);
   const bool use_wide_store = arch != ROCJITSU_CODE_ARCH_CDNA4;
@@ -481,19 +515,22 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     valid_outer_selection &= select_zero_outer_coordinate[dimension - 1u].has_value() &&
                              narrow_zero_outer_coordinate[dimension - 1u].has_value();
   }
-  if (!save_scc || !save_vcc || !save_exec || !select_initialization_x_lanes ||
-      !narrow_initialization_x_lanes || !valid_outer_selection || !skip_empty_wave ||
-      !save_selected_exec || !count_selected || !scale_x || !address ||
+  if (!save_scc || !save_vcc || !save_exec || !valid_initialization_x ||
+      !select_initialization_x_lanes || !narrow_initialization_x_lanes || !valid_outer_extraction ||
+      !valid_outer_selection || !skip_empty_wave || !save_selected_exec || !count_selected ||
+      !scale_x || !address ||
       (use_wide_store ? (!(use_quad_store ? store_quad : store_wide) || !more_literal)
                       : (!end || !store_low || !store_high || !more)) ||
       !advance || !retain_in_bounds || !loop || !wait_ds || !restore_exec || !restore_vcc ||
       !barrier || !restore_scc) {
-    const std::array<std::pair<bool, std::string_view>, 20> encodings = {{
+    const std::array<std::pair<bool, std::string_view>, 22> encodings = {{
         {save_scc.has_value(), "save-scc"},
         {save_vcc.has_value(), "save-vcc"},
         {save_exec.has_value(), "save-exec"},
+        {valid_initialization_x, "extract-initialization-x"},
         {select_initialization_x_lanes.has_value(), "select-initialization-x-lanes"},
         {narrow_initialization_x_lanes.has_value(), "narrow-initialization-x-lanes"},
+        {valid_outer_extraction, "outer-coordinate-extraction"},
         {valid_outer_selection, "outer-coordinate-selection"},
         {skip_empty_wave.has_value(), "skip-empty-wave"},
         {save_selected_exec.has_value(), "save-selected-exec"},
@@ -525,9 +562,12 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   words.push_back(*save_scc);
   words.push_back(*save_vcc);
   words.push_back(*save_exec);
+  words.insert(words.end(), extract_initialization_x.begin(), extract_initialization_x.end());
   words.push_back(*select_initialization_x_lanes);
   words.push_back(*narrow_initialization_x_lanes);
   for (uint8_t dimension = 1u; dimension < layout.workitem_id_dimensions; ++dimension) {
+    words.insert(words.end(), extract_outer_coordinate[dimension - 1u].begin(),
+                 extract_outer_coordinate[dimension - 1u].end());
     words.push_back(*select_zero_outer_coordinate[dimension - 1u]);
     words.push_back(*narrow_zero_outer_coordinate[dimension - 1u]);
   }
@@ -605,104 +645,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     return append_moi_parallel_workgroup_shadow_initialization(
         words, layout, address_vgpr, zero_vgpr, has_quad_zero_tuple, state_sgpr, arch, errors);
   }
-  if (!state_sgpr || *state_sgpr > 118u || layout.size == 0u || layout.size % 8u != 0u ||
-      layout.workitem_id_dimensions == 0u || layout.workitem_id_dimensions > 3u) {
-    errors.emplace_back(
-        "ConSan MOI workgroup-shadow initializer requires aligned LDS and scalar state");
-    return false;
-  }
-  const uint16_t exec_save = *state_sgpr;
-  const uint16_t vcc_save = static_cast<uint16_t>(*state_sgpr + 2u);
-  const uint16_t counter = static_cast<uint16_t>(*state_sgpr + 4u);
-  const uint16_t saved_scc = static_cast<uint16_t>(*state_sgpr + 5u);
-  const uint16_t temporary_exec = static_cast<uint16_t>(*state_sgpr + 6u);
-  const uint32_t slot_count = layout.size / 8u;
-
-  const auto save_scc = instrumentation::build_s_cselect_b32(
-      saved_scc, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-  const auto save_vcc = instrumentation::build_s_mov_b64(vcc_save, kRdna4VccLo, arch);
-  const auto save_exec = instrumentation::build_s_mov_b64(exec_save, kRdna4ExecLo, arch);
-  std::array<std::optional<uint32_t>, 3> zero_coordinate;
-  std::array<std::optional<uint32_t>, 3> narrow_coordinate;
-  for (uint8_t dimension = 0; dimension < layout.workitem_id_dimensions; ++dimension) {
-    zero_coordinate[dimension] =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), dimension, arch);
-    narrow_coordinate[dimension] =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kRdna4VccLo, arch);
-  }
-  const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(0, arch);
-  const auto address = instrumentation::build_v_mov_b32_literal(address_vgpr, layout.base, arch);
-  const auto store_low = instrumentation::build_ds_store_b32(address_vgpr, zero_vgpr, 0u, arch);
-  const auto store_high = instrumentation::build_ds_store_b32(address_vgpr, zero_vgpr, 4u, arch);
-  const auto advance = instrumentation::build_v_add_u32(address_vgpr, scalar_positive_inline_u32(8),
-                                                        address_vgpr, arch);
-  const auto decrement =
-      instrumentation::build_s_sub_u32(counter, counter, scalar_positive_inline_u32(1), arch);
-  const auto more =
-      instrumentation::build_s_cmp_lg_u32(counter, scalar_positive_inline_u32(0), arch);
-  const auto loop = instrumentation::build_s_cbranch_scc1(0, arch);
-  const auto wait_ds = instrumentation::build_s_wait_flat_load_lds0(arch);
-  const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, exec_save, arch);
-  const auto restore_vcc = instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save, arch);
-  const auto barrier = instrumentation::build_workgroup_barrier_only(arch);
-  const auto restore_scc =
-      instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch);
-  bool valid_coordinate_selection = true;
-  for (uint8_t dimension = 0; dimension < layout.workitem_id_dimensions; ++dimension) {
-    valid_coordinate_selection &=
-        zero_coordinate[dimension].has_value() && narrow_coordinate[dimension].has_value();
-  }
-  if (!save_scc || !save_vcc || !save_exec || !valid_coordinate_selection || !skip_empty_wave ||
-      !address || !store_low || !store_high || !advance || !decrement || !more || !loop ||
-      !wait_ds || !restore_exec || !restore_vcc || !barrier || !restore_scc) {
-    errors.emplace_back("ConSan MOI workgroup-shadow initializer could not encode target state");
-    return false;
-  }
-
-  words.push_back(*save_scc);
-  words.push_back(*save_vcc);
-  words.push_back(*save_exec);
-  for (uint8_t dimension = 0; dimension < layout.workitem_id_dimensions; ++dimension) {
-    words.push_back(*zero_coordinate[dimension]);
-    words.push_back(*narrow_coordinate[dimension]);
-  }
-  const size_t skip_empty_wave_index = words.size();
-  words.push_back(*skip_empty_wave);
-  words.insert(words.end(), address->begin(), address->end());
-  words.push_back(build_v_mov_b32_e32(zero_vgpr, scalar_positive_inline_u32(0), arch));
-  words.push_back(build_s_mov_b32(counter, kVopLiteralSource, arch));
-  words.push_back(slot_count);
-  const size_t loop_begin = words.size();
-  words.insert(words.end(), store_low->begin(), store_low->end());
-  words.insert(words.end(), store_high->begin(), store_high->end());
-  words.insert(words.end(), advance->begin(), advance->end());
-  words.push_back(*decrement);
-  words.push_back(*more);
-  const size_t loop_branch_index = words.size();
-  words.push_back(*loop);
-  words.push_back(*wait_ds);
-  const size_t restore_state_index = words.size();
-  words.push_back(*restore_exec);
-  words.push_back(*restore_vcc);
-  words.insert(words.end(), barrier->begin(), barrier->end());
-  words.push_back(*restore_scc);
-
-  const int64_t skip_delta =
-      static_cast<int64_t>(restore_state_index) - static_cast<int64_t>(skip_empty_wave_index + 1u);
-  const int64_t loop_delta =
-      static_cast<int64_t>(loop_begin) - static_cast<int64_t>(loop_branch_index + 1u);
-  if (skip_delta < std::numeric_limits<int16_t>::min() ||
-      skip_delta > std::numeric_limits<int16_t>::max() ||
-      loop_delta < std::numeric_limits<int16_t>::min() ||
-      loop_delta > std::numeric_limits<int16_t>::max()) {
-    errors.emplace_back("ConSan MOI workgroup-shadow initializer branch exceeds SOPP range");
-    return false;
-  }
-  words[skip_empty_wave_index] =
-      *instrumentation::build_s_cbranch_execz(static_cast<int16_t>(skip_delta), arch);
-  words[loop_branch_index] =
-      *instrumentation::build_s_cbranch_scc1(static_cast<int16_t>(loop_delta), arch);
-  return true;
+  errors.emplace_back("ConSan MOI workgroup-shadow initializer has invalid dimensionality");
+  return false;
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_owner_epoch_prologue_words(
@@ -757,6 +701,9 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   // scalar owner sourced from v0 before that scratch is allowed to clobber v0.
   if (persistent_owner_sgpr) {
     switch (owner_source) {
+    case ConSanMoiOwnerSource::Automatic:
+      errors.emplace_back("ConSan MOI scalar owner prologue has an unresolved automatic source");
+      return std::nullopt;
     case ConSanMoiOwnerSource::WorkitemId: {
       const auto read_owner = instrumentation::build_v_readfirstlane_b32(*persistent_owner_sgpr,
                                                                          kRdna4WorkitemIdX, arch);
@@ -765,10 +712,10 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
         return std::nullopt;
       }
       words.push_back(*read_owner);
-      const auto delay = instrumentation::build_salu_dependency_delay(arch);
-      if (!delay)
+      const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+      if (!wait)
         return std::nullopt;
-      words.push_back(*delay);
+      words.push_back(*wait);
       if (!append_moi_entry_salu_write(
               words,
               build_s_lshr_b32(*persistent_owner_sgpr, *persistent_owner_sgpr,
@@ -786,13 +733,10 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       break;
     }
     case ConSanMoiOwnerSource::HwId: {
-      const auto hwreg = build_hwreg_imm(kGfx12HwRegHwId1, 0, kGfx12HwIdOwnerBits);
-      const auto get_hw_id =
-          hwreg ? build_s_getreg_b32(*persistent_owner_sgpr, *hwreg, arch) : std::nullopt;
-      if (!get_hw_id || !append_moi_entry_salu_write(words, *get_hw_id, arch) ||
-          (one_based_owner_ids &&
-           !append_gfx12_nonzero_hw_id_owner(words, *persistent_owner_sgpr, arch))) {
-        errors.emplace_back("ConSan MOI scalar owner prologue could not encode HW_ID1");
+      if (!append_moi_resident_wave_owner(words, *persistent_owner_sgpr, one_based_owner_ids,
+                                          arch)) {
+        errors.emplace_back(
+            "ConSan MOI scalar owner prologue could not encode resident-wave identity");
         return std::nullopt;
       }
       break;
@@ -1012,6 +956,9 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   }
   if (!persistent_owner_sgpr)
     switch (owner_source) {
+    case ConSanMoiOwnerSource::Automatic:
+      errors.emplace_back("ConSan MOI owner/epoch prologue has an unresolved automatic source");
+      return std::nullopt;
     case ConSanMoiOwnerSource::WorkitemId: {
       auto owner_init = instrumentation::build_v_lshrrev_b32(
           owner_vgpr, scalar_positive_inline_u32(owner_shift_bits), kRdna4WorkitemIdX, arch);
@@ -1039,23 +986,9 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
         errors.emplace_back("ConSan MOI hw_id owner source requires RJ_CONSAN_MOI_OWNER_SGPR");
         return std::nullopt;
       }
-      const auto hwreg = build_hwreg_imm(kGfx12HwRegHwId1, /*offset=*/0, kGfx12HwIdOwnerBits);
-      if (!hwreg) {
-        errors.emplace_back("ConSan MOI owner/epoch prologue could not encode HW_ID1 hwreg");
-        return std::nullopt;
-      }
-      const auto get_hw_id = build_s_getreg_b32(*owner_sgpr, *hwreg, arch);
-      if (!get_hw_id) {
-        errors.emplace_back("ConSan MOI owner/epoch prologue could not encode s_getreg_b32");
-        return std::nullopt;
-      }
-      if (!append_moi_entry_salu_write(words, *get_hw_id, arch)) {
-        errors.emplace_back("ConSan MOI owner/epoch prologue cannot encode its HW_ID delay");
-        return std::nullopt;
-      }
-      if (one_based_owner_ids && !append_gfx12_nonzero_hw_id_owner(words, *owner_sgpr, arch)) {
-        errors.emplace_back("ConSan MOI owner/epoch prologue could not encode its nonzero HW_ID1 "
-                            "owner");
+      if (!append_moi_resident_wave_owner(words, *owner_sgpr, one_based_owner_ids, arch)) {
+        errors.emplace_back(
+            "ConSan MOI owner/epoch prologue could not encode resident-wave identity");
         return std::nullopt;
       }
       words.push_back(build_v_mov_b32_e32(owner_vgpr, *owner_sgpr, arch));
@@ -1838,7 +1771,10 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
   const auto overlaps = [&](std::optional<uint16_t> reg, uint16_t width = 1u) {
     return reg && range_overlaps(sgpr_base, sgpr_count, *reg, width);
   };
-  bool conflict = options.moi_exec_save_sgprs_persistent ||
+  const bool backs_up_only_automatic_owner =
+      options.automatic_moi_owner_sgpr && options.moi_owner_sgpr &&
+      sgpr_base == *options.moi_owner_sgpr && sgpr_count == 1u;
+  bool conflict = (options.moi_exec_save_sgprs_persistent && !backs_up_only_automatic_owner) ||
                   overlaps(options.moi_persistent_owner_sgpr) ||
                   overlaps(options.moi_persistent_epoch_sgpr) ||
                   overlaps(options.moi_persistent_workgroup_key_sgpr) ||
@@ -2109,25 +2045,37 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       }
     }
     std::optional<MoiEntryScalarBackup> entry_scalar_backup;
-    if (kernel_options.moi_inline_dynamic_stack_borrowed_sgpr) {
+    const bool needs_dynamic_stack_scalar_backup =
+        kernel_options.moi_inline_dynamic_stack_borrowed_sgpr.has_value();
+    const bool needs_automatic_owner_scalar_backup =
+        kernel_options.automatic_moi_owner_sgpr &&
+        kernel_options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
+        kernel_options.moi_owner_sgpr.has_value();
+    if (needs_dynamic_stack_scalar_backup || needs_automatic_owner_scalar_backup) {
       if (!is_rdna4_family_arch(arch) || !kernel_options.moi_exec_save_sgpr ||
           !kernel_options.automatic_moi_inline_sgpr_spill ||
           !kernel_options.moi_dynamic_stack_spill) {
-        result.errors.emplace_back(
-            "ConSan MOI dynamic-stack entry scalar backup has no valid Inline spill contract");
-        return;
+        if (needs_dynamic_stack_scalar_backup) {
+          result.errors.emplace_back(
+              "ConSan MOI dynamic-stack entry scalar backup has no valid Inline spill contract");
+          return;
+        }
       }
-      const uint16_t sgpr_count = moi_exec_save_sgpr_count(kernel_options, arch);
+      const uint16_t sgpr_base = needs_dynamic_stack_scalar_backup
+                                     ? *kernel_options.moi_exec_save_sgpr
+                                     : *kernel_options.moi_owner_sgpr;
+      const uint16_t sgpr_count =
+          needs_dynamic_stack_scalar_backup ? moi_exec_save_sgpr_count(kernel_options, arch) : 1u;
       if (sgpr_count == 0u || !moi_entry_scalar_backup_preserves_persistent_outputs(
-                                  kernel_options, *kernel_options.moi_exec_save_sgpr, sgpr_count)) {
+                                  kernel_options, sgpr_base, sgpr_count)) {
         result.errors.emplace_back(
-            "ConSan MOI dynamic-stack entry scalar backup overlaps persistent output state");
+            "ConSan MOI entry scalar backup overlaps persistent output state");
         return;
       }
       if (kernel.descriptor_file_offset > bytes.size() ||
           sizeof(KD) > bytes.size() - kernel.descriptor_file_offset) {
         result.errors.emplace_back(
-            "ConSan MOI dynamic-stack entry scalar backup descriptor exceeds original ELF bytes");
+            "ConSan MOI entry scalar backup descriptor exceeds original ELF bytes");
         return;
       }
       KD original_descriptor{};
@@ -2136,7 +2084,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       if (sgpr_count > moi_descriptor_wavefront_size(original_descriptor)) {
         result.outcome = ConSanTransformOutcome::Unsupported;
         result.warnings.emplace_back(
-            "ConSan MOI dynamic-stack entry scalar window exceeds one wave-local VGPR carrier");
+            "ConSan MOI entry scalar window exceeds one wave-local VGPR carrier");
         return;
       }
 
@@ -2158,12 +2106,12 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       if (backup_vgpr >= kMaxVgprs) {
         result.outcome = ConSanTransformOutcome::Unsupported;
         result.warnings.emplace_back(
-            "ConSan MOI dynamic-stack entry scalar backup has no entry-local VGPR carrier");
+            "ConSan MOI entry scalar backup has no entry-local VGPR carrier");
         return;
       }
       entry_scalar_backup = MoiEntryScalarBackup{
           .vgpr = static_cast<uint16_t>(backup_vgpr),
-          .sgpr_base = *kernel_options.moi_exec_save_sgpr,
+          .sgpr_base = sgpr_base,
           .sgpr_count = sgpr_count,
       };
     }

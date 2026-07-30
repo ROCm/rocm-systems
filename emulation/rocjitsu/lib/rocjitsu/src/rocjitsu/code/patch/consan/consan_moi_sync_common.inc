@@ -1108,7 +1108,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     if (!claim)
       return false;
     words.insert(words.end(), claim->begin(), claim->end());
-    if (!append_moi_flat_atomic_wait(words, arch))
+    if (!append_moi_global_atomic_wait(words, arch))
       return false;
     const auto won =
         instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
@@ -1186,7 +1186,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     if (!rollback)
       return false;
     words.insert(words.end(), rollback->begin(), rollback->end());
-    if (!append_moi_flat_atomic_wait(words, arch))
+    if (!append_moi_global_atomic_wait(words, arch))
       return false;
   }
 
@@ -1278,7 +1278,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
             offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) + sizeof(uint32_t), value,
             arch))
       return false;
-    const auto wait = instrumentation::build_s_wait_flat_store0(arch);
+    const auto wait = instrumentation::build_s_wait_global_store0(arch);
     if (!wait ||
         !append_load_u32_vgpr_at_offset(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), value, arch))
@@ -1297,7 +1297,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     if (!commit)
       return false;
     words.insert(words.end(), commit->begin(), commit->end());
-    if (!append_moi_flat_atomic_wait(words, arch))
+    if (!append_moi_global_atomic_wait(words, arch))
       return false;
   }
   return restore_exec(winners);
@@ -2284,7 +2284,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   if (!claim)
     return false;
   words.insert(words.end(), claim->begin(), claim->end());
-  if (!append_moi_flat_atomic_wait(words, arch))
+  if (!append_moi_global_atomic_wait(words, arch))
     return false;
   const auto claim_won =
       instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected), cas_new, arch);
@@ -2463,7 +2463,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                            sizeof(uint32_t),
                                        temporary, arch))
     return false;
-  const auto stage_drain = instrumentation::build_s_wait_flat_store0(arch);
+  const auto stage_drain = instrumentation::build_s_wait_global_store0(arch);
   if (!stage_drain)
     return false;
   words.push_back(*stage_drain);
@@ -2534,7 +2534,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   if (!commit)
     return false;
   words.insert(words.end(), commit->begin(), commit->end());
-  if (!append_moi_flat_atomic_wait(words, arch))
+  if (!append_moi_global_atomic_wait(words, arch))
     return false;
   const auto commit_won =
       instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected), cas_new, arch);

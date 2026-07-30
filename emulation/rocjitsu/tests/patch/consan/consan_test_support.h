@@ -13,6 +13,7 @@
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
 #include "util/bit.h"
@@ -422,7 +423,10 @@ std::vector<uint32_t> make_expected_offset_load_words(uint32_t byte_offset, uint
   if (!load)
     return {};
   std::vector<uint32_t> words(load->begin(), load->end());
-  words.push_back(0xBFC00000u);
+  const auto wait = instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
+  if (!wait)
+    return {};
+  words.push_back(*wait);
   return words;
 }
 

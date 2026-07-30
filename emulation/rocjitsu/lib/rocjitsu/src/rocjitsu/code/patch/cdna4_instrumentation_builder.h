@@ -10,6 +10,15 @@
 
 namespace rocjitsu {
 
+/// @brief Encode CDNA4 `s_getreg_b32 sdst, hwreg`.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_cdna4_s_getreg_b32(uint16_t sdst, uint16_t hwreg, rj_code_arch_t arch) {
+  constexpr uint16_t kSGetregB32Sopk = 17;
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || sdst > 127)
+    return std::nullopt;
+  return build_sopk_encoding(arch, kSGetregB32Sopk, sdst, hwreg);
+}
+
 /// @brief Encode CDNA4 `s_mov_b64 s[sdst:sdst+1], s[ssrc0:ssrc0+1]`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_cdna4_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
@@ -282,6 +291,26 @@ build_cdna4_v_readfirstlane_b32(uint16_t sdst, uint16_t vsrc, rj_code_arch_t arc
     return std::nullopt;
   return cdna4::build_vop1(cdna4::kVReadfirstlaneB32Vop1, {.src0 = vector_source_vgpr(vsrc),
                                                            .vdst = static_cast<uint8_t>(sdst)})[0];
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_cdna4_v_writelane_b32(uint16_t vdst, uint16_t ssrc, uint16_t lane, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || vdst > 255 || ssrc > 105 || lane > 63)
+    return std::nullopt;
+  return cdna4::build_vop3(cdna4::kVWritelaneB32Vop3, {.vdst = static_cast<uint8_t>(vdst),
+                                                       .src0 = ssrc,
+                                                       .src1 = scalar_positive_inline_u32(lane),
+                                                       .src2 = 0u});
+}
+
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_cdna4_v_readlane_b32(uint16_t sdst, uint16_t vsrc, uint16_t lane, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || sdst > 105 || vsrc > 255 || lane > 63)
+    return std::nullopt;
+  return cdna4::build_vop3(cdna4::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sdst),
+                                                      .src0 = vector_source_vgpr(vsrc),
+                                                      .src1 = scalar_positive_inline_u32(lane),
+                                                      .src2 = 0u});
 }
 
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>

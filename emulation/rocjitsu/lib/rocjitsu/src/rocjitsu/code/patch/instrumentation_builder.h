@@ -43,6 +43,15 @@ build_s_call_i64(uint16_t sdst, int16_t simm16, rj_code_arch_t arch) {
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_getreg_b32(uint16_t sdst, uint16_t hwreg, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return build_cdna3_s_getreg_b32(sdst, hwreg, arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return build_cdna4_s_getreg_b32(sdst, hwreg, arch);
+  return rocjitsu::build_s_getreg_b32(sdst, hwreg, arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return build_cdna3_s_mov_b64(sdst, ssrc0, arch);
@@ -291,6 +300,10 @@ build_v_readfirstlane_b32(uint16_t sdst, uint16_t vsrc, rj_code_arch_t arch) {
 
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_v_writelane_b32(uint16_t vdst, uint16_t ssrc, uint16_t lane, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return build_cdna3_v_writelane_b32(vdst, ssrc, lane, arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return build_cdna4_v_writelane_b32(vdst, ssrc, lane, arch);
   if (arch == ROCJITSU_CODE_ARCH_RDNA4)
     return build_rdna4_v_writelane_b32(vdst, ssrc, lane, arch);
   return arch == ROCJITSU_CODE_ARCH_GFX1250 ? build_gfx1250_v_writelane_b32(vdst, ssrc, lane, arch)
@@ -299,6 +312,10 @@ build_v_writelane_b32(uint16_t vdst, uint16_t ssrc, uint16_t lane, rj_code_arch_
 
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_v_readlane_b32(uint16_t sdst, uint16_t vsrc, uint16_t lane, rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return build_cdna3_v_readlane_b32(sdst, vsrc, lane, arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return build_cdna4_v_readlane_b32(sdst, vsrc, lane, arch);
   if (arch == ROCJITSU_CODE_ARCH_RDNA4)
     return build_rdna4_v_readlane_b32(sdst, vsrc, lane, arch);
   return arch == ROCJITSU_CODE_ARCH_GFX1250 ? build_gfx1250_v_readlane_b32(sdst, vsrc, lane, arch)
@@ -308,16 +325,36 @@ build_v_readlane_b32(uint16_t sdst, uint16_t vsrc, uint16_t lane, rj_code_arch_t
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_wait_flat_load0(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
-    return build_cdna3_s_wait_vmcnt0(arch);
+    return build_cdna3_s_wait_vmcnt_lgkmcnt0(arch);
   return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_flat0(arch)
-                                          : rocjitsu::build_s_wait_loadcnt0(arch);
+                                          : rocjitsu::build_s_wait_loadcnt_dscnt0(arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_wait_flat_store0(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
-    return build_cdna3_s_wait_vmcnt0(arch);
+    return build_cdna3_s_wait_vmcnt_lgkmcnt0(arch);
   return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_flat0(arch)
+                                          : rocjitsu::build_s_wait_storecnt_dscnt0(arch);
+}
+
+// Instrumentation-owned global memory never aliases LDS. Keep these waits
+// separate from build_s_wait_flat_* so report-buffer traffic does not
+// unnecessarily drain outstanding LDS operations on architectures with
+// independent counters.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_wait_global_load0(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return build_cdna3_s_wait_vmcnt0(arch);
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
+                                          : rocjitsu::build_s_wait_loadcnt0(arch);
+}
+
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_wait_global_store0(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return build_cdna3_s_wait_vmcnt0(arch);
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                           : rocjitsu::build_s_wait_storecnt0(arch);
 }
 
@@ -376,6 +413,41 @@ build_s_wait_indirect_pc0(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return build_s_nop(0, arch);
   return rocjitsu::build_s_wait_alu_sa_sdst0(arch);
+}
+
+/// @brief Separate a SALU-produced SGPR from a direct VALU operand consumer.
+///
+/// gfx12 exposes this dependency through SA_SDST. CDNA targets do not have the
+/// gfx12 depctr instruction, so use the target's documented scalar-to-vector
+/// scheduling separation. This helper is deliberately limited to direct VALU
+/// operands such as `v_mov` and `v_mbcnt`; it is not a generic VMEM-address or
+/// lane-index dependency primitive.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_salu_to_valu_dependency_wait(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return build_cdna4_salu_dependency_delay(arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return build_s_nop(0, arch);
+  if (!is_rdna4_family_arch(arch))
+    return std::nullopt;
+  return rocjitsu::build_s_wait_alu_sa_sdst0(arch);
+}
+
+/// @brief Separate a fixed-lane VALU transfer from its direct scalar consumer.
+///
+/// gfx12 exposes this dependency through VA_SDST. CDNA targets do not have the
+/// gfx12 depctr instruction, so use the target's documented vector-to-scalar
+/// scheduling separation. Callers use this after `v_readlane_b32`; it is not a
+/// general vector-memory completion wait.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_valu_to_salu_dependency_wait(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return build_cdna4_salu_dependency_delay(arch);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return build_s_nop(0, arch);
+  if (!is_rdna4_family_arch(arch))
+    return std::nullopt;
+  return rocjitsu::build_s_wait_alu_va_sdst0(arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
@@ -606,18 +678,12 @@ build_private_load_b32(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch)
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_wait_private_load0(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
-    return build_cdna3_s_wait_vmcnt0(arch);
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
-                                          : rocjitsu::build_s_wait_loadcnt0(arch);
+  return build_s_wait_global_load0(arch);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_wait_private_store0(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3)
-    return build_cdna3_s_wait_vmcnt0(arch);
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
-                                          : rocjitsu::build_s_wait_storecnt0(arch);
+  return build_s_wait_global_store0(arch);
 }
 
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>

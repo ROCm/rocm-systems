@@ -322,7 +322,7 @@ void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
     reg_val = wf.status_raw();
     break;
   case 4:
-    reg_val = static_cast<uint32_t>(wf.cu().id());
+    reg_val = wf.legacy_hw_id_raw();
     break;
   case 5:
     reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);

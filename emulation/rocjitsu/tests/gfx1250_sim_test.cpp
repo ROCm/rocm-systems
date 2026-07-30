@@ -3800,6 +3800,27 @@ TEST(Gfx1250SimulationTest, IbSts2ClusterFieldsAreZeroForOrdinaryDispatch) {
   EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), 0u);
 }
 
+TEST(Gfx1250SimulationTest, HwId1DistinguishesEveryResidentWave) {
+  const uint32_t code[] = {
+      0xB8824817u, // s_getreg_b32 s2, hwreg(HW_ID1, 0, 10)
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const uint64_t kernel = sim.write_kernel(0x10000, code, std::size(code), 104, 32);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel, /*grid_size_x=*/128, /*workgroup_size_x=*/128);
+  step_until_xcd_halted(sim);
+
+  constexpr std::array<uint32_t, 4> expected = {0u, 256u, 512u, 768u};
+  ASSERT_EQ(sim.snapshot->snapshots().size(), expected.size());
+  for (uint32_t wf_id = 0; wf_id < expected.size(); ++wf_id) {
+    const auto *wf = sim.snapshot->by_wf_id(wf_id);
+    ASSERT_NE(wf, nullptr);
+    EXPECT_EQ(wf->sgpr(2), expected[wf_id]);
+  }
+}
+
 TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlignedOffset) {
   // Scalar workgroup-ID reconstruction emitted by clang 23 when cluster
   // dimensions are not fixed by an amdgpu-cluster-dims attribute.

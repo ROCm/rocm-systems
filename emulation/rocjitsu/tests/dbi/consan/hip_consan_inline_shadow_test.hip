@@ -636,7 +636,11 @@ __global__ __launch_bounds__(128) void padded_barrier_ordered_lds_store(uint32_t
   __syncthreads();
 
   const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
-  if (tid < 32)
+  // Keep the control genuinely ordered: one representative in each of two
+  // waves touches the shared word. A whole-wave same-address store would
+  // itself contain unordered workitem pairs and would not be a clean barrier
+  // fixture.
+  if (tid == 0)
     padded_ds_store_b32(lds_addr, 0xCAFE0000u | tid);
 
   // Keep the fault target as one explicit, adjacent semantic barrier pair.
@@ -646,7 +650,7 @@ __global__ __launch_bounds__(128) void padded_barrier_ordered_lds_store(uint32_t
                "s_barrier_wait -1\n\t" ::
                    : "memory");
 
-  if (tid >= 64 && tid < 96)
+  if (tid == 64)
     padded_ds_store_b32(lds_addr, 0xFACE0000u | tid);
 
   // Test-only DBI destination for RJ_CONSAN_FAULT_MOVE_BARRIER. Keeping the
@@ -1087,8 +1091,7 @@ TEST(ConSanInlineShadowTest, BarrierOrderedCrossWaveStoreCompletes) {
 
     uint32_t out = 0;
     HIP_ASSERT(hipMemcpy(&out, d_out, sizeof(out), hipMemcpyDeviceToHost));
-    EXPECT_EQ(out & 0xFFFFFFE0u, 0xFACE0040u);
-    EXPECT_LE(out & 0x1Fu, 31u);
+    EXPECT_EQ(out, 0xFACE0040u);
   }
   free_device_ptr(d_out);
 }

@@ -174,6 +174,7 @@ consan_barrier_mutation_qualification(std::string_view target, ConSanBarrierMuta
   return {};
 }
 enum class ConSanMoiOwnerSource : uint8_t {
+  Automatic,
   WorkitemId,
   HwId,
 };
@@ -329,6 +330,9 @@ struct ConSanMoiPrologueScratchVgprAssignment {
 struct ConSanMoiTransientSgprAssignment {
   uint64_t descriptor_file_offset = 0;
   uint16_t exec_save_sgpr = 0;
+  /// Probe-local normalized resident-wave identity. Automatic Inline
+  /// assignments keep this in the final slot of their saved scalar window.
+  std::optional<uint16_t> owner_sgpr;
   /// A code-object-wide dispatch pair can be unavailable to an otherwise
   /// patchable full-pressure owner. Such an owner keeps its instrumentation
   /// and records zero generation rather than clobbering guest scalar state.
@@ -350,7 +354,9 @@ struct ConSanMoiTransientSgprAssignment {
 struct ConSanOptions {
   ConSanFlavor flavor = ConSanFlavor::None;
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
-  ConSanMoiOwnerSource moi_owner_source = ConSanMoiOwnerSource::WorkitemId;
+  /// Automatic selects a normalized resident-wave identity for Inline Shadow
+  /// and the entry workitem identity used by the other engines.
+  ConSanMoiOwnerSource moi_owner_source = ConSanMoiOwnerSource::Automatic;
   ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Likely;
   bool fail_closed = false;
   bool probe_nop = false;
@@ -468,7 +474,7 @@ struct ConSanOptions {
   /// Internal proof marker set only when the automatic EXEC-save window lies
   /// above every guest-referenced SGPR and can retain cross-site wave state.
   bool moi_exec_save_sgprs_persistent = false;
-  /// Internal marker set when a probe needs the final scalar save slot for a
+  /// Internal marker set when a probe needs the base scalar save slot for a
   /// site-local dynamic-stack spill frame.
   bool moi_dynamic_stack_spill = false;
   /// Internal marker set after inventory proves that Inline will emit at

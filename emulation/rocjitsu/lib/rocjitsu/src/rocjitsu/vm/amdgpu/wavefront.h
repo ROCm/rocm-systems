@@ -148,6 +148,34 @@ public:
   /// @returns Permanent slot index.
   uint32_t wf_id() const { return wf_id_; }
 
+  /// @brief Return the legacy HW_ID fields that identify a resident wave.
+  ///
+  /// GFX9 exposes a four-bit wave slot per SIMD in bits 0:3 and a two-bit
+  /// SIMD index in bits 4:5. RocJITsu assigns permanent slots by walking the
+  /// four SIMDs at each wave depth, matching that architectural layout.
+  uint32_t legacy_hw_id_raw() const {
+    constexpr uint32_t kSimdsPerCu = 4;
+    const uint32_t wave_id = wf_id_ / kSimdsPerCu;
+    const uint32_t simd_id = wf_id_ % kSimdsPerCu;
+    assert(wave_id < 16u && "legacy HW_ID cannot represent this wavefront slot");
+    return wave_id | (simd_id << 4u);
+  }
+
+  /// @brief Return the GFX12 HW_ID1 topology and resident-wave fields.
+  ///
+  /// The GFX12.0 and GFX12.1 simulator profiles have different SIMD/CU
+  /// topology. The implementation derives the architectural WAVE_ID, SIMD_ID,
+  /// WGP_ID, SA_ID, and (when present) SE_ID fields from the owning component
+  /// tree rather than from globally allocated simulator component IDs.
+  uint32_t hw_id1_raw() const;
+
+  /// @brief Return the modeled GFX12 HW_ID2 dispatch fields.
+  ///
+  /// Queue, workgroup, and VM identity come from dispatch state. Pipeline,
+  /// micro-engine, and state-context fields are currently unmodeled and read as
+  /// zero.
+  uint32_t hw_id2_raw() const;
+
   /// @brief Return the workgroup ID assigned at dispatch.
   /// @returns Workgroup ID.
   uint32_t wg_id() const { return wg_id_; }
@@ -157,6 +185,12 @@ public:
 
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
+
+  /// @brief Return the hardware queue ID assigned at dispatch.
+  uint32_t queue_id() const { return queue_id_; }
+
+  /// @brief Set the hardware queue ID assigned at dispatch.
+  void set_queue_id(uint32_t id) { queue_id_ = id; }
 
   /// @brief Return the owning process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }
@@ -465,6 +499,7 @@ public:
     pc = 0;
     wg_id_ = 0;
     dispatch_id_ = 0;
+    queue_id_ = 0;
     process_id_ = 0;
     lds_base_ = 0;
     lds_ = nullptr;
@@ -508,6 +543,7 @@ protected:
   uint32_t wf_id_ = 0;        ///< Slot index within the CU (permanent).
   uint32_t wg_id_ = 0;        ///< Workgroup ID (set per dispatch).
   uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t queue_id_ = 0;     ///< Hardware queue ID (set per dispatch).
   uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.

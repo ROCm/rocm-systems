@@ -2747,8 +2747,8 @@ validate_entry_scalar_backup_semantics(const AmdGpuCodeObject &original,
     std::vector<uint32_t> expected_restore;
     for (uint16_t index = 0; index < patch.entry_scalar_backup_sgpr_count; ++index) {
       const uint16_t sgpr = static_cast<uint16_t>(*patch.entry_scalar_backup_sgpr_base + index);
-      const auto save = instrumentation::build_v_writelane_b32(*patch.entry_scalar_backup_vgpr,
-                                                               sgpr, index, arch);
+      const auto save =
+          instrumentation::build_v_writelane_b32(*patch.entry_scalar_backup_vgpr, sgpr, index, arch);
       const auto restore =
           instrumentation::build_v_readlane_b32(sgpr, *patch.entry_scalar_backup_vgpr, index, arch);
       if (!save || !restore) {
@@ -2759,13 +2759,16 @@ validate_entry_scalar_backup_semantics(const AmdGpuCodeObject &original,
       expected_save.insert(expected_save.end(), save->begin(), save->end());
       expected_restore.insert(expected_restore.end(), restore->begin(), restore->end());
     }
-    const auto restore_wait = instrumentation::build_s_wait_alu_va_sdst0(arch);
-    if (expected_save.empty() || expected_restore.empty() || !restore_wait) {
+    const auto restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+    if (restore_wait)
+      expected_restore.push_back(*restore_wait);
+    else
+      expected_restore.clear();
+    if (expected_save.empty() || expected_restore.empty()) {
       errors.emplace_back(
           "ConSan final validation could not encode entry scalar backup expectations");
       continue;
     }
-    expected_restore.push_back(*restore_wait);
 
     std::vector<uint64_t> body_offsets = {
         patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset)};
@@ -2878,9 +2881,12 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       }
       capture_prefix.insert(capture_prefix.end(), successor->begin(), successor->end());
     }
+    const uint64_t scalar_backup_prefix_words =
+        patch.entry_scalar_backup_vgpr ? 2u * patch.entry_scalar_backup_sgpr_count
+                                       : 0u;
     const uint64_t required_words =
-        capture_prefix.size() + 2u * (restore_count + patch.dispatch_id_shifted_system_sgpr_count) +
-        reload_words;
+        scalar_backup_prefix_words + capture_prefix.size() +
+        2u * (restore_count + patch.dispatch_id_shifted_system_sgpr_count) + reload_words;
     const uint64_t required_bytes = required_words * sizeof(uint32_t);
     if (entry_offset > replacement_text.size() ||
         required_bytes > replacement_text.size() - entry_offset) {
@@ -2895,7 +2901,7 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
                   sizeof(word));
       return word;
     };
-    uint64_t cursor = 0;
+    uint64_t cursor = scalar_backup_prefix_words;
     for (uint32_t expected : capture_prefix) {
       if (read_word(cursor++) != expected) {
         errors.emplace_back("ConSan final validation found an invalid dispatch-ID capture in "
@@ -3377,7 +3383,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     }
     const auto owner_store = instrumentation::build_flat_store_b32(
         scratch, owner_vgpr, arch, offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id));
-    const auto wait_store = instrumentation::build_s_wait_flat_store0(arch);
+    const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
     if (!version_cas || !owner_store || !wait_store) {
       errors.emplace_back(
           "ConSan final validation could not encode release-transaction expectations");
@@ -3930,9 +3936,47 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     }
     if (text_relocated || requirement.allow_entry_delta)
       normalized.kernel_code_entry_byte_offset = original_descriptor.kernel_code_entry_byte_offset;
+    if (cdna) {
+      constexpr uint32_t kAccvgprOffsetGranularity = 4u;
+      const uint32_t original_encoded_accum_offset = AMDHSA_BITS_GET(
+          original_descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+      const uint32_t replacement_encoded_accum_offset = AMDHSA_BITS_GET(
+          replacement_descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+      if (replacement_encoded_accum_offset != original_encoded_accum_offset) {
+        const auto unified_vgpr_count = [](const KernelDescriptor &descriptor) {
+          const uint32_t granulated = AMDHSA_BITS_GET(
+              descriptor.compute_pgm_rsrc1,
+              kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+          constexpr uint32_t kCdnaVgprGranularity = 8u;
+          return (granulated + 1u) * kCdnaVgprGranularity;
+        };
+        const uint32_t original_accvgpr_base =
+            (original_encoded_accum_offset + 1u) * kAccvgprOffsetGranularity;
+        const uint32_t replacement_accvgpr_base =
+            (replacement_encoded_accum_offset + 1u) * kAccvgprOffsetGranularity;
+        const uint32_t original_unified_vgprs = unified_vgpr_count(original_descriptor);
+        const uint32_t replacement_unified_vgprs = unified_vgpr_count(replacement_descriptor);
+        const bool valid_empty_boundary_move =
+            requirement.allow_resource_delta && original_encoded_accum_offset != 0u &&
+            replacement_encoded_accum_offset != 0u &&
+            original_unified_vgprs <= original_accvgpr_base &&
+            replacement_unified_vgprs == replacement_accvgpr_base &&
+            replacement_accvgpr_base >= requirement.required_vgpr_count;
+        if (!valid_empty_boundary_move) {
+          errors.emplace_back(
+              "ConSan final validation found an invalid accumulator-boundary move for kernel '" +
+              original_kernel.name + "'");
+        }
+      }
+    }
     if (requirement.allow_resource_delta || has_unscoped_resource_growth) {
       normalized.compute_pgm_rsrc1 = original_descriptor.compute_pgm_rsrc1;
       normalized.compute_pgm_rsrc2 = original_descriptor.compute_pgm_rsrc2;
+      if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+        AMDHSA_BITS_SET(normalized.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                        AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
+                                        kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));
+      }
       normalized.private_segment_fixed_size = original_descriptor.private_segment_fixed_size;
       normalized.group_segment_fixed_size = original_descriptor.group_segment_fixed_size;
     }

@@ -14,24 +14,41 @@ struct MoiPrivateEpochLayout {
   return static_cast<uint8_t>(encoded + 1u);
 }
 
-[[nodiscard]] bool append_gfx12_nonzero_hw_id_owner(std::vector<uint32_t> &words,
-                                                    uint16_t owner_sgpr, rj_code_arch_t arch) {
-  // HW_ID1[4:0] is WAVE_ID and HW_ID1[9:8] is SIMD_ID. Bits 5 through 7 are
-  // unassigned, so WAVE_ID 32 is not a hardware owner. Inline metadata reserves
-  // zero for empty entries; remap only hardware owner zero to that unused value
-  // and leave every other hardware owner unchanged.
-  const auto is_zero =
-      instrumentation::build_s_cmp_eq_u32(owner_sgpr, scalar_positive_inline_u32(0), arch);
-  const auto replace_zero = instrumentation::build_s_cselect_b32(
-      owner_sgpr, scalar_positive_inline_u32(kGfx12InlineOwnerZeroReplacement), owner_sgpr, arch);
-  const auto wait_owner = build_s_wait_alu_sa_sdst0(arch);
-  if (!is_zero || !replace_zero || !wait_owner)
+struct MoiResidentWaveHwreg {
+  uint16_t id = 0;
+  uint16_t bits = 0;
+};
+
+[[nodiscard]] constexpr std::optional<MoiResidentWaveHwreg>
+moi_resident_wave_hwreg(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return MoiResidentWaveHwreg{.id = kLegacyHwRegHwId, .bits = kLegacyHwIdResidentWaveBits};
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return MoiResidentWaveHwreg{.id = kGfx12HwRegHwId1, .bits = kGfx12HwIdResidentWaveBits};
+  return std::nullopt;
+}
+
+[[nodiscard]] bool append_moi_resident_wave_owner(std::vector<uint32_t> &words, uint16_t owner_sgpr,
+                                                  bool one_based, rj_code_arch_t arch) {
+  const auto encoding = moi_resident_wave_hwreg(arch);
+  const auto hwreg =
+      encoding ? build_hwreg_imm(encoding->id, /*offset=*/0, encoding->bits) : std::nullopt;
+  const auto read =
+      hwreg ? instrumentation::build_s_getreg_b32(owner_sgpr, *hwreg, arch) : std::nullopt;
+  const auto delay = instrumentation::build_salu_dependency_delay(arch);
+  const auto wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
+  if (!read || !delay || !wait)
     return false;
-  words.push_back(*is_zero);
-  words.push_back(*replace_zero);
-  // The remap is an SALU write consumed by a later VALU. RDNA4 requires the
-  // scalar-destination dependency drain before that cross-pipeline read.
-  words.push_back(*wait_owner);
+  words.push_back(*read);
+  words.push_back(*delay);
+  if (!one_based) {
+    words.push_back(*wait);
+    return true;
+  }
+
+  words.push_back(build_s_add_u32(owner_sgpr, owner_sgpr, scalar_positive_inline_u32(1), arch));
+  words.push_back(*delay);
+  words.push_back(*wait);
   return true;
 }
 
@@ -1081,7 +1098,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         errors.emplace_back("ConSan MOI dynamic access-record probe could not encode range fields");
         return std::nullopt;
       }
-      const auto wait_store = instrumentation::build_s_wait_flat_store0(arch);
+      const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
       const auto restore_exec =
           instrumentation::build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
       if (!wait_store || !restore_exec) {
@@ -1260,7 +1277,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       errors.emplace_back("ConSan MOI first-light probe could not read report saturation");
       return std::nullopt;
     }
-    const auto saturation_read_wait = instrumentation::build_s_wait_flat_load0(arch);
+    const auto saturation_read_wait = instrumentation::build_s_wait_global_load0(arch);
     const auto select_saturation = instrumentation::build_v_and_b32_literal(
         record_compare_vgpr, kConSanMoiReportFlagRecordReplayBankSaturated, record_value_vgpr,
         arch);
@@ -1412,13 +1429,15 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto claim_dispatch = instrumentation::build_flat_atomic_cmpswap_b64(
         record_address_vgpr, record_value_vgpr, record_value_vgpr,
         /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-    const auto claim_dispatch_wait = instrumentation::build_s_wait_flat_load0(arch);
-    if (!claim_dispatch || !claim_dispatch_wait) {
+    if (!claim_dispatch) {
       errors.emplace_back("ConSan MOI first-light probe could not claim a dispatch slot");
       return std::nullopt;
     }
     words.insert(words.end(), claim_dispatch->begin(), claim_dispatch->end());
-    words.push_back(*claim_dispatch_wait);
+    if (!append_moi_global_atomic_wait(words, arch)) {
+      errors.emplace_back("ConSan MOI first-light probe could not wait for a dispatch slot claim");
+      return std::nullopt;
+    }
     const auto prior_dispatch_low_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
         scalar_positive_inline_u32(0), record_value_vgpr, arch);
     const auto prior_dispatch_high_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
@@ -1675,13 +1694,15 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto claim = instrumentation::build_flat_atomic_cmpswap_b64(
         record_address_vgpr, record_value_vgpr, record_value_vgpr,
         /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-    const auto claim_wait = instrumentation::build_s_wait_flat_load0(arch);
-    if (!claim || !claim_wait) {
+    if (!claim) {
       errors.emplace_back("ConSan MOI first-light probe could not encode its publication claim");
       return std::nullopt;
     }
     words.insert(words.end(), claim->begin(), claim->end());
-    words.push_back(*claim_wait);
+    if (!append_moi_global_atomic_wait(words, arch)) {
+      errors.emplace_back("ConSan MOI first-light probe could not wait for its publication claim");
+      return std::nullopt;
+    }
     const auto prior_low_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
         scalar_positive_inline_u32(0), record_value_vgpr, arch);
     const auto prior_high_nonzero = instrumentation::build_v_cmp_ne_u32_vcc(
@@ -1808,7 +1829,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       errors.emplace_back("ConSan MOI first-light probe could not encode range fields");
       return std::nullopt;
     }
-    const auto payload_wait = instrumentation::build_s_wait_flat_store0(arch);
+    const auto payload_wait = instrumentation::build_s_wait_global_store0(arch);
     const auto commit_address = instrumentation::build_v_add_u64_signed_i24(
         record_address_vgpr, offsetof(ConSanMoiAccessRecord, access_kind), arch);
     if (!payload_wait || !commit_address) {
@@ -1824,15 +1845,17 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(
         record_address_vgpr, record_value_vgpr, record_value_vgpr,
         /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-    const auto commit_wait = instrumentation::build_s_wait_flat_load0(arch);
-    if (!commit_value || !commit_expected || !commit || !commit_wait) {
+    if (!commit_value || !commit_expected || !commit) {
       errors.emplace_back("ConSan MOI first-light probe could not commit its publication");
       return std::nullopt;
     }
     words.insert(words.end(), commit_value->begin(), commit_value->end());
     words.insert(words.end(), commit_expected->begin(), commit_expected->end());
     words.insert(words.end(), commit->begin(), commit->end());
-    words.push_back(*commit_wait);
+    if (!append_moi_global_atomic_wait(words, arch)) {
+      errors.emplace_back("ConSan MOI first-light probe could not wait for its publication commit");
+      return std::nullopt;
+    }
     const auto commit_collision = instrumentation::build_v_cmp_ne_u32_vcc(
         scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty)),
         record_value_vgpr, arch);
@@ -1959,19 +1982,21 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto read_commit = instrumentation::build_flat_atomic_cmpswap_b32(
         record_address_vgpr, record_value_vgpr, record_value_vgpr,
         /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-    const auto read_commit_wait = instrumentation::build_s_wait_flat_load0(arch);
     const auto publication_incomplete = instrumentation::build_v_cmp_eq_u32_vcc(
         scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty)),
         record_value_vgpr, arch);
     const auto publication_kind_mismatch = instrumentation::build_v_cmp_ne_u32_vcc(
         scalar_positive_inline_u32(static_cast<uint32_t>(kind)), record_value_vgpr, arch);
-    if (!read_commit || !read_commit_wait || !publication_incomplete ||
-        !publication_kind_mismatch) {
+    if (!read_commit || !publication_incomplete || !publication_kind_mismatch) {
       errors.emplace_back("ConSan MOI first-light probe could not observe its publication commit");
       return std::nullopt;
     }
     words.insert(words.end(), read_commit->begin(), read_commit->end());
-    words.push_back(*read_commit_wait);
+    if (!append_moi_global_atomic_wait(words, arch)) {
+      errors.emplace_back(
+          "ConSan MOI first-light probe could not wait for its publication observation");
+      return std::nullopt;
+    }
     words.push_back(*publication_incomplete);
     if (!sequence.emit_branch(automatic_banked_capture ? owner_retry_label
                                                        : publication_incomplete_label,
@@ -2286,7 +2311,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
 
 [[nodiscard]] bool append_inline_shadow_owner_field(std::vector<uint32_t> &words,
                                                     const ConSanOptions &options, uint16_t low_vgpr,
-                                                    uint16_t tmp_vgpr, rj_code_arch_t arch,
+                                                    uint16_t tmp_vgpr, uint16_t owner_backup_vgpr,
+                                                    rj_code_arch_t arch,
                                                     std::optional<uint32_t> private_owner_offset,
                                                     std::optional<uint16_t> private_owner_shift,
                                                     std::vector<std::string> &errors) {
@@ -2307,6 +2333,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   }
 
   switch (options.moi_owner_source) {
+  case ConSanMoiOwnerSource::Automatic:
+    errors.emplace_back("ConSan MOI inline-shadow probe has an unresolved automatic owner source");
+    return false;
   case ConSanMoiOwnerSource::WorkitemId: {
     if (!private_owner_offset || !private_owner_shift) {
       errors.emplace_back(
@@ -2334,26 +2363,35 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                           "RJ_CONSAN_MOI_OWNER_SGPR");
       return false;
     }
-    const auto hwreg = build_hwreg_imm(kGfx12HwRegHwId1, /*offset=*/0, kGfx12HwIdOwnerBits);
-    const auto get_hw_id =
-        hwreg ? build_s_getreg_b32(*options.moi_owner_sgpr, *hwreg, arch) : std::nullopt;
-    if (!get_hw_id) {
-      errors.emplace_back("ConSan MOI inline-shadow probe could not derive owner from HW_ID1");
-      return false;
+    if (options.automatic_moi_owner_sgpr) {
+      const auto save = instrumentation::build_v_writelane_b32(
+          owner_backup_vgpr, *options.moi_owner_sgpr, 0u, arch);
+      if (!save) {
+        errors.emplace_back(
+            "ConSan MOI inline-shadow probe could not save its borrowed owner scalar");
+        return false;
+      }
+      words.insert(words.end(), save->begin(), save->end());
     }
-    const auto get_hw_id_delay = instrumentation::build_salu_dependency_delay(arch);
-    if (!get_hw_id_delay) {
-      errors.emplace_back("ConSan MOI inline-shadow probe could not encode its HW_ID1 read delay");
-      return false;
-    }
-    words.push_back(*get_hw_id);
-    words.push_back(*get_hw_id_delay);
-    if (!append_gfx12_nonzero_hw_id_owner(words, *options.moi_owner_sgpr, arch)) {
-      errors.emplace_back("ConSan MOI inline-shadow probe could not encode its nonzero HW_ID1 "
-                          "owner");
+    if (!append_moi_resident_wave_owner(words, *options.moi_owner_sgpr,
+                                        /*one_based=*/true, arch)) {
+      errors.emplace_back(
+          "ConSan MOI inline-shadow probe could not encode its resident-wave owner");
       return false;
     }
     words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_owner_sgpr, arch));
+    if (options.automatic_moi_owner_sgpr) {
+      const auto restore = instrumentation::build_v_readlane_b32(
+          *options.moi_owner_sgpr, owner_backup_vgpr, 0u, arch);
+      const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+      if (!restore || !wait) {
+        errors.emplace_back(
+            "ConSan MOI inline-shadow probe could not restore its borrowed owner scalar");
+        return false;
+      }
+      words.insert(words.end(), restore->begin(), restore->end());
+      words.push_back(*wait);
+    }
     break;
   }
   }
