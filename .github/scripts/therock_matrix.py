@@ -35,7 +35,7 @@ subtree_to_project_map = {
 project_map = {
     "core": {
         "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON"],
-        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo and amdsmi
+        "projects_to_test": "amdsmi, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo
     },
     "emulation": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_EMULATION=ON"],
@@ -93,7 +93,7 @@ project_map = {
     # instead of above blanket addition of all tests, we can add logic to determine which mathlibs to test, based on file changes from last nightly run. Can be handled once the tests scripts move to component/monorepo src
     "nightly": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocprim, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma",
+        "projects_to_test": "amdsmi, hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocprim, rocthrust, rocrand, hiprand, hipblaslt, rocblas, hipblas, rocroller, miopen, miopenprovider, hipfft, rocfft, rocsparse, hipsparse, hipsparselt, rocsolver, hipsolver, rocwmma",
     },
 }
 
