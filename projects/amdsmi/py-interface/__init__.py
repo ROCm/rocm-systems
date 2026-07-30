@@ -38,7 +38,6 @@ from .amdsmi_interface import amdsmi_get_npm_info
 # ESMI Dependent Functions
 try:
     from .amdsmi_interface import amdsmi_get_cpu_handles
-    from .amdsmi_interface import amdsmi_get_cpusocket_handles  # Deprecate in 8.0
     from .amdsmi_interface import amdsmi_get_cpucore_handles
     from .amdsmi_interface import amdsmi_get_cpu_hsmp_proto_ver
     from .amdsmi_interface import amdsmi_get_cpu_smu_fw_version
@@ -182,7 +181,6 @@ from .amdsmi_interface import amdsmi_gpu_validate_ras_eeprom
 from .amdsmi_interface import amdsmi_set_gpu_pci_bandwidth
 from .amdsmi_interface import amdsmi_set_power_cap
 from .amdsmi_interface import amdsmi_set_gpu_power_profile
-from .amdsmi_interface import amdsmi_set_gpu_clk_range
 from .amdsmi_interface import amdsmi_set_gpu_clk_limit
 from .amdsmi_interface import amdsmi_set_gpu_od_clk_info
 from .amdsmi_interface import amdsmi_set_gpu_od_volt_info
@@ -285,13 +283,15 @@ from .amdsmi_interface import amdsmi_get_gpu_compute_partition
 from .amdsmi_interface import amdsmi_set_gpu_compute_partition
 from .amdsmi_interface import amdsmi_get_gpu_compute_partition_mem_alloc_mode
 from .amdsmi_interface import amdsmi_set_gpu_compute_partition_mem_alloc_mode
+from .amdsmi_interface import amdsmi_get_gpu_accelerator_partition_mem_alloc_mode
+from .amdsmi_interface import amdsmi_set_gpu_accelerator_partition_mem_alloc_mode
 from .amdsmi_interface import amdsmi_get_gpu_memory_partition
 from .amdsmi_interface import amdsmi_set_gpu_memory_partition
+from .amdsmi_interface import amdsmi_set_gpu_memory_partition_mode
 from .amdsmi_interface import amdsmi_get_gpu_accelerator_partition_profile
 from .amdsmi_interface import amdsmi_get_gpu_accelerator_partition_profile_config
 from .amdsmi_interface import amdsmi_get_gpu_memory_partition_config
 from .amdsmi_interface import amdsmi_set_gpu_accelerator_partition_profile
-from .amdsmi_interface import amdsmi_set_gpu_memory_partition_mode
 
 # # Individual GPU Metrics Functions
 from .amdsmi_interface import amdsmi_get_gpu_metrics_header_info
@@ -334,6 +334,7 @@ from .amdsmi_interface import AmdSmiVoltageMetric
 from .amdsmi_interface import AmdSmiVoltageType
 from .amdsmi_interface import AmdSmiComputePartitionType
 from .amdsmi_interface import AmdSmiComputePartitionMemAllocModeType
+from .amdsmi_interface import AmdSmiAcceleratorPartitionMemAllocModeType
 from .amdsmi_interface import AmdSmiMemoryPartitionType
 from .amdsmi_interface import AmdSmiPowerProfilePresetMasks
 from .amdsmi_interface import AmdSmiGpuBlock
