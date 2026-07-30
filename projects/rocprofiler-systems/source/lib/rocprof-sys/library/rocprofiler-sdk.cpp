@@ -2475,7 +2475,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
     auto _counter_events   = rocprofiler_sdk::get_rocm_events();
     auto _gpu_perf_events  = config::get_gpu_perf_counters();
-    auto _spm_request      = rocprofiler_sdk::spm::get_request();
+    auto _spm_request      = rocprofiler_sdk::spm::request::from_settings();
     auto _version          = rocprofiler_sdk::get_version();
     if(_version.formatted == 0)
     {
@@ -2485,12 +2485,18 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto* _data        = as_client_data(user_data);
     _data->client_fini = fini_func;
 
-    if(!rocprofiler_sdk::spm::validate_beta_request(_spm_request, _counter_events,
-                                                    _gpu_perf_events))
+    if(!rocprofiler_sdk::spm::is_config_valid(_spm_request, _counter_events,
+                                              _gpu_perf_events))
     {
         return -1;
     }
-    rocprofiler_sdk::spm::prepare_beta_environment(_spm_request);
+    const auto _spm_beta_enabled =
+        rocprofiler_sdk::spm::sdk_beta_opt_in_enabled(_spm_request);
+    if(_spm_request.requested() && config::get_use_rocpd())
+    {
+        LOG_WARNING("SPM samples are not written to the RocPD database in this "
+                    "release; use Perfetto output for SPM results");
+    }
 
     _data->initialize();
     if(!_counter_events.empty()) _data->initialize_event_info();
@@ -2507,9 +2513,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // Control context for marker-based region filtering and pause/resume (always-on)
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->control_ctx));
 
-    if(!rocprofiler_sdk::spm::configure_runtime(_data, _spm_request))
+    // SPM being unavailable on this SDK/hardware/runtime path must not abort tool
+    // initialization. configure_runtime() already logged the specific reason.
+    if(_spm_beta_enabled && !rocprofiler_sdk::spm::configure_runtime(_data, _spm_request))
     {
-        return -1;
+        LOG_WARNING("Continuing without SPM counter collection");
     }
 
     auto external_corr_id_request_kinds =
@@ -2868,7 +2876,8 @@ tool_fini(void* callback_data)
         }
     }
 
-    auto* _data        = as_client_data(callback_data);
+    auto* _data = as_client_data(callback_data);
+    rocprofiler_sdk::spm::report_runtime_summary(_data);
     _data->client_id   = nullptr;
     _data->client_fini = nullptr;
     delete tool_data;

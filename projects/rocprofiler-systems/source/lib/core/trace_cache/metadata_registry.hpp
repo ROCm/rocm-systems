@@ -172,6 +172,13 @@ struct gpu_perf_counter_name_entry
     std::string   track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
 };
 
+struct spm_counter_name_entry
+{
+    std::uint64_t counter_id;  ///< SDK counter ID; reserved for RocPD pmc_id mapping
+    std::uint64_t counter_instance_id;  ///< SDK counter instance ID
+    std::string   counter_name;  ///< Qualified counter name, e.g. "SQ_WAVES[XCC=0]"
+};
+
 }  // namespace info
 
 struct metadata_registry
@@ -228,6 +235,13 @@ struct metadata_registry
     std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
     find_gpu_perf_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
 
+    void set_spm_counter_names(std::uint32_t                             device_id,
+                               std::vector<info::spm_counter_name_entry> entries);
+
+    std::optional<std::reference_wrapper<const info::spm_counter_name_entry>>
+    find_spm_counter_by_id(std::uint32_t device_id,
+                           std::uint64_t counter_instance_id) const;
+
 private:
     common::synchronized<info::process> m_process{};
     common::synchronized<
@@ -259,6 +273,13 @@ private:
     // O(1) lookup index: device_id -> counter_id -> index into the vector above
     std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
         m_gpu_perf_counter_index{};
+
+    // SPM counter names: device_id -> ordered name entries
+    std::map<std::uint32_t, std::vector<info::spm_counter_name_entry>>
+        m_spm_counter_names{};
+    // O(1) lookup index: device_id -> counter_instance_id -> index into the vector above
+    std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
+        m_spm_counter_index{};
 
     using callback_rename_map_t =
         std::map<rocprofiler_tracing_operation_t, std::string_view>;

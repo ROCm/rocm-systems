@@ -642,6 +642,33 @@ metadata_registry::find_gpu_perf_counter_by_id(std::uint32_t device_id,
 }
 
 void
+metadata_registry::set_spm_counter_names(
+    std::uint32_t device_id, std::vector<info::spm_counter_name_entry> entries)
+{
+    auto& index = m_spm_counter_index[device_id];
+    index.clear();
+    index.reserve(entries.size());
+    for(std::size_t i = 0; i < entries.size(); ++i)
+    {
+        index.emplace(entries[i].counter_instance_id, i);
+    }
+    m_spm_counter_names[device_id] = std::move(entries);
+}
+
+std::optional<std::reference_wrapper<const info::spm_counter_name_entry>>
+metadata_registry::find_spm_counter_by_id(std::uint32_t device_id,
+                                          std::uint64_t counter_instance_id) const
+{
+    auto idx_it = m_spm_counter_index.find(device_id);
+    if(idx_it == m_spm_counter_index.end()) return std::nullopt;
+
+    auto entry_it = idx_it->second.find(counter_instance_id);
+    if(entry_it == idx_it->second.end()) return std::nullopt;
+
+    return std::cref(m_spm_counter_names.at(device_id)[entry_it->second]);
+}
+
+void
 metadata_registry::add_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {

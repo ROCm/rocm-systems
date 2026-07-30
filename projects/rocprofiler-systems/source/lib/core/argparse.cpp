@@ -4,7 +4,6 @@
 #include "argparse.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
-#include "common/rocm_spm.hpp"
 #include "config.hpp"
 #include "exception.hpp"
 #include "gpu.hpp"
@@ -1226,13 +1225,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _events =
                     fmt::format("{}", fmt::join(p.get<strvec_t>("spm-events"), ","));
-                update_env(_data, env_vars::ROCM_SPM_ENABLED, true);
                 update_env(_data, env_vars::ROCM_SPM_EVENTS, _events);
             });
 
         _data.reg.processed_environs.emplace("spm_events");
         _data.reg.processed_environs.emplace("rocm_spm_events");
-        _data.reg.processed_environs.emplace("rocm_spm_enabled");
     }
 
     if(_data.reg.environ_filter("spm_sample_interval", _data))
@@ -1258,7 +1255,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                           "Set beta SPM counter sampling interval unit")
             .count(1)
             .dtype("string")
-            .choices({ std::string{ common::rocm_spm_sample_interval_unit_sclk_cycles } })
+            .choices({ std::string{ env_vars::SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES } })
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT,
                            p.get<std::string>("spm-sample-interval-unit"));

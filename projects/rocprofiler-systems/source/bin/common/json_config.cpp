@@ -402,15 +402,11 @@ resolve_schema_config(const nlohmann::json& config)
         if(hw.contains("spm"))
         {
             const auto& spm = hw["spm"];
-            resolve_enabled(result, spm, "enabled", env_vars::ROCM_SPM_ENABLED);
-            if(!spm.contains("enabled") || spm["enabled"].get<bool>())
-            {
-                resolve_value(result, spm, "events", env_vars::ROCM_SPM_EVENTS);
-                resolve_value(result, spm, "sample_interval",
-                              env_vars::ROCM_SPM_SAMPLE_INTERVAL);
-                resolve_value(result, spm, "sample_interval_unit",
-                              env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT);
-            }
+            resolve_value(result, spm, "events", env_vars::ROCM_SPM_EVENTS);
+            resolve_value(result, spm, "sample_interval",
+                          env_vars::ROCM_SPM_SAMPLE_INTERVAL);
+            resolve_value(result, spm, "sample_interval_unit",
+                          env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT);
         }
         if(hw.contains("papi_multiplexing"))
             resolve_enabled(result, hw["papi_multiplexing"], "enabled",
@@ -884,15 +880,9 @@ export_hardware_counters(nlohmann::json&                           config,
         hw["enabled"]                    = true;
         hw["gpu_perf_counters"]["value"] = *v;
     }
-    if(auto v = lookup(env_map, env_vars::ROCM_SPM_ENABLED))
-    {
-        hw["enabled"]        = true;
-        hw["spm"]["enabled"] = env_vars::is_truthy(*v);
-    }
     if(auto v = lookup(env_map, env_vars::ROCM_SPM_EVENTS))
     {
         hw["enabled"]                = true;
-        hw["spm"]["enabled"]         = true;
         hw["spm"]["events"]["value"] = *v;
     }
     if(auto v = lookup(env_map, env_vars::ROCM_SPM_SAMPLE_INTERVAL))

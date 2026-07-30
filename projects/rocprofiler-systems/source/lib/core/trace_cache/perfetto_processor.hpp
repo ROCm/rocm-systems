@@ -98,9 +98,6 @@ private:
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
     bool                                             m_cpu_pmc_initialized{ false };
     std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id{};
-#if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
-    std::unordered_map<std::uint64_t, std::string>   m_spm_counter_name_cache;
-#endif
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

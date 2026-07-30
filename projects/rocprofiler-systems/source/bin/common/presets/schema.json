@@ -389,14 +389,9 @@
                     "additionalProperties": false,
                     "description": "Beta ROCprofiler-SDK Streaming Performance Monitor (SPM) counter collection",
                     "properties": {
-                        "enabled": {
-                            "default": false,
-                            "description": "Enable beta SPM counter collection",
-                            "type": "boolean"
-                        },
                         "events": {
                             "$ref": "#/$defs/stringOrArrayValueField",
-                            "description": "SPM-capable ROCm/GPU hardware counters"
+                            "description": "SPM-capable ROCm/GPU hardware counters. Setting this requests SPM collection; a positive sample interval is also required"
                         },
                         "sample_interval": {
                             "$ref": "#/$defs/intValueField",

@@ -47,17 +47,17 @@ get_operations(rocprofiler_buffer_tracing_kind_t kindv);
 std::vector<std::string>
 get_rocm_events();
 
+namespace spm
+{
 [[nodiscard]] std::vector<std::string>
-get_rocm_spm_events();
-
-[[nodiscard]] bool
-get_rocm_spm_enabled();
+get_events();
 
 [[nodiscard]] std::uint64_t
-get_rocm_spm_sample_interval();
+get_sample_interval();
 
 [[nodiscard]] std::string
-get_rocm_spm_sample_interval_unit();
+get_sample_interval_unit();
+}  // namespace spm
 
 std::unordered_set<std::int32_t>
 get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv);

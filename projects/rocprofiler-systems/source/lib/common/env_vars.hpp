@@ -225,7 +225,6 @@ inline constexpr const char* CAUSAL_FILE_RESET = "ROCPROFSYS_CAUSAL_FILE_RESET";
 // PAPI's C header (papi.h). The identifiers carry a trailing suffix to avoid
 // preprocessor substitution; the env-var strings retain the original names.
 inline constexpr const char* ROCM_EVENTS               = "ROCPROFSYS_ROCM_EVENTS";
-inline constexpr const char* ROCM_SPM_ENABLED          = "ROCPROFSYS_ROCM_SPM_ENABLED";
 inline constexpr const char* ROCM_SPM_EVENTS           = "ROCPROFSYS_ROCM_SPM_EVENTS";
 inline constexpr const char* ROCM_SPM_SAMPLE_INTERVAL =
     "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL";
@@ -238,6 +237,10 @@ inline constexpr const char* PAPI_OVERFLOW             = "ROCPROFSYS_PAPI_OVERFL
 inline constexpr const char* PAPI_QUIET_MODE           = "ROCPROFSYS_PAPI_QUIET";
 inline constexpr const char* PAPI_THREADING            = "ROCPROFSYS_PAPI_THREADING";
 inline constexpr const char* USE_CODE_COVERAGE         = "ROCPROFSYS_USE_CODE_COVERAGE";
+
+// Supported value for ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT. This is a setting
+// value rather than a variable name, so it is kept apart from the names above.
+inline constexpr std::string_view SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES = "sclk_cycles";
 
 // --- MPI ---
 inline constexpr const char* MPI_INIT             = "ROCPROFSYS_MPI_INIT";
@@ -365,13 +368,6 @@ equals_ignore_case(std::string_view lhs, std::string_view rhs) noexcept
            std::tolower(static_cast<unsigned char>(rhs[idx])))
             return false;
     return true;
-}
-
-[[nodiscard]] inline bool
-is_truthy(std::string_view value) noexcept
-{
-    return value == "1" || equals_ignore_case(value, "true") ||
-           equals_ignore_case(value, "on") || equals_ignore_case(value, "yes");
 }
 
 [[nodiscard]] inline int

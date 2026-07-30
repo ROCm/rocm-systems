@@ -21,6 +21,7 @@
 
 #include "logger/debug.hpp"
 
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -149,6 +150,7 @@ struct client_data
     agent_counter_profile_map_t        agent_counter_profiles    = {};
 #if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
     common::synchronized<agent_spm_counter_config_map_t> agent_spm_counter_configs = {};
+    std::atomic<std::uint64_t>                           spm_data_loss_reports{ 0 };
 #endif
     common::synchronized<code_object_vec_t>   code_object_records   = {};
     common::synchronized<kernel_symbol_vec_t> kernel_symbol_records = {};

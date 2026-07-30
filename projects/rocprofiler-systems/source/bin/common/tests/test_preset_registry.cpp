@@ -91,6 +91,22 @@ constexpr auto gpu_preset_json = R"({
     }
 })";
 
+constexpr auto spm_preset_json = R"({
+    "metadata": {
+        "name": "spm-trace",
+        "cli_flag": "--spm-trace",
+        "description": "SPM trace preset"
+    },
+    "hardware_counters": {
+        "enabled": false,
+        "spm": {
+            "events": {"value": "SQ_WAVES:device=0"},
+            "sample_interval": {"value": 8192},
+            "sample_interval_unit": {"value": "sclk_cycles"}
+        }
+    }
+})";
+
 constexpr auto invalid_json = R"({ this is not valid json })";
 
 }  // namespace
@@ -300,4 +316,19 @@ TEST_F(preset_registry_test, describe_generates_output_tree)
     EXPECT_NE(desc.find("Tracing:"), std::string::npos);
     EXPECT_NE(desc.find("Profiling:"), std::string::npos);
     EXPECT_NE(desc.find("CPU Sampling:"), std::string::npos);
+}
+
+TEST_F(preset_registry_test, describe_reports_spm_events_without_hw_counter_gate)
+{
+    temp_dir dir;
+    dir.write_file("spm-trace.json", spm_preset_json);
+
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
+    preset_registry registry;
+    auto            desc = registry.describe("spm-trace");
+    ::unsetenv(env_vars::PRESET_DIR);
+
+    EXPECT_NE(desc.find("SPM trace preset"), std::string::npos);
+    EXPECT_NE(desc.find("ROCm SPM:        ON"), std::string::npos);
+    EXPECT_NE(desc.find("ROCm SPM Events: SQ_WAVES:device=0"), std::string::npos);
 }

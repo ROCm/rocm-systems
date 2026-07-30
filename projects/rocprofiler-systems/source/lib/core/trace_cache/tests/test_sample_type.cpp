@@ -535,11 +535,22 @@ TEST_F(sample_type_test, backtrace_region_sample_default_constructor)
 
 TEST_F(sample_type_test, spm_sample_serialize_deserialize)
 {
-    auto samples = std::vector<spm_counter_sample>{
-        spm_counter_sample{ 1000, 123.5, 11, 111, 0, 1, 2 },
-        spm_counter_sample{ 1200, 456.75, 12, 222, 1, 2, 3 },
+    auto counters = std::vector<spm_counter_info>{
+        spm_counter_info{ 11, 111 },
+        spm_counter_info{ 12, 222 },
     };
-    spm_sample original(7, 42, 99, 1234, 5678, 9876, 55, true, samples);
+    auto samples = std::vector<spm_timestamp_sample>{
+        spm_timestamp_sample{ 1000,
+                              {
+                                  spm_counter_value{ 0, 123.5 },
+                                  spm_counter_value{ 1, 456.75 },
+                              } },
+        spm_timestamp_sample{ 1200,
+                              {
+                                  spm_counter_value{ 0, 789.25 },
+                              } },
+    };
+    spm_sample original(7, 42, 99, 1234, 5678, 9876, 55, true, counters, samples);
 
     serialize(buffer.data(), original);
 
@@ -554,42 +565,63 @@ TEST_F(sample_type_test, spm_sample_serialize_deserialize)
     EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
     EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
     EXPECT_EQ(deserialized.data_loss, original.data_loss);
+    ASSERT_EQ(deserialized.counters.size(), original.counters.size());
+    for(size_t i = 0; i < original.counters.size(); ++i)
+    {
+        EXPECT_EQ(deserialized.counters.at(i).counter_id,
+                  original.counters.at(i).counter_id);
+        EXPECT_EQ(deserialized.counters.at(i).counter_instance_id,
+                  original.counters.at(i).counter_instance_id);
+    }
+
     ASSERT_EQ(deserialized.samples.size(), original.samples.size());
 
     for(size_t i = 0; i < original.samples.size(); ++i)
     {
         EXPECT_EQ(deserialized.samples.at(i).timestamp, original.samples.at(i).timestamp);
-        EXPECT_DOUBLE_EQ(deserialized.samples.at(i).value, original.samples.at(i).value);
-        EXPECT_EQ(deserialized.samples.at(i).counter_id,
-                  original.samples.at(i).counter_id);
-        EXPECT_EQ(deserialized.samples.at(i).counter_instance_id,
-                  original.samples.at(i).counter_instance_id);
-        EXPECT_EQ(deserialized.samples.at(i).xcc, original.samples.at(i).xcc);
-        EXPECT_EQ(deserialized.samples.at(i).shader_engine,
-                  original.samples.at(i).shader_engine);
-        EXPECT_EQ(deserialized.samples.at(i).instance, original.samples.at(i).instance);
+        ASSERT_EQ(deserialized.samples.at(i).values.size(),
+                  original.samples.at(i).values.size());
+        for(size_t j = 0; j < original.samples.at(i).values.size(); ++j)
+        {
+            EXPECT_EQ(deserialized.samples.at(i).values.at(j).counter_info_index,
+                      original.samples.at(i).values.at(j).counter_info_index);
+            EXPECT_DOUBLE_EQ(deserialized.samples.at(i).values.at(j).value,
+                             original.samples.at(i).values.at(j).value);
+        }
     }
 }
 
 TEST_F(sample_type_test, spm_sample_get_size)
 {
-    auto samples = std::vector<spm_counter_sample>{
-        spm_counter_sample{ 1000, 123.5, 11, 111, 0, 1, 2 },
-        spm_counter_sample{ 1200, 456.75, 12, 222, 1, 2, 3 },
+    auto counters = std::vector<spm_counter_info>{
+        spm_counter_info{ 11, 111 },
+        spm_counter_info{ 12, 222 },
     };
-    spm_sample sample(7, 42, 99, 1234, 5678, 9876, 55, true, samples);
+    auto samples = std::vector<spm_timestamp_sample>{
+        spm_timestamp_sample{ 1000,
+                              {
+                                  spm_counter_value{ 0, 123.5 },
+                                  spm_counter_value{ 1, 456.75 },
+                              } },
+        spm_timestamp_sample{ 1200,
+                              {
+                                  spm_counter_value{ 0, 789.25 },
+                              } },
+    };
+    spm_sample sample(7, 42, 99, 1234, 5678, 9876, 55, true, counters, samples);
 
     const auto expected_size =
-        sizeof(std::uint64_t) * 7 + sizeof(bool) + sizeof(std::uint32_t) +
-        samples.size() *
-            (sizeof(std::uint64_t) * 3 + sizeof(double) + sizeof(std::uint32_t) * 3);
+        sizeof(std::uint64_t) * 7 + sizeof(bool) + sizeof(std::uint32_t) * 2 +
+        counters.size() * (sizeof(std::uint64_t) * 2) +
+        samples.size() * (sizeof(std::uint64_t) + sizeof(std::uint32_t)) +
+        3 * (sizeof(std::uint32_t) + sizeof(double));
 
     EXPECT_EQ(get_size(sample), expected_size);
 }
 
 TEST_F(sample_type_test, spm_sample_empty_samples_and_no_data_loss)
 {
-    spm_sample original(7, 42, 99, 1234, 5678, 9876, 55, false, {});
+    spm_sample original(7, 42, 99, 1234, 5678, 9876, 55, false, {}, {});
 
     serialize(buffer.data(), original);
 
@@ -604,6 +636,7 @@ TEST_F(sample_type_test, spm_sample_empty_samples_and_no_data_loss)
     EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
     EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
     EXPECT_FALSE(deserialized.data_loss);
+    EXPECT_TRUE(deserialized.counters.empty());
     EXPECT_TRUE(deserialized.samples.empty());
 }
 

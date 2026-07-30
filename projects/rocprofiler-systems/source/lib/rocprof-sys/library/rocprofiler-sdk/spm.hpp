@@ -15,41 +15,42 @@ struct client_data;
 
 namespace spm
 {
-/// Captures the SPM beta settings resolved from Systems configuration.
-struct beta_request
+/// Captures the SPM counter collection settings resolved from Systems configuration.
+struct request
 {
-    bool                     enabled              = false;
     std::vector<std::string> events               = {};
     std::uint64_t            sample_interval      = 0;
     std::string              sample_interval_unit = {};
 
-    /// Returns true when SPM was explicitly enabled or SPM counters were requested.
-    [[nodiscard]] bool requested() const noexcept;
+    /// Returns true when SPM counters were requested.
+    [[nodiscard]] bool requested() const noexcept { return !events.empty(); }
+
+    /// Resolve an SPM collection request from the current Systems settings.
+    [[nodiscard]] static request from_settings();
 };
 
-/// Build an SPM beta request from the current Systems configuration settings.
-[[nodiscard]]
-beta_request
-get_request();
-
-/// Validate SPM beta request constraints.
+/// Validate SPM collection request constraints.
 ///
 /// Returns true when SPM is not requested. If SPM is requested, validates the required
-/// counter settings and mutual exclusion with ROCPROFSYS_ROCM_EVENTS and
+/// sample interval settings and mutual exclusion with ROCPROFSYS_ROCM_EVENTS and
 /// ROCPROFSYS_GPU_PERF_COUNTERS.
 [[nodiscard]]
 bool
-validate_beta_request(const beta_request&             request,
-                      const std::vector<std::string>& dispatch_counter_events,
-                      const std::string&              device_counter_events);
+is_config_valid(const request&                  req,
+                const std::vector<std::string>& dispatch_counter_events,
+                const std::string&              device_counter_events);
 
-/// Sets the SDK beta opt-in environment variable for validated SPM requests.
-void
-prepare_beta_environment(const beta_request& request);
+/// Returns true when the SDK beta SPM opt-in is explicitly enabled.
+[[nodiscard]] bool
+sdk_beta_opt_in_enabled(const request& req);
 
 /// Configure the SDK SPM runtime service on the dedicated Systems SPM context.
 [[nodiscard]] bool
-configure_runtime(client_data* data, const beta_request& request);
+configure_runtime(client_data* data, const request& req);
+
+/// Report any accumulated SPM runtime diagnostics.
+void
+report_runtime_summary(client_data* data);
 }  // namespace spm
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

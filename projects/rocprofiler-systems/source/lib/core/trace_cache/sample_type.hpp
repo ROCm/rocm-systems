@@ -608,19 +608,30 @@ get_size(const pmc_event_with_sample& item)
         item.value, item.system_tid);
 }
 
-struct spm_counter_sample
+struct spm_counter_info
 {
-    std::uint64_t timestamp           = 0;
-    double        value               = 0.0;
+    // Retained for RocPD SPM export, where the base SDK counter id maps to pmc_id.
     std::uint64_t counter_id          = 0;
     std::uint64_t counter_instance_id = 0;
-    std::uint32_t xcc                 = 0;
-    std::uint32_t shader_engine       = 0;
-    std::uint32_t instance            = 0;
 };
-static_assert(std::is_trivially_copyable<spm_counter_sample>::value,
-              "spm_counter_sample must remain trivially copyable for trace-cache "
+static_assert(std::is_trivially_copyable<spm_counter_info>::value,
+              "spm_counter_info must remain trivially copyable for trace-cache "
               "vector serialization");
+
+struct spm_counter_value
+{
+    std::uint32_t counter_info_index = 0;
+    double        value              = 0.0;
+};
+static_assert(std::is_trivially_copyable<spm_counter_value>::value,
+              "spm_counter_value must remain trivially copyable for trace-cache "
+              "vector serialization");
+
+struct spm_timestamp_sample
+{
+    std::uint64_t                  timestamp = 0;
+    std::vector<spm_counter_value> values    = {};
+};
 
 struct spm_sample : cacheable_t
 {
@@ -631,7 +642,8 @@ struct spm_sample : cacheable_t
                std::uint64_t _kernel_id, std::uint64_t _queue_id_handle,
                std::uint64_t _correlation_id_internal,
                std::uint64_t _correlation_id_ancestor, std::uint64_t _stream_handle,
-               bool _data_loss, std::vector<spm_counter_sample> _samples)
+               bool _data_loss, std::vector<spm_counter_info> _counters,
+               std::vector<spm_timestamp_sample> _samples)
     : agent_id_handle(_agent_id_handle)
     , dispatch_id(_dispatch_id)
     , kernel_id(_kernel_id)
@@ -640,26 +652,29 @@ struct spm_sample : cacheable_t
     , correlation_id_ancestor(_correlation_id_ancestor)
     , stream_handle(_stream_handle)
     , data_loss(_data_loss)
+    , counters(std::move(_counters))
     , samples(std::move(_samples))
     {}
 
-    std::uint64_t                   agent_id_handle         = 0;
-    std::uint64_t                   dispatch_id             = 0;
-    std::uint64_t                   kernel_id               = 0;
-    std::uint64_t                   queue_id_handle         = 0;
-    std::uint64_t                   correlation_id_internal = 0;
-    std::uint64_t                   correlation_id_ancestor = 0;
-    std::uint64_t                   stream_handle           = 0;
-    bool                            data_loss               = false;
-    std::vector<spm_counter_sample> samples                 = {};
+    std::uint64_t                     agent_id_handle         = 0;
+    std::uint64_t                     dispatch_id             = 0;
+    std::uint64_t                     kernel_id               = 0;
+    std::uint64_t                     queue_id_handle         = 0;
+    std::uint64_t                     correlation_id_internal = 0;
+    std::uint64_t                     correlation_id_ancestor = 0;
+    std::uint64_t                     stream_handle           = 0;
+    bool                              data_loss               = false;
+    std::vector<spm_counter_info>     counters                = {};
+    std::vector<spm_timestamp_sample> samples                 = {};
 };
 
 template <>
 inline void
 serialize(std::uint8_t* buffer, const spm_sample& item)
 {
-    size_t     pos         = 0;
-    const auto num_samples = static_cast<std::uint32_t>(item.samples.size());
+    size_t     pos          = 0;
+    const auto num_counters = static_cast<std::uint32_t>(item.counters.size());
+    const auto num_samples  = static_cast<std::uint32_t>(item.samples.size());
     utility::store_value(item.agent_id_handle, buffer, pos);
     utility::store_value(item.dispatch_id, buffer, pos);
     utility::store_value(item.kernel_id, buffer, pos);
@@ -668,16 +683,23 @@ serialize(std::uint8_t* buffer, const spm_sample& item)
     utility::store_value(item.correlation_id_ancestor, buffer, pos);
     utility::store_value(item.stream_handle, buffer, pos);
     utility::store_value(item.data_loss, buffer, pos);
+    utility::store_value(num_counters, buffer, pos);
     utility::store_value(num_samples, buffer, pos);
+    for(const auto& counter : item.counters)
+    {
+        utility::store_value(counter.counter_id, buffer, pos);
+        utility::store_value(counter.counter_instance_id, buffer, pos);
+    }
     for(const auto& sample : item.samples)
     {
         utility::store_value(sample.timestamp, buffer, pos);
-        utility::store_value(sample.value, buffer, pos);
-        utility::store_value(sample.counter_id, buffer, pos);
-        utility::store_value(sample.counter_instance_id, buffer, pos);
-        utility::store_value(sample.xcc, buffer, pos);
-        utility::store_value(sample.shader_engine, buffer, pos);
-        utility::store_value(sample.instance, buffer, pos);
+        utility::store_value(static_cast<std::uint32_t>(sample.values.size()), buffer,
+                             pos);
+        for(const auto& value : sample.values)
+        {
+            utility::store_value(value.counter_info_index, buffer, pos);
+            utility::store_value(value.value, buffer, pos);
+        }
     }
 }
 
@@ -686,17 +708,27 @@ template <>
 deserialize(std::uint8_t*& buffer)
 {
     spm_sample    item;
-    std::uint32_t num_samples = 0;
+    std::uint32_t num_counters = 0;
+    std::uint32_t num_samples  = 0;
     utility::parse_value(buffer, item.agent_id_handle, item.dispatch_id, item.kernel_id,
                          item.queue_id_handle, item.correlation_id_internal,
                          item.correlation_id_ancestor, item.stream_handle, item.data_loss,
-                         num_samples);
+                         num_counters, num_samples);
+    item.counters.resize(num_counters);
+    for(auto& counter : item.counters)
+    {
+        utility::parse_value(buffer, counter.counter_id, counter.counter_instance_id);
+    }
     item.samples.resize(num_samples);
     for(auto& sample : item.samples)
     {
-        utility::parse_value(buffer, sample.timestamp, sample.value, sample.counter_id,
-                             sample.counter_instance_id, sample.xcc, sample.shader_engine,
-                             sample.instance);
+        std::uint32_t num_values = 0;
+        utility::parse_value(buffer, sample.timestamp, num_values);
+        sample.values.resize(num_values);
+        for(auto& value : sample.values)
+        {
+            utility::parse_value(buffer, value.counter_info_index, value.value);
+        }
     }
     return item;
 }
@@ -708,12 +740,20 @@ get_size(const spm_sample& item)
     size_t total_size = utility::get_size(
         item.agent_id_handle, item.dispatch_id, item.kernel_id, item.queue_id_handle,
         item.correlation_id_internal, item.correlation_id_ancestor, item.stream_handle,
-        item.data_loss, static_cast<std::uint32_t>(item.samples.size()));
+        item.data_loss, static_cast<std::uint32_t>(item.counters.size()),
+        static_cast<std::uint32_t>(item.samples.size()));
+    for(const auto& counter : item.counters)
+    {
+        total_size += utility::get_size(counter.counter_id, counter.counter_instance_id);
+    }
     for(const auto& sample : item.samples)
     {
-        total_size += utility::get_size(sample.timestamp, sample.value, sample.counter_id,
-                                        sample.counter_instance_id, sample.xcc,
-                                        sample.shader_engine, sample.instance);
+        total_size += utility::get_size(sample.timestamp,
+                                        static_cast<std::uint32_t>(sample.values.size()));
+        for(const auto& value : sample.values)
+        {
+            total_size += utility::get_size(value.counter_info_index, value.value);
+        }
     }
     return total_size;
 }

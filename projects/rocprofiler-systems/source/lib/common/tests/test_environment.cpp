@@ -211,13 +211,16 @@ TEST_F(DuplicatedEnvironmentEntriesTest, RocmEventsUsesCommaDelimiter)
 
 TEST_F(DuplicatedEnvironmentEntriesTest, RocmSpmEventsUsesCommaDelimiter)
 {
+    // A ':' delimiter would collide with the ':device=N' counter suffix, so SPM
+    // events must consolidate with ','.
     std::vector<std::string> env_vars = {
-        "ROCPROFSYS_ROCM_SPM_EVENTS=SQ_WAVES",
-        "ROCPROFSYS_ROCM_SPM_EVENTS=SQ_BUSY_CYCLES",
+        std::string{ env_vars::ROCM_SPM_EVENTS } + "=SQ_WAVES:device=0",
+        std::string{ env_vars::ROCM_SPM_EVENTS } + "=SQ_BUSY_CYCLES:device=1",
     };
     consolidate_env_entries(env_vars);
     ASSERT_EQ(env_vars.size(), 1);
-    EXPECT_EQ(env_vars[0], "ROCPROFSYS_ROCM_SPM_EVENTS=SQ_WAVES,SQ_BUSY_CYCLES");
+    EXPECT_EQ(env_vars[0], std::string{ env_vars::ROCM_SPM_EVENTS } +
+                               "=SQ_WAVES:device=0,SQ_BUSY_CYCLES:device=1");
 }
 
 TEST_F(DuplicatedEnvironmentEntriesTest, RocmEventsPreservesDeviceSyntax)

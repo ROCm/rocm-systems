@@ -1,8 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// This file is always compiled. Keep SPM request parsing, validation, SDK beta
+// opt-in checks, and no-SDK fallbacks here; runtime wiring that requires
+// rocprofiler-sdk/experimental/spm.h belongs in spm.cpp.
+
 #include "common/environment.hpp"
-#include "common/rocm_spm.hpp"
 #include "core/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/spm.hpp"
 
@@ -20,8 +23,7 @@ namespace spm
 {
 namespace
 {
-constexpr auto beta_env_name  = "ROCPROFILER_SPM_BETA_ENABLED";
-constexpr auto beta_env_value = "1";
+constexpr auto beta_env_name = "ROCPROFILER_SPM_BETA_ENABLED";
 
 bool
 has_non_space_value(std::string_view value)
@@ -31,43 +33,26 @@ has_non_space_value(std::string_view value)
 }
 }  // namespace
 
-bool
-beta_request::requested() const noexcept
+request
+request::from_settings()
 {
-    return (enabled || !events.empty());
-}
+    auto spm_request                 = request{};
+    spm_request.events               = get_events();
+    spm_request.sample_interval      = get_sample_interval();
+    spm_request.sample_interval_unit = get_sample_interval_unit();
 
-beta_request
-get_request()
-{
-    auto request    = beta_request{};
-    request.events  = ::rocprofsys::rocprofiler_sdk::get_rocm_spm_events();
-    request.enabled = ::rocprofsys::rocprofiler_sdk::get_rocm_spm_enabled();
-    request.sample_interval =
-        ::rocprofsys::rocprofiler_sdk::get_rocm_spm_sample_interval();
-    request.sample_interval_unit =
-        ::rocprofsys::rocprofiler_sdk::get_rocm_spm_sample_interval_unit();
-    if(!request.events.empty()) request.enabled = true;
-
-    return request;
+    return spm_request;
 }
 
 bool
-validate_beta_request(const beta_request&             request,
-                      const std::vector<std::string>& dispatch_counter_events,
-                      const std::string&              device_counter_events)
+is_config_valid(const request&                  req,
+                const std::vector<std::string>& dispatch_counter_events,
+                const std::string&              device_counter_events)
 {
-    // Backstop for direct library load paths. Tool initialization must validate
-    // SPM requests and fail closed when required settings or mutual exclusions
+    // Backstop for direct library load paths. Tool initialization must reject
+    // SPM requests when the required interval or mutual-exclusion constraints
     // are not satisfied.
-    if(!request.requested()) return true;
-
-    if(request.events.empty())
-    {
-        LOG_WARNING("SPM counter collection was enabled, but no counters were requested. "
-                    "Set ROCPROFSYS_ROCM_SPM_EVENTS or pass --spm-events.");
-        return false;
-    }
+    if(!req.requested()) return true;
 
     if(!dispatch_counter_events.empty())
     {
@@ -83,33 +68,65 @@ validate_beta_request(const beta_request&             request,
         return false;
     }
 
-    if(request.sample_interval == 0)
+    if(req.sample_interval == 0)
     {
         LOG_WARNING("SPM counter collection requires a positive sample interval. Set "
-                    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL or pass --spm-sample-interval.");
+                    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL or pass --spm-sample-interval "
+                    "(for example, 8192). Supported intervals are hardware-limited and "
+                    "can be queried with 'rocprofv3-avail list --spm-config'.");
         return false;
     }
 
-    if(request.sample_interval_unit != common::rocm_spm_sample_interval_unit_sclk_cycles)
+    if(req.sample_interval_unit != env_vars::SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES)
     {
         LOG_WARNING("Unsupported SPM sample interval unit '{}'. Supported unit: "
                     "{}",
-                    request.sample_interval_unit,
-                    common::rocm_spm_sample_interval_unit_sclk_cycles);
+                    req.sample_interval_unit,
+                    env_vars::SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES);
         return false;
     }
 
     return true;
 }
 
-void
-prepare_beta_environment(const beta_request& request)
+bool
+sdk_beta_opt_in_enabled(const request& req)
 {
-    if(!request.requested()) return;
+    if(!req.requested()) return true;
 
-    ::rocprofsys::common::environment<>::set_env(beta_env_name, beta_env_value, 1);
-    LOG_WARNING("ROCm SPM counter collection is enabled as a beta feature");
+    if(::rocprofsys::common::get_env(beta_env_name, false))
+    {
+        LOG_WARNING("ROCm SPM counter collection is enabled as a beta feature");
+        return true;
+    }
+
+    LOG_WARNING("ROCm SPM counter collection was requested, but SDK beta SPM is "
+                "not explicitly enabled. SPM samples will be skipped for this "
+                "run. Set ROCPROFILER_SPM_BETA_ENABLED=ON to acknowledge the "
+                "beta risk and enable SPM collection.");
+    return false;
 }
+
+#if !ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
+bool
+configure_runtime(client_data* data, const request& req)
+{
+    (void) data;
+    if(!req.requested()) return true;
+
+    LOG_WARNING("SPM runtime collection was requested, but this rocprofiler-sdk "
+                "build does not provide the experimental SPM API. Build with a "
+                "rocprofiler-sdk version that provides "
+                "rocprofiler-sdk/experimental/spm.h.");
+    return false;
+}
+
+void
+report_runtime_summary(client_data* data)
+{
+    (void) data;
+}
+#endif
 }  // namespace spm
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

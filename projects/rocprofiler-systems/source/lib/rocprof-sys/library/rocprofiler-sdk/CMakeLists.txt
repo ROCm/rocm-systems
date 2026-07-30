@@ -11,8 +11,11 @@ set(rocprofiler_sdk_sources
     ${CMAKE_CURRENT_LIST_DIR}/trace_control.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rccl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/spm_config.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/spm.cpp
 )
+
+if(ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM)
+    list(APPEND rocprofiler_sdk_sources ${CMAKE_CURRENT_LIST_DIR}/spm.cpp)
+endif()
 
 set(rocprofiler_sdk_headers
     ${CMAKE_CURRENT_LIST_DIR}/counters.hpp

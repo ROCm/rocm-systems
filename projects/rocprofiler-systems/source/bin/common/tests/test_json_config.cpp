@@ -185,7 +185,6 @@ TEST_F(json_config_test, resolves_spm_hardware_counters_section)
     auto j = nlohmann::json::parse(R"({
         "hardware_counters": {
             "spm": {
-                "enabled": true,
                 "events": {"value": ["SQ_WAVES"]},
                 "sample_interval": {"value": 4200},
                 "sample_interval_unit": {"value": "sclk_cycles"}
@@ -195,10 +194,9 @@ TEST_F(json_config_test, resolves_spm_hardware_counters_section)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_SPM_ENABLED"), "true");
-    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_SPM_EVENTS"), "SQ_WAVES");
-    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL"), "4200");
-    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT"), "sclk_cycles");
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_EVENTS), "SQ_WAVES");
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "4200");
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT), "sclk_cycles");
 }
 
 // Test new schema format - causal section

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/env_vars.hpp"
-#include "common/rocm_spm.hpp"
 #include "core/config.hpp"
 #include "core/rocprofiler-sdk.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk/spm.hpp"
@@ -10,33 +9,79 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdlib>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace
 {
-using rocprofsys::rocprofiler_sdk::spm::beta_request;
-using rocprofsys::rocprofiler_sdk::spm::get_request;
-using rocprofsys::rocprofiler_sdk::spm::validate_beta_request;
+using rocprofsys::rocprofiler_sdk::spm::is_config_valid;
+using rocprofsys::rocprofiler_sdk::spm::request;
+using rocprofsys::rocprofiler_sdk::spm::sdk_beta_opt_in_enabled;
 
-beta_request
+constexpr auto sdk_spm_beta_env = "ROCPROFILER_SPM_BETA_ENABLED";
+
+class scoped_env
+{
+public:
+    explicit scoped_env(const char* name)
+    : m_name{ name }
+    {
+        if(const auto* value = std::getenv(name)) m_original = std::string{ value };
+    }
+
+    ~scoped_env()
+    {
+        if(m_original)
+            ::setenv(m_name, m_original->c_str(), 1);
+        else
+            ::unsetenv(m_name);
+    }
+
+    scoped_env(const scoped_env&)            = delete;
+    scoped_env& operator=(const scoped_env&) = delete;
+    scoped_env(scoped_env&&)                 = delete;
+    scoped_env& operator=(scoped_env&&)      = delete;
+
+private:
+    const char*                m_name = nullptr;
+    std::optional<std::string> m_original;
+};
+
+class spm_settings_test : public ::testing::Test
+{
+protected:
+    static void SetUpTestSuite()
+    {
+        auto settings = rocprofsys::settings::shared_instance();
+        rocprofsys::rocprofiler_sdk::config_settings(settings);
+    }
+
+    void TearDown() override
+    {
+        rocprofsys::config::set_setting_value(
+            std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS }, std::string{});
+        rocprofsys::config::set_setting_value(
+            std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
+            std::uint64_t{ 0 });
+    }
+};
+
+request
 make_valid_requested_spm_request()
 {
     const auto unit =
-        std::string{ rocprofsys::common::rocm_spm_sample_interval_unit_sclk_cycles };
-    return beta_request{ true, { "SQ_WAVES" }, 4200, unit };
+        std::string{ rocprofsys::env_vars::SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES };
+    return request{ { "SQ_WAVES" }, 4200, unit };
 }
 }  // namespace
 
-TEST(spm_beta_request, get_request_reflects_configured_spm_settings)
+TEST_F(spm_settings_test, from_settings_reflects_configured_spm_settings)
 {
     const auto unit =
-        std::string{ rocprofsys::common::rocm_spm_sample_interval_unit_sclk_cycles };
-    auto settings = rocprofsys::settings::shared_instance();
-    rocprofsys::rocprofiler_sdk::config_settings(settings);
+        std::string{ rocprofsys::env_vars::SPM_SAMPLE_INTERVAL_UNIT_SCLK_CYCLES };
 
-    ASSERT_TRUE(rocprofsys::config::set_setting_value(
-        std::string{ rocprofsys::env_vars::ROCM_SPM_ENABLED }, true));
     ASSERT_TRUE(rocprofsys::config::set_setting_value(
         std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS },
         std::string{ "SQ_WAVES,TD_TD_BUSY" }));
@@ -44,83 +89,103 @@ TEST(spm_beta_request, get_request_reflects_configured_spm_settings)
         std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
         std::uint64_t{ 4200 }));
 
-    const auto request = get_request();
+    const auto spm_request = request::from_settings();
 
-    EXPECT_TRUE(request.enabled);
-    ASSERT_EQ(request.events.size(), 2);
-    EXPECT_EQ(request.events.at(0), "SQ_WAVES");
-    EXPECT_EQ(request.events.at(1), "TD_TD_BUSY");
-    EXPECT_EQ(request.sample_interval, 4200);
-    EXPECT_EQ(request.sample_interval_unit, unit);
-
-    EXPECT_TRUE(rocprofsys::config::set_setting_value(
-        std::string{ rocprofsys::env_vars::ROCM_SPM_ENABLED }, false));
-    EXPECT_TRUE(rocprofsys::config::set_setting_value(
-        std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS }, std::string{}));
-    EXPECT_TRUE(rocprofsys::config::set_setting_value(
-        std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
-        std::uint64_t{ 0 }));
+    EXPECT_TRUE(spm_request.requested());
+    ASSERT_EQ(spm_request.events.size(), 2);
+    EXPECT_EQ(spm_request.events.at(0), "SQ_WAVES");
+    EXPECT_EQ(spm_request.events.at(1), "TD_TD_BUSY");
+    EXPECT_EQ(spm_request.sample_interval, 4200);
+    EXPECT_EQ(spm_request.sample_interval_unit, unit);
 }
 
-TEST(spm_beta_request, requested_reflects_enabled_flag_or_events)
+TEST(spm_request, requested_reflects_events)
 {
-    EXPECT_FALSE(beta_request{}.requested());
+    EXPECT_FALSE(request{}.requested());
 
-    auto enabled_request    = beta_request{};
-    enabled_request.enabled = true;
-    EXPECT_TRUE(enabled_request.requested());
-
-    auto event_request   = beta_request{};
+    auto event_request   = request{};
     event_request.events = { "SQ_WAVES" };
     EXPECT_TRUE(event_request.requested());
 }
 
-TEST(spm_beta_validation, accepts_when_spm_is_not_requested)
+TEST_F(spm_settings_test, events_request_spm_but_default_interval_is_invalid)
 {
-    EXPECT_TRUE(validate_beta_request(beta_request{}, {}, {}));
+    ASSERT_TRUE(rocprofsys::config::set_setting_value(
+        std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS }, std::string{ "SQ_WAVES" }));
+    ASSERT_TRUE(rocprofsys::config::set_setting_value(
+        std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
+        std::uint64_t{ 0 }));
+
+    const auto spm_request = request::from_settings();
+
+    EXPECT_TRUE(spm_request.requested());
+    EXPECT_EQ(spm_request.events, std::vector<std::string>{ "SQ_WAVES" });
+    EXPECT_EQ(spm_request.sample_interval, 0);
+    EXPECT_FALSE(is_config_valid(spm_request, {}, {}));
 }
 
-TEST(spm_beta_validation, rejects_enabled_request_without_events)
+TEST(spm_config_validation, accepts_when_spm_is_not_requested)
 {
-    auto request    = beta_request{};
-    request.enabled = true;
-
-    EXPECT_FALSE(validate_beta_request(request, {}, {}));
+    EXPECT_TRUE(is_config_valid(request{}, {}, {}));
 }
 
-TEST(spm_beta_validation, rejects_rocm_dispatch_counter_conflict)
+TEST(spm_config_validation, rejects_rocm_dispatch_counter_conflict)
 {
     const auto request = make_valid_requested_spm_request();
 
-    EXPECT_FALSE(validate_beta_request(request, { "SQ_WAVES" }, {}));
+    EXPECT_FALSE(is_config_valid(request, { "SQ_WAVES" }, {}));
 }
 
-TEST(spm_beta_validation, rejects_gpu_perf_counter_conflict)
+TEST(spm_config_validation, rejects_gpu_perf_counter_conflict)
 {
     const auto request = make_valid_requested_spm_request();
 
-    EXPECT_FALSE(validate_beta_request(request, {}, "SQ_WAVES"));
+    EXPECT_FALSE(is_config_valid(request, {}, "SQ_WAVES"));
 }
 
-TEST(spm_beta_validation, rejects_zero_sample_interval)
+TEST(spm_config_validation, rejects_zero_sample_interval)
 {
     auto request            = make_valid_requested_spm_request();
     request.sample_interval = 0;
 
-    EXPECT_FALSE(validate_beta_request(request, {}, {}));
+    EXPECT_FALSE(is_config_valid(request, {}, {}));
 }
 
-TEST(spm_beta_validation, rejects_unsupported_sample_interval_unit)
+TEST(spm_config_validation, rejects_unsupported_sample_interval_unit)
 {
     auto request                 = make_valid_requested_spm_request();
     request.sample_interval_unit = "ns";
 
-    EXPECT_FALSE(validate_beta_request(request, {}, {}));
+    EXPECT_FALSE(is_config_valid(request, {}, {}));
 }
 
-TEST(spm_beta_validation, accepts_valid_requested_spm_request)
+TEST(spm_config_validation, accepts_valid_requested_spm_request)
 {
     const auto request = make_valid_requested_spm_request();
 
-    EXPECT_TRUE(validate_beta_request(request, {}, {}));
+    EXPECT_TRUE(is_config_valid(request, {}, {}));
+}
+
+TEST(spm_beta_opt_in, accepts_when_spm_is_not_requested)
+{
+    scoped_env env{ sdk_spm_beta_env };
+    ::unsetenv(sdk_spm_beta_env);
+
+    EXPECT_TRUE(sdk_beta_opt_in_enabled(request{}));
+}
+
+TEST(spm_beta_opt_in, rejects_requested_spm_without_sdk_beta_env)
+{
+    scoped_env env{ sdk_spm_beta_env };
+    ::unsetenv(sdk_spm_beta_env);
+
+    EXPECT_FALSE(sdk_beta_opt_in_enabled(make_valid_requested_spm_request()));
+}
+
+TEST(spm_beta_opt_in, accepts_requested_spm_with_sdk_beta_env)
+{
+    scoped_env env{ sdk_spm_beta_env };
+    ::setenv(sdk_spm_beta_env, "ON", 1);
+
+    EXPECT_TRUE(sdk_beta_opt_in_enabled(make_valid_requested_spm_request()));
 }

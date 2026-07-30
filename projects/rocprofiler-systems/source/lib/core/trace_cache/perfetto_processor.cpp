@@ -34,11 +34,9 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "library/rocprofiler-sdk/fwd.hpp"
-#if ROCPROFSYS_HAS_ROCPROFILER_SDK_SPM
-#    include <rocprofiler-sdk/counters.h>
-#endif
 #include <rocprofiler-sdk/context.h>
 
 namespace rocprofsys::trace_cache
@@ -1421,35 +1419,55 @@ perfetto_processor_t::handle([[maybe_unused]] const spm_sample& _spm)
         return;
     }
 
-    auto get_counter_name = [&](std::uint64_t counter_id) -> const std::string& {
-        auto [itr, inserted] = m_spm_counter_name_cache.try_emplace(counter_id);
-        if(inserted)
-        {
-            auto info = rocprofiler_counter_info_v0_t{};
-            auto status =
-                rocprofiler_query_counter_info(rocprofiler_counter_id_t{ counter_id },
-                                               ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
-            itr->second = (status == ROCPROFILER_STATUS_SUCCESS && info.name != nullptr)
-                              ? std::string{ info.name }
-                              : fmt::format("counter_{}", counter_id);
-        }
-        return itr->second;
+    struct spm_track_info
+    {
+        bool   valid     = false;
+        size_t track_key = 0;
     };
 
-    for(const auto& sample : _spm.samples)
+    auto tracks = std::vector<spm_track_info>{};
+    tracks.reserve(_spm.counters.size());
+    for(const auto& counter : _spm.counters)
     {
-        const auto& counter_name = get_counter_name(sample.counter_id);
-        const auto  track_name =
-            fmt::format("GPU SPM {} [{}] XCC {} SE {} Instance {}", counter_name,
-                        device_id, sample.xcc, sample.shader_engine, sample.instance);
-        const auto track_key = std::hash<std::string>{}(
-            track_name + std::to_string(sample.counter_instance_id));
+        const auto name_info =
+            m_metadata.find_spm_counter_by_id(device_id, counter.counter_instance_id);
+        if(!name_info)
+        {
+            LOG_DEBUG("No SPM counter metadata for device {} counter instance {}; "
+                      "dropping samples for this counter",
+                      device_id, counter.counter_instance_id);
+            tracks.emplace_back();
+            continue;
+        }
+
+        const auto& counter_name = name_info->get().counter_name;
+        const auto  track_name = fmt::format("GPU SPM {} [{}]", counter_name, device_id);
+        const auto  track_key  = std::hash<std::string>{}(
+            track_name + std::to_string(counter.counter_instance_id));
 
         if(!counter_collection_track::exists(track_key))
             counter_collection_track::emplace(track_key, track_name, ROCM_COUNTER_UNIT);
-        TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value,
-                      counter_collection_track::at(track_key, 0), sample.timestamp,
-                      sample.value);
+        tracks.push_back({ true, track_key });
+    }
+
+    for(const auto& sample : _spm.samples)
+    {
+        for(const auto& value : sample.values)
+        {
+            if(value.counter_info_index >= _spm.counters.size())
+            {
+                LOG_WARNING("Skipping SPM sample with invalid counter info index {}",
+                            value.counter_info_index);
+                continue;
+            }
+
+            const auto& track = tracks[value.counter_info_index];
+            if(!track.valid) continue;
+
+            TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value,
+                          counter_collection_track::at(track.track_key, 0),
+                          sample.timestamp, value.value);
+        }
     }
 #else
     (void) _spm;
