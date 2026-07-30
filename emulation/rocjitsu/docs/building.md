@@ -25,8 +25,18 @@ cmake --build build
 | `RJ_ENABLE_UBSAN` | `OFF` | Enable UndefinedBehaviorSanitizer |
 | `RJ_ENABLE_TSAN` | `OFF` | Enable ThreadSanitizer |
 | `RJ_ENABLE_MSAN` | `OFF` | Enable MemorySanitizer |
+| `RJ_ENABLE_ASSERTIONS` | `OFF` | Keep first-party C/C++ assertions active in optimized builds |
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
+
+### Optimized builds with assertions
+
+Use the assertions configuration to reproduce failures from the required CI
+gate locally:
+
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRJ_ENABLE_ASSERTIONS=1
+```
 
 ### Sanitizer builds
 

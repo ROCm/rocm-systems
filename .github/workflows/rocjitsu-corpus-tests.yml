@@ -63,6 +63,19 @@ jobs:
             enable_ubsan: 0
             enable_tsan: 0
             enable_msan: 0
+            enable_assertions: 0
+            enable_expensive_checks: 0
+          - name: assertions
+            allow_failure: false
+            # Keep the required gate focused on relay routing, patch placement,
+            # and the trampoline planning surface covered by this configuration.
+            test_regex: '^(BuildConfigurationTest|ConSanBranchOnlyRelayRouter|DbiPatchPlacementPlanner|SoppBranchRelayPlanner|TrampolineBuilder(Plan|Emit)?)\.'
+            build_type: Release
+            enable_asan: 0
+            enable_ubsan: 0
+            enable_tsan: 0
+            enable_msan: 0
+            enable_assertions: 1
             enable_expensive_checks: 0
           - name: asan-ubsan
             allow_failure: true
@@ -72,6 +85,7 @@ jobs:
             enable_ubsan: 1
             enable_tsan: 0
             enable_msan: 0
+            enable_assertions: 0
             enable_expensive_checks: 1
           - name: asan-ubsan-gcc
             allow_failure: true
@@ -81,6 +95,7 @@ jobs:
             enable_ubsan: 1
             enable_tsan: 0
             enable_msan: 0
+            enable_assertions: 0
             enable_expensive_checks: 1
             c_compiler: gcc
             cxx_compiler: g++
@@ -95,6 +110,8 @@ jobs:
             enable_ubsan: 0
             enable_tsan: 1
             enable_msan: 0
+            enable_assertions: 0
+            enable_expensive_checks: 0
 
     steps:
       - name: Install base dependencies
@@ -200,21 +217,37 @@ jobs:
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }} \
+            -DRJ_ENABLE_ASSERTIONS=${{ matrix.enable_assertions }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }}
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
           WORKERS="$(( ($(nproc) + 1) / 2 ))"
-          cmake --build "${ROCJITSU_BUILD_DIR}" -j "${WORKERS}"
+          BUILD_TARGET=()
+          if [[ "${{ matrix.enable_assertions }}" == "1" ]]; then
+            # Every suite in the focused assertions regex is registered by this target.
+            BUILD_TARGET=(--target rocjitsu_tests)
+          fi
+          cmake --build "${ROCJITSU_BUILD_DIR}" \
+            "${BUILD_TARGET[@]}" \
+            -j "${WORKERS}"
+
+          if [[ "${{ matrix.enable_assertions }}" == "1" ]]; then
+            ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+              -R '^BuildConfigurationTest\.' \
+              --no-tests=error \
+              --output-on-failure
+          fi
 
           CTEST_SELECTION=()
           if [[ -n "${{ matrix.test_regex }}" ]]; then
             CTEST_SELECTION=(-R "${{ matrix.test_regex }}")
           fi
+          TEST_WORKERS="$(( WORKERS < 8 ? WORKERS : 8 ))"
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             "${CTEST_SELECTION[@]}" \
             -E "${EXCLUDED_TESTS}" \
             --output-on-failure \
-            -j "${WORKERS}"
+            -j "${TEST_WORKERS}"
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"

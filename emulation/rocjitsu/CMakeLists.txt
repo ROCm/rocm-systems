@@ -128,6 +128,11 @@ option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(RJ_ENABLE_MSAN "Enable MemorySanitizer" OFF)
+option(
+    RJ_ENABLE_ASSERTIONS
+    "Keep first-party C and C++ assertions enabled in optimized configurations"
+    OFF
+)
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
 option(
     RJ_ENABLE_EXPENSIVE_CHECKS
@@ -304,6 +309,28 @@ set(FLATBUFFERS_INSTALL OFF CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
+
+# First-party targets inherit these optimized-build assertion settings through
+# their shared build configuration. Fetched dependencies keep their upstream
+# assertion configuration.
+add_library(rj_build_config INTERFACE)
+if(RJ_ENABLE_ASSERTIONS)
+    if(MSVC)
+        target_compile_options(
+            rj_build_config
+            INTERFACE $<$<COMPILE_LANGUAGE:C,CXX>:/UNDEBUG>
+        )
+    else()
+        target_compile_options(
+            rj_build_config
+            INTERFACE $<$<COMPILE_LANGUAGE:C,CXX>:-UNDEBUG>
+        )
+    endif()
+    target_compile_definitions(
+        rj_build_config
+        INTERFACE RJ_ASSERTIONS_ENABLED=1
+    )
+endif()
 
 include(rj_flatbuffers)
 

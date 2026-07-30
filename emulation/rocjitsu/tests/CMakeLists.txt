@@ -488,6 +488,9 @@ add_executable(
     data_types_test.cpp
     drm_info_layout_test.cpp
 )
+if(RJ_ENABLE_ASSERTIONS)
+    target_sources(rocjitsu_tests PRIVATE build_configuration_test.cpp)
+endif()
 rj_add_consan_unit_sources(rocjitsu_tests)
 if(HAS_DEVICE_KERNELS)
     target_sources(
@@ -1191,7 +1194,10 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
             RJ_INSTALLED_ROCJITSU_BIN="${_rj_installed_rocjitsu_bin}"
             RJ_INSTALLED_CONFIG_PATH="${_rj_installed_cdna4_kmd_config}"
     )
-    target_link_libraries(rocminfo_test PRIVATE GTest::gtest_main)
+    target_link_libraries(
+        rocminfo_test
+        PRIVATE GTest::gtest_main rj_build_config
+    )
     add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_shared)
 
     if(RJ_INSTALL_TESTS)
@@ -1240,7 +1246,10 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
             RJ_INSTALLED_ROCJITSU_BIN="${_rj_installed_rocjitsu_bin}"
             RJ_INSTALLED_CONFIG_PATH="${_rj_installed_dbt_guest_config}"
     )
-    target_link_libraries(dbt_guest_rocminfo_test PRIVATE GTest::gtest_main)
+    target_link_libraries(
+        dbt_guest_rocminfo_test
+        PRIVATE GTest::gtest_main rj_build_config
+    )
     add_dependencies(
         dbt_guest_rocminfo_test
         rocjitsu_bin
@@ -1339,7 +1348,10 @@ if(HSA_RUNTIME64)
         hsa_init_test
         PRIVATE ${RJ_HSA_INCLUDE_DIR} ${HSA_INCLUDE_DIR}
     )
-    target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
+    target_link_libraries(
+        hsa_init_test
+        PRIVATE ${HSA_RUNTIME64} GTest::gtest rj_build_config
+    )
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
     add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_shared)
     if(RJ_INSTALL_TESTS)
@@ -2268,7 +2280,10 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
                 RJ_INSTALLED_INTERPOSER_DUP_BIN="interposer_dup_test"
         )
-        target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
+        target_link_libraries(
+            daemon_test
+            PRIVATE GTest::gtest_main rj_build_config
+        )
         add_dependencies(
             daemon_test
             rocjitsu_bin

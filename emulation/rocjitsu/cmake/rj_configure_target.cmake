@@ -35,6 +35,7 @@ function(rj_configure_target target)
         TOOL
     )
     cmake_parse_arguments(ARG "${options}" "" "" ${ARGN})
+    target_link_libraries(${target} PRIVATE rj_build_config)
 
     # Expand presets.
     if(ARG_LIB)
