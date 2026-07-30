@@ -157,10 +157,7 @@ class db_analysis(OmniAnalyze_Base):
             for dispatch in self._dispatch_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
-                kernel_key: KernelKey = (
-                    dispatch.pid if self.pc_sampling_only() else None,
-                    dispatch.kernel_name,
-                )
+                kernel_key: KernelKey = (dispatch.pid, dispatch.kernel_name)
                 # Add kernel object and map it, if not already added
                 if kernel_key not in kernel_objs:
                     kernel_objs[kernel_key] = orm.Kernel(
