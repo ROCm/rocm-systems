@@ -35,6 +35,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
+  Operand scc;
 };
 
 class SAddkCoI32Sopk : public Sopk {
@@ -43,6 +44,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand simm16;
+  Operand scc;
 };
 
 class SMulkI32Sopk : public Sopk {
@@ -86,6 +88,8 @@ public:
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand sdst;
   Operand simm16;
+  Operand pc;
+  Operand pc_in;
 };
 
 } // namespace gfx1250

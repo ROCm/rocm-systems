@@ -61,6 +61,6 @@ add_subdirectory(library)
 add_subdirectory(sanityTests)
 add_subdirectory(executionContext)
 
-if(ENABLE_OOB_TESTS AND HIP_PLATFORM STREQUAL "amd" AND NOT HIP_ASAN_ENABLED AND UNIX)
+if(ENABLE_OOB_TESTS AND HIP_PLATFORM STREQUAL "amd" AND NOT HIP_TESTS_ASAN_ENABLED AND UNIX)
   add_subdirectory(oob)
 endif()

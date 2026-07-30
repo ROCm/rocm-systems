@@ -651,7 +651,8 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
     bool regNeedConnect = true;
     ncclRegisterCollNvlsBuffers(comm, task, regBufSend, regBufRecv, &planner->collCleanupQueue, &regNeedConnect);
 
-    if (comm->runtimeConn && comm->initAlgoChannels[task->algorithm] == false) {
+    // Connect PAT on demand even when runtimeConn is off (ROCm default), so PAT QPs are created lazily on first PAT collective.
+    if ((comm->runtimeConn || task->algorithm == NCCL_ALGO_PAT) && comm->initAlgoChannels[task->algorithm] == false) {
       if (task->algorithm == NCCL_ALGO_NVLS_TREE && comm->initAlgoChannels[NCCL_ALGO_NVLS] == false &&
           regNeedConnect == true) {
         comm->initAlgoChannels[NCCL_ALGO_NVLS] = true;
@@ -2474,16 +2475,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", nBytes, info->algorithm, info->protocol, time);
   int nc = comm->nChannels;
 #ifdef ENABLE_WARP_SPEED
-  if (comm->topo->warpSpeedEnabled) {
-    nc /= comm->warpSpeedChannelMultiplier;
-    // Temporary check as we reduce CU usage for all collectives
-    // TODO: Remove this condition after optimizing all collectives
-    if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 &&
-        info->func != ncclFuncAllReduce && info->func != ncclFuncAllGather && info->func != ncclFuncReduceScatter &&
-        ncclParamMaxNchannels() < 0) {
-      nc *= 2;
-    }
-  }
+  nc = rcclWarpSpeedAdjustChannels(comm, info, nc);
 #endif
   int nt = comm->maxThreads[info->algorithm][info->protocol];
   int threadThreshold = comm->threadThresholds[info->algorithm][info->protocol];

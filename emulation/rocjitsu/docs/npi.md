@@ -41,6 +41,8 @@ What the grep can't point at are the "create a new thing" steps:
   and author the hand-written per-arch files (`isa.h`, `insts.h`, `mma_exec.h`,
   `addr_calc.h/.cpp`, ...) under
   `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<isa>/`.
+- Define its [ISA target provider](isa-target-providers.md) and select it in
+  each executable or shared object that should contain it.
 - Add HIP kernel coverage under `tests/kernels/`.
 
 ## Reminder
