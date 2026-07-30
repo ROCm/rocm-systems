@@ -33,7 +33,7 @@ on:
         # TODO: Drop this pin once the workflow's ROCm SDK includes the gfx1250
         # rocBLAS and hipBLASLt libraries required by the latest corpus.
         # Last updated on 2026/07/17.
-        default: "aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4"
+        default: "cc781dd88cabd1638d1beeb4539c521ccf27de60"
         required: true
 
 concurrency:
@@ -163,8 +163,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/17.
-          ref: ${{ github.event.inputs.legacy_corpus_ref || 'aa54cc86c9ebff3eb840743b36ff8d9b3b2d43c4' }}
+          # Last updated on 2026/08/06.
+          ref: ${{ github.event.inputs.legacy_corpus_ref || 'cc781dd88cabd1638d1beeb4539c521ccf27de60' }}
           path: rocjitsu-test-corpus
 
       - name: Checkout gfx1250 corpus
