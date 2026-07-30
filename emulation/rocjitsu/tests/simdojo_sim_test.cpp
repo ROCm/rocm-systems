@@ -219,6 +219,30 @@ TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
   }
 }
 
+TEST(TopologyPartitionTest, ManualPartitionRunsExternalProducerOnAssignedPartition) {
+  ProducerComponent external("external", 3);
+  SimulationEngine engine({.num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto consumer_component = std::make_unique<ConsumerComponent>("consumer");
+  auto *consumer = consumer_component.get();
+  root->add_child(std::move(consumer_component));
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(external.out_port(), consumer->in_port(), 0);
+
+  engine.topology().partition_manual(2, [](Component *) { return PartitionID{1}; });
+
+  ASSERT_EQ(external.partition_id(), 1u);
+  ASSERT_EQ(consumer->partition_id(), 1u);
+  engine.create();
+  auto exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(external.sent_, 3u);
+  ASSERT_EQ(consumer->received.size(), 3u);
+  for (size_t i = 0; i < consumer->received.size(); ++i)
+    EXPECT_EQ(consumer->received[i].second, i);
+}
+
 TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
   ProducerComponent external("external", 0, 1, false);
   Topology topology;

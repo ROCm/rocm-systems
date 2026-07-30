@@ -180,9 +180,10 @@ public:
 
   /// @brief Partition the topology with explicit partition assignments.
   ///
-  /// @details Bypasses the FM partitioner. Each component is assigned a
-  /// partition ID by the caller's callback. Used by tests that need
-  /// deterministic partition layouts.
+  /// @details Bypasses the FM partitioner. The caller's callback assigns every
+  /// component in the topology tree and every external link-endpoint owner.
+  /// This is the explicit policy entry point for hardware or ownership
+  /// constraints and deterministic partition layouts.
   /// @param num_partitions Number of partitions to create.
   /// @param assigner Callback returning the partition ID for each component.
   /// @throws std::invalid_argument if @p num_partitions is zero or @p assigner

@@ -51,13 +51,18 @@ struct TopologyBuildResult {
 /// the topology into a SimulationEngine. Multi-threaded rocjitsu topologies
 /// use the XCD-aware policy from rocjitsu/vm/amdgpu/partitioning.h:
 /// @code
+///   #include "rocjitsu/vm/amdgpu/partitioning.h"
+///
 ///   auto loaded = load_config("config.json", kEmbeddedSchema);
 ///   auto *soc = loaded.soc();
+///   loaded.engine_config.num_threads =
+///       rocjitsu::amdgpu::clamp_xcd_partition_count(
+///           soc, loaded.engine_config.num_threads);
 ///   simdojo::SimulationEngine engine(loaded.engine_config);
 ///   engine.topology().set_root(loaded.take_root());
 ///   loaded.wire_links(engine.topology());
 ///   if (loaded.engine_config.num_threads > 1 &&
-///       !amdgpu::partition_topology_by_xcds(
+///       !rocjitsu::amdgpu::partition_topology_by_xcds(
 ///           engine.topology(), soc, loaded.engine_config.num_threads))
 ///     throw std::invalid_argument("multi-threaded topology requires an XCD");
 ///   engine.create();

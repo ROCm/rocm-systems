@@ -17,6 +17,17 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+/// @brief Clamp a requested partition count to the visible XCD count.
+///
+/// @details Counts XCDs across all non-null SoCs and clamps
+/// @p requested_partitions to the inclusive range [1, max(total XCDs, 1)].
+/// @returns The usable partition count.
+[[nodiscard]] uint32_t clamp_xcd_partition_count(std::span<SoC *> socs,
+                                                 uint32_t requested_partitions);
+
+/// @brief Convenience overload for a single SoC.
+[[nodiscard]] uint32_t clamp_xcd_partition_count(SoC *soc, uint32_t requested_partitions);
+
 /// @brief Partition an AMDGPU topology by whole XCD subtrees.
 ///
 /// @details If @p num_partitions is nonzero and at least one XCD is present,

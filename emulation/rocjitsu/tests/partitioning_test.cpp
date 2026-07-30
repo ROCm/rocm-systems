@@ -103,6 +103,25 @@ TEST(XcdPartitioningTest, FourThreadsDistributesCdna4XcdsRoundRobinWithoutSplits
     expect_subtree_partition(topology.soc->xcd(i), i % 4);
 }
 
+TEST(XcdPartitioningTest, ClampPartitionCountUsesAllNonNullSocs) {
+  auto loaded = config::load_config(CONFIG_2GPU_PATH, rocjitsu::kEmbeddedSchema);
+  ASSERT_EQ(loaded.extra_gpu_builds.size(), 1u);
+
+  auto *soc0 = loaded.soc();
+  auto *soc1 = dynamic_cast<SoC *>(loaded.extra_gpu_builds[0].root.get());
+  ASSERT_NE(soc0, nullptr);
+  ASSERT_NE(soc1, nullptr);
+  ASSERT_EQ(soc0->num_xcds(), 8u);
+  ASSERT_EQ(soc1->num_xcds(), 8u);
+
+  std::array<SoC *, 3> socs = {soc0, nullptr, soc1};
+  EXPECT_EQ(amdgpu::clamp_xcd_partition_count(std::span<SoC *>(socs), 0), 1u);
+  EXPECT_EQ(amdgpu::clamp_xcd_partition_count(std::span<SoC *>(socs), 4), 4u);
+  EXPECT_EQ(amdgpu::clamp_xcd_partition_count(std::span<SoC *>(socs), 64), 16u);
+  EXPECT_EQ(amdgpu::clamp_xcd_partition_count(soc0, 64), 8u);
+  EXPECT_EQ(amdgpu::clamp_xcd_partition_count(static_cast<SoC *>(nullptr), 64), 1u);
+}
+
 TEST(XcdPartitioningTest, ZeroPartitionsIsNoopWithoutManualPartitions) {
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
@@ -201,6 +220,20 @@ TEST(XcdPartitioningTest, VmStepRejectsMultipleEnginePartitions) {
   EXPECT_EQ(rj_vm_run(vm.get(), &ticks_executed), ROCJITSU_STATUS_SUCCESS);
 }
 
+TEST(XcdPartitioningTest, VmStepSucceedsWithSingleEnginePartition) {
+  auto json = config_json_with_num_threads(CONFIG_1XCD_PATH, 1);
+
+  rj_vm_t *raw_vm = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_vm, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+
+  int active = 7;
+  EXPECT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(active, 0);
+}
+
 TEST(XcdPartitioningTest, CApiClampsZeroThreadsToOne) {
   auto json = config_json_with_num_threads(CONFIG_1XCD_PATH, 0);
 
@@ -237,6 +270,18 @@ TEST(XcdPartitioningTest, CApiClampsMultiGpuThreadsToTotalXcdCountAndRuns) {
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
 
   EXPECT_EQ(vm->engine_config.num_threads, 16u);
+  ASSERT_NE(vm->vm, nullptr);
+  ASSERT_EQ(vm->vm->num_socs(), 2u);
+
+  uint32_t global_xcd_index = 0;
+  for (uint32_t gpu = 0; gpu < vm->vm->num_socs(); ++gpu) {
+    auto *soc = vm->vm->soc(gpu);
+    ASSERT_NE(soc, nullptr);
+    ASSERT_EQ(soc->num_xcds(), 8u);
+    for (uint32_t i = 0; i < soc->num_xcds(); ++i, ++global_xcd_index)
+      expect_subtree_partition(soc->xcd(i), global_xcd_index % vm->engine_config.num_threads);
+  }
+
   EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
 }
 

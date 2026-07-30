@@ -105,12 +105,13 @@ private:
 ///
 /// Typical usage:
 /// @code
+///   SimulationEngine::Config config{.num_threads = 4};
 ///   SimulationEngine engine(config);
 ///   engine.topology().set_root(std::move(my_model));
-///   engine.create(); // partitions, initializes components
+///   engine.topology().partition_balanced(config.num_threads);
+///   engine.create(); // validates the partition policy and initializes components
 ///   // (user enqueues work via CP)
 ///   auto exit = engine.run(); // starts up components, runs to completion
-///   // OR: while (engine.step()) {} // starts up on first call, one tick per call
 /// @endcode
 class SimulationEngine {
 public:

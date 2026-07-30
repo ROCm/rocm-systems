@@ -3,12 +3,28 @@
 
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <unordered_map>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+uint32_t clamp_xcd_partition_count(std::span<SoC *> socs, uint32_t requested_partitions) {
+  uint32_t num_xcds = 0;
+  for (auto *soc : socs) {
+    if (soc)
+      num_xcds += soc->num_xcds();
+  }
+
+  return std::clamp(requested_partitions, 1u, std::max(num_xcds, 1u));
+}
+
+uint32_t clamp_xcd_partition_count(SoC *soc, uint32_t requested_partitions) {
+  std::array<SoC *, 1> socs = {soc};
+  return clamp_xcd_partition_count(std::span<SoC *>(socs), requested_partitions);
+}
 
 bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> socs,
                                 uint32_t num_partitions) {

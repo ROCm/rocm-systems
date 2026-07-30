@@ -249,10 +249,10 @@ void Topology::partition_manual(uint32_t num_partitions,
     throw std::invalid_argument("partition_manual: num_partitions must be nonzero");
 
   auto components = collect_all_components();
-  const size_t num_tree_components = components.size();
+  append_link_endpoint_owners(components);
 
   std::vector<PartitionID> assignments;
-  assignments.reserve(num_tree_components);
+  assignments.reserve(components.size());
   for (auto *comp : components) {
     PartitionID pid = assigner(comp);
     if (pid >= num_partitions)
@@ -271,22 +271,8 @@ void Topology::partition_manual(uint32_t num_partitions,
     partitions[pid].total_weight += comp->weight();
   }
 
-  // A link endpoint may be owned by a component that is not part of the topology
-  // tree (e.g. a standalone backing controller wired in after construction).
-  // Include each external owner once on partition 0 on every rebuild,
-  // regardless of a stale partition ID from a previous partition_manual()
-  // call.
-  append_link_endpoint_owners(components);
-  for (size_t i = num_tree_components; i < components.size(); ++i) {
-    auto *owner = components[i];
-    partitions[0].components.push_back(owner);
-    partitions[0].total_weight += owner->weight();
-  }
-
-  for (size_t i = 0; i < num_tree_components; ++i)
+  for (size_t i = 0; i < components.size(); ++i)
     components[i]->set_partition_id(assignments[i]);
-  for (size_t i = num_tree_components; i < components.size(); ++i)
-    components[i]->set_partition_id(0);
 
   partitions_ = std::move(partitions);
   classify_links();
