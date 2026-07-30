@@ -3191,89 +3191,6 @@ __global__ void indexedSignalResetOnlyKernel(
   }
 }
 
-// put + ncclGin_VASignalAdd on a non-zero VA offset; sigWin uses STRICT_ORDERING.
-TEST_F(GinMPIDeviceTests, VASignalAdd_Put) {
-  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
-  if (auto reason = vaSignalTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
-  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
-    GTEST_SKIP() << "Requires exactly 2 ranks";
-
-  ASSERT_EQ(ncclSuccess, createTestCommunicator());
-  ncclComm_t  comm   = getActiveCommunicator();
-  hipStream_t stream = getActiveStream();
-  int rank = -1, nRanks = -1;
-  ncclCommUserRank(comm, &rank);
-  ncclCommCount(comm, &nRanks);
-  ASSERT_EQ(2, nRanks);
-
-  constexpr size_t kBytes    = 4096;
-  constexpr size_t kSigBytes = 64;
-  constexpr size_t kSigOff   = 8;   // non-zero, 8-byte aligned signal cell
-  constexpr uint64_t kAddend = 5;
-  constexpr int    kPeer     = 1;
-
-  void* dSrc = nullptr;
-  void* dDst = nullptr;
-  void* dSig = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSig, kSigBytes));
-  auto memCleanup = makeScopeGuard([&]() {
-    if (dSrc) (void)ncclMemFree(dSrc);
-    if (dDst) (void)ncclMemFree(dDst);
-    if (dSig) (void)ncclMemFree(dSig);
-  });
-
-  ncclWindow_t srcWin = nullptr, dstWin = nullptr, sigWin = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dSrc, kBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dDst, kBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dSig, kSigBytes, &sigWin,
-                                       NCCL_WIN_COLL_SYMMETRIC | NCCL_WIN_STRICT_ORDERING));
-  auto winCleanup = makeScopeGuard([&]() {
-    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
-    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
-    if (sigWin) (void)ncclCommWindowDeregister(comm, sigWin);
-  });
-
-  ncclDevCommRequirements reqs = defaultGinReqs();
-  reqs.railGinBarrierCount = 1;
-  reqs.ginSignalCount      = 1;
-  ncclDevComm devComm{};
-  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
-  auto devCommCleanup = makeScopeGuard([&]() {
-    (void)ncclDevCommDestroy(comm, &devComm);
-  });
-
-  std::vector<uint8_t> hs(kBytes, 0), hd(kBytes, 0), hsig(kSigBytes, 0);
-  for (size_t i = 0; i < kBytes; i++) hs[i] = static_cast<uint8_t>(0x37 + (i & 0x1F));
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hs.data(), kBytes, hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hd.data(), kBytes, hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSig, hsig.data(), kSigBytes, hipMemcpyHostToDevice));
-
-  MPI_Barrier(MPI_COMM_WORLD);
-  if (rank == 0) {
-    putVASignalAddProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
-        srcWin, dstWin, kBytes, sigWin, kSigOff, kAddend, kPeer, devComm);
-  } else {
-    putVASignalConsumerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(sigWin, kSigOff, kAddend, devComm);
-  }
-  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
-
-  {
-    std::vector<uint8_t> r(kBytes, 0);
-    hipError_t hipErr = hipSuccess;
-    if (rank == 1)
-      hipErr = hipMemcpy(r.data(), dDst, kBytes, hipMemcpyDeviceToHost);
-    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
-    ASSERT_MPI_BUFFER_EQ_ON_RANK(rank, 1, hs, r);
-  }
-}
-
 // gin.signal() with VA Inc/Add and indexed SignalAdd (no payload GFDs).
 TEST_F(GinMPIDeviceTests, VASignal_NoPayload_IncAndAdd) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
@@ -3407,7 +3324,7 @@ TEST_F(GinMPIDeviceTests, VASignal_ReadAndReset) {
 
   constexpr size_t kBytes    = 4096;
   constexpr size_t kSigBytes = 64;
-  constexpr size_t kSigOff   = 0;
+  constexpr size_t kSigOff   = 8;   // non-zero, 8-byte aligned VA signal cell
   constexpr ncclGinSignal_t kSigIdx = 1;
   constexpr uint64_t kVaAddend = 5;
   constexpr uint64_t kIdxAddend = 9;
@@ -3460,7 +3377,7 @@ TEST_F(GinMPIDeviceTests, VASignal_ReadAndReset) {
   ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSig, hsig.data(), kSigBytes, hipMemcpyHostToDevice));
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dOut, 0, 2 * sizeof(uint64_t)));
 
-  // VA: put + VASignalAdd, then read/reset on consumer.
+  // VA: put + VASignalAdd (STRICT_ORDERING, non-zero sigOff), read/reset, payload check.
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0) {
     putVASignalAddProducerKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
@@ -3479,6 +3396,14 @@ TEST_F(GinMPIDeviceTests, VASignal_ReadAndReset) {
     ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
     ASSERT_MPI_EQ_ON_RANK(rank, 1, kVaAddend, hostOut[0]);
     ASSERT_MPI_EQ_ON_RANK(rank, 1, kResetExpected, hostOut[1]);
+  }
+  {
+    std::vector<uint8_t> r(kBytes, 0);
+    hipError_t hipErr = hipSuccess;
+    if (rank == 1)
+      hipErr = hipMemcpy(r.data(), dDst, kBytes, hipMemcpyDeviceToHost);
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, 1, hipErr);
+    ASSERT_MPI_BUFFER_EQ_ON_RANK(rank, 1, hs, r);
   }
 
   // Indexed: put + SignalAdd, then read/reset on consumer.

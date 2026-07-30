@@ -3176,7 +3176,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall); excludes Phase-1 VA signal tests (gin_device_signal_phase1) and tests with dedicated entries below",
-          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.VASignalAdd_Put:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create",
+          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create",
           "timeout": 600
         },
         {
@@ -3312,18 +3312,13 @@
           "test_filter": "GinMPIDeviceTests.VASignal_Put"
         },
         {
-          "name": "GIN_VASignalAdd_Put",
-          "description": "put + ncclGin_VASignalAdd at non-zero VA offset with NCCL_WIN_STRICT_ORDERING",
-          "test_filter": "GinMPIDeviceTests.VASignalAdd_Put"
-        },
-        {
           "name": "GIN_VASignal_NoPayload_IncAndAdd",
           "description": "Zero-byte gin.signal() phases: VASignalInc, VASignalAdd, indexed SignalAdd",
           "test_filter": "GinMPIDeviceTests.VASignal_NoPayload_IncAndAdd"
         },
         {
           "name": "GIN_VASignal_ReadAndReset",
-          "description": "waitSignal/readSignal/resetSignal on VA and indexed signal cells after remote updates",
+          "description": "put + VASignalAdd (non-zero VA offset, STRICT_ORDERING) with payload verify; waitSignal/readSignal/resetSignal on VA and indexed cells",
           "test_filter": "GinMPIDeviceTests.VASignal_ReadAndReset"
         },
         {
