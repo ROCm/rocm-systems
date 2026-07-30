@@ -787,6 +787,13 @@ build_id_from_target_memory(pid_t                pid,
     });
 }
 
+// Runs only when the file's device/inode did not match the mapping, which is
+// the case for a file found by pathname under /proc/<pid>/root after an overlay
+// or bind mount gave the same content a different inode. Matching Build IDs
+// then say the file and the mapped image are the same build. That is an
+// identity check, not an integrity check: the linker writes the Build ID once
+// and nothing recomputes it, so a library whose bytes are edited after linking
+// keeps its original note and is still accepted here.
 bool
 build_id_matches_target(pid_t                pid,
                         const target_elf&    elf,
