@@ -128,8 +128,6 @@ class MetricCommands:
                 args.base_board = base_board
             if gpu_board:
                 args.gpu_board = gpu_board
-            if partition:
-                args.partition = partition
             if power:
                 args.power = power
             if clock:
@@ -182,6 +180,8 @@ class MetricCommands:
             if throttle:
                 args.violation = throttle
                 args.throttle = throttle
+            if partition:
+                args.partition = partition
             current_platform_args += [
                 "fan",
                 "voltage_curve",
@@ -340,9 +340,11 @@ class MetricCommands:
         )
         num_partition = partition_metric_info["num_partition"]
 
-        # Fetch partition metrics once per GPU; the sections below reuse this result
+        # Fetch partition metrics once per GPU; the sections below reuse this result.
+        # --partition is only registered on baremetal Linux, so gate on the same
+        # platform condition before reading args.partition.
         gpu_partition_metrics = None
-        if args.partition:
+        if self.helpers.is_baremetal() and self.helpers.is_linux() and args.partition:
             try:
                 gpu_partition_metrics = amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(
                     args.gpu
@@ -477,8 +479,8 @@ class MetricCommands:
                     engine_usage["jpeg_busy"] = "N/A"
                     engine_usage["vcn_busy"] = "N/A"
 
-                    # When partition flag is set, use partition-scoped data source
-                    if args.partition and gpu_partition_metrics is not None:
+                    # Use partition-scoped data when partition metrics were fetched.
+                    if gpu_partition_metrics is not None:
                         xcp_gfx_busy = gpu_partition_metrics.get("xcp_stats.gfx_busy_inst", [])
                         xcp_jpeg_busy = gpu_partition_metrics.get("xcp_stats.jpeg_busy", [])
                         xcp_vcn_busy = gpu_partition_metrics.get("xcp_stats.vcn_busy", [])
@@ -528,6 +530,21 @@ class MetricCommands:
                                 current_xcp
                             ]
                         engine_usage["vcn_busy"] = new_xcp_dict
+                    else:
+                        # On devices without XCP partitions (e.g. Navi), vcn_busy_percent
+                        # is available via sysfs; there is no equivalent sysfs for gfx_busy_inst
+                        # or jpeg_busy on these devices.
+                        try:
+                            engine_usage["vcn_busy"] = amdsmi_interface.amdsmi_get_vcn_busy_percent(
+                                args.gpu
+                            )
+                        except amdsmi_exception.AmdSmiLibraryException as e:
+                            logging.debug(
+                                "Failed to get vcn busy percent for gpu %s | %s",
+                                gpu_id,
+                                e.get_error_info(),
+                            )
+                            engine_usage["vcn_busy"] = "N/A"
 
                     logging.debug(f"After updates to engine_usage dictionary = {engine_usage}")
 
@@ -828,9 +845,9 @@ class MetricCommands:
 
                 clock_unit = "MHz"
 
-                # When partition flag is set, use partition-scoped data source
+                # Use partition-scoped data when partition metrics were fetched.
                 partition_metrics_used = False
-                if args.partition and gpu_partition_metrics is not None:
+                if gpu_partition_metrics is not None:
                     try:
                         partition_metrics_used = True
 
@@ -1478,8 +1495,8 @@ class MetricCommands:
                         e.get_error_info(),
                     )
 
-                # When partition flag is set, use partition-scoped data source
-                if args.partition and gpu_partition_metrics is not None:
+                # Use partition-scoped data when partition metrics were fetched.
+                if gpu_partition_metrics is not None:
                     temperatures = {
                         "edge": temperature_edge_current,
                         "hotspot": temperature_hotspot_current,

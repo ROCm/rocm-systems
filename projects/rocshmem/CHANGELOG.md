@@ -8,8 +8,8 @@
    * `rocshmem_calloc`
    * `rocshmem_buffer_unregister_all`
    * `rocshmem_buffer_register/unregister` for GDA backend
-   * `rocshmem_buffer_register_symmetric` for IPC backend
-   * `rocshmem_buffer_unregister_symmetric` for IPC backend
+   * `rocshmem_buffer_register_symmetric` for IPC and GDA backends
+   * `rocshmem_buffer_unregister_symmetric` for IPC and GDA backends
    * `rocshmem_reduce_on_stream`
    * `rocshmem_team_split_2D`
 * Added tile-granular RMA operations for the IPC backend

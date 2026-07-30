@@ -41,21 +41,18 @@ namespace gin {
 namespace gdaki {
 
 NCCL_DEVICE_INLINE uint32_t docaOptFlagsFromGinOptFlags(uint32_t ginOptFlags) {
-  return DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_DEFAULT
-    | (!!(ginOptFlags & ncclGinOptFlagsMaySkipCreditCheck) * DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_SKIP_AVAILABILITY_CHECK)
-    | (!!(ginOptFlags & ncclGinOptFlagsAggregateRequests) * DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_SKIP_DB_RINGING);
+  return DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_DEFAULT |
+         (!!(ginOptFlags & ncclGinOptFlagsMaySkipCreditCheck) *
+          DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_SKIP_AVAILABILITY_CHECK) |
+         (!!(ginOptFlags & ncclGinOptFlagsAggregateRequests) * DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_SKIP_DB_RINGING);
 }
 
 template <enum doca_gpu_dev_verbs_resource_sharing_mode resource_sharing_mode, typename Coop>
-NCCL_DEVICE_INLINE static void putImplMode(ncclGinCtx ctx, Coop coop, int peer, bool hasWins,
-                                              ncclGinWindow_t dstWin, size_t dstOff, ncclGinWindow_t srcWin,
-                                              size_t srcOff, size_t bytes, bool hasSignal,
-                                              size_t signalOffset, __be32 signalKey, ncclGinSignalOp_t signalOp,
-                                              uint64_t signalOpArg, bool hasCounter,
-                                              ncclGinCounter_t counterId, bool hasDescriptor,
-                                              ncclGinDescriptorSmem* descriptor,
-                                              cuda::thread_scope required, cuda::thread_scope given,
-                                              uint32_t optFlags) {
+NCCL_DEVICE_INLINE static void putImplMode(
+  ncclGinCtx ctx, Coop coop, int peer, bool hasWins, ncclGinWindow_t dstWin, size_t dstOff, ncclGinWindow_t srcWin,
+  size_t srcOff, size_t bytes, bool hasSignal, size_t signalOffset, __be32 signalKey, ncclGinSignalOp_t signalOp,
+  uint64_t signalOpArg, bool hasCounter, ncclGinCounter_t counterId, bool hasDescriptor,
+  ncclGinDescriptorSmem* descriptor, cuda::thread_scope required, cuda::thread_scope given, uint32_t optFlags) {
   using nccl::utility::loadConst;
   coop.sync();
   if (coop.thread_rank() == 0) {
@@ -100,14 +97,14 @@ NCCL_DEVICE_INLINE static void putImplMode(ncclGinCtx ctx, Coop coop, int peer, 
     if (hasWins) {
       if (hasSignal && hasCounter) {
         doca_gpu_dev_verbs_put_signal_counter<DOCA_GPUNETIO_VERBS_SIGNAL_OP_ADD, resource_sharing_mode>(
-          qp, raddr, laddr, bytes, sig_raddr, sig_laddr, signalOpArg, companion_qp, counter_raddr,
-          counter_laddr, 1, codeOpt);
+          qp, raddr, laddr, bytes, sig_raddr, sig_laddr, signalOpArg, companion_qp, counter_raddr, counter_laddr, 1,
+          codeOpt);
       } else if (hasSignal) {
         doca_gpu_dev_verbs_put_signal<DOCA_GPUNETIO_VERBS_SIGNAL_OP_ADD, resource_sharing_mode>(
           qp, raddr, laddr, bytes, sig_raddr, sig_laddr, signalOpArg, codeOpt);
       } else if (hasCounter) {
-        doca_gpu_dev_verbs_put_counter<resource_sharing_mode>(
-          qp, raddr, laddr, bytes, companion_qp, counter_raddr, counter_laddr, 1, codeOpt);
+        doca_gpu_dev_verbs_put_counter<resource_sharing_mode>(qp, raddr, laddr, bytes, companion_qp, counter_raddr,
+                                                              counter_laddr, 1, codeOpt);
       } else {
         doca_gpu_dev_verbs_put<resource_sharing_mode>(qp, raddr, laddr, bytes, codeOpt);
       }
@@ -116,8 +113,8 @@ NCCL_DEVICE_INLINE static void putImplMode(ncclGinCtx ctx, Coop coop, int peer, 
         doca_gpu_dev_verbs_signal_counter<DOCA_GPUNETIO_VERBS_SIGNAL_OP_ADD, resource_sharing_mode>(
           qp, sig_raddr, sig_laddr, signalOpArg, companion_qp, counter_raddr, counter_laddr, 1, codeOpt);
       } else {
-        doca_gpu_dev_verbs_signal<DOCA_GPUNETIO_VERBS_SIGNAL_OP_ADD, resource_sharing_mode>(
-          qp, sig_raddr, sig_laddr, signalOpArg, codeOpt);
+        doca_gpu_dev_verbs_signal<DOCA_GPUNETIO_VERBS_SIGNAL_OP_ADD, resource_sharing_mode>(qp, sig_raddr, sig_laddr,
+                                                                                            signalOpArg, codeOpt);
       }
     }
 
@@ -130,41 +127,32 @@ NCCL_DEVICE_INLINE static void putImplMode(ncclGinCtx ctx, Coop coop, int peer, 
 }
 
 template <typename Coop>
-NCCL_DEVICE_INLINE static void putImpl(ncclGinCtx ctx, Coop coop, int peer, bool hasWins,
-                                              ncclGinWindow_t dstWin, size_t dstOff, ncclGinWindow_t srcWin,
-                                              size_t srcOff, size_t bytes, bool hasSignal,
-                                              size_t signalOffset, __be32 signalKey, ncclGinSignalOp_t signalOp,
-                                              uint64_t signalOpArg, bool hasCounter,
-                                              ncclGinCounter_t counterId, bool hasDescriptor,
-                                              ncclGinDescriptorSmem* descriptor,
-                                              cuda::thread_scope required, cuda::thread_scope given,
-                                              uint32_t optFlags) {
+NCCL_DEVICE_INLINE static void putImpl(
+  ncclGinCtx ctx, Coop coop, int peer, bool hasWins, ncclGinWindow_t dstWin, size_t dstOff, ncclGinWindow_t srcWin,
+  size_t srcOff, size_t bytes, bool hasSignal, size_t signalOffset, __be32 signalKey, ncclGinSignalOp_t signalOp,
+  uint64_t signalOpArg, bool hasCounter, ncclGinCounter_t counterId, bool hasDescriptor,
+  ncclGinDescriptorSmem* descriptor, cuda::thread_scope required, cuda::thread_scope given, uint32_t optFlags) {
   switch ((ncclGinResourceSharingMode)ctx.resourceSharingMode) {
-    case NCCL_GIN_RESOURCE_SHARING_CTA:
-      putImplMode<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_CTA>(
-        ctx, coop, peer, hasWins, dstWin, dstOff, srcWin, srcOff, bytes,
-        hasSignal, signalOffset, signalKey, signalOp, signalOpArg,
-        hasCounter, counterId, hasDescriptor, descriptor,
-        required, given, optFlags);
-      break;
-    default:
-      putImplMode<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(
-        ctx, coop, peer, hasWins, dstWin, dstOff, srcWin, srcOff, bytes,
-        hasSignal, signalOffset, signalKey, signalOp, signalOpArg,
-        hasCounter, counterId, hasDescriptor, descriptor,
-        required, given, optFlags);
-      break;
+  case NCCL_GIN_RESOURCE_SHARING_CTA:
+    putImplMode<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_CTA>(ctx, coop, peer, hasWins, dstWin, dstOff, srcWin, srcOff,
+                                                               bytes, hasSignal, signalOffset, signalKey, signalOp,
+                                                               signalOpArg, hasCounter, counterId, hasDescriptor,
+                                                               descriptor, required, given, optFlags);
+    break;
+  default:
+    putImplMode<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(ctx, coop, peer, hasWins, dstWin, dstOff, srcWin, srcOff,
+                                                               bytes, hasSignal, signalOffset, signalKey, signalOp,
+                                                               signalOpArg, hasCounter, counterId, hasDescriptor,
+                                                               descriptor, required, given, optFlags);
+    break;
   }
 }
 
 template <enum doca_gpu_dev_verbs_resource_sharing_mode resource_sharing_mode, typename Coop, typename T>
-NCCL_DEVICE_INLINE static void putValueImplMode(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin,
-                                      size_t dstOff, T srcData, bool hasSignal,
-                                      size_t signalOffset, __be32 signalKey, ncclGinSignalOp_t signalOp,
-                                      uint64_t signalOpArg, bool hasDescriptor,
-                                      ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope required, cuda::thread_scope given,
-                                      uint32_t optFlags) {
+NCCL_DEVICE_INLINE static void putValueImplMode(
+  ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin, size_t dstOff, T srcData, bool hasSignal,
+  size_t signalOffset, __be32 signalKey, ncclGinSignalOp_t signalOp, uint64_t signalOpArg, bool hasDescriptor,
+  ncclGinDescriptorSmem* descriptor, cuda::thread_scope required, cuda::thread_scope given, uint32_t optFlags) {
   using nccl::utility::loadConst;
 
   coop.sync();
@@ -208,26 +196,24 @@ NCCL_DEVICE_INLINE static void putValueImplMode(ncclGinCtx ctx, Coop coop, int p
 }
 
 template <typename Coop, typename T>
-NCCL_DEVICE_INLINE static void putValueImpl(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin,
-                                      size_t dstOff, T srcData, bool hasSignal,
-                                      size_t signalOffset, __be32 signalKey, ncclGinSignalOp_t signalOp,
-                                      uint64_t signalOpArg, bool hasDescriptor,
-                                      ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope required, cuda::thread_scope given,
-                                      uint32_t optFlags) {
+NCCL_DEVICE_INLINE static void putValueImpl(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin, size_t dstOff,
+                                            T srcData, bool hasSignal, size_t signalOffset, __be32 signalKey,
+                                            ncclGinSignalOp_t signalOp, uint64_t signalOpArg, bool hasDescriptor,
+                                            ncclGinDescriptorSmem* descriptor, cuda::thread_scope required,
+                                            cuda::thread_scope given, uint32_t optFlags) {
   switch ((ncclGinResourceSharingMode)ctx.resourceSharingMode) {
-    case NCCL_GIN_RESOURCE_SHARING_CTA:
-      putValueImplMode<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_CTA>(
-        ctx, coop, peer, dstWin, dstOff, srcData,
-        hasSignal, signalOffset, signalKey, signalOp, signalOpArg,
-        hasDescriptor, descriptor, required, given, optFlags);
-      break;
-    default:
-      putValueImplMode<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(
-        ctx, coop, peer, dstWin, dstOff, srcData,
-        hasSignal, signalOffset, signalKey, signalOp, signalOpArg,
-        hasDescriptor, descriptor, required, given, optFlags);
-      break;
+  case NCCL_GIN_RESOURCE_SHARING_CTA:
+    putValueImplMode<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_CTA>(ctx, coop, peer, dstWin, dstOff, srcData, hasSignal,
+                                                                    signalOffset, signalKey, signalOp, signalOpArg,
+                                                                    hasDescriptor, descriptor, required, given,
+                                                                    optFlags);
+    break;
+  default:
+    putValueImplMode<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(ctx, coop, peer, dstWin, dstOff, srcData, hasSignal,
+                                                                    signalOffset, signalKey, signalOp, signalOpArg,
+                                                                    hasDescriptor, descriptor, required, given,
+                                                                    optFlags);
+    break;
   }
 }
 
@@ -239,9 +225,8 @@ template <>
 struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_GDAKI> {
   template <typename Coop>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t remoteWin, size_t remoteOff,
-                                      ncclGinWindow_t localWin, size_t localOff, size_t bytes,
-                                      bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
-                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
+                                      ncclGinWindow_t localWin, size_t localOff, size_t bytes, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
     coop.sync();
     if (coop.thread_rank() == 0) {
@@ -257,8 +242,7 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_GDAKI> {
       doca_gpu_dev_verbs_addr uninitialized_daddr{};
       doca_gpu_dev_verbs_ticket_t unused_out_ticket;
       uint32_t codeOpt = nccl::gin::gdaki::docaOptFlagsFromGinOptFlags(optFlags);
-      doca_gpu_dev_verbs_get(
-          qp, raddr, laddr, bytes, uninitialized_daddr, &unused_out_ticket, codeOpt);
+      doca_gpu_dev_verbs_get(qp, raddr, laddr, bytes, uninitialized_daddr, &unused_out_ticket, codeOpt);
     }
     coop.sync();
   }
@@ -275,10 +259,8 @@ struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_GDAKI> {
     doca_gpu_dev_verbs_addr daddr;
     daddr.addr = 0;
     daddr.key = loadConst(&gdaki->sink_buffer_lkey);
-    doca_gpu_dev_verbs_mcst<
-        DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU,
-        DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO>(
-        qp, daddr, &req->docaTicket);
+    doca_gpu_dev_verbs_mcst<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU, DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO>(
+      qp, daddr, &req->docaTicket);
   }
 };
 
@@ -307,15 +289,12 @@ struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_GDAKI> {
 template <>
 struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_GDAKI> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, bool hasWins,
-                                      ncclGinWindow_t dstWin, size_t dstOff, ncclGinWindow_t srcWin,
-                                      size_t srcOff, size_t bytes,
-                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
-                                      uint64_t signalOpArg, bool hasCounter,
-                                      ncclGinCounter_t counterId, bool hasDescriptor,
-                                      ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope required, cuda::thread_scope given,
-                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, bool hasWins, ncclGinWindow_t dstWin,
+                                      size_t dstOff, ncclGinWindow_t srcWin, size_t srcOff, size_t bytes,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
+                                      bool hasCounter, ncclGinCounter_t counterId, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, cuda::thread_scope required,
+                                      cuda::thread_scope given, uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
     size_t signalOffset = 0;
     __be32 signalKey = 0;
@@ -329,23 +308,18 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_GDAKI> {
       signalKey = loadConst(loadConst(&signalMh->rkeys) + peer);
       signalOffset = signal.vaSignal.signalOffset;
     }
-    nccl::gin::gdaki::putImpl(
-      ctx, coop, peer, hasWins, dstWin, dstOff, srcWin, srcOff, bytes,
-      hasSignal, signalOffset, signalKey, signalOp, signalOpArg,
-      hasCounter, counterId, hasDescriptor, descriptor,
-      required, given, optFlags
-    );
+    nccl::gin::gdaki::putImpl(ctx, coop, peer, hasWins, dstWin, dstOff, srcWin, srcOff, bytes, hasSignal, signalOffset,
+                              signalKey, signalOp, signalOpArg, hasCounter, counterId, hasDescriptor, descriptor,
+                              required, given, optFlags);
   }
 };
 
 template <>
 struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_GDAKI> {
   template <typename Coop, typename T>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin,
-                                      size_t dstOff, T srcVal,
-                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
-                                      uint64_t signalOpArg, bool hasDescriptor,
-                                      ncclGinDescriptorSmem* descriptor,
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin, size_t dstOff,
+                                      T srcVal, ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
+                                      uint64_t signalOpArg, bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
                                       cuda::thread_scope required, cuda::thread_scope given,
                                       uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
@@ -361,11 +335,8 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_GDAKI> {
       signalOffset = sizeof(uint64_t) * (signal.indexedSignal.signalId + loadConst(&gdaki->signals_table.offset));
       signalKey = loadConst(loadConst(&gdaki->signals_table.rkeys) + peer);
     }
-    nccl::gin::gdaki::putValueImpl(
-      ctx, coop, peer, dstWin, dstOff, srcVal,
-      hasSignal, signalOffset, signalKey, signalOp, signalOpArg,
-      hasDescriptor, descriptor, required, given, optFlags
-    );
+    nccl::gin::gdaki::putValueImpl(ctx, coop, peer, dstWin, dstOff, srcVal, hasSignal, signalOffset, signalKey,
+                                   signalOp, signalOpArg, hasDescriptor, descriptor, required, given, optFlags);
   }
 };
 
@@ -423,19 +394,19 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_GDAKI> {
 
     if (abortFlag) {
       uint32_t steps = 0;
-      #pragma unroll 1
+#pragma unroll 1
       for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
         int status = EBUSY;
-        uint64_t ticket = doca_gpu_dev_verbs_atomic_read<uint64_t, DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(&qps[peer].sq_rsvd_index);
-        if (ticket == 0)
-          return;
+        uint64_t ticket = doca_gpu_dev_verbs_atomic_read<uint64_t, DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(
+          &qps[peer].sq_rsvd_index);
+        if (ticket == 0) return;
         --ticket;
         while (status != 0 && !testAbort(abortFlag, steps)) {
           status = doca_gpu_dev_verbs_poll_one_cq_at(&qps[peer].cq_sq, ticket);
         }
       }
     } else {
-      #pragma unroll 1
+#pragma unroll 1
       for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
         doca_gpu_dev_verbs_wait(qps + peer);
       }

@@ -3,7 +3,7 @@
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
 
-## ROCm Compute Profiler 3.8.0 for ROCm 7.15.0
+## ROCm Compute Profiler 3.8.0 for ROCm 10.0.0
 
 ### Added
 
@@ -15,6 +15,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations.
 
 * Added experimental Triton support to ML API tracing. Profile with `--experimental --triton-trace` to emit a ROCTX marker per Triton/Inductor kernel launch attributed to the user call site, and analyze with `--experimental --list-triton-operators` or `--experimental --triton-operator <pattern>` to list or filter Triton operators independently of Torch.
+
+* Added support for GPU metrics on gfx1153 hardware.
 
 ### Changed
 
@@ -43,6 +45,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * The Dual VALU (VOPD) instruction mix metric is now reported for gfx115x in the WGP panel.
 
 * Fixed multi-user roofline benchmarking on shared systems: the per-GPU lock file under `/tmp/rocprof-compute-benchmark/` is now created world-readable/writable (0666) so any user can acquire it, regardless of which user created it first or the active umask. Stale unreadable lock files left by older versions in a sticky `/tmp` cannot be repaired automatically and must be removed manually by their owner or an administrator.
+
+* Fixed CDNA memory chart CLI output to show the numbered `3. Memory Chart` header without repeating the default per-kernel normalization label.
 
 ### Upcoming changes
 
@@ -123,7 +127,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Upcoming changes
 
-* Roofline support for RDNA3.5 gfx115x devices.
+* Roofline support for gfx1153 devices.
 
 ### Known issues
 

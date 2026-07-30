@@ -41,6 +41,7 @@
 #include <cstring>
 #include <cassert>
 #include <mutex>
+#include <new>
 #include <algorithm>
 #include "util/os.h"
 #include "util/utils.h"
@@ -506,6 +507,19 @@ static void prepare_fork_handler(void) { dxg_runtime->hsakmt_mutex.lock(); }
 static void parent_fork_handler(void) { dxg_runtime->hsakmt_mutex.unlock(); }
 static void child_fork_handler(void) {
   dxg_runtime->is_forked = true;
+
+  /* prepare_fork_handler() locked hsakmt_mutex right before fork() so that
+   * no other thread would be mid-operation during the fork snapshot. In the
+   * child only this one thread survives, and its TID differs from whichever
+   * thread performed the lock in the parent, so the mutex's internal
+   * owner/lock state inherited via fork() is stale and can never be
+   * legitimately released by calling unlock() here. Reset it in place so
+   * the child starts with a fresh, unlocked mutex - otherwise the next
+   * hsaKmtOpenKFD() call in the child deadlocks forever waiting on a lock
+   * nobody in this process can release.
+   */
+  dxg_runtime->hsakmt_mutex.~recursive_mutex();
+  new (&dxg_runtime->hsakmt_mutex) std::recursive_mutex();
 }
 
 /* Call this from the child process after fork. This will clear all
@@ -588,6 +602,9 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   if ((envvar = getenv("ROCR_USE_PM4")) != nullptr) {
     dxg_runtime->use_pm4_ = safe_env_to_int(envvar, 0);
   }
+#ifdef __linux__
+  dxg_runtime->use_pm4_ = 1;  // Force PM4 usage on Linux for now
+#endif
 
   // Disable wait timeout if ROCR_DISABLE_WAIT_TIMEOUT is set.
   if ((envvar = getenv("ROCR_DISABLE_WAIT_TIMEOUT")) != nullptr) {

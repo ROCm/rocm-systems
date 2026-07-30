@@ -2,8 +2,8 @@
 
 matrix-ubuntu-nightly:
   # MI355
-  - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
-  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
+  - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-gfx950-1gpu-ccs-ossci-rocm' }
+  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-gfx950-1gpu-ccs-ossci-rocm' }
   # MI325
   - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }
   - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }
@@ -15,6 +15,6 @@ matrix-ubuntu-nightly:
   - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-gfx1151-gpu-rocm' }
 matrix-ubuntu-ci:
   # MI355
-  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
+  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-gfx950-1gpu-ccs-ossci-rocm' }
   # Strix Halo
   - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', runner: 'linux-gfx1151-gpu-rocm' }

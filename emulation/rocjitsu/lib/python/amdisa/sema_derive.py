@@ -31,6 +31,8 @@ from amdisa.sema_ast import (
     SemaNodeKind,
     SemaType,
 )
+from amdisa.sema_effects import inline_binary_op_effects
+from amdisa.sema_properties import InstructionProperty, derive_properties
 
 if TYPE_CHECKING:
     from amdisa.semantics import InstructionSemantics
@@ -211,7 +213,15 @@ def derive_sema_block(sem: InstructionSemantics) -> SemaBlock | None:
     cls = _DERIVE_REGISTRY.get(sem.semantic_class)
     if cls is None:
         return None
-    return cls.derive(sem)
+    block = cls.derive(sem)
+    writes_scc = InstructionProperty.WRITES_SCC in derive_properties(block)
+    declared_scc_write = sem.sets_scc not in (None, 'none')
+    if writes_scc != declared_scc_write:
+        raise ValueError(
+            f'{sem.name}: sets_scc={sem.sets_scc!r} disagrees with '
+            f'derived SCC write={writes_scc}'
+        )
+    return block
 
 
 class _ScalarDeriver:
@@ -408,14 +418,7 @@ class _ScalarBinop(_ScalarDeriver):
 
         kind = _OP_TO_KIND.get(op or '', SemaNodeKind.CALL)
 
-        scc_handled_by_template = op in (
-            'addc',
-            'subb',
-            'lshl1_add',
-            'lshl2_add',
-            'lshl3_add',
-            'lshl4_add',
-        )
+        scc_handled_by_template = inline_binary_op_effects(op).writes_scc
         needs_cached_ops = (
             sem.sets_scc
             and sem.sets_scc != 'none'
@@ -569,7 +572,7 @@ class _ScalarBinop(_ScalarDeriver):
                     children=(_id(fn), src0, src1),
                 )
             elif sem.sets_scc == 'compare':
-                cmp_kind = SemaNodeKind.GE if op == 'max' else SemaNodeKind.LT
+                cmp_kind = SemaNodeKind.GT if op == 'max' else SemaNodeKind.LT
                 scc_expr = SemaNode(
                     cmp_kind,
                     ty=SemaType.U1,
@@ -718,21 +721,49 @@ class _ScalarBfe(_ScalarDeriver):
         return SemaBlock(sem.name, ExecModel.SCALAR, body)
 
 
+_SAVEEXEC_OP_TO_KIND = {
+    'and': SemaNodeKind.AND,
+    'or': SemaNodeKind.OR,
+    'xor': SemaNodeKind.XOR,
+    'andn1': SemaNodeKind.AND,
+    'orn1': SemaNodeKind.OR,
+    'andn2': SemaNodeKind.AND,
+    'orn2': SemaNodeKind.OR,
+    'and_not0': SemaNodeKind.AND,
+    'or_not0': SemaNodeKind.OR,
+    'and_not1': SemaNodeKind.AND,
+    'or_not1': SemaNodeKind.OR,
+    'nand': SemaNodeKind.AND,
+    'nor': SemaNodeKind.OR,
+    'xnor': SemaNodeKind.XOR,
+}
+
+
 @_register('scalar_saveexec')
 class _ScalarSaveexec(_ScalarDeriver):
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
-        op = sem.operation or 'and'
+        op = sem.operation
+        if op is None:
+            raise ValueError('Unsupported SAVEEXEC operation: None')
+        try:
+            kind = _SAVEEXEC_OP_TO_KIND[op]
+        except KeyError:
+            raise ValueError(
+                f'Unsupported SAVEEXEC operation: {sem.operation}'
+            ) from None
+
         stmts: list[SemaNode] = []
         is_b32 = sem.data_type == 'b32'
         src_ty = SemaType.U32 if is_b32 else SemaType.U64
+        exec_id = 'EXEC' if is_b32 else 'EXEC_RAW'
 
         # Cache source and EXEC before any writes (prevents aliasing).
         src0 = _cast(_src(0), src_ty)
         stmts.append(_assign(_id('src', SemaType.U64), src0))
         cached_src = _id('src', SemaType.U64)
 
-        stmts.append(_assign(_id('old_exec', SemaType.U64), _id('EXEC', SemaType.U64)))
+        stmts.append(_assign(_id('old_exec', SemaType.U64), _id(exec_id, SemaType.U64)))
         exec_read = _id('old_exec', SemaType.U64)
 
         saved_exec = _cast(exec_read, SemaType.U32) if is_b32 else exec_read
@@ -743,7 +774,6 @@ class _ScalarSaveexec(_ScalarDeriver):
             )
         )
 
-        kind = _OP_TO_KIND.get(op, SemaNodeKind.AND)
         if op in ('nand', 'nor', 'xnor'):
             inner = SemaNode(kind, ty=SemaType.U64, children=(exec_read, cached_src))
             new_exec = SemaNode(SemaNodeKind.BITNEG, ty=SemaType.U64, children=(inner,))
@@ -852,14 +882,14 @@ class _ScalarSaveexec(_ScalarDeriver):
                 children=(new_exec, _lit('0xffffffff', SemaType.U64)),
             )
 
-        stmts.append(_assign(_id('EXEC', SemaType.U64), new_exec))
+        stmts.append(_assign(_id(exec_id, SemaType.U64), new_exec))
         stmts.append(
             _scc_write(
                 SemaNode(
                     SemaNodeKind.NE,
                     ty=SemaType.U1,
                     children=(
-                        _id('EXEC', SemaType.U64),
+                        _id(exec_id, SemaType.U64),
                         _lit('0', SemaType.U64),
                     ),
                 ),
@@ -1882,6 +1912,41 @@ class _DsAtomic(_ScalarDeriver):
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
 
+@_register('ds_atomic2')
+class _DsAtomic2(_ScalarDeriver):
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        elem_ty = _elem_type(sem.elem_size)
+        op = sem.operation or 'swap'
+        addr0 = _addr_call(
+            'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET0', SemaType.U32)
+        )
+        addr1 = _addr_call(
+            'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET1', SemaType.U32)
+        )
+
+        def atomic_swap(addr_name: str, source_index: int) -> SemaNode:
+            return SemaNode(
+                SemaNodeKind.CALL,
+                ty=elem_ty,
+                call_name=f'atomic_{op}',
+                children=(
+                    _id(f'atomic_{op}'),
+                    _id(addr_name, SemaType.U32),
+                    _cast(_src(source_index), elem_ty),
+                ),
+            )
+
+        stmts = [
+            _assign(_id('addr0', SemaType.U32), addr0),
+            _assign(_id('addr1', SemaType.U32), addr1),
+            _assign(_cast(_dst(0), elem_ty), atomic_swap('addr0', 1)),
+            _assign(_cast(_dst(1), elem_ty), atomic_swap('addr1', 2)),
+        ]
+        body = SemaNode(SemaNodeKind.SEQ, children=tuple(stmts))
+        return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+
 @_register('ds_read_addtid')
 class _DsReadAddtid(_ScalarDeriver):
     @staticmethod
@@ -2069,6 +2134,7 @@ class _VectorDot2cBf16(_ScalarDeriver):
 
 for _dot_cls in (
     'dot2_f32_f16',
+    'dot2_f32_bf16',
     'dot2_i32_i16',
     'dot2_u32_u16',
     'dot4_i32_i8',
@@ -2440,12 +2506,30 @@ class _ScalarCmovk(_ScalarDeriver):
 class _ScalarAddk(_ScalarDeriver):
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
+        src = SemaNode(
+            SemaNodeKind.SIGNEXT_FROM_BIT,
+            ty=SemaType.I32,
+            children=(_cast(_src(0), SemaType.U32), _lit('15')),
+        )
+        old_dst = _cast(_dst(0), SemaType.U32)
         result = SemaNode(
             SemaNodeKind.ADD,
             ty=SemaType.U32,
-            children=(_cast(_dst(0), SemaType.U32), _cast(_src(0), SemaType.U32)),
+            children=(old_dst, _cast(src, SemaType.U32)),
         )
-        body = _assign(_cast(_dst(0), SemaType.U32), result)
+        overflow = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.U1,
+            call_name='signed_add_overflows',
+            children=(_id('signed_add_overflows'), old_dst, _cast(src, SemaType.U32)),
+        )
+        body = SemaNode(
+            SemaNodeKind.SEQ,
+            children=(
+                _scc_write(overflow),
+                _assign(_cast(_dst(0), SemaType.U32), result),
+            ),
+        )
         return SemaBlock(sem.name, ExecModel.SCALAR, body)
 
 
@@ -2484,16 +2568,63 @@ class _ScalarCselect(_ScalarDeriver):
 class _ScalarWrexec(_ScalarDeriver):
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
+        is_b32 = sem.data_type == 'b32'
+        src_ty = SemaType.U32 if is_b32 else SemaType.U64
+        exec_id = 'EXEC' if is_b32 else 'EXEC_RAW'
         stmts = [
-            _assign(_id('EXEC', SemaType.U64), _cast(_src(0), SemaType.U64)),
-            _scc_write(
-                SemaNode(
-                    SemaNodeKind.NE,
-                    ty=SemaType.U1,
-                    children=(_id('EXEC', SemaType.U64), _lit('0', SemaType.U64)),
-                )
-            ),
+            _assign(_id('src', SemaType.U64), _cast(_src(0), src_ty)),
+            _assign(_id('old_exec', SemaType.U64), _id(exec_id, SemaType.U64)),
         ]
+        src = _id('src', SemaType.U64)
+        old_exec = _id('old_exec', SemaType.U64)
+
+        if sem.operation in ('andn1', 'and_not0'):
+            result = SemaNode(
+                SemaNodeKind.AND,
+                ty=SemaType.U64,
+                children=(
+                    old_exec,
+                    SemaNode(SemaNodeKind.BITNEG, ty=SemaType.U64, children=(src,)),
+                ),
+            )
+        elif sem.operation in ('andn2', 'and_not1'):
+            result = SemaNode(
+                SemaNodeKind.AND,
+                ty=SemaType.U64,
+                children=(
+                    src,
+                    SemaNode(
+                        SemaNodeKind.BITNEG, ty=SemaType.U64, children=(old_exec,)
+                    ),
+                ),
+            )
+        else:
+            raise ValueError(f'Unsupported WREXEC operation: {sem.operation}')
+
+        if is_b32:
+            result = SemaNode(
+                SemaNodeKind.AND,
+                ty=SemaType.U64,
+                children=(result, _lit('0xffffffff', SemaType.U64)),
+            )
+
+        stmts.extend(
+            (
+                _assign(_id('result', SemaType.U64), result),
+                _assign(_cast(_dst(0), src_ty), _cast(_id('result'), src_ty)),
+                _assign(_id(exec_id, SemaType.U64), _id('result', SemaType.U64)),
+                _scc_write(
+                    SemaNode(
+                        SemaNodeKind.NE,
+                        ty=SemaType.U1,
+                        children=(
+                            _id('result', SemaType.U64),
+                            _lit('0', SemaType.U64),
+                        ),
+                    )
+                ),
+            )
+        )
         body = SemaNode(SemaNodeKind.SEQ, children=tuple(stmts))
         return SemaBlock(sem.name, ExecModel.SCALAR, body)
 

@@ -33,6 +33,10 @@ namespace rdc {
 
 rdc_status_t Smi2RdcError(amdsmi_status_t rsmi);
 
+// Count how many of the retired/bad-page records are pending retirement.
+// Returns 0 when records is null or count is 0.
+uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, uint32_t count);
+
 // Physical/instance-0: gpu_id is a flat GPU index. Partition-instance: device_index is
 // a socket index, instance_index the per-socket proc. These diverge in CPX. See SmiUtils.cc.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
