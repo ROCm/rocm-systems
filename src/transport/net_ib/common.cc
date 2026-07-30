@@ -175,7 +175,7 @@ void* ncclIbAsyncThreadMain(void* args) {
       WARN("NET/IB : %s:%d async fatal event on SRQ, unused for now (%p): %s", dev->devName, dev->portNum, srq, str);
       break;
     case IBV_EVENT_GID_CHANGE:
-      WARN("NET/IB : %s:%d GID table changed", dev->devName, dev->portNum);
+      INFO(NCCL_NET, "NET/IB: %s: GID table changed on %s:%d", __func__, dev->devName, dev->portNum);
       break;
     case IBV_EVENT_DEVICE_SPEED_CHANGE:
       ncclIbUpdateDeviceSpeed(dev);
