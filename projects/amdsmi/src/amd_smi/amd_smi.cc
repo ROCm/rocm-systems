@@ -939,23 +939,35 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
 
 amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
                                        amdsmi_nic_fw_info_t* info) {
+  (void)processor_handle;  // unused
+  (void)info;              // unused
   return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
 }
 
 amdsmi_status_t amdsmi_get_nic_device_bdf(amdsmi_processor_handle processor_handle,
                                           amdsmi_bdf_t* bdf) {
+  (void)processor_handle;  // unused
+  (void)bdf;               // unused
   return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
 }
 
 amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor_handle,
                                                uint32_t port_index, uint32_t* num_stats,
                                                amdsmi_nic_stat_t* stats) {
+  (void)processor_handle;  // unused
+  (void)port_index;        // unused
+  (void)num_stats;         // unused
+  (void)stats;             // unused
   return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
 }
 
 amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
                                                  uint32_t port_index, uint32_t* num_stats,
                                                  amdsmi_nic_stat_t* stats) {
+  (void)processor_handle;  // unused
+  (void)port_index;        // unused
+  (void)num_stats;         // unused
+  (void)stats;             // unused
   return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
 }
 
@@ -1368,6 +1380,7 @@ amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_han
 
   return AMDSMI_STATUS_SUCCESS;
 #else
+  (void)processor_handle;  // unused
   return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 }

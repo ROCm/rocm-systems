@@ -822,7 +822,7 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
   std::string line;
   if (std::getline(fs, line)) {
     try {
-      uint32_t line_value = std::stoul(std::string(trim(line)));
+      uint32_t line_value = static_cast<uint32_t>(std::stoul(std::string(trim(line))));
       if (line_value > 100) {
         // max of uint32_t is used to indicate the erroneous value
         *vcn_busy_percent = std::numeric_limits<uint32_t>::max();

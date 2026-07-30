@@ -35,7 +35,7 @@ struct RAII {
   std::function<void()> _finish;
 };
 
-void dump_ainic_info(int idx, const amd::smi::AMDSmiAINICDevice::AINICInfo& ainic_info) {
+void dump_ainic_info(uint32_t idx, const amd::smi::AMDSmiAINICDevice::AINICInfo& ainic_info) {
 #if 0   // Expected Output:
 NIC: 0
    ASIC:
@@ -211,8 +211,8 @@ NIC: 0
       //     "          fw.heartbeat: ??" << ainic_info.versions.running.fw_heartbeat << "\n" <<
       //     "          fw.status: ??" << ainic_info.versions.running.fw_status << "\n"
       "   PORTS:" << "\n";
-  for (int port_idx = 0; port_idx < ainic_info.port.num_ports; ++port_idx) {
-    oss << "      PORT_" << static_cast<int>(port_idx) << ":\n"
+  for (uint32_t port_idx = 0; port_idx < ainic_info.port.num_ports; ++port_idx) {
+    oss << "      PORT_" << port_idx << ":\n"
         << "            BDF: " << 0 << "\n"
         << "            TYPE: " << ainic_info.port.ports[port_idx].type << "\n"
         << "            FLAVOUR: " << ainic_info.port.ports[port_idx].flavour << "\n"
@@ -232,8 +232,7 @@ NIC: 0
         << "            PAUSE_TX: " << ainic_info.port.ports[port_idx].pause_tx << "\n";
   }  // port
   oss << "   RDMA_DEVICES: " << "\n";
-  int rdma_dev_idx = 0;
-  for (int port_idx = 0; port_idx < ainic_info.port.num_ports; ++port_idx) {
+  for (uint32_t port_idx = 0; port_idx < ainic_info.port.num_ports; ++port_idx) {
     oss << "      RDMA_DEVICES: " << "\n";
     for (uint8_t rdma_dev_idx = 0; rdma_dev_idx < ainic_info.rdma_dev.num_rdma_dev;
          ++rdma_dev_idx) {
@@ -277,7 +276,6 @@ NIC: 0
 }
 
 std::optional<std::vector<amd::smi::AMDSmiAINICDevice::AINICInfo>> get_nics() {
-  auto& amdsmi = amd::smi::AMDSmiSystem::getInstance();
   uint32_t soc_count = 10;
   std::vector<amdsmi_socket_handle> sockets(soc_count);
   // Get the sockets of the system
@@ -304,7 +302,7 @@ std::optional<std::vector<amd::smi::AMDSmiAINICDevice::AINICInfo>> get_nics() {
     }
 
     for (uint32_t idx = 0; idx < processor_count; ++idx) {
-      amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {0};
+      amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
       amdsmi_status_t status = amdsmi_get_ainic_info(processor_handles[idx], &ainic_info);
       if (status == AMDSMI_STATUS_SUCCESS) {
         dump_ainic_info(idx, ainic_info);
@@ -347,6 +345,8 @@ std::map<std::string, uint64_t> port_stats() {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+  (void)argc;  // unused
+  (void)argv;  // unused
   RAII _([]() { amdsmi_init(AMDSMI_INIT_AMD_NICS); }, []() { amdsmi_shut_down(); });
   auto nics = get_nics();
   for (const auto& [key, value] : port_stats()) {
