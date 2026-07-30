@@ -61,6 +61,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "_comment": { "$ref": "#/$defs/comment" },
         "install_flags": {
           "type": "array",
           "items": { "type": "string" },
@@ -147,6 +148,11 @@
 
   "$defs": {
 
+    "comment": {
+      "description": "Free-form rationale for maintainers. Ignored by the runner.",
+      "type": "string"
+    },
+
     "env_variables_map": {
       "description": "Key/value pairs of environment variables. Values are always strings (use '' to unset).",
       "type": "object",
@@ -229,6 +235,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "_comment": { "$ref": "#/$defs/comment" },
         "extends": {
           "description": "Name (or list of names) of parent configuration(s) to inherit from",
           "oneOf": [
