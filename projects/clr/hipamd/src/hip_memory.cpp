@@ -717,7 +717,13 @@ void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, hip::Stream& s
 
 // ================================================================================================
 hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                      hip::Stream& stream, bool isHostAsync, bool isGPUAsync) {
+                      hip::Stream& stream, bool isHostAsync, bool isGPUAsync,
+                      amd::Command** retainedCommand) {
+  // <REVIEW HELPER> Clear the optional output before validation so every early
+  // return has an unambiguous "no command was submitted" result.
+  if (retainedCommand != nullptr) {
+    *retainedCommand = nullptr;
+  }
   if (sizeBytes == 0) {
     // Skip if nothing needs writing.
     return hipSuccess;
@@ -819,6 +825,13 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
         cmd->release();
       }
     }
+  }
+  // <REVIEW HELPER> Retain before dropping ihipMemcpy's reference. Returning
+  // this exact object was chosen over getLastQueuedCommand(), which another
+  // thread can change after this enqueue.
+  if (retainedCommand != nullptr) {
+    command->retain();
+    *retainedCommand = command;
   }
   command->release();
   return hipSuccess;

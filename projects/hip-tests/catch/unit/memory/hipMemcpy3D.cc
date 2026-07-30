@@ -60,7 +60,9 @@ HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior)
       GetMemcpy3DParms(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
                        make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
 
-  b_context.block_stream();
+  // <REVIEW HELPER> Verify callback enqueue success; an unblocked stream would
+  // invalidate this test's host-asynchronous behavior proof.
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   hipError_t memcpy_err = hipSuccess;

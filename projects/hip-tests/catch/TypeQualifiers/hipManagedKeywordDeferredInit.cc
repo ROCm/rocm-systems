@@ -5,6 +5,8 @@
  */
 
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
+#include <chrono>
 #include <vector>
 
 // Tests in this file each drive a HIP API against a __managed__ symbol to
@@ -320,7 +322,9 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpy3D_SyncBehavior) {
   HipTest::BlockingContext b_context{nullptr};
   hipStream_t kernel_stream{nullptr};
 
-  b_context.block_stream();
+  // <REVIEW HELPER> block_stream now reports callback-enqueue failures instead
+  // of letting the test continue with a stream that was never blocked.
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   hipMemcpy3DParms parms = {};
@@ -376,7 +380,9 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipLaunchKernel_SyncBehavior) {
   HipTest::BlockingContext b_context{nullptr};
   hipStream_t kernel_stream{nullptr};
 
-  b_context.block_stream();
+  // <REVIEW HELPER> Validate blocker setup so this remains a deadlock regression,
+  // not a false pass after callback-enqueue failure.
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   AddConst<<<dim3(kNumBlocks), dim3(kBlockSize), 0, kernel_stream>>>(g_managed_launch, kN,
@@ -474,20 +480,39 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipMemcpyPeer) {
 HIP_TEST_CASE(Unit_hipManagedKeyword_NonBlockingStreamOrdering) {
   CHECK_MANAGED_MEMORY_SUPPORT
 
-  hipStream_t nb_stream = nullptr;
-  HIP_CHECK(hipStreamCreateWithFlags(&nb_stream, hipStreamNonBlocking));
+  // <REVIEW HELPER> StreamGuard guarantees destruction on every assertion path;
+  // the original manual destroy leaked the stream when an assertion aborted.
+  StreamGuard nb_stream(Streams::withFlags, hipStreamNonBlocking);
+  // <REVIEW HELPER> Warm callback dispatch before measuring ordering so startup
+  // latency cannot masquerade as the stream being correctly blocked.
+  HipTest::StreamCallbackLatch warmup_latch(nb_stream.stream());
+  HIP_CHECK(warmup_latch.enqueue());
+  REQUIRE(warmup_latch.wait_for(std::chrono::seconds(5)));
 
+  HipTest::StreamCallbackLatch completion_latch(nb_stream.stream());
   HipTest::BlockingContext b_context{nullptr};
-  b_context.block_stream();
+  // <REVIEW HELPER> A checked blocker makes the null-stream dependency
+  // deterministic and guarantees failure-safe unblocking through RAII.
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   constexpr int kSentinel = 0x5151;
-  WriteManagedNonBlocking<<<dim3(kNumBlocks), dim3(kBlockSize), 0, nb_stream>>>(kSentinel);
+  WriteManagedNonBlocking<<<dim3(kNumBlocks), dim3(kBlockSize), 0, nb_stream.stream()>>>(kSentinel);
   HIP_CHECK(hipGetLastError());
 
+  // <REVIEW HELPER> Without the explicit initialization dependency, the warmed
+  // nonblocking stream reaches this callback while the null stream is blocked.
+  // A bounded latch replaced immediate query/unblock, which could pass by race.
+  HIP_CHECK(completion_latch.enqueue());
+  const bool completed_while_blocked =
+      completion_latch.wait_for(std::chrono::milliseconds(500));
+
+  // <REVIEW HELPER> Release and synchronize before assertions so even a failing
+  // mutation cannot leave the process with a permanently blocked null stream.
   b_context.unblock_stream();
-  HIP_CHECK(hipStreamSynchronize(nb_stream));
-  HIP_CHECK(hipStreamDestroy(nb_stream));
+  HIP_CHECK(hipStreamSynchronize(nb_stream.stream()));
+  REQUIRE_FALSE(completed_while_blocked);
+  REQUIRE(completion_latch.complete());
 
   for (int i = 0; i < kN; ++i) {
     INFO("Index " << i);

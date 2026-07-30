@@ -8,6 +8,7 @@
 #include "amd_hsa_elf.hpp"
 
 #include <cstring>
+#include <utility>
 
 #include <hip/driver_types.h>
 #include "hip/hip_runtime_api.h"
@@ -282,6 +283,48 @@ hipError_t DynCO::populateDynGlobalFuncs() {
 }
 
 // Static Code Object
+// <REVIEW HELPER> ManagedVarInitState owns retained ROCclr command references.
+// Central RAII cleanup covers normal completion, map teardown, and moved states.
+// Command uses intrusive retain/release ownership rather than std::unique_ptr,
+// so the state needs explicit move operations to transfer those retained refs.
+StatCO::ManagedVarInitState::~ManagedVarInitState() { ReleaseCommands(); }
+
+StatCO::ManagedVarInitState::ManagedVarInitState(ManagedVarInitState&& other) noexcept
+    : initialized(other.initialized),
+      completion(std::exchange(other.completion, nullptr)),
+      copies(std::move(other.copies)),
+      terminalError(other.terminalError) {
+  // <REVIEW HELPER> Reset non-container fields in the moved-from state so its
+  // destructor cannot release or replay state now owned by this object.
+  other.initialized = false;
+  other.terminalError = hipSuccess;
+}
+
+StatCO::ManagedVarInitState& StatCO::ManagedVarInitState::operator=(
+    ManagedVarInitState&& other) noexcept {
+  if (this != &other) {
+    ReleaseCommands();
+    initialized = other.initialized;
+    completion = std::exchange(other.completion, nullptr);
+    copies = std::move(other.copies);
+    terminalError = other.terminalError;
+    other.initialized = false;
+    other.terminalError = hipSuccess;
+  }
+  return *this;
+}
+
+void StatCO::ManagedVarInitState::ReleaseCommands() {
+  if (completion != nullptr) {
+    completion->release();
+    completion = nullptr;
+  }
+  for (amd::Command* copy : copies) {
+    copy->release();
+  }
+  copies.clear();
+}
+
 StatCO::StatCO(const PlatformState& owner) : owner_(owner) {}
 
 StatCO::~StatCO() {
@@ -488,14 +531,9 @@ void StatCO::RemoveAllFatBinaries() {
   }
   managedVars_.clear();
 
-  // Release any retained managed-var init completion markers
-  for (auto& [_, initCmd] : managedVarInitCmd_) {
-    if (initCmd != nullptr) {
-      initCmd->release();
-    }
-  }
-  managedVarInitCmd_.clear();
-  managedVarsDevicePtrInitalized_.clear();
+  // <REVIEW HELPER> Clearing the state map invokes its RAII cleanup, replacing
+  // separate marker/copy/error-map loops that could get out of sync.
+  managedVarInitStates_.clear();
 
   // Delete all registered functions and clear the container
   for (auto const& [_, func] : functions_) {
@@ -642,70 +680,167 @@ void StatCO::ResizeForDevices(size_t device_count) {
 }
 
 // ================================================================================================
+// <REVIEW HELPER> Commands queued before an immediate setup error still own
+// queue references; this releases only the extra observer references retained
+// for later status inspection.
+static void ReleaseRetainedCommands(std::vector<amd::Command*>& commands) {
+  for (amd::Command* command : commands) {
+    command->release();
+  }
+  commands.clear();
+}
+
+// <REVIEW HELPER> Resource exhaustion can be retried by rewriting every symbol;
+// other asynchronous failures poison the device state until teardown.
+static bool IsRecoverableManagedVarInitFailure(cl_int status) {
+  return status == CL_MEM_OBJECT_ALLOCATION_FAILURE || status == CL_OUT_OF_HOST_MEMORY ||
+         status == CL_OUT_OF_RESOURCES;
+}
+
+// <REVIEW HELPER> Keep low-level ROCclr status translation in one place instead
+// of scattering generic hipErrorUnknown returns through the state machine.
+static hipError_t MapManagedVarInitFailure(cl_int status) {
+  return IsRecoverableManagedVarInitFailure(status) ? hipErrorOutOfMemory : hipErrorUnknown;
+}
+
+// <REVIEW HELPER> Submission is isolated here because it must retain every exact
+// copy command and publish the state only after the whole batch is queued. This
+// helper is private and is called only while InitManagedVarDevicePtr holds
+// sclock_; it deliberately does not acquire the mutex again.
+hipError_t StatCO::QueueManagedVarInitialization(int deviceId, ManagedVarInitState& state) {
+  if (managedVars_.empty()) {
+    state.initialized = true;
+    return hipSuccess;
+  }
+
+  hip::Stream* stream = g_devices.at(deviceId)->NullStream();
+  if (stream == nullptr) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
+    return hipErrorInvalidResourceHandle;
+  }
+
+  std::vector<amd::Command*> initCopyCmds;
+  for (auto& [_, managedVars] : managedVars_) {
+    for (Var* var : managedVars) {
+      FatBinaryInfo** module = var->ModuleInfo();
+      if (*module == nullptr) {
+        // <REVIEW HELPER> DigestFatBinary also takes sclock_. This is why
+        // sclock_ remains a recursive_mutex: lazy module loading can re-enter
+        // the same lock while the first-touch state transition is serialized.
+        std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
+      }
+
+      hipError_t result = var->AllocateManagedVarPtr();
+      if (result != hipSuccess) {
+        ReleaseRetainedCommands(initCopyCmds);
+        return result;
+      }
+
+      amd::Memory* mem = nullptr;
+      result = var->GetStatDeviceVar(&mem, deviceId);
+      if (result != hipSuccess) {
+        ReleaseRetainedCommands(initCopyCmds);
+        return result;
+      }
+
+      // <REVIEW HELPER> This must stay host-asynchronous. A synchronous copy was
+      // tried originally, but deadlocked when a callback blocked the null stream.
+      amd::Command* copyCmd = nullptr;
+      result = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
+                          mem->getSize(), hipMemcpyHostToDevice, *stream,
+                          /*isHostAsync=*/true, /*isGPUAsync=*/true, &copyCmd);
+      if (result != hipSuccess) {
+        ReleaseRetainedCommands(initCopyCmds);
+        return result;
+      }
+      if (copyCmd != nullptr) {
+        // <REVIEW HELPER> Retain the exact copy returned by ihipMemcpy; sampling
+        // the stream's last command here raced with unrelated null-stream work.
+        initCopyCmds.push_back(copyCmd);
+      }
+    }
+  }
+
+  state.copies = std::move(initCopyCmds);
+  // <REVIEW HELPER> The marker gives other streams a device-side dependency
+  // without blocking the calling host thread.
+  state.completion = new amd::Marker(*stream, kMarkerDisableFlush);
+  state.completion->enqueue();
+  state.initialized = true;
+  return hipSuccess;
+}
+
+// <REVIEW HELPER> Status inspection is deferred until the trailing marker is
+// terminal; waiting on each earlier in-order copy is therefore nonblocking.
+// The marker alone cannot report failures from earlier in-order copies, which
+// is why the exact copy commands must also be retained and inspected.
+hipError_t StatCO::FinalizeManagedVarInitialization(ManagedVarInitState& state) {
+  if (state.completion == nullptr || state.completion->status() > CL_COMPLETE) {
+    return hipSuccess;
+  }
+
+  cl_int failureStatus = CL_SUCCESS;
+  for (amd::Command* copyCmd : state.copies) {
+    if (!copyCmd->awaitCompletion() && failureStatus == CL_SUCCESS) {
+      failureStatus = copyCmd->status();
+    }
+  }
+  if (failureStatus == CL_SUCCESS && state.completion->status() < CL_COMPLETE) {
+    failureStatus = state.completion->status();
+  }
+  state.ReleaseCommands();
+
+  if (failureStatus == CL_SUCCESS) {
+    return hipSuccess;
+  }
+
+  const hipError_t initError = MapManagedVarInitFailure(failureStatus);
+  if (IsRecoverableManagedVarInitFailure(failureStatus)) {
+    // <REVIEW HELPER> A retry rewrites every symbol. Permanently caching
+    // transient out-of-resource failures prevented recovery in an earlier approach.
+    state.initialized = false;
+  } else {
+    state.terminalError = initError;
+  }
+  return initError;
+}
+
+// <REVIEW HELPER> Nonblocking and per-thread streams do not serialize with the
+// null stream, so enqueue a device-side wait instead of synchronizing the host.
+// No marker is needed for the null stream itself because queue order already
+// places the operation after its initialization copies. The Marker constructor
+// retains state.completion through its wait list until the wait marker finishes.
+void StatCO::OrderStreamAfterManagedVarInitialization(int deviceId, hip::Stream* orderStream,
+                                                      const ManagedVarInitState& state) {
+  if (state.completion == nullptr || orderStream == nullptr ||
+      orderStream == g_devices.at(deviceId)->GetNullStream()) {
+    return;
+  }
+
+  amd::Command::EventWaitList waitList{state.completion};
+  amd::Command* waitMarker = new amd::Marker(*orderStream, kMarkerDisableFlush, waitList);
+  waitMarker->enqueue();
+  waitMarker->release();
+}
+
+// <REVIEW HELPER> Keep the externally called method as the small coordinator:
+// queue once, observe terminal status, then order the operation's stream.
+// std::scoped_lock was NOT introduced by this refactor; the original function
+// already held sclock_ for its full duration. Keeping it here means all three
+// helpers execute under one lock, so concurrent first-touch callers cannot both
+// enqueue initialization. scoped_lock supplies RAII unlock on every early return.
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId, hip::Stream* orderStream) {
   std::scoped_lock lock(sclock_);
-  hipError_t err = hipSuccess;
-  const bool initialized =
-      managedVarsDevicePtrInitalized_.find(deviceId) != managedVarsDevicePtrInitalized_.end() &&
-      managedVarsDevicePtrInitalized_[deviceId];
-
-  if (!initialized) {
-    if (!managedVars_.empty()) {
-      hip::Stream* stream = g_devices.at(deviceId)->NullStream();
-      if (stream == nullptr) {
-        ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
-        return hipErrorInvalidResourceHandle;
-      }
-      for (auto& vecIter : managedVars_) {
-        for (auto& var : vecIter.second) {
-          // Lazy load
-          FatBinaryInfo** module = var->ModuleInfo();
-          if (*(module) == nullptr) {
-            std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
-          }
-          // Allocate managed var for deferred loading
-          IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
-          // Copy from managed var host to device ptr. This is enqueued
-          // host-asynchronously and never waited on here: a host-synchronous copy
-          // would block the calling thread on the null stream, which the
-          // application may have left blocked (for example with a pending host
-          // callback), and would deadlock.
-          amd::Memory* mem = nullptr;
-          IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
-          err = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
-                           mem->getSize(), hipMemcpyHostToDevice, *stream, /*isHostAsync=*/true);
-        }
-      }
-      // Record a completion marker after the async init copies and retain it so
-      // later work on other streams can be ordered after the init below.
-      amd::Command* initCmd = new amd::Marker(*stream, kMarkerDisableFlush);
-      initCmd->enqueue();
-      managedVarInitCmd_[deviceId] = initCmd;  // retained (released once complete)
-    }
-    managedVarsDevicePtrInitalized_[deviceId] = true;
+  ManagedVarInitState& state = managedVarInitStates_[deviceId];
+  if (state.terminalError != hipSuccess) {
+    return state.terminalError;
   }
-
-  // The init copies run on the null stream and are host-asynchronous, so a stream
-  // that does not serialize with the null stream (e.g. hipStreamNonBlocking, or a
-  // per-thread default stream) would not otherwise observe them. Add an explicit
-  // device-side dependency so orderStream waits for the init to complete. This
-  // never blocks the host, and self-limits to the startup window: once the init
-  // marker completes it is released and this becomes a no-op.
-  auto cmdIter = managedVarInitCmd_.find(deviceId);
-  if (cmdIter != managedVarInitCmd_.end() && cmdIter->second != nullptr) {
-    amd::Command* initCmd = cmdIter->second;
-    if (initCmd->status() <= CL_COMPLETE) {
-      initCmd->release();
-      cmdIter->second = nullptr;
-    } else if (orderStream != nullptr && orderStream != g_devices.at(deviceId)->GetNullStream()) {
-      amd::Command::EventWaitList waitList;
-      waitList.push_back(initCmd);
-      amd::Command* waitMarker = new amd::Marker(*orderStream, kMarkerDisableFlush, waitList);
-      waitMarker->enqueue();
-      waitMarker->release();
-    }
+  if (!state.initialized) {
+    IHIP_RETURN_ONFAIL(QueueManagedVarInitialization(deviceId, state));
   }
-  return err;
+  IHIP_RETURN_ONFAIL(FinalizeManagedVarInitialization(state));
+  OrderStreamAfterManagedVarInitialization(deviceId, orderStream, state);
+  return hipSuccess;
 }
 
 // ================================================================================================

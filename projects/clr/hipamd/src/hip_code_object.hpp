@@ -209,12 +209,39 @@ class StatCO : public CodeObject {
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostFunctions_;
   //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
-  //! Tracks managed var initialization per device
-  std::unordered_map<int, bool> managedVarsDevicePtrInitalized_;
-  //! Per-device completion marker for the async managed-var init copies. Used to
-  //! order later work after the init; released and set to nullptr once observed
-  //! complete (steady state) or during teardown.
-  std::unordered_map<int, amd::Command*> managedVarInitCmd_;
+  // <REVIEW HELPER> Keep all per-device initialization lifetime and error data
+  // together. Separate maps previously made partial cleanup easy to miss.
+  struct ManagedVarInitState {
+    ManagedVarInitState() = default;
+    ~ManagedVarInitState();
+    // <REVIEW HELPER> Raw command pointers are retained references, so copying
+    // would double-release them; explicit moves transfer that ownership.
+    ManagedVarInitState(const ManagedVarInitState&) = delete;
+    ManagedVarInitState& operator=(const ManagedVarInitState&) = delete;
+    ManagedVarInitState(ManagedVarInitState&& other) noexcept;
+    ManagedVarInitState& operator=(ManagedVarInitState&& other) noexcept;
+
+    void ReleaseCommands();
+
+    bool initialized = false;
+    amd::Command* completion = nullptr;
+    std::vector<amd::Command*> copies;
+    //! <REVIEW HELPER> Unrecoverable errors are replayed until teardown so later
+    //! operations cannot silently assume that managed symbols were initialized.
+    hipError_t terminalError = hipSuccess;
+  };
+
+  // <REVIEW HELPER> These helpers separate submission, completion/error
+  // processing, and cross-stream ordering; the public entry point only
+  // coordinates the state machine.
+  hipError_t QueueManagedVarInitialization(int deviceId, ManagedVarInitState& state);
+  hipError_t FinalizeManagedVarInitialization(ManagedVarInitState& state);
+  void OrderStreamAfterManagedVarInitialization(int deviceId, hip::Stream* orderStream,
+                                                const ManagedVarInitState& state);
+
+  //! <REVIEW HELPER> One state-machine instance per device prevents duplicate
+  //! initialization while sclock_ serializes first-touch callers.
+  std::unordered_map<int, ManagedVarInitState> managedVarInitStates_;
 };
 
 };  // namespace hip

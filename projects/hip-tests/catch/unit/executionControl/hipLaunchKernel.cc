@@ -37,7 +37,9 @@ HIP_TEST_CASE(Unit_hipLaunchKernel_Positive_Synchronization_Behavior) {
   HipTest::BlockingContext b_context{nullptr};
   hipStream_t kernel_stream{nullptr};
 
-  b_context.block_stream();
+  // <REVIEW HELPER> Fail immediately if the blocking callback was not enqueued;
+  // otherwise this synchronization test could produce a false pass.
+  HIP_CHECK(b_context.block_stream());
   REQUIRE(b_context.is_blocked());
 
   HIP_CHECK(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr,

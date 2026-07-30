@@ -787,8 +787,11 @@ namespace hip {
   extern hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void* ptr,
                                         uint64_t value, uint64_t mask, unsigned int flags,
                                         size_t sizeBytes);
+  // <REVIEW HELPER> The optional output returns the exact copy command while it
+  // is still locally owned, avoiding a racy lookup of the stream's last command.
   hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                        hip::Stream& stream, bool isHostAsync = false, bool isGPUAsync = true);
+                        hip::Stream& stream, bool isHostAsync = false, bool isGPUAsync = true,
+                        amd::Command** retainedCommand = nullptr);
   hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream = nullptr,
                           bool isAsync = false);
 
