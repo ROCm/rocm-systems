@@ -22,7 +22,7 @@ See :ref:`analysis database schema <analysis-database>` for what it contains.
 
 Before using this workflow, review the `ROCm Optiq system requirements`_ and confirm that
 your ROCm Optiq version supports the analysis database schema emitted by your installed
-ROCm Compute Profiler version. Version and platform compatibility requirements can change
+ROCm Compute Profiler. Compatibility requirements for ROCm Optiq and ROCm Compute Profiler can change
 independently.
 
 For information about opening the analysis databases and using the interface, see the `ROCm Optiq analysis guide`_.
