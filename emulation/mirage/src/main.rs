@@ -199,19 +199,35 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
             let json = cli.json;
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async move {
-                if mirage_ctl::needs_daemon(&cmd) {
+                match mirage_ctl::daemon_need(&cmd) {
                     // Anything touching a session runs against the
                     // daemon, which owns them. It is started on demand,
                     // so a first-time user never has to know it exists.
-                    let ctl = RpcClient::connect().await?;
-                    mirage_ctl::dispatch(cmd, ctl, json).await
-                } else {
+                    mirage_ctl::DaemonNeed::Always => {
+                        let ctl = RpcClient::connect().await?;
+                        mirage_ctl::dispatch(cmd, ctl, json).await
+                    }
+                    // `state purge` has to reach a *running* daemon to
+                    // stop its sessions, but starting one so it can be
+                    // told to exit is both pointless and, when
+                    // auto-start is disabled or the previous daemon
+                    // crashed, a hard failure that deletes nothing.
+                    mirage_ctl::DaemonNeed::IfRunning => {
+                        match RpcClient::connect_existing(&mirage_ctl::rpc_client::default_socket())
+                            .await
+                        {
+                            Ok(ctl) => mirage_ctl::dispatch(cmd, ctl, json).await,
+                            Err(_) => mirage_ctl::dispatch(cmd, mirage_ctl::LocalCtl, json).await,
+                        }
+                    }
                     // Configuration and registry queries are answered
                     // here. Starting a background daemon to read a
                     // directory would be a surprise the user did not ask
                     // for — and, in a test harness, a stray process in
                     // the real user's runtime directory.
-                    mirage_ctl::dispatch(cmd, mirage_ctl::LocalCtl, json).await
+                    mirage_ctl::DaemonNeed::Never => {
+                        mirage_ctl::dispatch(cmd, mirage_ctl::LocalCtl, json).await
+                    }
                 }
             })
         }

@@ -257,8 +257,14 @@ async fn handle(
             return attach(framed, manager, exec).await;
         }
 
+        // Note the flag before `request` is consumed: `DaemonShutdown` is
+        // answered *and then* ends the connection, which is the contract
+        // `proto` documents — the client learns the request was accepted
+        // instead of inferring it from a dropped socket. Deriving this
+        // from the response instead cannot work, since a dozen unrelated
+        // operations also answer `Response::Ok`.
+        let shutting_down = matches!(request, Request::DaemonShutdown);
         let response = dispatch(&manager, request, started).await;
-        let shutting_down = matches!(response, Response::Ok if false);
         send(&mut framed, &response).await?;
         if shutting_down {
             return Ok(());
@@ -420,6 +426,17 @@ async fn attach(
             return Ok(());
         }
     };
+
+    // Acknowledge the attach before any output.
+    //
+    // Whether the attach was accepted has to be answerable *now*, not
+    // whenever the workload next writes something. Without this frame a
+    // client cannot tell "attached to a silent `sleep 300`" from
+    // "rejected, no such exec" until output arrives — which for a silent
+    // workload is never — so it either blocks or has to treat a refusal
+    // as an empty stream and report success for an exec that does not
+    // exist.
+    sink.send(encode(&Response::Ok).into()).await?;
 
     loop {
         tokio::select! {

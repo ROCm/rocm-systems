@@ -139,6 +139,17 @@ impl SessionManager {
     /// sequence would make shutdown take the SIGTERM grace period times
     /// the number of sessions.
     pub async fn shutdown_all(&self) {
+        // Latch the shutdown flag first, whatever brought us here.
+        //
+        // Only the `daemon_shutdown` RPC used to set it, so a `SIGTERM`,
+        // an idle timeout or a deleted socket left `session_create` still
+        // accepting work — and a request already in flight could insert
+        // its session after the map below had been taken, producing a
+        // session the daemon reports as created and then never tears
+        // down. Every shutdown path runs through here, so this is the
+        // place the guard belongs.
+        self.shutdown.send_replace(true);
+
         let sessions: Vec<Arc<Session>> = {
             let mut guard = self.write();
             std::mem::take(&mut *guard).into_values().collect()
@@ -148,6 +159,16 @@ impl SessionManager {
         }
         tracing::info!(count = sessions.len(), "tearing down all sessions");
         futures::future::join_all(sessions.iter().map(|s| s.teardown())).await;
+
+        // Last-resort sweep over the sessions we just took. `teardown` is
+        // the correct path and normally leaves nothing, but a process
+        // that survived it (a container exec whose provider hung, say)
+        // must still not outlive the daemon — and by this point these
+        // sessions are out of the map, so `kill_all_now` can no longer
+        // see them.
+        for session in &sessions {
+            session.kill_now();
+        }
     }
 
     /// Look up a session, or report it missing.
@@ -314,7 +335,7 @@ impl SessionManager {
                 def.image = tag;
             }
 
-            let head_port = pick_port();
+            let head_port = crate::session::pick_head_port();
             let node_env = plan.env.clone();
             let command = plan.command.clone();
 
@@ -355,12 +376,18 @@ impl SessionManager {
     }
 }
 
-/// Reserve an ephemeral port for the containerised head node.
-fn pick_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .ok()
-        .and_then(|l| l.local_addr().ok())
-        .map_or(0, |a| a.port())
+/// A mirage-generated line on an attached exec's stderr.
+///
+/// Used for things the client has to know but the workload did not say —
+/// that its output was truncated, or that frames were skipped. It goes on
+/// stderr, tagged, so it is distinguishable from the workload's own
+/// output and does not corrupt a piped stdout.
+fn notice(message: &str) -> StreamPacket {
+    StreamPacket::Output {
+        node: 0,
+        stream: mirage_core::ctl::StdStream::Stderr,
+        data: format!("mirage: {message}\n").into_bytes(),
+    }
 }
 
 #[async_trait]
@@ -457,6 +484,15 @@ impl MirageCtl for SessionManager {
 
         {
             let mut sessions = self.write();
+            // Re-check under the write lock. `shutdown_all` latches the
+            // flag and *then* takes the map, both of which race the
+            // check above; re-reading here means either we insert before
+            // the map is taken (and the session is torn down with the
+            // rest) or we refuse. A session inserted after the take would
+            // be one nothing ever destroys.
+            if self.is_shutting_down() {
+                return Err(MirageError::daemon("daemon is shutting down"));
+            }
             if sessions.contains_key(&id) {
                 return Err(MirageError::SessionExists(id.to_string()));
             }
@@ -476,22 +512,45 @@ impl MirageCtl for SessionManager {
         let session = self.get(id).await?;
         let mut watch = session.watch_health();
 
-        // Deadline is extended while the session is doing something with
-        // an externally-bounded duration (pulling or building an image).
-        // The timeout is there to catch a stuck session, and a slow
-        // registry is not stuck.
-        let mut deadline = tokio::time::Instant::now() + timeout;
+        // The timeout is there to catch a *stuck* session, and a slow
+        // container registry is not stuck. While the session is in a
+        // phase whose duration is bounded by something outside mirage
+        // (pulling or building an image), the clock is suspended
+        // entirely.
+        //
+        // Suspending it — rather than restarting it each time round the
+        // loop — is what actually implements that. Each phase reports
+        // itself exactly once and the work then happens inside a single
+        // blocking call, so a multi-gigabyte pull produces one health
+        // event and then silence: a deadline merely *reset* on that one
+        // event still expires mid-pull, and `mirage run` tears down a
+        // session whose image was downloading normally.
+        //
+        // Waiting unbounded here is safe because bring-up always
+        // publishes again: `bring_up` records a terminal `failed` health
+        // on any error, and the phase callback fires on the way out of
+        // every step.
+        let mut deadline = Some(tokio::time::Instant::now() + timeout);
         loop {
             {
                 let health = watch.borrow_and_update().clone();
                 if health.is_settled() {
                     return Ok(health);
                 }
-                if state::is_externally_bounded(health.state.as_deref()) {
-                    deadline = tokio::time::Instant::now() + timeout;
-                }
+                deadline = if state::is_externally_bounded(health.state.as_deref()) {
+                    None
+                } else {
+                    // Leaving an externally-bounded phase restarts the
+                    // clock: the time spent pulling must not be charged
+                    // to the steps after it either.
+                    Some(deadline.unwrap_or_else(|| tokio::time::Instant::now() + timeout))
+                };
             }
-            match tokio::time::timeout_at(deadline, watch.changed()).await {
+            let changed = match deadline {
+                Some(deadline) => tokio::time::timeout_at(deadline, watch.changed()).await,
+                None => Ok(watch.changed().await),
+            };
+            match changed {
                 // Health changed; loop and re-inspect.
                 Ok(Ok(())) => {}
                 // The session was dropped while we waited.
@@ -562,6 +621,21 @@ impl MirageCtl for SessionManager {
         // and its exit code instead of nothing.
         let (tx, rx) = tokio::sync::mpsc::channel(256);
         tokio::spawn(async move {
+            // Say so when the replay is incomplete. The hub counts what
+            // it evicted precisely so this is not guesswork, and a
+            // truncated log that looks whole is worse than no log: a user
+            // reads the surviving tail and concludes the error they are
+            // hunting never happened.
+            if sub.dropped_bytes > 0 {
+                let note = notice(&format!(
+                    "earlier output was dropped ({} bytes) to stay within \
+                     the retained-output limit",
+                    sub.dropped_bytes
+                ));
+                if tx.send(note).await.is_err() {
+                    return;
+                }
+            }
             for packet in sub.replay {
                 let terminal = matches!(packet, StreamPacket::ExecExit { .. });
                 if tx.send(packet).await.is_err() || terminal {
@@ -589,8 +663,17 @@ impl MirageCtl for SessionManager {
                     // dropped packets. Keep going rather than
                     // disconnecting: a gap in output is bad, but silently
                     // losing the exit code would hang the client.
+                    //
+                    // Tell the client about the gap, though. Logging it
+                    // in the daemon puts the one record of it somewhere
+                    // the person reading the output will never look.
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!(dropped = n, "attach client fell behind; output skipped");
+                        let note =
+                            notice(&format!("{n} output frames were skipped (client too slow)"));
+                        if tx.send(note).await.is_err() {
+                            return;
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                 }

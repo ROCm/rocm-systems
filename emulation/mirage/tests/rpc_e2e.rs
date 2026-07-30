@@ -480,6 +480,61 @@ async fn attaching_to_a_missing_exec_reports_it_rather_than_hanging() {
 }
 
 #[tokio::test]
+async fn attaching_to_a_silent_exec_is_acknowledged_immediately() {
+    // Whether an attach was accepted has to be answerable before the
+    // workload says anything, and a long-running job may say nothing for
+    // hours. Without an acknowledgement frame a client cannot distinguish
+    // "attached to a silent `sleep`" from "rejected, no such exec" — so
+    // it either blocks or, as the CLI did, treats a refusal as an empty
+    // stream and reports success for an exec that does not exist.
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    env.start_session("p", "silent");
+    let tag = marker("silent");
+
+    env.ok(&[
+        "exec", "start", "silent", "--detach", "--keep", "--", "/bin/sh", "-c",
+        &tagged_sleep(&tag),
+    ]);
+    wait_for("the workload to start", Duration::from_secs(15), || {
+        harness::count_processes(&tag) > 0
+    });
+
+    let mut framed = connect(&env).await;
+    framed
+        .send(
+            serde_json::to_vec(&Request::Attach {
+                exec: mirage_core::exec::ExecRef {
+                    session: mirage_core::session::SessionId::new("silent").unwrap(),
+                    exec: mirage_core::exec::ExecId::from_counter(0),
+                },
+            })
+            .unwrap()
+            .into(),
+        )
+        .await
+        .unwrap();
+
+    let frame = tokio::time::timeout(Duration::from_secs(10), framed.next())
+        .await
+        .expect("a successful attach must be acknowledged, not wait for output")
+        .expect("a response")
+        .unwrap();
+    assert!(
+        matches!(
+            serde_json::from_slice::<Response>(&frame).unwrap(),
+            Response::Ok
+        ),
+        "the daemon must acknowledge an accepted attach before any output"
+    );
+
+    env.ok(&["session", "stop", "silent"]);
+}
+
+#[tokio::test]
 async fn the_daemon_exits_when_idle() {
     let env = Env::new();
     // A background process with no exit condition is the thing users

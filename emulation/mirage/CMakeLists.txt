@@ -27,6 +27,13 @@
 #                                       dashboard SPA (cargo feature
 #                                       `webui`; requires the Node.js
 #                                       toolchain). Implies the daemon.
+#   * `MIRAGE_ALLOW_TEST_SKIP` (OFF)  — let the end-to-end suites report
+#                                       success when the `rocjitsu`
+#                                       runtime is missing and every
+#                                       session test therefore skipped.
+#                                       Off by default: a suite that
+#                                       silently proves nothing is worse
+#                                       than a red one.
 #   * `MIRAGE_CARGO_PROFILE`  (release)
 #   * `MIRAGE_CARGO`          (auto)  — override cargo binary
 #
@@ -48,6 +55,12 @@ option(
     "Build HotSwap (COMGR + patched ROCR + intercept) from source"
     OFF
 )
+option(
+    MIRAGE_ALLOW_TEST_SKIP
+    "Pass MIRAGE_E2E_ALLOW_SKIP=1 so the e2e suites may skip without a \
+rocjitsu runtime"
+    OFF
+)
 set(MIRAGE_CARGO_PROFILE "release" CACHE STRING "Cargo build profile")
 set(MIRAGE_CARGO
     ""
@@ -62,6 +75,20 @@ endif()
 message(STATUS "mirage: using cargo at ${MIRAGE_CARGO}")
 
 set(_mirage_env)
+
+# Each end-to-end suite has one test that fails when every *other* test in
+# it skipped for a missing emulator runtime, so a build without rocjitsu
+# cannot go green while proving nothing. That is the right default, but it
+# makes `ctest` red on the mirage-only build documented in
+# docs/building.md — so the acknowledgement has to be reachable from here
+# and not only from a hand-exported environment variable.
+if(MIRAGE_ALLOW_TEST_SKIP)
+    list(APPEND _mirage_env "MIRAGE_E2E_ALLOW_SKIP=1")
+    message(
+        STATUS
+        "mirage: end-to-end suites may skip (MIRAGE_E2E_ALLOW_SKIP=1)"
+    )
+endif()
 
 # Select the cargo features for the (optional) web UI. `webui` pulls in
 # the daemon's HTTP surface plus the bundled SPA; `daemon` is just the
@@ -121,9 +148,11 @@ install(PROGRAMS ${_mirage_bin} DESTINATION bin RENAME mirage)
 
 enable_testing()
 
-# Full Rust workspace test suite. Picks up: core unit tests, daemon
-# e2e, lifecycle e2e, and the env-gated ml_scenarios tests (which
-# auto-skip when their prerequisites are missing).
+# Full Rust workspace test suite: every crate's unit tests plus the
+# integration suites under `tests/` (e2e, rpc_e2e, container_e2e,
+# interactive, strain, daemon_e2e, matrix_e2e, the emulator benchmark)
+# and `supervisor/tests/`. Session tests skip without a rocjitsu runtime;
+# see MIRAGE_ALLOW_TEST_SKIP above for what that means for `ctest`.
 add_test(
     NAME cargo_test
     COMMAND

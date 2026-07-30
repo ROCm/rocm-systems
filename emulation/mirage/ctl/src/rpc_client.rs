@@ -92,8 +92,8 @@ impl RpcClient {
                 socket.display()
             )));
         }
-        client.spawn_daemon()?;
-        client.await_daemon().await?;
+        let daemon = client.spawn_daemon()?;
+        client.await_daemon(daemon).await?;
         client.check_version().await.map(|()| client)
     }
 
@@ -149,7 +149,24 @@ impl RpcClient {
             })
             .await?
         {
-            Response::Hello { .. } => Ok(()),
+            // Check the answer, do not merely accept its shape. The
+            // daemon rejects a mismatched client too, but relying on that
+            // alone means the guarantee only holds when the *daemon* is
+            // the newer of the two — and the case this exists for is the
+            // opposite one, where mirage was upgraded and left an old
+            // long-lived daemon running.
+            Response::Hello {
+                version,
+                daemon_version,
+            } if version == PROTOCOL_VERSION => {
+                tracing::debug!(daemon_version, "connected to the mirage daemon");
+                Ok(())
+            }
+            Response::Hello { version, .. } => Err(MirageError::daemon(format!(
+                "protocol version mismatch: this client speaks \
+                 v{PROTOCOL_VERSION}, the running daemon speaks v{version}. \
+                 Run `mirage daemon stop` and retry to restart it."
+            ))),
             other => Err(unexpected(&other)),
         }
     }
@@ -163,7 +180,15 @@ impl RpcClient {
     }
 
     /// Start a daemon in the background.
-    fn spawn_daemon(&self) -> Result<()> {
+    ///
+    /// Returns the child handle, which the caller must reap. It is a real
+    /// child of this process, and one that routinely exits within
+    /// milliseconds: when two CLIs race to auto-start, the loser's daemon
+    /// finds the lock taken and returns immediately. Dropping the handle
+    /// without waiting leaves that exit sitting in the process table as a
+    /// zombie for as long as this CLI runs — which for `mirage run --
+    /// ./train.py` is hours.
+    fn spawn_daemon(&self) -> Result<std::process::Child> {
         let bin = mirage_binary()?;
         let log_path = mirage_core::paths::daemon_log_path();
         if let Some(parent) = log_path.parent() {
@@ -213,26 +238,45 @@ impl RpcClient {
             }
         }
 
-        cmd.spawn().map_err(|e| {
+        let child = cmd.spawn().map_err(|e| {
             MirageError::daemon(format!(
                 "could not start the mirage daemon via {}: {e}",
                 bin.display()
             ))
         })?;
         tracing::debug!(bin = %bin.display(), "started a mirage daemon");
-        Ok(())
+        Ok(child)
     }
 
     /// Wait for an auto-started daemon to accept connections.
-    async fn await_daemon(&self) -> Result<()> {
+    ///
+    /// Reaps `child` if it exits during the wait, which is the expected
+    /// outcome whenever another daemon was already running: the one we
+    /// started sees the lock taken and exits at once, and something has
+    /// to collect it.
+    async fn await_daemon(&self, mut child: std::process::Child) -> Result<()> {
         let deadline = tokio::time::Instant::now() + STARTUP_TIMEOUT;
+        let mut exited = None;
         loop {
             if self.probe().await.is_ok() {
                 return Ok(());
             }
+            // Reap it the moment it goes, rather than leaving a zombie
+            // for the life of this command. Its exit is not necessarily a
+            // failure — the loser of an auto-start race exits 0 having
+            // handed over to the daemon that won — so keep polling the
+            // socket either way, and only report the status if the socket
+            // never comes up.
+            if exited.is_none() {
+                exited = child.try_wait().ok().flatten();
+            }
             if tokio::time::Instant::now() >= deadline {
+                let how = exited.map_or_else(
+                    || "it is still running but never bound its socket".to_string(),
+                    |status| format!("it exited with {status}"),
+                );
                 return Err(MirageError::daemon(format!(
-                    "the mirage daemon did not start within {STARTUP_TIMEOUT:?}. \
+                    "the mirage daemon did not start within {STARTUP_TIMEOUT:?}: {how}. \
                      See {} for why.",
                     mirage_core::paths::daemon_log_path().display()
                 )));
@@ -343,6 +387,23 @@ fn mirage_binary() -> Result<PathBuf> {
         "could not locate the `mirage` binary to start a daemon with; \
          set MIRAGE_BIN to its path",
     ))
+}
+
+/// Decode one frame of an attach stream.
+///
+/// `Ok(Some(packet))` is output, `Ok(None)` is a clean end of stream, and
+/// `Err` is the daemon refusing or aborting the attach.
+fn decode_attach_frame(frame: &[u8]) -> Result<Option<mirage_core::ctl::StreamPacket>> {
+    match serde_json::from_slice::<Response>(frame) {
+        Ok(Response::Stream(packet)) => Ok(Some(packet)),
+        Ok(Response::StreamEnd) => Ok(None),
+        Ok(Response::Error { kind, message }) => Err(Response::into_error(kind, message)),
+        Ok(other) => {
+            tracing::debug!("ignoring {other:?} on an attach stream");
+            Ok(None)
+        }
+        Err(e) => Err(MirageError::daemon(format!("malformed attach frame: {e}"))),
+    }
 }
 
 /// A response that does not match the request that produced it.
@@ -565,27 +626,49 @@ impl MirageCtl for RpcClient {
             .await
             .map_err(|e| MirageError::daemon(format!("cannot send attach: {e}")))?;
 
+        // Wait for the daemon's acknowledgement before returning, so that
+        // a rejected attach is an `Err` from this call.
+        // `SessionManager::session_attach` reports a missing exec that
+        // way, and the two implementations of one trait method have to
+        // agree: handing back an empty stream instead makes
+        // `mirage attach <session> <typo>` print nothing and exit 0.
+        match framed.next().await {
+            Some(Ok(frame)) => {
+                let ack: Response = serde_json::from_slice(&frame)
+                    .map_err(|e| MirageError::daemon(format!("cannot decode attach: {e}")))?;
+                match ack {
+                    Response::Ok => {}
+                    Response::Error { kind, message } => {
+                        return Err(Response::into_error(kind, message));
+                    }
+                    other => return Err(unexpected(&other)),
+                }
+            }
+            Some(Err(e)) => {
+                return Err(MirageError::daemon(format!("cannot read attach: {e}")));
+            }
+            None => {
+                return Err(MirageError::daemon(
+                    "the daemon closed the connection without accepting the attach",
+                ));
+            }
+        }
+
         let (tx, rx) = tokio::sync::mpsc::channel(256);
         tokio::spawn(async move {
             while let Some(frame) = framed.next().await {
                 let Ok(frame) = frame else { return };
-                match serde_json::from_slice::<Response>(&frame) {
-                    Ok(Response::Stream(packet)) => {
+                match decode_attach_frame(&frame) {
+                    // A `StreamEnd`, or an error the daemon raised
+                    // mid-stream. Either way the exchange is over;
+                    // dropping `tx` ends the stream, and the caller
+                    // treats an end with no `ExecExit` as a failure
+                    // rather than as a workload that succeeded.
+                    Ok(None) | Err(_) => return,
+                    Ok(Some(packet)) => {
                         if tx.send(packet).await.is_err() {
                             return;
                         }
-                    }
-                    Ok(Response::StreamEnd) => return,
-                    Ok(Response::Error { kind, message }) => {
-                        tracing::debug!("attach failed: {}", Response::into_error(kind, message));
-                        return;
-                    }
-                    Ok(other) => {
-                        tracing::debug!("ignoring {other:?} on an attach stream");
-                    }
-                    Err(e) => {
-                        tracing::debug!("malformed attach frame: {e}");
-                        return;
                     }
                 }
             }
@@ -632,39 +715,6 @@ impl MirageCtl for RpcClient {
         self.request_ok(Request::DaemonShutdown).await
     }
 }
-
-/// A stdin writer bound to an attached exec.
-///
-/// Attach and stdin travel on separate connections in this client, which
-/// keeps the streaming path simple; the daemon accepts stdin frames on
-/// either.
-#[derive(Debug, Clone)]
-pub struct StdinWriter {
-    client: RpcClient,
-    exec: ExecRef,
-}
-
-impl StdinWriter {
-    /// Build a writer for `exec`.
-    #[must_use]
-    pub fn new(client: RpcClient, exec: ExecRef) -> Self {
-        Self { client, exec }
-    }
-
-    /// Forward `data` to the workload's stdin.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the exec has no open stdin or the daemon
-    /// cannot be reached.
-    pub async fn write(&self, data: &[u8]) -> Result<()> {
-        self.client.session_stdin(&self.exec, data).await
-    }
-}
-
-/// Re-exported so callers can name the packet type without depending on
-/// `mirage_core::ctl` directly.
-pub use mirage_core::ctl::StreamPacket as Packet;
 
 #[cfg(test)]
 mod tests {

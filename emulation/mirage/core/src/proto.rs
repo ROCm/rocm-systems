@@ -35,7 +35,6 @@
 //! that by the supervisor's read buffer, so the cap only ever rejects a
 //! malformed or hostile peer rather than legitimate traffic.
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -326,6 +325,10 @@ pub enum Response {
 pub enum ErrorKind {
     /// A requested profile does not exist.
     ProfileNotFound,
+    /// A requested topology does not exist.
+    TopologyNotFound,
+    /// A requested agent does not exist.
+    AgentNotFound,
     /// A requested session does not exist.
     SessionNotFound,
     /// A session with that id already exists.
@@ -346,6 +349,8 @@ impl From<&MirageError> for ErrorKind {
     fn from(e: &MirageError) -> Self {
         match e {
             MirageError::ProfileNotFound(_) => Self::ProfileNotFound,
+            MirageError::TopologyNotFound(_) => Self::TopologyNotFound,
+            MirageError::AgentNotFound(_) => Self::AgentNotFound,
             MirageError::SessionNotFound(_) => Self::SessionNotFound,
             MirageError::SessionExists(_) => Self::SessionExists,
             MirageError::ExecNotFound(_) => Self::ExecNotFound,
@@ -369,17 +374,31 @@ impl Response {
 
     /// Rebuild a typed [`MirageError`] from an error response.
     ///
-    /// Round-tripping is lossy by construction — an `Io` error arrives as
-    /// a message, not a `std::io::Error` — but the *kind* survives, which
-    /// is what callers actually branch on.
+    /// Round-tripping is lossy in the *payload* — an `Io` error arrives
+    /// as a message, not a `std::io::Error`, and an `InvalidId` as a
+    /// message rather than an [`IdError`](crate::session::IdError) — but
+    /// the kind survives every variant, which is what callers actually
+    /// branch on. In particular every `…NotFound` kind rebuilds into an
+    /// error for which [`MirageError::is_not_found`] holds, so a client
+    /// cleaning up opportunistically over the socket behaves the same as
+    /// one driving the manager in process.
     #[must_use]
     pub fn into_error(kind: ErrorKind, message: String) -> MirageError {
         match kind {
             ErrorKind::ProfileNotFound => MirageError::ProfileNotFound(message),
+            ErrorKind::TopologyNotFound => MirageError::TopologyNotFound(message),
+            ErrorKind::AgentNotFound => MirageError::AgentNotFound(message),
             ErrorKind::SessionNotFound => MirageError::SessionNotFound(message),
             ErrorKind::SessionExists => MirageError::SessionExists(message),
             ErrorKind::ExecNotFound => MirageError::ExecNotFound(message),
             ErrorKind::Timeout => MirageError::Timeout(message),
+            // `Io` and `InvalidId` genuinely cannot be rebuilt:
+            // `MirageError::Io` needs a `std::io::Error` and `Id` an
+            // `IdError`, and neither crossed the wire. Their rendered
+            // messages already name the problem, so they arrive as
+            // `Other` — the one place the kind does not survive, and the
+            // reason `is_not_found` is the only predicate callers should
+            // rely on across the socket.
             ErrorKind::InvalidId | ErrorKind::Io | ErrorKind::Other => MirageError::Other(message),
         }
     }
@@ -401,9 +420,6 @@ pub const ENV_SOCKET: &str = "MIRAGE_SOCKET";
 /// already-running daemon sets this and gets a clean error instead of a
 /// surprise background process.
 pub const ENV_AUTOSTART: &str = "MIRAGE_AUTOSTART";
-
-/// Extra environment a spawned exec always receives, keyed by name.
-pub type EnvMap = BTreeMap<String, String>;
 
 #[cfg(test)]
 mod tests {

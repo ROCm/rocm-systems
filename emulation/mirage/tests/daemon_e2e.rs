@@ -488,3 +488,14 @@ fn unknown_spa_route_falls_back_to_index() {
     let body = r.text().unwrap();
     assert!(body.to_ascii_lowercase().contains("<html"));
 }
+
+#[test]
+fn the_suite_can_actually_run() {
+    // Three of the tests here — the session lifecycle, the websocket
+    // attach and the signal path — are the only coverage the HTTP API has
+    // of anything behind the manager, and all three skip without an
+    // emulator runtime. A skipped Rust test still reports `ok`, so
+    // without this guard the suite goes green having exercised nothing
+    // but static routes. See `assert_suite_can_run`.
+    harness::assert_suite_can_run();
+}

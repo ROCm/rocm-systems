@@ -413,7 +413,15 @@ fn kmd_search_dirs() -> Vec<PathBuf> {
     if let Ok(exe) = std::env::current_exe()
         && let Some(exe_dir) = exe.parent()
     {
-        dirs.extend((0..=3).map(|levels| {
+        // Up to four levels, not three. Three is what `target/<profile>/
+        // mirage` needs, but an integration-test binary lives one
+        // directory deeper, in `target/<profile>/deps/` — so with three
+        // the library was discoverable by the `mirage` binary and *not*
+        // by the test binaries that link a backend directly. That is not
+        // a cosmetic difference: every test in `supervisor/tests` gates
+        // itself on the backend being installed, so they all skipped, and
+        // a skipped Rust test still reports `ok`.
+        dirs.extend((0..=4).map(|levels| {
             exe_dir
                 .iter()
                 .chain(std::iter::repeat_n("..".as_ref(), levels))

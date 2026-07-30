@@ -35,6 +35,29 @@ fn read_exact(stream: &mut UnixStream, buf: &mut [u8]) {
     stream.read_exact(buf).expect("read response");
 }
 
+/// Start a daemon, or `None` when this machine's `librocjitsu.so` cannot
+/// provide one.
+///
+/// A library that is *present but does not export the daemon API* — a
+/// stale sibling build, or one configured without the daemon — is
+/// indistinguishable, for these tests, from one that is not installed at
+/// all, and must skip for the same reason. Only a load failure counts as
+/// "not available"; anything else is a real failure and still panics.
+fn start_or_skip(
+    lib: &std::path::Path,
+    config: &std::path::Path,
+    runtime_dir: &std::path::Path,
+) -> Option<Daemon> {
+    match Daemon::start(lib, config, runtime_dir) {
+        Ok(daemon) => Some(daemon),
+        Err(e @ rocjitsu_sys::daemon::DaemonError::Load { .. }) => {
+            eprintln!("rocjitsu KMD library cannot host a daemon ({e}); skipping");
+            None
+        }
+        Err(e) => panic!("daemon should start: {e}"),
+    }
+}
+
 #[test]
 fn daemon_serves_handshake() {
     let _g = mirage_core::paths::test_env_lock();
@@ -69,7 +92,9 @@ fn daemon_serves_handshake() {
     let config = kmd_config(&def, None).expect("sim config should materialise");
 
     let runtime_dir = tmp.path().join("rt");
-    let daemon = Daemon::start(&lib, &config, &runtime_dir).expect("daemon should start");
+    let Some(daemon) = start_or_skip(&lib, &config, &runtime_dir) else {
+        return;
+    };
     assert_eq!(daemon.status(), RjDaemonStatus::Running);
     assert!(
         daemon.socket_path().exists(),
@@ -153,7 +178,9 @@ fn dropping_the_handle_stops_the_daemon() {
     let runtime_dir = tmp.path().join("rt");
 
     let socket_path = {
-        let daemon = Daemon::start(&lib, &config, &runtime_dir).expect("daemon should start");
+        let Some(daemon) = start_or_skip(&lib, &config, &runtime_dir) else {
+            return;
+        };
         let path = daemon.socket_path().to_path_buf();
         assert!(path.exists());
         path
@@ -193,7 +220,9 @@ fn daemon_serves_multiple_clients() {
     };
     let config = kmd_config(&def, None).unwrap();
     let runtime_dir = tmp.path().join("rt");
-    let daemon = Daemon::start(&lib, &config, &runtime_dir).expect("daemon should start");
+    let Some(daemon) = start_or_skip(&lib, &config, &runtime_dir) else {
+        return;
+    };
     assert_eq!(daemon.status(), RjDaemonStatus::Running);
 
     for req_id in 0..3u32 {

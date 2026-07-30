@@ -38,6 +38,14 @@ pub enum MirageError {
     #[error("profile not found: {0}")]
     ProfileNotFound(String),
 
+    /// No topology with that name exists.
+    #[error("topology not found: {0}")]
+    TopologyNotFound(String),
+
+    /// No agent with that name exists.
+    #[error("agent not found: {0}")]
+    AgentNotFound(String),
+
     /// No live session with that id exists.
     #[error("session not found: {0}")]
     SessionNotFound(String),
@@ -92,7 +100,11 @@ impl MirageError {
     pub fn is_not_found(&self) -> bool {
         matches!(
             self,
-            Self::ProfileNotFound(_) | Self::SessionNotFound(_) | Self::ExecNotFound(_)
+            Self::ProfileNotFound(_)
+                | Self::TopologyNotFound(_)
+                | Self::AgentNotFound(_)
+                | Self::SessionNotFound(_)
+                | Self::ExecNotFound(_)
         )
     }
 }

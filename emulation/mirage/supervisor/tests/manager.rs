@@ -44,6 +44,16 @@ impl Env {
         let guard = mirage_core::paths::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(dir.path());
+        // Seed the builtin agents and topologies into the private root.
+        //
+        // The manager is driven directly here, with no CLI and no daemon
+        // in the way — and materialising the builtins is something both
+        // of those do on the way past (`ensure_builtins_present`). Without
+        // it every session fails bring-up on the by-name agent reference
+        // its topology carries, with a bare "io error on
+        // …/agent/mi350x.json".
+        mirage_builtin::ensure_agents(false).unwrap();
+        mirage_builtin::ensure_topologies(false).unwrap();
         Self {
             manager: Arc::new(SessionManager::default()),
             _dir: dir,
@@ -1218,4 +1228,31 @@ fn count_tagged(marker: &str) -> usize {
         .map(str::trim)
         .filter(|l| !l.is_empty() && *l != me)
         .count()
+}
+
+#[test]
+fn the_suite_can_actually_run() {
+    // Every test in this file skips when the emulator runtime is missing,
+    // and a skipped Rust test still reports `ok` — so the only
+    // integration coverage the supervisor has would go green in half a
+    // second while proving nothing. One deliberate failure says what is
+    // missing; the rest skip quietly.
+    //
+    // `MIRAGE_E2E_ALLOW_SKIP=1` accepts the skips, for a build that
+    // deliberately excludes rocjitsu (see the CMake option of the same
+    // name). This mirrors `tests/harness::assert_suite_can_run`, which
+    // this crate cannot use: `supervisor/tests` is a different package
+    // from the `mirage` binary's `tests/`.
+    if emulator_available() {
+        return;
+    }
+    assert!(
+        std::env::var_os("MIRAGE_E2E_ALLOW_SKIP").is_some(),
+        "the `{TEST_EMULATOR}` runtime was not found, so every test in \
+this suite skipped and it proves nothing.\n\n\
+         Build the sibling `emulation/rocjitsu` project, or set ROCM_HOME \
+to an install that provides librocjitsu.so.\n\n\
+         If this build deliberately excludes rocjitsu, set \
+MIRAGE_E2E_ALLOW_SKIP=1 to accept the skips."
+    );
 }

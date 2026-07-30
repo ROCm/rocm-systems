@@ -425,7 +425,13 @@ case "$1" in
       esac
     done
     shift
-    [ -n "$workdir" ] && cd "$workdir" 2>/dev/null
+    # Fail like a real provider does. `podman exec -w` on a directory
+    # that does not exist inside the container aborts the exec; swallowing
+    # it here would let mirage pass a *host* path as the container
+    # workdir and still look correct in these tests.
+    if [ -n "$workdir" ]; then
+      cd "$workdir" || { echo "chdir to '$workdir': no such directory" >&2; exit 126; }
+    fi
     if [ -n "$envs" ]; then
       exec env $envs "$@"
     fi

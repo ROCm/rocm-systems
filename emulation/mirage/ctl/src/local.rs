@@ -12,7 +12,7 @@
 //!
 //! Session and exec operations are *not* implemented here. They return a
 //! clear error rather than a plausible-looking empty answer, so a command
-//! misclassified by [`needs_daemon`] fails loudly instead of quietly
+//! misclassified by [`daemon_need`] fails loudly instead of quietly
 //! reporting that no sessions exist.
 
 use async_trait::async_trait;
@@ -31,32 +31,53 @@ use crate::{CtlCmd, StateCmd};
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LocalCtl;
 
-/// Whether a command needs to reach the daemon.
+/// How a command relates to the daemon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DaemonNeed {
+    /// Answer it in this process; never contact or start a daemon.
+    Never,
+    /// Use a daemon if one is already running, and answer it here
+    /// otherwise. Starting one would be self-defeating.
+    IfRunning,
+    /// Meaningless without a daemon; start one on demand.
+    Always,
+}
+
+/// How a command relates to the daemon.
 ///
-/// Anything touching a session or an exec does. Configuration commands do
-/// not: profiles, topologies and agents are files, and the daemon reads
-/// them off disk when it needs them, so there is no cached copy to keep
-/// coherent.
+/// Anything touching a session or an exec needs one. Configuration
+/// commands do not: profiles, topologies and agents are files, and the
+/// daemon reads them off disk when it needs them, so there is no cached
+/// copy to keep coherent.
 #[must_use]
-pub fn needs_daemon(cmd: &CtlCmd) -> bool {
+pub fn daemon_need(cmd: &CtlCmd) -> DaemonNeed {
     match cmd {
         // Sessions, execs, and anything that streams from one.
         CtlCmd::Session(_)
         | CtlCmd::Exec(_)
         | CtlCmd::Run(_)
         | CtlCmd::Attach(_)
-        | CtlCmd::Logs(_) => true,
+        | CtlCmd::Logs(_) => DaemonNeed::Always,
 
-        // Purge stops every session and the daemon itself, so it needs
-        // one; writing the builtins is pure filesystem work.
-        CtlCmd::State(StateCmd::Purge { .. }) => true,
-        CtlCmd::State(StateCmd::Builtins) => false,
+        // Purge stops every session and the daemon itself, and then
+        // deletes the directories. It reaches a *running* daemon, but
+        // must never start one: auto-starting a daemon to ask it to exit
+        // is absurd on its face, and with `MIRAGE_AUTOSTART=0` — or on a
+        // machine whose daemon has already crashed, which is when a user
+        // reaches for purge — the connection simply fails and nothing is
+        // deleted at all. Every step of `purge` already tolerates a
+        // control plane with no sessions, so answering it locally is
+        // correct when there is no daemon to talk to.
+        //
+        // Writing the builtins is pure filesystem work.
+        CtlCmd::State(StateCmd::Purge { .. }) => DaemonNeed::IfRunning,
+        CtlCmd::State(StateCmd::Builtins) => DaemonNeed::Never,
 
         CtlCmd::Profile(_)
         | CtlCmd::Topology(_)
         | CtlCmd::Agent(_)
         | CtlCmd::Emulators { .. }
-        | CtlCmd::Paths => false,
+        | CtlCmd::Paths => DaemonNeed::Never,
     }
 }
 
@@ -205,23 +226,35 @@ mod tests {
     fn configuration_commands_do_not_need_a_daemon() {
         // Starting a background process to read a directory is exactly the
         // surprise this classification exists to avoid.
-        assert!(!needs_daemon(&CtlCmd::Paths));
-        assert!(!needs_daemon(&CtlCmd::Emulators { long: false }));
-        assert!(!needs_daemon(&CtlCmd::Profile(ProfileCmd::List {
-            long: false
-        })));
-        assert!(!needs_daemon(&CtlCmd::Topology(TopologyCmd::List)));
-        assert!(!needs_daemon(&CtlCmd::Agent(AgentCmd::List)));
-        assert!(!needs_daemon(&CtlCmd::State(StateCmd::Builtins)));
+        for cmd in [
+            CtlCmd::Paths,
+            CtlCmd::Emulators { long: false },
+            CtlCmd::Profile(ProfileCmd::List { long: false }),
+            CtlCmd::Topology(TopologyCmd::List),
+            CtlCmd::Agent(AgentCmd::List),
+            CtlCmd::State(StateCmd::Builtins),
+        ] {
+            assert_eq!(daemon_need(&cmd), DaemonNeed::Never, "{cmd:?}");
+        }
     }
 
     #[test]
     fn session_commands_need_a_daemon() {
-        assert!(needs_daemon(&CtlCmd::Session(SessionCmd::List)));
-        assert!(needs_daemon(&CtlCmd::State(StateCmd::Purge {
-            force: true,
-            all: false
-        })));
+        assert_eq!(
+            daemon_need(&CtlCmd::Session(SessionCmd::List)),
+            DaemonNeed::Always
+        );
+        // Purge stops the daemon and then deletes its directories: it has
+        // to reach a running one, but starting one in order to ask it to
+        // exit is both absurd and, under `MIRAGE_AUTOSTART=0`, a hard
+        // failure that deletes nothing.
+        assert_eq!(
+            daemon_need(&CtlCmd::State(StateCmd::Purge {
+                force: true,
+                all: false
+            })),
+            DaemonNeed::IfRunning
+        );
     }
 
     #[test]

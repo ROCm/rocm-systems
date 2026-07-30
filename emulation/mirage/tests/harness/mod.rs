@@ -190,9 +190,22 @@ impl Env {
     }
 
     /// Stop this environment's daemon and wait for it to go away.
+    ///
+    /// Runs from `Drop`, including while a failed assertion is unwinding,
+    /// so it must not panic: a panic during unwinding aborts the process,
+    /// which takes down every test sharing this binary and loses the
+    /// original assertion message. `run` panics when it cannot spawn —
+    /// exactly what an EMFILE or a fork failure under the strain suite's
+    /// load produces — so spawn directly here and give up quietly.
     pub fn stop_daemon(&self) {
-        let pid = self.daemon_pid();
-        let _ = self.run(&["daemon", "stop"]);
+        let Ok(status) = self.mirage().args(["daemon", "status"]).output() else {
+            return;
+        };
+        let pid = String::from_utf8_lossy(&status.stdout)
+            .lines()
+            .find_map(|l| l.strip_prefix("running   pid "))
+            .and_then(|p| p.trim().parse::<u32>().ok());
+        let _ = self.mirage().args(["daemon", "stop"]).output();
         let Some(pid) = pid else { return };
         // `daemon stop` is acknowledged before the daemon exits, so wait
         // for the process itself: a test asserting nothing leaked needs

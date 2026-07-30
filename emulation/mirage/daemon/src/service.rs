@@ -96,7 +96,15 @@ fn render_unit(exe: &std::path::Path, addr: Option<SocketAddr>, system: bool) ->
          # workload's process group and waits for it, so a shorter stop\n\
          # timeout would have systemd SIGKILL the daemon mid-cleanup and\n\
          # orphan exactly the processes it was in the middle of reaping.\n\
+         #\n\
+         # KillMode=mixed is what makes that ordering the daemon's to\n\
+         # keep: the default, control-group, SIGTERMs every process in\n\
+         # the cgroup at once, so the workloads and the emulator daemon\n\
+         # die alongside the supervisor instead of in the order it tears\n\
+         # them down. With mixed, only the supervisor is signalled and\n\
+         # systemd falls back to SIGKILLing the group after the timeout.\n\
          KillSignal=SIGTERM\n\
+         KillMode=mixed\n\
          TimeoutStopSec=60\n\
          \n\
          [Install]\n\
@@ -176,6 +184,11 @@ mod tests {
         let unit = render_unit(std::path::Path::new("/usr/bin/mirage"), None, false);
         assert!(unit.contains("KillSignal=SIGTERM"), "{unit}");
         assert!(unit.contains("TimeoutStopSec=60"), "{unit}");
+        // Without this, systemd's default KillMode=control-group
+        // SIGTERMs the workloads at the same instant as the supervisor,
+        // pre-empting the ordered teardown the timeout above exists to
+        // protect.
+        assert!(unit.contains("KillMode=mixed"), "{unit}");
     }
 
     #[test]

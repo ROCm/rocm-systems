@@ -9,7 +9,6 @@
 //! destroyed must be able to rely on that.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
@@ -53,6 +52,15 @@ const CONTAINER_RUNTIME_DIR: &str = "/mnt/mirage/runtime";
 /// ran `mirage host --rank N` here, which meant every container had a
 /// second mirage process inside it polling a bind-mounted directory.
 const CONTAINER_IDLE_COMMAND: &[&str] = &["sleep", "infinity"];
+
+/// Most processes one exec may start, across every node.
+///
+/// An emulated job is bounded by what the host can actually fork, and the
+/// grid size comes off the wire (`nproc_per_node`) multiplied by the
+/// topology's node count. A cap turns a typo or a hostile client into a
+/// clear error instead of an overflow and a fork bomb inside a daemon
+/// that owns every other session on the machine.
+const MAX_WORLD_SIZE: u32 = 4096;
 
 /// A live session.
 #[derive(Debug)]
@@ -148,9 +156,19 @@ impl Session {
         let _previous = self.health.send_replace(health);
     }
 
-    /// Publish a non-terminal phase.
+    /// Publish a lifecycle phase.
+    ///
+    /// `stopped` is marked terminal, because it is: a torn-down session
+    /// will never become healthy, and anyone waiting on it has their
+    /// answer. Publishing it as non-terminal makes
+    /// [`SessionHealth::is_settled`] false for a session that is provably
+    /// finished, so a concurrent `mirage session wait` blocks for its
+    /// entire timeout and then reports a timeout for a session that was
+    /// stopped seconds earlier.
     pub fn set_phase(&self, healthy: bool, phase: &str, message: Option<String>) {
-        self.set_health(SessionHealth::phase(healthy, phase, message));
+        let mut health = SessionHealth::phase(healthy, phase, message);
+        health.terminal = phase == state::STOPPED;
+        self.set_health(health);
     }
 
     /// The container record, once bring-up has produced one.
@@ -212,14 +230,39 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns an error if the session is being torn down, or if the
-    /// process grid cannot be described (an unresolvable topology).
+    /// Returns an error if the session is not ready, if it is being torn
+    /// down, or if the process grid cannot be described (an unresolvable
+    /// topology).
     pub fn start_exec(
         &self,
         def: &ExecDef,
         replay_bytes: usize,
         max_finished: usize,
     ) -> Result<Arc<Exec>> {
+        // Refuse until bring-up has finished. This is a correctness
+        // guard, not politeness: the emulator injection and the container
+        // record are both written by bring-up, and `build_specs` reads
+        // whatever is there *now*. Run before they are set and it happily
+        // produces a spec with an empty `InjectionDef` (no `LD_PRELOAD`,
+        // no runtime directory) and no container — so the workload runs
+        // directly on the real host, unemulated, touching whatever GPU is
+        // actually installed, and exits 0. Mirage reports success for a
+        // job that never went near the emulator.
+        //
+        // Reachable from `mirage session start --no-wait` followed
+        // immediately by `mirage exec start`, and from the HTTP API with
+        // `ready_timeout: 0`.
+        let health = self.health();
+        if !health.healthy {
+            return Err(MirageError::other(format!(
+                "session {} is not ready ({}); wait for it with \
+                 `mirage session wait {}`",
+                self.def.id,
+                health.state.as_deref().unwrap_or("unknown"),
+                self.def.id
+            )));
+        }
+
         let specs = self.build_specs(def)?;
 
         let mut inner = self.lock();
@@ -403,7 +446,24 @@ impl Session {
         } else {
             StdioMode::Pipes
         };
-        let world_size = node_count * nproc;
+        // `nproc_per_node` arrives from a client over the socket, so the
+        // grid size is attacker- (or typo-) controlled and the product
+        // has to be checked. Unchecked, `--nproc-per-node 2000000000`
+        // panics the connection task in a debug build and wraps in a
+        // release one, leaving the nested loop below trying to fork
+        // billions of processes inside the daemon every other session
+        // shares.
+        let world_size = node_count
+            .checked_mul(nproc)
+            .filter(|n| *n <= MAX_WORLD_SIZE)
+            .ok_or_else(|| {
+                MirageError::other(format!(
+                    "{node_count} nodes x {nproc} processes per node is \
+                     {} processes, more than the {MAX_WORLD_SIZE} mirage \
+                     will start for one exec",
+                    u64::from(node_count) * u64::from(nproc)
+                ))
+            })?;
         let (head_addr, head_port) = match &containers {
             Some(state) => (container_name(&self.def.id, 0), state.head_port),
             None => ("127.0.0.1".to_string(), pick_head_port()),
@@ -454,7 +514,16 @@ impl Session {
                     env.insert("LD_PRELOAD".to_string(), combined);
                 }
 
-                let workdir = args
+                // The session's working directory is a *host* path — the
+                // directory the client was in when it created the
+                // session. It is a sensible default for a process running
+                // on the host, and meaningless inside a container, where
+                // nothing mounts it and `provider exec -w` fails the whole
+                // exec with "chdir: no such file or directory". A
+                // containerised exec therefore only gets a working
+                // directory when one was asked for explicitly, and
+                // otherwise keeps the image's own.
+                let host_workdir = args
                     .workdir
                     .clone()
                     .or_else(|| Some(self.def.workdir.clone()));
@@ -475,7 +544,7 @@ impl Session {
                         let env_pairs: Vec<(String, String)> = env.into_iter().collect();
                         let argv = engine.exec_command_line(
                             &container,
-                            workdir.as_deref(),
+                            args.workdir.as_deref(),
                             &env_pairs,
                             &args.command,
                             &args.args,
@@ -505,7 +574,7 @@ impl Session {
                         command: args.command.clone(),
                         args: args.args.clone(),
                         env,
-                        workdir,
+                        workdir: host_workdir,
                         stdio,
                         inherit_env: false,
                     },
@@ -560,7 +629,7 @@ pub fn resolve_profile(reference: &MaybeRef<ProfileDef>) -> Result<ProfileDef> {
 /// again by the time the workload binds it. That is the standard trick
 /// and its standard caveat; a collision is possible but vanishingly rare
 /// and self-evident when it happens.
-fn pick_head_port() -> u16 {
+pub(crate) fn pick_head_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .ok()
         .and_then(|l| l.local_addr().ok())
@@ -766,12 +835,6 @@ pub fn plan_container(ctx: &SessionContext, injection: &InjectionDef) -> Contain
     }
 }
 
-/// The scratch directory a session's emulator assets live in.
-#[must_use]
-pub fn scratch_dir(id: &SessionId) -> PathBuf {
-    mirage_core::paths::session_runtime_dir(id)
-}
-
 /// Build the [`SessionDef`] for a create request.
 #[must_use]
 pub fn make_def(
@@ -795,6 +858,7 @@ mod tests {
 
     use super::*;
     use mirage_core::emulator::{EmulatorDef, ExecMode};
+    use std::path::PathBuf;
     use mirage_core::topology::TopologyDef;
 
     fn ctx(runtime_dir: PathBuf) -> SessionContext {

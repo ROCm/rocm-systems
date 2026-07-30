@@ -291,6 +291,17 @@ fn resolved_env(spec: &SpawnSpec) -> Vec<(std::ffi::OsString, std::ffi::OsString
                 env.push(((*key).into(), value));
             }
         }
+        // A terminal program needs `TERM` to be *something*, and the
+        // daemon frequently has none: a systemd service has no terminal,
+        // so `mirage daemon install` produces an environment where the
+        // allowlist above copies nothing and `mirage run -- bash` gives
+        // the shell an unset `TERM` — no prompt colours, and `clear`,
+        // `less` and anything ncurses failing outright with "TERM
+        // environment variable not set". Naming a default costs nothing
+        // and is what the per-session host used to do.
+        if std::env::var_os("TERM").is_none() {
+            env.push(("TERM".into(), "xterm-256color".into()));
+        }
     }
     for (k, v) in &spec.env {
         env.push((k.into(), v.into()));
@@ -549,8 +560,16 @@ impl Spawned {
 
         // The direct child is gone, but a descendant that changed its own
         // process group, or was reparented before we signalled, may still
-        // be alive. Sweep the group once more; cheap and idempotent.
-        signal_group(self.pid, Signal::SIGKILL);
+        // be alive. Sweep the group once more.
+        //
+        // The *group*, and only the group: the child has just been reaped,
+        // so its pid is free for the kernel to hand out again, and
+        // `signal_group`'s single-pid fallback would then deliver SIGKILL
+        // to whatever now owns that number — the hazard `Spawned::signal`
+        // refuses to take. `kill(-pid)` only reaches a group that still
+        // has a living member, which is exactly the case this sweep is
+        // for, and it fails harmlessly with ESRCH otherwise.
+        signal_process_group_only(self.pid, Signal::SIGKILL);
 
         self.drain_pumps().await;
         exit
@@ -578,13 +597,18 @@ impl Spawned {
     /// the pump would wait on it indefinitely. The bounded wait keeps
     /// teardown finite in that case, and aborting only ever discards
     /// output from a process that already outlived the exec.
+    ///
+    /// The abort is load-bearing and must be explicit. *Dropping* a tokio
+    /// `JoinHandle` detaches its task rather than cancelling it, so a
+    /// pump left behind that way would run for the lifetime of the daemon
+    /// holding a pipe fd and a clone of the exec's `OutputChunk` sender —
+    /// and because that sender never drops, the channel never closes and
+    /// `forward_output` never ends either.
     async fn drain_pumps(&mut self) {
         const DRAIN_GRACE: Duration = Duration::from_millis(250);
-        for pump in self.pumps.drain(..) {
-            if tokio::time::timeout(DRAIN_GRACE, &mut { pump })
-                .await
-                .is_err()
-            {
+        for mut pump in self.pumps.drain(..) {
+            if tokio::time::timeout(DRAIN_GRACE, &mut pump).await.is_err() {
+                pump.abort();
                 tracing::debug!(
                     pid = self.pid,
                     "output pump still open after the child exited; \
@@ -607,15 +631,34 @@ impl Spawned {
 /// signals the caller's own group — so a zero or negative pid reaching
 /// here would turn a routine cleanup into killing the user's session.
 pub fn signal_group(pid: u32, sig: Signal) {
-    let Ok(pid) = i32::try_from(pid) else {
+    let Ok(raw) = i32::try_from(pid) else {
         return;
     };
-    if pid <= 0 {
+    if raw <= 0 {
         return;
     }
-    if nix::sys::signal::kill(Pid::from_raw(-pid), sig).is_err() {
-        let _ = nix::sys::signal::kill(Pid::from_raw(pid), sig);
+    if !signal_process_group_only(pid, sig) {
+        let _ = nix::sys::signal::kill(Pid::from_raw(raw), sig);
     }
+}
+
+/// Send `sig` to the process group led by `pid`, and never to `pid` alone.
+///
+/// Returns whether the group signal was delivered. Used where the child
+/// has already been reaped: the group only exists while a member is
+/// alive, whereas the bare pid may already have been recycled by the
+/// kernel and handed to an unrelated process.
+///
+/// Non-positive pids are rejected for the same reason as in
+/// [`signal_group`].
+pub fn signal_process_group_only(pid: u32, sig: Signal) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    nix::sys::signal::kill(Pid::from_raw(-pid), sig).is_ok()
 }
 
 /// Whether a pid is still alive.

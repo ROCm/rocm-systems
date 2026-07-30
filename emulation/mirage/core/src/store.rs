@@ -81,6 +81,10 @@ pub fn topology_list() -> Result<Vec<String>> {
 ///
 /// Returns an error if there is no such topology, or it is malformed.
 pub fn topology_get(name: &str) -> Result<TopologyDef> {
+    let path = crate::paths::topology_path(name);
+    if !path.exists() {
+        return Err(MirageError::TopologyNotFound(name.to_string()));
+    }
     crate::topology::store::get(name)
 }
 
@@ -101,7 +105,7 @@ pub fn topology_put(name: &str, topology: &TopologyDef) -> Result<()> {
 pub fn topology_delete(name: &str) -> Result<()> {
     let path = crate::paths::topology_path(name);
     if !path.exists() {
-        return Err(MirageError::other(format!("topology not found: {name}")));
+        return Err(MirageError::TopologyNotFound(name.to_string()));
     }
     std::fs::remove_file(&path).map_err(|e| MirageError::io(path, e))
 }
@@ -121,6 +125,10 @@ pub fn agent_list() -> Result<Vec<String>> {
 ///
 /// Returns an error if there is no such agent, or it is malformed.
 pub fn agent_get(name: &str) -> Result<AgentDef> {
+    let path = crate::paths::agent_path(name);
+    if !path.exists() {
+        return Err(MirageError::AgentNotFound(name.to_string()));
+    }
     crate::agent::store::get(name)
 }
 
@@ -141,7 +149,7 @@ pub fn agent_put(name: &str, agent: &AgentDef) -> Result<()> {
 pub fn agent_delete(name: &str) -> Result<()> {
     let path = crate::paths::agent_path(name);
     if !path.exists() {
-        return Err(MirageError::other(format!("agent not found: {name}")));
+        return Err(MirageError::AgentNotFound(name.to_string()));
     }
     std::fs::remove_file(&path).map_err(|e| MirageError::io(path, e))
 }
@@ -237,13 +245,28 @@ mod tests {
     }
 
     #[test]
-    fn deleting_something_absent_reports_not_found() {
+    fn every_kind_reports_a_missing_document_as_not_found() {
+        // Not merely "an error": the kind is what the HTTP API turns into
+        // a 404 rather than a 500, what survives the wire in
+        // `proto::ErrorKind`, and what `is_not_found` answers for a
+        // caller cleaning up something that may already be gone. Reading
+        // or deleting a missing agent used to surface as a raw
+        // `io error on /…/agent/ghost.json`, which is none of those.
         let _g = crate::paths::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         crate::paths::set_test_root(dir.path());
-        assert!(profile_delete("ghost").is_err());
-        assert!(topology_delete("ghost").is_err());
-        assert!(agent_delete("ghost").is_err());
+
+        for err in [
+            profile_delete("ghost").unwrap_err(),
+            topology_delete("ghost").unwrap_err(),
+            agent_delete("ghost").unwrap_err(),
+            profile_get("ghost").unwrap_err(),
+            topology_get("ghost").unwrap_err(),
+            agent_get("ghost").unwrap_err(),
+        ] {
+            assert!(err.is_not_found(), "{err:?}");
+        }
+
         crate::paths::clear_test_root();
     }
 }

@@ -227,9 +227,11 @@ async fn serve_forever(args: DaemonArgs) -> anyhow::Result<()> {
         http.abort();
     }
 
-    // Last-resort sweep. `shutdown_all` is the correct path and normally
-    // leaves nothing, but a process that survived it (a container exec
-    // whose provider hung, say) must still not outlive the daemon.
+    // Anything that raced its way into the map while `shutdown_all` was
+    // running. `shutdown_all` sweeps the sessions it took itself — they
+    // are out of the map by the time it finishes, so this call cannot see
+    // them — and latches the shutdown flag so the window is a narrow one,
+    // but a workload nobody reaped must not outlive the daemon.
     manager.kill_all_now();
     Ok(())
 }

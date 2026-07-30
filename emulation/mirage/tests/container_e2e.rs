@@ -122,7 +122,13 @@ case "$1" in
     done
     # The next argument is the container name; the rest is the command.
     shift
-    [ -n "$workdir" ] && cd "$workdir" 2>/dev/null
+    # Fail like a real provider does. `podman exec -w` on a directory
+    # that does not exist inside the container aborts the exec; swallowing
+    # it here would let mirage pass a *host* path as the container
+    # workdir and still look correct in these tests.
+    if [ -n "$workdir" ]; then
+      cd "$workdir" || { echo "chdir to '$workdir': no such directory" >&2; exit 126; }
+    fi
     if [ -n "$envs" ]; then
       exec env $envs "$@"
     fi
@@ -186,6 +192,23 @@ fn a_containerised_run_brings_up_executes_and_cleans_up() {
     assert!(
         log.contains("exec -i"),
         "the workload was not run via `provider exec`:\n{log}"
+    );
+    // And with no `-w`, because none was asked for. The session's working
+    // directory is the *host* path the client was in; passing it here
+    // makes the provider chdir to a directory that does not exist inside
+    // the container and fail the exec outright. Only an explicit
+    // `--workdir` may become `-w`.
+    //
+    // The mock cannot catch this by executing, since it runs on the host
+    // where that path does happen to exist — so the argv is asserted
+    // directly.
+    let exec_line = log
+        .lines()
+        .find(|l| l.starts_with("exec -i"))
+        .unwrap_or_else(|| panic!("no provider exec was recorded:\n{log}"));
+    assert!(
+        !exec_line.contains(" -w "),
+        "a containerised exec was given a host working directory:\n{exec_line}"
     );
     // Teardown removes everything bring-up created.
     assert!(log.contains("rm -f mirage-"), "container not removed:\n{log}");

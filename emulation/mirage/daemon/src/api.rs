@@ -81,9 +81,11 @@ impl From<mirage_core::error::MirageError> for ApiError {
     fn from(e: mirage_core::error::MirageError) -> Self {
         use mirage_core::error::MirageError as E;
         let status = match &e {
-            E::ProfileNotFound(_) | E::SessionNotFound(_) | E::ExecNotFound(_) => {
-                StatusCode::NOT_FOUND
-            }
+            // One arm for every "the thing you named does not exist"
+            // variant. Missing a kind here answers 500 for what is
+            // plainly a 404, and the dashboard cannot tell a typo from a
+            // broken daemon.
+            e if e.is_not_found() => StatusCode::NOT_FOUND,
             E::SessionExists(_) => StatusCode::CONFLICT,
             E::Id(_) => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -353,6 +355,11 @@ async fn delete_agent(
 
 // ---- sessions --------------------------------------------------------------
 
+/// `serde(default)` for a `bool` field whose sensible default is `true`.
+const fn default_true() -> bool {
+    true
+}
+
 #[derive(Deserialize)]
 struct CreateSessionBody {
     profile: String,
@@ -360,9 +367,17 @@ struct CreateSessionBody {
     id: Option<SessionId>,
     #[serde(default)]
     workdir: Option<String>,
-    /// Run the emulator in out-of-process daemon mode instead of the
-    /// default in-process (local) emulation.
-    #[serde(default)]
+    /// Run the emulator in out-of-process daemon mode. This is the
+    /// default, and matches `mirage session start`; pass `false` for
+    /// in-process (local) emulation.
+    ///
+    /// The default is not `bool`'s: in-process emulation cannot share GPU
+    /// memory across processes, so a multi-GPU RCCL collective needs the
+    /// daemon. Defaulting to `false` here would mean the same profile
+    /// behaved differently depending on whether the session was created
+    /// from the dashboard or the CLI, and the difference would only
+    /// surface once a collective was attempted.
+    #[serde(default = "default_true")]
     daemon: bool,
     /// Override/enable containerisation: run every node inside a
     /// container built from this image.
@@ -457,10 +472,39 @@ async fn create_session(
     }).await?;
     // Bring-up is already under way; optionally wait for it to settle so
     // the caller gets a session it can immediately run execs in.
+    //
+    // "Settled" is not "healthy": `session_wait_ready` returns `Ok` for a
+    // session that reached a *terminal failure* too, which is the whole
+    // point — the caller learns why rather than timing out. Reporting
+    // that as 201 hands the dashboard a session it will immediately try
+    // to run an exec in. And a wait that times out must not leave the
+    // half-built session registered with no id in the response for anyone
+    // to clean up.
     if body.ready_timeout > 0 {
-        s.ctl
+        let health = match s
+            .ctl
             .session_wait_ready(&def.id, Duration::from_secs(body.ready_timeout))
-            .await?;
+            .await
+        {
+            Ok(health) => health,
+            Err(e) => {
+                let _ = s.ctl.session_destroy(&def.id).await;
+                return Err(e.into());
+            }
+        };
+        if !health.healthy {
+            let _ = s.ctl.session_destroy(&def.id).await;
+            return Err(ApiError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!(
+                    "session {} failed to start: {}",
+                    def.id,
+                    health.message.unwrap_or_else(|| health
+                        .state
+                        .unwrap_or_else(|| "unknown".to_string()))
+                ),
+            });
+        }
     }
     Ok(Json(def))
 }

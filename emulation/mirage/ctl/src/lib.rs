@@ -13,7 +13,7 @@
 pub mod local;
 pub mod rpc_client;
 
-pub use local::{LocalCtl, needs_daemon};
+pub use local::{DaemonNeed, LocalCtl, daemon_need};
 
 use std::io::IsTerminal;
 use std::io::Write;
@@ -1739,7 +1739,7 @@ async fn exec_start<C: MirageCtl + 'static>(
         println!("{}", r.exec);
         return Ok(ExitCode::from(0));
     }
-    let code = follow_attach(ctl.clone(), &r).await?;
+    let code = follow_attach(ctl.clone(), &r, true).await?;
     if !a.keep
         && let Err(e) = ctl.exec_remove(&r).await
         && !e.is_not_found()
@@ -1799,7 +1799,7 @@ async fn attach_cmd<C: MirageCtl + 'static>(
         session: a.session,
         exec: a.exec,
     };
-    follow_attach(ctl, &r).await
+    follow_attach(ctl, &r, true).await
 }
 
 /// Whether to allocate a pseudo-terminal for an exec, as a CLI flag.
@@ -1934,69 +1934,88 @@ fn spawn_resize_forwarder<C: MirageCtl + 'static>(
     }))
 }
 
-/// Attach to an exec: stream its output to this terminal and forward this
-/// terminal's input to it, until the exec exits.
+/// Attach to an exec: stream its output to this terminal and, when
+/// `interactive`, forward this terminal's input to it, until the exec
+/// exits.
+///
+/// `interactive` is what separates driving a workload from watching one.
+/// `mirage run` and `mirage attach` drive it: they put the local terminal
+/// in raw mode, forward keystrokes, track `SIGWINCH`, and close the
+/// workload's stdin when their own reaches EOF. `mirage logs --follow`
+/// only watches, and must do none of those — a log viewer that types into
+/// somebody else's shell, or sends it EOF because the viewer was run with
+/// stdin at `/dev/null`, is a bug and not a feature.
 ///
 /// Returns the exec's exit code so `mirage run` can exit with it.
 async fn follow_attach<C: MirageCtl + 'static>(
     ctl: Arc<C>,
     r: &ExecRef,
+    interactive: bool,
 ) -> anyhow::Result<ExitCode> {
     let mut stream = ctl.session_attach(r).await?;
 
-    let _raw = RawModeGuard::enable_if_tty();
+    let _raw = interactive.then(RawModeGuard::enable_if_tty).flatten();
 
     // Keep the remote terminal the same size as this one. A program that
     // draws to the screen reads its window size from the terminal and
     // redraws on `SIGWINCH`; without this it keeps whatever size the exec
     // was created with and renders into the wrong shape the moment the
     // user resizes their window.
-    let resizer = spawn_resize_forwarder(ctl.clone(), r.clone());
+    let resizer = interactive
+        .then(|| spawn_resize_forwarder(ctl.clone(), r.clone()))
+        .flatten();
 
     // Forward this process's stdin to the workload. Reading stdin is
     // blocking, so it happens on a dedicated blocking task rather than on
     // the runtime; the attach loop below owns the lifetime and the task
     // ends when the process does.
-    let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(16);
-    std::thread::spawn(move || {
-        use std::io::Read as _;
-        let mut stdin = std::io::stdin().lock();
-        let mut buf = [0u8; 4096];
-        loop {
-            match stdin.read(&mut buf) {
-                // EOF on our own stdin.
-                Ok(0) => return,
-                Ok(n) => {
-                    if stdin_tx.blocking_send(buf[..n].to_vec()).is_err() {
-                        return;
+    let forwarder = interactive.then(|| {
+        let (stdin_tx, mut stdin_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(16);
+        std::thread::spawn(move || {
+            use std::io::Read as _;
+            let mut stdin = std::io::stdin().lock();
+            let mut buf = [0u8; 4096];
+            loop {
+                match stdin.read(&mut buf) {
+                    // EOF on our own stdin.
+                    Ok(0) => return,
+                    Ok(n) => {
+                        if stdin_tx.blocking_send(buf[..n].to_vec()).is_err() {
+                            return;
+                        }
                     }
+                    Err(_) => return,
                 }
-                Err(_) => return,
             }
-        }
-    });
+        });
 
-    let stdin_ctl = ctl.clone();
-    let stdin_ref = r.clone();
-    let forwarder = tokio::spawn(async move {
-        while let Some(chunk) = stdin_rx.recv().await {
-            // A write failing means the workload closed its stdin or
-            // exited. That is normal, not an error worth reporting: stop
-            // forwarding and let the output loop decide when we are done.
-            if stdin_ctl.session_stdin(&stdin_ref, &chunk).await.is_err() {
-                return;
+        let stdin_ctl = ctl.clone();
+        let stdin_ref = r.clone();
+        tokio::spawn(async move {
+            while let Some(chunk) = stdin_rx.recv().await {
+                // A write failing means the workload closed its stdin or
+                // exited. That is normal, not an error worth reporting:
+                // stop forwarding and let the output loop decide when we
+                // are done.
+                if stdin_ctl.session_stdin(&stdin_ref, &chunk).await.is_err() {
+                    return;
+                }
             }
-        }
-        // Our own stdin reached EOF. Propagate it, or a workload that
-        // reads to EOF never finishes: `echo hi | mirage run -- cat`
-        // would hang forever waiting for an end-of-input that the
-        // pipeline already delivered to us.
-        let _ = stdin_ctl.session_stdin_close(&stdin_ref).await;
+            // Our own stdin reached EOF. Propagate it, or a workload that
+            // reads to EOF never finishes: `echo hi | mirage run -- cat`
+            // would hang forever waiting for an end-of-input that the
+            // pipeline already delivered to us.
+            let _ = stdin_ctl.session_stdin_close(&stdin_ref).await;
+        })
     });
 
     let mut stdout = std::io::stdout().lock();
     let mut stderr = std::io::stderr().lock();
-    let mut exit: i32 = 0;
+    // `None` until the exec tells us how it ended. A stream that finishes
+    // without an `ExecExit` — the daemon died, the connection dropped,
+    // the exec was evicted — is a workload whose outcome was never
+    // observed, and reporting that as success is how a lost CI job passes.
+    let mut exit: Option<i32> = None;
     while let Some(packet) = stream.next().await {
         match packet {
             StreamPacket::Output { stream, data, .. } => match stream {
@@ -2015,15 +2034,26 @@ async fn follow_attach<C: MirageCtl + 'static>(
             },
             StreamPacket::NodeExit { .. } => {}
             StreamPacket::ExecExit { exit_code } => {
-                exit = exit_code;
+                exit = Some(exit_code);
                 break;
             }
         }
     }
-    forwarder.abort();
+    if let Some(forwarder) = forwarder {
+        forwarder.abort();
+    }
     if let Some(resizer) = resizer {
         resizer.abort();
     }
+
+    let Some(exit) = exit else {
+        anyhow::bail!(
+            "the output stream for exec {} ended before the workload \
+             reported an exit status, so its outcome is unknown. The \
+             daemon may have stopped; see `mirage daemon status`.",
+            r.exec
+        );
+    };
 
     // Exit codes are a byte. Preserve the sign convention for
     // signal-killed workloads (128 + signal) by masking rather than
@@ -2047,7 +2077,9 @@ async fn logs_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: LogsArgs) -> anyhow::R
     let status = ctl.exec_status(&r).await?;
 
     if a.follow {
-        return follow_attach(ctl, &r).await;
+        // Watching, not driving: no raw mode, no stdin forwarding, and
+        // above all no `stdin_close` — see `follow_attach`.
+        return follow_attach(ctl, &r, false).await;
     }
 
     let mut stream = ctl.session_attach(&r).await?;
@@ -2165,7 +2197,32 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
     };
     let r = ctl.session_exec(&def).await?;
     tracing::info!(session = %sid, exec = %r.exec, "exec submitted; attaching");
-    let code = follow_attach(ctl.clone(), &r).await?;
+
+    // Race the attach against this process being asked to stop.
+    //
+    // A transient session belongs to this command, and only this command
+    // knows to destroy it — the daemon deliberately treats a client
+    // going away as a detach, and its idle timeout only fires when it
+    // owns *no* sessions, so a `mirage run` that dies without cleaning
+    // up strands its session, its emulator and its workload for as long
+    // as the machine stays up. Ctrl-C reaches us whenever stdin is not a
+    // terminal (piped input, a CI runner), because then there is no raw
+    // mode to turn Ctrl-C into a keystroke for the workload.
+    let code = {
+        let attach = follow_attach(ctl.clone(), &r, true);
+        tokio::pin!(attach);
+        tokio::select! {
+            code = &mut attach => code?,
+            signal = interrupted() => {
+                tracing::info!(session = %sid, "interrupted; cleaning up");
+                // Ask the workload to stop, and fall through to the
+                // teardown below rather than exiting from here.
+                let _ = ctl.exec_signal(&r, signal).await;
+                ExitCode::from(u8::try_from(128 + signal).unwrap_or(128))
+            }
+        }
+    };
+
     if created && !a.keep_session {
         // Awaited, not fired and forgotten: `session_destroy` only
         // returns once every workload process has been reaped, so this is
@@ -2175,6 +2232,28 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         }
     }
     Ok(code)
+}
+
+/// Resolve when this process is asked to stop, yielding the signal number.
+///
+/// `SIGTERM` as well as `SIGINT`: a CI runner cancelling a job, or a shell
+/// script's `kill`, sends the former, and both have to reach the cleanup
+/// path rather than killing the CLI outright.
+async fn interrupted() -> i32 {
+    use tokio::signal::unix::{SignalKind, signal};
+    let (Ok(mut sigint), Ok(mut sigterm)) = (
+        signal(SignalKind::interrupt()),
+        signal(SignalKind::terminate()),
+    ) else {
+        // Without handlers the default disposition applies and this
+        // future must never win the race.
+        std::future::pending::<()>().await;
+        unreachable!()
+    };
+    tokio::select! {
+        _ = sigint.recv() => libc::SIGINT,
+        _ = sigterm.recv() => libc::SIGTERM,
+    }
 }
 
 // ----- state dispatch --------------------------------------------------------

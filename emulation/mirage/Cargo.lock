@@ -1227,6 +1227,7 @@ dependencies = [
  "chrono",
  "futures",
  "libc",
+ "mirage_builtin",
  "mirage_container",
  "mirage_core",
  "mirage_rocjitsu",

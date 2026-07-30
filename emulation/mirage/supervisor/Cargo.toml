@@ -26,6 +26,7 @@ pty-process = { version = "0.5.3", features = ["async"] }
 tempfile = { workspace = true }
 chrono = { workspace = true }
 mirage_rocjitsu = { workspace = true }
+mirage_builtin = { workspace = true }
 nix = { workspace = true }
 libc = { workspace = true }
 futures = { workspace = true }

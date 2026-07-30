@@ -24,7 +24,7 @@ use tokio::sync::{Mutex as AsyncMutex, mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::output::OutputHub;
-use crate::process::{Exit, SpawnSpec, Spawned, signal_group, spawn};
+use crate::process::{Exit, SpawnSpec, Spawned, signal_process_group_only, spawn};
 
 /// Depth of the channel carrying output from the pump tasks to the hub.
 ///
@@ -133,10 +133,22 @@ impl Exec {
         // Only rank 0 gets an attached stdin: it is the process a user
         // interacts with, and fanning one input stream out to several
         // readers has no sensible semantics.
-        let stdin = spawned
-            .iter_mut()
-            .find(|(node, _)| *node == 0)
-            .and_then(|(_, child)| child.stdin.take());
+        //
+        // Every other rank's input is taken and dropped immediately,
+        // which closes the pipe and gives that process EOF on stdin.
+        // Merely *not attaching* it is not the same thing: the handle
+        // would stay inside its `Spawned` for the process's whole life,
+        // holding the write end open, and a worker that reads to EOF —
+        // `cat`, `sort`, a launcher reading a manifest — would block
+        // forever on input that can never arrive, so the exec would never
+        // finish either.
+        let mut stdin = None;
+        for (node, child) in &mut spawned {
+            let input = child.stdin.take();
+            if *node == 0 {
+                stdin = input;
+            }
+        }
 
         let exec = Arc::new(Self {
             id,
@@ -197,7 +209,7 @@ impl Exec {
     /// is reachable even when "await teardown properly" is not.
     pub fn kill_now(&self) {
         for pid in self.live_pids() {
-            signal_group(pid, Signal::SIGKILL);
+            signal_process_group_only(pid, Signal::SIGKILL);
         }
     }
 
@@ -218,7 +230,16 @@ impl Exec {
             .map_err(|_| MirageError::other(format!("invalid signal: {sig}")))?;
         let pids: Vec<u32> = self.lock_pids().values().copied().collect();
         for pid in pids {
-            signal_group(pid, signal);
+            // The *group*, never the bare pid. A pid leaves this map only
+            // after its process has been reaped, and the removal happens
+            // a scheduling quantum after the reap — so a signal arriving
+            // in that window sees a number the kernel may already have
+            // reissued. `kill(-pid)` can only reach a process group that
+            // still has a living member, which narrows the window to the
+            // recycled pid *also* having become a group leader;
+            // `signal_group`'s bare-pid fallback would have no such
+            // protection and could signal any unrelated process.
+            signal_process_group_only(pid, signal);
         }
         Ok(())
     }
@@ -415,7 +436,24 @@ async fn supervise(exec: Arc<Exec>, spawned: Vec<(u32, Spawned)>) {
 
     // Close stdin so nothing holds the write end of a pipe to a dead
     // process, and so a later `session_stdin` gets a clear error.
-    exec.close_stdin().await;
+    //
+    // Bounded, like the two waits above and for the same reason. This
+    // takes the stdin lock, and on a terminal it also *writes* the EOF
+    // character — so a concurrent `session_stdin` blocked on a full pipe
+    // that a surviving grandchild is not reading would hold it forever.
+    // Everything downstream of here is what makes an exec finish, and
+    // `session_destroy` waits on that with no timeout of its own: a hang
+    // in this line is a permanently unkillable session.
+    const CLOSE_STDIN: std::time::Duration = std::time::Duration::from_secs(5);
+    if tokio::time::timeout(CLOSE_STDIN, exec.close_stdin())
+        .await
+        .is_err()
+    {
+        tracing::debug!(
+            exec = %exec.id,
+            "closing stdin did not complete; a descendant is holding the pipe"
+        );
+    }
 
     exec.hub.finish(exit_code);
     // Publish completion. `send_replace` rather than `send`: the value
@@ -694,6 +732,38 @@ mod tests {
         exec.close_stdin().await;
         finish(&exec).await;
         assert_eq!(output_text(&exec, StdStream::Stdout), "hello stdin\n");
+    }
+
+    #[tokio::test]
+    async fn workers_get_eof_on_stdin_rather_than_an_open_pipe() {
+        // Only rank 0 has an attached stdin, but "not attached" has to
+        // mean *closed*, not "held open by the daemon". A worker that
+        // reads to EOF — `cat`, `sort`, a launcher reading a manifest —
+        // otherwise blocks forever on input that can never arrive, and
+        // because the exec ends only when every rank does, the whole exec
+        // hangs and `session destroy` hangs with it.
+        let exec = Exec::start(
+            ExecId::from_counter(0),
+            def(),
+            vec![
+                spec(0, "exit 0"),
+                SpawnSpec {
+                    node: 1,
+                    command: "/bin/cat".to_string(),
+                    args: vec![],
+                    env: BTreeMap::new(),
+                    workdir: None,
+                    stdio: crate::process::StdioMode::Pipes,
+                    inherit_env: false,
+                },
+            ],
+            DEFAULT_REPLAY_BYTES,
+        );
+        let status = tokio::time::timeout(Duration::from_secs(30), exec.wait_finished())
+            .await
+            .map(|()| exec.status())
+            .expect("a worker reading stdin must see EOF, not hang");
+        assert_eq!(status.nodes[&1].exit_code, Some(0));
     }
 
     #[tokio::test]
