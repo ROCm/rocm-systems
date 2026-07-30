@@ -74,12 +74,6 @@ KernelKey = tuple[Optional[int], str]
 CodeObjectKey = tuple[int, int]
 
 
-def _normalize_pid(pid: Any) -> Optional[int]:  # noqa: ANN401
-    if pid is None or pd.isna(pid):
-        return None
-    return int(pid)
-
-
 class MetricInfoRow(NamedTuple):
     name: str
     metric_id: str
@@ -163,9 +157,8 @@ class db_analysis(OmniAnalyze_Base):
             for dispatch in self._dispatch_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
-                dispatch_pid = _normalize_pid(dispatch.pid)
                 kernel_key: KernelKey = (
-                    dispatch_pid if self.pc_sampling_only() else None,
+                    dispatch.pid if self.pc_sampling_only() else None,
                     dispatch.kernel_name,
                 )
                 # Add kernel object and map it, if not already added
@@ -427,7 +420,7 @@ class db_analysis(OmniAnalyze_Base):
         )
 
         for tool_data in tool_data_records:
-            pid = int(tool_data["metadata"]["pid"])
+            pid: int = tool_data["metadata"]["pid"]
 
             for code_object in load_aggregated_pc_sampling(tool_data):
                 code_object_key: CodeObjectKey = (pid, code_object.code_object_id)
@@ -1039,7 +1032,7 @@ class db_analysis(OmniAnalyze_Base):
             workload_path, []
         )
         for tool_data in tool_data_records:
-            pid = int(tool_data["metadata"]["pid"])
+            pid: int = tool_data["metadata"]["pid"]
             dispatched_kernel_ids = {
                 dispatch_record["dispatch_info"]["kernel_id"]
                 for dispatch_record in tool_data["buffer_records"]["kernel_dispatch"]
@@ -1064,8 +1057,7 @@ class db_analysis(OmniAnalyze_Base):
         tool_data_records: list[dict[str, Any]],
     ) -> dict[int, dict[str, Any]]:
         return {
-            int(tool_data["metadata"]["pid"]): tool_data
-            for tool_data in tool_data_records
+            tool_data["metadata"]["pid"]: tool_data for tool_data in tool_data_records
         }
 
     @staticmethod
@@ -1082,7 +1074,7 @@ class db_analysis(OmniAnalyze_Base):
         tool_data: dict[str, Any],
         kernel_objs: dict[KernelKey, orm.Kernel],
     ) -> dict[tuple[Any, str], orm.Kernel]:
-        pid = int(tool_data["metadata"]["pid"])
+        pid: int = tool_data["metadata"]["pid"]
         dispatched_kernel_ids = {
             dispatch_record["dispatch_info"]["kernel_id"]
             for dispatch_record in tool_data["buffer_records"]["kernel_dispatch"]
