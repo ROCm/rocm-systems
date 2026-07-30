@@ -1098,6 +1098,7 @@ public:
   DsLoadU8D16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -1108,6 +1109,7 @@ public:
   DsLoadU8D16HiVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -1118,6 +1120,7 @@ public:
   DsLoadI8D16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -1128,6 +1131,7 @@ public:
   DsLoadI8D16HiVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -1138,6 +1142,7 @@ public:
   DsLoadU16D16Vds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;
@@ -1148,6 +1153,7 @@ public:
   DsLoadU16D16HiVds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand addr;
   Operand dsmem;

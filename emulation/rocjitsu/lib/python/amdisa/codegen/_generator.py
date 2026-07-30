@@ -6976,6 +6976,17 @@ class CodeGenerator:
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
+                        # Operand-backed twin for VGPR-MSB banked profiles
+                        # (gfx1250), which read banked VGPRs only from
+                        # implicit_use_operands(); see _partial_def_outputs above.
+                        if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                            public_members.append(
+                                cgen.Statement(
+                                    'void implicit_use_operands('
+                                    'std::vector<const ::rocjitsu::Operand *> &operands) const '
+                                    'override'
+                                )
+                            )
                     if gfx1250_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
@@ -8135,6 +8146,28 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
+                        # Operand-backed twin (see header decl): gfx1250 clears
+                        # the VGPR class from implicit_uses() and reads banked
+                        # VGPRs only from implicit_use_operands(). gfx1250 has
+                        # only single-register D16 loads, so the whole operand is
+                        # the partial register; the operand hook cannot express a
+                        # partial last register of a multi-register def.
+                        if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                            assert d16_partial_reg_offset == 0, (
+                                'multi-register D16 partial def is not '
+                                'expressible via implicit_use_operands'
+                            )
+                            inst_impls.append(
+                                cgen.Line(
+                                    f'void {inst.fmt_name}::implicit_use_operands'
+                                    f'(std::vector<const ::rocjitsu::Operand *> &operands) '
+                                    f'const {{\n'
+                                    f'  {inst.fmt_true_enc_name}::implicit_use_operands(operands);\n'
+                                    f'  if ({d16_implicit_use_opnd}.to_register_ref())\n'
+                                    f'    operands.push_back(&{d16_implicit_use_opnd});\n'
+                                    f'}}'
+                                )
+                            )
                     execution_impls = [exec_impl]
                     if not profile.split_execution_sources:
                         inst_impls.extend(execution_impls)

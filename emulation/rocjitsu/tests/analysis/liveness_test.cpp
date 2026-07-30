@@ -2809,6 +2809,38 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDestinationBank) {
       << "the low-bank alias must not be treated as the read register";
 }
 
+TEST(LivenessAnalysis, Gfx1250D16LoadImplicitUseResolvesDestinationBank) {
+  // A gfx1250 D16 load's destination preserve-read must resolve through the Dst
+  // VGPR-MSB bank via implicit_use_operands(); implicit_uses() VGPRs are dropped
+  // there. DST bank 2 (0x80), vdst v1 -> physical v513 must be live before it.
+  constexpr auto set_dst_bank_two =
+      gfx1250::build_sopp(gfx1250::kSSetVgprMsbSopp, {.simm16 = 0x80});
+  constexpr auto load = gfx1250::build_vflat(gfx1250::kFlatLoadD16U8Vflat, {.vdst = 1});
+  constexpr auto end = gfx1250::build_sopp(gfx1250::kSEndpgmSopp);
+  TestCodeObject co({set_dst_bank_two[0], load[0], load[1], load[2], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  ASSERT_EQ(std::string_view((*instruction).mnemonic()), "flat_load_d16_u8");
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
+  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
+      << "D16 load preserve-read must resolve to the DST bank";
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}))
+      << "the low-bank alias must not be treated as the read register";
+}
+
 TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDespiteExplicitBank0Alias) {
   // Aliasing case: v_mov_b16 v1, v1 reads v1 as an explicit SRC0 (bank 0) and
   // also preserve-reads its destination v1 in DST bank 2 (physical v513). A

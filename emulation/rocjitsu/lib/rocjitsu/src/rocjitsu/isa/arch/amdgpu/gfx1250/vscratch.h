@@ -159,6 +159,7 @@ public:
   ScratchLoadD16U8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -170,6 +171,7 @@ public:
   ScratchLoadD16I8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -181,6 +183,7 @@ public:
   ScratchLoadD16B16Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -192,6 +195,7 @@ public:
   ScratchLoadD16HiU8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -203,6 +207,7 @@ public:
   ScratchLoadD16HiI8Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -214,6 +219,7 @@ public:
   ScratchLoadD16HiB16Vscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;

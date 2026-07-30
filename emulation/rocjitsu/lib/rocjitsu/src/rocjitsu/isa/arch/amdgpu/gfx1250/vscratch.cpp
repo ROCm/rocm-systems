@@ -302,6 +302,13 @@ void ScratchLoadD16U8Vscratch::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void ScratchLoadD16U8Vscratch::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vscratch::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(1516)),
@@ -325,6 +332,13 @@ void ScratchLoadD16I8Vscratch::implicit_uses(RegisterSet &uses) const {
   Vscratch::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void ScratchLoadD16I8Vscratch::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vscratch::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
@@ -352,6 +366,13 @@ void ScratchLoadD16B16Vscratch::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void ScratchLoadD16B16Vscratch::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vscratch::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(1518)),
@@ -375,6 +396,13 @@ void ScratchLoadD16HiU8Vscratch::implicit_uses(RegisterSet &uses) const {
   Vscratch::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void ScratchLoadD16HiU8Vscratch::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vscratch::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
@@ -402,6 +430,13 @@ void ScratchLoadD16HiI8Vscratch::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+void ScratchLoadD16HiI8Vscratch::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vscratch::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
+}
+
 ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
                selected_exec_fn(1520)),
@@ -425,6 +460,13 @@ void ScratchLoadD16HiB16Vscratch::implicit_uses(RegisterSet &uses) const {
   Vscratch::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
+}
+
+void ScratchLoadD16HiB16Vscratch::implicit_use_operands(
+    std::vector<const ::rocjitsu::Operand *> &operands) const {
+  Vscratch::implicit_use_operands(operands);
+  if (vdst.to_register_ref())
+    operands.push_back(&vdst);
 }
 
 ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst)

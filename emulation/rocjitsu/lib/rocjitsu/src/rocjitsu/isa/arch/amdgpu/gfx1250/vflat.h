@@ -159,6 +159,7 @@ public:
   FlatLoadD16U8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -170,6 +171,7 @@ public:
   FlatLoadD16I8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -181,6 +183,7 @@ public:
   FlatLoadD16B16Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -192,6 +195,7 @@ public:
   FlatLoadD16HiU8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -203,6 +207,7 @@ public:
   FlatLoadD16HiI8Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -214,6 +219,7 @@ public:
   FlatLoadD16HiB16Vflat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
+  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand vaddr;
   Operand saddr;
