@@ -46,14 +46,21 @@ extern "C" {
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{cpu_bm} @tag{guest_windows} @endcond
  */
 typedef enum {
-  AMDSMI_INIT_ALL_PROCESSORS = 0xFFFFFFFF,  //!< Initialize all processors
-  AMDSMI_INIT_AMD_CPUS = (1 << 0),          //!< Initialize AMD CPUS
-  AMDSMI_INIT_AMD_GPUS = (1 << 1),          //!< Initialize AMD GPUS
-  AMDSMI_INIT_NON_AMD_CPUS = (1 << 2),      //!< Initialize Non-AMD CPUS
-  AMDSMI_INIT_NON_AMD_GPUS = (1 << 3),      //!< Initialize Non-AMD GPUS
-  AMDSMI_INIT_AMD_APUS = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS), /**< Initialize AMD CPUS and
-                                                                           GPUS (Default option) */
-  AMDSMI_INIT_AMD_NICS = (1 << 4)                                       //!< Initialize NIC's
+  AMDSMI_INIT_ALL_PROCESSORS = 0xFFFFFFFF,  //!< Initialize all processors.
+  AMDSMI_INIT_AMD_CPUS = (1 << 0),          /**< Initialize AMD CPUs. Requires the `amd_hsmp` kernel
+                                                 module (with HSMP enabled in BIOS). CPU discovery
+                                                 is skipped non-fatally if `amd_hsmp` is
+                                                 unavailable. */
+  AMDSMI_INIT_AMD_GPUS = (1 << 1),          /**< Initialize AMD GPUs. Requires the `amdgpu` kernel
+                                                 driver. */
+  AMDSMI_INIT_NON_AMD_CPUS = (1 << 2),      //!< Initialize non-AMD CPUs.
+  AMDSMI_INIT_NON_AMD_GPUS = (1 << 3),      //!< Initialize non-AMD GPUs.
+  AMDSMI_INIT_AMD_APUS = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS), /**< Initialize AMD CPUs and
+                                                 GPUs. Default flag for ::amdsmi_init(). Requires
+                                                 the `amdgpu` driver and optionally `amd_hsmp`. CPU
+                                                 discovery is skipped non-fatally if `amd_hsmp` is
+                                                 unavailable. */
+  AMDSMI_INIT_AMD_NICS = (1 << 4)                                       //!< Initialize NICs.
 } amdsmi_init_flags_t;
 
 /**
