@@ -174,6 +174,29 @@ TEST_F(AmdSmiWrapTest, FabricViewsAgreeWithCachedDeviceInfo)
     }
 }
 
+// amd_smi_fabricTelemIdToString dispatches on the loaded runtime's major
+// version between the pre-27 return-value signature and the 27+ out-param
+// signature (see amdSmiTelemIdUsesOutParam in amdsmi_wrap.h). The predicate
+// itself is unit-tested in AmdSmiFabricTests; this drives the actual dispatch
+// against whichever runtime is really loaded and pins the contract its callers
+// depend on: for any id it returns a printable string, never nullptr. A
+// regression in the reinterpret_cast legacy path (or the out-param path) would
+// otherwise only surface as a crash or garbage log line on real hardware.
+TEST_F(AmdSmiWrapTest, FabricTelemIdToStringNeverReturnsNull)
+{
+    requireDevices(1);
+    if(amd_smi_ensureFabricInitialized() != ncclSuccess)
+        GTEST_SKIP() << "fabric not available on this machine";
+
+    // An id the runtime does not map still has to come back as a printable
+    // string, because callers log it unconditionally. Whichever call
+    // convention matched the loaded library, both paths collapse a missing
+    // name to "UNKNOWN" rather than nullptr.
+    const char* unknownName = amd_smi_fabricTelemIdToString(~static_cast<uint64_t>(0));
+    ASSERT_NE(unknownName, nullptr);
+    EXPECT_GT(std::strlen(unknownName), 0u);
+}
+
 // The regression this suite exists for: RCCL_USE_AMD_SMI_LIB selects between
 // amdsmi_get_gpu_fabric_info() and the ualink sysfs nodes, and the two are
 // meant to be interchangeable views of one fabric. They silently diverged when
