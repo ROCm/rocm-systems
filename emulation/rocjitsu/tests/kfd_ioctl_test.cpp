@@ -1224,6 +1224,93 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotClampsCopyToCallerCapacity) 
   server.join();
 }
 
+// As serve_one_ioctl_reply, but overrides the snapshot outputs in the echoed
+// arg struct so the reply can report a device total and entry size that differ
+// from the request — what a daemon with fewer GPUs than the caller asked for
+// returns.
+void serve_one_snapshot_reply(int server_fd, uint32_t out_num_devices, uint32_t out_entry_size,
+                              size_t arg_struct_size, size_t extra_bytes, uint8_t poison) {
+  rocjitsu::RpcHeader hdr{};
+  int in_fds[1] = {-1};
+  size_t num_in = 1;
+  if (rocjitsu::rpc_recv_msg(server_fd, &hdr, sizeof(hdr), in_fds, &num_in) <= 0)
+    return;
+  if (in_fds[0] >= 0)
+    ::close(in_fds[0]);
+  std::vector<uint8_t> req(hdr.payload_bytes);
+  if (!rocjitsu::rpc_recv_exact(server_fd, req.data(), hdr.payload_bytes))
+    return;
+
+  std::vector<uint8_t> out(arg_struct_size + extra_bytes);
+  std::memcpy(out.data(), req.data() + sizeof(rocjitsu::RpcIoctlRequest), arg_struct_size);
+  std::memset(out.data() + arg_struct_size, poison, extra_bytes);
+
+  kfd_ioctl_dbg_trap_args echoed{};
+  std::memcpy(&echoed, out.data(), sizeof(echoed));
+  echoed.device_snapshot.num_devices = out_num_devices;
+  echoed.device_snapshot.entry_size = out_entry_size;
+  std::memcpy(out.data(), &echoed, sizeof(echoed));
+
+  rocjitsu::RpcHeader resp{};
+  resp.opcode = rocjitsu::RPC_IOCTL;
+  resp.request_id = hdr.request_id;
+  resp.result = 0;
+  resp.payload_bytes = static_cast<uint32_t>(out.size());
+  rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
+  rocjitsu::rpc_send_exact(server_fd, out.data(), out.size());
+}
+
+// Daemon mode must reproduce the driver's strided write, not overwrite the
+// caller's whole declared capacity: amdkfd fills min(num_devices(IN), total)
+// entries of entry_size(OUT) bytes at entry_size(IN) stride, so entries past
+// the device total and the padding inside each entry stay as the caller left
+// them. This is what SimulatedKfd does on the local path.
+TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotLeavesUnfilledEntriesAndPaddingIntact) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kRequested = 4;
+  constexpr uint32_t kReturned = 2; // daemon enumerates fewer GPUs than asked
+  constexpr uint32_t kEntryBytes = sizeof(kfd_dbg_device_info_entry);
+  constexpr uint32_t kStride = kEntryBytes + 16; // caller pads each entry
+  constexpr size_t kCap = static_cast<size_t>(kRequested) * kStride;
+  constexpr uint8_t kSentinel = 0xAB;
+  constexpr uint8_t kPoison = 0xCD;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kCap, kSentinel);
+
+  std::jthread server([&, server_fd = sv[1]] {
+    serve_one_snapshot_reply(server_fd, kReturned, kEntryBytes, arg_struct_size, kCap, kPoison);
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = kRequested;
+  snap.device_snapshot.entry_size = kStride;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  EXPECT_EQ(snap.device_snapshot.num_devices, kReturned);
+
+  for (uint32_t i = 0; i < kRequested; ++i) {
+    const auto entry = caller_buf.begin() + static_cast<size_t>(i) * kStride;
+    const bool filled = i < kReturned;
+    EXPECT_TRUE(std::all_of(entry, entry + kEntryBytes,
+                            [&](uint8_t b) { return b == (filled ? kPoison : kSentinel); }))
+        << "entry " << i << (filled ? " was not populated" : " was written past the device total");
+    EXPECT_TRUE(
+        std::all_of(entry + kEntryBytes, entry + kStride, [](uint8_t b) { return b == kSentinel; }))
+        << "entry " << i << " padding was clobbered";
+  }
+
+  server.join();
+}
+
 // A closed but positive notifier fd cannot be transferred over SCM_RIGHTS:
 // sendmsg() rejects it with EBADF at the client. send_ioctl() must surface that
 // errno so the interposer reports EBADF, not the EPERM a bare -1 becomes

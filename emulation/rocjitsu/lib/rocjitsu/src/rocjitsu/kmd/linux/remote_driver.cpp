@@ -378,6 +378,11 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint32_t saved_dbg_rinfo_size = 0;
   uint64_t saved_dbg_snapshot_ptr = 0;
   size_t saved_dbg_snapshot_cap = 0;
+  // The response overwrites num_devices/entry_size with the daemon's outputs,
+  // so the request's own count and stride have to be kept to reproduce the
+  // driver's strided write on copy-back.
+  uint32_t saved_dbg_snapshot_devices = 0;
+  uint32_t saved_dbg_snapshot_stride = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
     case AMDKFD_IOC_WAIT_EVENTS:
@@ -401,6 +406,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         break;
       case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
         saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
+        saved_dbg_snapshot_devices = dbg->device_snapshot.num_devices;
+        saved_dbg_snapshot_stride = dbg->device_snapshot.entry_size;
         saved_dbg_snapshot_cap =
             static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
         break;
@@ -590,15 +597,40 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
                                 std::min(static_cast<size_t>(dbg->enable.rinfo_size), extra));
           }
           break;
-        case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+        case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT: {
           // Only propagate snapshot bytes on success; a failed op (e.g. -ENOSYS)
           // must not mutate caller memory or dereference the saved output
-          // pointer. Clamp any successful copy to the original buffer capacity.
-          if (resp->result == 0) {
-            dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
-            copy_len = std::min(saved_dbg_snapshot_cap, extra);
+          // pointer.
+          if (resp->result != 0)
+            break;
+          // Replay the driver's write pattern instead of bulk-copying the tail.
+          // amdkfd fills min(num_devices(IN), device total) entries, writing
+          // entry_size(OUT) bytes at entry_size(IN) stride, and leaves the rest
+          // of the caller's buffer alone — both the entries past the device
+          // count and, when the caller's stride is wider than the current
+          // struct, the padding inside each entry. A bulk copy of the declared
+          // capacity would instead zero all of that (the request tail is sent
+          // empty, so the daemon fills only what it enumerates), diverging from
+          // what SimulatedKfd writes on the local path. It would also trust
+          // num_devices(IN) as a real allocation size, which callers are
+          // entitled to oversize.
+          const uint32_t entries =
+              std::min(saved_dbg_snapshot_devices, dbg->device_snapshot.num_devices);
+          const size_t stride = saved_dbg_snapshot_stride;
+          if (stride == 0)
+            break;
+          const size_t written = std::min<size_t>(dbg->device_snapshot.entry_size, stride);
+          auto *snapshot_out = reinterpret_cast<uint8_t *>(saved_dbg_snapshot_ptr);
+          for (uint32_t i = 0; i < entries; ++i) {
+            const size_t offset = static_cast<size_t>(i) * stride;
+            // Bound every entry separately: the last one must fit in both the
+            // caller's buffer and the tail the daemon actually returned.
+            if (offset + written > saved_dbg_snapshot_cap || offset + written > extra)
+              break;
+            std::memcpy(snapshot_out + offset, payload.data() + arg_size + offset, written);
           }
           break;
+        }
         default:
           break;
         }
