@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <ctime>
 #include <type_traits>
 #include <utility>
@@ -511,6 +512,34 @@ inline bool amdSmiFabricStateUsable(amdsmi_fabric_type_t type, amdsmi_fabric_acc
          (state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE || state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
 }
 
+// Major version the loaded amd_smi reports as itself, or this sentinel when it
+// has not been read yet. Shared by the fabric-struct and telemetry compatibility
+// paths below, both of which follow the loaded runtime's major version.
+constexpr uint32_t kAmdSmiLibVersionUnknown = 0;
+
+// local_accelerators[] in amdsmi_fabric_info_v1_t grew from 8 (<=26.x) to 16
+// (27+). The two fields after it -- addr_mode and accel_state -- therefore sit
+// 32 bytes later in the 27+ layout. We compile against the 16-entry layout, but
+// reach the library through dlopen, and a <=26.x runtime (which does populate
+// this struct) writes accel_state at the 8-entry offset. Reading it straight
+// out of our struct would pick up 32 bytes of local_accelerators tail instead.
+// Follow the loaded runtime's major version, the same way the telemetry call
+// convention does; everything rccl reads before local_accelerators is at a
+// stable offset and needs no adjustment.
+constexpr uint32_t kAmdSmiFabricLocal16Major = 27;
+constexpr uint32_t kAmdSmiFabricLocalGpusPre27 = 8;
+
+inline amdsmi_fabric_accelerator_vpod_state_t amdSmiFabricAccelState(const amdsmi_fabric_info_v1_t& v1,
+                                                                     uint32_t libMajor) {
+  size_t offset = offsetof(amdsmi_fabric_info_v1_t, accel_state);
+  if (libMajor != kAmdSmiLibVersionUnknown && libMajor < kAmdSmiFabricLocal16Major) {
+    offset -= static_cast<size_t>(AMDSMI_FABRIC_MAX_LOCAL_GPUS - kAmdSmiFabricLocalGpusPre27) * sizeof(uint32_t);
+  }
+  amdsmi_fabric_accelerator_vpod_state_t state{};
+  std::memcpy(&state, reinterpret_cast<const uint8_t*>(&v1) + offset, sizeof(state));
+  return state;
+}
+
 /*************************************************************************
  * amdsmi_fabric_info_t layout compatibility
  *
@@ -559,7 +588,6 @@ inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info
 // reports. An unknown version must assume the out-parameter form: calling a 27+
 // implementation the old way leaves it writing through an uninitialized pointer,
 // whereas calling an older one the new way merely leaves the name unwritten.
-constexpr uint32_t kAmdSmiLibVersionUnknown = 0;
 constexpr uint32_t kAmdSmiTelemOutParamMajor = 27;
 
 inline bool amdSmiTelemIdUsesOutParam(uint32_t libMajor) {

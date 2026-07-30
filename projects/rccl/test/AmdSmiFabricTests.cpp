@@ -7,6 +7,7 @@
 #include "amdsmi_wrap.h"
 
 #include <cstddef>
+#include <cstring>
 #include <gtest/gtest.h>
 
 namespace RcclUnitTesting
@@ -245,6 +246,54 @@ TEST(AmdSmiFabricLayoutCompat, BothShapesShareOneAbi)
     EXPECT_EQ(offsetof(MockNestedFabricInfo, fabric_info) + offsetof(MockNestedFabricVer, fabric_version),
               offsetof(MockFlatFabricInfo, fabric_info));
     EXPECT_EQ(offsetof(MockNestedFabricInfo, reserved), offsetof(MockFlatFabricInfo, reserved));
+}
+
+// ---------------------------------------------------------------------------
+// accel_state runtime offset
+//
+// local_accelerators[] in amdsmi_fabric_info_v1_t grew from 8 to 16 entries in
+// 27.0, moving accel_state 32 bytes later. We compile against the 16-entry
+// layout but reach the library through dlopen, so a <=26.x runtime writes
+// accel_state 32 bytes before where our struct places it. The accessor has to
+// follow the loaded runtime's major version, not our compiled offset.
+// ---------------------------------------------------------------------------
+
+// Offset accel_state occupies in the older 8-entry layout, derived from our
+// compiled 16-entry struct so the test tracks the real field automatically.
+static size_t Pre27AccelStateOffset()
+{
+    return offsetof(amdsmi_fabric_info_v1_t, accel_state) -
+           static_cast<size_t>(AMDSMI_FABRIC_MAX_LOCAL_GPUS - kAmdSmiFabricLocalGpusPre27) * sizeof(uint32_t);
+}
+
+TEST(AmdSmiFabricAccelState, ReadsCurrentLayoutForModernRuntime)
+{
+    amdsmi_fabric_info_v1_t v1{};
+    v1.accel_state = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE;
+    EXPECT_EQ(amdSmiFabricAccelState(v1, kAmdSmiFabricLocal16Major), AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE);
+}
+
+TEST(AmdSmiFabricAccelState, UnknownRuntimeUsesCurrentLayout)
+{
+    amdsmi_fabric_info_v1_t v1{};
+    v1.accel_state = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY;
+    EXPECT_EQ(amdSmiFabricAccelState(v1, kAmdSmiLibVersionUnknown), AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
+}
+
+TEST(AmdSmiFabricAccelState, ReadsShiftedOffsetForPre27Runtime)
+{
+    // Emulate what a 26.x library writes into our 16-entry buffer: accel_state
+    // lands 32 bytes earlier, and the tail of local_accelerators[] where our
+    // compiled field sits is left as some other value.
+    amdsmi_fabric_info_v1_t v1{};
+    const auto pre27State = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE;
+    std::memcpy(reinterpret_cast<uint8_t*>(&v1) + Pre27AccelStateOffset(), &pre27State, sizeof(pre27State));
+    v1.accel_state = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR; // decoy at the 16-entry offset
+
+    EXPECT_EQ(amdSmiFabricAccelState(v1, 26), AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE);
+    // And the modern read would have picked up the decoy, proving the offset matters.
+    EXPECT_EQ(amdSmiFabricAccelState(v1, kAmdSmiFabricLocal16Major),
+              AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR);
 }
 
 // ---------------------------------------------------------------------------
