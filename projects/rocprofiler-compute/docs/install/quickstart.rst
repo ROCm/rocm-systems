@@ -223,24 +223,19 @@ analysis options are available to accommodate different workflows.
 
 .. list-table::
   :header-rows: 1
-  :widths: 25 25 25
+  :widths: 25 25
 
   * - Analysis option
     - When to Use
-    - Links to docs
   * - :doc:`CLI (Command Line Interface) </how-to/analyze/cli>`
     - Fast, scriptable insights; great for automation and quick checks.
-    - :doc:`CLI analysis </how-to/analyze/cli>`
   * - :doc:`GUI (Standalone Graphical Interface) </how-to/analyze/standalone-gui>`
     - Interactive exploration, visual drill-down, and detailed charts.
-    - :doc:`Standalone GUI analysis </how-to/analyze/standalone-gui>`
   * - :doc:`TUI (Textual User Interface) </how-to/analyze/tui>`
     - Lightweight, keyboard-driven experience for terminals.
-    - :doc:`Text-based User Interface (TUI) analysis </how-to/analyze/tui>`
   * - :doc:`ROCm Optiq </how-to/analyze/optiq>`
     - Interactive graphical exploration of generated ROCm Compute Profiler
       analysis databases.
-    - :doc:`ROCm Optiq analysis </how-to/analyze/optiq>`
 
 **Analysis Command:**
 
