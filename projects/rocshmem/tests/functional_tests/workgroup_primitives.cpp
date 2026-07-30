@@ -188,6 +188,10 @@ void WorkGroupPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
                          args.skip, start_time, end_time, source, dest, size,
                          _shmem_context, batch_size, grid_psync);
       break;
+    default:
+      std::cerr << "Invalid Test: unhandled TestType " << _type
+                << " in WorkGroupPrimitiveTester::launchKernel" << std::endl;
+      exit(-1);
   }
 
   num_msgs = (loop + args.skip) * gridSize.x;

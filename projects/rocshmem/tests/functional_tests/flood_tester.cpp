@@ -233,6 +233,10 @@ void FloodTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                          shared_bytes, stream, loop, args.skip, start_time,
                          end_time, r_buf, s_buf, _shmem_context, wf_size);
       break;
+    default:
+      std::cerr << "Invalid Test: unhandled TestType " << _type
+                << " in FloodTester::launchKernel" << std::endl;
+      exit(-1);
   }
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x * num_pes;

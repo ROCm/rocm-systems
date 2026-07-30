@@ -198,6 +198,10 @@ void SignalingOperationsTester::launchKernel(dim3 gridSize, dim3 blockSize, int 
                          start_time, end_time, s_buf, r_buf, size, sig_addr,
                          _shmem_context, sig_op);
       break;
+    default:
+      std::cerr << "Invalid Test: unhandled TestType " << _type
+                << " in SignalingOperationsTester::launchKernel" << std::endl;
+      exit(-1);
   }
 
   num_msgs = (loop + args.skip) * gridSize.x;

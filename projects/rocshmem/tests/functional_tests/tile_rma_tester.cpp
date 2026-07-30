@@ -502,6 +502,10 @@ void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
     case TileGet1DTestType:
       LAUNCH_TILE_RMA_TEST(TileGet1DTestType);
       break;
+    default:
+      std::cerr << "Invalid Test: unhandled TestType " << _type
+                << " in TileRMATester::launchKernel" << std::endl;
+      exit(-1);
   }
 
 #undef LAUNCH_TILE_RMA_TEST

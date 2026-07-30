@@ -242,6 +242,10 @@ void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                          end_time, source, dest, size, _shmem_context,
                          wf_size, batch_size, grid_psync);
       break;
+    default:
+      std::cerr << "Invalid Test: unhandled TestType " << _type
+                << " in PrimitiveTester::launchKernel" << std::endl;
+      exit(-1);
   }
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
