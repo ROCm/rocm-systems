@@ -279,16 +279,8 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDeviceAttributeGPUDirectRDMAWithHipV
 
 HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDeviceAttributeHostAllocDmaBufSupported) {
   int hostAllocDmaBufSupported = -1;
-  hipError_t status =
-      hipDeviceGetAttribute(&hostAllocDmaBufSupported,
-                            hipDeviceAttributeHostAllocDmaBufSupported, 0);
-  // Skip where the attribute isn't exposed (e.g. HIP on NVIDIA with CUDA < 13, or
-  // drivers predating the query) instead of hard-failing.
-  if (status == hipErrorInvalidValue || status == hipErrorNotSupported) {
-    HIP_SKIP_TEST("hipDeviceAttributeHostAllocDmaBufSupported is not supported on this platform.");
-    return;
-  }
-  HIP_CHECK(status);
+  HIP_CHECK(hipDeviceGetAttribute(&hostAllocDmaBufSupported,
+                                  hipDeviceAttributeHostAllocDmaBufSupported, 0));
   INFO("hipDeviceAttributeHostAllocDmaBufSupported: " << hostAllocDmaBufSupported);
   REQUIRE((hostAllocDmaBufSupported == 0 || hostAllocDmaBufSupported == 1));
 }
