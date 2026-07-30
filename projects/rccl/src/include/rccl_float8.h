@@ -27,6 +27,60 @@
 #include <hip/hip_version.h>
 
 typedef uint16_t fp8x2_storage_t;
+
+// Inf handling on the narrow-float downconvert.
+//
+// The default saturates +/-Inf to +/-max_finite, which is what both AMD
+// (MODE.FP16_OVFL=1) and NVIDIA (.satfinite) do in their saturating conversion
+// modes. Setting this to 0 restores the older behavior of clamping only finite
+// values and letting Inf reach the convert unchanged, which yields NaN for fp8
+// (no Inf encoding) and Inf for bf8; it is kept switchable so the two can be
+// compared on hardware. Finite inputs are unaffected either way.
+//
+// Whichever setting is in force applies to both the 1-wide and 2-wide reduce
+// paths, so a reduction result never depends on how the data happened to be
+// aligned.
+#ifndef RCCL_NARROW_FP_SATURATE_INF
+#define RCCL_NARROW_FP_SATURATE_INF 1
+#endif
+
+// Largest finite magnitude of the fp8/bf8 encodings in force for this
+// translation unit. This mirrors the branch below that picks the types: gfx942
+// and the software-emulated fallback use the fnuz variants, where e4m3 stops at
+// 240, while the OCP variants used by the host pass and by gfx950 and gfx12xx
+// reach 448. e5m2 is 57344 in every case.
+#if HIP_VERSION >= 60300000 &&                                                                     \
+    (!__HIP_DEVICE_COMPILE__ || defined(__gfx950__) || defined(__gfx1200__) ||                      \
+     defined(__gfx1201__) || defined(__gfx1250__) || defined(__gfx1251__))
+#define RCCL_FP8_MAX_FINITE 448.0f
+#else
+#define RCCL_FP8_MAX_FINITE 240.0f
+#endif
+#define RCCL_BF8_MAX_FINITE 57344.0f
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// Clamp into the destination's range. Used by the 1-wide reduce specializations
+// and, in its two-lane form further down, by the packed helpers.
+//
+// In the saturating case, elementwise_minimum/maximum are the IEEE-754-2019
+// minimum/maximum operations, which propagate NaN, rather than minNum/maxNum,
+// which return the non-NaN operand. That is what makes a separate NaN guard
+// unnecessary: NaN survives the clamp on its own. gfx950 lowers this to
+// v_maximum3_f32 plus v_minimum3_f32 and gfx1250 to v_maximum_f32 plus
+// v_minimum_f32, two VALU ops per lane; gfx942 has no NaN-propagating min/max
+// and lowers it to a compare and select.
+inline __host__ __device__ float rccl_narrow_sat_f32(float v, float maxFinite) {
+#if RCCL_NARROW_FP_SATURATE_INF
+  return __builtin_elementwise_minimum(__builtin_elementwise_maximum(v, -maxFinite), maxFinite);
+#else
+  // fminf/fmaxf return the non-NaN operand and would also clamp Inf, so both
+  // have to be excluded explicitly here.
+  bool finite = (v == v) && (v < __builtin_huge_valf()) && (v > -__builtin_huge_valf());
+  return finite ? __builtin_fminf(__builtin_fmaxf(v, -maxFinite), maxFinite) : v;
+#endif
+}
+#endif
+
 #if __cplusplus < 201103L || (!defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__))
 /*! \brief Struct to represent a 8 bit floating-point number. */
 
@@ -188,6 +242,189 @@ inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) 
   v.bfp8x2 = y;
   w.bfp8[0] = hadd_b(u.bfp8[0], v.bfp8[0]);
   w.bfp8[1] = hadd_b(u.bfp8[1], v.bfp8[1]);
+  return w.bfp8x2;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Packed 2-wide fp8/bf8 reduce helpers: Prod, MinMax and PreMulSum's premul.
+//
+// Each is bit-identical to the per-element expression the 1-wide reduce
+// specializations use. Two properties are needed for that, and neither comes for
+// free:
+//
+//  1. An f32 intermediate. f32 represents every sum and product of two fp8/bf8
+//     values exactly. f16 does not: e4m3 448*448 = 200704 exceeds f16's 65504
+//     and becomes Inf, which then packs to fp8 NaN instead of saturating. This
+//     is why the packed paths do not use the f16 converts even on the targets
+//     that have them.
+//  2. Clamping before the pack. v_cvt_pk_{fp8,bf8}_f32 sends out-of-range values
+//     to NaN/Inf, so rccl_narrow_sat_f32 has to run first. MinMax is the
+//     exception: its result is always one of its inputs and so is already
+//     representable, and it uses the unclamped pack.
+//
+// gfx1250 (MI4xx) can instead saturate in hardware via MODE.FP16_OVFL (bit 23).
+// That is not used here because it is wave-level state that also redirects
+// f32->f16/bf16 converts and v_pk_*_bf16 overflow from Inf to saturation, which
+// reaches well beyond fp8. Note also that the 8-wide v_cvt_scalef32_pk8_*
+// converts ignore FP16_OVFL entirely and always need an explicit clamp.
+// ---------------------------------------------------------------------------
+
+#if __HIP_DEVICE_COMPILE__ &&                                                                     \
+    (defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1200__) ||                         \
+     defined(__gfx1201__) || defined(__gfx1250__) || defined(__gfx1251__))
+#define RCCL_FP8_PACKED_CVT 1
+#endif
+
+#ifdef RCCL_FP8_PACKED_CVT
+inline __device__ float2_t rccl_narrow_sat2_f32(float2_t v, float maxFinite) {
+#if RCCL_NARROW_FP_SATURATE_INF
+  float2_t hi = {maxFinite, maxFinite};
+  float2_t lo = {-maxFinite, -maxFinite};
+  return __builtin_elementwise_minimum(__builtin_elementwise_maximum(v, lo), hi);
+#else
+  v[0] = rccl_narrow_sat_f32(v[0], maxFinite);
+  v[1] = rccl_narrow_sat_f32(v[1], maxFinite);
+  return v;
+#endif
+}
+
+inline __device__ float2_t rccl_unpack2_f32_fp8(fp8x2_storage_t x) {
+  return __builtin_amdgcn_cvt_pk_f32_fp8((int)x, false);
+}
+
+inline __device__ float2_t rccl_unpack2_f32_bf8(fp8x2_storage_t x) {
+  return __builtin_amdgcn_cvt_pk_f32_bf8((int)x, false);
+}
+
+inline __device__ fp8x2_storage_t rccl_pack2_fp8_f32(float2_t v) {
+  return (fp8x2_storage_t)(__builtin_amdgcn_cvt_pk_fp8_f32(v[0], v[1], 0, false) & 0xFFFFu);
+}
+
+inline __device__ fp8x2_storage_t rccl_pack2_bf8_f32(float2_t v) {
+  return (fp8x2_storage_t)(__builtin_amdgcn_cvt_pk_bf8_f32(v[0], v[1], 0, false) & 0xFFFFu);
+}
+
+inline __device__ fp8x2_storage_t rccl_sat_pack2_fp8_f32(float2_t v) {
+  return rccl_pack2_fp8_f32(rccl_narrow_sat2_f32(v, RCCL_FP8_MAX_FINITE));
+}
+
+inline __device__ fp8x2_storage_t rccl_sat_pack2_bf8_f32(float2_t v) {
+  return rccl_pack2_bf8_f32(rccl_narrow_sat2_f32(v, RCCL_BF8_MAX_FINITE));
+}
+#endif
+
+// Packed multiply. Both lanes go through one v_pk_mul_f32 and one packed
+// saturating convert.
+inline __device__ fp8x2_storage_t hmul2(fp8x2_storage_t x, fp8x2_storage_t y) {
+#ifdef RCCL_FP8_PACKED_CVT
+  return rccl_sat_pack2_fp8_f32(rccl_unpack2_f32_fp8(x) * rccl_unpack2_f32_fp8(y));
+#else
+  union {
+    rccl_float8 fp8[2];
+    fp8x2_storage_t fp8x2;
+  } u, v, w;
+  u.fp8x2 = x;
+  v.fp8x2 = y;
+  w.fp8[0] = rccl_float8(rccl_narrow_sat_f32(float(u.fp8[0]) * float(v.fp8[0]), RCCL_FP8_MAX_FINITE));
+  w.fp8[1] = rccl_float8(rccl_narrow_sat_f32(float(u.fp8[1]) * float(v.fp8[1]), RCCL_FP8_MAX_FINITE));
+  return w.fp8x2;
+#endif
+}
+
+inline __device__ fp8x2_storage_t hmul2_b(fp8x2_storage_t x, fp8x2_storage_t y) {
+#ifdef RCCL_FP8_PACKED_CVT
+  return rccl_sat_pack2_bf8_f32(rccl_unpack2_f32_bf8(x) * rccl_unpack2_f32_bf8(y));
+#else
+  union {
+    rccl_bfloat8 bfp8[2];
+    fp8x2_storage_t bfp8x2;
+  } u, v, w;
+  u.bfp8x2 = x;
+  v.bfp8x2 = y;
+  w.bfp8[0] = rccl_bfloat8(rccl_narrow_sat_f32(float(u.bfp8[0]) * float(v.bfp8[0]), RCCL_BF8_MAX_FINITE));
+  w.bfp8[1] = rccl_bfloat8(rccl_narrow_sat_f32(float(u.bfp8[1]) * float(v.bfp8[1]), RCCL_BF8_MAX_FINITE));
+  return w.bfp8x2;
+#endif
+}
+
+// Packed multiply by a broadcast scalar, for PreMulSum's premul step.
+inline __device__ fp8x2_storage_t hpremul2(fp8x2_storage_t x, float s) {
+#ifdef RCCL_FP8_PACKED_CVT
+  float2_t vs = {s, s};
+  return rccl_sat_pack2_fp8_f32(rccl_unpack2_f32_fp8(x) * vs);
+#else
+  union {
+    rccl_float8 fp8[2];
+    fp8x2_storage_t fp8x2;
+  } u, w;
+  u.fp8x2 = x;
+  w.fp8[0] = rccl_float8(rccl_narrow_sat_f32(float(u.fp8[0]) * s, RCCL_FP8_MAX_FINITE));
+  w.fp8[1] = rccl_float8(rccl_narrow_sat_f32(float(u.fp8[1]) * s, RCCL_FP8_MAX_FINITE));
+  return w.fp8x2;
+#endif
+}
+
+inline __device__ fp8x2_storage_t hpremul2_b(fp8x2_storage_t x, float s) {
+#ifdef RCCL_FP8_PACKED_CVT
+  float2_t vs = {s, s};
+  return rccl_sat_pack2_bf8_f32(rccl_unpack2_f32_bf8(x) * vs);
+#else
+  union {
+    rccl_bfloat8 bfp8[2];
+    fp8x2_storage_t bfp8x2;
+  } u, w;
+  u.bfp8x2 = x;
+  w.bfp8[0] = rccl_bfloat8(rccl_narrow_sat_f32(float(u.bfp8[0]) * s, RCCL_BF8_MAX_FINITE));
+  w.bfp8[1] = rccl_bfloat8(rccl_narrow_sat_f32(float(u.bfp8[1]) * s, RCCL_BF8_MAX_FINITE));
+  return w.bfp8x2;
+#endif
+}
+
+// Packed min/max. The result is always one of the inputs, so it is already
+// representable and the pack needs no clamp. fminf/fmaxf are used rather than a
+// packed f16 min/max so that NaN and signed-zero tie-breaks are decided by the
+// same operation the scalar path uses.
+inline __device__ fp8x2_storage_t hminmax2(fp8x2_storage_t x, fp8x2_storage_t y, bool isMin) {
+#ifdef RCCL_FP8_PACKED_CVT
+  float2_t a = rccl_unpack2_f32_fp8(x);
+  float2_t b = rccl_unpack2_f32_fp8(y);
+  float2_t r = {isMin ? fminf(a[0], b[0]) : fmaxf(a[0], b[0]),
+                isMin ? fminf(a[1], b[1]) : fmaxf(a[1], b[1])};
+  return rccl_pack2_fp8_f32(r);
+#else
+  union {
+    rccl_float8 fp8[2];
+    fp8x2_storage_t fp8x2;
+  } u, v, w;
+  u.fp8x2 = x;
+  v.fp8x2 = y;
+  w.fp8[0] = rccl_float8(isMin ? fminf(float(u.fp8[0]), float(v.fp8[0]))
+                               : fmaxf(float(u.fp8[0]), float(v.fp8[0])));
+  w.fp8[1] = rccl_float8(isMin ? fminf(float(u.fp8[1]), float(v.fp8[1]))
+                               : fmaxf(float(u.fp8[1]), float(v.fp8[1])));
+  return w.fp8x2;
+#endif
+}
+
+inline __device__ fp8x2_storage_t hminmax2_b(fp8x2_storage_t x, fp8x2_storage_t y, bool isMin) {
+#ifdef RCCL_FP8_PACKED_CVT
+  float2_t a = rccl_unpack2_f32_bf8(x);
+  float2_t b = rccl_unpack2_f32_bf8(y);
+  float2_t r = {isMin ? fminf(a[0], b[0]) : fmaxf(a[0], b[0]),
+                isMin ? fminf(a[1], b[1]) : fmaxf(a[1], b[1])};
+  return rccl_pack2_bf8_f32(r);
+#else
+  union {
+    rccl_bfloat8 bfp8[2];
+    fp8x2_storage_t bfp8x2;
+  } u, v, w;
+  u.bfp8x2 = x;
+  v.bfp8x2 = y;
+  w.bfp8[0] = rccl_bfloat8(isMin ? fminf(float(u.bfp8[0]), float(v.bfp8[0]))
+                                 : fmaxf(float(u.bfp8[0]), float(v.bfp8[0])));
+  w.bfp8[1] = rccl_bfloat8(isMin ? fminf(float(u.bfp8[1]), float(v.bfp8[1]))
+                                 : fmaxf(float(u.bfp8[1]), float(v.bfp8[1])));
   return w.bfp8x2;
 #endif
 }
@@ -769,6 +1006,89 @@ inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) 
   w.fp8[1] = hadd_b(u.fp8[1], v.fp8[1]);
 
   return w.fp8x2;
+}
+
+// Per-element forms of the packed reduce helpers, for builds without the fp8
+// conversion instructions. The rccl_float8/rccl_bfloat8 constructors saturate,
+// so these define the semantics the packed paths above have to reproduce.
+inline __device__ fp8x2_storage_t hmul2(fp8x2_storage_t x, fp8x2_storage_t y) {
+  union {
+    rccl_float8 fp8[2];
+    fp8x2_storage_t fp8x2;
+  } u, v, w;
+  u.fp8x2 = x;
+  v.fp8x2 = y;
+  w.fp8[0] = rccl_float8(rccl_narrow_sat_f32(float(u.fp8[0]) * float(v.fp8[0]), RCCL_FP8_MAX_FINITE));
+  w.fp8[1] = rccl_float8(rccl_narrow_sat_f32(float(u.fp8[1]) * float(v.fp8[1]), RCCL_FP8_MAX_FINITE));
+
+  return w.fp8x2;
+}
+
+inline __device__ fp8x2_storage_t hmul2_b(fp8x2_storage_t x, fp8x2_storage_t y) {
+  union {
+    rccl_bfloat8 bfp8[2];
+    fp8x2_storage_t bfp8x2;
+  } u, v, w;
+  u.bfp8x2 = x;
+  v.bfp8x2 = y;
+  w.bfp8[0] = rccl_bfloat8(rccl_narrow_sat_f32(float(u.bfp8[0]) * float(v.bfp8[0]), RCCL_BF8_MAX_FINITE));
+  w.bfp8[1] = rccl_bfloat8(rccl_narrow_sat_f32(float(u.bfp8[1]) * float(v.bfp8[1]), RCCL_BF8_MAX_FINITE));
+
+  return w.bfp8x2;
+}
+
+inline __device__ fp8x2_storage_t hpremul2(fp8x2_storage_t x, float s) {
+  union {
+    rccl_float8 fp8[2];
+    fp8x2_storage_t fp8x2;
+  } u, w;
+  u.fp8x2 = x;
+  w.fp8[0] = rccl_float8(rccl_narrow_sat_f32(float(u.fp8[0]) * s, RCCL_FP8_MAX_FINITE));
+  w.fp8[1] = rccl_float8(rccl_narrow_sat_f32(float(u.fp8[1]) * s, RCCL_FP8_MAX_FINITE));
+
+  return w.fp8x2;
+}
+
+inline __device__ fp8x2_storage_t hpremul2_b(fp8x2_storage_t x, float s) {
+  union {
+    rccl_bfloat8 bfp8[2];
+    fp8x2_storage_t bfp8x2;
+  } u, w;
+  u.bfp8x2 = x;
+  w.bfp8[0] = rccl_bfloat8(rccl_narrow_sat_f32(float(u.bfp8[0]) * s, RCCL_BF8_MAX_FINITE));
+  w.bfp8[1] = rccl_bfloat8(rccl_narrow_sat_f32(float(u.bfp8[1]) * s, RCCL_BF8_MAX_FINITE));
+
+  return w.bfp8x2;
+}
+
+inline __device__ fp8x2_storage_t hminmax2(fp8x2_storage_t x, fp8x2_storage_t y, bool isMin) {
+  union {
+    rccl_float8 fp8[2];
+    fp8x2_storage_t fp8x2;
+  } u, v, w;
+  u.fp8x2 = x;
+  v.fp8x2 = y;
+  w.fp8[0] = rccl_float8(isMin ? fminf(float(u.fp8[0]), float(v.fp8[0]))
+                               : fmaxf(float(u.fp8[0]), float(v.fp8[0])));
+  w.fp8[1] = rccl_float8(isMin ? fminf(float(u.fp8[1]), float(v.fp8[1]))
+                               : fmaxf(float(u.fp8[1]), float(v.fp8[1])));
+
+  return w.fp8x2;
+}
+
+inline __device__ fp8x2_storage_t hminmax2_b(fp8x2_storage_t x, fp8x2_storage_t y, bool isMin) {
+  union {
+    rccl_bfloat8 bfp8[2];
+    fp8x2_storage_t bfp8x2;
+  } u, v, w;
+  u.bfp8x2 = x;
+  v.bfp8x2 = y;
+  w.bfp8[0] = rccl_bfloat8(isMin ? fminf(float(u.bfp8[0]), float(v.bfp8[0]))
+                                 : fmaxf(float(u.bfp8[0]), float(v.bfp8[0])));
+  w.bfp8[1] = rccl_bfloat8(isMin ? fminf(float(u.bfp8[1]), float(v.bfp8[1]))
+                                 : fmaxf(float(u.bfp8[1]), float(v.bfp8[1])));
+
+  return w.bfp8x2;
 }
 
 // Special operator overloading
