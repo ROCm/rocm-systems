@@ -271,7 +271,7 @@ ______________________________________________________________________
 When the **JIRA/ISSUE ID reference** is missing from the PR description, the bot
 adds a **`Not ready to Review`** label to the PR so it is clearly gated.
 The label is removed automatically once that reference is added.
-The **Unit Test** check and **Forbidden Files** are (⚠️ warning-only).Other failures (
+The **Unit Test** and **Forbidden Files** checks are (⚠️ warning-only). Other failures (
 Draft PR, pre-commit, CodeQL) do **not** add the label.
 
 **How are pre-commit and CodeQL shown?**

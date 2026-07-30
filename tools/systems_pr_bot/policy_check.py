@@ -1,7 +1,7 @@
 """
 Main script to policy-check PRs and report results in a comment. This is the
 core of the bot's logic: it loads policy.yml, validates the pull request
-(title, description, forbidden files, unit tests), waits for the
+(description, forbidden files, unit tests), waits for the
 required CI checks, posts a single results-table comment, and manages the
 "Not ready to Review" label.
 """
@@ -18,7 +18,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
 import yaml
@@ -57,15 +57,12 @@ def _env_flag(name: str, default: bool = True) -> bool:
 CAN_POST_COMMENTS = _env_flag("POST_COMMENTS")
 CAN_MUTATE_PR = _env_flag("MUTATE_PR")
 
-# Only these policy checks trigger the "Not ready to Review" label when they
-# fail. Per current policy, the label is added ONLY for:
-#   • the JIRA/ISSUE ID reference part of the description (detected separately
-#     in main() via `jira_issue_failed`).
-# The Unit Test check is now WARNING-ONLY: it never blocks the workflow and
-# never adds the label — it just shows a ⚠️ Warning row with details.
-# All other failures (title format, description length/checklist,
-# Forbidden Files, pre-commit, …) do NOT add the label either.
-LABEL_TRIGGER_CHECKS: Set[str] = set()
+# The "Not ready to Review" label is added ONLY when the JIRA/ISSUE ID
+# reference is missing from the PR description (detected in main() via
+# `jira_issue_failed`). The Unit Test and Forbidden Files checks are
+# WARNING-ONLY: they never block the workflow and never add the label. All
+# other failures (description length/checklist, pre-commit, …) do NOT add the
+# label either.
 
 # Fixed display order for rows in the results table (by check name). Any row
 # whose name is not listed here is appended after these, in its original order.
@@ -605,6 +602,20 @@ def build_policy_table_comment(
     appended. `ready` switches the heading to "Ready for Review"; `note` adds an
     optional banner (used for the bump-PR special case).
     """
+    def _format_details(details: List[str]) -> str:
+        """Join a check's detail parts into one table-cell-safe string.
+
+        Each part's non-empty lines are joined with <br>, parts are separated by
+        a divider, and any literal '|' is escaped as '&#124;' so it does not end
+        the Markdown table cell early (which would truncate the text).
+        """
+        blocks: List[str] = []
+        for part in details:
+            lines = [ln.strip() for ln in part.splitlines() if ln.strip()]
+            if lines:
+                blocks.append("<br>".join(lines))
+        return "<br>───<br>".join(blocks).replace("|", "&#124;")
+
     # Render rows in a fixed, human-friendly order regardless of the order in
     # which they were appended (policy rows + required-check rows).
     order_index = {name: i for i, name in enumerate(TABLE_ORDER)}
@@ -635,27 +646,13 @@ def build_policy_table_comment(
         if r.warn and r.details:
             # Warning rows still show their details (what is wrong) even though
             # they do NOT fail the workflow.
-            blocks: List[str] = []
-            for part in r.details:
-                lines = [ln.strip() for ln in part.splitlines() if ln.strip()]
-                if lines:
-                    blocks.append("<br>".join(lines))
-            detail = "<br>───<br>".join(blocks).replace("|", "&#124;")
+            detail = _format_details(r.details)
         elif r.passed and r.note:
             detail = r.note
         elif r.passed or r.wip or r.tbe or not r.details:
             detail = "—"
         else:
-            blocks = []
-            for part in r.details:
-                lines = [ln.strip() for ln in part.splitlines() if ln.strip()]
-                if lines:
-                    blocks.append("<br>".join(lines))
-            detail = "<br>───<br>".join(blocks)
-            # A literal '|' ends a markdown table cell early, which makes the
-            # column show only "half" the text. Escape it (and other table-
-            # breaking chars) so the FULL details always render in the cell.
-            detail = detail.replace("|", "&#124;")
+            detail = _format_details(r.details)
         rows.append(f"| {r.icon} **{r.name}** | {status} | {detail} |")
 
     table = "| Check | Status | Details |\n" "|---|:---:|---|\n" + "\n".join(rows)
@@ -952,7 +949,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     policy = load_policy(policy_path)
 
     pr = get_pr(owner=owner, repo=repo, pr_number=pr_number, token=token)  # type: ignore[arg-type]
-    title = str(pr.get("title") or "")
     body = str(pr.get("body") or "")
 
     # --- PR description ---
@@ -999,7 +995,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "<!-- therock-pr-bot-fix-policies -->\n"
             "✅ Auto-approved — this is an automated dependency bump PR.",
         )
-        print(f"��� Bump PR by @{author} — all checks auto-passed.")
+        print(f"🤖 Bump PR by @{author} — all checks auto-passed.")
         return 0
 
     pr_files = list(iter_pr_files(owner, repo, pr_number, token))  # type: ignore[arg-type]
@@ -1018,7 +1014,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     results.append(CheckResult("PR Description", "📝", not check_errors, check_errors))
 
     # Only the JIRA/ISSUE ID reference rule of the description triggers the
-    # "Not ready to Review" label — not the title, length, or checklist rules.
+    # "Not ready to Review" label — not the length or checklist rules.
     jira_issue_failed = any("must reference a JIRA ID" in e for e in check_errors)
 
     # Draft PR check is "Enabled soon" — logic kept in ensure_pr_not_draft but
@@ -1095,14 +1091,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             build_policy_table_comment(combined, marker),
         )
 
-        # Add "Not ready to Review" ONLY when Unit Test fails OR the JIRA/ISSUE
-        # ID reference is missing from the description. All other failures
-        # (title format, description length/checklist, forbidden files, PR size,
-        # pre-commit) do NOT add the label.
-        should_label = jira_issue_failed or any(
-            not r.passed and r.name in LABEL_TRIGGER_CHECKS for r in results
-        )
-        if should_label:
+        # Add "Not ready to Review" ONLY when the JIRA/ISSUE ID reference is
+        # missing from the description. All other failures (forbidden files,
+        # Unit Test, pre-commit) do NOT add the label.
+        if jira_issue_failed:
             add_label(owner, repo, pr_number, token, NOT_READY_LABEL)  # type: ignore[arg-type]
         else:
             remove_label(owner, repo, pr_number, token, NOT_READY_LABEL)  # type: ignore[arg-type]

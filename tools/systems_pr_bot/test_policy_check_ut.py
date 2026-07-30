@@ -260,8 +260,7 @@ class ForbiddenFileTests(unittest.TestCase):
         body = pc.build_policy_table_comment([result], marker, ready=True)
         self.assertIn("⚠️ Warning", body)
         self.assertIn("secret.pem", body)
-        # Forbidden Files must NOT be in the label-triggering set.
-        self.assertNotIn("Forbidden Files", pc.LABEL_TRIGGER_CHECKS)
+        # Forbidden Files is warning-only — it never adds the label.
 
 
 # ----------------------------- unit tests check ------------------------------
@@ -375,8 +374,6 @@ class UnitTestRuleTests(unittest.TestCase):
         body = pc.build_policy_table_comment([result], marker, ready=True)
         self.assertIn("⚠️ Warning", body)
         self.assertIn("missing test", body)
-        # Unit Test must NOT be in the label-triggering set anymore.
-        self.assertNotIn("Unit Test", pc.LABEL_TRIGGER_CHECKS)
 
 
 # ----------------------------- draft + bump ----------------------------------
